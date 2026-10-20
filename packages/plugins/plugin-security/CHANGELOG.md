@@ -1,5 +1,1971 @@
 # @objectstack/plugin-security
 
+## 18.0.0
+
+### Major Changes
+
+- 41d0d40: feat(objectql,plugin-security)!: an object a deployment declares platform-global gets no organization column on that deployment — the #12699 declaration made total (ADR-0131 D7)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered platform-global-object-organization-column-retired -->
+  
+  **BREAKING** on a deployment whose `org-scoping` service declares `platformGlobalObjects`. Nothing changes on any other deployment.
+  
+  ADR-0131 D7: "an object a deployment declares platform-global gets no organization column on that deployment (the injected-columns plan reads the declaration), so Layer 0 and the driver agree by having nothing to scope." Until now the declaration stood the organization wall down for the object while the object kept its `organization_id` column, so the SQL driver went on scoping a read by the caller's organization that the wall no longer scoped.
+  
+  - **The plan** (`@objectstack/spec`): `resolveInjectedSystemColumns(def, deployment?)` takes the deployment's validated `platformGlobalObjects` as an optional second argument. An object it names is planned with no `organization_id`, and nothing else in its plan moves. With no second argument, or an empty list, the plan is the same as before. Author-time callers (the linter, the import mapper, the tenancy census) have no deployment and pass none.
+  - **The registry** (`@objectstack/objectql`): `ObjectQLPlugin` reads the declaration at the top of `start()`, before the first schema sync, and installs it with the new `SchemaRegistry.setDeploymentPlatformGlobalObjects()`. A declared object is registered with no `organization_id`, no tenant index and `systemFields: { tenant: false }`, and its table is created without the column. An object registered earlier, inside another plugin's `init()`, is re-planned at that moment, before its table exists. The `/meta` read exits serve the same shape. On the way back in, the write path removes the recorded `tenant: false`, so a Studio save stores the body the author wrote. The plugin logs the declared list once at boot.
+  - **The order** (ADR-0116): every `init()` completes before any `start()`, so a provider that registers `org-scoping` in its `init()` has registered by the time the engine reads it. `OrganizationsPlugin` now declares `providesServices: ['org-scoping']` (`@objectstack/organizations`). A provider that registers the service later, with a different declaration than the one the columns were planned from, fails the boot at `kernel:ready` with an error that names both lists and the fix.
+  - **The stand-down is retired** (`@objectstack/plugin-security`): `getObjectSecurityMeta` no longer reads `platformGlobalObjects`. A declared object reaches the security layer as its own `systemFields.tenant: false`, the same way every deployment-level object does: Layer 0 composes no organization predicate on it, a wildcard `organization_id` policy does not apply to it, and the ADR-0123 D2 no-active-organization write refusal does not fire on it. The `[security] deployment declares N platform-global object(s)` boot line is gone; the engine logs the list instead.
+  - **One reader** (`@objectstack/core`): `readDeploymentOrgScopingEntitlement` moved from plugin-security into `@objectstack/core` and is exported there, with its rules unchanged. An absent key declares nothing. A malformed key is refused whole: no object is declared, and the consumer of that key warns once. The engine warns for a malformed `platformGlobalObjects`, and plugin-security for a malformed `suppressUnboundedOrgAdminGrant`. `suppressUnboundedOrgAdminGrant` and its behaviour are unchanged.
+  
+  **What moves for consumers.**
+  
+  - **On the declaring deployment**, a declared object has no `organization_id`. FROM an authored filter, list-view column, report grouping, formula or seed key naming `organization_id` on that object, TO the same reference with that field removed. A write that still names it is refused `INVALID_FIELD`, and a filter on it `INVALID_FILTER`. The object is governed by object permission, not by the organization wall: a reader the object permission admits reads every row, where the SQL driver used to narrow a read to the caller's organization and the rows with no organization.
+  - **An object that declares its own `organization_id`** keeps that column, because it is the author's and not the platform's, and the organization wall keeps scoping it. The engine warns once at boot and names the object. Remove the authored field, or drop the object from the declaration.
+  - **Author-time tools** have no deployment, so they still list `organization_id` among a declared object's columns. Only the declaring deployment differs, and it refuses the name at runtime.
+  - **Existing databases: nothing moves automatically** (ADR-0131 D14). Schema sync is additive, so on a declaring deployment the physical `organization_id` column stays and the boot drift report names it orphaned. The operator removes it once the rows need nothing from it. No boot step reads or writes it.
+- 8311650: `sys_user_permission_set` refuses an assignment whose validity window ends at or before it starts (ADR-0091 D1/D2)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of one stored value combination on a data object; no metadata key, export or authorable surface moves, so `objectstack migrate meta` has nothing to rewrite -->
+  
+  **BREAKING**: an accept-set narrowing on the data door, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  - **What is refused.** A write that leaves an assignment with both `valid_from` and `valid_until` set and `valid_until` at or before `valid_from` is refused with `400 VALIDATION_FAILED`, a `rule_violation` at `valid_until`. The window is half-open, `[valid_from, valid_until)`, so such an assignment can never grant anything: the resolver drops it at every evaluation. Until this release it was stored without a word, so an administrator who mistyped a date got an assignment that silently granted nothing.
+  - **Which writes are judged.** Every insert, from every writer, system writers included, single rows and batches alike. An update is judged by the stored row overlaid with the patch, and only when it moves a bound: by id, and for each matched row of a multi-row update. The refusal is a declared validation rule on the object, `validity_window_order`, so the engine runs it on every one of those write paths.
+  - **What still lands, unchanged.** A window that ends after it starts, one bound alone (either one), and no window at all. An update that moves neither bound is not judged, so an assignment stored before this release with an inverted window does not block an unrelated edit; the write that repairs it is the only one that has to state a valid window.
+  - **To fix a refused write**, set `valid_until` later than `valid_from`, or leave one of the two empty for an open-ended window.
+
+### Minor Changes
+
+- b27f8de: feat(plugin-security): organization administrators assign positions and permission sets to their own members, inside the organization boundary
+  
+  Clause-②: no
+  
+  ADR-0090 D12 (as amended for ADR-0131 D3) names three kinds of administrator. This release enforces the second one, the organization administrator: a holder of `organization_admin` or `organization_admin_no_bypass` for the active organization who is not a platform administrator.
+  
+  - **What an organization administrator may now do.** Create and remove `sys_user_position` and `sys_user_permission_set` rows of its own organization, for that organization's members. Every permission set the row distributes must be inside the organization boundary: the granted set, or each set the assigned position carries (including the set of the position's own name). A set is inside when its `objects['*']` entry carries neither `viewAllRecords` nor `modifyAllRecords`, it has no `adminScope`, and every name in its `systemPermissions` is a capability declared `scope: 'org'`. `admin_full_access`, both organization-administrator sets and the three MCP agent ceilings are outside by name. An assignment row is never edited in place: remove it and create the one you mean. A row inserted with no organization lands in the caller's organization.
+  - **What is refused, and how.** An out-of-boundary write answers `403 PERMISSION_DENIED`, and the message names the set and the condition it failed. The same refusal covers a row of another organization, removal of an organization-less row, a business unit of another organization, an edit in place and a filter delete. Assigning a user who is not a member of the organization is refused `400 VALIDATION_FAILED` as before, for every writer. So is assigning a built-in identity position (`platform_admin`, `org_owner`, `org_admin`, `org_member`). Organization membership rows stay platform-administrator-only.
+  - **Overrides.** `organization_admin`, and so `organization_admin_no_bypass`, now carries `allowCreate` and `allowDelete` on both assignment tables. `allowEdit` stays `false`.
+  - **The two doors.** `GET /security/my-delegable-scope` reports an organization administrator with `isTenantAdmin: false`, every unit of its organization as placeable, and only in-boundary positions as assignable. The walled `organization_admin` was reported as tenant-level before. Explaining another user's access now admits an organization administrator explaining a member of its own organization.
+  - **Unchanged.** Platform administrators keep today's behaviour. Delegated (`adminScope`) administrators keep D12's subtree, allowlist and strict containment. Everyone else is denied as before. No spec key, no endpoint and no membership-model change.
+- b2e7870: fix(security): under the `single` tenancy posture the first-user platform-admin grant is owned by the Default Organization, and every reader of platform standing reads that row
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, export, option, error code or stored shape is added, removed or renamed: the new resolver and guard helpers and the guard's organization standing-key list are module-private, and `bootstrapPlatformAdmin`'s `reason` was already a string. The only stored-shape move — an organization-less `admin_full_access` grant becoming the Default Organization's — is ADR-0131 D10's ceremony (`os migrate organization-ownership --apply`), so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no Zod schema in packages/spec changes (not runtime-interface-only or type-surface-only in the spec sense); and nothing exported is removed (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM** (`@objectstack/plugin-security`): a `single` deployment holding several organizations, none slugged `default`, promoted its first user with an organization-less `admin_full_access` grant. **TO:** it is not promoted; the bootstrap logs one `error` line, returns `reason: 'default_organization_unresolved'` and writes no grant row. **Fix:** give the intended organization the slug `default` (or keep one organization, or declare a walled posture); the next `kernel:ready` or sign-up pass promotes.
+  - **FROM** (`@objectstack/plugin-auth`): a `sys_organization` `slug` change or delete was never refused. **TO:** it is refused with `403 PERMISSION_DENIED` when that organization is the Default Organization whose `admin_full_access` grant is the last unbanned administrator's anchor. **Fix:** give another account administrator standing first, then make the change.
+  - **FROM** (`@objectstack/plugin-auth`): `ensureDefaultOrganization` under `single`, with a sole organization of another slug, created a second, `default`-slugged organization and bound the administrator there. **TO:** it reuses the sole organization; no second organization is created. **Fix:** none needed; an install that wants a `default`-slugged organization re-slugs its existing one or creates it explicitly.
+  - **Widening** (`@objectstack/core`): under `single` only an organization-less `admin_full_access` grant conferred `PLATFORM_ADMIN`. Now a grant owned by the Default Organization confers it too and applies in every organization; a pre-existing Default-Organization-scoped `admin_full_access` grant gains the rung on upgrade; and `sys_organization` becomes a standing-deriving table (the resolver reads it only under `single` for a holder of an organization-owned `admin_full_access` grant — one or two small reads per uncached request; the last-administrator guard adds three to six small reads per guarded write).
+  
+  - **The promotion writes the Default Organization (`@objectstack/plugin-security`).** A `single` deployment with no configuration still promotes its first user that can sign in. The `admin_full_access` grant row that promotion writes now carries the Default Organization as its `organization_id` (ADR-0131 D5), never NULL. The Default Organization is the one with `slug = 'default'`, else the only organization: the organization the auth plugin creates at boot. A deployment that names no Default Organization (several organizations, none with the slug `default`) is not promoted. The bootstrap logs one `error` line saying why and returns `reason: 'default_organization_unresolved'`. It writes no grant without an owner. `OS_PLATFORM_OWNER_EMAIL` is still the walled-posture channel and is not required under `single`.
+  - **The authorization resolver reads that row (`@objectstack/core`).** Under `single`, `PLATFORM_ADMIN` derives from an `admin_full_access` grant owned by the Default Organization, and still from the organization-less row an earlier release wrote. The anchoring grant applies in whichever organization the user acts in, as the organization-less row always did. A grant of the set owned by any other organization confers the set in that organization, never platform standing. Under a walled posture no grant anchors standing (unchanged). One predicate decides both postures, with the posture as its parameter. The resolver reads `sys_organization` only for a user who holds an organization-owned `admin_full_access` grant under `single`.
+  - **An upgraded database keeps its administrator.** `os migrate organization-ownership --apply` gives a `single` database's organization-less grants to the Default Organization, the platform admin's grant included. Before this change the resolver then stopped grading that admin `PLATFORM_ADMIN`, and every later boot found no organization-less holder and promoted again. The holder scan now reads the Default Organization's grant, so a migrated database keeps its admin and promotes nobody else. A user who holds both rows counts as one holder.
+  - **The last-administrator guard and the default-organization bootstrap read it too (`@objectstack/plugin-auth`).** The break-glass guard counts the holder of the Default Organization's grant as a platform admin and treats that grant as evidence that the environment once had one. It also judges the two organization writes that move the anchor off that grant: changing the Default Organization's `slug` while another organization exists, and deleting it. Either is refused when it would leave no administrator who can sign in. `ensureDefaultOrganization` finds the admin through the same grant. Under `single` it also reuses the Default Organization when that is a sole organization with another slug, where it used to create a second, `default`-slugged organization.
+- 959c209: feat(plugin-security)!: the six built-in positions are declared position metadata of the plugin (ADR-0131 D2)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable key, export or stored shape changes; the refusal is of six reserved position names at one REST door, and no stored definition is rewritten -->
+  
+  **BREAKING** on one write door, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  - **What is declared.** The identity positions `platform_admin`, `org_owner`, `org_admin` and `org_member` (ADR-0068 D2) and the audience anchors `everyone` and `guest` (ADR-0090 D5/D9) are registered with the engine registry as `position` metadata owned by `com.objectstack.plugin-security`, the way the plugin's own permission sets are. Their names, labels and descriptions come from one list built from `@objectstack/spec`'s `BUILTIN_IDENTITY_NAMES` and `BUILTIN_IDENTITY_METADATA` and the anchor text, and the built-in seeder reads that same list.
+  - **Rows and grants do not move.** `sys_position` is seeded exactly as before: the same names, the same organizations (one copy per organization under a walled posture, one organization-less pass under `single`), `managed_by: 'platform'`, `active: true`, `is_default: false`, and the same labels and descriptions. No principal's grants change.
+  - **What a client can now read.** `GET /api/v1/meta/position` lists the six beside the stack's own positions, and `GET /api/v1/meta/position/:name` answers `200` with each one's definition, where it answered `404 RESOURCE_NOT_FOUND`. The security catalog read (`createSecurityCatalogReader` in `@objectstack/core`) lists them from the engine registry.
+  - **What a client can no longer write.** `PUT /api/v1/meta/position/:name` naming one of the six is refused `403 NOT_OVERRIDABLE`: the name is provided by a code package, and `position` has no overlay. It was saved as an environment-wide definition before. Give an authored position a different name. `DELETE /api/v1/meta/position/:name` on one of the six still answers `200` and removes nothing.
+  - **The declared-positions seeder** keeps reading the engine registry first and the metadata service only when the registry holds no position. The six are left out of that decision and out of what it seeds, so stack-declared positions keep seeding and the six keep the built-in seeder as their one writer.
+- aa71c4d: `sys_user_permission_set` gains `permission_set`, the name of the permission set a grant holds, written beside `permission_set_id` (ADR-0131 D4)
+  
+  Clause-②: yes (widening)
+  
+  - **The column.** `permission_set` is a read-only text column, at most 100 characters, holding the `name` of the `sys_permission_set` row that `permission_set_id` points at. It is readable everywhere the grant row is readable. A grant written before this release has `NULL` here until the backfill stage rewrites it. No reader uses the column yet: the grant is still resolved from `permission_set_id`, which stays until it is dropped in a later major (ADR-0131 D10).
+  - **The platform writes it, on every write that carries `permission_set_id`, for every caller.** Two `@objectstack/plugin-security` engine hooks (`beforeInsert` and `beforeUpdate` on `sys_user_permission_set`) look up the set by id and store its name. A write that sends only the id, which is how the data door and the Setup forms write, gets the name filled in.
+  - **A name that names a different set is refused** with `400 VALIDATION_FAILED`, `invalid_value` at `permission_set`. This covers a name that disagrees with the id written beside it, or with the id already stored when only the name is written. For a non-system caller it also covers a name beside an id that names no set this caller's organization can see. A name that agrees is accepted. A cleared name (`null`) is not stored as a clear: the derived name is written back. Before this change the column did not exist, so a write naming it was refused with `400 INVALID_FIELD`. No write that was accepted before is refused now.
+  - **Every platform grant writer writes both columns:** the organization-admin reconcile and the platform-admin promotion in `@objectstack/plugin-security`, the self-registration grant in `@objectstack/plugin-auth`, and the RLS probe persona in `@objectstack/verify`.
+  - **Nothing to migrate.** No principal's grants change. To fill the column on grants written by your own code, write the set's name as `permission_set`, or leave it out and the platform fills it in. Do not write any other value there.
+- ba8af87: feat(plugin-security)!: under `single`, a position created or edited in Setup is also written to the environment ledger, and positions Setup wrote earlier are backfilled into it once (ADR-0131 D3)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export, type or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door: under the single posture, a sys_position create or rename whose name the metadata door refuses is now refused at the data door too, and the remedy is a different data value (the position's name), not a rewrite of anyone's code or metadata. The backfill writes environment definitions from rows; it converts no stored metadata shape. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no TypeScript declaration moves (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0131 D3 gives positions one home, the environment registry. Under `single`, a position an administrator creates in Setup used to be a `sys_position` row only: no environment definition, so the security catalog read did not find it. Under `single`, every Setup create, edit, rename and delete of a position now also writes the position's definition through the metadata door, at environment scope.
+  
+  **What a Setup position write does now, under `single`.**
+  
+  - **Create.** The row is written as before, with the same checks: a required label, the reserved built-in names, and one name per organization. The definition `{ name, label, description, delegatable }` is then saved from that row as an environment item, and the security catalog read resolves it at once. `active` and `is_default` stay on the row only.
+  - **Edit.** The row is updated, and the definition is saved again from it. A patch that touches only `active` or `is_default` writes the row and nothing else.
+  - **Rename.** The new name's definition is saved, and the old name's definition is deleted.
+  - **Delete.** The row is deleted, then the definition. If the definition delete fails, an error is logged that names the remedy, because the next boot would bring the position back from the surviving definition.
+  - **Unchanged.** Under a walled posture, every write behaves as before. System writes (the seeders and the package door) are never translated. On a kernel without a metadata door, the row is written as before. For a position a package or a built-in declares, a Setup edit is written to the row exactly as before, and nothing is written to metadata.
+  - **No grant changes.** Every reader still reads the row, so a user holding a position is granted exactly what they were granted before.
+  
+  **What stops being accepted.** Under `single`, the data door now refuses a create, or a rename into, a position name that the metadata door refuses. The refusal is the metadata door's own: `400 INVALID_REQUEST` for a name outside the item-name grammar (uppercase, a space, a hyphen, a leading digit or underscore), or `422 INVALID_METADATA` for a name `PositionSchema.name` refuses (a single character, a dot). No row is kept. `PositionSchema` already declared such names rejected, and a position named that way could never have a definition.
+  
+  - An edit of an existing row that already carries such a name is still accepted. It stays a row write, with no definition.
+  - **Remedy.** Name the position in lowercase `snake_case`: it starts with a letter, is at least two characters, and holds letters, digits and underscores only. For example, write `sales_manager` instead of `Sales Manager`. Then re-point any assignment that names the old spelling.
+  
+  **One more refusal follows from the new definitions.** Positions, permission sets and capabilities hold one name per deployment. Once a Setup position is defined in the environment ledger, a package that registers a position under the same name is refused with `422 NAMESPACE_CONFLICT`, and the refusal names both holders. Before this change, the same registration was accepted.
+  
+  **The one-time backfill.** At `kernel:bootstrapped`, under `single`, every position whose name the security catalog read does not resolve gets an environment definition from its row. This covers positions Setup wrote before this release.
+  
+  - A name the environment ledger, a package or a built-in already declares is left alone.
+  - A name the metadata door refuses is not written. It is reported at `warn`, with its remedy, as a final class.
+  - If two rows of one name disagree, the name is reported at `error` and nothing is written for it.
+  - When every name is decided, the verdict is recorded in `sys_migration` (`adr-0131-position-environment-backfill`). If a write fails or two rows disagree, the verdict is not recorded, and the next boot runs the pass again.
+- 99801d8: feat(plugin-security)!: under `single`, a Setup create of a position, or a rename into a name, that a package or a built-in already holds is refused with the metadata door's own refusal (ADR-0048 addendum N.2/N.3)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export, type or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door: under the single posture, a sys_position create, or a rename into a name, that a package or a built-in holds is now refused at the data door, as the metadata door already refuses the same name, and the remedy is a different data value (the position's name), not a rewrite of anyone's code or metadata. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no TypeScript declaration moves (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Positions hold one name per deployment (ADR-0048 addendum, N.2). A position a package declares, and the platform's built-in positions, are managed items: the metadata door already refused an environment save under their names (`PUT /api/v1/meta/position/:name` answers `403 NOT_OVERRIDABLE`). The Setup data door did not.
+  
+  **FROM.** Under `single`, a non-system `POST /api/v1/data/sys_position` whose `name` a package or a built-in holds answered `201`. The new row sat beside the package's (or the platform's) position under the same name. A `PATCH` that renamed an administrator's position into such a name answered `200`, and it also deleted that position's own environment definition. Measured on the showcase: a create of `manager` (package-declared), `everyone` or `guest` (built-in audience anchors) answered `201`, and a rename into `exec` answered `200`.
+  
+  **TO.** Under `single`, the same create, or a rename into such a name, is refused with the metadata door's own refusal, relayed as the door builds it: `403 NOT_OVERRIDABLE`. No row is kept, a renamed row keeps its old name, and its definition is untouched. The door's own verdict is asked; nothing is written to environment metadata for such a name.
+  
+  - **Unchanged.** The engine's own refusals answer first, as before: a reserved built-in identity name (`platform_admin`, `org_owner`, `org_admin`, `org_member`) stays `400 VALIDATION_FAILED`, and a name already held in the same organization stays `409 UNIQUE_VIOLATION`. An edit that keeps such a name, and a delete, behave as before. System writes, walled postures and kernels without a metadata door behave as before. Under a walled posture, each organization already holds its own rows of the declared and built-in names, so the same create answers `409 UNIQUE_VIOLATION`, as before.
+  - **Remedy.** Rename the position: give it a name no package and no built-in holds (for example `regional_manager` instead of `manager`), then point any assignment at the new name. `GET /api/v1/meta/position` lists the names already held.
+- 2e10c9a: feat(core)!: the authorization resolver reads which permission set a user grant holds from the grant's name, `sys_user_permission_set.permission_set` (ADR-0131 D4)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export, type or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is runtime resolution and two write doors: a stored grant that names no permission set, or names one only another organization holds, stops conferring through the resolver; a write naming a grant after another organization's set is refused; and the break-glass guard judges one more column. The remedy is data (a grant re-pointed at a set of its own organization), never a rewrite of anyone's code or metadata, and the one-time backfill that names existing grants already ships. The other categories are closed on facts: every package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no TypeScript declaration moves (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **What the resolver reads now.** `resolveUserAuthzGrants` (and every surface built on it: `resolveAuthzContext`, `hasPlatformAdminStanding`, the explain engine, `runAs: 'user'` automation) finds a user grant's permission set by the grant's `permission_set` name. The set row is the grant's own organization's row of that name, or else the organization-less row of that name. `permission_set_id` is no longer read for this. Deactivation is still read from the set row. Sets a principal holds through a position are still reached through the position binding's id.
+  
+  - **Platform standing.** An unscoped grant is read against the organization-less `admin_full_access` row only. An organization's copy of `admin_full_access` gives that organization's grants its capabilities, never platform standing.
+  - **Nobody's resolved permissions change** where a grant's name and id agree. The platform's grant writers store both, and the one-time backfill names grants stored before the name column existed. Goldens for the platform administrator, an organization administrator, a member and an agent are unchanged in `single`, `group` and `isolated`.
+  
+  **What stops conferring.**
+  
+  - **A grant that names nothing.** This is a grant the backfill has not named yet, or one it could not name: its id names no set row, its id names another organization's set row, or the name is not in the security catalog. Such a grant now confers nothing through the resolver. The backfill runs at `kernel:bootstrapped`, before any server opens its socket, so on the first boot after upgrading no request is answered before the grants it can name are named. The grants it cannot name are listed in its boot report.
+  - **A grant whose id names another organization's set.** Before this change, such a grant conferred that set. It now confers nothing.
+  - **Remedy.** Read the backfill's boot report, which lists each grant by row id. Re-point each listed grant at a permission set of its own organization, or at an organization-less one, with an update of `permission_set_id`. The platform stamps the name, and the grant confers again.
+  
+  **What the grant name hook refuses now** (`@objectstack/plugin-security`). The name is taken only from a set row of the grant's own organization, or from an organization-less one. A tenant-less system writer can read every organization's sets, and it could name an organization-less grant after another organization's set. Now such a grant is stored without a name. A write that supplies that name is refused, from a system writer too, with the hook's usual `400 VALIDATION_FAILED` and `invalid_value` at `permission_set`. An update that re-points a grant at such a set, or moves a grant to an organization its set does not belong to, clears the name.
+  
+  **What the last-administrator guard judges now** (`@objectstack/plugin-auth`). `organization_id` on `sys_permission_set` is a standing column. Moving the organization-less `admin_full_access` row into an organization takes away every grant-anchored platform administrator, as deleting it does, so the guard refuses it when it would leave none. An organization's copy of `admin_full_access` no longer counts as the set being in effect.
+  
+  **Nothing to migrate** in code or metadata.
+- dac99c2: feat(plugin-security)!: the permission-set projection, its seed-name lookup and refusal sink are deleted (ADR-0131 D3, C3 stage 7a)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/plugin-security#permissionSetRowFields, @objectstack/plugin-security#permissionSetBodyFromRow, @objectstack/plugin-security#upsertEnvPermissionSet, @objectstack/plugin-security#projectPermissionMutation, @objectstack/plugin-security#registerPermissionSetProjection, @objectstack/plugin-security#createPermissionSetWriteThrough, @objectstack/plugin-security#reconcilePermissionSetProjection, @objectstack/plugin-security#PermissionSeedOutcome, @objectstack/plugin-security#ProjectionDeps, @objectstack/plugin-security#ProjectionReconcileOutcome, @objectstack/plugin-security#WriteThroughDeps) The retired names are runtime functions and types of the projector that mirrored a permission-set definition into a sys_permission_set row. No metadata moves: no spec key, authorable spelling or stored shape changes, and no stored row is rewritten. Stage 8 already stopped registering the projector and the data-door write-through, so nothing in a running deployment called them. -->
+  
+  **BREAKING** (retired exports of `@objectstack/plugin-security`), graded `minor` on the v18 prerelease line.
+  
+  Stage 8 stopped registering the `sys_permission_set` row object, the `permission` mutation projector and the data-door write-through. This change deletes the modules behind them: `permission-set-projection`, `seed-name-lookup` and `seed-refusal-sink`. A permission set is written through the metadata door alone (`PUT /api/v1/meta/permission/:name`), and the security catalog serves it by name.
+  
+  What a consumer sees:
+  
+  - FROM `createPermissionSetWriteThrough(deps)` TO nothing: no `sys_permission_set` data-door write exists to redirect. Write the set through the metadata door. Delete the call.
+  - FROM `registerPermissionSetProjection(protocol, deps)` TO nothing: no row mirrors a definition. Delete the call.
+  - FROM `reconcilePermissionSetProjection(...)` TO nothing: there is no projection to reconcile at boot. Delete the call.
+  - FROM `projectPermissionMutation(...)` TO nothing. Delete the call.
+  - FROM `upsertEnvPermissionSet(...)` TO `PUT /api/v1/meta/permission/:name`, or the metadata protocol's `saveMetaItem({ type: 'permission', name, item })`.
+  - FROM `permissionSetBodyFromRow(row)` TO `permissionSetDefinitionFromRow(row)` from `@objectstack/core`: the same mapping, for converting a stored `sys_permission_set` row into its definition.
+  - FROM `permissionSetRowFields(definition)` TO nothing: no row is written. Delete the call.
+  - FROM the types `PermissionSeedOutcome`, `ProjectionDeps`, `ProjectionReconcileOutcome` and `WriteThroughDeps` TO nothing. Delete the import.
+  
+  Unchanged: the security catalog's echo of a metadata-door permission set or position on an environment kernel, which lives in its own module since #23308. The packaged-permission-set lock still refuses a metadata-door save of a set a code package ships (`403 NOT_OVERRIDABLE`), and the boot still reports environment overlays that shadow such a set. `OverlayDetectionOptions.logger` now asks only for `warn`, the one channel the reading reports on.
+  
+  **`@objectstack/spec`** (patch): the `permission.tabPermissions` liveness entry no longer cites the deleted projection, and the liveness README's registered-but-unbound `permission-set-projection` proof row is retired with the invariant it described (no `@proof` tag carries it any more).
+- 0253192: A permission-set grant names its set by name: `sys_user_permission_set.permission_set` is the grant's one reference, and `permission_set_id` is no longer written or required
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A data-door contract change on a platform object's rows, not on any metadata schema: no key of any spec schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. Stored grants written before the name column are named by the existing one-time backfill at boot; the id column and its data are dropped by a later ADR-0131 D10 stage, not here. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+  
+  **BREAKING** accept-set narrowing on `sys_user_permission_set`, shipped as `minor` under the repo's launch-window convention for breaking changes. ADR-0131 D10's first step: every grant names its set, then the id column goes.
+  
+  - **Before.** A grant was written with `permission_set_id`, a required lookup to a `sys_permission_set` row, and the platform derived `permission_set` (read-only) from that row. A write carrying only the id was accepted and named; a supplied name had to agree with the id's row.
+  - **Now.** `permission_set` is required and writable: it holds the permission set's machine name, and the set is the security catalog's definition of that name (ADR-0131 D3). `permission_set_id` is optional, and nothing writes it or derives anything from it. A grant that names no set is refused `400 VALIDATION_FAILED` (`required` at `permission_set`). A non-system write naming a set the security catalog does not hold is refused `400 VALIDATION_FAILED` (`reference_not_found` at `permission_set`), the same envelope `sys_user_position.position` answers with; a deactivated set is still a set and is accepted. System writes are not judged against the catalog.
+  - **The platform's own grant writers** (the platform-admin promotion and the organization-admin reconcile) write the name alone and read no `sys_permission_set` row to do it, so a database with no such rows still gets its first platform administrator and its organization administrators. A row id is read only to revoke, or not duplicate, a grant written before the name column existed, which names nothing until the one-time backfill names it. Uninstalling a package revokes the grants that name its sets.
+  - **Unchanged.** Grants written before this release keep their id and are named by the existing backfill; the resolver and every grant reader already read the name.
+  
+  **The remedy.** A caller that wrote `{ user_id, permission_set_id: <row id> }` writes `{ user_id, permission_set: '<set name>' }`: the `name` of that set, as the metadata door (`GET /api/v1/meta/permission`) lists it.
+- bfc15d2: feat(spec,core)!: a position's permission sets are declared in `permissionSets` on its definition, and the authorization resolver reads positions, their sets and the set bodies from the security catalog (ADR-0131 D3/D4)
+  
+  Clause-②: yes
+  
+  <!-- adr-0087: registered position-permission-sets-declared -->
+  
+  **BREAKING** (the resolver stops reading the position → permission-set junction), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **FROM → TO.** A position's permission sets were `sys_position_permission_set` rows. They are now declared in `permissionSets` on the position's definition; junction rows no longer grant.
+  
+  ```ts
+  definePosition({ name: 'sales_rep', label: 'Sales Representative', permissionSets: ['crm_sales_user'] });
+  ```
+  
+  The one-line fix for an app that bound sets to its positions with a boot-time binder: name the sets in `permissionSets` on each position.
+  
+  **`@objectstack/spec`.** `PositionSchema` accepts `permissionSets`: a list of permission-set names (lowercase snake_case). Before, the key was refused with a pointer to the junction. Each name is resolved in the environment catalog when a holder's grants are resolved. A name the catalog does not hold confers nothing.
+  
+  **`@objectstack/core`.** `resolveUserAuthzGrants`, and every surface built on it (`resolveAuthzContext`, `hasPlatformAdminStanding`, the permission explainer, `runAs: 'user'` automation), reads the security catalog the security plugin binds to its engine (`bindSecurityCatalogReader`, `securityCatalogReaderOf`):
+  
+  - A held position grants the sets its definition's `permissionSets` names. The junction rows and the read of set rows by the junction's ids are gone.
+  - A held set, granted directly or through a position, has the body (`systemPermissions`, `tabPermissions`) of its catalog definition. A set that only a `sys_permission_set` row carries, with no definition, confers nothing — including a row inserted directly (a script or a harness, outside the product's doors).
+  - **Deactivation moves to the activation ledger** (ADR-0049, as ADR-0131 D3 and ADR-0126 §4 place it). A position or a permission set is switched off by a `sys_metadata_activation` row of type `position` or `permission` whose `active` is false, deployment-wide. The `sys_position` and `sys_permission_set` rows are no longer read at all, their `active` column included. A name with no ledger row is in effect. A composition that does not register the ledger object (no `PlatformObjectsPlugin`) switches nothing off and issues no ledger read.
+  - The exported `ADMIN_STANDING_SURFACE` follows what the resolver reads: `sys_permission_set`, `sys_position` and `sys_position_permission_set` leave it, and `sys_metadata_activation` enters in the role `derives`, with the columns `metadata_type`, `name` and `active`. The `kind` union of `ADMIN_STANDING_NON_TABLE_INPUTS` gains `security-catalog`, for the catalog's `admin_full_access` definition.
+  - `convertDeactivatedCatalogRows` turns the rows' `active: false` flags into ledger rows. A name some organizations switched off and others kept on is reported `conflicting`, because the ledger is deployment-wide. The upgrade ceremony applies it beside `convertPositionBindingRows`. ⛔ It never runs at boot.
+  - Platform standing still requires an organization-less `admin_full_access` user grant, now resolved by name in the catalog.
+  - An engine no security plugin started on has no catalog bound, and resolves no set and no position-bound set. That is what an engine with no permission tables provisioned resolved before.
+  - `convertPositionBindingRows` converts the junction rows into each position's `permissionSets`. It answers per name `declared`, `converted` or `conflicting`, and it lists dangling bindings. The upgrade ceremony applies it. ⛔ It never runs at boot.
+  
+  **`@objectstack/plugin-security`.** The plugin binds the catalog read (engine registry and metadata service) to its engine at `start()`. At `kernel:ready` the built-in `everyone` anchor declares the deployment's baseline in its `permissionSets`: the app's `isDefault` set and the platform's `member_default`. It is judged by the same high-privilege check against the stack's declared capabilities that the boot binding used. Under a wall the envelope now carries `member_default` beside the app's set, as it did under `single`. `member_default` carries no system or tab permission, and enforcement already applied it to every human as the additive baseline. A Setup edit of a position row under `single` keeps the `permissionSets` the stored definition names (the row has no column for it).
+  
+  **`@objectstack/plugin-auth`.** The last-administrator guard follows what the resolver reads. Its standing-key map judges `sys_metadata_activation` (`metadata_type`, `name`, `active`) in place of `sys_permission_set`. A ledger write that switches `admin_full_access` off is refused only when it would leave no administrator who can sign in, and switching it back on is never refused. The guard no longer judges `sys_permission_set` writes, because the resolver no longer reads that row.
+  
+  **`@objectstack/platform-objects`.** The position metadata form gains a `permissionSets` row, translated in zh-CN, ja-JP and es-ES.
+  
+  **`@objectstack/plugin-security`.** The name-fold warning's remedy now names the position definition's `permissionSets`, not a junction row.
+  
+  **What stops granting at upgrade, and what to do.**
+  
+  - **A deactivation made in Setup.** The Deactivate action on a position or a permission set writes the row's `active` column, which no longer switches anything off. ⚠️ Until the upgrade ceremony converts the rows (`convertDeactivatedCatalogRows`), a position or set deactivated that way **grants again**. No enable/disable door accepts the `permission` or `position` type yet, so a new deactivation has no in-product path. To revoke now, remove the assignments or the binding.
+  
+  - **A binding made in Setup.** Binding a permission set on a position's page writes a `sys_position_permission_set` row, and so does confirming an audience-binding suggestion. That row no longer grants. Until Setup writes the definition (objectui C9), declare the binding in the position's `permissionSets` through the metadata door (`PUT /api/v1/meta/position/:name`, platform administrator) or in the app's code.
+  - **Under a wall (`group`, `isolated`): a position or permission set an organization authored in Setup.** It is a data row with no definition in the environment catalog (ADR-0131 D3), so it stops granting (ruling #15196 Q3 = A). To keep it, a platform administrator re-creates it as environment metadata through the metadata door, under the same name, with its `permissionSets` or its set body. No command promotes a row in place today.
+  - **Existing junction rows** are converted into definitions by the ADR-0131 upgrade ceremony (`os migrate organization-ownership --apply`) under `single` only, where its `authored-conversion` step applies `convertPositionBindingRows`. Under a wall (`group`, `isolated`) the ceremony converts no binding (ADR-0131 D3): its `rewrite` step refuses each binding whose position's definition does not name the bound sets, and the ceremony stops there until the operator acts and re-runs it. A position no catalog declares is declared with those sets in `permissionSets` through one door only: the deployment's code, or the metadata door (`PUT /api/v1/meta/position/:name`, platform administrator). A declared position the metadata door can edit takes the missing sets through that door. A definition a package ships is sealed (ADR-0131 D6), and no door on the database adds sets to it. A name that organizations bound differently is reported `conflicting` and is never merged.
+- 2ff0825: feat(plugin-security)!: the security plugin's own readers (set resolution, the delegated-administration gate, the permission explainer and the position-assignment refusal) read the security catalog and the activation ledger, not the catalog rows (ADR-0131 D3/D4)
+  
+  Clause-②: yes
+  
+  <!-- adr-0087: not-required (already-registered position-permission-sets-declared) stage 1 registered this cutover: row-only catalog items confer nothing, and this changeset carries that rule to the security plugin's own readers -->
+  
+  **BREAKING** (enforcement stops reading `sys_permission_set` rows), shipped as `minor` under the launch-window convention for breaking changes. This is the second step of the cutover that `position-permission-sets-declared` registers: the authorization resolver already reads the catalog; now the security plugin's readers read the same catalog.
+  
+  **Permission-set resolution (`@objectstack/plugin-security`).**
+  
+  - FROM: a set name the metadata service and the bootstrap sets did not answer was loaded from a `sys_permission_set` row (the caller's organization's, else an organization-less one), its object map and field map included, and dropped when the row's `active` was false.
+  - TO: it is loaded from the security catalog (the environment registry the security plugin binds to its engine): every package's sets and every set an author saved through the metadata door. A set that only a row carries resolves nothing. The resolver already granted nothing through such a set; now its object and field permissions stop applying too.
+  - Fix: declare the set through the metadata door (`PUT /api/v1/meta/permission/NAME`) or in a package.
+  - A permission set that resolves only because a POSITION of the same name was folded into the request is dropped when the activation ledger (`sys_metadata_activation`, type `permission`) switched it off. The row's `active` column is not read.
+  
+  **Delegated administration (ADR-0090 D12).**
+  
+  - FROM: the sets a position distributes were its `sys_position_permission_set` rows in the caller's organization; `delegatable` was the organization's `sys_position` row's; the assignable-positions listing (`describeDelegableScope`) listed `sys_position` rows; a direct grant's set (and its `adminScope`) was its `sys_permission_set` row.
+  - TO: all four read the security catalog by name. A position distributes the sets its definition's `permissionSets` names, so the containment check and the listing see a binding declared only on the definition. `delegatable` is the definition's. The listing offers every position the catalog holds. A direct grant's set is the catalog's definition of the name the grant carries; a grant naming a set the catalog does not hold is refused for a delegate (a tenant administrator is not judged).
+  - A name a position's `permissionSets` carries that the catalog does not hold must be on the delegate's allowlist too. It grants nothing today, but it starts granting as soon as a set of that name is authored.
+  - A catalog read that fails refuses the delegate's write. Before, it approved it as "distributes nothing".
+  
+  **The permission explainer.** "deactivated" is read from the activation ledger through the resolver's own read, so explain and enforce agree. A direct grant whose set the catalog does not hold is reported neither as expired nor as deactivated: there is no set to lose.
+  
+  **Position assignments (`sys_user_position.position`).**
+  
+  - FROM: refused `400 VALIDATION_FAILED` unless a `sys_position` row (the writer's organization's, or an organization-less one) carried the name. A position declared only in a package or saved only through the metadata door was refused.
+  - TO: refused unless the security catalog holds a position of that name. A registry-declared position is accepted. A name only a `sys_position` row carries (with no definition) is refused, because it grants nothing. A deactivated position is still accepted.
+  
+  **One position name per deployment under `single`.**
+  
+  - FROM: a Setup create of a position, or a rename into a name, that an environment definition already held overwrote that definition (another organization's label and description, an empty `permissionSets`).
+  - TO: refused `409 UNIQUE_VIOLATION`, the answer a second row of the name in one organization already gets, and the row write is undone. This covers a definition another organization's row wrote, one saved through the metadata door, and one an application stack declares. A name a package or a built-in holds keeps its `403 NOT_OVERRIDABLE`.
+  
+  **`@objectstack/core`.** `readDisabledCatalogNames(ql, positions, sets)` is exported: the resolver's one read of the activation ledger. It returns the names switched off for this deployment and is now shared by the explainer and the security plugin.
+- 149294c: A boot report lists, per organization, every security catalog reference whose name resolves nowhere (ADR-0131 D3/D4)
+  
+  Clause-②: no
+  
+  ADR-0131 D4 makes every reference to a position or a permission set a name, resolved through the security catalog (the environment registry). A stored reference whose name the catalog does not hold confers nothing, while Setup still lists it. At every boot, at `kernel:bootstrapped` and after the two one-time backfills, `@objectstack/plugin-security` now reads the stored references and logs what the catalog does not resolve. The report writes nothing: no row, no definition, no ledger entry.
+  
+  - **Where to read it.** In the boot log, as `[security]` lines at `error`, one line per kind of finding. Each line's metadata lists the organizations (`organizationId`, `null` for organization-less rows) with a count and the names or row ids, at most 50 per list. A clean boot logs one `info` line that says every reference resolves.
+  - **What it lists, per organization:**
+    - `sys_user_position` assignments whose `position` the catalog does not resolve;
+    - `sys_user_permission_set` grants whose `permission_set` the catalog does not resolve;
+    - `sys_user_permission_set` grants with no `permission_set` at all. The one-time name backfill could not name them: the set row is missing, belongs to another organization, or carries a name the catalog does not resolve (a row-only set). An unnamed grant confers nothing;
+    - `sys_position` rows whose name the catalog does not resolve, by name and organization. Under a walled posture these are the positions an organization authored in Setup: the catalog is environment-level, so they have no catalog home, and their assignments distribute no permission set. Under `single` these are the row-only positions the row-only backfill could not define, with `refusedNames` naming the ones whose names the metadata door refuses. The backfill reports that class once and records its verdict; this report lists it at every boot.
+  - **And under `single` only:** position names carried by more than one `sys_position` row (two organizations' rows, or an organization's row beside a package's or a built-in's seeded row). A position name is unique per deployment under `single`, so each is reported as conflicting, never guessed and never merged.
+  - **What clears a line.** The next boot re-reads everything. A reference whose definition is declared again (its package or its environment definition) leaves the report. So does a walled organization's position once a definition of that name is saved through the metadata door. Otherwise remove the row, or re-point it at a name the catalog holds.
+  - **A read that did not happen is not a finding.** If a scan or the catalog read fails, the report says which store it could not read, at `warn`, and reports nothing for that boot.
+  - **The grant-name backfill's warnings now say what such a grant is worth.** A grant the backfill could not name, because its set row's name is not in the catalog or its name write did not land, confers nothing until a later boot names it. The warning used to say these grants still resolved by id. That stopped being true when the authorization resolver began reading grants by name.
+  - **Nothing to migrate.** No configuration is needed.
+- 990341a: feat(plugin-security): the boot no longer writes `sys_position` rows — the built-in and declared position seeders and the `everyone` baseline junction writer are deleted
+  
+  Clause-②: no
+  
+  `SecurityPlugin` no longer seeds a `sys_position` row for the six built-in positions (`platform_admin`, `org_owner`, `org_admin`, `org_member`, `everyone`, `guest`) or for a position a stack declares, and no longer writes a `sys_position_permission_set` row binding the baseline sets to `everyone`. Positions are served by the security catalog (ADR-0131 D2): the built-ins are this plugin's declarations, a stack's positions are registry items, and `everyone`'s baseline — the app's default set and `member_default`, minus any set the high-privilege check refuses — is that anchor's declared `permissionSets`. `GET /api/v1/meta/position` lists all of them, and assigning a declared position needs no row.
+  
+  No authorization decision changes: since the resolver reads position definitions, no grant reads a `sys_position` or `sys_position_permission_set` row, and a fresh database and an existing one grant every principal the same. On a database that was already seeded, the existing rows stay as they are; they are no longer refreshed at boot.
+  
+  FROM → TO:
+  
+  - FROM reading the built-in or declared positions from `sys_position` → TO the security catalog read (`createSecurityCatalogReader`) or `GET /api/v1/meta/position`.
+  - FROM the `everyone` → baseline `sys_position_permission_set` rows → TO the `everyone` definition's `permissionSets`.
+- 9646991: feat(plugin-security): the curated platform capabilities are declared `capability` metadata
+  
+  Clause-②: no
+  
+  `SecurityPlugin` now declares the nine curated platform capabilities (`PLATFORM_CAPABILITIES` in `@objectstack/spec`: `manage_users`, `manage_org_users`, `manage_metadata`, `manage_platform_settings`, `setup.access`, `setup.write`, `studio.access`, `manage_sharing`, `view_all_audit_log`) to the engine registry under its own package id, from that one spec list. The security catalog read (`createSecurityCatalogReader`) and `GET /api/v1/meta/capability` now list them beside the capabilities a stack declares, and `GET /api/v1/meta/capability/:name` answers each one's definition (`name`, `label`, `description`, `scope`) where it answered `404`. A write to one of them at the metadata door is still refused, as before: `capability` is code-only.
+  
+  Nothing else changes: the `sys_capability` rows the boot seeds are identical, on a fresh database and on one already seeded, and no capability seeder reports the platform's own declarations.
+- 7aa8d51: feat(plugin-security): the boot no longer writes `sys_capability` rows for the platform's curated capabilities
+  
+  Clause-②: no
+  
+  The curated and derived-default capability seeder (`bootstrapSystemCapabilities`) is deleted. On a fresh database the boot writes no `sys_capability` row for the nine curated platform capabilities (`manage_users`, `manage_org_users`, `manage_metadata`, `manage_platform_settings`, `setup.access`, `setup.write`, `studio.access`, `manage_sharing`, `view_all_audit_log`), and none for a name a permission set grants in `systemPermissions` without declaring it. The curated capabilities are served by the registry: `GET /api/v1/meta/capability` lists them and `GET /api/v1/meta/capability/:name` answers each one's definition, as before. Declare a capability your package grants with `defineCapability` (`stack.capabilities`); a declared capability is still seeded as a package row.
+  
+  No authorization decision changes: a grant is still resolved by the capability name in `systemPermissions`, and no runtime check reads a `sys_capability` row. On a database that was already seeded, the existing rows stay as they are; they are no longer refreshed at boot.
+  
+  In `@objectstack/spec` (`PLATFORM_CAPABILITIES`) and `@objectstack/lint` (`validateCapabilityReferences`), the doc comments now name the registry instead of the retired seeder; no behaviour changes there.
+- 95a8435: feat(plugin-security): a package's declared capabilities are served by the registry alone — the declared-capability seeder and its collision diagnostic are deleted
+  
+  Clause-②: no
+  
+  `SecurityPlugin` no longer seeds a `sys_capability` row for a capability a package declares (`defineCapability` / a stack's `capabilities`). The registry is that capability's one home (ADR-0131 D3): the security catalog read (`createSecurityCatalogReader`), `GET /api/v1/meta/capability` and the anchor predicates' declared-capability context read the declaration there, as they already did. This change does not alter how the platform's curated capabilities are served.
+  
+  A capability name declared by two packages, or a package declaring a curated platform capability name, is refused at boot by the registry's one-holder rule (`SecurityCatalogNameConflictError`, `422`), which already refused it before the deleted runtime diagnostic could run.
+  
+  In `@objectstack/spec`, `@objectstack/objectql`, `@objectstack/runtime` and `@objectstack/lint`, the shipped comments and the capability liveness evidence (`liveness/capability.json`) now name the registry instead of the retired declared-capability seeder. Their behaviour is unchanged.
+  
+  Removed from `@objectstack/plugin-security`'s public exports, with no replacement:
+  
+  - `CAPABILITY_NAME_COLLISION`
+  - `capabilityNameCollisionDiagnostic`
+  - `formatCapabilityNameCollisionDiagnostic`
+  - `reportCapabilityNameCollisions`
+  - `CapabilityNameCollisionDiagnostic` (type)
+  
+  FROM → TO:
+  
+  - FROM a package's declared capability materialized as a `managed_by: 'package'` `sys_capability` row at boot → TO the declaration served by the registry, with no row written. Read it with `GET /api/v1/meta/capability/:name` or the security catalog read, not from `sys_capability`.
+  - FROM a name collision reported at boot through `reportCapabilityNameCollisions` → TO the same collision refused by the registry's one-holder rule. Delete any import of the five names above; there is nothing to call in their place.
+- c8a9783: feat(plugin-security)!: no seeder or materializer writes a `sys_permission_set` row — the declared-permission seeder, the platform-default materialization and the `permission` publish materializer are deleted
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime change on a platform object's rows and on TypeScript surfaces, not on any metadata schema: no key of any spec schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The rows the retired seeders wrote stay in the table until a later ADR-0131 stage; nothing reads them for authorization. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `SecurityPlugin` no longer writes a `sys_permission_set` row for any permission set: not for the platform defaults (`admin_full_access`, `member_default`, …), not for a set a package declares, not for an organization's copy, and not on a metadata reload or an organization's creation. Permission sets are served by the security catalog (ADR-0131 D3), and since the grant names its set (`sys_user_permission_set.permission_set`), no grant path needs a row. A fresh database still promotes its first platform administrator, grants organization administrators and self-registered members, and grants every principal what it was granted before. On a database that was already seeded, the existing rows stay as they are; they are no longer refreshed at boot. Until a later stage retires the ADR-0094 projector, publishing a permission set (a package-door publish, or a writable base's direct publish) still has it write a projection row, `managed_by: 'admin'` with no `package_id` (a package-door publish wrote `managed_by: 'package'` before this release); no authorization path reads it, and uninstalling the package removes it.
+  
+  - **Accepted package defaults follow every publish.** The `everyone` anchor is derived again after every landed `permission` mutation (publish, direct save or delete, through any door), so an accepted set whose new body no longer qualifies stops granting at once. Before this release the re-derivation ran only inside the publish materializer, and only when the published body carried an `isDefault` key.
+  - **`drift_status` and `drift_detail` are gone from `sys_permission_set`**, with the **Needs Attention** list view that listed them. Nothing computes them any more: the declared-versus-enforced diagnostic retired with the rows it compared. A Studio overlay that shadows a packaged set is still named at boot.
+  - **Uninstalling a package still revokes every grant of its permission sets** (ADR-0090 D5, "no ghost grants"). With no row standing for a package's set, both uninstall doors (`deletePackage` and `DELETE /api/v1/marketplace/install-local/:id`) capture the set names the package held just before they withdraw it from the registry, and the `security.package-permissions` cleanup revokes every `sys_user_permission_set` grant naming them. The withdrawal still runs before the cleanups. A grant naming such a set would otherwise survive the uninstall and be live again on reinstall. Grants written before the name column, and position bindings, are still reached through a legacy `sys_permission_set` row where an already-seeded database holds one.
+  - `bootstrapPlatformAdmin` no longer takes the `resync` option and no longer reports `seeded`, `resynced` or `resyncSkipped`. A refused read of the legacy `admin_full_access` row (the restrict-only reach to a grant written before the name column existed) withholds the promotion and says so once.
+  
+  Added (additive, nothing an author writes changes):
+  
+  - `@objectstack/metadata-protocol`: the optional `declared?: UninstallDeclared` argument of `UninstallCleanup` (and of `runUninstallCleanups`' request), the `UninstallDeclared` type, and `captureUninstallDeclared(registry, packageId, stored?)`, the one capture both doors call. A cleanup that ignores `declared` behaves as before.
+  - `@objectstack/objectql`: `SchemaRegistry.securityCatalogNamesHeldBy(packageId, type)`.
+  - `@objectstack/plugin-security`: `cleanupPackagePermissions` takes an optional fourth argument, the captured names.
+  
+  Removed from `@objectstack/plugin-security`'s public exports, with no replacement:
+  
+  - `bootstrapDeclaredPermissions`
+  - `normalizeManagedByVocab`
+  - `computePermissionSetDriftDiagnostics`, `persistPermissionSetDriftDiagnostics`, `runPermissionSetDriftDiagnostics`, and the types `PermissionSetDriftStatus`, `PermissionSetDriftDiagnostic`, `DriftDiagnosticsOptions`
+  - `CAPABILITY_DECLARATION_UNOWNED`, `CAPABILITY_PLATFORM_NAME_REFUSED`, `PERMISSION_SET_DECLARATION_UNOWNED`, `capabilityDeclarationUnownedDiagnostic`, `capabilityPlatformNameRefusedDiagnostic`, `permissionSetDeclarationUnownedDiagnostic`, `reportCapabilityDeclarationUnowned`, `reportCapabilityPlatformNameRefused`, `reportPermissionSetDeclarationUnowned`, and the types `CapabilityDeclarationUnownedDiagnostic`, `CapabilityPlatformNameRefusedDiagnostic`, `PermissionSetDeclarationUnownedDiagnostic`
+- 60bcfe7: feat(plugin-security,rest,spec)!: the permission-set "Discard Overlay" action, its REST route and its contract member are retired; no door creates the overlay it discarded, and a database holding one is refused at cold boot (ADR-0131 cutover, ADR-0048)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered security-permission-set-overlay-discard-retired -->
+  
+  **BREAKING** — a narrowing of the public surface: one HTTP route, one Setup action and one optional contract member are removed. Shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The action deleted the environment-wide `sys_metadata` row that shadowed a package-declared permission set, then re-projected the set's `sys_permission_set` row. Neither half has anything left to do:
+  
+  - No door creates such an overlay. The metadata door refuses a save over a packaged permission set on every topology, whatever `OS_METADATA_WRITABLE` says. The data door refuses an edit of one (clone it instead). The data API cannot write `sys_metadata`. A package that declares a name the environment holds is refused at install.
+  - An overlay stored before those refusals makes the cold boot refuse the deployment with `422 NAMESPACE_CONFLICT`, so a server that could answer the route never holds one.
+  - The authorization resolver reads the security catalog, not `sys_permission_set` rows, so the re-projected row granted nothing.
+  
+  ### What was removed
+  
+  | removed | what to use instead |
+  | --- | --- |
+  | `POST /api/v1/security/permission-sets/:id/discard-overlay` | `os migrate security-catalog-overlays` with the flags and environment the deployment boots with lists every overlay row with no server running; `--apply` deletes them (a history tombstone per row). |
+  | the **Discard Overlay** action on `sys_permission_set` in Setup | the same offline step. To keep a customization of a packaged set, clone it under a new name (the **Clone** action) and assign the clone. |
+  | `ISecurityService.discardPermissionSetOverlay` and `PermissionSetOverlayDiscardResult` (`@objectstack/spec/contracts`) | nothing: delete the call and the import. `tsc` names each one. |
+  | `discardPermissionSetOverlay`, `PermissionSetNotFoundError`, `PermissionSetOverlayStateError` and the `PermissionSetOverlayDiscardDeps` / `PermissionSetOverlayDiscardResult` types (`@objectstack/plugin-security`) | nothing: delete the import. |
+  
+  **The one-line fix:** stop calling the route or the member, and clear any overlay offline with `os migrate security-catalog-overlays --apply` before the first boot on this release.
+  
+  `ERROR_CODE_LEDGER['@objectstack/plugin-security']` no longer lists `INVALID_STATE` or `NOT_FOUND`: the removed action was their only producer in this package. Both codes stay registered under `@objectstack/rest`, and the union of codes is unchanged.
+  
+  The permission-set drift diagnostic no longer names the action in its `overlay_shadow` detail, and the boot reading of shadowed packaged sets names the offline step instead.
+- 66949b7: feat(plugin-security)!: the four security-catalog row objects are retired — `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` (ADR-0131 D3)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered catalog-row-objects-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Positions, permission sets and capabilities live in the security catalog — the environment registry, fed by package declarations and by environment metadata saved through `/api/v1/meta` (ADR-0131 D3). The four row objects that mirrored them are no longer registered, so their data and REST routes and their Setup object pages are gone. No table is dropped and no row is deleted.
+  
+  FROM → TO:
+  
+  - `GET|POST|PATCH|DELETE /api/v1/data/sys_permission_set` → `GET|PUT|DELETE /api/v1/meta/permission/:name`; to copy a set, `POST /api/v1/security/permission-sets/:name/clone` with `{ name, label }`.
+  - `… /api/v1/data/sys_position` → `/api/v1/meta/position/:name`. A position's permission sets are its definition's `permissionSets`.
+  - `… /api/v1/data/sys_position_permission_set` → the position definition's `permissionSets` (`PUT /api/v1/meta/position/:name`).
+  - `… /api/v1/data/sys_capability` → read-only `GET /api/v1/meta/capability`; a package declares a capability with `defineCapability` (`stack.capabilities`).
+  - Setup → Access Control → Positions / Capabilities / Permission Sets now open Setup's catalog lists (`/apps/setup/metadata/<type>?scope=environment`) instead of the object pages; the `sys_position` record page (`SysPositionDetailPage`) is removed.
+  - An object permission on one of the four names in a permission set grants nothing and can be deleted.
+  
+  What else changes:
+  
+  - `sys_user_permission_set.permission_set_id` is a plain text column now, not a lookup: same column, same stored ids, same indexes. It is not written and grants nothing; a grant names its set by `permission_set`.
+  - A permission set saved through the metadata door is written to no row: the `permission` mutation projector, the `sys_permission_set` and `sys_position` data-door write-throughs and the row-only position backfill are no longer registered.
+  - On a fresh `single`-posture database the first human is promoted to platform administrator without reading any catalog row. An unscoped grant written before `sys_user_permission_set.permission_set` existed (it names no set) still withholds the promotion until the organization-ownership migration names it.
+  - Uninstalling a package still revokes every grant naming a permission set the package declared, by the names the uninstalling door captures before the withdrawal (`declared`, `captureUninstallDeclared`), and now by those names alone: the cleanup reads and removes no `sys_permission_set` or `sys_position_permission_set` row, so the `sets` and `positionBindings` counts on its outcome are always 0. A grant written before `sys_user_permission_set.permission_set` existed names no set and is not reached; the organization-ownership migration names it.
+  - On a `group` or `isolated` deployment the data-door half of the walled catalog refusal goes with the objects: a data-door insert, update or delete on `sys_position`, `sys_permission_set` or `sys_capability` answers `404 OBJECT_NOT_FOUND` for every caller instead of `403 PERMISSION_DENIED` below the platform operator. The refusal at the `/meta` write doors, the permission-set clone door and the `/packages` write doors is unchanged.
+  - `capability-reference-unknown` no longer counts a `sys_capability` seed row as a declared capability — no runtime reader consults one. Declare the capability with `defineCapability`.
+  - On an existing database `os migrate plan`'s unmanaged-table sweep now lists the `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` tables: they keep their rows and no object declares them any more. The sweep only reports; nothing is dropped, and the tables stay for the organization-ownership migration.
+  
+  Removed exports, no replacement:
+  
+  - `@objectstack/plugin-security`: the object definitions `SysPosition`, `SysPermissionSet`, `SysPositionPermissionSet`, `SysCapability` (from `./objects`); `securityObjects` lists the remaining three.
+  - `@objectstack/platform-objects/pages`: `SysPositionDetailPage`.
+  - `@objectstack/spec`: `SystemObjectName.POSITION`, `SystemObjectName.PERMISSION_SET`; the four names leave `PLATFORM_OBJECTS_BY_PACKAGE['plugin-security']` and `PLATFORM_PROVIDED_OBJECT_NAMES`.
+  - `@objectstack/core`: `isRowActive` and `ActivatableRow` — a catalog row's `active` column decides nothing; deactivation is the activation ledger's (`sys_metadata_activation`).
+  - `@objectstack/objectql`: the published `PLATFORM_OBJECT_TENANCY` record loses its `sys_permission_set` key (the other three names were never in it). A removed key of an exported constant is a narrowing, so `@objectstack/objectql` takes `minor` under the launch-window convention for breaking changes.
+- d112087: feat(plugin-security)!: accepting a package's `isDefault` suggestion takes effect for the whole deployment
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING.** A package's `isDefault: true` permission set now reaches every signed-in member through ONE deployment-level acceptance, and the acceptance takes effect. Before this release a confirm wrote a `sys_position_permission_set` row that granted nothing.
+  
+  - **What an accept does.** `POST /api/v1/security/suggested-bindings/:id/confirm` records the decision once for the deployment, and the security plugin derives the `everyone` anchor's definition again as the baseline plus every accepted set. The derivation also runs at boot, on uninstall and on a package-door publish. A member's reads of the package's objects change on the next request. `bindingCreated` is `true` when the definition did not name the set before.
+  - **Who may decide (narrowing).** All three routes now need the `manage_metadata` capability, and under a `group` or `isolated` tenancy posture the platform operator. Before this release a tenant administrator (the `*` wildcard holder) listed, confirmed and dismissed suggestions for their organization. That caller is now refused `403 PERMISSION_DENIED`. Remedy: a `manage_metadata` holder decides, once for the deployment.
+  - **The record is the deployment's.** `sys_audience_binding_suggestion` rows are owned by the Default Organization. A deployment with no Default Organization (several organizations, none with slug `default`) answers `409 SUGGESTION_STATE` with the remedy.
+  - **Rows written before this release are never promoted.** A Default Organization row a tenant administrator confirmed or dismissed is set back to `pending`, unless the baseline already names the set. A row another organization owns, or none, is not read. Boot logs a warning with the count. Such rows granted nothing before this release and grant nothing after it.
+  - **The high-risk gate is on the definition (ADR-0090 D7).** Accepting a set that carries a bit the `everyone` anchor forbids answers `403 PERMISSION_DENIED`. If a publish later adds such a bit to an accepted set, the derivation withholds it and logs an `error` that names the set.
+  - **Revoke.** `POST …/:id/dismiss` on an accepted suggestion revokes it, and `everyone` is derived again without the set. A set that only the baseline names (`confirmed`, no resolver) cannot be dismissed (`409`).
+  - **Only `everyone`.** A `guest`-anchor suggestion is refused `409`, because accepting it would record a grant that never takes effect.
+  - **The anchors stay sealed.** No caller writes `everyone`'s definition. An acceptance changes the derivation's input, and the plugin re-declares the definition. Reconciliation reads that definition and no binding row.
+  - **Declarations come from the security catalog.** A suggestion is offered for an `isDefault` set that the catalog serves with an owning package, which is the source the authorization resolver reads. The module no longer reads `sys_position`, `sys_permission_set` or `sys_position_permission_set`. It also no longer materializes a set.
+  - **New field:** `sys_audience_binding_suggestion.deployment_decision`, a boolean that is `true` when a `manage_metadata` holder resolved the row.
+  
+  Exported TypeScript surface (the compiler names each caller):
+  
+  - Removed: `reapOrganizationLessSuggestions`, `listSuggestionOrganizationIds` and the `SuggestionReconcileScope` type. Nothing replaces them, because the record is no longer per organization.
+  - `reconcileAudienceBindingSuggestions` and `syncAudienceBindingSuggestions` now take `(ql, logger)`. The metadata, scope and organization parameters are gone.
+  - `SuggestionReconcileOutcome` reports `unread` in place of `organizations` and `reaped`. `SuggestionSyncOutcome` gains `reopened`.
+  - `SuggestionDeps` drops `resolveSets` and takes `posture` and `rederiveEveryone`.
+  - New: `readAcceptedEveryoneSets(ql, metadata)` and the `WithheldAcceptance` type.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-security/src/suggested-audience-bindings.ts#SuggestionDeps, packages/plugins/plugin-security/src/suggested-audience-bindings.ts#SuggestionReconcileOutcome) TypeScript service plumbing with no metadata surface; the compiler names every caller, and no stored row or authored key changes shape (the new object field defaults to false) -->
+- 06cc45d: Under a walled posture the security catalog is the platform operator's: tenants are refused creating, changing or deleting positions, permission sets and capabilities, and may only assign them
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered walled-catalog-tenant-writes-retired -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3: "Shared-DB multi-tenant (`group` / `isolated`): tenant admins cannot create or edit catalog items; the operator defines the catalog for every tenant … Creation through Setup or the API is refused with a message naming the posture and the capability.").
+  
+  **Why.** The catalog is environment-level, and every organization resolves it by name. Measured on a booted `isolated` and `group` stack: an organization owner granted `manage_metadata` inside their own organization saved `PUT /meta/permission/:name` over a permission set another organization's member holds, and that member's next resolution carried the change. One organization's write changed what another organization's members resolve.
+  
+  **FROM → TO**, on a `group` or `isolated` deployment, for a caller below the platform operator (the `PLATFORM_ADMIN` rung: the deployment's declared `OS_PLATFORM_OWNER_EMAIL` owner):
+  
+  - `PUT /meta/:type/:name`, `DELETE /meta/:type/:name`, `POST /meta/:type/:name/publish` and `POST /meta/:type/:name/rollback` on `@objectstack/rest`, and `PUT /meta/:type/:name` on the runtime dispatcher, for `position` or `permission`: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN` (the dispatcher's `PUT` answers `403 PERMISSION_DENIED`). The message names the posture and the capability.
+  - The same doors for `capability`: admitted where they were admitted. `capability` is a code-only type, so these doors already refused its writes before this change; only the sentence the caller reads changes, to the posture refusal. For `capability`, the accept set narrows at the data door on `sys_capability`, below.
+  - `POST /security/permission-sets/:name/clone` (the permission-set clone door): **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before the source is read.
+  - A data-door insert, update or delete on `sys_position`, `sys_permission_set` or `sys_capability`: **FROM** admitted to any caller whose grants admit the table (a `sys_permission_set` create landed in the environment ledger; a `sys_position` create landed as an organization row with no definition) **TO** `403 PERMISSION_DENIED`, before anything is written. This includes an ADR-0090 D12 delegate whose `adminScope` carries `authorEnvironmentSets`: under a wall it can no longer author environment permission sets at the data door. Its assignment and binding paths are untouched.
+  
+  **Unchanged.** Assignments: `sys_user_position` and `sys_user_permission_set` rows stay organization rows that an organization's administrators write for their own members. The platform operator and the engine's own writes (seeders, installers, migrations) write the catalog as before. Every other metadata type is untouched. Under `single` (and with no `tenancy` service), catalog writes stay with `manage_metadata` holders, exactly as before. The catalog activation door already required the platform operator under a wall.
+  
+  **The remedy.** A tenant that needs a position or permission set asks the platform operator to define it in Studio, or through a managed package. The tenant's administrators then assign it to their members. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-catalog-tenant-writes-retired`. `@objectstack/metadata-core` exports the one predicate every door asks, `walledCatalogWriteVerdict`, beside `isSecurityCatalogType`, `SECURITY_CATALOG_TYPES` and `PLATFORM_OPERATOR_POSTURE`. A custom door that writes catalog items asks it after `metaWriteCapabilityVerdict`.
+- c8b062f: feat(metadata-protocol,metadata-core,objectql,rest,plugin-security,spec)!: every metadata read is environment → code; legacy organization rows and overlays of sealed managed content are reported at boot, not served (ADR-0131 D6)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered metadata-read-organization-scope-retired -->
+  
+  **BREAKING (narrowing).** No read that is refused today is admitted. Graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N`.
+  
+  ADR-0131 D6 retires the per-organization overlay axis. The doors carry no organization and the protocol refuses every organization-scoped write; now every protocol read is environment → code as well.
+  
+  **What changes.**
+  
+  - The item, list, layered, cached (ETag), history, diff, audit, drafts and commit-timeline reads, the `_lock` gate's overlay layer, search's page sweep, diagnostics and references serve the environment's stored row, else the code packages' definition — whatever organization a caller names. A row stored organization-scoped by an earlier release is served by no read and loaded by no boot.
+  - `overlayScope` on the layered read is `'env'` or `null`; `'org'` is gone.
+  - `listDrafts` lists the environment's drafts only, and its rows carry no `organizationId`.
+  - `listCommits` lists the environment's commits only, for every caller: a legacy organization commit is not shown, so an operator on the packages door no longer sees every organization's legacy commits, and a rollback plan never contains one.
+  - [Triage ruling Q1 → C] An environment row that overlays an item a managed package ships, on a type sealed against overlays (any type whose registry entry admits no overlay — a managed flow, action, hook, object or datasource, for example — written through the `OS_METADATA_WRITABLE` hatch before the seal), is not served: the package's definition is. An `object` such row is not loaded at boot either, so the engine keeps the packaged schema. A stored fork of a code-declared permission set keeps its own ruling instead: the reads do not decline it, a cold boot refuses a deployment that holds one (ADR-0048), and the offline `os migrate security-catalog-overlays` removes it.
+  - `@objectstack/objectql` binds the environment's authored hook and action rows only; a legacy organization-scoped hook or action row is no longer bound.
+  - Boot names both populations, once each: `[metadata_org_scoped_unserved]` lists every legacy organization row per type (active and draft), plus the legacy rows of `sys_metadata_commit`, `sys_metadata_history` and `sys_metadata_audit`, and names the v18 migration ceremony (`os migrate`, ADR-0131 D10) that carries them; `[metadata_sealed_overlay_unserved]` lists the sealed overlays per type with the two remedies. Nothing is deleted or rewritten.
+  - The anonymous public-form doors keep reading the Default Organization's legacy `view` layer, fail-closed, until that ceremony (triage ruling Q3 A) — through the protocol-internal `legacyFormOrganizationId` key, which no spec request declares and which the protocol honours for `view` alone.
+  - The seed loader's refusal of an unowned record now prescribes `organization_id` on the record first: a seed published through a package carries no caller organization.
+  
+  **What moves for consumers.**
+  
+  | From | To |
+  |:--|:--|
+  | `organizationId` on a `GetMetaItems` / `GetMetaItem` / `GetMetaItemLayered` / `AuditMetaItem` / `HistoryMetaItem` / `GetMetaItemCached` request (`@objectstack/spec`) | drop it: the read is the environment's. The key is stripped at a spec parse (the schemas are not strict) and no longer type-checks |
+  | `organizationId` on a `listDrafts` / `listCommits` / `diffMetaItem` / `getMetaDiagnostics` / `findReferencesToMeta` request (`@objectstack/metadata-protocol`) | drop it |
+  | `ListDraftsResponse` draft `organizationId` | gone: every listed draft is the environment's |
+  | `SysMetadataRepository.listDrafts` row `organizationId` (`@objectstack/metadata-protocol`) | gone: every listed row is an environment draft, whichever repository asks |
+  | `overlayScope: 'org'` (`GetMetaItemLayeredResponse`) | only `'env'` or `null` |
+  | `declaresOrgOverride`, `organizationIdForMetaRead` (`@objectstack/metadata-core`) | removed — no read takes an organization. Read `allowOrgOverride` off `DEFAULT_METADATA_TYPE_REGISTRY` where a type's overlay channel is the question |
+  | `MetadataAuthoringGateContext.organizationId` (`@objectstack/metadata-protocol`) | removed — no write is organization-scoped, and no gate read it |
+  | `organizationId` on `projectPermissionMutation`'s `evt` (`@objectstack/plugin-security`) | drop it: the projection reads the environment → code layered read, whatever organization the event names |
+  | a legacy organization-scoped `sys_metadata` row a deployment relied on | re-save the item in Studio to make it environment-wide now, or wait for the v18 migration ceremony, which promotes it |
+  | an environment overlay of a managed item on a sealed type (flow, action, hook, object, datasource …) | re-express the change as a new item under a new name (a linkage-free clone), then delete the stored row; or delete the row |
+  
+  **What does not change.** No stored row is deleted, rewritten or migrated. The anonymous form doors' read of organization-layer withdrawals is unchanged.
+- 6729e10: feat(plugin-audit,plugin-security)!: the compliance ledger `sys_audit_log` loses its injected organization column; the organization a row is about stays in `tenant_id`, and an organization reader is scoped on it by a platform row policy (ADR-0131 D7)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sys-audit-log-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's convention for breaking changes on this line.
+  
+  Some ledger rows are about deployment-level actions no organization owns: a change of platform-administrator standing at boot, a change to a global setting, plugin-auth's administrative user writes. An injected organization column made the tenant wall the ledger's anchor, so under a walled posture those rows were hidden from every reader, platform administrators included. ADR-0131 D7 takes the column off: the ledger is governed by object permission, and the organization a row is about is the plain attribution field `tenant_id`, which the tenant-field resolver does not claim.
+  
+  - **`sys_audit_log`** (`@objectstack/plugin-audit`) declares `systemFields: { tenant: false }`, so the registry injects no `organization_id` and a new table is provisioned without it. `tenant_id` (a lookup to `sys_organization`) is unchanged and is the only organization column. The record mirror, the record-view writer and the sign-in writer stamp it as before and no longer stamp `organization_id`. A write that still names `organization_id` on the ledger is refused `INVALID_FIELD`, and a filter on it `INVALID_FILTER`.
+  - **The read scope** (`@objectstack/plugin-security`, the shipped permission sets): a platform row policy, `sys_audit_log_org` (`tenant_id == current_user.organization_id`), in `organization_admin` (and its no-bypass variant), `member_default` and `viewer_readonly`. `organization_admin` also names `sys_audit_log` explicitly, read only and without `viewAllRecords` / `modifyAllRecords`: its wildcard's superuser bypass would otherwise skip the policy on an object with no tenant column. Under an organization wall an organization administrator or viewer reads the rows about its active organization; a platform administrator (`admin_full_access`) reads every row, the rows about no organization included. Under `single` the policy is stripped by provenance (ADR-0105 D3), as every platform tenant policy is.
+  - **`config_change` rows** (`@objectstack/service-settings`): a GLOBAL-scope settings change is about no organization, so its ledger row carries no `tenant_id`, whatever organization the writing session had active. Tenant- and user-scope changes keep the writer's organization. The settings writer and plugin-security's platform-admin standing writer no longer probe for or stamp `organization_id`.
+  - **Retention** (`@objectstack/objectql`): a tenant-scope `lifecycle.retention_overrides` window on `sys_audit_log` partitions the reaper's and the archiver's passes on `tenant_id`, and the global pass keeps the rows with no `tenant_id`.
+  - **`view_all_audit_log`**: its description (`@objectstack/spec/security`) now names the row scope it does not lift; the capability still lifts only the parent-record read gate.
+  
+  **What moves for consumers.**
+  
+  - **Authored references.** A filter, list-view column, report grouping, formula or seed key that names `organization_id` on `sys_audit_log` names `tenant_id` instead; the two held the same value on every row a writer wrote.
+  - **Who reads what, under a wall.** A platform administrator now also reads the rows about no organization, global settings changes included. An organization administrator reads exactly its active organization's rows. Under the `group` posture an organization reader is scoped to the ACTIVE organization's rows, not the union of its memberships. A permission set an application ships that grants `viewAllRecords` on the ledger (directly or through a wildcard) skips the row policy, as it skips Layer 1 on every object the wall does not cover.
+  - **Who reads what, under `single`.** The row policy is stripped under `single` (ADR-0105 D3), as every platform tenant policy is. So a deployment that holds more than one organization under `single` serves every organization's ledger rows to every ledger reader. The remedy is a walled posture.
+  - **Existing databases — nothing moves automatically** (ADR-0131 D14). Schema sync is additive: the physical `organization_id` column stays and the boot drift report names it orphaned. The v18 upgrade ceremony confirms its values equal `tenant_id` and drops it (`os migrate apply --allow-destructive`), reporting any row where they differ.
+- a3bcbcf: feat(plugin-security)!: a data-engine context that carries no principal and is not a system context is refused (ADR-0096 D5 strict mode)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export, type or stored shape is added, removed, renamed or re-shaped, and no stored row is read, rewritten or converted, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime admission: the security middleware refuses an engine operation whose context names no user, no position and no permission set and is not a system context, which it used to hand through. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no TypeScript declaration moves (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** for in-process code: an accept-set narrowing of the data engine's security middleware, shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **What is refused now.** A data-engine operation whose execution context carries no principal (no user id, no position, no permission set) and is not a system context. That covers a call that passes no context at all, an empty one, one with only a tenant id, and one with only provenance fields. Every layer answers it the same way:
+  
+  - the engine middleware throws `PermissionDeniedError`, `403 PERMISSION_DENIED`, for every verb (find, findOne, count, aggregate, insert, update, delete), before the operation runs;
+  - `canReadObject`, `canExport` and `canWriteObject` answer `false`;
+  - `getReadFilter` answers the deny filter (zero rows).
+  
+  It used to be handed straight through, with no CRUD gate, no row-level security, no field mask and no tenant wall. That contradicted the published contract for an empty tool-execution context, "unauthenticated (RLS-on, sees-nothing)", which this change now keeps. The field projections (`getReadableFields` and its siblings) answer such a context as they answer any caller that resolves no permission set.
+  
+  **What is unchanged.**
+  
+  - A system context (`isSystem: true`) is admitted everywhere, as before.
+  - A context that carries a principal without a user id is decided by what it carries: a named permission set, the guest principal, or the public-form grant.
+  - An unauthenticated HTTP request is answered as before: a door that requires a session answers `401 UNAUTHENTICATED` before the engine is asked anything, and an endpoint an application declared open runs it as the guest principal.
+  
+  **What to do.** Code that calls the data engine in-process must state who it acts for. FROM: an engine call with no context, or with a context that names nobody. TO: either
+  
+  - pass the caller's execution context, so the caller's own permissions decide; or
+  - for platform plumbing whose own door already authorized the caller (a store read or write the platform owns), pass the explicit system opt-in, `context: { isSystem: true }`.
+  
+  The one-line fix: give every in-process engine call a context, the caller's or `{ isSystem: true }`. The refusal message names both.
+  
+  `@objectstack/metadata-protocol`: the protocol's own platform-store reads and writes behind the publish, history, audit, diff, commit, migration and code-only delete doors now pass the explicit system opt-in, like its other store calls. Nothing those doors answer changes.
+- c6fe02d: `SecurityPlugin` declares the identity objects its authorization store reads, `sys_user` and `sys_member`, and refuses to boot a kernel that does not register them. The refusal names the missing objects and the plugin that registers them, where the kernel used to boot and then fail every authenticated request's permission read as an outage.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A boot refusal of a plugin composition, not a metadata change: no spec key, export, option or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. The remedy is a kernel composition edit (mount plugin-auth's identity objects), which no ledger entry can derive from metadata. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this boot path and this diff adds none (not already-registered); and what narrows is which kernels boot, not a runtime interface or a type surface (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: a kernel that booted before is refused at boot, shipped as `minor` under the launch-window convention.
+  
+  **Why.** Permission resolution, `resolveUserAuthzGrants` in `@objectstack/core`, reads `sys_user` and `sys_member`, which `@objectstack/plugin-auth` registers. The engine refuses a read of an object its registry does not hold, so a kernel with `SecurityPlugin` and without those objects booted cleanly, and then every authenticated request's permission read failed with `AuthzStoreUnavailableError` (`SERVICE_UNAVAILABLE`, 503), which reads as an outage and names no missing dependency.
+  
+  **What is refused.** A kernel where `SecurityPlugin.start()` ran and the engine registry does not hold `sys_user` or `sys_member` at `kernel:ready`: `bootstrap()` rejects with an error named `AuthzIdentityObjectsMissingError`, whose `missingObjects` lists the absent names and whose message names `@objectstack/plugin-auth`, `AuthPlugin` and `createIdentityObjectsPlugin()`. Measured in this repository: three test harnesses that boot `SecurityPlugin` without `AuthPlugin` (one in `@objectstack/runtime`, two in `@objectstack/service-automation`), each now mounting `createIdentityObjectsPlugin()`. By reading the code, not by a run: `objectstack dev` through `DevPlugin` with `services: { auth: false }` and security left on is refused too.
+  
+  **What still boots, unchanged.** A kernel that mounts `AuthPlugin` (`os serve` pairs the two; `@objectstack/verify`'s `bootStack` mounts both); a kernel that registers the two objects any other way; and a boot that composes `SecurityPlugin` for its declarations only (`os migrate`, which suppresses `start()`).
+  
+  **The remedy.** on a kernel that mounts `SecurityPlugin` without `AuthPlugin`, such as a test kit, add `await kernel.use(createIdentityObjectsPlugin())` from `@objectstack/plugin-auth`. It registers plugin-auth's own identity list, so a hand-written plugin that registers `SysUser` and `SysMember` is no longer needed, though it still satisfies the check. A `DevPlugin` stack with `services: { auth: false }` either turns security off as well or passes `createIdentityObjectsPlugin()` in `extraPlugins`. Nothing in an app's metadata changes.
+- ffb31fc: fix(plugin-security)!: `granted_by` on the grant tables is provenance: the platform stamps the writer, and a non-system caller can no longer name the granter
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing at the delegated-admin write gate over an existing column: `sys_user_permission_set.granted_by` and `sys_user_position.granted_by` gain `readonly: true` and keep their name, type, target and storage, so no authorable key, spelling, export or stored shape moves and there is nothing for `objectstack migrate meta` to rewrite. A caller that sent a granter has nothing to change in what it sends; the value it named is replaced by its own user id. Stored rows keep their bytes. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this column and this diff adds none (not registered or already-registered); and the change narrows what a runtime write door stores, not a runtime TypeScript interface or a type surface alone (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `granted_by` records who wrote a grant. The platform already treated it that way: the delegated-admin gate stamped the writer, and the organization-admin reconcile writes the attributed human or null (ADR-0118 D1, an id or null and never a sentinel). But the column was a plain lookup, so a non-system caller could store any existing user as the granter, and the integrity audit filed a granter that no longer resolves as a broken business reference, which raised its `[integrity] stored references that resolve to nothing` warning on every run.
+  
+  **What moves for consumers.**
+  
+  - **Non-system inserts store the writer.** The delegated-admin gate now stamps the caller's user id into `granted_by` on every `sys_user_permission_set` and `sys_user_position` insert it admits, whatever the payload carried. A tenant-level admin's insert and a delegate's insert are stamped alike. Before, a supplied value was stored as sent, and a tenant-level admin's insert that supplied none stored `null`.
+  - **Non-system updates cannot change it.** Both columns are now `readonly: true`, so the engine's update strip drops a caller's `granted_by` and the row keeps its granter. Before, the update landed. A caller that passes `strictReadonlyWrites` is refused instead, as for every read-only column.
+  - **The integrity audit files it as provenance.** A `granted_by` that names a user who no longer exists is reported under the audit's `provenance` bucket, which does not raise the warning. A business reference that resolves to nothing is reported under `dangling` and warns, as before.
+  
+  **Unchanged.**
+  
+  - System-context writers keep the value they write: invitation placement stamps the issuer, the organization-admin reconcile stamps the attributed human or `null`, and the platform-admin promotion writes `null`. A server-side writer that must record someone other than its caller writes under a system context, as these do.
+  - Who may write a grant, and what a grant gives, are unchanged. The gate's authority decision runs first; a refused write is not stamped.
+  - Stored rows are not rewritten, and no stored row is refused on read. A row whose `granted_by` already names someone else, or holds a value that names no user, keeps it.
+  - `sys_record_share.granted_by` (plugin-sharing) is unchanged: its only writer is the sharing service, which already stamps the acting user under a system context.
+- 81bd9fa: fix(plugin-security)!: a position assignment or permission-set grant scoped to an organization must name a member of that organization
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door: a non-system insert or update of a sys_user_position or sys_user_permission_set row whose user holds no sys_member row in the row's organization is refused with the existing 400 VALIDATION_FAILED envelope. The other categories are closed on facts: the one bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and nothing exported is removed or narrowed, so it is neither runtime-interface-only nor type-surface-only. -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **What stops being accepted.** A `sys_user_position` or `sys_user_permission_set` row whose `organization_id` is set may name only a user who holds a `sys_member` row in that organization. A non-system insert or update that would store any other user is refused with `400 VALIDATION_FAILED`, one `fields[]` entry at `user_id` with `code: reference_not_found` — the envelope a `user_id` naming no user already receives. No new error code. It applies to every non-system caller, platform administrators included, and to every engine write: `POST` / `PATCH /api/v1/data/...`, batch inserts, predicate updates, and scripts and flows that run as a user or a service principal. The organization judged is the one the row is stored with: its own `organization_id`, or, when it names none, the caller's active organization stamped at write time.
+  
+  **What stays accepted.**
+  
+  - System-context writes: seed replay, invitation acceptance, the organization-admin reconcile and the platform bootstraps.
+  - A row stored with no organization: a global grant names no organization to be a member of.
+  - An update that changes neither `user_id` nor `organization_id`, so a stored row whose holder has since left the organization stays editable and can be end-dated.
+  - A stock `single`-posture deployment: under the default `auto` membership policy every user is a member of the default organization, so every assignment there names a member.
+  
+  **What changes for you.** Add the user to the organization first, then assign the position or grant the permission set. A script that assigned a grant before the user joined now receives the `400` above; reorder it.
+- f2626c7: fix(plugin-security)!: the Layer 0 tenant write wall refuses a non-system update that would leave a row with no organization
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export, type or stored shape is added, removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door: where the Layer 0 tenant wall applies, a non-system update that would store a row with no organization is refused with the existing 403 PERMISSION_DENIED envelope. The other categories are closed on facts: the one bumped package publishes (not unpublished); no ADR-0087 id covers this path and this diff adds none (not registered / already-registered); and nothing exported is removed or narrowed, so it is neither runtime-interface-only nor type-surface-only. -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **What stops being accepted.** Under a walled tenancy posture (`isolated` or `group`), on an object the Layer 0 tenant wall covers, a non-system update that would leave the row with no organization is refused with `403 PERMISSION_DENIED`. That holds for the value the caller sends and for the value the stored row ends up with after the `beforeUpdate` hooks, on the by-id and the predicate update paths alike, and for every non-system caller the wall covers, platform administrators on public tenant objects included. The rule the wall already stated for an update, that a row's organization stays one the caller's organization scope admits, now covers "no organization" as well as "another organization". An organization-less row is not inert: on an ordinary tenant object it leaves every reader's scope, and on the organization-scoped grant tables (`sys_user_position`, `sys_user_permission_set`) it is read as a grant that applies in every organization.
+  
+  **What stays accepted.**
+  
+  - An update that does not touch `organization_id`, and one that keeps the row's own organization.
+  - System-context writes (seed replay, imports, migrations, platform bootstraps).
+  - A platform administrator on an object whose posture permits crossing the wall, as before.
+  - The `single` posture, where no tenant wall applies.
+  - Inserts: an absent or empty organization on an insert is still filled with the caller's active organization.
+  
+  **What changes for you.** A script or flow that cleared a row's organization through a user or service-principal context now receives the `403` above. Keep the row in its organization; if a row genuinely must carry no organization (a global grant, for example), write it from a system context.
+- 00bee27: fix(plugin-security)!: a definition edit or delete of a position a code package declares is refused at the data door, as the metadata door already refuses it; its row now carries package provenance, and its row state stays switchable
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export, type or stored shape is added, removed, renamed or re-shaped. What changes is one column the boot seeder writes on its own rows (sys_position.managed_by, now package for a position a code package declares) and, through the system-row write gate, a runtime write door: an admin-door update of such a row's definition columns, and its delete, are refused, while a patch of its row state (active, is_default) passes. No stored row is left for `objectstack migrate meta` to convert, because the seeder corrects the stamp itself at the next boot. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no TypeScript declaration moves (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING**: an accept-set narrowing of the `sys_position` data door, shipped as `minor` under the launch-window convention for breaking changes. It carries ADR-0131 D6 (no door edits a managed definition) and D3 (managed items are read-only and clonable).
+  
+  **What was wrong.** The declared-position seeder wrote the row of a package-declared position with no provenance stamp, so the row carried the object default, `managed_by: 'admin'`, and the system-row write gate did not protect it. A Setup or data API edit of its label answered `200`, and the next boot wrote the declared label back over it with no message. The metadata door already refused the same edit with `403 NOT_OVERRIDABLE`.
+  
+  **What is refused now.** A position is package-declared when the engine registry's artifact lookup answers a code package for its name, the same lookup the metadata door refuses a save from. On such a position's row, the admin door now answers `403 PERMISSION_DENIED`, with the message it already gives for a built-in position, to:
+  
+  - an update that touches a definition column (`name`, `label`, `description`, `delegatable`) or any column other than the two row-state columns below. That covers single-record edits, `updateMany`, and filtered updates. Until now a label or description edit answered `200` and the next boot wrote the declaration back over it; a `delegatable` edit answered `200` and persisted.
+  - a delete. Until now it answered `200` and the next boot created the row again. The other lifecycle writes (transfer, restore, purge) are refused as well.
+  
+  **What stays switchable.** A patch that touches only row state (`active` and/or `is_default`) still passes, so Setup's Activate, Deactivate and Set as Default keep working on a package-declared position and persist across restarts. This is the rule a packaged permission set already follows: switching it off is not an edit of its definition. A filtered update passes on the same terms, as long as its filter reaches no built-in position.
+  
+  System-context writes are unchanged: the boot seeder still refreshes the row's label and description from the declaration.
+  
+  **What is unchanged.**
+  
+  - A position an administrator created in Setup, and a position the environment authored through the metadata door, keep an unmanaged row (`admin`) and stay editable.
+  - The built-in positions are refused exactly as before, a bare `active` or `is_default` patch included.
+  - Assigning a position to users and binding permission sets to it are writes on other rows (`sys_user_position`, `sys_position_permission_set`), and this change does not touch them.
+  
+  **At the first boot after upgrading.** The existing row of each package-declared position is re-stamped `package` in place when it carries `admin`, no value, or the legacy `user`. Only `managed_by` changes: the `active`, `is_default` and `delegatable` values an administrator set before the upgrade are kept. The boot's `declared positions seeded` info line counts these rows as `restampedPackageProvenance`. The seeder matches a row by name, as its label refresh always has, so a position created in Setup whose name a package declares later becomes that package's position: its definition is refused the same way, and its row state stays switchable.
+  
+  **What to do.** To change a package-declared position's label, description or `delegatable`, change it in the package and publish a new version. To have a position you can edit in Setup, clone it under a new name with the Clone Position action, bind its permission sets, and assign the clone.
+- ce3d0ad: The registered `security` service serves `checkControlledByParentWrite(object, recordId, context)`, the ADR-0055 master-detail write check that `ISecurityService` declares as optional.
+  
+  - **What it answers.** It answers what a by-id update of the record gets from the master-detail write check. It runs the write path's own composition and never re-derives it: the engine middleware's context prologue (a principal-less context, permission sets that cannot be resolved and a missing on-behalf-of delegator are refused with the same `403 PERMISSION_DENIED`), and then the check for the principal's permission sets and, on a delegated context, for the delegator's (ADR-0090 D10). The first refusal is the answer. A refusal resolves `deny` with the leg it came from, the three non-verdicts resolve `unresolvable` with their reason, and an object that is not `controlled_by_parent` resolves `not_applicable`. A system context resolves `allow`. A store fault rejects with the engine's own error, so a datasource outage keeps its `503`.
+  - **Where it differs from the write path's guard.** A principal whose permission sets resolve to none is judged over that empty list, so it answers `deny` on `object_permission` as the contract declares. A principal with positions or sets and no user id is also judged, where the write path skips the check. It answers `deny` when it holds no `update` grant on the master, and its own update is refused by the object-level gate anyway.
+  - **Who asks it.** The `sys_attachment` parent gate in `@objectstack/service-storage` and the `sys_comment` moderation gate in `@objectstack/plugin-audit` ask it, so they judge a `controlled_by_parent` parent through its master.
+  - The boot line that announces the `security` service now lists the members the registered service actually serves, read from the service object. The hand-kept list it replaced had fallen behind by five members.
+  
+  Nothing an author writes changes, and no by-id write is judged differently. The middleware's context prologue moved into one method that the middleware and the member both call. Its refusals, their order and their wording are unchanged.
+- d303b3e: `security/explain` answers an update of a `controlled_by_parent` record the way that record's own by-id update is answered: its record verdict now comes from the master-detail write check (ADR-0055), which it never asked.
+  
+  - **What was wrong.** On such a record the sharing service's per-record gate abstains, because the effective model of `controlled_by_parent` is `public`, and explain read the abstention as "writable". It also kept the platform ownership floor (`owner_only_writes`) on the record, which the write path hands over to the master-detail write check. So `record.visible` for an update was decided by that floor (`decidedBy: 'rls'`) for every principal who did not create the record. That was refused, on the wrong layer and with no word about the master, for a principal who may not edit the master. It was also refused for a principal who may edit the master, beside a `PATCH` that answers `200`.
+  - **What it does now.** For every update of a record that exists, explain asks the security service's `checkControlledByParentWrite` with the context it is explaining (another user's, when `userId` names one). A `deny` or `unresolvable` outcome makes the record not writable, decided by the `sharing` layer, whose record attribution names the refusing leg (`object_permission`, `row_level_security`, `record_sharing` or `master_chain`) or the reason the check reached no verdict. A rejection of the check is reported fail-closed, as a dependency that throws already is. `allow` and `not_applicable` leave the report exactly as before. The update's row-level composition carries the write path's own master-gate coverage vouch, so the ownership floor is handed over to that check as the write path hands it, and never on behalf of a delegator.
+  - **What is unchanged.** Every object that is not `controlled_by_parent`. Object-level reports (no `recordId`). The `allowed` field, which answers whether the principal may update the object at all. `delete` is unchanged too: explain asks no master check for it and keeps its floor.
+  - **Public surface.** `ExplainEngineDeps` gains the optional `checkControlledByParentWrite` dependency. A deps bag wired without it explains an update as before, and claims nothing about a master.
+- ad14957: fix(metadata-protocol): a create under a name a managed package or a built-in holds is told to choose another name, not to edit the source artifact (#22591)
+  
+  Clause-②: yes
+  
+  The public input surface widens: `packagedBaseRefusal` accepts `operation: 'create'`, and `tenantAuthoredWriteRefusal` takes an optional operation; no verdict, code or status moves.
+  
+  A write onto an item a managed package ships, on a type with no environment overlay, is refused with `403 NOT_OVERRIDABLE`. The refusal's remedy used to assume the write was an edit of that item: "Edit the source artifact and redeploy", or, for a flow, an action or a permission set, its clone or on/off switch. That remedy is wrong for a create. An administrator who creates a position of their own under a name a package or a built-in already holds (`manager`, `everyone`, `guest`, …), or renames one into such a name, cannot edit a source artifact they did not write, and did not ask to customize the package's item.
+  
+  The remedy now follows what the write did:
+  
+  - **A create, or a rename into the name**, is told: the name is taken; to author your own item, choose a name no package or built-in holds, and `GET /api/v1/meta/:type` lists the names in use. This is one sentence for every metadata type.
+  - **An edit** keeps the sentence it had, byte for byte.
+  
+  Which writes are refused does not change, and neither do the code and the status.
+  
+  Where the remedy is a create's:
+  
+  - **Setup** (`@objectstack/plugin-security`): a create of a `sys_position` row, or a rename into a name a package or a built-in holds, under the `single` posture. The data door relays the metadata door's refusal for a create.
+  - **The metadata door** (`PUT /api/v1/meta/:type/:name`): a save sent with `If-None-Match: *`, the first-write precondition (`parentVersion: null` in `saveMetaItem`). Any other save is an edit, as before.
+  - **`ObjectStackProtocolImplementation.packagedBaseRefusal`** takes `operation: 'create'` beside `'save'` and `'delete'`, for a door that knows its write takes a name. The verdict is the `'save'` verdict. `tenantAuthoredWriteRefusal` takes an optional `operation: 'create'` the same way.
+- 1e62f71: Inbound mail lands as a capability: `requires: ['mailbox']` registers the mirrored message `sys_mail_message`, its record links `sys_mail_association` and the mailbox directory `sys_mailbox`, with an unassociated pool restricted to mailbox owners and the new `manage_mailboxes` capability
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec`.** Two closed vocabularies each gain one entry; every stack and permission set that parsed before parses unchanged.
+    - **`mailbox`** is a platform capability token (`PLATFORM_CAPABILITY_TOKENS`, provider `@objectstack/service-mailbox`, open edition). It is not on the always-on slate: an app that wants mailboxes declares `requires: ['mailbox']`.
+    - **`manage_mailboxes`** is a curated organization capability (`PLATFORM_CAPABILITIES`), held by default by platform administrators (`ADMIN_FULL_ACCESS_CAPABILITIES`). Its holder reads the mailbox directory, and every mirrored message and association of its organization past the mail read gates, the unassociated pool included. Object grants and field-level security still apply to a holder.
+  - **`@objectstack/service-mailbox`** (new). `MailboxServicePlugin` owns the three objects (ADR-0029 D1/D2: registered only where the capability is required) and installs two read gates on the data middleware, so a list's `total` agrees with its rows:
+    - `sys_mail_message`, the RFC 5322 mirror of one inbound message (participants, Message-ID and threading headers, subject, text and HTML bodies, attachments as `sys_attachment` rows). A row is served to a caller who can read a record one of its associations names, to the owner of the mailbox it arrived in, or to a `manage_mailboxes` holder. A message no record matched (`association_state: 'unassociated'`) is therefore refused to an ordinary member as not found (`404 RECORD_NOT_FOUND`), never shown organization-wide.
+    - `sys_mail_association`, one row per (message, record) link with the participant address and email field that matched. A row is served to a caller who can read the record it names, or to a `manage_mailboxes` holder.
+    - `sys_mailbox`, the mailbox's address and owner, served only to a `manage_mailboxes` holder (`requiredPermissions`).
+    - All three are `engine-owned` and the data API serves `get` and `list` only. The HTML body is plain text (`textarea`), never rendered markup. Nothing writes these rows yet: the IMAP connector and the ingest engine, which stamp associations from the email fields an app flags with `mailAssociation`, ship next in this package.
+  - **`@objectstack/core`.** `resolveReadableParentIds` ("which of these parent records can the caller read", one caller-scoped engine read per parent object) is exported, so every parent-derived read gate asks the one evaluator. `CAPABILITY_PROVIDERS` gains the `mailbox` row.
+  - **`@objectstack/plugin-security`.** `organization_admin` (and its derived no-bypass variant) holds `manage_mailboxes`: an organization administrator reads its own organization's mailboxes and pool.
+  - **`@objectstack/plugin-audit`, `@objectstack/service-storage`.** The comment, activity, ledger and attachment gates import `resolveReadableParentIds` from `@objectstack/core` instead of carrying their own copies. The two copies were byte-identical, so no gate's answer changes.
+  - **`@objectstack/cli`, `@objectstack/verify`.** Both depend on `@objectstack/service-mailbox`, so `objectstack serve` and `bootStack` mount the provider an app's `requires: ['mailbox']` names. The ADR-0131 organization-ownership inventory carries a row for each new object.
+- 76815b9: feat(spec)!: a `controlled_by_parent` object derives its master from exactly one required `master_detail` — the parse refuses anything else, and the runtime's two fallback tiers retire (#23100)
+  
+  Clause-②: no (narrowing)
+  
+  ADR-0055 §1 says a `controlled_by_parent` object "must declare exactly one required `master_detail` field … Validation error otherwise (fail closed)". Until now neither the parse nor the runtime kept it. `ObjectSchema` accepted such an object with no master at all. The security runtime derived a master through a three-tier fallback the record never stated: a required `master_detail`, then any `master_detail`, then a required `lookup`, taking the first match by field order within a tier. The maintainer ruling (letter B) enforces the record, under ADR-0049 (enforce-or-remove).
+  
+  **BREAKING — what moves for consumers.**
+  
+  - **`@objectstack/spec`.** `ObjectSchema` (raw `.parse()` / `.safeParse()`, `ObjectSchema.create()`, `defineStack`, `os validate` and the metadata save door) refuses an object declaring `sharingModel: 'controlled_by_parent'` unless exactly one of its fields is a `master_detail` declared `required: true`. With none, the issue sits at `sharingModel` and names each field that relied on a retired tier. With two or more, it sits at `fields` and names them. A plain object literal is judged like a raw parse: an omitted `required` on its `master_detail` is refused, while `ObjectSchema.create()` keeps forcing an omitted `required` to `true`. The step-18 semantic migration entry `cbp-master-relation-tiers-retired` carries the prescription for `os migrate meta`. The step-18 conversion `cbp-master-detail-required-defaulted` covers the one lossless shape: a `controlled_by_parent` object whose one `master_detail` omits `required`, which Studio's field designer writes. It gets `required: true`, exactly what `ObjectSchema.create()` does. It runs on stored rows, built artifacts and `os migrate meta --from 17`. A live authoring parse still refuses the shape and names the fix.
+  - **`@objectstack/plugin-security`.** The relation resolver derives a master from that one field and nothing else. An object that declares a non-required `master_detail` only, a required `lookup` only, or two required `master_detail` fields resolves no master. Every read of it is denied, and every write and insert is refused with `422 INVALID_METADATA`. The plugin reports such an object once per object (`[security/controlled-by-parent] … resolves no master relation`), naming the shape it relied on. The `422` message now says "not exactly one required master_detail field".
+  - **`@objectstack/lint`.** `security-controlled-by-parent-no-relation` now refuses the non-required `master_detail` and required `lookup` shapes as well. `security-controlled-by-parent-ambiguous-relation` reports two or more required `master_detail` fields as "no master is derived", since the runtime no longer picks one by field order. Two required `lookup` fields are now a no-relation object, not a tie. `security-master-detail-ungranted` no longer treats a lookup-bound `controlled_by_parent` object as a detail.
+  
+  **FROM → TO — HotCRM's three objects.** These are the only producers measured on the retired third tier: the read-only HotCRM clone at `0f84c9c`, 8 `controlled_by_parent` objects, 5 of them already on one required `master_detail`. HotCRM's pinned engine is unaffected until it bumps past the release that carries this change.
+  
+  | object | FROM | TO |
+  |---|---|---|
+  | `crm_campaign_member` | `crm_campaign: Field.lookup('crm_campaign', { required: true })` | `crm_campaign: Field.masterDetail('crm_campaign', { required: true, deleteBehavior: 'restrict' })` |
+  | `crm_event_attendee` | `crm_event: Field.lookup('crm_event', { required: true })` | `crm_event: Field.masterDetail('crm_event', { required: true, deleteBehavior: 'restrict' })` |
+  | `crm_article_feedback` | `crm_knowledge_article: Field.lookup('crm_knowledge_article', { required: true, deleteBehavior: 'cascade' })` | `crm_knowledge_article: Field.masterDetail('crm_knowledge_article', { required: true, deleteBehavior: 'cascade' })` |
+  
+  `deleteBehavior: 'restrict'` keeps what the two lookups do today: a campaign or an event with members or attendees cannot be deleted. Without it a `master_detail` cascades, and a detail's rows are deleted with their master. An object whose rows must outlive their parent is not a detail. It leaves `controlled_by_parent` for `private`, `public_read` or `public_read_write`.
+  
+  **Remedy, in one line.** On every object with `sharingModel: 'controlled_by_parent'`, declare exactly one `master_detail` field with `required: true`, pointing at the master. Every other parent is a `lookup`.
+  
+  **Unchanged.**
+  
+  - An object with one required `master_detail` resolves and derives exactly as before, chain walk included. So does a required `master_detail` beside other `lookup` fields, or beside a `master_detail` that is not required. Every in-tree `controlled_by_parent` object is in that set: `examples/app-crm` (1), `examples/app-showcase` (2), the CLI's eval corpus (4) and the dogfood fixtures.
+  - Stored metadata whose one `master_detail` merely omits `required` keeps serving, converted as above. A stored row in any other retired shape is not rewritten: it still registers, under its `[metadata_spec_invalid]` diagnostic, and is denied until it is corrected and saved. Those shapes are an explicit `required: false`, two masters, or a required `lookup`. None of them is converted: turning a `lookup` into a `master_detail` changes what deleting the master does to every row, choosing between two masters is the pick ADR-0055 §1 refuses, and leaving `controlled_by_parent` is the author's decision.
+  - No export, signature or error code is added or removed.
+  
+  <!-- adr-0087: registered cbp-master-detail-required-defaulted, cbp-master-relation-tiers-retired -->
+- e790cfc: feat(security)!: an anonymous caller never owns a record and never sets its owner — the owner-anchor stamp's guest branch (ADR-0138 E3, D1)
+  
+  Clause-②: no (narrowing) — a guest-supplied owner is refused at the endpoints and the owner column never holds the guest or the system principal. That tightens what a guest write may carry and admits nothing refused today.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, accept set of a metadata schema or stored shape moves: no spec schema, metadata type, stored row or published response field is added, removed, renamed or re-shaped. What narrows is a value an anonymous caller may send in a write, judged by the security middleware at run time; no metadata names it, so there is nothing for `objectstack migrate meta` to rewrite, and the record's own row for this card states the disposition "none: no new key, and nothing moves". The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this and this diff adds none (not registered or already-registered); no exported TypeScript declaration changes (not runtime-interface-only or type-surface-only); no export is removed (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0138 D1 rules that the guest is a principal, never an owner. The owner-anchor stamp in `SecurityPlugin` (the step that stamps an absent `owner_id` with the acting user and refuses a forged one) now carries the guest branch the record names as D1's enforcement point. It applies to the guest envelope, an anonymous request served by an `authRequired: false` endpoint:
+  
+  - **Nothing is stamped for a guest.** An absent owner stays unset: never the guest, never the system principal. An empty `owner_id` (an empty string) is left unset too, where it used to be stored as an empty string.
+  - **A guest-supplied owner is refused**, on create and on update, with `PERMISSION_DENIED` (`403`), whatever the guest is granted. The transfer grant is never consulted for a guest. Before this change a guest whose bound permission set carried the transfer bit could create a row owned by any user, the system principal included. The anchor tier already refuses that bit on a guest binding, so no binding a deployment can make today reached it, and this branch does not depend on the tier. Without the transfer bit the refusal already happened before this change; its message now says that no grant admits a guest's owner, instead of naming the transfer grant as the remedy.
+  - **An owner the scenario sets stands.** A `beforeInsert` hook runs after the stamp, inside the engine's operation, and a record-change flow writes as itself, so neither is mistaken for a value the guest sent.
+  
+  Unchanged: the public form doors, which strip a submitted owner and leave it unset (`PUBLIC_FORM_SERVER_MANAGED_FIELDS`); every signed-in caller, whose absent owner is still stamped with its own id and whose foreign owner still needs the transfer grant; and system writes.
+  
+  What a guest client does: leave `owner_id` out of an anonymous write. The object's own hooks or record-change flows decide who owns the row, and the row stays unowned when none does.
+- 14a13bc: fix(metadata-protocol)!: the metadata save, restore and publish doors refuse a permission set whose body `packageId` disagrees with the package it is saved into, and the audience-binding suggestion reader takes a set's owner from its binding only (ADR-0086 D3)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered permission-set-package-id-binding-mismatch-refused -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0086 D3 declares `PermissionSetSchema.packageId` as the owning package of a package-shipped set, absent for an environment-authored one. The owner every reader uses is the package the set is saved into: the stored row's `package_id`, served as `_packageId`. A body `packageId` that named another package was accepted and then silently overridden, so an author, an AI build above all, never learned that the owner it wrote was not the owner it got.
+  
+  **FROM.** A permission set saved and published into package `app.crm` with `packageId: 'app.other'` in its body answered `200` and `published`, and was owned by `app.crm` everywhere it was read. A set saved into no package with `packageId: 'app.other'` was stored as an environment-authored set, while the audience-binding suggestion reader offered it, accepted it and derived it into `everyone` as `app.other`'s.
+  
+  **TO.**
+  
+  - **`@objectstack/metadata-protocol`.** The save door (`PUT /api/v1/meta/permission/:name`, draft and publish mode, and every in-process caller) the restore doors (`POST /api/v1/meta/permission/:name/rollback` and a commit revert's restore limb) and the draft promotion (`POST /api/v1/meta/permission/:name/publish` and the package publish) refuse a permission set whose body `packageId` is not the package the row is written into, with `400 VALIDATION_ERROR`, the code and status the doors already answer for a body `name` that disagrees with its row. `issues[]` carries the key at `packageId`. A body `packageId` on a set saved into no package is refused too, the empty string included: a present key declares a package-shipped set. The message names both values and both remedies. The package judged is the one the write lands in: a draft saved without naming a package lands in the package of the item's active row, and is judged against it. A package publish that meets such a draft (one stored before this change) aborts the whole batch, `outcome: 'refused'`, with the draft in `failed[]` under `VALIDATION_ERROR`. A rollback to a stored version that carries such a body (one written before this change) is refused, and a commit revert reports it in `failed[]` under the same code; the remedy there is to save the set again with `packageId` dropped or set to its package, instead of restoring that version. Nothing is written, published or restored. Package duplication copies a set whose body names the source package as naming the target package. `os migrate meta --stored --apply` records a stored set it rewrites, and the door refuses, as that row's failure.
+  - **`@objectstack/plugin-security`.** The audience-binding suggestion reader takes a set's owner from its binding only, never from its body's `packageId`. A set bound to no package has no owner there, so no suggestion is created for it. An acceptance recorded under the package its body named is withheld from `everyone` at the next derivation. The withholding is reported at `warn`, naming the set and its reason. Accepting a pending suggestion of that kind is refused.
+  - **`@objectstack/spec`.** The `PermissionSetSchema.packageId` description states the refusal. The step-18 semantic migration entry `permission-set-package-id-binding-mismatch-refused` carries the upgrade sweep.
+  
+  **Unchanged.** A body `packageId` equal to the package the set is saved into is accepted, and an absent one is accepted everywhere. Stored rows are not rewritten. A stored set whose body disagrees with its binding keeps loading and keeps reading as its binding, and is refused on its next save or publish, as is a restore of a stored version that carries one. An installed package's own sets are owned by the package that ships them, as before.
+  
+  **Remedy, in one line.** Drop `packageId` from the permission set's body, or save the set into the package it names (`?package=<id>` on the REST door, `packageId` in process).
+- eeb95f7: fix(spec,objectql)!: a permission set whose body `packageId` disagrees with the package that ships it is refused at `defineStack` / `os validate` / `os build` and at package registration, and every reader takes a set's owner from its binding only (ADR-0086 D3)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered permission-set-package-id-binding-mismatch-refused) this change widens that entry, in this diff, to the build and registration doors: same key, same ruling, same remedy, no stored row rewritten -->
+  
+  **BREAKING** (an accept-set narrowing on a published authoring surface), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0086 D3 declares `PermissionSetSchema.packageId` as the owning package of a package-shipped set, absent for an environment-authored one. The owner every reader uses is the binding: the package that ships the set or that it is saved into, served as `_packageId`. The metadata save, restore and publish doors already refuse a body `packageId` that disagrees with it. Package source and package registration did not: a set whose body named another package was registered under the package that shipped it, with no refusal and no warning, so an author, an AI build above all, never learned that the owner it wrote was not the owner it got.
+  
+  **What is refused, and where.** One judge, `judgePermissionSetOwnerBinding` (new export of `@objectstack/spec/security`), serves every door:
+  
+  - **The stack schema** (`ObjectStackDefinitionSchema`), so `defineStack`, `objectstack validate`, `objectstack build`, the lint scorer and an artifact load all refuse a set whose body `packageId` is not the id of the package that ships it: the stack's `manifest.id`, each `packages[]` body's own `id`, and `manifest.id` for a top-level set no body declares. A stack with no `manifest` ships its sets from no package, so any key there is refused, the empty string included. The issue sits at the set's `packageId` (`permissions.0.packageId`); `defineStack` throws `STACK_SCHEMA_INVALID` (422) carrying it.
+  - **Package registration** (`ObjectQL.registerApp`, the manifest and a nested plugin, for a manifest no schema parse judged) throws `400 VALIDATION_ERROR` with `issues[]` at `packageId` before the set is filed, the envelope the same seam throws for a view container whose `name` disagrees with its key.
+  
+  The message prescribes first, names both values, and offers both remedies: drop the key, or ship the set from the package it names. No error code is minted.
+  
+  **Readers.** `@objectstack/plugin-security`'s packaged-set lock (`classifyPackagedPermissionSet`) and `@objectstack/cli`'s permission-set name-collision report take a set's package from its binding only. A set filed into no package whose body named one is no longer locked as that package's, and a stack with no `manifest` declares no owner for the collision report.
+  
+  **Unchanged.** A body `packageId` equal to the package that ships the set is accepted, and an absent one is accepted everywhere. A top-level copy of a set a `packages[]` body declares (an artifact built with both halves) is judged on its body, not against the artifact's own id. The metadata save, restore and publish doors answer in the same words as before (`@objectstack/metadata-protocol` now calls the shared judge). Stored `sys_metadata` rows are not rewritten.
+  
+  ## FROM → TO
+  
+  | door | FROM | TO |
+  |:--|:--|:--|
+  | `defineStack` / `objectstack validate` / `objectstack build` | `defineStack({ manifest: { id: 'com.acme.crm', … }, permissions: [{ name: 'crm_member', packageId: 'com.acme.other', … }] })` accepted; the set was owned by `com.acme.crm` | refused at `permissions.0.packageId`, `STACK_SCHEMA_INVALID` 422 |
+  | `ObjectQL.registerApp` | the same manifest registered the set under `com.acme.crm`, silently | `400 VALIDATION_ERROR`, `issues[]` at `packageId`, nothing filed |
+  | an artifact built before this change | loaded, the set owned by the shipping package | refused at load; rebuild it without the key |
+  
+  **Remedy, in one line.** Drop `packageId` from the permission set in your stack source (the package that ships a set is its owner), or move the set into the stack of the package it names, then build again.
+- b9dbc3d: feat(plugin-security): under a walled posture, the deployment-level acceptance of package defaults can be host configuration (`acceptedDefaultPermissionSets`, ADR-0131 D5) (#23385)
+  
+  Clause-②: yes (widening)
+  
+  **What was wrong.** On a walled (`group` / `isolated`) deployment with several organizations and none of slug `default`, the audience-binding suggestion record has no organization to own it. Every boot logged `[security] audience-binding suggestion sync failed (non-fatal)`, and the accept door answered `409 SUGGESTION_STATE` with the remedy "create the Default Organization (slug 'default')". That is a reserved organization for deployment-level rows, the shape ADR-0131 §1.5 rejects.
+  
+  **What is new.** `SecurityPluginOptions.acceptedDefaultPermissionSets?: readonly string[]` is read only under a walled posture. When it is declared, possibly as `[]`:
+  
+  - the `everyone` anchor derives from the baseline plus the declared sets. Each name passes the same checks an accepted suggestion does: the security catalog serves it under some package, it declares `isDefault: true`, and it carries no bit the `everyone` anchor forbids (ADR-0090 D7). A name that fails a check grants nothing and is reported, at `error` for a forbidden bit;
+  - the `sys_audience_binding_suggestion` record is neither read nor written, so the boot no longer warns. Existing rows are counted once and reported, not deleted;
+  - the record's list, accept and dismiss doors answer `409 SUGGESTION_STATE` naming the option.
+  
+  ```ts
+  new SecurityPlugin({ acceptedDefaultPermissionSets: [] });              // nothing beyond the baseline
+  new SecurityPlugin({ acceptedDefaultPermissionSets: ['crm_readonly'] }); // every member also holds crm_readonly
+  ```
+  
+  A walled deployment that declares nothing keeps today's behaviour. When it has no organization to own the record, the refusal now names `acceptedDefaultPermissionSets` instead of "create the Default Organization".
+  
+  **Refused loudly.** A value that is not a list of non-empty names is refused at construction. A declaration under the `single` posture is refused at `start()`: there the record owned by the Default Organization is the acceptance. The `single` posture is otherwise unchanged, including its refusal text.
+  
+  **Exported for callers of the module's functions.** `readAcceptedEveryoneSets`, `syncAudienceBindingSuggestions` and `reconcileAudienceBindingSuggestions` take an optional trailing `DeploymentAcceptance` (`{ posture, acceptedDefaultPermissionSets }`), and `SuggestionDeps` gains `acceptedDefaultPermissionSets`. Omitted, they read the record as before. `WithheldAcceptance` gains `source: 'record' | 'host-configuration'`.
+- dd29bbe: feat(metadata-core,metadata-protocol)!: the `sys_metadata` family declares no organization column — `sys_metadata`, `sys_metadata_audit`, `sys_metadata_commit` and `sys_metadata_history` (ADR-0131 D6/D7)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered sys-metadata-organization-column-retired, sys-metadata-audit-organization-column-retired, sys-metadata-commit-organization-column-retired, sys-metadata-history-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Metadata is the environment's (ADR-0131 D6). The four tables of the metadata family no longer declare `organization_id`, and each sets `systemFields.tenant: false`, so the engine injects none back. The engine refuses an undeclared field, so nothing reads or writes the column any more.
+  
+  FROM → TO:
+  
+  - An authored filter, list-view column, report grouping, formula or seed key naming `organization_id` on one of the four tables → delete it; no organization owns a row. The field resolver answers it as an unknown field.
+  - `new SysMetadataRepository({ engine, organizationId, orgLabel })` → `new SysMetadataRepository({ engine, orgLabel })`. The `organizationId` option is gone: every repository reads and writes the environment's rows.
+  - `DatabaseLoader`'s `organizationId` option (and so `MetadataManager.setDatabaseDriver` / `setDataEngine`'s `organizationId` argument) → accepted and ignored, like `environmentId`: no write stamps it and no read filters on it. Drop the argument.
+  - `@objectstack/spec`: the published `ApiError.code` / `ErrorCode` enum widens by `LEGACY_ORGANIZATION_ROWS_UNREADABLE`, registered under `@objectstack/metadata-core`.
+  - `isLegacyOrganizationRow(row)` (`@objectstack/metadata-core`) → `readLegacyOrganizationRows(driver, table?)`. The row-value test read a key the engine no longer returns, so it is removed. The new read answers from the physical column, through the table's driver (`engine.getDriverForObject`): id → organization, empty on a migrated or fresh database. A seam that cannot answer is refused (`LegacyOrganizationRowsUnreadable`), never read as "none".
+  - An existing database → run `os migrate organization-ownership` (review its plan), then `os migrate organization-ownership --apply --plan-file FILE` with that plan file. The ceremony promotes or reports the legacy organization rows, then drops the physical column. Until it has run, the v18 runtime refuses to start against the database.
+  
+  The indexes are re-keyed with the column:
+  
+  - The overlay unique key is (`type`, `name`, `package_id`, `bundle_member`): the declared `idx_sys_metadata_overlay_active` and the runtime partial indexes of the same names. Removing the organization TIGHTENS uniqueness. On a database the ceremony has not cleared, two legacy organizations' rows, or an organization's row and the environment's, can share a key. There the runtime index migration keeps the previous index and names the duplicates (ADR-0120 D4); it never drops a row. `os migrate duplicates` and the boot report group by the same key.
+  - `sys_metadata_history` is unique on (`event_seq`) and on (`type`, `name`, `version`). Its other indexes, and those of `sys_metadata_audit` and `sys_metadata_commit`, lose their organization prefix.
+  - `idx_sys_metadata_org_type` is gone.
+  
+  What else changes:
+  
+  - The boot line `[metadata_org_scoped_unserved]` is gone with the column it read. A database still holding legacy organization rows is refused at boot instead, until the ceremony has run.
+  - The package uninstall no longer removes a legacy organization's row of the package's name: no row carries an organization.
+  - Who reads the family through the generic data door (`/data/sys_metadata_*`), before → after:
+    - `sys_metadata_audit`, `sys_metadata_history`, `sys_metadata_commit`, **under a wall** (`isolated` / `group`): before, the tenant wall filtered each caller to its own organization's rows, and an `organization_admin` read its organization's. With the column gone the wall has nothing to filter on, so without a gate that admin would read every organization's trail, history bodies and commit ranges. After: each requires `studio.access` (`requiredPermissions`, the #22107 precedent). The capability is platform-scoped, so an `organization_admin` holding it by role does not exist, and that admin is refused.
+    - The same three, **under `single`**: before, any caller whose grant covered the table (a read wildcard) read it. After: `studio.access` is required there too. A Studio author (the platform admin among them) reads as before; a plain member is refused.
+    - Every `/meta` door serving these rows admits `studio.access`: `/meta/:type/:name/history`, `/audit` and `/diff` admit `studio.access` or `manage_metadata`, and `/packages/:id/commits` admits `studio.access` alone; `setup.access` alone is refused at all four. `requiredPermissions` is an AND-gate and cannot name an any-of set, and `setup.access` is held by organization admins, so it could not be the gate. A caller holding only `manage_metadata` therefore still reads the history and audit rows through `/meta`, but not the commit rows, and none of them through the data door.
+    - `sys_metadata` stays ungated, before and after: its rows are what `/meta` already serves to every organization.
+  - On a database the ceremony has not migrated (which `os serve` refuses, but every `os migrate` boot opens, the ceremony's own among them), the legacy organization rows are still told apart, off the physical column:
+    - every read the metadata protocol makes of the family goes through one seam that leaves them out. That covers boot hydration; the `/meta` list, by-name, layered and draft-preview reads; the item lock (`_lock`) the reads report and the save and delete gates enforce; the package-less write and read address; and the package, commit, audit, history and diff reads. Two reads keep them on purpose and read the column themselves: `os migrate meta --stored` reports such a row, and the commit revert refuses a legacy commit by name. The authored hook and action binders leave them out too;
+    - the metadata repository's write never resolves to one: before, a save of an address that only a legacy organization's row held rewrote that row in place (measured on the ceremony's template promotion). Now the write targets the environment's row, and with none it creates one, which the re-keyed unique index refuses beside the organization's row until the ceremony settles it;
+    - `os migrate meta --stored` reports such a row `skipped` and never re-saves it;
+    - `os migrate security-catalog-overlays` neither lists nor deletes it;
+    - a commit recorded in a legacy organization's layer is still refused by the revert;
+    - the runtime-datasource reads, the packaged permission-set overlay reading, the kernel:ready security-catalog echo, the stored flow-credential move and a `DatabaseLoader` (engine- or driver-backed) leave them out.
+  - `SqlDriver.listPhysicalColumns(object, options?)` (new, read-only): a table's physical column names, from the catalog, joining `options.transaction`. `TursoDriver`'s remote face answers it from the remote catalog. Every boot asks whether the family still carries the retired column, and it asks this way, not through `execute()`. So `os migrate plan` keeps its "a plan writes nothing" line on a migrated or fresh database. The legacy rows themselves are read with a raw statement only where the column exists.
+  - `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
+  - The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.
+- 6f21216: feat(plugin-security,cli)!: `sys_user_permission_set.permission_set_id` is retired, the boot-time grant-name backfill is deleted, and a grant is unique per user, set and organization (ADR-0131 D4/D10)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered ups-permission-set-id-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  A permission-set grant names its set by `permission_set`, its one reference (ADR-0131 D4). The legacy id column is no longer declared, and the grant's uniqueness now keys the name.
+  
+  FROM → TO:
+  
+  - `sys_user_permission_set.permission_set_id` → `permission_set`, the machine name of the set the grant holds. A seed row or data-door write that still carries `permission_set_id` is refused with `400 INVALID_FIELD`. Fix: delete the key and name the set, `{ user_id, permission_set: '<set name>', organization_id }`.
+  - The unique index (`user_id`, `permission_set_id`, `organization_id`) and the (`permission_set_id`) index → one unique index on (`user_id`, `permission_set`, `organization_id`), declared `unique: 'organization'`: its organization key part is NULL-safe (ADR-0120 D3), so it refuses a second grant of one set to one user in one organization AND a second platform-wide grant (organization NULL), for every writer and every write path — batches, multi-row updates, concurrent writes and raw SQL included. The data doors answer `409 UNIQUE_VIOLATION` (the engine throws `DuplicateRecordError`, `DUPLICATE_RECORD`). Fix: keep the grant that exists; to change it, update that row.
+  - The boot-time grant-name backfill (`runOneTimeGrantPermissionSetNameBackfill`, the `sys_migration` entry it recorded at `kernel:bootstrapped`) → the v18 ceremony: plan it with `os migrate organization-ownership --out plan.json`, review the file it writes, then run `os migrate organization-ownership --apply --backup-taken --plan-file plan.json`. Its verified rewrite names every grant from the physical `permission_set_id` column by raw SQL, verifies each name against the security catalog, and its `column-drops` step then drops the column through the schema-drift ceremony (schema sync is additive, so an undeclared column stays until it is dropped). Fix: run the ceremony on every database upgraded from a release before the `permission_set` column existed, then restart the server: the boot's organization-administrator sweep revokes, by name, a newly named grant whose pair no longer qualifies, and a server left running across `--apply` serves it until then.
+  
+  On a 17.x database every grant names nothing until `--apply` names it, so between the first v18 boot and `--apply` no grant confers anything, the platform administrator's included.
+  
+  What else changes:
+  
+  - The plan run, `os migrate organization-ownership --out plan.json`, reports a `grants` block on `sys_user_permission_set`, keyed like the new index (a NULL organization keyed with NULL):
+    - `duplicates`: groups of named grants holding one set for one user in one organization. `--apply`'s `column-drops` step does not drop `permission_set_id` while one group remains.
+    - `rewriteCollisions`: legacy grants whose derived name their user already holds in the same organization. `--apply`'s rewrite names none of them and blocks, naming both ids.
+    - On a database without the `permission_set` column it counts zero and names the remedy (boot this release once), instead of refusing the plan.
+  
+    The ceremony deletes no grant: remove the one you do not keep, then re-run.
+  - The organization-administrator reconcile and its boot sweep write no grant for a pair holding an unnamed grant in that organization: the ceremony's rewrite names that grant, and a named grant beside it would hold the key the rename needs.
+  - `--apply` drops the two retired indexes before the column, in a separate earlier schema-drift apply: MySQL refuses to drop a column a key still uses.
+  - The organization-administrator reconcile and its boot sweep, the platform-admin bootstrap's unnamed-grant leg (Leg C) and the catalog reference report read grants by name only. A legacy grant that names nothing confers nothing, still withholds the platform-admin promotion while it is unscoped, and is reached by no revocation until the ceremony's rewrite names it; once named, the boot sweep revokes it where its pair no longer qualifies. The report's `UnnamedGrant` entries lose `permissionSetId`.
+  - `GET /meta/object/sys_user_permission_set` no longer serves the hidden `permission_set_id` field.
+- be48c5e: feat(spec)!: retire the delegated-admin scope's `manageBindings` and `authorEnvironmentSets` — rights no door honoured (#23488)
+  
+  **BREAKING** — `manageBindings` and `authorEnvironmentSets` on a permission set's `adminScope` (`AdminScopeSchema`, ADR-0090 D12) are now refused at parse. They named the right to bind sets to positions and the right to author environment permission sets, and they gated the `sys_position_permission_set` and `sys_permission_set` rows, which ADR-0131 D3 retired. A position's sets are part of its definition and a permission set is a definition; both are written through the metadata door, which admits a `manage_metadata` holder and reads no `adminScope`. So a delegate who "may bind" or "may author" was granted nothing. Delete both keys: a delegate's scope is placement, assignment and the allowlist.
+  
+  Clause-②: yes (narrowing)
+  
+  Measured before removal, at `cdc42eb49`: no production author set either key to `true` (the showcase wrote the default `false`; the control key `manageAssignments: true` has four production authors), and no door that writes a position or a permission set consulted either key. Their one reader was the delegated-admin gate's strict-containment comparison, which changes below.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `adminScope: { …, manageBindings: true \| false }` | nothing — delete the key |
+  | `adminScope: { …, authorEnvironmentSets: true \| false }` | nothing — delete the key |
+  | a delegate who re-composes what a position distributes, or authors a set's body | a `manage_metadata` holder writes the position or set definition through the metadata door (ADR-0131 D3); the delegate assigns people to positions and grants allowlisted sets inside its subtree |
+  | reading `scopes[].manageBindings` / `scopes[].authorEnvironmentSets` from `GET /api/v1/security/my-delegable-scope` (`DelegableAdminScope`) | nothing — the report carries `manageAssignments` as the scope's one action right |
+  
+  **The one-line fix:** delete `manageBindings` and `authorEnvironmentSets` from every `adminScope`.
+  
+  **What an author who still writes either sees.** `tsc` fails at the authoring site (`AdminScope` types both keys as retired), and the parse — `definePermissionSet()`, `defineStack({ permissions })`, `PUT /api/v1/meta/permission/:name` — refuses it at its own path with the prescription:
+  
+  > `permission.adminScope.manageBindings` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove, ADR-0090 D12) — nothing honoured it once the position-to-permission-set binding rows it gated were retired: a position's sets are part of its definition (ADR-0131 D3), and that definition is written through the metadata door, which admits a `manage_metadata` holder and reads no adminScope. Delete the key; a delegate's scope is placement, assignment and the allowlist — `businessUnit` with `includeSubtree`, `manageAssignments`, and `assignablePermissionSets`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  ## The containment change (`@objectstack/plugin-security`)
+  
+  The delegated-admin gate judges a delegate who hands out a set that itself carries an `adminScope` — a `sys_user_position` assignment of a position that distributes it, or a direct `sys_user_permission_set` grant — by **strict containment**. That comparison read both retired flags. It now reads `includeSubtree`, `manageAssignments` and the allowlist only:
+  
+  - a delegate whose own scope set either flag `true` can **no longer** hand out a scope otherwise EQUAL to its own — the inert flag used to count as the strictly-larger axis and let that lateral copy through the equal-scope refusal. It is refused `403 PERMISSION_DENIED` (`… would hand out an adminScope not strictly contained by yours`);
+  - a granted scope that set either flag `true` no longer counts as out-reaching a delegate that did not.
+  
+  `DelegatedAdminGate.describeDelegableScope()` (and so `GET /api/v1/security/my-delegable-scope`) no longer reports either flag.
+  
+  ## The retirement kit
+  
+  - **Two `retiredKey()` tombstones** on `AdminScopeSchema`, a `strictObject` — so each refusal carries its prescription and `tsc` fails first. `RETIRED_KEYS_BY_MAJOR[18]`: `security/AdminScope:manageBindings`, `security/AdminScope:authorEnvironmentSets`. `DelegableAdminScope` (`@objectstack/spec/contracts`) drops both fields.
+  - **The D2 conversion `permission-admin-scope-binding-authoring-removed`** (protocol 18, retired from the load path) deletes both keys from every `permissions[].adminScope`, one notice per key, whatever they hold. Both keys carried the default `false`, so a 17.x parse materialized them in every declared scope; the rehydration seams replay this conversion over stored `permission` rows and built artifacts, and `os migrate meta --stored` lists the rows that carry them before the upgrade.
+  - **The D3 entry `permission-admin-scope-binding-authoring-retired`** records the containment change above: the judgement the strip cannot make for the upgrader.
+  - **`@objectstack/core`:** `permissionSetDefinitionFromRow` — the mapping `os migrate`'s legacy-row ceremony saves a `sys_permission_set` row through — drops both keys from the row's `admin_scope`. That save goes through `saveMetaItem`, which replays no conversion: measured, a 17.x row's body answered `422 INVALID_METADATA` at `adminScope.manageBindings`, and the same body without the keys saved.
+  - **`@objectstack/platform-objects`:** the permission-set form's `adminScope` help text (all four locales) names the scope's live keys only.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for. Studio's two switches for these keys retire in an objectui follow-up.
+  
+  <!-- adr-0087: registered permission-admin-scope-binding-authoring-removed, permission-admin-scope-binding-authoring-retired -->
+- 94e60c0: fix(plugin-security)!: the row-policy collection applies an object's declared `defaultRowScope` when no permission set the caller holds carries a row policy for the object
+  
+  Clause-②: no (narrowing) — the narrowing is real only for a principal with no platform baseline whose permission sets carry no row policy for an object that declares a default; no object in this release declares one, and no export, option, schema or stored shape moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime row-scope narrowing at the security plugin's one row-policy collection, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped: `ObjectSchema.defaultRowScope` already parses, and this change only gives it its reader, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is the rows a principal reads on an object that declares a default when none of its permission sets carries a row policy for that object and operation: it now reads under the object's default instead of under no row filter. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers the collection and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `ObjectSchema.defaultRowScope` declares an object's default row-level security policy. Until now no server read it. The security plugin's row-policy collection (`collectRLSPolicies`), which every read, write and explain composes from, now applies it:
+  
+  - **When it applies.** When the policies the caller's permission sets carry for the object and the operation come out empty, the object's default is collected in their place, for the declaring object. Empty means what the collection already meant by it: a held policy for every object (`'*'`) counts, while a held policy that is switched off, outside the caller's positions, or for another operation does not.
+  - **How it is judged.** Exactly as a held policy: its `operation`, `positions` and `enabled` decide where it applies, and its `using` and `check` compile through the same compiler. So it scopes reads, the by-id and bulk write filters, and the post-image check, and `checkAuthoredRowWrite` reads it as the declaration it is. A `using` the compiler cannot lower is dropped with the same warning and fails closed to zero rows, as an authored policy's does.
+  - **Explain** names an applied default as the object's own declaration, with its `name`, `label` and `description`: the row-level layer's `detail` says so, and a record-grained explanation names the rule after the default, reached `via: 'object_default'`.
+  - **Unchanged:** a policy an authored set carries for the object is used as authored, with the default not added to it; a principal whose superuser bypass skips row policies never reaches the collection; an object that declares no default collects exactly what it collected before. A deployment that composes the platform baseline is unaffected for the identity objects, whose shipped sets carry their own policies.
+  
+  What changes for you: nothing until an object declares `defaultRowScope`. Once one does, a principal whose permission sets carry no row policy for it reads only the rows the default admits. To give such a principal a different scope, put a row policy for the object in a permission set it holds; that policy is then used instead of the default.
+
+### Patch Changes
+
+- d11fa8c: fix(plugin-security): a delegated agent's own leg does not collect an object's declared default row scope (#24341)
+  
+  Clause-②: no
+  
+  An agent acting on behalf of a user (ADR-0090 D10) is judged on two legs that the read door ANDs together: its own sets, which are a capability ceiling and carry no row policy, and its delegator's sets. Since the row-policy collection began applying an object's declared `defaultRowScope` where the held sets carry no row policy, the ceiling's silent leg collected that default too. Where the delegator's own leg is wider than the default, the agent then read fewer rows than its delegator. The platform administrator is the case in point: the administrator's own leg skips row policies on the identity objects, so an agent acting for the administrator would have read only the administrator's own rows there, where it read every row before.
+  
+  The collection no longer adds an object's default on a delegated principal's own leg, so a ceiling's silence is not read as the object's default. The delegator's leg collects the default exactly as any principal's does, and a principal that acts for no one keeps the default whenever its sets are silent.
+  
+  What moves, against `18.0.0-next.5`: on an object that declares `defaultRowScope`, an agent acting for a user reads the rows its delegator's side admits, and its explain output names no object default on the agent's side. Before this release's reader, that was already so.
+  
+  **Unchanged.**
+  
+  - A principal that acts for no one, a human or otherwise, collects an object's default when its sets carry no row policy for the object and operation, as before.
+  - The delegator's side, the superuser bypass, and every authored policy are judged as before.
+  - No export, option or type moves.
+- 7d45c8e: fix(plugin-security): the shipped permission sets stop copying the row scope thirteen identity objects declare as their own default
+  
+  Clause-②: no
+  
+  `organization_admin` (and so `organization_admin_no_bypass`), `member_default` and `viewer_readonly` no longer carry their copies of the row policy that thirteen identity objects declare as their `defaultRowScope`. The thirteen are the seven SCIM projection tables (`sys_scim_user`, `sys_scim_subject`, `sys_scim_projection_grant`, `sys_scim_identity_tombstone`, `sys_scim_group`, `sys_scim_group_member`, `sys_scim_connection_binding`), `sys_verification` and `sys_jwks`, and the `select` self scope of `sys_account`, `sys_team_member`, `sys_oauth_access_token` and `sys_oauth_refresh_token`. Each copy was byte-identical to its object's declaration. The row-policy collection applies an object's declared default wherever the caller's held sets carry no policy for that object and operation, so every holder of the shipped sets reads exactly the rows it read before. That holds with the platform baseline and without it (`fallbackPermissionSet: null`), under the walled and the `single` posture, and for an MCP agent acting for a holder.
+  
+  Explain now names the object's default (`via: 'object_default'`) where it named the set's policy on those thirteen objects.
+  
+  **Kept in the sets.**
+  
+  - `sys_user`'s two policies, and every `all`-spelled self scope (`sys_session`, `sys_two_factor`, `sys_user_preference`, `sys_api_key`, `sys_device_code`, `sys_oauth_consent`, `sys_oauth_application`, `sys_organization`). A member's `update` and `delete` collection holds the `'*'` ownership floor, so the object's default is never collected there, and these copies are what scope a member's writes to their own rows.
+  - `sys_audit_log_org`. Where no organization wall is enforced, the platform's own tenant policies are stripped by provenance, and that provenance is read off these sets. The copy is what makes the ledger's identical default the platform's policy, so `single` keeps serving the ledger unscoped.
+  
+  **If an application set authors a row policy for one of these thirteen objects**, that policy is used as authored and the object's default is not added beside it. Before, a holder who also held a shipped set had that set's copy OR-ed in, so an authored scope that left out the holder's own rows was widened back to them. Now the authored policy alone decides on that object and operation. Measured: no package or example in this repository authors such a policy.
+- 1f949da: fix(plugin-security): `security.explain` answers an on-behalf-of caller's by-id update and delete the way the write itself does
+  
+  For a principal acting on behalf of a user (an OAuth agent), explain's record-grained `update` / `delete` verdict now composes what the by-id PATCH / DELETE composes (ADR-0090 D10):
+  
+  - record sharing's per-record gate is asked twice, as the write asks it: as the delegated principal at its agent-leg write depth, then as the delegator at the delegator's own write depth;
+  - the delegator's own row-level write filter is ANDed beside the principal's, as the write's pre-image check ANDs it.
+  
+  Before, explain asked the gate once at owner-only depth and left the delegator's write filter out, so it could refuse a row the write admits and admit a row the write refuses. Ordinary (non-delegated) callers are unaffected, and so is the delegated read verdict.
+- 71a8b5e: fix(plugin-security): `security/explain`'s record-grained `update`, `delete` and `transfer` verdicts compose the by-id write gate's authored-row-write deferral, so a row an app-authored row-level write policy admits is reported writable, as its `PATCH` / `DELETE` answers
+  
+  Clause-②: no (no accept set or public surface moves: enforcement is unchanged, and explain's record verdict now gives the answer the by-id write already gives)
+  
+  - **What was wrong.** The sharing middleware's by-id write gate does not stop at record sharing's refusal: it asks the security service whether an app-authored row-level policy admits the row for that verb (`checkAuthoredRowWrite`), and on `admit` hands the row to the pre-image gate, which admits it. Explain's record-grained write verdict asked record sharing's per-record gate alone, so on a private object, for a row owned by someone else that only such a policy lets the caller write, the `PATCH` / `DELETE` landed while explain answered `record.visible: false`, decided by `sharing`.
+  - **What explain answers now.** The same deferral, on the same condition: only when the per-record update or delete gate refuses the row, asked through the sharing service's own probe with the context that gate is asked with. A `transfer` is deferred as an `update`, since its door is the `PATCH` that writes `owner_id`. Only the literal `admit` lifts the refusal; `abstain`, any other answer and a failed probe leave it standing. The record verdict is then `visible: true`, `decidedBy: 'rls'`, the layer that last admitted the row; the `sharing` layer still reports `excluded`, and its detail names the deferral. A sharing service without the probe defers nothing, as before.
+  - **What does not move.** No enforcement answer changes. The `sys_attachment` and `sys_comment` parent gates ask record sharing first and refuse on its `deny` without asking explain, so a row this deferral admits is still refused there at the record-sharing step.
+- 21301a3: fix(plugin-security): a delegated administrator's position assignment is judged on every permission set the assignment grants, the set of the position's own name included
+  
+  Clause-②: no
+  
+  - **The rule (ADR-0090 D12, as amended 2026-10-17).** The sets a position carries are every set an assignment of it grants: the names its definition's `permissionSets` lists and, while the authorization resolver folds held position names into the requested set names, the permission set of the position's own name when the catalog holds one. The organization-level branch already counted that set. The delegated branch now does too, through the same helper.
+  - **What a delegate is now refused.** A `sys_user_position` insert, update or delete by an `adminScope` holder whose allowlist does not cover the position's own-name set is refused `403 PERMISSION_DENIED`. The message names the set and says it is the set of the position's own name. An own-name set that carries an `adminScope` is held to strict containment like any other distributed set. A delegatable position whose own-name set carries an `adminScope` can no longer be self-delegated.
+  - **What the delegable-scope report offers.** `GET /api/v1/security/my-delegable-scope` no longer lists a position for a delegate whose allowlist misses that position's own-name set, so the picker offers only what the write admits.
+  - **Unchanged.** A position with no permission set of its own name is judged on its listed sets alone, as before. Tenant-level administrators and the organization-level branch are untouched, and the resolver's fold itself is not changed. To keep a delegate able to assign such a position, add the own-name set to the scope's `assignablePermissionSets`.
+- 1366740: fix(plugin-security): the delegable-scope report no longer offers the built-in identity positions to a platform administrator or a delegate
+  
+  Clause-②: no
+  
+  `GET /security/my-delegable-scope` (`describeDelegableScope`) listed `platform_admin`, `org_owner`, `org_admin` and `org_member` in `assignablePositions` for a tenant-level administrator and for a delegate holding a placing `adminScope`. `sys_user_position.position` refuses those four names from every writer with `400 VALIDATION_FAILED`, so the invite dialog and Setup's position picker offered choices that could only fail.
+  
+  Every branch of the report (tenant-level, organization-level, delegated) now reads one position listing that leaves out the ADR-0068 D2 identity names through the same `isReservedIdentityName` predicate the write's validation is built from, beside the audience anchors it already left out. No other position leaves any branch, and placeable business units are unchanged. The write path's refusal and the reserved list are unchanged. No spec key, endpoint or configuration changes.
+- 605b3e2: fix(plugin-security): an on-behalf-of by-id write never admits a row its delegator's own by-id write refuses (ADR-0090 D10)
+  
+  Clause-②: no
+  
+  ADR-0090 D10 says a delegated principal, such as an OAuth agent acting for a user, never exceeds its delegator. The by-id write already asked every row gate as the delegator too. But it composed the delegator's row-level write filter differently from the filter the delegator's own direct write of the same row gets. Where an app-authored row-level write policy bounds the delegator, a write on the delegator's behalf could therefore be admitted for a row the delegator's own write is refused.
+  
+  Each gate that judges a delegated by-id write now also composes the delegator's filter as the delegator's own direct write gets it, and requires both:
+  
+  - the pre-image check of a by-id `update` or `delete`;
+  - the post-image check of the row an `update` stores;
+  - the master gate of a `controlled_by_parent` detail write, on the delegator's pass.
+  
+  The change only narrows. A write is admitted only where it was admitted before AND the delegator's own write of that row is admitted. Nothing refused before is admitted now: where the delegator's own write admits a row that the delegated write has always refused, that row stays refused. `security.explain`'s record verdict for an on-behalf-of `update` or `delete` composes the same two filters, so it still gives the answer the door gives. Writes that are not delegated are unchanged.
+- 8a058d8: fix(plugin-security): under the `group` posture, a tenant-scoped insert from a session with no active organization is refused 403 naming the missing organization, as `isolated` already answered, instead of a 500
+  
+  Clause-②: no (no accept set moves: the insert was refused before and is refused now, with the ADR-0123 D2 answer in place of an internal error)
+  
+  - **Before.** On `group` (any union-scope posture), a member of an organization whose session had no active organization got `500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` for a create on a tenant-scoped object, logged as an unhandled REST error.
+  - **After.** That create gets `403 PERMISSION_DENIED` with the message `isolated` gives the same session, which names the missing active organization and tells the user to join or select one.
+  - **Unchanged.** Nothing was written before and nothing is written now. The refusal judges the row as it is about to be stored, the same row the engine's own organization check reads, so it covers exactly the inserts that answered 500 and no insert that was admitted. Reads still span the member's organizations. Updates and deletes of rows the membership wall admits, inserts from a session with an active organization, system contexts, a platform operator on a posture-permitting object, the delegator's leg, and every `isolated` and `single` answer are as before.
+- fec87e7: feat(spec)!: a package manifest's `permissions` no longer takes a flat list of permission strings — the structured `{ services, hooks, network, fs }` block is the only form (#13458)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered manifest-permissions-string-list-removed, manifest-permissions-string-list-retired -->
+  
+  **BREAKING** — an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not yet in on `main`).
+  
+  `ManifestPermissionsSchema` was a union of a flat `string[]` and the structured ADR-0025 §3.2 block. Nothing ever acted on the list: the loader registers the consented `grantedPermissions` set from the environment artifact with the permission enforcer, never the manifest's request, and the only code that met a list on a manifest was two reports saying it had been skipped. The marketplace install disclosure reads only the four lists, so a list was shown to an installer as "Requests no special permissions." (ADR-0049 enforce-or-remove). `ManifestPermissionsSchema` is now the structured block itself.
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | `permissions: ['system.user.read', 'system.data.write']` | `permissions: { services: [...], hooks: [...], network: [...], fs: [...] }`, naming the platform services the plugin resolves, the lifecycle hooks it registers, the network hosts it reaches and the filesystem paths it touches. |
+  | `permissions: []` | delete `permissions`: absence is the spelling for "requests nothing". |
+  | a list on an app manifest that ships no code | delete `permissions`. An app's record access is its permission SETS, in the stack's own top-level `permissions` collection. |
+  
+  **The one-line fix: replace every manifest `permissions` list with the structured block, or delete it.** A permission string has no mechanical mapping onto the four lists, so the translation is done by hand. `os migrate meta --from 17` lists the mechanical edits for existing sources; apply them by hand.
+  
+  **What an author now sees.** Writing a list fails `tsc` (the key's type is the block), and `os validate`, `os build`, `os plugin build` and `defineStack` refuse it at `manifest.permissions` with the block's own answer: `Expected the plugin permission block { services?, hooks?, network?, fs? }, received a flat list.`, followed by the prescription. Every structured block that parsed before still parses, unchanged.
+  
+  ### The retirement kit
+  
+  - **Schema.** `ManifestPermissionsSchema` is `PluginPermissionsSchema`, by identity, and both export names stay. The block answers a list with its prescription on its own error map, the bare-array pattern `ListViewExportOptionsSchema` uses. The block also carries `EnvironmentArtifactSchema.grantedPermissions` values, so the answer is worded true there too, where a list was never legal.
+  - **D2 conversion `manifest-permissions-string-list-removed`** (step 18, retired from the load path): a lossless delete of an all-string list from the stack's `manifest` and every `packages[].manifest`. The notice carries the dropped strings. A built artifact replays it at the artifact door, so an artifact built while the list was legal still boots. It never touches the structured block, an array of objects, or the top-level ADR-0090 permission-set collection.
+  - **D3 entry `manifest-permissions-string-list-retired`** carries the judgement the delete cannot make: what each dropped string meant in services, hooks, hosts and paths.
+  - **Liveness.** `manifest.permissions` stays `live` on corrected evidence. Its consumer is the marketplace install disclosure, and it refuses nothing at load. The four keys are now drilled.
+  - **The two skip reports reworded.** `AppPlugin`'s security registrar and `@objectstack/plugin-security`'s audience-binding reconciler both report a manifest-stage `permissions` they cannot read as permission sets. They now name the flat list as the retired legacy form. They behave as before.
+  
+  **Measured producers: none outside tests.** On origin/main e67ba80049, no manifest in `examples/`, `apps/`, `packages/`, `skills/` or `content/docs/` writes a list. The exceptions are five `@objectstack/spec` `manifest.test.ts` fixtures, re-triaged here, and the skip-report tests of `@objectstack/runtime` and `@objectstack/plugin-security`, which hand a list to an unparsed bundle on purpose and still pass. The same instrument finds those five fixtures, which is its control. At the objectui pin `a58626c88dc8`, nothing reads `manifest.permissions` (control: 91 `manifest.(id|name|version)` reads), and the install disclosure reads the structured block alone. Deployed and cloud-held manifests NOT MEASURED.
+- 17e4425: A position saved through the metadata door no longer stops an app's declared positions from being seeded
+  
+  Clause-②: no
+  
+  Every seeding pass copies the app's declared positions into the `sys_position` catalog: the boot's pass and, on a walled deployment, the pass each new organization gets. That seeder read one source or the other: the engine registry alone whenever it held any position besides the six built-ins, otherwise the metadata service. A position a platform administrator saves with `PUT /api/v1/meta/position/:name` lives in the registry. So after one such save, every later pass seeded that position and none of the app's own. Measured on the showcase, walled: an organization created after the save held 7 positions (the six built-ins and the saved one) instead of 17.
+  
+  The seeder now reads through the security catalog read (`createSecurityCatalogReader`). It reads both sources on every pass, and for a name both hold, the registry answers first.
+  
+  - **New organizations** get the built-ins, every declared position and every door-saved one. Measured on the same walled showcase: 17 positions.
+  - **Rows are written as before.** The door-saved position's row is unchanged: same name, label and description, `active: true`, `is_default: false`, no provenance stamp. For a name both sources hold, the registry's definition is still the one written.
+  - **The six built-in positions** are still written only by the built-in seeder, with `managed_by: 'platform'`. Some deployments saved a definition under a built-in name before the six were declared, and that definition still shadows the declaration when the catalog is read. This seeder skips it by name, so it never reaches a row.
+  - **A catalog read that fails** now writes nothing for that pass, and the boot reports it once as `[security] declared-position seeding failed`. That covers a source that cannot be read and a metadata list that lost a loader. Before, the seeder seeded whatever part it could read, without saying so.
+  - **No grant changes.** A principal's permissions move only if it holds a position that is newly seeded into its organization.
+- 7d7943d: Grants written before `sys_user_permission_set.permission_set` existed now get their permission set's name, once, at boot (ADR-0131 D4)
+  
+  Clause-②: no
+  
+  - **What happens on the first boot after upgrading.** At `kernel:bootstrapped`, `@objectstack/plugin-security` fills `permission_set` on every grant that has no name yet. The name is the `name` of the `sys_permission_set` row that the grant's `permission_set_id` points at. The set row is read inside the grant's own organization: a grant of an organization may name that organization's set or an organization-less one, and an organization-less grant may name only an organization-less set. Each name is checked in the security catalog before it is written. Only the name column is written: no id changes, no grant is moved and no row is deleted. No principal's grants change, because readers still resolve grants from `permission_set_id`.
+  - **What is left unnamed, and reported in the boot log by count and grant id.** A grant whose id names no set row (`warn`). A grant whose id names another organization's set row (`warn`); nothing about that organization is logged. A grant whose set row carries a name the security catalog does not hold at that boot (`error`): register the permission set definition, or re-point the grant.
+  - **It runs once.** When the pass has nothing left that a later boot could decide differently, it records its verdict in `sys_migration` under the id `adr-0131-grant-permission-set-name-backfill`, and later boots skip it. A grant the catalog could not verify, or a write that did not land, leaves the verdict unrecorded, so the next boot tries again. Without a `sys_migration` table (no `PlatformObjectsPlugin` in the composition) the pass still runs on every boot, and renames nothing it already named.
+  - **Nothing to migrate.** No configuration is needed.
+- 19bb55e: The permission-set grant readers in `@objectstack/plugin-security` read which set a grant holds from its name column, `sys_user_permission_set.permission_set` (ADR-0131 D4)
+  
+  Clause-②: no
+  
+  - **What reads the name now.** The explain engine's dropped-grant provenance (`buildContextForUser`: an expired grant, or a grant of a deactivated set), the platform-admin bootstrap's existing-holder check (`bootstrapPlatformAdmin`, and the seed-ownership claim's `findExistingPlatformAdmin`), the organization-admin reconcile (`reconcileOrgAdminGrant`, `backfillOrgAdminGrants`) and the delegated-administration gate's judgement of a stored grant it is asked to change or delete. Each reads the grant's `permission_set` instead of its `permission_set_id`. Deactivation is still read from the `sys_permission_set` row, now found by that name: the grant's own organization's row, else the organization-less one. The authorization resolver in `@objectstack/core` still reads the id, and nobody's resolved permissions change.
+  - **A grant whose name is empty.** A grant written before the name column existed has no name until the one-time backfill names it at `kernel:bootstrapped`, and the backfill leaves a grant unnamed when its id names no set row or another organization's set row. Such a grant grants nothing through these readers. Explain reports nothing for it. The organization-admin reconcile still finds it through its id when it revokes the grant or checks for a duplicate before inserting one. The delegated-administration gate refuses a delegate's change to it; a tenant administrator is not affected. The platform-admin bootstrap does not promote a second administrator while an unscoped grant on the `admin_full_access` row is still unnamed. It returns `reason: 'admin_grant_unnamed'` without an `adminUserId`, logs a warning, and the next boot reads the grant by its name.
+  - **Within the organization-admin reconcile,** a pair that already holds the organization-admin set by name, through any organization's copy of it, gets no second grant.
+  - The earlier release notes for the name column said no reader used it yet. That is no longer true of the readers listed above.
+  - **Nothing to migrate.**
+- 6a49efb: fix(plugin-security): the `sys_user_position.position` refusal names the security catalog type it judged against, and reads no retired catalog table
+  
+  A `sys_user_position` write naming no position in the security catalog is still refused `400 VALIDATION_FAILED` with one `reference_not_found` entry at `position`. That entry's `constraint.target` now reads `position`, the security catalog type the value is judged against, instead of `sys_position`, a catalog table that is no longer registered. The sibling `sys_user_permission_set.permission_set` refusal already answers `target: 'permission'`. A client that read `constraint.target` should expect `position`.
+  
+  The refusal no longer looks a refused value up as a `sys_position` record id to suggest that row's name. That lookup could not succeed on a current deployment, so it never suggested a name. Every refused value now gets the same remedy: write the machine name of an existing position, or declare the position first.
+  
+  Also removed: the unused internal `per-organization-catalog.ts` module, which nothing imported. Nothing else changes.
+  
+  Clause-②: no
+- 5c9bfb0: fix(plugin-security): the position write-through and the row-only position backfill are deleted, and the boot reference report stops reading position rows (ADR-0131 D3, C3 stage 7b)
+  
+  Clause-②: no
+  
+  Stage 8 stopped registering the `sys_position` row object, the `sys_position` data-door write-through and the row-only position backfill. This change deletes the modules behind them, `position-write-through` and `position-environment-backfill`. A position is written through the metadata door alone (`PUT /api/v1/meta/position/:name`). No export of the package's entry changes.
+  
+  What a deployment observes:
+  
+  - **The boot reference report reads no `sys_position` row.** It still lists, per organization, every position assignment and permission-set grant whose name the security catalog does not resolve, and every grant that names no permission set. It no longer has the two position-row lines ("position(s) … have sys_position rows and no definition" and "position name(s) are carried by more than one sys_position row"). No composition provisions that table any more, so those lines could not fire. Legacy position rows are converted and reported by the upgrade ceremony (ADR-0131 D10).
+  - The Setup-create refusal for a position name the catalog already holds (`409 UNIQUE_VIOLATION`, raised by the deleted write-through) goes with its module. A `sys_position` data-door create cannot reach the engine any more, so nothing raised it.
+- 0d3ea29: fix(plugin-security): the data-door write gates of the retired catalog row objects are removed, the boot report names positions that bind a permission set nobody serves, and the texts that still named the retired objects and modules are corrected (ADR-0131 D3/D4, C3 stage 8-post)
+  
+  Clause-②: no
+  
+  Stage 8 retired the `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` row objects, so no write to them reaches the engine. This change removes what only guarded those writes. No export of any package's entry changes, and no request that reaches the server is answered differently.
+  
+  - **`@objectstack/plugin-security`.**
+    - Three of the security middleware's gates on those objects are gone: the package-provenance gate on `sys_permission_set`, the platform/package row gate on `sys_position` and `sys_capability`, and the curated capability-name gate on `sys_capability`. The delegated-administration gate no longer judges `sys_position_permission_set` bindings or `sys_permission_set` authoring; it still governs `sys_user_position` assignments, `sys_user_permission_set` grants and `sys_member`. The rules those gates carried still hold where the catalog now lives: `everyone` and `guest` are code-declared positions an environment cannot overlay, and a capability cannot be created or overlaid through the metadata door at all.
+    - The walled data-door refusal for those objects is deleted. Stage 8 already left it unwired, and no composition registers the objects it judged; the metadata door's walled refusal is unchanged.
+    - The internal duplicate-name refusal class that only the retired permission-set data door raised is removed.
+    - The packaged-permission-set lock's refusal no longer has a "choose a different name" variant: only the retired data door's create raised it. The metadata door's refusal text is unchanged, and the published signatures keep their `operation` parameter.
+    - The boot's catalog reference report lists one more finding, per position: a position definition whose `permissionSets` names a set the security catalog does not resolve, usually because the package that declared the set is uninstalled or disabled. A holder of such a position is granted nothing through that name. The line clears by itself at the next boot after the package is installed again. It is logged at `error` once per boot, like the report's other lines.
+  - **`@objectstack/platform-objects`** and **`@objectstack/plugin-security`** object metadata: the descriptions of `sys_invitation.positions`, `sys_user_position` (object and `position`), and `sys_audience_binding_suggestion`'s permission-set name no longer name the retired objects. The translated texts follow.
+  - **`@objectstack/spec`**: the `projectionApplied` and `materializeApplied` descriptions on the metadata save, publish and batch-publish responses give a current example (`datasource`, `flow`) instead of `permission` → `sys_permission_set`. `EvalUser.positions` describes the positions assigned through `sys_user_position`. `PermissionSet.description`'s doc comment no longer names the deleted projection. The `name` describes of `PositionSchema` and `PermissionSetSchema` say a name is unique within the security catalog the environment serves (ADR-0131 D3: there is no organization-level catalog), replacing "unique per organization", which read the retired rows' index. The error-code ledger drops `@objectstack/plugin-security`'s `UNIQUE_VIOLATION` row, which named the removed refusal; `UNIQUE_VIOLATION` stays registered by its other emitters.
+  - **`@objectstack/core`**: the doc comments of `positionDefinitionFromRow` and `permissionSetDefinitionFromRow` no longer describe the deleted boot backfills as current.
+  - **`@objectstack/metadata-protocol`**: the doc comments of the publish materializer, mutation projector and uninstall cleanup registries give current examples (`flow`, `datasource`, the grant revocation) instead of `permission` → `sys_permission_set`.
+- 48cca4a: Setup's user page grants a position or a permission set by picking its name from the security catalog (ADR-0131 D4)
+  
+  Clause-②: no
+  
+  - `@objectstack/plugin-security`: `sys_user_position.position` declares `widget: 'position-ref'` and `sys_user_permission_set.permission_set` declares `widget: 'permission-ref'`, so the grant form offers a picker over the positions and permission sets the catalog serves, and stores the chosen name. A console without those widgets keeps the text input. `sys_user_permission_set.permission_set_id`, the legacy id that grants nothing, is now `hidden` and no longer appears on the grant form; the column stays until a later release drops its data.
+  - `@objectstack/platform-objects`: the user page's Positions and Permission Sets lists no longer carry the "Assign position" / "Grant permission set" buttons. Those buttons listed `sys_position` / `sys_permission_set` rows, which a deployment need not hold. Grant with the list's **New**, which opens the grant form; removing a grant is unchanged.
+- 9e9e6f9: feat(cli)!: `os meta resync` is deleted
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A CLI command is removed; it reconciled platform rows no reader uses for authorization, and no key of any spec schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `os meta resync` reconciled the platform-default `sys_permission_set` rows (`admin_full_access`, `member_default`, …) to the shipped declaration. Since the authorization resolver reads permission sets from the security catalog (ADR-0131 D3), an edited default set is served from its declaration at the next boot, and the rows the command reconciled decide nothing. The command, its `--yes` / `--json` modes and its skip-count explanation are gone; a script that calls it gets oclif's unknown-command error.
+  
+  In `@objectstack/plugin-security`, `@objectstack/driver-sql` and `@objectstack/runtime`, shipped comments and one warning sentence (the permission-set backfill's re-provision list) no longer name the command. Their behaviour is unchanged.
+- 2fbe1fd: Internal move with no behavior change: the organization-scoping helpers and the seed write-refusal accumulator leave `per-organization-catalog.ts` for two new internal modules, `organization-scope.ts` and `write-refusals.ts`
+  
+  Clause-②: no
+- eebaf3b: feat(objectql,core): the driver's tenant read scope is the organization wall's verdict — one predicate for Layer 0 and every driver (ADR-0131 D8)
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** The engine no longer derives `DriverOptions.tenantId` / `tenantIds` beside the organization wall. `buildDriverOptions` projects the wall's own verdict onto them: the verdict plugin-security records on the operation (`OperationContext.tenantLayer0Verdict`) where its wall ran, and otherwise the same function over the engine's own facts (the posture in force, the context's organization and membership set). The function, `computeTenantLayer0Verdict` with its input type `TenantLayer0Input`, moves to `@objectstack/core` (new export); `@objectstack/plugin-security`'s `tenant-layer.ts` re-exports it and its Layer 0 is byte-identical.
+  - **FROM → TO, per posture, for a read, count, aggregate, update or delete on an object with an organization column:**
+  
+    | posture / caller | driver scope before | driver scope now |
+    |:--|:--|:--|
+    | `single`, any caller naming an organization | that organization (plus organization-less rows) | **none** |
+    | `isolated`, member | the active organization | unchanged |
+    | `group`, member | the membership set | unchanged |
+    | walled, exempt `PLATFORM_ADMIN` on a posture-permitting object, or the verified platform owner's read | the active organization | **none** — what Layer 0 already admitted |
+    | walled, system context naming an organization | that organization | unchanged |
+  
+  - **Not changed.** Inserts and upserts keep the active organization as `tenantId` in every posture: the row is stamped with it, its counter scopes by it, and an upsert that would merge into another organization's row is still refused. Both `orWhereNull` compatibility arms in `SqlDriver.applyTenantScope` stay (their retirement is a later stage of ADR-0131 D13).
+  - **Who notices.** A `single` deployment that holds more than one organization was kept apart by the driver only by accident; postures now differ only in enforcement (ADR-0131 D11), and `single` enforces no wall. To keep organizations apart, run the `isolated` or `group` posture. Code that relied on a context organization to narrow a read on `single` names the organization in its own `where`.
+  - **Migration.** ADR-0087 semantic entry `driver-read-scope-follows-tenant-wall`. A deployment's `platformGlobalObjects` carve-out already reaches the driver through the column plan (ADR-0131 D7): a declared object carries no organization column, so neither wall has anything to scope.
+- e67ba80: The seed ownership claim no longer fires app hooks or record-change flows
+  
+  Clause-②: no
+  
+  On a freshly seeded database, the first sign-up promotes the first user to platform admin, and `claimSeedOwnership` hands every seeded row to that admin inside the same request. That write ran under a bare system context, so every claimed row went through the full write pipeline: hooks bound from app metadata fired, record-change flows ran, approvals opened on seeded records and notifications went to the new admin. Measured on hotcrm `56d98f7e` (17.7.0, a 354-row seed), the first sign-up took about 45 s, and in that time the claim fired 1,254 app hooks, ran 8 flows, opened 2 approvals and handed 8 emails to the transport.
+  
+  The claim's write now runs with `{ isSystem: true, skipAutomations: true }`. The seed itself is end-state data written without automation, and the claim keeps that rule for the write that completes it.
+  
+  - **App hooks no longer fire for the seed ownership claim.** No hook bound from metadata (an app's `hooks`, sandboxed bodies included) runs on the claim's owner change, and no record-change flow is dispatched for it. So the claim opens no approval and sends no notification.
+  - **Which claims.** Every pass of the claim: the promotion pass inside the first sign-up, and the pass that runs on `app:seeded` on every boot, the first and every later one.
+  - **Still runs.** Hooks that plugins register in code still run, so the claim still writes one audit row per claimed record (plugin-audit) and plugin-sharing still recomputes the grants the owner change earns. Every claimed row's `owner_id` is the admin and its `updated_at` still advances, exactly as before. The per-row hook ceiling and the paged fallback for very large objects are unchanged.
+  - **If an app relied on it.** An app hook or flow that reacted to the claim's owner change no longer sees it, just as it never saw the seed's own writes. None of the hooks or flows in ObjectStack's own example apps reads it.
+- 4049cac: fix(plugin-security): the boot heal of drifted `sys_permission_set` rows converges on duplicated names, stops paying a discarded metadata read per row, and a refused existence read no longer inserts a duplicate (#22169)
+  
+  Clause-②: no
+  
+  **The heal writes the row it read, by its id.** `reconcilePermissionSetProjection` heals every overlay-less, env-authored record that drifted from its metadata definition. It used to hand each drifted record to a by-name upsert, which re-read the first record of that name (lowest id). On a table holding more than one record per name, only that one was ever written: every other record was logged "re-projected" and left drifted, on every boot. Now each drifted record is updated by its own id, facets only (label, description and the permission columns; identity, `active` and provenance are never touched). The drift line is logged after the write and names the record's id; a refused write is logged as refused instead of as re-projected. On a real engine with 8 names × 3 records, the boot after the healing one went from 116 statements and 16 drift warnings to 4 statements and none.
+  
+  **The layered metadata read is lazy, once per name.** The heal awaited `getMetaItemLayered` (four statements on the protocol) for every candidate record before deciding whether it needed it, and it does not need it while a `SchemaRegistry` is readable. It is now read only when no registry answers, and once per name per pass.
+  
+  **A refused existence read declines the insert.** `bootstrapPlatformAdmin` reads each default permission set by name and inserts when it finds none. A refused read answered as "none", so on a table without the per-organization unique index the boot inserted a second record of a set that already existed. A refused read now inserts nothing, and the pass says so once, naming the sets. When `admin_full_access` is one of them, the promotion half reports `admin_permission_set_unreadable` instead of `admin_permission_set_missing`.
+  
+  **Unchanged.** Existing duplicate records are healed, never deleted: removing them is an operator repair. The live single-mutation projection keeps its per-item read.
+- 746637e: fix(service-automation)!: retire the `RunProvenanceContext` type; `RunDataContext` names only what `resolveRunDataContext` returns
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/services/service-automation/src/runtime-identity.ts#RunDataContext) Two TypeScript-only declarations in one runtime file move, and neither is metadata: `RunDataContext` loses its `RunProvenanceContext` arm, and the `RunProvenanceContext` interface declared beside it in the same file is removed together with its type export. No spec key, authorable spelling, Zod schema or stored shape moves, and no stored row is read or rewritten, so `objectstack migrate meta` has nothing to rewrite. The channel that reaches an affected consumer is the compiler, at the consumer's own import. -->
+  
+  **BREAKING** for TypeScript code that imports from `@objectstack/service-automation`: one type export is removed and one type narrows. It ships as `minor` under the launch-window convention for breaking changes. No runtime behaviour changes in any package.
+  
+  **What is removed.** The `RunProvenanceContext` type export, the `{ flowRunId }`-only "provenance" envelope, and its arm of `RunDataContext`. No code in this repository builds or reads one. Since ADR-0096 D5, the data engine's security middleware refuses a context that carries no principal and is not a system context (`403 PERMISSION_DENIED`, for every verb). So the type described a context the engine refuses, while its docstring said such a context was "indistinguishable from passing no context at all" and was let through.
+  
+  **What `RunDataContext` is now.** Exactly what `resolveRunDataContext` returns: `isSystem: true` for a `runAs: 'system'` run, and the triggering user's principal for a `runAs: 'user'` run. A run that resolves no principal is refused before any data operation (`AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`), as before.
+  
+  **If your code named the type.** There is no replacement, because the context it described is refused. A custom data node builds its context with `resolveRunDataContext(context)`, typed `RunDataContext`.
+  
+  **`@objectstack/plugin-security`, `@objectstack/runtime`, `@objectstack/service-analytics`, `@objectstack/platform-objects`:** comment and docstring text only. Shipped comments that said the security middleware hands through, skips or falls open for a context with no principal now say that it used to, and that ADR-0096 D5 refuses such a context. Nothing these packages do changes.
+- 86bf9ed: `security/explain` answers a delete and a transfer of a `controlled_by_parent` record the way each verb's own door answers it: their record verdicts now come from the master-detail write check (ADR-0055), as the update's already did.
+  
+  - **What was wrong.** The write path runs the master-detail write check on every by-id write of such a record (an update, a delete, a transfer), and hands the record's platform ownership floor over to that check. explain asked the check for an update only.
+    - A delete kept its `owner_only_deletes` floor. A principal who may edit the master but did not create the record was explained as refused (`decidedBy: 'rls'`) beside a `DELETE` that answers `200`. A principal who may not edit the master was refused on that floor, with no word about the master, beside a `DELETE` whose `403` names the master.
+    - A transfer asked only the sharing service's per-record gate, which abstains on such a record. A principal who may not edit the master was explained as allowed to transfer it, beside the `PATCH` that writes `owner_id` and answers `403`.
+  - **What it does now.** For an update, a delete or a transfer of a record that exists (and a restore or a purge, which the object gate still refuses to everyone), explain asks the security service's `checkControlledByParentWrite` with the context it is explaining. The check judges edit access to the master whatever the record's own verb, so its answer is each verb's answer. A `deny` or `unresolvable` outcome makes the record not writable, decided by the `sharing` layer, whose record attribution names the verb and the refusing leg (or the reason no verdict was reached). A delete's row-level composition carries the write path's master-gate coverage vouch, as an update's does, so the ownership floor is handed over as the write path hands it, and never on behalf of a delegator.
+  - **What is unchanged.** Every object that is not `controlled_by_parent`. Object-level reports (no `recordId`). The `allowed` field. A `create` asks no master check: the write path reads an insert's master from the request body, which an explanation does not carry. The `ExplainEngineDeps` type: the `checkControlledByParentWrite` dependency keeps its signature and is now asked for every by-id write, not only an update.
+- 25be876: `security/explain` composes a transfer's row-level security as the update its door is, and a restore's and a purge's as the write class the by-id write path composes them as.
+  
+  - **What was wrong.** The by-id write path composes a lifecycle verb's row-level security for its nearest write class: transfer and restore as `update`, purge as `delete`. explain composed it for the verb as asked, which the RLS compiler reads as a read (`select`). So no update-class policy and no ownership floor reached a transfer's verdict. On a row an app-authored update policy excludes, explain answered `record.visible: true`, with "No business RLS policy applies to this record", beside the `PATCH` that writes `owner_id` and answers `403 PERMISSION_DENIED`.
+  - **What it does now.** The mapping is declared once, in plugin-security, and both readers read it: the by-id write pre-image gate (byte-identical to the expression it replaces) and explain. explain composes both of its row-level readings for the mapped operation: the record's row story and the object-level `rls` layer. A transfer of a row an update policy excludes is now `visible: false`, decided by `rls`, as an update of that row is. The object-level `allowed` reads the `rls` layer's deny-all verdict, so for a transfer it now reads the update class's. Restore and purge are still refused at the object gate for every principal, so `object_crud` still decides their verdict first; the `rls` layer under it now reports the update and delete classes.
+  - **What is unchanged.** Every other operation: `read`, `create`, `update`, `delete` and `export` are composed exactly as before. The RLS compiler's own default for an unlisted operation. The read path's row-level filter injection, which never sees a lifecycle verb. No export is added to the package.
+- 18d9990: `security/explain` answers a transfer of a row the caller cannot read the way the transfer door does: as a record that does not exist.
+  
+  - **What was wrong.** On the write doors, a row the caller cannot read answers what a nonexistent id answers: the by-id update or delete the caller addresses gets `404 RECORD_NOT_FOUND`. A transfer's door is the `PATCH` that writes `owner_id`, an update, so a transfer of an unreadable row gets that 404 too. explain's matching rewrite (the missing-record shape, `record: { visible: false }` with no `decidedBy`) keyed on the verb as asked, `update` or `delete`, so it never ran for `transfer`. Where the caller's update policy admitted the hidden row, explain answered `visible: true`, decided by `rls`. Where the caller declared no write policy, it answered `visible: false` decided by `rls`, which is the shape of a 403 refusal, not of the door's 404.
+  - **What it does now.** The rewrite asks which operation the verb's door is through the same mapping the by-id write path reads (`transfer` and `restore` as update, `purge` as delete). So every write verb whose door is a by-id update or delete is asked the read question, and a transfer of a row the caller cannot read is `{ visible: false }` with no decider, beside the door's 404.
+  - **What is unchanged.** `update` and `delete` are answered exactly as before. `restore` and `purge` are still refused at the object gate for every principal, which answers first. A readable row keeps its verdict for every verb. The object-level `allowed` answers the object question and is not touched. No door changes, and no export is added to the package.
+- 680a86b: `security/explain` answers a by-id write of a row the caller cannot read with the whole answer it gives for an id no row carries, layers included.
+  
+  Clause-②: no
+  
+  - The update, delete and transfer doors already answer such a row `404 RECORD_NOT_FOUND`, as they answer a nonexistent id, and explain's record verdict already took the missing-record shape. Every row-scoped layer's `record` block, and the tenant layer's verdict, now come from the same path a nonexistent id takes, so no layer names a status the door does not give.
+  - Nothing you author changes. The doors and the record verdict answer exactly as before, and an explanation of a row the caller can read is unchanged.
+- b1d701b: `security/explain` decides whether a record-grained explanation may say a record exists by the read access of whoever asked for it, not by the explained principal's.
+  
+  Clause-②: no
+  
+  - **An asker who cannot read the record** gets, for every operation, exactly the answer an id no row carries gets: `record` is `{ recordId, visible: false }` with no `decidedBy`, and every layer's per-record attribution is the missing record's.
+    - An asker explaining another user (`manage_users`, or a delegated administrator's scope) cannot read a record its own by-id read finds no row for, or refuses (a declared 4xx, such as no read grant on the object).
+    - A principal explaining itself cannot read a record its own by-id read finds no row for. A refused read does not count, so the explanation shows what that principal's own doors answer: a principal that may edit a record it may not read is told what its edit does.
+    - Before, a principal explaining itself a `read` of a row its read finds no row for was told the row's verdict and why, and an administrator with no read grant on the object was told any row's story; the by-id write verbs already answered a self-explanation of such a row as missing.
+  - **An asker who can read the record** gets the explained principal's full record story. For a `read`, that is the principal's own verdict, decider included, so the `controlled_by_parent` read verdict on the master leg (not visible, decided by the `sharing` layer) is what such an asker is told. For a by-id `update`, `delete` or `transfer` of a row the principal cannot read, the verdict stays `visible: false`, the answer that principal's write gets, and now names the layer that decided the principal's read; each row-scoped layer's `record` carries that read's attribution, prefaced with the write's `404 RECORD_NOT_FOUND`. Before, such an asker was told the missing record's answer.
+  - A system asker reads every record. The batch form (`recordIds`) answers each id as the singular form does.
+  - `@objectstack/spec`: the `record` verdict's description and the `recordIds` "Missing records" clause in `explain.zod.ts` now say which ids an asker cannot read, by asker, and that those answer as missing. Description text only; no schema shape changes.
+  - Nothing you author changes, and no exported type or signature moves. Object-level explanations (no `recordId`) are unchanged.
+- c11b758: `security/explain`'s record-grained `read` verdict for a `controlled_by_parent` record now equals the read door's answer on the master leg (ADR-0055).
+  
+  - **What changed.** The read door scopes such a record by its master as well as by its own row-level security. explain's read branch modelled the record's own row-level security only. It now asks the read door's own by-id read, with the context it is explaining, wherever every other leg of the read's row story admits the record. A record the door does not return is reported not visible, decided by the `sharing` layer. A record the door returns is reported exactly as before. A rejection of that read is reported fail-closed, as a dependency that throws already is. An `export` explanation, which streams the same find, answers the same way.
+  - **What is unchanged.** Every object that is not `controlled_by_parent`. Object-level reports (no `recordId`). The `allowed` field. Every write verb. The answer for an id no row carries. The `ExplainEngineDeps` type: the `recordAbsentToCaller` dependency keeps its signature and is now asked for such a read too.
+- 7856110: The RLS deny sentinel and the composed `ReadableIds` leaf are declared once in `@objectstack/spec/data`, and every place in `@objectstack/plugin-security` that handed out a copy of the sentinel now returns the object itself (ADR-0139 D2)
+  
+  Clause-②: yes (widening: new exported members of the published spec `data` entry)
+  
+  - **`RLS_DENY_FILTER` moves into the spec.** FROM `@objectstack/plugin-security`'s own frozen literal TO `RLS_DENY_FILTER` exported by `@objectstack/spec/data`. The value is unchanged: `{ id: '__rls_deny__:00000000-0000-0000-0000-000000000000' }`, an `id` equality no record satisfies, so a consumer that never heard of it still reads zero rows. `@objectstack/plugin-security` keeps exporting `RLS_DENY_FILTER` under the same name and type; it is now the spec's object, not a second copy. Nothing to change in code that imports it from either package.
+  - **One object, compared by identity.** `getReadFilter` (`ISecurityService`) now returns the sentinel itself, not a copy, for a principal-less caller, a sharing scope that cannot be resolved, an on-behalf-of caller, a caller with no permission set and a resolution failure. It also returns the sentinel itself when the only layer that constrains is the tenant wall's deny, the RLS compiler's deny (every applicable policy dropped), or the deny of a `controlled_by_parent` object whose master cannot be resolved. Before this release most of those returned a spread copy, which matched the same zero rows but was a different object. Not every zero-row answer is the sentinel: a deny ANDed with another layer is returned as the composed `$and`, with the sentinel inside it, and the record-sharing layer's own deny, `{ id: '__deny_all__' }`, is returned unchanged when sharing is the only layer that constrains. ADR-0139 D2 step 2 has the engine's `ReadableIds` composition recognise the deny by `scope === RLS_DENY_FILTER` and answer it `$in: []`; any other zero-row answer composes like any scope and still matches no row. The object is frozen: code that edited the filter `getReadFilter` returned now gets a `TypeError` instead of silently changing a deny.
+  - **The composed leaf.** `ReadableIds.compose(leaf, scope)` builds the frozen value `{ object, scope }` the engine hands a driver in place of a `ReadableIds` leaf (D2 step 3). It is branded under `COMPOSED_READABLE_IDS_BRAND` (`Symbol.for('objectstack.filter.readableIds.composed')`), so a JSON round-trip, a structured clone or a spread drops the brand. `isComposedReadableIds(value)` recognises it. The type `ComposedReadableIds` is exported. `scope` is `undefined` for "no row restriction"; `compose` throws a `TypeError` for anything but a `ReadableIds.of` leaf, for a scope that is neither `undefined` nor a non-null, non-array object, and for `RLS_DENY_FILTER` itself, which D2 step 2 answers `$in: []`.
+  - **`isReadableIds` answers as before.** It answers `false` for a composed leaf, so it still means "an uncomposed leaf", and a driver refuses on it. The comparand-shape door's `admitReadableIds` admits the uncomposed leaf only: a composed leaf handed to the engine from outside is refused `INVALID_FILTER` / 400 as a non-list comparand.
+- dfb3ba2: A `controlled_by_parent` master that is itself a detail decides who may write its details the way its own record update is decided: whoever can edit a quote can edit its lines
+  
+  Clause-②: no
+  
+  In a two-level master-detail chain (a quote line under a quote under an account, every level below the account `controlled_by_parent`), one person got two answers about the same quote. An organization member who could edit a quote they had not created was allowed to update the quote itself, but every insert, update and delete of its lines was refused `403 PERMISSION_DENIED` ("requires edit access to its master record … not editable by this user (row-level security)"). Only the quote's creator could change its lines. The quote's own update hands the platform's creator-only floor (`owner_only_writes`, positions `['org_member']`) to the master-detail write check, by the 2026-08-15 ruling; the check that a line write runs on the quote kept that floor.
+  
+  Now the line write asks the same question the quote's own update asks. By the maintainer's ruling (letter A), a line write under a middle master is admitted exactly when the same person may update that middle master directly:
+  
+  - **Admitted now:** an organization member who can update the quote (and the account above it) may insert, update and delete its lines, whoever created the quote.
+  - **Still refused:** the account above is not editable or not readable; the quote is not editable through its object permission; or an app-authored update rule on the quote refuses the person.
+  - **Also refused now:** the quote's creator, writing the lines of a quote that an app-authored update rule refuses them. The quote's own update already refused them. The line write had admitted them, because the floor and the app's rule each admitted a row on its own.
+  - **Unchanged:** a write made on behalf of another user keeps both principals' floors at every level. A master that governs its own rows, a single-level detail, the cycle guard and the depth bound are untouched.
+  
+  `security/explain` and the parent gates of `sys_attachment` and `sys_comment` ask the same check, so they give the same answers.
+- 920bc12: fix: the approval request actions' success toasts name the request, and Explain access names the principal as a person
+  
+  Clause-②: no
+  
+  Server-authored strings that the console renders verbatim now name what and who they are about.
+  
+  - `@objectstack/plugin-approvals`: every action on `sys_approval_request` had a bare-verb `successMessage` (`Approved.`, `Rejected.`, `Reassigned.` and so on). Each now names the request through `${result.request.record_title}`. Each action's route answers `{ request, … }` with the read-back request and its display enrichment, so `record_title` is the title the inbox shows: the target record's display field, else its payload snapshot. The new copies:
+    - Approve and Reject use the inbox row's inline wording: `Approved "TITLE"` and `Rejected "TITLE"`.
+    - The others read `Reassigned "TITLE"`, `Sent "TITLE" back for revision`, `Information requested on "TITLE"`, `Reminder sent for "TITLE"`, `Recalled "TITLE"`, `Resubmitted "TITLE"` and `Reply posted on "TITLE"`.
+  
+    The zh-CN, ja-JP and es-ES values of the same keys carry the same token. No key, route or response shape changes.
+  - `@objectstack/plugin-security`: the explain engine's principal layer said `Principal USER_ID holds position(s) …`. It now names the person first and the id second, for example `Principal Ada Lovelace (ada@example.com; id usr_1) holds position(s) …`. Three other users in the same layer are named the same way:
+    - an on-behalf-of delegator;
+    - the user an ADR-0091 D3 delegated position came from, in the clause;
+    - that same user in the position's contributor attribution (`delegation from …`).
+  
+    Each user row is read with the asker's own context, so row-level and field-level security apply. An asker whose read returns no row gets the bare id, as before, and a field its read masks is left out. As a result, two askers can now be shown different names for the same user. The decision's `principal` object and every verdict are unchanged.
+- 37510aa: feat(security): the guest's grants channel — an anonymous request at a guest-entry door holds the sets bound to the `guest` anchor, in the one organization the deployment resolves for it (ADR-0138 E1, D3/D4)
+  
+  ADR-0087 disposition: none. No authorable key, accept set or stored shape moves: no spec schema, metadata type, stored row or published response field is added, removed, renamed or re-shaped. A declared binding that was not enforced becomes enforced (ADR-0090 D9, as ADR-0138 D3 amends it).
+  
+  **The bindings that start granting.** On the reference apps, none: `app-showcase`, `app-crm`, `app-multi-package` and `app-todo` declare no definition of the `guest` anchor that names a set. `app-showcase` ships `showcase_guest_portal` as a capability an administrator may bind and binds it to no anchor (its `client_portal_user` position is an ordinary position), and `app-crm`'s `guest_portal` is the public form doors' set, which keeps its own posture. No reference app declares a permission set named `guest`, so no grant stops either. A set starts granting only where a deployment holds an environment definition of the `guest` position that names it.
+  
+  What changes:
+  
+  - **`@objectstack/core`** — the anonymous branch of `resolveAuthzContext` resolves the guest's grants on a face that takes the explicit guest entry (the new `guestEntry` input). It reads the sets the `guest` position's definition names, through the same position-bound read every position uses, and the activation ledger as for any held set. It resolves them only in the organization the guest entry's organization step derives (`resolveGuestOrganization`), which asks ADR-0131 D9's predicate and no second spelling of it. With nothing bound, the guest holds no set and no read is issued. The predicate itself, `resolveSystemWriteOrganization`, moves to `@objectstack/core` so both of its askers share it. New exports: `resolveGuestOrganization`, `resolveSystemWriteOrganization` (with `SystemWriteOrganizationDecision` and `SystemWriteRefusalReason`), and `GuestOrganizationUnresolvedError` with `isGuestOrganizationUnresolvedError` and its constants.
+  - **`@objectstack/objectql`** — `resolveSystemWriteOrganization` and its two types are re-exported from `@objectstack/core` as the same bindings. Nothing a caller imports changes.
+  - **`@objectstack/plugin-security`** — the set resolution treats the guest's sets as any requested set, and no longer folds the guest's position into the request. A permission set that merely shares the anchor's name no longer reaches an anonymous caller, and the baseline and `everyone` never did. At the CRUD gate, a guest that reaches a data operation acting in no organization, on a deployment where the organization step refuses, is refused before the operation runs.
+  - **`@objectstack/plugin-sharing`** — the read filter answers deny-all for the guest on every object that record sharing scopes, before the sharing-model branch: the guest reaches rows only through share links, never through the object's sharing model (ADR-0138 D3 item 6, as the maintainer's ruling C amends it). `externalSharingModel` is still not read for any caller. Share links are redeemed at their own door and are unchanged.
+  - **`@objectstack/runtime`** — the runtime face, which serves the guest, asks for the guest's grants.
+  
+  What an anonymous caller sees at an `authRequired: false` endpoint of `type: 'object_operation'`:
+  
+  - **One organization, a set bound to `guest`:** the operation runs as the guest, under that set, in that organization. A read the set grants is admitted and returns no row, whatever the object's sharing model (`private`, `public_read`, `public_read_write` or `controlled_by_parent`): the guest reaches a record only through a share link. A create the set grants lands in that organization with no owner.
+  - **Nothing bound:** `403 PERMISSION_DENIED`, as before.
+  - **A walled deployment, several organizations, or none:** `501 NOT_IMPLEMENTED`, naming the missing site binding (ADR-0138 D5), where it used to be `403 PERMISSION_DENIED` with nothing granted. Nothing that was served stops being served. The operator's log names the reason once.
+  
+  Unchanged: share links, which still serve an anonymous caller the one record they name, with `publicSharing.eligibility` checked at the mint and at every redemption; the public form doors, which keep their own posture and organization; the flow door, which runs under the flow's own declared posture; every surface that answers an anonymous request `401`; and every signed-in caller.
+  
+  Level: `minor` for `@objectstack/core`, because new exported symbols widen its published index; `patch` for the other four, whose exports do not move.
+- 09ef77c: fix(plugin-security): a permission set published into a runtime package names that package to the security catalog, so its `isDefault: true` records an `everyone` suggestion
+  
+  Clause-②: no
+  
+  - **What was wrong.** A writable runtime package's permission set marked `isDefault: true`, published through the package door with no `packageId` in its body, recorded no audience-binding suggestion on an environment kernel, so ADR-0090 D5's "packages suggest, admins confirm" never happened for it. On that kernel the protocol hydrates no stored row into the engine registry, so the security catalog finds the set in the metadata service. The only body there is the permission-set projection's in-memory copy, and that copy carried no `_packageId`. The catalog served the set as unowned while `GET /api/v1/meta/permission/NAME` named the package, and the suggestion collector skipped it.
+  - **What changed.** The projection's copy of a tenant-authored set now names the package its stored row is bound to. It reads that binding from the protocol's by-name read (the `_packageId` that read serves) and derives none of its own. The catalog, the by-name read and the layered read (`?layers=true`, whose `packageId` comes from the same copy) now name the same owner. `GET /api/v1/security/suggested-bindings` lists one pending suggestion under that package. A `manage_metadata` holder still has to accept it: the publish grants nothing.
+  - **When the body's `packageId` disagrees.** A set whose body declares a `packageId` other than the package it is published into is now owned, for the catalog and the suggestions, by the package it is published into, which is what the by-name read already served. On an environment kernel, a suggestion recorded under the body's package is pruned at the next sync while pending, and withheld from `everyone` with its reason logged if it was accepted. A pending suggestion under the publishing package replaces it.
+  - **Unchanged.** The packaged-permission-set lock and every edit door. (No `sys_permission_set` row is written for the set: C3 stage 7a retires the last writer.) A code package's set, whose owner the catalog reads from its artifact. A set saved into no package, which stays unowned and records no suggestion. A copy of a code-shipped set's legacy overlay, which carries no owner, as before.
+  - **If the binding cannot be read**, the copy is registered without an owner, as before, and one warning says so. It still enforces the new body, and the next save, publish or boot reads the binding again.
+- 301eec6: feat(spec)!: retire the object's `externalSharingModel` — the external org-wide default no principal ever read (#23268)
+  
+  **BREAKING** — `externalSharingModel` on an object (`ObjectSchema`, the `object` metadata type) is now refused at parse. ADR-0090 D11 declared it as a second org-wide default for portal and partner principals, and nothing ever evaluated it: no request resolves an external principal, and the authorization kernel's `EXTERNAL` rung (ADR-0095 / ADR-0099) admits explicitly shared rows only, never an org-wide default. Setting `externalSharingModel: 'private'` hid nothing from anyone. Delete the key. `sharingModel` is the one org-wide default; a principal reaches a row it does not own through an explicit share (a manual share or a sharing rule), and an anonymous reader through a share link (`publicSharing`, unchanged).
+  
+  Clause-②: no (narrowing)
+  
+  Measured before removal, at `e4ec6ec1a`: no row-pipeline reader in any package. The key's only readers were authoring checks of its own ordering against `sharingModel` — the publish linter's alias and wider-than-internal branches, and the `plugin-security` posture gate's env-tighten comparison — plus the Studio console's object settings select (a separate console change). The only authored instances in this repository were two showcase objects.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `externalSharingModel: 'private'` (or `'public_read'`, `'public_read_write'`, `'controlled_by_parent'`) on an object | nothing — delete the key; share rows explicitly where an outside principal needs them |
+  | `import { SECURITY_EXTERNAL_WIDER } from '@objectstack/lint'` | nothing — the rule `security-external-wider-than-internal` is removed with the key it judged |
+  
+  **The one-line fix:** delete `externalSharingModel` from every object.
+  
+  **What an author who still writes it sees.** `tsc` fails at the authoring site (`ObjectSchema` types the key as retired), and the parse — `ObjectSchema.create()`, `defineStack({ objects })`, `PUT /api/v1/meta/object/:name` (draft saves included) — refuses it at its own path with the prescription:
+  
+  > `object.externalSharingModel` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — it never had an effect: no request resolves an external principal, and the external rung of the authorization kernel (ADR-0095) admits explicitly shared rows only, never an org-wide default, so the value changed no answer for anyone. Delete the key. `sharingModel` is the one org-wide default; a principal reaches a row it does not own through an explicit share, and an anonymous reader through a share link (`publicSharing`). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  ## The retirement kit
+  
+  - **A `retiredKey()` tombstone** on `ObjectSchema`, a `strictObject` — so the refusal carries the prescription rather than a bare unknown-key report, and `tsc` fails first. `RETIRED_KEYS_BY_MAJOR[18]`: `data/Object:externalSharingModel`.
+  - **The D2 conversion `object-external-sharing-model-removed`** (protocol 18, retired from the load path) deletes the key from every `objects[]` entry, one notice per object, as a lossless delete. Studio's object settings offered the select and `PUT /api/v1/meta/object` persisted it until this release, so a stored `object` row can carry it; the rehydration seams replay this conversion over stored rows, and `os migrate meta --stored` lists the rows that carry it before the upgrade.
+  - **The D3 entry `object-external-sharing-model-retired`** asks the author whether anything they built assumed the key kept outside users away from an object's rows. Nothing ever enforced that.
+  - **Ledger:** the row goes `planned` → `dead`, kept as a tombstone row (a tombstone keeps the key in the walked shape).
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  **`@objectstack/lint`:** the `security-external-wider-than-internal` rule and its exported `SECURITY_EXTERNAL_WIDER` id are removed, and `security-owd-alias` no longer reads `externalSharingModel`; the parse refuses the key on every parsed door. On an unparsed intake (`os lint` on a raw config) the ledger-driven advisory reports it as `liveness-dead-property`.
+  
+  **`@objectstack/plugin-security`:** the object posture gate's env-tighten-only rule (R1) compares `sharingModel` alone; the external half left with the key.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered object-external-sharing-model-removed, object-external-sharing-model-retired -->
+- 6d96721: fix(plugin-security): an environment kernel's security catalog serves metadata-door permission sets and positions again
+  
+  Clause-②: no
+  
+  On an environment kernel (the per-project kernel a hosted tenant runs), a permission set or a position saved, published or deleted through the metadata door is in the security catalog again:
+  
+  - It resolves from the kernel's metadata service, under the package its stored row is bound to.
+  - A user granted it is authorized by it.
+  - An `isDefault: true` set in a runtime package records its pending `everyone` suggestion again (ADR-0090 D5).
+  
+  After a restart, the stored overlays are served again too.
+  
+  This regressed in C3 stage 8 (`feat(plugin-security)!: retire the four security-catalog row objects`). That change unwired the permission-set projector. On an environment kernel, the projector's in-memory echo was the only thing that put a stored set into the metadata service, because the metadata door hydrates no project row into the engine registry. Since stage 8, such a set resolved to nothing and granted nothing (fail-closed), and no suggestion was recorded.
+  
+  Positions never had an echo. On an environment kernel, a metadata-door position was unresolved before stage 8 as well, and it now resolves.
+  
+  `SecurityPlugin` now registers its own mutation projector for `permission` and `position` on the protocol, plus one pass over the stored environment-wide overlays at `kernel:ready`. Both only register the overlay body in the metadata service. They write no row, and they change nothing a host kernel resolves, since a host kernel reads these from the engine registry first.
+- b1e9280: fix(plugin-security, organizations): the seed-ownership claims hand over only the rows the seed wrote, and a guest-written or public-form row keeps no owner (ADR-0138 D1)
+  
+  The claim that hands seeded records to the platform admin runs on every `app:seeded`, so on every boot of an app with seed data. Its NULL-owner arm re-owned every unowned row of every eligible object, and no stored column tells a seed row from a guest-written row or a public form's intake. Those rows keep no owner on purpose (ADR-0138 D1: "the owner stays unset"), and the claim handed them to the platform admin at the next boot.
+  
+  - **`claimSeedOwnership`** (`@objectstack/plugin-security`) re-owns a NULL-owner row only when the seed reported landing on it: `owner_id IS NULL AND id IN (seeded ids)`, in chunks of half the per-row hook ceiling, read through the `seed-settlement` contract's `seededRecordIds`. The settle pass (`app:seeded`) and the first-admin promotion (`bootstrapPlatformAdmin`, new option `seededRecordIds`) both pass the reading. A replay reports the rows an earlier boot wrote, so a seed row is still claimed on a later boot. The `usr_system` arm is unchanged: only a seed or a legacy install writes that owner.
+  - **`claimOrgSeedOwnership`** (`@objectstack/organizations`) takes the same selector, read for the organization the owner bind claims for: the rows that organization's seed replay landed on, which ran in the same call that created it. Each write carries at most half the per-row hook ceiling's worth of ids, so none is refused for its size and the claim no longer reads pages.
+  - A row a hook, a flow or an assignment rule gave an owner keeps it, as before.
+  
+  **Direct callers.** Called without `seededRecordIds`, `claimSeedOwnership` re-owns only `usr_system`-owned rows and its pass report says no seed reading was published; `claimOrgSeedOwnership` re-owns nothing and says so. The deprecated `ensureDefaultOrganization` wrapper in `@objectstack/organizations` holds no kernel, so it hands over no row; use `OrganizationsPlugin`, which binds the reading.
+  
+  **Outside the claim's purpose** (handing the boot seed to the first admin), and so no longer re-owned by a later boot's pass: rows written by seed writers that emit no `app:seeded` — a package install's or a publish's seed apply, the dev hot-reload seeder, and the marketplace install's seed. A dataset they share with the boot bundle is re-reported by the next boot's replay and claimed then.
+- 0d784da: fix(cli,plugin-security): `os migrate organization-ownership --apply` resolves the built-in positions and the `everyone` baseline, so a 17.x database's seeded `everyone` binding no longer blocks the ceremony
+  
+  Clause-②: no
+  
+  - **What was wrong.** The ceremony's boot composes the security plugin for its declarations only: `init()` runs, and `start()` and every lifecycle hook do not. The plugin declared the six built-in positions (`platform_admin`, `org_owner`, `org_admin`, `org_member`, `everyone`, `guest`) in `start()`, and the `everyone` baseline at `kernel:ready`. So the ceremony's catalog held neither. Every 17.x environment database carries a seeded binding from `everyone` to `member_default`. On every such database, `authored-conversion` stopped with "Binding rows give position everyone the sets member_default, and the catalog holds no position of that name to carry them". With `OS_MULTI_ORG_ENABLED=true`, the rewrite gate stopped on the same binding ("deleting them would lose a grant").
+  - **What changed.** `SecurityPlugin.init()` now declares the six built-in positions. It also declares `everyone` naming the deployment baseline: the app's `isDefault` set composed with `member_default`. These are registry declarations only, and nothing is read from or written to the database. The ceremony's catalog now resolves `everyone` with `member_default`, as a started kernel does, so that binding converts as declared. A binding that names a position no catalog declares still blocks.
+  - **The baseline in `init()` is the fail-closed reading.** The high-privilege check runs with no declared-capability context there, because the stack's declarations are still arriving while plugins initialize. So a shipped baseline set whose system permission only an app's capability declaration excuses is not named in `init()`. The `everyone` derivation at `kernel:ready` is unchanged. It runs the check against every declared capability, adds the package defaults a `manage_metadata` holder accepted, and replaces the `init()` declaration.
+  - **What a started kernel sees.** Its catalog after boot is the same. Three things move earlier or stay put:
+    - the six positions, and `everyone`'s baseline, are in the engine registry from the plugin's `init()` instead of from its `start()` and `kernel:ready`;
+    - if the `kernel:ready` derivation fails, `everyone` keeps the baseline from `init()`, where it used to name no set;
+    - the "the built-in positions … were NOT declared as position metadata" warning, for an engine that exposes no registry, now prints from `init()`.
+  - **Unchanged.** The cold boot's refusal of an environment-held name still skips the built-in names. A stored definition under a built-in name still shadows the declaration at read. The ceremony's `authored-conversion` and rewrite steps are unchanged. The ceremony still does not read the accepted package defaults: a binding to a set that only an acceptance puts on `everyone` still blocks.
+- be50633: refactor(plugin-security): the audience-anchor binding gate on `sys_position_permission_set` is deleted
+  
+  Clause-②: no
+  
+  `SecurityPlugin`'s private engine-middleware gate that refused binding a high-privilege permission set to the `everyone` or `guest` position guarded writes to `sys_position_permission_set` only. C3 stage 8 (#23222) unregistered that object, so no write has reached the gate since. The gate, its call in the middleware and its three unit cases are removed.
+  
+  No behaviour changes, and nothing exported changes. The anchor tier itself (`describeAnchorForbiddenBits` from `@objectstack/spec/security`) still applies wherever a binding is made: when an `everyone` suggestion is confirmed (`confirmAudienceBindingSuggestion`), and on every derivation of the `everyone` anchor. No door binds a set to `guest`.
+- 23e689d: fix(plugin-security,spec): the unnamed-grant boot line and the `ups-permission-set-id-column-retired` upgrade entry name the reviewed-plan ceremony, `--out plan.json` then `--apply --backup-taken --plan-file plan.json`, instead of a bare `--apply` the CLI refuses (ADR-0131 D10)
+  
+  Clause-②: no
+  
+  `os migrate organization-ownership --apply` refuses a run without `--plan-file`, the file a plan run wrote and the operator reviewed. Two remedy texts still told the operator to run `--apply` alone, which answers `plan-file-required` and writes nothing:
+  
+  - `@objectstack/plugin-security`: the `kernel:bootstrapped` catalog reference report's error line for grants that name no permission set (`permission_set` empty).
+  - `@objectstack/spec`: the `replacement` of the ADR-0087 entry `ups-permission-set-id-column-retired`, the row the upgrade guide prints for the retired `sys_user_permission_set.permission_set_id`.
+  
+  Both now name the two steps: plan first, `os migrate organization-ownership --out plan.json`, review the file it writes, then `os migrate organization-ownership --apply --backup-taken --plan-file plan.json`, which executes that plan; restart afterwards. The ceremony itself is unchanged: its rewrite names each legacy grant from the retired id, and its column-drops step drops the two retired indexes and then the column. Only the text changes; the line's level, its fields and the entry's `id` are as they were.
+- 099cc9d: Clause-②: no
+  
+  The approval, security, automation and sharing objects describe their records in plain admin
+  sentences. Approval Delegations now reads "While someone is away, approvals assigned to them
+  personally go to their delegate.", Record Shares "Records shared beyond their owner, one row per
+  grant.", User Positions "Which positions each user holds, one row per assignment.", Audience
+  Binding Suggestions "A package's suggestion to give one of its permission sets to everyone who
+  signs in, and the decision taken on it." and Automation Runs "Paused automation runs waiting to
+  resume, and the recent history of finished runs." Field help on Approval Requests, Approval
+  Delegations, User Positions, User Permission Sets and Audience Binding Suggestions, the
+  descriptions of the `organization_admin_no_bypass`, `mcp_agent_data_read` and
+  `mcp_agent_data_write` permission sets, the flow-dispatch ledger's description and the
+  reserved-position refusal no longer carry design-record numbers or runtime vocabulary; those
+  references stay in the code comments. The zh-CN, ja-JP and es-ES translations follow. Wording
+  only: no field, permission or behaviour changes.
+- 5fb8d15: Clause-②: no
+  
+  The Everyone and Guest built-in positions describe themselves in plain admin sentences. Setup's
+  Positions page now reads "Built-in audience anchor: every authenticated member holds this position
+  implicitly. Permission sets bound to it are the default grants for the tenant. High-privilege sets
+  cannot be bound here." for Everyone, and "Built-in audience anchor: unauthenticated principals hold
+  this position implicitly and exclusively. Bindings face the strictest checks — named objects only,
+  read-mostly, never a wildcard." for Guest; the design-record references stay in the code comments.
+  An upgraded deployment shows the same text: the page lists the declared positions, and a stored
+  position row an earlier release wrote is neither read nor rewritten. Wording only: no permission or
+  behaviour change.
+- 2bcd406: fix(plugin-security): the security catalog echo keeps naming a disabled package's permission set or position as that package's
+  
+  The echo reads which package owns a stored overlay from the protocol's by-name read. That read now withholds a disabled package's item and keeps its protection envelope, so the echo reads the envelope's `packageId` instead of `item._packageId`. Before, a disabled package's set was echoed unowned, lost its ADR-0090 D5 audience-binding suggestion, and stayed unowned after the package was re-enabled until the next save, publish or boot. Enforcement is unchanged.
+- 44a5011: Clause-②: no
+  
+  Refusals and Setup help text that a user reads inside the running system no longer call that system
+  "this environment". They say "this system", or they drop the noun.
+  
+  - `@objectstack/plugin-auth`: the two self-registration refusals drop the noun ("Self-registration is
+    closed (audience posture invite_only).", "Self-registration is limited to approved email domains, …").
+    So do the OAuth self-service `503` ("OIDC provider is not enabled") and the SSO `400`
+    `DOMAIN_VERIFICATION_DISABLED` ("Domain verification is not enabled (set
+    OS_SSO_DOMAIN_VERIFICATION)."). The last-administrator guard's refusals and its two warning lines say
+    "this system", including "nobody able to administer the system". The OIDC authorize-gate refusal
+    (`403 ENV_ACCESS_DENIED`) keeps "this environment". Only the cloud control plane installs that gate,
+    and there the noun names the environment a cloud user is signing in to.
+  - `@objectstack/plugin-security`: the diagnostic `message` of the packaged-permission-set lock now reads
+    "… is declared by package '…' and is locked — editing it here would …". The provenance-unknown
+    refusal says "this system could not determine …". Both `userMessage` texts are unchanged.
+  - `@objectstack/service-settings`: the Mail and SMS provider groups read "Choose how this system sends
+    outbound email." and "… outbound SMS.". The Authentication audience group reads "Who may become a user
+    of this system's apps.". The zh-CN, ja-JP and es-ES bundles change only the noun, to 本系统,
+    このシステム and este sistema.
+  
+  Only the human-readable text moves. Every HTTP status, error code, settings key and response shape
+  stays as it was.
+- ef1fcb2: A declared index states its uniqueness scope: bare `unique: true` on `indexes[]` is refused (protocol 18, ADR-0120 D1/D7), stored metadata converts it to `unique: 'global'` with zero drift, and `VISIBILITY_STRICT_OPTIONS` leaves `@objectstack/spec`'s public surface.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered declared-index-bare-unique-true-retired, visibility-strict-options-unexported -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface and one export removal, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not in on `main`).
+  
+  **Why.** On a declared index, bare `unique: true` was the one `unique` spelling whose scope was positional. It built the index over exactly `fields`, one holder across the whole installation, while reading like "unique per organization" to an author who knew the field-level meaning. 17.x warned (lint `unique/unscoped-declared-index`). Protocol 18 refuses it, so the scope is always stated.
+  
+  **What is refused.** A declared index (`objects[].indexes[]`, `objectExtensions[].indexes[]`) whose `unique` is bare `true`. The refusal names both replacements, and says which one keeps the index bare `true` built. It is raised by:
+  
+  - the schema (`IndexSchema.unique`, now `false | 'global' | 'organization'`), at every door that parses: `ObjectSchema.create()` and `ObjectSchema.parse()`, `defineStack`, `os validate`, `os build`, and the runtime save door (`422 INVALID_METADATA`). `tsc` refuses it too, because the input type no longer admits `true`;
+  - lint `unique/unscoped-declared-index`, now an `error` and a gating rule on all three commands. It is what refuses the spelling under `os lint`, which never parses.
+  
+  **What converts.** The protocol-18 ADR-0087 conversion `declared-index-unique-scope` rewrites a declared index's bare `true` to `'global'` on every data-at-rest seam: stored `sys_metadata` rows (`applyConversionsToStoredItem`), built artifacts inside their declared-floor window, and `os migrate meta --from 17`. `'global'` is exactly the index bare `true` built, so the physical index is byte-identical and the drift plan is empty. It is retired from the authoring funnel, so a live author is refused and taught instead of converted silently.
+  
+  **What stays accepted.** Field-level `unique: true` still means one holder per organization and stays valid indefinitely. On a declared index, `unique: false` or omitted, `'global'` and `'organization'` parse exactly as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `indexes: [{ fields: [...], unique: true }]` | `indexes: [{ fields: [...], unique: 'global' }]`: the same index, nothing on disk changes |
+  | …the same, when you meant one holder per organization | `unique: 'organization'`: the driver prepends the NULL-safe organization key part at registration, and `os migrate plan` shows the index change |
+  | `import { VISIBILITY_STRICT_OPTIONS } from '@objectstack/spec/shared'` (or the root entry) | delete the import: it was an internal option bag for the spec's own visibility-carrying schemas, and those schemas are unchanged |
+  
+  **The one-line fix: on every declared index, write `unique: 'global'` where you wrote `unique: true`.** Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **Who is affected, measured.** At `e67ba80049`, an AST census found 48 declared indexes with bare `unique: true` in 39 source files of this repository, all platform and plugin objects. Every one is respelled `'global'` in this change, and the nine-key S5 corpus is pinned to build byte-identical indexes before and after (`driver-sql`'s `sql-driver-unique-tenancy.test.ts`). `examples/**` and `apps/**` carry none. Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `IndexSchema.unique` in `data/object.zod.ts`, with its own prescription. The lint rule moved from `warning` to `error` and from advisory to gating.
+  - **The conversion.** `declared-index-unique-scope` (`toMajor: 18`, retired from the load path, `retiredAfter: '17.7.0'`), with its S4/S5 fixture.
+  - **The ledger.** The D3 semantic entries `declared-index-bare-unique-true-retired` (the scope each respelled index really meant is the author's call) and `visibility-strict-options-unexported`, plus a step-18 rationale fragment.
+  - **The export.** `VISIBILITY_STRICT_OPTIONS` moved to the unbarrelled `shared/visibility-strict-options.ts`, beside its type `StrictObjectOptions`. `check:api-surface` counts the removal.
+  - **The pins.** The "`'global'` is a synonym of `true`" driver pin retired with the bare spelling. The verbatim pin is stated in `'global'`.
+- Updated dependencies [5a871e4]
+- Updated dependencies [ffba02e]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [1b40780]
+- Updated dependencies [78b1a63]
+- Updated dependencies [d11fa8c]
+- Updated dependencies [ca426cb]
+- Updated dependencies [4ad3ce5]
+- Updated dependencies [8016a9d]
+- Updated dependencies [df9d07e]
+- Updated dependencies [8eac321]
+- Updated dependencies [a5a781b]
+- Updated dependencies [9a7838e]
+- Updated dependencies [191e043]
+- Updated dependencies [b12e16a]
+- Updated dependencies [fbafb85]
+- Updated dependencies [35450f0]
+- Updated dependencies [4840720]
+- Updated dependencies [1e8b628]
+- Updated dependencies [12d1476]
+- Updated dependencies [bd6dab0]
+- Updated dependencies [14ccb1d]
+- Updated dependencies [c0803b0]
+- Updated dependencies [d117382]
+- Updated dependencies [4bc3bec]
+- Updated dependencies [1f949da]
+- Updated dependencies [ecb7b44]
+- Updated dependencies [41edf73]
+- Updated dependencies [1c1144f]
+- Updated dependencies [014863d]
+- Updated dependencies [3983965]
+- Updated dependencies [3230d66]
+- Updated dependencies [0c910d5]
+- Updated dependencies [9d13b5f]
+- Updated dependencies [317cddd]
+- Updated dependencies [b2e7870]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [dac99c2]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [48cca4a]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [66949b7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [f9b4217]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [7958bdf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [4e4111c]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [0b7ba4d]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [345d3f3]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [746637e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [94379f4]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [194a42d]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [31b5a5f]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [8532783]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [87e902d]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [777eed2]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [5677add]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [ed03834]
+- Updated dependencies [e1deaef]
+- Updated dependencies [3071d3e]
+- Updated dependencies [1badd31]
+- Updated dependencies [58f5c90]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [4216796]
+- Updated dependencies [a22e67b]
+- Updated dependencies [5f37d36]
+- Updated dependencies [62ce45d]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [8464380]
+- Updated dependencies [8c10776]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [1912af4]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [60f9baf]
+- Updated dependencies [f5ef054]
+- Updated dependencies [584e737]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [301eec6]
+- Updated dependencies [572ecfb]
+- Updated dependencies [5547ad4]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [0f05907]
+- Updated dependencies [5e725b8]
+- Updated dependencies [086fa46]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [f606ba2]
+- Updated dependencies [d176b0a]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [ee0e115]
+- Updated dependencies [c2bb302]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [0a052e6]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [c03077e]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [f7af839]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [a237d7f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [077b75f]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [45e6001]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [9f024d8]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [01fafde]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [26501ae]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [94e60c0]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [adb7910]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [b7a688e]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [8311650]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [325a92e]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/core@18.0.0
+  - @objectstack/spec@18.0.0
+  - @objectstack/platform-objects@18.0.0
+  - @objectstack/metadata-core@18.0.0
+  - @objectstack/formula@18.0.0
+  - @objectstack/types@18.0.0
+
 ## 18.0.0-next.5
 
 ### Minor Changes

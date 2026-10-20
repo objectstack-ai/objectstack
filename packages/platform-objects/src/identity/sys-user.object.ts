@@ -248,7 +248,7 @@ export const SysUser = ObjectSchema.create({
           requiresFeature: 'phoneNumber',
         },
         { field: 'name', required: false },
-        { name: 'password', label: 'Password (leave empty to generate)', type: 'text', required: false },
+        { name: 'password', label: 'Password (leave empty to generate)', type: 'password', required: false },
         {
           name: 'mustChangePassword',
           label: 'Require Password Change On First Login',
@@ -296,7 +296,7 @@ export const SysUser = ObjectSchema.create({
       // `generatePassword` rides as a constant so an empty field generates.
       bodyExtra: { generatePassword: true },
       params: [
-        { name: 'newPassword', label: 'New Password (leave empty to generate)', type: 'text', required: false },
+        { name: 'newPassword', label: 'New Password (leave empty to generate)', type: 'password', required: false },
         {
           name: 'mustChangePassword',
           label: 'Require Password Change On Next Login',
@@ -505,8 +505,8 @@ export const SysUser = ObjectSchema.create({
       successMessage: 'Password changed',
       refreshAfter: false,
       params: [
-        { name: 'currentPassword', label: 'Current Password', type: 'text', required: true },
-        { name: 'newPassword', label: 'New Password', type: 'text', required: true },
+        { name: 'currentPassword', label: 'Current Password', type: 'password', required: true },
+        { name: 'newPassword', label: 'New Password', type: 'password', required: true },
         { name: 'revokeOtherSessions', label: 'Sign out other devices', type: 'boolean', required: false, defaultValue: true },
       ],
     },
@@ -559,7 +559,7 @@ export const SysUser = ObjectSchema.create({
       successMessage: 'Account deleted',
       refreshAfter: false,
       params: [
-        { name: 'password', label: 'Current Password', type: 'text', required: true },
+        { name: 'password', label: 'Current Password', type: 'password', required: true },
       ],
     },
     // ── Two-factor authentication ─────────────────────────────────
@@ -594,7 +594,7 @@ export const SysUser = ObjectSchema.create({
       requiresFeature: 'twoFactor',
       refreshAfter: true,
       params: [
-        { name: 'password', label: 'Current Password', type: 'text', required: true },
+        { name: 'password', label: 'Current Password', type: 'password', required: true },
       ],
       // No `successMessage`: `resultDialog` suppresses it, so one declared
       // here would be unreachable text that still ships to every translator.
@@ -623,7 +623,7 @@ export const SysUser = ObjectSchema.create({
       successMessage: 'Two-factor authentication disabled.',
       refreshAfter: true,
       params: [
-        { name: 'password', label: 'Current Password', type: 'text', required: true },
+        { name: 'password', label: 'Current Password', type: 'password', required: true },
       ],
     },
     {
@@ -643,7 +643,7 @@ export const SysUser = ObjectSchema.create({
       description: 'Generate a new set of backup codes? Any previously generated codes will stop working.',
       refreshAfter: false,
       params: [
-        { name: 'password', label: 'Current Password', type: 'text', required: true },
+        { name: 'password', label: 'Current Password', type: 'password', required: true },
       ],
       // No `successMessage` — see the note above `enable_two_factor`. The toast
       // this replaces ("New backup codes generated — save them somewhere safe")

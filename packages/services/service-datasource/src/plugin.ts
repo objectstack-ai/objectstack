@@ -10,6 +10,7 @@ import {
   type ObjectLike,
   type Logger,
 } from './external-datasource-service.js';
+import { registeredDriverName } from './datasource-connection-service.js';
 
 // The structural `DataEngineLike` re-declaration that used to live here is
 // DELETED (#11493, part of the fix by the maintainer ruling): the `'data'`
@@ -139,8 +140,26 @@ export class ExternalDatasourceServicePlugin implements Plugin {
         : undefined;
     };
 
+    /**
+     * [#24772] The live driver behind a datasource name, for the saved
+     * datasource's Test probe: the engine's registry entry under the name
+     * {@link registeredDriverName} resolves. That is the resolver
+     * `DatasourceConnectionService.disconnect` applies, reused rather than
+     * restated, because the primary datasource's driver is registered under
+     * its natural name (ADR-0062) and a lookup by `'default'` finds nothing.
+     *
+     * Resolved where it is used, never at `init()`, for the reason
+     * `metadataSaveDoor` is (AGENTS.md, "Startup registry reads").
+     */
+    const liveDriver: ExternalDatasourceServiceConfig['liveDriver'] = (datasource) => {
+      const data = safeGetService<IDataEngine>(ctx, 'data');
+      const driverName = registeredDriverName(data, datasource);
+      return driverName ? data?.getDriverByName?.(driverName) : undefined;
+    };
+
     const config: ExternalDatasourceServiceConfig = {
       introspect,
+      liveDriver,
       getDatasource: async (n) => (await metadata()?.get('datasource', n)) as DatasourceLike | undefined,
       // [#21842] Both object reads come from the one registry, so the sweep
       // judges the very definitions it listed. See `objectRegistry`.

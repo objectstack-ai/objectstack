@@ -1,5 +1,1273 @@
 # Changelog
 
+## 18.0.0
+
+### Minor Changes
+
+- fbafb85: feat(plugin-email,plugin-auth): identity mail — verification, password reset, magic link, the email-change notice, an account invitation — is recorded in `sys_identity_email`, a deployment-level sibling of `sys_email` with no organization column
+  
+  Clause-②: yes (widening)
+  
+  ADR-0131 D7, ruling of record 6257510973 (letter Q2 A). Expand-first: this release adds the new log and its write path, and keeps reading every row and job an 18.0 install left behind. It moves and deletes nothing.
+  
+  - **The new object.** `sys_identity_email` (`@objectstack/platform-objects`, registered by `EmailServicePlugin`) has `sys_email`'s fields, so the row shape is the same, and `systemFields: { tenant: false }`, so it has no organization column. It is append-only, readable over `get` / `list`, and gated by `manage_platform_settings` (like `sys_job`), because its rows carry password-reset and sign-in links.
+  - **The contract.** `SendEmailInput` and `SendTemplateInput` (`@objectstack/spec/contracts`) gain `identityMail?: boolean`. With `true`, the mail service writes the row to `sys_identity_email`. Without it, the row goes to `sys_email`, as before. `identityMail: true` together with an `organizationId` is refused as `VALIDATION_FAILED` and recorded as a rejected row in `sys_identity_email`. The organization is not written.
+  - **One pipeline, both logs.** The queue worker, the outbox drain hook, the boot outbox sweep, attachment reclamation and the internal-header readback read a row from the log it lives in. A delivery or reclaim job for a `sys_identity_email` row carries `object: 'sys_identity_email'` beside `rowId`. A job with no `object` reads `sys_email`, which covers every job an 18.0 process queued. A job naming anything else is refused at `error` and touches no row. `EmailPersistence.insert` / `update` / `readHeadersJson` take the log as an optional last argument. A custom implementation that ignores it keeps every row in its one store. `@objectstack/plugin-email` exports `TENANT_EMAIL_OBJECT`, `IDENTITY_EMAIL_OBJECT`, `EMAIL_LOG_OBJECTS`, `isEmailLogObject` and `EmailLogObject`.
+  - **plugin-auth.** The five identity sends say `identityMail: true` and name no organization, under every posture. Before, they carried the Default Organization under `single` and nothing under a wall. The organization invitation (`auth.invitation`) is tenant mail. It still carries its organization and still lands in `sys_email`.
+  - **What a reader of `sys_email` sees.**
+    - **Before.** Identity mail was a `sys_email` row: stamped with the Default Organization under `single`, organization-less under a wall.
+    - **Now.** New identity mail is a `sys_identity_email` row. Rows already in `sys_email` stay there and are still delivered, swept and reclaimed.
+    - **Remedy.** A report, export or query that looks for verification or reset mail reads both logs. For example: `ql.find('sys_identity_email', { where: { related_object: 'sys_user', related_id: userId } })` beside the same query on `sys_email`.
+  - **Inventory.** `os migrate organization-ownership`'s inventory lists `sys_identity_email` as deployment-level (column-drop fate, nothing to attribute). Moving the identity rows already in `sys_email` is an 18.x upgrade-ceremony step, not part of this release.
+- b2e7870: fix(security): under the `single` tenancy posture the first-user platform-admin grant is owned by the Default Organization, and every reader of platform standing reads that row
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, export, option, error code or stored shape is added, removed or renamed: the new resolver and guard helpers and the guard's organization standing-key list are module-private, and `bootstrapPlatformAdmin`'s `reason` was already a string. The only stored-shape move — an organization-less `admin_full_access` grant becoming the Default Organization's — is ADR-0131 D10's ceremony (`os migrate organization-ownership --apply`), so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no Zod schema in packages/spec changes (not runtime-interface-only or type-surface-only in the spec sense); and nothing exported is removed (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM** (`@objectstack/plugin-security`): a `single` deployment holding several organizations, none slugged `default`, promoted its first user with an organization-less `admin_full_access` grant. **TO:** it is not promoted; the bootstrap logs one `error` line, returns `reason: 'default_organization_unresolved'` and writes no grant row. **Fix:** give the intended organization the slug `default` (or keep one organization, or declare a walled posture); the next `kernel:ready` or sign-up pass promotes.
+  - **FROM** (`@objectstack/plugin-auth`): a `sys_organization` `slug` change or delete was never refused. **TO:** it is refused with `403 PERMISSION_DENIED` when that organization is the Default Organization whose `admin_full_access` grant is the last unbanned administrator's anchor. **Fix:** give another account administrator standing first, then make the change.
+  - **FROM** (`@objectstack/plugin-auth`): `ensureDefaultOrganization` under `single`, with a sole organization of another slug, created a second, `default`-slugged organization and bound the administrator there. **TO:** it reuses the sole organization; no second organization is created. **Fix:** none needed; an install that wants a `default`-slugged organization re-slugs its existing one or creates it explicitly.
+  - **Widening** (`@objectstack/core`): under `single` only an organization-less `admin_full_access` grant conferred `PLATFORM_ADMIN`. Now a grant owned by the Default Organization confers it too and applies in every organization; a pre-existing Default-Organization-scoped `admin_full_access` grant gains the rung on upgrade; and `sys_organization` becomes a standing-deriving table (the resolver reads it only under `single` for a holder of an organization-owned `admin_full_access` grant — one or two small reads per uncached request; the last-administrator guard adds three to six small reads per guarded write).
+  
+  - **The promotion writes the Default Organization (`@objectstack/plugin-security`).** A `single` deployment with no configuration still promotes its first user that can sign in. The `admin_full_access` grant row that promotion writes now carries the Default Organization as its `organization_id` (ADR-0131 D5), never NULL. The Default Organization is the one with `slug = 'default'`, else the only organization: the organization the auth plugin creates at boot. A deployment that names no Default Organization (several organizations, none with the slug `default`) is not promoted. The bootstrap logs one `error` line saying why and returns `reason: 'default_organization_unresolved'`. It writes no grant without an owner. `OS_PLATFORM_OWNER_EMAIL` is still the walled-posture channel and is not required under `single`.
+  - **The authorization resolver reads that row (`@objectstack/core`).** Under `single`, `PLATFORM_ADMIN` derives from an `admin_full_access` grant owned by the Default Organization, and still from the organization-less row an earlier release wrote. The anchoring grant applies in whichever organization the user acts in, as the organization-less row always did. A grant of the set owned by any other organization confers the set in that organization, never platform standing. Under a walled posture no grant anchors standing (unchanged). One predicate decides both postures, with the posture as its parameter. The resolver reads `sys_organization` only for a user who holds an organization-owned `admin_full_access` grant under `single`.
+  - **An upgraded database keeps its administrator.** `os migrate organization-ownership --apply` gives a `single` database's organization-less grants to the Default Organization, the platform admin's grant included. Before this change the resolver then stopped grading that admin `PLATFORM_ADMIN`, and every later boot found no organization-less holder and promoted again. The holder scan now reads the Default Organization's grant, so a migrated database keeps its admin and promotes nobody else. A user who holds both rows counts as one holder.
+  - **The last-administrator guard and the default-organization bootstrap read it too (`@objectstack/plugin-auth`).** The break-glass guard counts the holder of the Default Organization's grant as a platform admin and treats that grant as evidence that the environment once had one. It also judges the two organization writes that move the anchor off that grant: changing the Default Organization's `slug` while another organization exists, and deleting it. Either is refused when it would leave no administrator who can sign in. `ensureDefaultOrganization` finds the admin through the same grant. Under `single` it also reuses the Default Organization when that is a sole organization with another slug, where it used to create a second, `default`-slugged organization.
+- 34dba5a: Under the `single` tenancy posture the Default Organization is created at boot, before the application seeds and before the server accepts a request, and the first admin of a fresh deployment is its owner
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A boot-order and accept-set change in the auth plugin's runtime: no key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The `autoDefaultOrganization` constructor option keeps its name and type; what narrows is the state it can produce, described below. The TypeScript surface only grows: an optional `organizationCreatedByThisProcess` on `EnsureDefaultOrganizationOnceOptions`, an optional `ownerPromoted` and the `owner_promotion_failed` reason on `EnsureDefaultOrganizationResult`. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+  
+  **BREAKING** boot and accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3).
+  
+  - **A boot invariant.** Under the `single` posture (the posture in force, so a degraded walled request counts), the auth plugin's `start()` finds or creates the Default Organization (`slug: 'default'`), with or without a platform admin. Every application plugin starts after it. Before this change the organization was created on `kernel:ready` only once a platform admin existed, so on a fresh deployment it arrived with the first sign-up, after the seeds had loaded with no owner.
+  - **A failure stops the boot.** If the organization cannot be created, or the store cannot be read, `start()` throws and the deployment does not boot. Before, the bootstrap logged a warning and the deployment served anyway. An install holding several organizations and none with `slug: 'default'` gets no new organization; the boot logs it and continues.
+  - **`autoDefaultOrganization: false` no longer means "no organization".** It now turns off only the platform admin's owner bind. A host that set it to keep an organization-less `single` deployment gets the Default Organization anyway: under `single` no row is organization-less.
+  - **Every user belongs to it from the first boot.** Because the organization exists before anyone signs up, the membership reconciler binds every new user (under the `auto` membership policy) to it as `member` the moment they are created, so every session carries it as the active organization. Before, a user created before the first admin carried none. The one-time membership backfill likewise has its target at the first `kernel:ready`.
+  - **The first admin is the owner.** That includes the first admin, whom the reconciler binds as `member` before the owner bind learns they are the platform admin. While the one-time owner bind is undecided and the Default Organization has no owner, the bootstrap promotes that `member` row to `owner` in place and records the decision as `promoted`. A decided bind, an existing owner, or a membership elsewhere is never touched.
+  - **The in-memory driver answers `503` until C8.** `@objectstack/driver-memory` refuses tenant-scoped reads, and every session now carries the Default Organization, so under `single` its signed-in reads answer `503` until ADR-0131 C8 (#15212, D8) gives `single` no read predicate. The platform admin met the same refusal before this change, once the Default Organization existed. A SQL driver (`connection: { filename: ':memory:' }` for an in-process store) serves the deployment meanwhile.
+  
+  **The remedy.** If the boot stops on the Default Organization, make the `sys_organization` insert land: check the datasource's write permission and connectivity, and whether a legacy unique index on `slug` refuses `default`. A host relying on `autoDefaultOrganization: false` for an organization-less `single` deployment has no such deployment any more; run a walled posture if organizations are meant to be absent until created.
+- aa71c4d: `sys_user_permission_set` gains `permission_set`, the name of the permission set a grant holds, written beside `permission_set_id` (ADR-0131 D4)
+  
+  Clause-②: yes (widening)
+  
+  - **The column.** `permission_set` is a read-only text column, at most 100 characters, holding the `name` of the `sys_permission_set` row that `permission_set_id` points at. It is readable everywhere the grant row is readable. A grant written before this release has `NULL` here until the backfill stage rewrites it. No reader uses the column yet: the grant is still resolved from `permission_set_id`, which stays until it is dropped in a later major (ADR-0131 D10).
+  - **The platform writes it, on every write that carries `permission_set_id`, for every caller.** Two `@objectstack/plugin-security` engine hooks (`beforeInsert` and `beforeUpdate` on `sys_user_permission_set`) look up the set by id and store its name. A write that sends only the id, which is how the data door and the Setup forms write, gets the name filled in.
+  - **A name that names a different set is refused** with `400 VALIDATION_FAILED`, `invalid_value` at `permission_set`. This covers a name that disagrees with the id written beside it, or with the id already stored when only the name is written. For a non-system caller it also covers a name beside an id that names no set this caller's organization can see. A name that agrees is accepted. A cleared name (`null`) is not stored as a clear: the derived name is written back. Before this change the column did not exist, so a write naming it was refused with `400 INVALID_FIELD`. No write that was accepted before is refused now.
+  - **Every platform grant writer writes both columns:** the organization-admin reconcile and the platform-admin promotion in `@objectstack/plugin-security`, the self-registration grant in `@objectstack/plugin-auth`, and the RLS probe persona in `@objectstack/verify`.
+  - **Nothing to migrate.** No principal's grants change. To fill the column on grants written by your own code, write the set's name as `permission_set`, or leave it out and the platform fills it in. Do not write any other value there.
+- 2e10c9a: feat(core)!: the authorization resolver reads which permission set a user grant holds from the grant's name, `sys_user_permission_set.permission_set` (ADR-0131 D4)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export, type or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is runtime resolution and two write doors: a stored grant that names no permission set, or names one only another organization holds, stops conferring through the resolver; a write naming a grant after another organization's set is refused; and the break-glass guard judges one more column. The remedy is data (a grant re-pointed at a set of its own organization), never a rewrite of anyone's code or metadata, and the one-time backfill that names existing grants already ships. The other categories are closed on facts: every package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no TypeScript declaration moves (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **What the resolver reads now.** `resolveUserAuthzGrants` (and every surface built on it: `resolveAuthzContext`, `hasPlatformAdminStanding`, the explain engine, `runAs: 'user'` automation) finds a user grant's permission set by the grant's `permission_set` name. The set row is the grant's own organization's row of that name, or else the organization-less row of that name. `permission_set_id` is no longer read for this. Deactivation is still read from the set row. Sets a principal holds through a position are still reached through the position binding's id.
+  
+  - **Platform standing.** An unscoped grant is read against the organization-less `admin_full_access` row only. An organization's copy of `admin_full_access` gives that organization's grants its capabilities, never platform standing.
+  - **Nobody's resolved permissions change** where a grant's name and id agree. The platform's grant writers store both, and the one-time backfill names grants stored before the name column existed. Goldens for the platform administrator, an organization administrator, a member and an agent are unchanged in `single`, `group` and `isolated`.
+  
+  **What stops conferring.**
+  
+  - **A grant that names nothing.** This is a grant the backfill has not named yet, or one it could not name: its id names no set row, its id names another organization's set row, or the name is not in the security catalog. Such a grant now confers nothing through the resolver. The backfill runs at `kernel:bootstrapped`, before any server opens its socket, so on the first boot after upgrading no request is answered before the grants it can name are named. The grants it cannot name are listed in its boot report.
+  - **A grant whose id names another organization's set.** Before this change, such a grant conferred that set. It now confers nothing.
+  - **Remedy.** Read the backfill's boot report, which lists each grant by row id. Re-point each listed grant at a permission set of its own organization, or at an organization-less one, with an update of `permission_set_id`. The platform stamps the name, and the grant confers again.
+  
+  **What the grant name hook refuses now** (`@objectstack/plugin-security`). The name is taken only from a set row of the grant's own organization, or from an organization-less one. A tenant-less system writer can read every organization's sets, and it could name an organization-less grant after another organization's set. Now such a grant is stored without a name. A write that supplies that name is refused, from a system writer too, with the hook's usual `400 VALIDATION_FAILED` and `invalid_value` at `permission_set`. An update that re-points a grant at such a set, or moves a grant to an organization its set does not belong to, clears the name.
+  
+  **What the last-administrator guard judges now** (`@objectstack/plugin-auth`). `organization_id` on `sys_permission_set` is a standing column. Moving the organization-less `admin_full_access` row into an organization takes away every grant-anchored platform administrator, as deleting it does, so the guard refuses it when it would leave none. An organization's copy of `admin_full_access` no longer counts as the set being in effect.
+  
+  **Nothing to migrate** in code or metadata.
+- bfc15d2: feat(spec,core)!: a position's permission sets are declared in `permissionSets` on its definition, and the authorization resolver reads positions, their sets and the set bodies from the security catalog (ADR-0131 D3/D4)
+  
+  Clause-②: yes
+  
+  <!-- adr-0087: registered position-permission-sets-declared -->
+  
+  **BREAKING** (the resolver stops reading the position → permission-set junction), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **FROM → TO.** A position's permission sets were `sys_position_permission_set` rows. They are now declared in `permissionSets` on the position's definition; junction rows no longer grant.
+  
+  ```ts
+  definePosition({ name: 'sales_rep', label: 'Sales Representative', permissionSets: ['crm_sales_user'] });
+  ```
+  
+  The one-line fix for an app that bound sets to its positions with a boot-time binder: name the sets in `permissionSets` on each position.
+  
+  **`@objectstack/spec`.** `PositionSchema` accepts `permissionSets`: a list of permission-set names (lowercase snake_case). Before, the key was refused with a pointer to the junction. Each name is resolved in the environment catalog when a holder's grants are resolved. A name the catalog does not hold confers nothing.
+  
+  **`@objectstack/core`.** `resolveUserAuthzGrants`, and every surface built on it (`resolveAuthzContext`, `hasPlatformAdminStanding`, the permission explainer, `runAs: 'user'` automation), reads the security catalog the security plugin binds to its engine (`bindSecurityCatalogReader`, `securityCatalogReaderOf`):
+  
+  - A held position grants the sets its definition's `permissionSets` names. The junction rows and the read of set rows by the junction's ids are gone.
+  - A held set, granted directly or through a position, has the body (`systemPermissions`, `tabPermissions`) of its catalog definition. A set that only a `sys_permission_set` row carries, with no definition, confers nothing — including a row inserted directly (a script or a harness, outside the product's doors).
+  - **Deactivation moves to the activation ledger** (ADR-0049, as ADR-0131 D3 and ADR-0126 §4 place it). A position or a permission set is switched off by a `sys_metadata_activation` row of type `position` or `permission` whose `active` is false, deployment-wide. The `sys_position` and `sys_permission_set` rows are no longer read at all, their `active` column included. A name with no ledger row is in effect. A composition that does not register the ledger object (no `PlatformObjectsPlugin`) switches nothing off and issues no ledger read.
+  - The exported `ADMIN_STANDING_SURFACE` follows what the resolver reads: `sys_permission_set`, `sys_position` and `sys_position_permission_set` leave it, and `sys_metadata_activation` enters in the role `derives`, with the columns `metadata_type`, `name` and `active`. The `kind` union of `ADMIN_STANDING_NON_TABLE_INPUTS` gains `security-catalog`, for the catalog's `admin_full_access` definition.
+  - `convertDeactivatedCatalogRows` turns the rows' `active: false` flags into ledger rows. A name some organizations switched off and others kept on is reported `conflicting`, because the ledger is deployment-wide. The upgrade ceremony applies it beside `convertPositionBindingRows`. ⛔ It never runs at boot.
+  - Platform standing still requires an organization-less `admin_full_access` user grant, now resolved by name in the catalog.
+  - An engine no security plugin started on has no catalog bound, and resolves no set and no position-bound set. That is what an engine with no permission tables provisioned resolved before.
+  - `convertPositionBindingRows` converts the junction rows into each position's `permissionSets`. It answers per name `declared`, `converted` or `conflicting`, and it lists dangling bindings. The upgrade ceremony applies it. ⛔ It never runs at boot.
+  
+  **`@objectstack/plugin-security`.** The plugin binds the catalog read (engine registry and metadata service) to its engine at `start()`. At `kernel:ready` the built-in `everyone` anchor declares the deployment's baseline in its `permissionSets`: the app's `isDefault` set and the platform's `member_default`. It is judged by the same high-privilege check against the stack's declared capabilities that the boot binding used. Under a wall the envelope now carries `member_default` beside the app's set, as it did under `single`. `member_default` carries no system or tab permission, and enforcement already applied it to every human as the additive baseline. A Setup edit of a position row under `single` keeps the `permissionSets` the stored definition names (the row has no column for it).
+  
+  **`@objectstack/plugin-auth`.** The last-administrator guard follows what the resolver reads. Its standing-key map judges `sys_metadata_activation` (`metadata_type`, `name`, `active`) in place of `sys_permission_set`. A ledger write that switches `admin_full_access` off is refused only when it would leave no administrator who can sign in, and switching it back on is never refused. The guard no longer judges `sys_permission_set` writes, because the resolver no longer reads that row.
+  
+  **`@objectstack/platform-objects`.** The position metadata form gains a `permissionSets` row, translated in zh-CN, ja-JP and es-ES.
+  
+  **`@objectstack/plugin-security`.** The name-fold warning's remedy now names the position definition's `permissionSets`, not a junction row.
+  
+  **What stops granting at upgrade, and what to do.**
+  
+  - **A deactivation made in Setup.** The Deactivate action on a position or a permission set writes the row's `active` column, which no longer switches anything off. ⚠️ Until the upgrade ceremony converts the rows (`convertDeactivatedCatalogRows`), a position or set deactivated that way **grants again**. No enable/disable door accepts the `permission` or `position` type yet, so a new deactivation has no in-product path. To revoke now, remove the assignments or the binding.
+  
+  - **A binding made in Setup.** Binding a permission set on a position's page writes a `sys_position_permission_set` row, and so does confirming an audience-binding suggestion. That row no longer grants. Until Setup writes the definition (objectui C9), declare the binding in the position's `permissionSets` through the metadata door (`PUT /api/v1/meta/position/:name`, platform administrator) or in the app's code.
+  - **Under a wall (`group`, `isolated`): a position or permission set an organization authored in Setup.** It is a data row with no definition in the environment catalog (ADR-0131 D3), so it stops granting (ruling #15196 Q3 = A). To keep it, a platform administrator re-creates it as environment metadata through the metadata door, under the same name, with its `permissionSets` or its set body. No command promotes a row in place today.
+  - **Existing junction rows** are converted into definitions by the ADR-0131 upgrade ceremony (`os migrate organization-ownership --apply`) under `single` only, where its `authored-conversion` step applies `convertPositionBindingRows`. Under a wall (`group`, `isolated`) the ceremony converts no binding (ADR-0131 D3): its `rewrite` step refuses each binding whose position's definition does not name the bound sets, and the ceremony stops there until the operator acts and re-runs it. A position no catalog declares is declared with those sets in `permissionSets` through one door only: the deployment's code, or the metadata door (`PUT /api/v1/meta/position/:name`, platform administrator). A declared position the metadata door can edit takes the missing sets through that door. A definition a package ships is sealed (ADR-0131 D6), and no door on the database adds sets to it. A name that organizations bound differently is reported `conflicting` and is never merged.
+- e7e6544: feat(plugin-auth)!: the last-administrator guard, the self-registration admission and the default-organization step read the security catalog and the activation ledger, never a `sys_permission_set` row (ADR-0131 D3/D4)
+  
+  Clause-②: yes (narrowing: a zero-administrator write is refused when an unscoped grant names a set the security catalog does not hold, and self-registration is refused when its declared set is not in the catalog or is switched off in the activation ledger; widening: writes to a `sys_permission_set` row are no longer judged by the guard, and a ledger write switching `admin_full_access` off is refused only when it would leave no administrator)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no authorable metadata key changes and nothing for an upgrader to rewrite: three runtime readers ask the store the resolver already reads (whose own move is registered as position-permission-sets-declared), and two guard exports with no importer outside this package are removed -->
+  
+  **BREAKING**, shipped as `minor` under the launch-window convention for breaking changes. It finishes, for `plugin-auth`, the move the authorization resolver made in the same release: a permission set exists when the security catalog bound to the engine holds its definition, and it is switched off by a `sys_metadata_activation` row of type `permission` whose `active` is false. No `sys_permission_set` row decides either any more, its `active` column included.
+  
+  **The last-administrator guard.**
+  
+  - A grant-anchored platform administrator is counted the way the resolver derives one: an unscoped, in-window grant naming `admin_full_access`, which the catalog holds and the ledger leaves on. An engine with no catalog bound counts none, as the resolver grants none.
+  - Switching `admin_full_access` off in the ledger (an insert, an update of its row, or an update moving another row onto that pair) is judged like every other standing write. It is refused only when it would leave no administrator who can sign in. A config-anchored or organization administrator still standing permits it. The flat refusal of every such write is gone, and with it `refuseLedgerSwitchingAdminOff`.
+  - Writes to a `sys_permission_set` row (delete, rename, `active`, `organization_id`) are no longer judged. The resolver reads no row, so none of them moves an administrator. `PERMISSION_SET_STANDING_KEYS` is removed, and with it the guard's two `sys_permission_set` hooks.
+  - With zero administrators, the guard still tells the bootstrap window from an emptied environment. The evidence is now an unscoped, in-window grant naming a set the catalog does not hold (or naming none), or `admin_full_access` switched off in the ledger while such grants name it. Its remedy is to switch the set back on, and that write is permitted.
+  
+  Two exports of the guard are removed, with nothing in their place: `PERMISSION_SET_STANDING_KEYS` (the table it judged is no longer read) and `refuseLedgerSwitchingAdminOff` (`registerLastAdminGuard` judges ledger writes itself). No package in this repository imports either outside `plugin-auth`.
+  
+  **Self-registration.** The admission asks whether the declared `selfRegistrationPermissionSet` would grant: the catalog holds it and the ledger leaves it on. A `sys_permission_set` row of that name must also exist, because the grant's `permission_set_id` is written with its id. The row's `active` is no longer read, at admission or when the grant is written.
+  
+  **The default organization.** The platform administrator the default-organization step binds as owner is found through a set the catalog holds and the ledger leaves on, not through a `sys_permission_set` row.
+- 8c5aa50: feat(plugin-email,plugin-auth)!: an organization can no longer create or edit an email template row; the template provenance stamp and the auth SMS template seed retire
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door (an organization's create and update of a sys_email_template row are refused) and a boot seed (no sys_notification_template row is written). The three retired names are runtime functions and a string constant of @objectstack/plugin-email with no metadata surface and no replacement: a direct caller meets the compiler's missing-export error and deletes the call. Measured consumers in this repository outside the package: one audit script, updated here. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the retired names are functions and a constant, not a type surface (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing and three retired exports), shipped as `minor` under the launch-window convention for breaking changes. It carries ADR-0131 D6 and the maintainer's ruling C on ADR-0131 §6 Q1: email templates are not overridden per organization.
+  
+  **What stops being accepted.**
+  
+  - **The `sys_email_template` organization door is closed.** An organization's create and update of a template row are refused with `403 PERMISSION_DENIED`, and the message names the closed door: every engine `insert` / `update` whose context names a caller and is not system-elevated. That covers `POST` / `PATCH /api/v1/data/sys_email_template`, the Studio record editor, batch and import routes, and scripts and flows that run as a user or a service principal. System-context writes still pass: the built-in seed, the declared-template boot sweep, the live projection of a Studio `email_template` save into its row, and the v18 migration ceremony's promotion. Delete is not part of this door.
+  - **The template provenance stamp is retired.** It marked a package- or platform-seeded row `customized: true` when a non-system caller updated it. With the door closed no such update reaches the engine's write, so nothing marks a row any more. Rows already marked keep their mark and are still never overwritten by the boot seeders; they are the population the v18 migration ceremony promotes to environment-level Studio templates.
+  - **Retired exports of `@objectstack/plugin-email`:** `bindEmailTemplateProvenanceStamp`, `unbindEmailTemplateProvenanceStamp` and `EMAIL_TEMPLATE_PROVENANCE_PACKAGE`. They have no replacement. `EmailServicePlugin` closes the door itself, and there is no stamp left to bind, so a direct call is deleted, not rewritten.
+  - **The auth SMS template seed is retired.** A boot with phone sign-in on no longer writes the built-in OTP and invitation texts into `sys_notification_template` as rows. It was internal to `@objectstack/plugin-auth` and exported nothing.
+  
+  **What renders unchanged.**
+  
+  - Every email template renders as before: the template loader still reads `sys_email_template`, and a Studio edit of an `email_template` still reaches the mail at once and survives a restart.
+  - Every auth SMS text renders byte for byte as the seeded store rendered it, for every built-in text and every recipient locale. Each locale rung renders an operator's active row when one exists, and the built-in text where no row exists at that locale. A deactivated or blank row passes its rung on, as it did before.
+  - A `sys_notification_template` row an operator already has still wins, and no existing row is touched.
+  
+  **What changes for you.** To change what an email template sends, edit the `email_template` in Studio. A script or integration that wrote `sys_email_template` rows through the data API now receives `403 PERMISSION_DENIED`. `@objectstack/platform-objects` corrects the `is_system` and `customized` field help on `sys_email_template`, which said an organization may edit a row.
+- c6fe02d: `createIdentityObjectsPlugin()` registers plugin-auth's identity objects (`sys_user`, `sys_member`, `sys_organization` and the rest of the list `AuthPlugin` registers) on a kernel that does not mount `AuthPlugin`, such as an app's or a plugin's own test kit.
+  
+  Clause-②: yes (widening)
+  
+  - **What is new.** `createIdentityObjectsPlugin(options?)`, the `IdentityObjectsPlugin` class it returns, `IdentityObjectsPluginOptions` (`manifestDatasource`, with the meaning `AuthPluginOptions.manifestDatasource` has) and `IDENTITY_OBJECTS_PLUGIN_NAME` (`com.objectstack.auth.identity-objects`, its kernel plugin name).
+  - **One list.** It registers the identity half of plugin-auth's manifest: the header, the objects and the field plugin-auth adds to `sys_sso_provider`. `AuthPlugin` spreads the same builder into the one manifest it registers, so a reduced kernel and a full one register the same objects, and a kit no longer copies plugin-auth's object list or manifest id.
+  - **Same owner.** The objects register under plugin-auth's package id, `com.objectstack.plugin-auth`, as `AuthPlugin` registers them. The registry records one owning package per object, so a different id would make the owner of `sys_user` depend on which plugin a kernel mounts.
+  - **No authentication.** It registers objects only: no sessions, no routes, no `auth` service.
+  - **Not beside `AuthPlugin`.** `AuthPlugin` registers the same objects itself. A kernel that mounts both is refused at boot, by the identity plugin's `init()`, with an error naming both.
+  - **Usage.** `await kernel.use(createIdentityObjectsPlugin())` after `ObjectQLPlugin`. A suite that boots through `@objectstack/verify` already gets these objects: its `bootStack` mounts `AuthPlugin`.
+  - **Unchanged.** `AuthPlugin` registers the same manifest it registered before, under the same id.
+- f66c440: fix(auth): the plugin-auth doors that re-dispatch to better-auth or call its endpoints in-process no longer renew a browser session behind its cookie (#22398)
+  
+  **What was wrong.** A better-auth session read renews a session older than `session.updateAge`: it moves `sys_session.expires_at` to `now + expiresIn` and stages the renewed session cookie on that read's own response. Eight doors read the session in-process by a route other than `auth.api.getSession`, so the rule the `getSession` readers follow did not reach them, and each kept only the JSON, or the status and body, of the response the cookie was staged on. Measured on better-auth 1.7.3 with a session aged to `now + expiresIn − updateAge − 60 s`, each moved `expires_at` by +86460 s on a cookie request and set no session cookie, before its own answer (a refusal included):
+  
+  - through a `/get-session` re-dispatch and the bridge's forward to a better-auth route: `POST /api/v1/auth/admin/sso/register`, `POST /api/v1/auth/admin/sso/register-saml`, `POST /api/v1/auth/admin/sso/request-domain-verification`, `POST /api/v1/auth/admin/sso/verify-domain` and `POST /api/v1/auth/send-verification-email`;
+  - through an in-process vendor endpoint call carrying the request's headers: `POST /api/v1/auth/organization/add-member` (`addMember`), `POST /api/v1/auth/set-initial-password` (`setPassword`) and `POST /api/v1/auth/sys-oauth-application/register` (`createOAuthClient`).
+  
+  **The rule now** is the one every in-process `getSession` reader follows, decided by what the request carries:
+  
+  - **A session cookie** (a browser): the re-dispatched URL carries `disableRefresh=true`, and a vendor endpoint call takes `inProcessSessionReadInput(headers)` from `@objectstack/types`, whose `query` better-auth's session middleware passes into its read. The session renews only through `GET /api/v1/auth/get-session`, which re-issues the cookie, so cookie and session expire together. Measured after the change: each door leaves `expires_at` unchanged on a cookie request and sets no cookie.
+  - **No session cookie** (a bearer-only client): unchanged. Each door still renews the session to `now + expiresIn` and sets no cookie on a response to a request that sent none.
+  
+  **Upgrading.** Nothing to change. The shared helpers the cloud auth proxy mounts (`runRegisterSsoProviderFromForm`, `runRegisterSamlProviderFromForm`, `runRequestDomainVerification`, `runVerifyDomain`, `runResendVerificationEmail`, `runSetInitialPassword`) carry the same rule, so both mount points stay in step. `SetPasswordCapableApi.setPassword` now also accepts an optional `query: { disableRefresh: true }`; better-auth's own `auth.api.setPassword` honours it (measured on 1.7.3).
+- e148ca9: With SSO domain verification on, `POST /api/v1/auth/admin/sso/request-domain-verification` and `POST /api/v1/auth/admin/sso/verify-domain` answer an unknown `providerId` with `404 RESOURCE_NOT_FOUND`, no longer with `400 DOMAIN_VERIFICATION_DISABLED`
+  
+  Clause-②: yes (widening)
+  
+  - **Before.** With `OS_SSO_DOMAIN_VERIFICATION` on, a platform admin who sent a `providerId` that does not exist got `400 DOMAIN_VERIFICATION_DISABLED`, "Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION)": an instruction to turn on a feature that was already on. `@better-auth/sso` answers both an unmounted route (feature off) and an unknown provider (feature on) with a `404` that carries no `code`, and both bridges mapped every such `404` to the feature-off answer.
+  - **Now.** The two mounts hand each bridge the environment's own setting (`AuthManager.isSsoDomainVerificationEnabled()`). Off: `400 DOMAIN_VERIFICATION_DISABLED`, as before, and the vendor is no longer called. On: a code-less vendor `404` is the provider lookup missing, answered `404 RESOURCE_NOT_FOUND` with a message naming the provider id. The decision never reads the vendor's `404` wording.
+  - **Unchanged.** The platform-admin gate answers first, on or off (an anonymous caller gets `401`). A missing `providerId` is still `400 INVALID_REQUEST`. With the feature on, an existing provider still gets the vendor's own answer: the DNS record, `NO_PENDING_VERIFICATION`, `DOMAIN_VERIFICATION_FAILED`, a `403` for a provider the caller may not manage.
+  - **The exported bridges.** `runRequestDomainVerification` and `runVerifyDomain` take an optional third argument, `{ domainVerificationEnabled?: boolean }`. A caller that omits it keeps the earlier mapping: a code-less `404` is answered `400 DOMAIN_VERIFICATION_DISABLED`, byte for byte. A host that mounts these helpers itself passes the environment's setting to get the not-found answer.
+- f9ebb7d: fix(plugin-auth)!: the identity import asks each lookup target its declared exposure before matching a cell, like every other `runImport` caller (#22800)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one runtime read: the identity import stops matching cells against a lookup target whose existing `enable` declaration already refuses `list` on every data route (the remedy is the declaration the author already wrote). The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only); `IdentityImportDeps` keeps its shape and only its doc comment changes. -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The identity import (`runAdminImportUsers`) parses its payload with `prepareImportRequest` and runs its rows through `runImport`, with a run protocol of its own that writes through better-auth. Its `sys_user` field map, which decides which cells are references, is read through the import's declaration reader (`IdentityImportDeps.getMetaItem`).
+  
+  **FROM.** The run protocol was built without that reader, so `runImport`'s `servesReferenceTarget` answered "served" without asking: a lookup cell was matched against its TARGET object even when the target's declaration refuses `list` (`enable.apiEnabled: false`, or an `apiMethods` whitelist without `list`). A cell naming an existing record resolved and a cell naming none answered `reference_not_found`, so the row report told the two apart.
+  
+  **TO.** The run protocol carries the same reader the parser is handed (one binding, so whenever a cell is a reference its target is judged). A target the spec's decision (`canServeApiOperation`, for `list`) does not serve answers every cell, naming a record or not, a pasted id included, `reference_not_found`, and nothing of the target is read. A target with no `enable` block, or a whitelist that grants `list`, resolves exactly as before. The decision takes no caller, so the system identity the import's reads run under is answered like any other caller. No new error code, no status change.
+  
+  **Measured producers.** `sys_user` declares two lookups: `manager_id` into `sys_user` (the import strips that column before `runImport`; its own second pass links managers) and `primary_business_unit_id` into `sys_business_unit`. Both targets serve `list`, and the registry injects no columns into `sys_user` (`managedBy: 'better-auth'`), so no shipped import answer changes. Deployed object extensions of `sys_user` were NOT MEASURED.
+  
+  **Fix, if an import relied on the old answer:** the target's own declaration decides. Grant `list` in its `enable.apiMethods`, or drop `enable.apiEnabled: false`, if the object is meant to be matched by import.
+- 3490bf5: The identity import's automatic invitation email links to the Console's set-password page, no longer to an `INVALID_TOKEN` error
+  
+  Clause-②: yes (widening)
+  
+  - **Before.** For every row an admin imported under the Automatic (or Invite) password policy with email delivery, `POST /api/v1/auth/admin/import-users` requested the password reset with no `redirectTo`. better-auth then emailed a link ending in an empty `callbackURL=`, and its `GET /reset-password/:token` refused that link with a redirect to `?error=INVALID_TOKEN`, which the Console shows on its sign-in page. The token in the link was still valid, but the invited user had no page to use it on.
+  - **Now.** The reset request carries `redirectTo` set to the Console's set-password page (`${origin}${uiBasePath}/reset-password`, by default `/_console/reset-password`), the page the Console's own forgot-password flow lands on. The emailed link opens `/_console/reset-password?token=…`, and better-auth's origin check accepts it because it is the deployment's own origin.
+  - **The two new members.** Both are additions; nothing existing changes shape.
+    - `AuthManager.getConsoleUrl(path)` is a public reader of the absolute URL of a Console page. It returns what the class already composes for every email and SMS link it sends.
+    - `IdentityImportDeps.consoleResetPasswordUrl?()` is optional. `AuthPlugin` wires it to `getConsoleUrl('/reset-password')`. A host that calls `runAdminImportUsers` itself should pass it to get a working invitation link. A caller that omits it sends the request exactly as before (`{ email }`), so the link keeps the empty `callbackURL`.
+  - **Unchanged.** The SMS invitation, the temporary-password policy, and the email copy (the invitation still uses the password-reset template).
+- 917b1a0: fix(plugin-auth)!: IdentityObjectsPlugin keeps the single posture's Default Organization at boot
+  
+  Clause-②: no (narrowing) — it restores ADR-0131 D3's Default Organization boot invariant, which `default-organization-invariant.ts` states as "[ADR-0131 D3] The Default Organization as a BOOT INVARIANT under the single posture", in the kernel that mounts `createIdentityObjectsPlugin()` without `AuthPlugin`; no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A boot-time invariant of a plugin composition, not a metadata change: no spec key, export, option, config field or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which compositions boot and which hand-made organization topologies a system write accepts: a kernel that mounts `createIdentityObjectsPlugin()` and publishes its driver only after `bootstrap()` is refused at boot, and a kit that inserts its own organization row next to the Default Organization has its system writes that name no organization refused as ambiguous. The remedy is a kernel composition edit (publish the driver before the boot, read the Default Organization instead of inserting one), which no ledger entry can derive from metadata. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this boot path and this diff adds none (not registered / already-registered); and the one type change is the optional `Plugin.start` lifecycle member made concrete on `IdentityObjectsPlugin`, which narrows nothing a caller types against (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A kernel that mounts `createIdentityObjectsPlugin()` without `AuthPlugin` now holds its Default Organization under the `single` tenancy posture, so its seeds and system writes on tenant-scoped objects are stamped with it instead of refused with "the install holds no organization at all".
+  
+  - **Refused now:** a composition that mounts `createIdentityObjectsPlugin()` and publishes its driver after `bootstrap()` (the identity objects' `start()` reads `sys_organization` under `single`, so the boot fails with `No driver available for object 'sys_organization'`); and a kit that inserts its own organization row after boot, which now holds two organizations under `single`, so every system write that names no organization is refused as ambiguous (ADR-0131 D9).
+  - **Unchanged:** the walled postures (`group`, `isolated`), where `start()` creates nothing; the refusal at `init()` of `createIdentityObjectsPlugin()` mounted beside `AuthPlugin`; every composition that publishes its driver before boot; and a declaration-only boot (`os migrate`), which suppresses `start()`.
+  
+  - **Why.** ADR-0131 D3 makes the Default Organization a boot invariant under `single`: it owns every row. Registering `sys_organization` is what turns the engine's and the seed loader's zero-organization branch from "unstamped" into "refused" (D9). `IdentityObjectsPlugin` registers that object, but only `AuthPlugin.start()` created the organization, so the reduced kernel the plugin exists for (ObjectQL, `createIdentityObjectsPlugin()`, `SecurityPlugin`) refused every seed row of an organization-owned object.
+  - **What changed in `@objectstack/plugin-auth`.** `IdentityObjectsPlugin` gains a `start()` that, under `single`, finds or creates the Default Organization with the same invariant `AuthPlugin.start()` runs. It is idempotent, and a failure fails the boot. The posture is the `tenancy` service's when one is registered, otherwise the requested one (`OS_TENANCY_POSTURE`). Under `group` and `isolated` it does nothing. Nothing new is exported, and the plugin is still refused beside `AuthPlugin`.
+  - **What changed in `@objectstack/runtime`.** `AppPlugin` orders `com.objectstack.auth.identity-objects` ahead of itself, as it already ordered `com.objectstack.auth`, so the organization exists before the inline seed loads, wherever a host lists the two plugins.
+  - **If your test kit mounts `createIdentityObjectsPlugin()`.** Its kernel now reads and writes `sys_organization` during `bootstrap()` under `single`. Publish the driver before the boot (a `driver.default` service, or a datasource plugin), not with `registerDriver()` after it. Otherwise the boot fails with `No driver available for object 'sys_organization'`. A kit that inserted its own organization row to stand in for the missing one now holds two, and a system write that names no organization is refused as ambiguous; drop that insert and read the Default Organization (`slug: 'default'`) the boot created.
+- 404fc47: feat(plugin-auth): `registerOrganizationRecordPage: false` leaves out the platform's `sys_organization` default record page, so a host that ships its own page is the only default
+  
+  Clause-②: yes (widening)
+  
+  A deployment holds at most one `isDefault: true` record page per object, and a second one is refused at registration with `DEFAULT_RECORD_PAGE_CONFLICT`. `AuthPlugin` always registered `sys_organization_detail` (the Members / Invitations / Teams tab strip) as the default record page of `sys_organization`, so a deployment composing `AuthPlugin` beside a host that ships its own default page for that object was refused at boot.
+  
+  - **New option.** `AuthPluginOptions.registerOrganizationRecordPage` defaults to `true`. Only an explicit `false` leaves out `sys_organization_detail`, so the host's page is the only default whichever plugin starts first. Plugin order and precedence rules play no part.
+  - **Nothing else moves.** With `false`, `AuthPlugin` still registers the identity objects, the `sys_user_detail` record page, the System Overview dashboard, and the auth routes and services. It logs one `info` line at boot naming the option.
+  - **The default is unchanged.** A deployment that does not set the option registers `sys_organization_detail` as before. A host page beside it, with no option set, is still refused with `DEFAULT_RECORD_PAGE_CONFLICT`.
+  - **To adopt it:** construct `new AuthPlugin({ …, registerOrganizationRecordPage: false })` in the host that registers its own `isDefault: true` record page for `sys_organization`. With the option set and no default page of the host's own, the organization record view opens the synthesized default layout, without the Members / Invitations / Teams tabs.
+- 0f05907: feat(spec,core,plugin-auth)!: an API key answers as its owner's session does when the ADR-0069 policy holds the account, the forced reset gets its own code and an explicit revocation switch
+  
+  Clause-②: yes (narrowing) — the published contract widens (the posture codes become a closed vocabulary with a declared scope, a new `PASSWORD_RESET_REQUIRED` code, a per-user posture member on the auth service contract, new `@objectstack/core` exports) and the API-key door narrows (a key whose owner holds an account-scope posture is refused where it was served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key admission seam plus one new error code, not a metadata change. No authorable spec key, stored shape or metadata surface is removed or renamed, so `objectstack migrate meta` has nothing to rewrite. `ExecutionContext.authGate.code` narrows from a bare string to the closed posture vocabulary, but that field is server-constructed only and never authored; its one producer already wrote only members of it. What narrows is which API keys are served (a key whose owner owes MFA enrolment is refused with 403 MFA_REQUIRED), and the administrator-forced password change answers its own code. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key door, and a changed code for the administrator-forced password change), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling C′ on #23287: posture codes are a closed vocabulary, and each code declares what it holds.
+  
+  - **The vocabulary and its scope (`@objectstack/spec/kernel`).** `AuthGateCodeSchema` is the closed set of codes an `authGate` may carry: `PASSWORD_EXPIRED`, `PASSWORD_RESET_REQUIRED` and `MFA_REQUIRED`. `AUTH_GATE_SCOPES` declares each code's scope once: `MFA_REQUIRED` holds the **account** (every credential of the user); `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` hold the **credential** (password sign-in alone). `ExecutionContext.authGate.code` is typed against the vocabulary, and `PASSWORD_RESET_REQUIRED` is registered for `@objectstack/plugin-auth` in the error-code ledger.
+  - **One per-user posture computation (`@objectstack/plugin-auth`, `IAuthService.resolveUserAuthGates`).** It answers every posture a user holds, most urgent first, keyed by user id and the organization the credential operates in. The session gate shows its first entry, as before.
+  - **One judgment at the shared key-admission seam (`@objectstack/core`).** `resolveApiKeyAdmission` asks that computation for the key's owner and holds the key on an account-scope posture (a new `held` outcome). `resolveAuthzContext` resolves a held key as a held principal: the owner, `credential: 'api_key'`, and the posture on `authGate`. Both new inputs are optional (`userAuthGates`), and `userAuthGateSourceOf(authService)` binds one from an auth service.
+  - **REST and the runtime dispatcher** judge a key-admitted request by the key's answer, and re-read the session cookie for the gate only when a session admitted the caller. The declared-endpoint fallback does the same.
+  - **The raw-host families** take the same answer through the shared seam: datasource admin, share links, settings, and the storage family's door. The webhook-redeliver door admits no API key at all, and still does not.
+  - **The forced reset (`POST /api/v1/auth/admin/set-user-password`, the `set_user_password` action).** `must_change_password` now answers `PASSWORD_RESET_REQUIRED` instead of reusing `PASSWORD_EXPIRED`. The act carries `revokeSessionsAndKeys`, **on by default**: it ends every live session of the user and revokes every API key they own, and the response reports what landed (`revoked: { sessions, apiKeys, failed, complete }`).
+  
+  What changes for you:
+  
+  - **Refused now:** an API key whose owner owes MFA enrolment past the grace window gets `403 MFA_REQUIRED`, with the message the session gets, on every face that admits keys. It works again the moment the owner enrols, with nothing reissued: the refusal is not a revocation.
+  - **Unchanged:** a key whose owner's password expired, or whose administrator forced a password change, keeps working. A session sent beside an API key no longer answers for the key.
+  - **A forced password change answers `PASSWORD_RESET_REQUIRED`.** A client that recognises `PASSWORD_EXPIRED` to show its change-password flow should recognise `PASSWORD_RESET_REQUIRED` the same way.
+  - **An administrator's password reset now signs the user out everywhere and revokes their API keys by default.** For a routine reset, pass `revokeSessionsAndKeys: false` (or clear the switch in the Set Password dialog). Revoked keys stay revoked after the password change; an administrator can restore a key a routine reset revoked with the Restore API Key action, or the owner mints a replacement.
+  - **Hosts calling `resolveAuthzContext` or `resolveApiKeyAdmission` directly** pass `userAuthGates: userAuthGateSourceOf(authService)` to have the key's owner asked. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `held` outcome.
+- 0be162c: fix(plugin-auth)!: impersonation, SSO-provider administration and the admin plugin's role-scalar actions refuse a caller the ADR-0069 authentication policy holds
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at three doors better-auth serves inside plugin-auth (the re-authorized impersonation endpoint, SSO-provider registration, update and delete, and the admin plugin's own role-scalar actions), not a metadata change. No spec key, option, config field, response field or stored shape is removed, renamed or re-shaped, and a caller the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which callers these doors serve: a user who holds an ADR-0069 posture (an expired or administrator-forced password, or enforced MFA not yet enrolled, globally or by the organization the session operates in) is now refused with the session gate's 403 before the door acts. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers these doors and this diff adds none (not registered / already-registered); the one added export is an addition, so nothing published is retired or re-typed (not runtime-interface-only / type-surface-only / runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 D3 holds a signed-in user out of every protected resource while their password has expired (or an administrator has forced a change) or while enforced MFA is not yet enrolled, until they remediate. REST, the runtime dispatcher and the platform-admin actions plugin-auth mounts on the host server already refuse such a user. Three doors better-auth serves itself did not, because their session is a raw read that never carries the posture:
+  
+  - **Impersonation** (`POST /admin/impersonate-user`): a held platform administrator could mint a session as another user, and that session is not held, so the hold was bypassed outright.
+  - **SSO-provider administration** (`POST /sso/register`, `/sso/update-provider`, `/sso/delete-provider`): a held platform administrator could register an identity provider, and rewrite the issuer of, or delete, one they own.
+  - **The admin plugin's own actions, judged on the legacy `role` scalar** (set-role, get-user, update-user, list-users, list-user-sessions, revoke-user-session, revoke-user-sessions): a held caller carrying `role = 'admin'` was admitted, writes included.
+  
+  From → to. Before: a held caller passed these doors as if unheld. Now: each door asks the auth service for the caller's posture in the organization their session operates in (the same computation, and the same first entry, the session carries) and refuses a held caller with `403`, `{ success: false, error: { code, message } }`, where `code` is the posture's own (`PASSWORD_EXPIRED`, `MFA_REQUIRED` or `PASSWORD_RESET_REQUIRED`) and `message` names the remedy: the refusal the session gate and `judgePlatformAdmin` already give. No new error code.
+  
+  - **Order:** an anonymous caller still meets the vendor's `401` first. A held signed-in caller who is not an administrator now meets the posture's `403` code instead of the vendor's `403 YOU_ARE_NOT_ALLOWED_*`: same status, the remedy named.
+  - **Unchanged:** a caller the policy does not hold is served exactly as before. Stopping an impersonation and the admin plugin's permission question are not held, and sign-in, change-password, two-factor enrollment and sign-out still answer a held session, so remediation works as before. A posture lookup that fails holds no one, as it does for the session.
+  - **New export:** `judgeHeldSession` (`@objectstack/plugin-auth`), the held refusal `judgePlatformAdmin` gives, now shared with these doors.
+  
+  What changes for you. An administrator the policy holds must remediate (change the password, or enroll an authenticator) before impersonating a user, registering or changing an SSO provider or using the admin plugin's user actions, as on every other protected route.
+- 02a691a: fix(plugin-auth)!: the platform-admin actions refuse a session the ADR-0069 authentication policy holds, a platform administrator's included
+  
+  Clause-②: no (narrowing: a held session is refused on the platform-admin surface, which ADR-0069 D3 already declares gated)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at one family of routes plugin-auth mounts directly on the host server, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and a session the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which sessions the family serves: a session whose user carries the ADR-0069 posture (an expired or administrator-forced password, or enforced MFA not yet enrolled) is now refused with the gate's 403 before any of the family's logic runs. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers these routes and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only / runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 D3 holds a signed-in user out of every protected resource while their password has expired (or an administrator has forced a change) or while enforced MFA is not yet enrolled, until they remediate. REST and the runtime dispatcher already refuse such a session. The platform-admin actions plugin-auth mounts on the host server (user creation, password, ban, removal, unlock, manager, import, membership, OAuth-client and SSO administration) are judged by one shared judge, `judgePlatformAdmin`, which read the session and the admin rung but never the posture, so a held platform administrator could still administer the platform.
+  
+  - **Refused now:** a held session meets `403` with the gate's own `code` (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) and `message` on every platform-admin action that judge guards, in the family's declared envelope, before the action runs. The judge asks the shared decision (`evaluateAuthGate`, `@objectstack/core`) without a request path, so these actions never inherit the exemption that keeps the auth endpoints reachable.
+  - **Order:** an anonymous caller still meets `401 UNAUTHENTICATED` first. A held signed-in caller who is not a platform administrator now meets the posture's `403` code instead of `403 PERMISSION_DENIED`: same status, the remedy named.
+  - **Unchanged:** a session the policy does not hold is served exactly as before. Sign-in, change-password, two-factor enrollment and sign-out still answer a held session, so remediation works as before.
+  
+  What changes for you. A platform administrator the policy holds must remediate (change the password, or enroll an authenticator) before the platform-admin actions answer them, as on every other protected route.
+- fc1a55a: fix(plugin-auth): the identity import invites with `auth.account_invitation`, not the password-reset email
+  
+  Clause-②: yes (widening)
+  
+  A user created through Setup › Users › Import (`POST /api/v1/auth/admin/import-users`) and invited by email now receives the new `auth.account_invitation` template from `@objectstack/plugin-email`.
+  
+  - **FROM → TO for an imported user's email.** FROM `auth.password_reset` ("We received a request to reset the password … If you didn't request this, ignore this email"), although the user requested nothing. TO `auth.account_invitation`: the administrator who ran the import (name and email, as their user record holds them), the new account's address, a "Set your password" link, and the link's real expiry. The link is the same one as before: it lands on the Console's set-password page, and its token is the same better-auth reset token.
+  - **Every other password reset is unchanged.** A user who asks for a reset (`POST /api/v1/auth/request-password-reset`) still receives `auth.password_reset`, whether or not they were imported. Only the import's own request sends the invitation: the import marks that one request on the server, and nothing a client sends can set the mark. `auth.invitation` (an invitation into an organization) is unchanged.
+  - **If you customized `auth.password_reset` for imported users,** move that wording to `auth.account_invitation`: imported users no longer receive `auth.password_reset`.
+  - **The stated expiry is the token's real lifetime.** better-auth gives the token `emailAndPassword.resetPasswordTokenExpiresIn` seconds, or 3600 when that is unset or `0`. A configured `0` used to make the reset email say "expires in 0 minutes"; it now says 60, as the token does, and so does the invitation.
+- 1d79556: feat(spec,core,runtime,plugin-auth)!: API keys get a lifecycle: a 90-day default expiry, a one-year ceiling, a 90-day inactivity expiry, a one-year grace for keys created with none, and distinct refusal codes
+  
+  Clause-②: yes (narrowing) — the published contract widens (four `auth` settings keys, the `IAuthService.resolveApiKeyLifecyclePolicy` member and its `ApiKeyLifecyclePolicy` type, four registered error codes, new `@objectstack/core` exports) and the API-key doors narrow (a signing past the ceiling is refused; an inactive key, a key past its grace, and a revoked or expired key sent beside a session are refused where they were served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key signing door and the shared key-admission seam, not a metadata change. No authorable spec key, stored shape or metadata surface is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite: the four new `auth` settings keys are additive and defaulted, `sys_api_key` gains no column (its existing `expires_at` and `last_used_at` are written by the platform), and `ResolveAuthzInput.apiKeyLifecycle` / the sixth parameter of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal` are server-side wiring no author writes. What narrows is which API keys are served and which signings are accepted; the remedy is a new key or a nearer date, never a rewrite of a package source or a stored row. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key doors), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling A on #23367: the key store stays `sys_api_key`, and the policy is auth configuration.
+  
+  - **The policy (`@objectstack/plugin-auth`, `IAuthService.resolveApiKeyLifecyclePolicy`).** Three `auth` settings keys, bound by `bindAuthSettings`: `api_key_default_expiry_days` (90), `api_key_max_expiry_days` (365) and `api_key_inactivity_days` (90; `0` turns it off). A fourth, `api_key_policy_started_at`, is recorded once — on the first boot that runs the policy, at `kernel:bootstrapped` — and anchors the two clocks below; it survives restarts and is never overwritten by the platform.
+  - **The signing door (`POST /api/v1/keys`).** A signing that names no `expires_at` gets the default life and the response echoes it. An `expires_at` further away than the ceiling is refused `400 API_KEY_EXPIRY_TOO_LONG`, naming the latest date allowed; exactly the ceiling is accepted. A kernel with no auth service signs as before.
+  - **The key-admission seam (`resolveApiKeyAdmission`, `@objectstack/core`).** A real key its own state refuses is a new outcome, `lifecycle`, with one of three distinct codes: `API_KEY_REVOKED`, `API_KEY_EXPIRED` (past `expires_at`, or past the grace of a key created with none) or `API_KEY_INACTIVE` (no recorded use for longer than the window). `resolveAuthzContext` raises it as the branded `ApiKeyLifecycleRefusalError` (`403`, a located message naming the key's prefix, the date and the remedy). An unknown key is still `none`.
+  - **`last_used_at` is written.** Its description promised "Automatically updated on each API call", and nothing wrote it. The seam now stamps it on an admitted (or held) call, at most once an hour per key, and the inactivity judgment reads the value as it was BEFORE that call's stamp, so a key's own use cannot revive it. A stamp that fails never fails the request; it is said once, at `error`.
+  - **Keys created before the policy.** A key with no expiry gets one year from `api_key_policy_started_at`; the date is stamped onto its `expires_at` the first time it is admitted, so the keys page shows it, and the refusal after it names it. A key with no recorded use counts its inactivity from the same anchor (or from its own creation, when later) — never from an earlier `created_at`, since no use was ever recorded before the policy.
+  - **Every face that admits keys** passes the policy source (`apiKeyLifecyclePolicySourceOf(authService)`, a required input beside `userAuthGates`). Every one of them answers the refusal's `403` and code: the runtime dispatcher (the MCP HTTP endpoint among its routes), the REST data API, the settings routes, the storage download routes, the datasource admin routes, the share-link routes, the marketplace install-local routes and the MCP stdio transport. Each relays the refusal by its brand, so every other identity fault at those doors keeps its existing answer.
+  - **`OS_CLOUD_API_KEY` is untouched.** It is the runtime's outbound credential to the control plane, never admitted by this seam.
+  
+  What changes for you:
+  
+  - **A key created without an expiry now expires.** It used to live until revoked; it now lives 90 days (or the configured default). Pass `expires_at` to choose, and create a new key before it ends.
+  - **A signing asking for more than a year is refused** `400 API_KEY_EXPIRY_TOO_LONG`, where it used to be accepted. Ask for the date the message names, or an earlier one.
+  - **A key unused for 90 days is refused** `403 API_KEY_INACTIVE`, where it used to be served. It is not revoked; the remedy is a new key.
+  - **A key that already existed with no expiry keeps working for one year** from the date the policy took effect on your deployment (`auth.api_key_policy_started_at`), then answers `403 API_KEY_EXPIRED` naming that date. Replace such keys within the year.
+  - **A revoked or expired key answers its own code** (`403 API_KEY_REVOKED` / `API_KEY_EXPIRED`) on every face that accepts a key, where it used to answer the generic `401`; and a session cookie sent beside such a key no longer answers for it.
+  - **Hosts calling `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** pass `apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService)` (or the sixth argument), or an explicit `undefined` where no auth service exists. A caller of `resolveAuthzContext` that wants the located answer re-raises `ApiKeyLifecycleRefusalError` (`isApiKeyLifecycleRefusalError`) the way it re-raises the store outage. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `lifecycle` outcome.
+- 9cb9d95: feat(spec,plugin-auth): a short-lived principal-session mint, `IAuthService.mintPrincipalSession`, implemented by `AuthManager`
+  
+  Clause-②: yes (widening)
+  
+  An in-process service can now act as the requesting user through a door that only accepts a session, such as a headless browser rendering a page the user may see, under the user's own principal and never a system one. Nothing is removed and no HTTP route is added.
+  
+  - **`@objectstack/spec`** (`contracts`): an optional `IAuthService` member, `mintPrincipalSession(context, options?)`, its types `PrincipalSession`, `PrincipalSessionCookie` and `PrincipalSessionMintOptions`, and the constant `PRINCIPAL_SESSION_MAX_TTL_SECONDS` (`120`). The member is optional, so every existing `IAuthService` implementation compiles unchanged.
+  - **`@objectstack/plugin-auth`**: `AuthManager.mintPrincipalSession(context, options?)`.
+  
+  What the mint guarantees:
+  
+  - **Human principals only, refused before anything is minted.** A context with no user, a system context, or a `principalKind` other than `human` gets `PERMISSION_DENIED` / `403`. So does a user row that is missing, the system user or banned. A user an authentication policy holds gets `403` with the policy's own code (`MFA_REQUIRED`, `PASSWORD_EXPIRED`, `PASSWORD_RESET_REQUIRED`), whether the posture rides on the context or is computed at the call. A `ttlSeconds` outside 1 to 120 gets `VALIDATION_ERROR` / `400`: it is refused, never clamped.
+  - **Short and never renewed.** The session lives at most 120 seconds. Reading it never extends it, on the cookie lane, the bearer lane or the in-process session read alike.
+  - **Revocable.** `revoke()` ends the session. Afterwards neither the token nor the cookie resolves one. It is bound to that session alone and safe to call twice, so call it in a `finally`.
+  - **The deployment's own cookie.** The cookie carries the name and attributes of the plugin's session cookie, the cookie prefix and, on a secure deployment, `__Secure-` included. The session's active organization is the context's `tenantId`.
+  
+  ```ts
+  const auth = ctx.getService<IAuthService>('auth');
+  const session = await auth.mintPrincipalSession?.(context, { ttlSeconds: 60 });
+  try {
+    // send session.token as `Authorization: Bearer`, or set session.cookie in a browser
+  } finally {
+    await session?.revoke();
+  }
+  ```
+- e246f06: feat(plugin-auth,platform-objects,core)!: an API key an administrator's forced password reset revoked is restored by a platform administrator only; its owner creates a new key (#23993)
+  
+  **BREAKING** (an accept-set narrowing at the `sys_api_key` write door), shipped as `minor` under the launch-window convention for breaking changes. For an operator: a key revoked by `POST /api/v1/auth/admin/set-user-password` (the forced reset, which revokes the user's keys by default) can no longer be restored by its owner; a platform administrator restores it with the Restore API Key action, or the owner creates a new key. For an integrator: `PATCH /api/v1/data/sys_api_key/{id}` with `{ revoked: false }` on such a key now answers `403 PERMISSION_DENIED` for its owner, where it answered `200`; and `sys_api_key` gains a readonly `revoked_reason` column.
+  
+  Clause-②: yes (narrowing)
+  
+  What widens: `sys_api_key` declares one more field, `revoked_reason`. What narrows: the owner's restore of a key whose `revoked_reason` is `admin_password_reset` is refused, where it was admitted.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A write-door narrowing on one platform object plus one new readonly platform field, not a metadata change an author makes. No authorable spec key, stored shape or metadata surface is removed or renamed, so `objectstack migrate meta` has nothing to rewrite: the refused request is a runtime call whose remedy is a person (a platform administrator) or a new key, not a rewrite. No ADR-0087 id covers this and none is added. -->
+  
+  #23287 ruling C′ makes the forced reset revoke the user's API keys by default, for a suspected compromise: a key that outlives the reset is the hole the reset was meant to close. Its changeset names who acts afterwards: a platform administrator restores such a key, or the owner mints a replacement. The owner could nevertheless restore it through the same door as any revoked key, because the row recorded no reason. Now it does.
+  
+  - **`sys_api_key.revoked_reason` (`@objectstack/platform-objects`).** A readonly `select` whose one value is `admin_password_reset`, set when the forced reset revoked the key and cleared when the key is restored. Empty for a key revoked from the API Keys list. Translated in `zh-CN`, `ja-JP` and `es-ES`.
+  - **The stamp (`@objectstack/plugin-auth`).** The forced reset's revocation writes `revoked_reason: admin_password_reset` beside `revoked: true`, the one place the reason is set. A key already revoked before the reset is not written, so it keeps no reason.
+  - **The restore guard (`@objectstack/plugin-auth`).** One `beforeUpdate` hook on `sys_api_key`, registered after the ADR-0092 D2 identity write guard. A user-context restore of a key carrying the reason is refused `403 PERMISSION_DENIED` unless the caller has platform-administrator standing (the ADR-0068 D2 rung); the refusal names both roads. Every restore it admits, the administrator's included, clears the reason. Revoking an already-revoked key leaves the reason in place, and the column is not on the D2 whitelist, so no data-API write can clear it. On a multi-row update every row is judged by its own stored state. System-context writes (the mint, the last-used stamp, the forced reset) are never refused.
+  - **The key door's message (`@objectstack/core`).** `API_KEY_REVOKED` for a key the forced reset revoked now says only a platform administrator can restore it; any other revoked key keeps today's sentence. Code, status and every carried field are unchanged.
+  
+  What changes for you:
+  
+  - **Refused now:** the owner restoring a key the forced reset revoked: `403 PERMISSION_DENIED`, naming the platform administrator and the new-key road. The administrator's restore works as before and clears the reason.
+  - **Unchanged:** revoking and restoring a key from the API Keys list, by its owner or an administrator; a forced reset with `revokeSessionsAndKeys: false`, which revokes nothing.
+  - **Keys revoked by a forced reset before this release** carry no reason, so their owner can still restore them. Such keys exist only where `18.0.0-next.2` or a `main` build since 2026-10-14 ran a forced reset; nothing backfills them, because the reset's audit row records counts, not key ids.
+- ab3ba2c: Clause-②: no (narrowing)
+  
+  fix(plugin-auth)!: sixteen of this package's own routes refuse a declared JSON body that does not parse with `400 INVALID_REQUEST`, instead of answering as if no body was sent
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, no stored row is rewritten or deleted, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of sixteen of this package's own routes, and of the exported bridges eleven of them mount, for one input: a body declared as JSON that does not parse, which used to be read as no body. The remedy is in the requests a client sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed, every signature is unchanged (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  These routes read a body that does not parse as no body, through `try { body = await request.json() } catch { body = {} }` or a module-private `parseJson` that answered `{}` from its `catch`, so a truncated body was answered as if the client had sent none:
+  
+  - `POST /api/v1/auth/admin/oauth2/toggle-disabled`, `/admin/unlock-user` and `/sys-oauth-application/register`;
+  - `POST /api/v1/auth/admin/import-users`;
+  - `POST /api/v1/auth/admin/sso/register`, `/admin/sso/register-saml`, `/admin/sso/request-domain-verification` and `/admin/sso/verify-domain`;
+  - `POST /api/v1/auth/send-verification-email`;
+  - `POST /api/v1/auth/admin/ban-user` and `/admin/unban-user`;
+  - `POST /api/v1/auth/admin/set-user-manager`;
+  - `POST /api/v1/auth/admin/create-user` and `/admin/set-user-password`;
+  - `POST /api/v1/auth/organization/add-member`;
+  - `POST /api/v1/auth/set-initial-password`.
+  
+  `/admin/unlock-user` answered `400 "userId is required"` for a body that carried `userId` and lacked its closing brace. `/send-verification-email` read the same input as the one-click resend, and sent the link to the caller's own address for a body that named another one.
+  
+  What changes for an integrator. A body sent as `application/json` (matched case-insensitively) that is not blank and does not parse: FROM the route's answer for an empty body, TO `400` with `{ "success": false, "error": { "code": "INVALID_REQUEST", "message": "The request body could not be parsed as JSON (it was sent as application/json). It was refused rather than read as an empty body: send a well-formed JSON document, or no body at all." } }`, the answer the HTTP transports give the same body. A declared JSON body whose stream cannot be read is refused with the same code and "The request body could not be read. It was refused rather than read as an empty body." Each route refuses where it reads its body. The import, the four SSO bridges, ban/unban, set-user-manager, create-user, set-user-password and add-member read it after their platform-admin gate (and after the admin-plugin or organization-plugin check where the route has one). toggle-disabled, unlock-user, sys-oauth-application/register, the resend and set-initial-password read it before anything else runs. Nothing is looked up, written, sent or forwarded to better-auth.
+  
+  The exported bridges eleven of these routes mount (`runAdminImportUsers`, `runRegisterSsoProviderFromForm`, `runRegisterSamlProviderFromForm`, `runRequestDomainVerification`, `runVerifyDomain`, `runResendVerificationEmail`, `runSetInitialPassword`, `runAdminCreateUser`, `runAdminSetUserPassword`, `runAdminBanUser` and `runAdminUnbanUser`) answer the same refusal, so a host that mounts them itself refuses it too. Their signatures and result types are unchanged.
+  
+  **Remedy, in one line.** Send a JSON body as well-formed JSON with `Content-Type: application/json`, or send no body.
+  
+  **Unchanged.** An empty body (no body at all, a zero-byte one, or whitespace only) is still no body, and every route answers it as before: `/admin/unlock-user` with `400 "userId is required"`, and `/send-verification-email` as the one-click resend to the caller's own address. A body that parses is read as before, whatever its `Content-Type`, and a body that does not declare JSON and does not parse is still read as no body.
+- 8a88901: fix(plugin-auth,plugin-email): the organization invitation mail names the invitee's role by its label in the mail's language (`成员`, `メンバー`, `Miembro`, `Member`), not by the stored value `member`
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** The zh-CN, ja-JP and es-ES invitation mails printed the stored membership role inside a translated sentence: 「邀请您以 member 的身份加入」. The sender now passes `{{role}}` as the `sys_member.role` option label in the locale the mail is written in, the same label the console shows for that option. It reads the label through the runtime's i18n service and the console's own object translation path, so a tenant's translation of the option, made in Studio, reaches the mail too. The four bodies keep interpolating the one `role` variable; its name and type are unchanged, and its declaration now says it carries the label.
+  - **The plain-text part names the role too.** The four text bodies gain the role clause their HTML bodies carry, so both parts of the mail name the same facts. For example, the English text is now `Dana (dana@example.com) invited you to join Northwind on Acme as Member.`
+  - **Stated fallbacks.** A role list (`admin,member`) is labelled role by role and joined as a list in the mail's language (`管理员和成员`). A value with no option label is named as stored, and one warning names it. With no i18n service, or one that fails, the mail names the option's authored English label, never an empty string.
+  - **New option (widening).** `AuthManagerOptions.getI18n?: () => II18nService | undefined` is a lazy accessor for the `i18n` service, read when the invitation is sent. `AuthPlugin` wires it from the kernel. An embedder that builds `AuthManager` itself and omits it gets the authored labels.
+  - **What changes for you.** If you have overridden `auth.invitation` and interpolate `{{role}}`, it now receives the label, not the stored value.
+- 99e9d29: feat(plugin-auth): an OAuth consent binds the consenting user's active organization, the access token carries it as `organization_id`, and `verifyMcpAccessToken` returns it as `organizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** When a user consents to an OAuth client, the embedded authorization server records the consenting session's active organization as the consent's `reference_id`. The value rides the authorization code onto the refresh family it starts (`sys_oauth_refresh_token.reference_id`), and every access token minted from either carries it as the `organization_id` claim. It is written through the installed `@better-auth/oauth-provider`'s own seams (`postLogin.consentReferenceId` and `customAccessTokenClaims`); no new configuration key or environment variable.
+  - **The session's organization, never the request's.** The value is read from the consenting session only. Nothing in the authorize request, the consent body or the client's registration can choose it.
+  - **No organization, no claim.** A user with no active organization at consent gets a consent with no reference, and tokens with no `organization_id`. There is no guessed or default organization; such a token's principal resolves with global grants only.
+  - **A refresh keeps the consent's organization.** A refresh token mints access tokens in the organization its consent bound, even after the user switches the browser session to another organization. Authorizing again while another organization is active asks for a second consent, for that organization.
+  - **Existing consents re-confirm once.** A consent stored before this change has no reference, so the next authorization made while the user has an active organization shows the consent page again, once. Until the user re-confirms, a refresh family started before this change keeps minting tokens with no `organization_id`, so they carry global grants only.
+  - **`AuthManager.verifyMcpAccessToken`.** Its result type gains `organizationId?: string`, matching `IAuthService.verifyMcpAccessToken` in `@objectstack/spec/contracts`, and it returns the token's `organization_id` claim there. A token whose `organization_id` is present but is not a non-empty string is refused, as every other malformed token is: this server never mints one. The organization is a record, not an authorization. The caller vets it on every request by the rule that vets a session's active organization (`vetOrganizationClaim`, `@objectstack/core`).
+  - **`@objectstack/platform-objects`.** The `reference_id` field description on `sys_oauth_consent`, `sys_oauth_refresh_token` and `sys_oauth_access_token` now names the bound organization, instead of "Caller-supplied correlation identifier". Prose only; no field, type or schema change.
+- 51ad8e4: Clause-②: yes (widening)
+  
+  fix(cli,runtime): the 17 → 18 organization-ownership upgrade of a single-posture database that holds no organization leaves no row without one, the boot the ceremony prescribes writes nothing before it is refused, and a ceremony that did not verify is never served (ADR-0131 D3, D10)
+  
+  A 17.x single-posture install whose seed ran before any organization existed holds rows of organization-owned objects with `organization_id` NULL and an empty `sys_organization`. Upgrading it took this path: the ceremony's attribution checkpointed itself done at zero rows; the boot its rewrite step asks for created the Default Organization and let the inline seed stamp some rows before it refused; the second `--apply` did not run attribution again, dropped the columns and recorded discrepancies with `verified_at` NULL; and `os start` then served that database.
+  
+  - **The ceremony creates the Default Organization (`@objectstack/cli`).** Under the `single` posture, on a database that holds no organization and rows no anchor names, `os migrate organization-ownership` plans those rows as the Default Organization's and says so in a plan warning (`defaultOrganizationCreatedByApply: true` in the plan file). `--apply` creates it before its first write, through plugin-auth's boot invariant (the row a single-posture boot creates), and gives it every such row. A run that cannot create it — a boot without the auth family that declares `sys_organization` — blocks at attribution, naming why, instead of attributing nothing and certifying. Nothing is created under a walled posture, or when the database holds organizations.
+  - **The ceremony names the Default Organization as the boot does (`@objectstack/cli`).** Under `single` it is the organization with `slug = 'default'`, else the sole organization whatever its slug — the boot invariant's and the tenancy service's definition (ADR-0093 D3). Before, the plan required `slug = 'default'`, so a database whose only organization had another slug kept its unanchored rows NULL through the ceremony while v18 derives every owner from that organization. Several organizations, none of them `default`, still name none, and their rows are reported. In the plan file (the command's own output, not a published schema) `defaultOrganization.slug` is now that organization's own slug, no longer always `'default'`.
+  - **A checkpointed attribution runs again (`@objectstack/cli`)** whenever the plan derives an owner for rows still NULL: a row the operator made attributable since, or one an earlier run found no Default Organization for. It writes only where `organization_id` is NULL, so no owner already written is derived again. A database left by an earlier release's ceremony in that state is completed by re-running `--apply`.
+  - **The boot guard judges before any plugin writes (`@objectstack/runtime`, `@objectstack/plugin-auth`).** `OrganizationOwnershipBootGuardPlugin` judges in its own `start()`, after the engine's schema sync (the column the rewrite step waits for is still added) and before every plugin that writes rows at start: `AppPlugin` (the inline seed), `AuthPlugin` and the identity-objects plugin (the Default Organization) name it (`com.objectstack.organization-ownership-boot-guard`) in `optionalDependencies`. A refused boot leaves every row as it found it.
+  - **A ceremony that did not verify is refused (`@objectstack/runtime`).** With no table left in the v17 shape, a boot whose `adr-0131-organization-ownership` marker exists and is not verified — the post-check found rows the ceremony has not carried — is refused with `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`, naming the re-run. A database with no marker (a fresh one) boots as before.
+  - **The refusal now arrives as a `cause` (`@objectstack/runtime`).** A failed `start()` is reported by the kernel as its own error ("Plugin … failed to start"), with the plugin's error as its `cause`. A host that composes the guard and inspects the boot error asks `isOrganizationOwnershipBootRefusal` of each `cause` down the chain: asked of the kernel's own error it now answers `false`. `assertOrganizationOwnershipMigrated(engine)` still throws the refusal itself. `os serve` and `os dev` read it from the chain.
+  - **One new export (`@objectstack/plugin-auth`, `minor`).** `ensureDefaultOrganizationExists(ql, options?)` — the Default Organization's boot invariant, find-or-create under `single` — for the ceremony, so the organization it creates is the row a single-posture boot creates, from one producer. A host composing a kernel still never calls it: `AuthPlugin` and the identity-objects plugin keep the invariant on every boot. No other package entry changes.
+  
+  Unchanged: the ceremony's steps, fates and refusals otherwise; a walled posture's unattributable rows (reported, never assigned); the boot of a fresh or verified database; and every plugin's order on a kernel that does not compose the guard. Repairing a database whose organization-scoped seed load already inserted twins of NULL-organization rows is an operator's data repair.
+
+### Patch Changes
+
+- 25e16ab: fix(plugin-auth): the auth IP allow-list judges the client address the server established (#24739)
+  
+  Clause-②: no
+  
+  The `allowed_ip_ranges` auth setting (ADR-0069 D5) and the `last_login_ip` login audit (D7) now establish a request's client address by the same rule as the inbound rate limiter: `X-Forwarded-For` (its first entry), then `X-Real-IP`, count only when the stack declares `server.trustProxy`. Otherwise the address is the connection's peer address.
+  
+  **For operators who set `allowed_ip_ranges`:**
+  
+  - Behind a reverse proxy or load balancer, declare `server: { trustProxy: true }` in the stack before you upgrade. Without it, the allow-list judges the proxy's own address for every request.
+  - A request whose client address cannot be established (the transport reports no peer address, and no forwarded header is trusted) is now refused with `403 IP_NOT_ALLOWED`. Before, it was admitted. The first such refusal logs a warning that names `allowed_ip_ranges` and `server.trustProxy`.
+  - `CF-Connecting-IP` is no longer read. Behind Cloudflare, declare `server.trustProxy`, and the `X-Forwarded-For` it sets is used.
+  - A dual-stack listener reports an IPv4 client in IPv4-mapped form (`::ffff:203.0.113.7`). That address is now matched as the IPv4 address it denotes.
+  - With `allowed_ip_ranges` unset or empty, nothing changes.
+  
+  **`last_login_ip`** records the address the allow-list judged, or no address when none could be established. It is no longer read from a forwarded header the deployment does not trust.
+  
+  **By package:**
+  
+  - `@objectstack/plugin-auth`: the rule is published as the dependency-free `@objectstack/plugin-auth/client-address` entry (`resolveClientAddress`). `AuthPlugin` and `AuthManager` take a `trustProxy` option. `AuthManager.handleRequest` takes an optional second argument that carries the transport's `remoteAddress`.
+  - `@objectstack/runtime`: the inbound rate limiter imports the rule from that entry instead of keeping its own copy. Its keys are unchanged.
+  - `@objectstack/cli`: `objectstack serve` passes the stack's `server.trustProxy` to `AuthPlugin` as well as to the dispatcher. A host that composes `AuthPlugin` itself passes `trustProxy` the same way.
+  - `@objectstack/service-settings`: the `allowed_ip_ranges` help text says which address is judged.
+- 3465ad4: fix(plugin-audit,plugin-auth): a refused sign-in and an account lockout each write a `sys_audit_log` row, as a successful sign-in already does
+  
+  Clause-②: no
+  
+  - **Two new ledger actions, each with its writer.** `sys_audit_log.action` gains `login_failed` and `account_locked`. A refused `/sign-in/email` that names an existing account writes one `login_failed` row. The refused sign-in that stamps the account lockout (`lockoutThreshold`, ADR-0069 D2) also writes one `account_locked` row. A sign-in refused while the account is locked writes `login_failed` with the reason `ACCOUNT_LOCKED`. A successful sign-in still writes `login`, unchanged.
+  - **What each row records.** `user_id` is the account the sign-in named, and the row names `sys_user` and that account's id as its target. The outcome is the action, plus the refusal's machine code in `metadata` (`INVALID_EMAIL_OR_PASSWORD`, `ACCOUNT_LOCKED`, …), and the lock's `locked_until` and `threshold` on an `account_locked` row. `created_at` is the time. `ip_address` and `user_agent` are resolved by the rule better-auth applies to a session row, which is where a `login` row's values come from. `actor` is null, because a refused attempt authenticated nobody. A row never carries the attempted credential, and an identifier that resolves to no account writes no row.
+  - **Where they show.** Setup → Audit Log's *Auth* preset (the `auth_events` list view) now lists `login`, `logout`, `login_failed` and `account_locked`. Each row is about the account it names, so the ledger's record read gate judges it by that `sys_user` record, as for any row about a user. It carries no `tenant_id`: a refused attempt has no session to take an organization from, so it is a deployment-level row under the ledger's organization scope.
+  - **Recorded with or without a lockout.** A refused sign-in writes its row whether or not `lockoutThreshold` is set.
+  - **`@objectstack/plugin-audit` types.** `AuthSessionAuditEvent.action` widens to `AuthEventAuditAction` (`'login' | 'logout' | 'login_failed' | 'account_locked'`). `AuthEventAuditAction` and `AuthAccountAuditAction` are new exported types, and `AuthSessionAuditAction` is unchanged.
+- c849af2: fix(plugin-auth): the account lockout resolves the account the sign-in credential check resolves
+  
+  Clause-②: no
+  
+  - **One account per sign-in.** The ADR-0069 D2 lock gate, its failed sign-in counter and the `login_failed` / `account_locked` account events now share one resolver. It looks the account up exactly as better-auth's `/sign-in/email` credential check does, so all four name the same account for every identifier the credential check resolves to it.
+  - **What that guarantees.** Every refused sign-in that resolves to an account counts toward that account's one lock. An existing lock refuses every sign-in that resolves to the account, including one with the correct password. A successful sign-in clears the counter, as before. An identifier that resolves to no account changes no account and writes no account event.
+  - **Nothing to migrate.** The lockout state stays on the account's own `sys_user` row (`failed_login_count`, `locked_until`), written by its id, and `lockoutThreshold` / `lockoutDurationMinutes` keep their meaning.
+- 9d13b5f: fix(plugin-auth,platform-objects): Revoke Session on a `sys_session` row ends the session it names
+  
+  Clause-②: no
+  
+  - **The action.** The `sys_session` `revoke_session` row action (Setup → Sessions, Account → Active Sessions) posts the row's `id` as `sessionId` to a new plugin-auth route, `POST /api/v1/auth/sys-session/revoke`. The server resolves the session from the id. The session token stays `internal: true`: it is not served to the console or to any other client, and no request to or answer from this route carries it.
+  - **Who may revoke.** The session's owner: the route hands the request to better-auth's own `POST /api/v1/auth/revoke-session`, so that route's checks and its `user_revoked` record apply exactly as before. Another user's session: a platform administrator only (the ADR-0068 D2 standing every `/api/v1/auth/admin/*` mount judges). The session is ended in place with `revoke_reason: admin` (ADR-0069 D4), stays listed under the Revoked view, and its next request is unauthenticated.
+  - **Refusals.** An anonymous caller: `401 UNAUTHENTICATED`. A body without `sessionId`: `400 INVALID_REQUEST`. Every other caller, and an id that names no live session: `404 RESOURCE_NOT_FOUND`, one answer for every cause. A platform administrator whose own sign-in is held by the authentication policy: `403` with the policy's code.
+  - **Unchanged.** `POST /api/v1/auth/revoke-session`, "Sign out other devices", and every `sys_session` read path.
+- 19bb55e: The permission-set grant readers in `@objectstack/plugin-auth` read which set a grant holds from its name column, `sys_user_permission_set.permission_set` (ADR-0131 D4)
+  
+  Clause-②: no
+  
+  - **What reads the name now.** The last-administrator guard (`registerLastAdminGuard`) counts a grant-anchored platform administrator from an unscoped, in-window grant whose `permission_set` is `admin_full_access`, provided the `admin_full_access` row of that name is active. The default-organization bootstrap (`ensureDefaultOrganization`) finds the platform administrator by the same grant name. The self-registration grant checks by name whether the new user already holds the declared set. None of them reads `permission_set_id` for this any more.
+  - **The guard treats `permission_set` as a standing column.** A write that clears the name on the last administrator's grant is refused like any other revocation. A write that re-points `permission_set_id` without a name is treated as taking the standing away, because the platform derives the new name only after the guard runs. A write that only repeats the grant's own id keeps the standing.
+  - **A grant whose name is empty.** A grant written before the name column existed has no name until `@objectstack/plugin-security`'s one-time backfill names it at `kernel:bootstrapped`. The guard does not count such a grant as an administrator. When no administrator is counted, such a grant, if unscoped and in-window, is evidence that the environment is not a fresh install, so the write is refused instead of the bootstrap window opening. The default-organization bootstrap answers `no_admin` for it and binds no owner; that answer records no decision, so a later trigger binds once the grant has its name.
+  - **Nothing to migrate.**
+- 0253192: Grants name their permission set, with no `sys_permission_set` row read (ADR-0131 D4)
+  
+  - `@objectstack/plugin-auth`: the self-registration grant names the declared set alone. Admission asks the security catalog and the activation ledger whether the set grants, and the settlement writes `{ user_id, permission_set }` with no row read, so a deployment with no `sys_permission_set` row for the set still grants it. The last-administrator guard reads which set a grant holds from its name only; writing `permission_set_id` moves no standing.
+  - `@objectstack/verify`: the RLS probe persona's grant names the registered probe set alone; it no longer needs, or refuses for want of, a boot-seeded `sys_permission_set` row.
+  - `@objectstack/platform-objects`: Setup's user page grants a permission set by name: the Add picker stores the set's machine name (`valueField: 'name'`, `linkField: 'permission_set'`), and the list shows the name column. The picker still lists `sys_permission_set` rows; listing the security catalog itself is a console change.
+- 4935c66: The startup banner prints one line per warning class, each warning appears once, and a localhost boot no longer warns that OAuth is unencrypted.
+  
+  Clause-②: no
+  
+  - **One line per class.** Flows that declare a trigger but are not bound are grouped by trigger type and reason, with the flows listed: `⚠ 8 flows declare a 'schedule' trigger but are NOT bound — disabled by deployment policy — … (OS_AUTOMATION_SCHEDULED_WORK_ENABLED is unset or not truthy), so no time trigger arms …: flow_a, flow_b, …`. Before, the full reason (up to ~650 characters) printed once per flow. The banner now shows the reason's first sentence; `--log-level debug` still streams each flow's full reason. A real binding failure, or a missing trigger, keeps its own line, worded as before.
+  - **Printed once.** *Boot diagnostics* no longer repeats the automation plugin's per-flow `… is NOT bound` and shadowed-flow warnings, which the banner's `Flows:` list already shows. Its header counts them instead: `(8 more already listed above)`. Every other boot warning replays exactly as before. A boot that fails before the banner still replays all of them.
+  - **OAuth on loopback.** `OAuth is served UNENCRYPTED: …` is logged at `info` when the issuer's host is loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`), so it is not shown at the default `warn` level. It stays `warn` on a private or link-local issuer. The sentence and the transport rule are unchanged.
+  - ⛔ Nothing you author changes. Which flows bind, the scheduled-work switch, the transport rule, the service-automation warning an embedded host reads, and every public key, export and parameter are unchanged.
+- 6ff6ed6: A first boot no longer logs a refused `sys_migration` insert, and the owner-bind ledger row records the outcome that happened
+  
+  Clause-②: no
+  
+  On every first boot (`os serve` and `os dev`, on `:memory:`, file SQLite and PostgreSQL), *Boot diagnostics* showed `WARN Insert operation failed {"object":"sys_migration", … UNIQUE constraint failed: sys_migration.id}` with a full stack. The one-time default-organization owner bind (`createEnsureDefaultOrganizationOnce`, ADR-0093 D7) re-entered itself: the owner write makes the security plugin grant `organization_admin`, that grant insert is a bootstrap trigger, and the inner call recorded the decision first. It recorded `admin-already-member` with no organization. The outer call's accurate record (`promoted` or `bound`, with the organization id) was then refused. Nothing was bound twice. The ledger row named the wrong outcome.
+  
+  The gate now marks the decision in flight before its first `await`. A call that finds it in flight still creates a missing Default Organization, but binds nobody and records nothing. The deciding call records its own outcome once. A call that did not act (no platform admin yet, or a refused write) clears the mark, so the next trigger still decides.
+  
+  - **Nothing you author changes.** No key, export or option is added or removed. The walled `@objectstack/organizations` wiring calls the same gate and gets the same rule.
+  - **A real ledger write failure is still reported.** Only the gate's own second write is gone; a refused `sys_migration` insert for any other reason still logs at `error`, with the remedy.
+  - **Rows already written are not rewritten.** A deployment whose first boot recorded `admin-already-member` keeps that row; nothing reads its `details`.
+- 0ee2d15: A seeded boot no longer reads the `auth` settings before the settings engine binds
+  
+  Clause-②: no
+  
+  Under `os serve` and `os dev`, an app with inline seed data emits `app:seeded` while plugins are still starting. The auth plugin's one-time membership backfill (ADR-0093 D6) ran on that event. Through it, the plugin bound the `auth` settings namespace before `SettingsServicePlugin` had bound its data engine. The boot logged `[SettingsService] Pre-bind READ of namespace 'auth'`, and the binding was computed from the manifest defaults, not from the saved `auth` settings. Measured on the showcase: one such line on every boot.
+  
+  The backfill is now armed by its own `kernel:ready` hook, which runs after the settings plugin binds its engine. A trigger of the pass before that hook does nothing: the `kernel:ready` pass runs afterwards and scans the same rows. A seed that settles after `kernel:ready` still re-runs the pass, as before.
+  
+  - **Which settings are read is unchanged.** Only the moment of the first read moves.
+  - **A saved `auth.membership_policy` governs the one-time pass.** Before, the pass's first run could read the manifest default `auto` while a saved `invite-only` sat unread.
+- 4f4c4ed: fix(auth,services): the remaining in-process session reads no longer renew a browser session behind its cookie (#22258)
+  
+  **What was wrong.** better-auth's `getSession` renews a session older than `session.updateAge`: it moves `sys_session.expires_at` to `now + expiresIn` and stages the renewed session cookie on that call's own response. Nine doors in these packages read the session in-process (`auth.api.getSession({ headers })`) and answer with their own response, so the renewal landed in the database and its cookie was discarded. The browser kept its old cookie, which then expired before the session: a dead cookie beside a live bearer, after which every cookie-only path saw a signed-out user. The doors: `POST /api/v1/auth/admin/oauth2/toggle-disabled`, every `/api/v1/auth/admin/*` mount behind the shared platform-admin gate, `POST /api/v1/auth/admin/unlock-user` and `POST /api/v1/auth/admin/has-permission` (`@objectstack/plugin-auth`); `POST /api/v1/webhooks/redeliver`; the storage upload and download doors (`/api/v1/storage/*`); the share-link management routes (`/api/v1/share-links`); the settings routes (`/api/settings`); and the datasource-admin routes (`/api/v1/datasources/*`).
+  
+  **The rule now** is the one the REST, dispatcher, current-user and cloud-connection doors already follow. Each of these reads goes through `inProcessSessionReadInput(headers)` from `@objectstack/types`:
+  
+  - **A request carrying a session cookie** (a browser, including a console that sends its cookie beside its bearer) reads with `query.disableRefresh`. The session renews only through `GET /api/v1/auth/get-session`, which re-issues the cookie with `Max-Age = expiresIn`, so cookie and session expire together.
+  - **A bearer-only request** (`@objectstack/client` outside a browser, the `os` CLI) is unchanged: a read past `updateAge` still renews the session, and no cookie is set on a response to a request that sent none.
+  
+  **Upgrading.** Nothing to change. `@objectstack/plugin-webhooks` now depends on `@objectstack/types` directly; it already reached it through `@objectstack/core`.
+- 8a995b8: The auth plugin registers its `app:seeded` membership-backfill handler when its backfill is armed, not when the plugin starts
+  
+  Clause-②: no
+  
+  The one-time membership backfill (ADR-0093 D6) re-runs on `app:seeded`, so users written by a seed that settles after `kernel:ready` still get a membership. Its handler used to be registered in `start()` and kept from acting early by a runtime flag: until the backfill's own `kernel:ready` hook armed it, the handler returned without doing anything. The handler is now registered by that `kernel:ready` hook, at the moment it arms the backfill, so it does not exist before the settings engine binds. The boot-ordering gate reads this from the source, which it cannot do with a flag.
+  
+  - **What the backfill does is unchanged.** An `app:seeded` that fires before the backfill is armed still does nothing, and one that fires after it still re-runs the pass.
+  - **No option, setting or export changes.** `OS_SKIP_MEMBERSHIP_BACKFILL=1` still registers no `app:seeded` handler at all.
+- 6f4c518: fix(plugin-auth): a fresh `os dev` database opens on the console shell, not on the "Set the workspace timezone" dialog — the dev seed gives the workspace it lands its admin in the host's time zone
+  
+  Clause-②: no
+  
+  **FROM.** The dev admin seed (`NODE_ENV=development`, on unless `OS_SEED_ADMIN=0`) created its admin and left the admin's workspace with `localization.timezone` unset. The console asks an administrator for a zone while that key still resolves from the manifest default, so every fresh `os dev` database (each `--fresh` run, each new database file) opened on the dialog. The console's own workspace-creation paths already send the creator's browser zone; the seed did not go through them.
+  
+  **TO.** On the boot that seeds the admin, the seed writes the host's resolved zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`, so `TZ` chooses it) to `localization.timezone` for each organization the admin is a member of. Under the default `single` posture that is the Default Organization. The write goes through the settings service, the same door the dialog's confirm uses. It is one `tenant` row per organization, with the key's IANA zone check applied there.
+  
+  **Unchanged.**
+  - A zone already set on any rung (the organization's, the global one, an `OS_LOCALIZATION_TIMEZONE` override) is never overwritten.
+  - A host that reports no zone, or reports one the settings door refuses, gets nothing written. The workspace keeps the default and the dialog still asks.
+  - Boots after the seeding one write nothing, so a database that already exists is not touched.
+  - Production is not affected: the seed stays gated to `NODE_ENV=development`.
+  - `sys_organization.timezone` is a separate key, which the dialog does not read. It is not written.
+  
+  **Note for in-process test boots.** `@objectstack/verify`'s harness forces `NODE_ENV=development` to get the seeded admin, so its boots now give that admin's workspace the host's zone too. On a host in `UTC` the resolved value is the same as before. On a host in another zone, a suite that relies on the default `UTC` can set `TZ=UTC`, or set the zone through `PUT /api/settings/localization` as it would for any workspace.
+- e611e2b: fix(plugin-auth): a user import reports an invitation that the email transport failed to deliver
+  
+  Clause-②: no
+  
+  Setup › Users › Import (`POST /api/v1/auth/admin/import-users`) used to report an email invitation as delivered when the email transport failed. The import invites by asking better-auth for a password reset, and better-auth catches whatever the send throws and still answers `{ status: true }`. So the import's `INVITE_EMAIL_FAILED` path was never reached by a failed delivery: the row read `delivery: 'email'`, and `summary.errors` stayed `0`.
+  
+  - **A failed invitation is now reported on its row.** This covers a transport that answers `failed` and a transport that throws. The row is `ok: false`, has no `delivery`, carries `code: 'INVITE_EMAIL_FAILED'` and an `error` naming the transport's reason, and is counted in `summary.errors`. Its `action` stays `'created'` and its `id` stays, because the account exists. The fix is to send the invitation again or to set the user's password as an admin. The import does not roll the row back and does not fall back to a temporary password.
+  - **The SMS invitation reports a failure the same way.** A phone-only row whose invitation SMS fails is `ok: false` with no `delivery`, carries `code: 'INVITE_SMS_FAILED'`, and is counted in `summary.errors`. Before, it read `delivery: 'sms'` and was not counted.
+  - **A delivery is reported only when the email service accepts it.** A row is reported delivered when the service answers `sent` or `queued`. If the reset request answers without the service accepting the message, the row is reported failed, never delivered.
+  - **`summary.delivery` counts only deliveries that succeeded.** A row whose invitation failed is counted in `summary.errors` and in `summary.created`, so `created + updated + skipped + errors` exceeds `total` by exactly those rows.
+  - **A successful invitation is reported as before.** A public `POST /api/v1/auth/request-password-reset` is unchanged: it answers the same thing whether the address's mail went out, failed, or has no account behind it.
+- 0cfd0c4: Clause-②: no
+  
+  A session minted by `IAuthService.mintPrincipalSession` is no longer refreshed by a read. Before,
+  `get-session` (and every endpoint that reads the session) still renewed it on each request: #23772's
+  guard held its expiry, but the row's `updatedAt` was rewritten, the session cookie was re-set with a
+  7-day `Max-Age`, and `bearer()` answered `set-auth-token`. The console reads that header as a token
+  rotation, so a browser carrying a minted cookie stayed on "Opening your console…" and the print
+  service could not render under the requesting user. A request that carries a minted session now
+  sets better-auth's own per-request skip-refresh switch, on the cookie lane, the bearer lane and
+  in-process. The mint's contract, TTL, refusals and revoke are unchanged.
+- 03ac4ec: fix(plugin-auth): the invitation role cap's refusals on `POST /organization/invite-member` carry an error code, and a membership read that fails answers `503` instead of a refusal
+  
+  Clause-②: no
+  
+  The role cap in `beforeCreateInvitation` refused with `403` and a message but no `code`, while better-auth's own `owner` refusal on the same endpoint carries one. A client, the console's Invite User dialog among them, could not tell the refusals apart without reading English prose. Each refusal now carries the code the error-code ledger registers for it under `@objectstack/plugin-auth`, in the same `{ message, code }` body:
+  
+  - `INVITE_ROLE_ABOVE_ISSUER`: the requested role grades above the issuer's own, for example a `delegated_admin` inviting as `admin`.
+  - `INVITE_ISSUER_MEMBER_ONLY`: an issuer below admin grade asked for a role other than a plain `member`, for example a `delegated_admin` inviting as `delegated_admin`.
+  - `INVITE_ISSUER_UNVERIFIED`: fail-closed. The issuer's membership role was not established: the read found no usable `sys_member` row, or the `AuthManager` has no data engine to read from.
+  
+  A membership read that throws is a store outage, not a verdict about the issuer. It used to answer the same `403` as an unverified issuer. It now answers `503` with the code `SERVICE_UNAVAILABLE`, as the organization slug guard does for its own read faults. No invitation is created either way.
+  
+  Unchanged: which invitations are admitted, the status of every refusal (`403`), better-auth's own `owner` refusal, and the exports.
+- d731b89: fix(identity): the Invite User dialog offers only the roles the caller may grant, read from the same table the invitation role cap enforces
+  
+  Clause-②: yes (widening)
+  
+  **What was wrong.** A `delegated_admin` who opened Invite User was offered Owner, Admin and Delegated Admin. The server's invitation role cap refuses all three for that issuer. The `role` param inherited one static option list from the field, and nothing told the client which roles this caller may grant.
+  
+  **What is new in `@objectstack/spec` (`identity`).** One table, `INVITATION_ROLE_GRANTORS`, says which issuer grades may invite as each membership role:
+  
+  | role | issuers that may grant it |
+  |---|---|
+  | `owner` | `owner` |
+  | `admin`, `delegated_admin` | `owner`, `admin` |
+  | `member` | any issuer (`INVITATION_ROLE_ANY_ISSUER`) |
+  
+  New exports beside it: `invitationRoleGrantors(role)` (a role the closed vocabulary does not list takes the `owner`, `admin` row), `invitationRoleGrantPredicate(role)` (the CEL gate, one `'<projected grade>' in current_user.positions` term per grade, `undefined` for an any-issuer row), `INVITATION_ROLE_OPTIONS` (the role picker's options, each carrying its gate as `visibleWhen`), and the types `InvitationRoleGrantors` and `InvitationRoleOption`.
+  
+  **`@objectstack/plugin-auth`.** The invitation role cap now reads that table to decide which invitations it admits. It refuses exactly what it refused before, with the same refusal text. A pin compares it with the previous implementation on 1,517 request and issuer pairs.
+  
+  **`@objectstack/platform-objects`.** The `role` param of the three `invite_user` actions (`sys_user`, `sys_member`, `sys_invitation`) declares `INVITATION_ROLE_OPTIONS` itself instead of inheriting the field's list. The option values and English labels are unchanged. A `delegated_admin` is now offered Member only, an admin Admin, Delegated Admin and Member, and an owner all four. The per-option gate is a UI courtesy; the server cap remains the authority. Because the options are declared on the param, their labels now translate under `_actions.invite_user.params.role.options.<value>`, and the bundles carry those keys in every locale.
+- f792290: Clause-②: no
+  
+  perf(plugin-auth, plugin-hono-server): an authenticated request reads 8 rows in 4 round trips before its handler, down from 11 in 7, and `/auth/me/*` resolves the caller's grants once
+  
+  Measured on a real engine (SQLite through `@objectstack/driver-sql`), for a signed-in user whose session has an active organization:
+  
+  | before the handler | before | after |
+  |:--|:--|:--|
+  | REST and dispatcher doors (`resolveAuthzContext` with the in-process session read) | 11 reads, 7 round trips | 8 reads, 4 round trips |
+  | `GET /auth/me/permissions`, `/auth/me/localization`, `/me/apps` | 17 reads, 9 round trips | 8 reads, 4 round trips |
+  | `GET /api/v1/auth/get-session` | 11 reads, 7 round trips | 10 reads, 6 round trips when it reads the signing key; 8 in 4 while the key is held |
+  
+  - **An in-process session read no longer signs a JWT.** better-auth runs `/get-session`'s after-hooks for a server-side `auth.api.getSession(...)` call too, so every door that asked "who is calling" had the jwt plugin read the signing key (two `sys_jwks` round trips) and sign a `set-auth-jwt` header the caller then discarded. The hook now runs only when the call answers an HTTP request. `GET /api/v1/auth/get-session` still carries `set-auth-jwt`, signed exactly as before. A server-side caller that wants the header dispatches the request through `AuthManager.handleRequest`.
+  - **The session token is not read back after the session was found by it.** `sys_session.token` is withheld from ordinary reads and recovered for better-auth through a privileged read. better-auth finds the session by its token, so that read had nothing to add. It was a second round trip between the session row and the user row on every session read. A read keyed on any other column still recovers the token.
+  - **`/auth/me/*` and `/me/apps` resolve the grants once.** These routes resolved the caller's grants twice per request: once inside the session read (for the payload's `positions[]`) and once more for their own context. They now resolve through `resolveAuthzContext`, whose request-scoped memo serves the second resolution from the first while no write has landed in between. The memo ends with the request. The routes still admit a session only, and the session's active organization stands as before.
+  - **An unreadable authorization store is an outage on `/auth/me/*` and `/me/apps`, not a signed-out caller.** Because these routes now authorize through `resolveAuthzContext`, they follow the rule every transport through it follows: a permission-store read that fails answers `503` with the code `SERVICE_UNAVAILABLE` (on `HonoHttpServer`'s error seam) instead of `{ authenticated: false }` or `{ apps: [] }`, which a client cannot tell from an anonymous caller. A store whose tables were never created is not an outage: those routes answer the signed-in caller with no grants, as before.
+  - **The signing key is held across requests, under two bounds.** The keyring the jwt plugin signs with is kept after a read. Any write to `sys_jwks` that passes this process's engine drops it at once, and it is never kept longer than 30 seconds, which bounds a write this process cannot see (another node minting a key). An engine without a middleware seam keeps nothing. On a host without Ed25519 the keyring is still filtered to keys the host can use.
+  
+  Unchanged: the session and user every door resolves, every grant, the `/get-session` body and its renewal, every option and environment variable, and the exports. No new configuration key. The one answer that changes is the outage answer above.
+- 9040945: fix(plugin-auth): the MCP access-token verifier follows the signing keyring instead of holding its own copy of the key set for five minutes
+  
+  Clause-②: no
+  
+  - **What changed.** `AuthManager.verifyMcpAccessToken` no longer keeps its own copy of the signing key set for five minutes. It reads the key set on every call through the same keyring reader the token signer and `/jwks` use, so the set it checks a signature against is held only under both halves of the cross-request caching rule: a `sys_jwks` write that passes this process's data engine retires it in the same operation, and a 30-second bound covers a write the process cannot see, such as one made on another node.
+  - **A token signed by a key the set does not carry gets one fresh read.** Before such a token is refused, the keyring is read once more from the table, and the token is checked again. That read is shared by every token that arrives while it is in flight, and a new one starts no sooner than 30 seconds after the previous one, so tokens that name keys which do not exist cost at most one keyring read per 30 seconds. A token whose key is still absent after that read is refused, as before.
+  - **Unchanged.** Issuer, audience, expiry, the `client_credentials` refusal and the `organization_id` claim are checked exactly as before. Only the public key set `/jwks` publishes is used for verification. No export, configuration key or environment variable is added.
+- af284b0: feat(spec): the remaining `getSession` readers read `AuthSessionApi`'s declared result, and none reads a top-level `activeOrganizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains three optional `user` members**, each declared for a named reader: `isPlatformAdmin` (`boolean`, the ADR-0068 D2 rung plugin-auth's `customSession` derives) and `role` (`string | null`, better-auth's `admin` plugin scalar), both read by `judgePlatformAdmin` in `@objectstack/plugin-auth`; and `name` (`string`), read by the runtime dispatcher's AI-route `req.user` resolver as the display name. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **The readers read through the declared type instead of `any` or a cast** (types only, runtime behaviour unchanged): `judgePlatformAdmin` and the four platform-admin mounts in `@objectstack/plugin-auth` (better-auth's own session type now has to fit the declaration at those reads), the REST server's two session reads (`@objectstack/rest`), the dispatcher's posture read, `resolveSessionData` and both `HttpDispatcher` reads (`@objectstack/runtime`), the cloud-connection and install-local session reads (`@objectstack/cloud-connection`), the webhook redeliver door (`@objectstack/plugin-webhooks`), and the storage session bridge (`@objectstack/service-storage`).
+  - **Fix — the top-level `activeOrganizationId` fallback is removed** from the storage upload stamp (`@objectstack/service-storage`) and from install-local's `resolveActiveOrgId` (`@objectstack/cloud-connection`). The active organization is read from `session.activeOrganizationId` alone, where the contract declares it. No in-process producer answers a top-level `activeOrganizationId` (better-auth's read is `{ user, session }`), so for the shipped auth plugin nothing changes. An auth service that answered only the flattened shape now gets no organization: the upload is not stamped, and install-local reports no active organization. To fix it, answer the active organization on `session.activeOrganizationId`, as `AuthSessionApi` declares it.
+- 83dfbc0: fix(plugin-auth): the organization, invitation-placement and phone-OTP hook refusals carry their ADR-0112 codes
+  
+  Clause-②: no
+  
+  Eight refusals thrown from plugin-auth's better-auth hooks answered with `message` alone, so a client could only show or match English prose. Each now carries a `code` it can branch on, and keeps its HTTP status.
+  
+  - `POST /auth/organization/create`: the reserved `__global__` id or slug answers 400 `VALIDATION_ERROR`. Where the deployment's effective tenancy posture enforces no organization wall (`/auth/config` publishes `features.multiOrgEnabled: false`), creating an organization answers 403 `ORGANIZATION_CREATION_DISABLED`.
+  - `POST /auth/organization/invite-member` with placement intent (`businessUnitId` and `positions`): with no delegated-administration runtime to authorize it, 403 `INVITE_PLACEMENT_UNSUPPORTED`; refused by the delegated-administration gate, 403 `INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE`.
+  - `POST /auth/organization/update` with a new slug: while the organization has an active environment (any environment that is neither archived nor failed), 403 `ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS`. Its message no longer says environments "still reference" the organization or tells you to rename their hostnames: the guard reads no hostname, and archiving those environments is the remedy. When the guard's own read cannot answer, 503 `SERVICE_UNAVAILABLE`.
+  - Phone OTP sends (`/auth/phone-number/send-otp`, `/auth/phone-number/request-password-reset`): the per-number limit and the deployment's daily SMS quota both answer 429 `RATE_LIMIT_EXCEEDED`. It is one code for both walls, so a caller still cannot tell which budget it hit. The body is better-auth's flat `code` and `message`, with no `Retry-After` header.
+  - **One behaviour change:** a placement check that fails before the gate reaches a verdict (the issuer's grants could not be read from the store) now answers 503 `SERVICE_UNAVAILABLE`, not a 403 scope refusal carrying the store's message. No invitation is created either way.
+- 9524666: fix(plugin-auth): the self-registration grant settles on the registrant's first membership, owned by that organization (ADR-0131 D3)
+  
+  Clause-②: no
+  
+  The declared self-registration permission set (`auth.audience.selfRegistrationPermissionSet`) is an assignment, and an assignment is an organization row (ADR-0131 D3). It is now written with the registrant's first membership and owned by that membership's organization, under every posture. It is never written without an organization.
+  
+  - **`single`: unchanged.** The membership reconciler binds the Default Organization in the same `user.create.after` hook, so a sign-up still ends with one grant, owned by the Default Organization.
+  - **A wall (`group`, `isolated`).** A self-registrant belongs to no organization at sign-up, so the sign-up writes no `sys_user_permission_set` row. It used to write one with no organization. The grant is held as a pending claim in `sys_verification`, which is deployment-level and survives a restart. The first `sys_member` row written for the user lands exactly one grant, owned by that organization. That row can come from creating an organization (the creator becomes its owner), accepting an invitation, being added by an administrator, or any other membership writer. A later membership writes no second grant.
+  - **The claim waits 365 days.** A registrant who first joins an organization after that holds only the deployment's baseline. An engine with no middleware seam cannot settle a claim, so there a registrant with no organization is reported ungranted at `error` at sign-up instead.
+  - Grants already written without an organization by earlier walled sign-ups are not touched here.
+- d65826f: fix: framework writes on tenant-column objects name the organization they can derive (ADR-0131 D9)
+  
+  Clause-②: yes (widening)
+  
+  A write on a tenant-column object with no organization is derived under `single` and refused under a wall (ADR-0131 D9). Before the engine stops letting such writes through, each of these producers now names the organization it can derive itself. Under `single` that is the Default Organization, which is the owner the engine would derive anyway, so no reader changes. Under a wall the row names an organization only where the producer has one. The rows it cannot attribute are written exactly as before.
+  
+  - **`@objectstack/plugin-auth`.** The self-registration grant (`sys_user_permission_set`) and the auth mails about a user (verification, password reset, account invitation, magic link, change-email notice → `sys_email`) read one derivable organization: the `tenancy` service's `defaultOrgId()`. Under `single` that is the Default Organization. Under a wall it is none, because the registrant belongs to no organization yet. The verification and reset mails used to persist with no organization even under `single`.
+  - **`@objectstack/plugin-audit`.** An activity row (`sys_activity`) about a record with no organization of its own (a `sys_user`, a platform setting), written with no session organization (a sign-up), takes the Default Organization under `single`. The record's own organization and then the session's still win. The ledger's `tenant_id` attribution is unchanged. New optional `AuditWriterOptions.getDefaultOrganizationId()`; `AuditPlugin` wires it to the `tenancy` service.
+  - **`@objectstack/service-settings`.** The `sys_secret` ciphertext and the `sys_setting_audit` history row of a `tenant` or `user` value carry that value's organization, which is the same owner as its `sys_setting` row. A `global` value's rows name none. New optional `organization_id` on `SettingsSecretStore.insert`'s row and `organizationId` on `SettingsAuditWriter.write`'s entry; the built-in writers persist them. A failed `sys_setting_audit` write is now reported at `error`, not `warn`: the settings write succeeds while its history row is lost. The first report names the consequence and the fix. `buildSettingAuditWriter`'s optional logger argument keeps every sink it accepted (none, `{}`, or one with an optional `warn`) and additionally takes a sink that carries `error`. It reports through `error` when the sink has it, else through `warn`.
+  - **`@objectstack/verify`.** The RLS probe and position personas' grants (`sys_user_permission_set`, `sys_user_position`) belong to the organization the persona is a member of (the Default Organization under `single`). They used to be written with an explicit `organization_id: null`. A persona that belongs to no organization, or to several, names none.
+- 44a5011: Clause-②: no
+  
+  Refusals and Setup help text that a user reads inside the running system no longer call that system
+  "this environment". They say "this system", or they drop the noun.
+  
+  - `@objectstack/plugin-auth`: the two self-registration refusals drop the noun ("Self-registration is
+    closed (audience posture invite_only).", "Self-registration is limited to approved email domains, …").
+    So do the OAuth self-service `503` ("OIDC provider is not enabled") and the SSO `400`
+    `DOMAIN_VERIFICATION_DISABLED` ("Domain verification is not enabled (set
+    OS_SSO_DOMAIN_VERIFICATION)."). The last-administrator guard's refusals and its two warning lines say
+    "this system", including "nobody able to administer the system". The OIDC authorize-gate refusal
+    (`403 ENV_ACCESS_DENIED`) keeps "this environment". Only the cloud control plane installs that gate,
+    and there the noun names the environment a cloud user is signing in to.
+  - `@objectstack/plugin-security`: the diagnostic `message` of the packaged-permission-set lock now reads
+    "… is declared by package '…' and is locked — editing it here would …". The provenance-unknown
+    refusal says "this system could not determine …". Both `userMessage` texts are unchanged.
+  - `@objectstack/service-settings`: the Mail and SMS provider groups read "Choose how this system sends
+    outbound email." and "… outbound SMS.". The Authentication audience group reads "Who may become a user
+    of this system's apps.". The zh-CN, ja-JP and es-ES bundles change only the noun, to 本系统,
+    このシステム and este sistema.
+  
+  Only the human-readable text moves. Every HTTP status, error code, settings key and response shape
+  stays as it was.
+- e22defb: fix(plugin-auth): a migrate-and-exit boot (`OS_MIGRATE_AND_EXIT=1`) no longer provisions the development admin, whatever `NODE_ENV` says
+  
+  Clause-②: no
+  
+  - **What changed.** `objectstack serve` reads `OS_MIGRATE_AND_EXIT` only after the kernel bootstrap, and the dev-admin seed runs on `kernel:ready`, inside that bootstrap. So a migration run with `NODE_ENV=development` seeded exactly as a dev boot does: run against an empty database, it left a known-credential login behind. `isDevAdminSeedArmed()` now answers "not armed" when `OS_MIGRATE_AND_EXIT` is `1`, the same spelling `serve` exits on, and the clause wins over an explicit `OS_SEED_ADMIN=1`. A migrate-and-exit boot of an empty database now creates no `sys_user` row and no `sys_account` row.
+  - **The walled owner check follows.** It reads the same function, so on a migration run the seed no longer counts as a way to verify a declared platform owner. A walled migrate-and-exit boot of an empty database completes its schema sync as before; it just seeds no login.
+  - **Unchanged.** The `objectstack dev` seed: still armed under `NODE_ENV=development` on a database with no login, and still off under `OS_SEED_ADMIN=0`. Any `OS_MIGRATE_AND_EXIT` value other than `1` is a boot that goes on to serve, and keeps its seed. A database that already holds a login was never seeded and is not touched.
+  - **If a pipeline relied on the seed.** Create the first account through the deployment's own provisioning path after the migration step, as a production deployment does.
+- ef1fcb2: A declared index states its uniqueness scope: bare `unique: true` on `indexes[]` is refused (protocol 18, ADR-0120 D1/D7), stored metadata converts it to `unique: 'global'` with zero drift, and `VISIBILITY_STRICT_OPTIONS` leaves `@objectstack/spec`'s public surface.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered declared-index-bare-unique-true-retired, visibility-strict-options-unexported -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface and one export removal, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not in on `main`).
+  
+  **Why.** On a declared index, bare `unique: true` was the one `unique` spelling whose scope was positional. It built the index over exactly `fields`, one holder across the whole installation, while reading like "unique per organization" to an author who knew the field-level meaning. 17.x warned (lint `unique/unscoped-declared-index`). Protocol 18 refuses it, so the scope is always stated.
+  
+  **What is refused.** A declared index (`objects[].indexes[]`, `objectExtensions[].indexes[]`) whose `unique` is bare `true`. The refusal names both replacements, and says which one keeps the index bare `true` built. It is raised by:
+  
+  - the schema (`IndexSchema.unique`, now `false | 'global' | 'organization'`), at every door that parses: `ObjectSchema.create()` and `ObjectSchema.parse()`, `defineStack`, `os validate`, `os build`, and the runtime save door (`422 INVALID_METADATA`). `tsc` refuses it too, because the input type no longer admits `true`;
+  - lint `unique/unscoped-declared-index`, now an `error` and a gating rule on all three commands. It is what refuses the spelling under `os lint`, which never parses.
+  
+  **What converts.** The protocol-18 ADR-0087 conversion `declared-index-unique-scope` rewrites a declared index's bare `true` to `'global'` on every data-at-rest seam: stored `sys_metadata` rows (`applyConversionsToStoredItem`), built artifacts inside their declared-floor window, and `os migrate meta --from 17`. `'global'` is exactly the index bare `true` built, so the physical index is byte-identical and the drift plan is empty. It is retired from the authoring funnel, so a live author is refused and taught instead of converted silently.
+  
+  **What stays accepted.** Field-level `unique: true` still means one holder per organization and stays valid indefinitely. On a declared index, `unique: false` or omitted, `'global'` and `'organization'` parse exactly as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `indexes: [{ fields: [...], unique: true }]` | `indexes: [{ fields: [...], unique: 'global' }]`: the same index, nothing on disk changes |
+  | …the same, when you meant one holder per organization | `unique: 'organization'`: the driver prepends the NULL-safe organization key part at registration, and `os migrate plan` shows the index change |
+  | `import { VISIBILITY_STRICT_OPTIONS } from '@objectstack/spec/shared'` (or the root entry) | delete the import: it was an internal option bag for the spec's own visibility-carrying schemas, and those schemas are unchanged |
+  
+  **The one-line fix: on every declared index, write `unique: 'global'` where you wrote `unique: true`.** Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **Who is affected, measured.** At `e67ba80049`, an AST census found 48 declared indexes with bare `unique: true` in 39 source files of this repository, all platform and plugin objects. Every one is respelled `'global'` in this change, and the nine-key S5 corpus is pinned to build byte-identical indexes before and after (`driver-sql`'s `sql-driver-unique-tenancy.test.ts`). `examples/**` and `apps/**` carry none. Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `IndexSchema.unique` in `data/object.zod.ts`, with its own prescription. The lint rule moved from `warning` to `error` and from advisory to gating.
+  - **The conversion.** `declared-index-unique-scope` (`toMajor: 18`, retired from the load path, `retiredAfter: '17.7.0'`), with its S4/S5 fixture.
+  - **The ledger.** The D3 semantic entries `declared-index-bare-unique-true-retired` (the scope each respelled index really meant is the author's call) and `visibility-strict-options-unexported`, plus a step-18 rationale fragment.
+  - **The export.** `VISIBILITY_STRICT_OPTIONS` moved to the unbarrelled `shared/visibility-strict-options.ts`, beside its type `StrictObjectOptions`. `check:api-surface` counts the removal.
+  - **The pins.** The "`'global'` is a synonym of `true`" driver pin retired with the bare spelling. The verbatim pin is stated in `'global'`.
+- c7a3234: perf(core,plugin-auth): an authenticated request resolves its caller's grants once, not twice
+  
+  Clause-②: no
+  
+  `resolveAuthzContext` learns who the caller is from the transport's `getSession`. Against `@objectstack/plugin-auth` that is better-auth's `getSession`, whose `customSession` hook resolves the principal's grants for the session payload's `positions[]` and `isPlatformAdmin`; `resolveAuthzContext` then resolved the same grants again, with the same arguments, for the request's envelope. Every authenticated request on a door that resolves identity through `resolveAuthzContext` with a better-auth session read (the runtime dispatcher and the REST server among them) paid every grant read twice: eight reads per resolution for a caller in an organization.
+  
+  `resolveAuthzContext` now runs inside a request-scoped grants memo. A resolution that already completed inside the same call, with the same user, organization and seeds, is served to the next caller that asks for exactly that resolution, so the hook's resolution serves the resolver's own. The decision a request is authorised with is unchanged:
+  
+  - The memo lives for one `resolveAuthzContext` call (an `AsyncLocalStorage` scope, closed when the call settles). Nothing is cached across requests; the cross-request grants cache keeps its own default-off switch, `OS_AUTHZ_GRANTS_CACHE_TTL_MS`.
+  - An entry is served only when a fresh read would agree with it. No write may have started, been executed at the driver, or still be in flight on the engine since the first resolution opened: the engine's write epoch (bumped when a write starts) and a write observer the memo registers as an engine middleware (counting writes into the chain and, after the driver step, out of it) must both read what they read at the open, with nothing inside the chain. The observer sees statement execution, not commit visibility. A write inside an `engine.transaction()` becomes visible only at its COMMIT, outside every chain. On driver-sql (not on the Turso remote face, which opens no transaction), a request whose step 2 falls inside that one commit round trip is authorised as of its first resolution, and the next request reads fresh — the same answer as a write from another process. No grant validity boundary may lie between the two clocks. The organization must be the same (the session arm's dropped-claim re-resolution is its own entry). A `bypassGrantsCache` caller is never served, a failed resolution is never stored, and an engine without the write-epoch seam or `registerMiddleware` declines entirely.
+  - `plugin-auth`'s hook now passes the session's email as its seed email, exactly as `resolveAuthzContext` does for the same session, so the two calls ask for the same resolution. The seed reaches only the envelope's `email`, which the hook does not read: the payload's `positions[]` and `isPlatformAdmin` are unchanged, and platform-admin standing still compares the stored `sys_user.email`, never a seed.
+  
+  Where the saving does not apply, the request reads the grants twice, as before — always the safe direction:
+  
+  - a request that meets a concurrent write on its engine;
+  - a request whose session read itself writes: the first request on a fresh auth instance generates its signing key, and with an idle timeout configured `enforceSessionControls` stamps `sys_session.last_activity_at` about once a minute per session;
+  - the first `resolveAuthzContext` call on an engine, which registers the write observer and stores nothing for it.
+- Updated dependencies [5a871e4]
+- Updated dependencies [ffba02e]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [1b40780]
+- Updated dependencies [d11fa8c]
+- Updated dependencies [ca426cb]
+- Updated dependencies [4ad3ce5]
+- Updated dependencies [8016a9d]
+- Updated dependencies [df9d07e]
+- Updated dependencies [8eac321]
+- Updated dependencies [a5a781b]
+- Updated dependencies [9a7838e]
+- Updated dependencies [191e043]
+- Updated dependencies [b12e16a]
+- Updated dependencies [fbafb85]
+- Updated dependencies [35450f0]
+- Updated dependencies [6464df3]
+- Updated dependencies [1e8b628]
+- Updated dependencies [12d1476]
+- Updated dependencies [bd6dab0]
+- Updated dependencies [14ccb1d]
+- Updated dependencies [c0803b0]
+- Updated dependencies [d117382]
+- Updated dependencies [4bc3bec]
+- Updated dependencies [1f949da]
+- Updated dependencies [ecb7b44]
+- Updated dependencies [41edf73]
+- Updated dependencies [1c1144f]
+- Updated dependencies [014863d]
+- Updated dependencies [3983965]
+- Updated dependencies [3230d66]
+- Updated dependencies [3230d66]
+- Updated dependencies [0c910d5]
+- Updated dependencies [5fcc794]
+- Updated dependencies [9d13b5f]
+- Updated dependencies [317cddd]
+- Updated dependencies [b2e7870]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [dac99c2]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [48cca4a]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [66949b7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [f9b4217]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [7958bdf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [a7a48b7]
+- Updated dependencies [b88c356]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [1fb274e]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [0db5ad5]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [4e4111c]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [3aa0c7b]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [0b7ba4d]
+- Updated dependencies [4578c56]
+- Updated dependencies [fbcbcf1]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [746637e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [166a94f]
+- Updated dependencies [b2549a8]
+- Updated dependencies [7806a14]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [194a42d]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [4b7c630]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [9859e4e]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [d952358]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [31b5a5f]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [87e902d]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [777eed2]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [3fdb92d]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [ed03834]
+- Updated dependencies [e1deaef]
+- Updated dependencies [3071d3e]
+- Updated dependencies [d294951]
+- Updated dependencies [6a6a4d3]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [4216796]
+- Updated dependencies [a22e67b]
+- Updated dependencies [5f37d36]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [646303e]
+- Updated dependencies [e9bc60b]
+- Updated dependencies [52ff308]
+- Updated dependencies [d1f082d]
+- Updated dependencies [8464380]
+- Updated dependencies [8c10776]
+- Updated dependencies [8024e12]
+- Updated dependencies [c4b84ad]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [1912af4]
+- Updated dependencies [0511341]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [5d63c37]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [87d0619]
+- Updated dependencies [d9d7edd]
+- Updated dependencies [4e0838d]
+- Updated dependencies [d45d0e9]
+- Updated dependencies [60f9baf]
+- Updated dependencies [f5ef054]
+- Updated dependencies [0d34066]
+- Updated dependencies [584e737]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [301eec6]
+- Updated dependencies [572ecfb]
+- Updated dependencies [5547ad4]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [24e064f]
+- Updated dependencies [0f05907]
+- Updated dependencies [5e725b8]
+- Updated dependencies [086fa46]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [cac0be8]
+- Updated dependencies [1f3ac4f]
+- Updated dependencies [57994c3]
+- Updated dependencies [1eac7ad]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [f606ba2]
+- Updated dependencies [d176b0a]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c263588]
+- Updated dependencies [ee0e115]
+- Updated dependencies [7c6b7f4]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [0a052e6]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [c03077e]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [f7af839]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [5c2ac83]
+- Updated dependencies [a237d7f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [aefab7c]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [c1c0a90]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [45e6001]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [9f024d8]
+- Updated dependencies [9975c26]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [aaaeeac]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8259ea0]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [58a2faa]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [01fafde]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [26501ae]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [94e60c0]
+- Updated dependencies [741aa85]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [adb7910]
+- Updated dependencies [adb7910]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [b7a688e]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [8311650]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [325a92e]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/core@18.0.0
+  - @objectstack/spec@18.0.0
+  - @objectstack/platform-objects@18.0.0
+  - @objectstack/rest@18.0.0
+  - @objectstack/types@18.0.0
+  - @objectstack/service-messaging@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes

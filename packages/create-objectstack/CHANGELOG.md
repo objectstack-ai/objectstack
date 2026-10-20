@@ -1,5 +1,88 @@
 # create-objectstack
 
+## 18.0.0
+
+### Minor Changes
+
+- 19805d8: The blank starter ships a test story: `pnpm test` boots the scaffolded app's own stack with `bootStack` from `@objectstack/verify` and asserts one business fact through its in-process handle
+  
+  Clause-②: no
+  
+  A project scaffolded with `npx create-objectstack` used to start with no `test` script and no way to assert its own behaviour, so the first test an author wrote was a hand-assembled kernel or a faked `ctx`. The blank template now carries:
+  
+  - **`note.test.ts`**, one starter test. It boots the app the project declares (its objects, its plugins, the services it requires) on the real engine, in-process, with an in-memory database and no server, and asserts that a note without a title is refused with the engine's own `VALIDATION_FAILED` error naming `title`, beside the same note with a title being saved. It addresses the object as `Note.name`, so it follows the namespace scaffolding writes.
+  - **`vitest.config.ts`**: a 60 s hook timeout for the boot, vitest's console capture switched off, so a log line the stack writes while a worker shuts down cannot fail a green run, and `OS_REGISTRY_LOG: 'warn'`, which drops the engine's one-line-per-registered-item boot log.
+  - **`package.json`**: a `test` script (`vitest run`), and `@objectstack/verify` (at the project's `@objectstack/*` range) and `vitest` as devDependencies. The vitest range is `~4.0.0`, the one `objectstack init -t plugin` and `objectstack create plugin` declare, and it is generated from that shared policy rather than written by hand, so the three scaffolders cannot drift apart. `~4.0.0` is the range that installs on npm 10, the npm Node 22 bundles; `^4.0.0` does not.
+  - **`tsconfig.json`** includes every root `*.ts` (`"*.ts"`, as `objectstack init` writes it), so `pnpm typecheck` checks the starter test and the vitest config.
+  - **`README.md`** lists `pnpm test` beside `validate`, `lint` and `typecheck`.
+  
+  The project's CI workflow is unchanged: its steps are the script set every scaffolder's project must declare, and `objectstack init -t app` declares no `test` script.
+- 5da2c0f: feat(create-objectstack): a scaffolded project installs its AI skills from the `@objectstack/skills` package at its own `@objectstack/spec` version, never from the repository's `main` branch
+  
+  Clause-②: no
+  
+  - **The project depends on the catalog.** The blank template's `devDependencies` gain `@objectstack/skills`, at the same `^<version>` as every other `@objectstack/*` dependency, so a new project's dependency set changes: the skills are the ones written for the `@objectstack/spec` it installs.
+  - **The install reads `node_modules`.** After `<pm> install`, the scaffolder runs `npx -y skills@1.7.2 experimental_sync --agent claude-code --copy -y`, which copies the installed package's catalog into `.claude/skills/` as real files, once, beside a `skills-lock.json` that names the package as every skill's source. The GitHub `npx skills add objectstack-ai/objectstack/skills …` command is gone from the run, its summary and the `AGENTS.md` and `README.md` it writes into the project.
+  - **The summary says what happened.** It names the package version installed and prints the same command for re-installing after an upgrade of the `@objectstack/*` packages, and for any other agent runtime. When the install leaves no catalog to read, or a skill did not come from the package, the run says so instead of reporting the skills installed.
+  - **The flags keep their meaning.** `--skip-skills` skips the skills step. `--skip-install` installs no skills, because nothing is in `node_modules` yet; the summary names `<pm> install` and then the sync command.
+  - **To move a project created earlier onto the package:** add `@objectstack/skills` to `devDependencies` at your `@objectstack/spec` range and run your package manager's install. Remove the skills `skills add` installed — `npx skills remove objectstack-data -y` and so on for each `objectstack-*` skill, or `npx skills remove --all` if you installed no others — because the sync skips a skill it did not install and leaves the old copy in place. Then run `npx skills@1.7.2 experimental_sync --agent claude-code --copy -y` (name your own runtime after `--agent`).
+
+### Patch Changes
+
+- 5f98778: fix(create-objectstack): the scaffolded Dockerfile installs from the lockfile the project carries
+  
+  Clause-②: no
+  
+  Where pnpm is on PATH, `create-objectstack` installs with pnpm and the project gets `pnpm-lock.yaml` and no `package-lock.json`. The `Dockerfile` it wrote copied `package*.json` and ran `npm ci`, so `docker build` stopped with `EUSAGE` before `os build` ran.
+  
+  - The build stage now copies `package.json` and whichever of `pnpm-lock.yaml`, `pnpm-workspace.yaml` and `package-lock.json` exist, then installs from the lockfile: `corepack pnpm@10 install --frozen-lockfile` for `pnpm-lock.yaml`, `npm ci` for `package-lock.json`. With neither, the build stops and says to install once and commit the lockfile.
+  - pnpm is pinned to major 10, the major the template's `.github/workflows/ci.yml` installs with. An unpinned Corepack takes the registry's newest pnpm, which the Corepack bundled with Node 22 could not run when this was measured.
+  - Unchanged: `os build` in the image, the runtime stage and its pinned image tag.
+  - A project scaffolded before this release keeps its own `Dockerfile`. To fix one, replace its `COPY package*.json ./` and `RUN npm ci` lines with the build stage shown in the self-hosting guide.
+- 31cd210: A new project's `pnpm-workspace.yaml` is now a short settings file: one comment line above each block instead of 57 to 66 lines of version history and measurements. `npm create objectstack`, `objectstack init` and a standalone `objectstack create` now write the same 21-line file.
+  
+  Clause-②: no
+  
+  - The settings are unchanged: `packages: []`, the same `onlyBuiltDependencies` and `allowBuilds` lists, and the same `peerDependencyRules.allowedVersions` entries, in the same order. A project installs exactly as before.
+  - Each block keeps one line that says why it is there: which pnpm versions read each build-approval key, and that the peer rules only silence a warning that was measured harmless.
+  - The measurements behind each setting now live in the `@objectstack/cli` source next to the values they explain, so they are kept up to date there instead of in every project.
+  - Already-scaffolded projects are not touched. Their longer comments can be deleted or kept; the settings are identical.
+- e4ad677: fix(create-objectstack): a project name that starts with the template's namespace scaffolds instead of being refused
+  
+  Clause-②: no
+  
+  A project whose namespace begins with the template's own namespace plus `_` (for example `blank-probe`, namespace `blank_probe`, under the `blank` template) was refused with exit 1: "1 object name(s) still carry the template's 'blank_' prefix … This is a bug in the scaffolder". The rewrite was correct (`blank_note` became `blank_probe_note`), but the check that verifies it tested each name against the template prefix alone, and `blank_probe_note` starts with `blank_`.
+  
+  - The check now reports a name as stale only when it carries the template's prefix and not the new namespace's prefix, so `blank-probe` scaffolds with objects named `blank_probe_*`.
+  - A name the rewrite really missed (`blank_note` under namespace `blank_probe`) is still refused, as before.
+  - The same rule applies to every template namespace; no name is treated specially.
+  - No migration: a project that scaffolded before this release is unaffected, and a name that was refused before can be scaffolded again.
+- d795719: fix(create-objectstack): a blank scaffold installs on npm 10 again — its `package.json` overrides `vitest` to the range it already declares
+  
+  Clause-②: no
+  
+  A project from `npm create objectstack` (or `npx create-objectstack`) could not be installed with npm 10, the npm that Node 22 bundles and the one the scaffolder falls back to when pnpm is absent. `npm install` exited 1 with `Cannot read properties of null (reading 'edgesOut')`. The template's own dependencies were not the cause. Optional `vitest` peers deeper in the dependency tree led npm 10 to vitest 4.1.12, whose peer declarations contradict each other, and npm 10's resolver crashes on that. npm 11 installs the same project.
+  
+  The blank template now ships:
+  
+  ```json
+  "overrides": {
+    "vitest": "~4.0.0"
+  }
+  ```
+  
+  This routes every `vitest` in the npm dependency graph to the range the project declares in `devDependencies`. npm 11 already resolves the whole tree to that version, and with the override npm 10.9.x installs the identical tree. pnpm does not read npm's `overrides` field, so pnpm installs are unchanged.
+  
+  If you change `devDependencies.vitest` in a scaffolded project, change `overrides.vitest` to the same value. npm refuses an override that differs from the direct dependency (`EOVERRIDE: Override for vitest@… conflicts with direct dependency`). An existing project that hits the `edgesOut` crash on npm 10 can install with npm 11 or later.
+- 0b69564: Clause-②: no
+  
+  When the dependency install fails (a network error, a registry outage, an engine mismatch, an npm crash), the
+  scaffolder's closing "Next steps" now lists `npm install` (or `pnpm install`, whichever package manager the run
+  detected) before `npm run dev` and `npm run validate`, the same as it does under `--skip-install`. Before, a
+  failed install printed the same list as a successful one, so the next command it named ran against an empty
+  `node_modules`. A successful install still prints no install step. No flag, exit code, prompt or scaffolded file
+  changes.
+
 ## 18.0.0-next.5
 
 No changes in this release.

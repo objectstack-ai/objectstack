@@ -2686,7 +2686,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2697,7 +2697,8 @@
         "app": "showcase",
         "requires": [
           "a showcase object with feeds enabled (default — enable.feeds !== false) so the discussion panel mounts and sys_comment writes are accepted (packages/spec/src/data/object.zod.ts feeds default true; plugin-audit enforceFeedsCapability)",
-          "a record to comment on (e.g. a seeded showcase_task or showcase_account)"
+          "a record to comment on (e.g. a seeded showcase_task or showcase_account)",
+          "for the recipient read-gate clause (acceptance[9]) on a stock `single` boot: the knownGaps[0] second user, a member of the same organization, and two admin-owned records — a showcase_private_note (sharingModel 'private', owner-only, examples/app-showcase/src/data/objects/private-note.object.ts), which the member cannot read, and a showcase_account (public_read_write), which the member can. The cross-organization leg needs a walled boot (RUNNER.md 'A walled boot is a fixture of its own') holding two organizations, with the comment's record in one and the mentioned user a member of the other only"
         ],
         "provisioning": {
           "use": "qa-feeds-disabled",
@@ -2705,7 +2706,8 @@
         },
         "knownGaps": [
           "the @mention TARGET and the bell/notification clauses need a SECOND signed-up user — a fresh single-user boot cannot exercise them; record those clauses blocked(fixture) and run the optimistic-reconcile + sys_comment + activity-interleave clauses as the single author",
-          "CLOSED by the qa-feeds-disabled recipe (#12118) for the two FEEDS_DISABLED clauses: before it, no showcase object declared enable.feeds:false and there was no scratch recipe for this area, so the code appeared only in `negative`. Fall back to the pinned engine/API suites named in `automated` ONLY if the recipe cannot be replayed on the boot under test — and when you do, record WHICH of the two the verdict rests on, because the pins run against their own fixtures (cmt_nofeeds / lead_walled) and not against the showcase surface this item otherwise drives."
+          "CLOSED by the qa-feeds-disabled recipe (#12118) for the two FEEDS_DISABLED clauses: before it, no showcase object declared enable.feeds:false and there was no scratch recipe for this area, so the code appeared only in `negative`. Fall back to the pinned engine/API suites named in `automated` ONLY if the recipe cannot be replayed on the boot under test — and when you do, record WHICH of the two the verdict rests on, because the pins run against their own fixtures (cmt_nofeeds / lead_walled) and not against the showcase surface this item otherwise drives.",
+          "acceptance[9]'s cross-organization leg runs live only on a walled boot (isolated or group), which the stock showcase does not provision. A run without one records that leg blocked(fixture) citing RUNNER.md's walled entry. Its pin (automated.ref, packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts) reaches the ENGINE layer, not HTTP: a real kernel, ObjectQL engine and SQLite driver with AuditPlugin and the real core grant resolver, while plugin-security's read layer is played by one middleware composing the posture's tenant clause and an owner-only rule, and messaging is played by an emit() recorder. Under RUNNER rule 6 the pin scores the clause partial at most, naming the HTTP layer and the real plugin-security as missing; the stock `single` leg is driven live"
         ]
       },
       "steps": [
@@ -2721,7 +2723,8 @@
         "RE-THREAD (UPDATE-SIDE) FEEDS_DISABLED probe — take the sys_comment row posted earlier against the feeds-ENABLED record and PATCH /api/v1/data/sys_comment/<its id> with { thread_id: 'qa_nofeeds:<the throwaway record id>' } as admin, capturing the refusal. This is the UPDATE half of the #10170 gate (enforceFeedsCapability registered on beforeUpdate as well as beforeInsert, packages/plugins/plugin-audit/src/audit-writers.ts): re-read the comment afterward and confirm its thread_id is UNCHANGED",
         "control for both probes — repeat the same two calls against a feeds-ENABLED parent (the seeded showcase record used above) and confirm they SUCCEED. A 403 that also fires on the enabled parent is measuring access, not the capability gate, and neither clause may be scored from it",
         "FEED FILTER — on a record whose feed now holds at least one comment (posted above) and one field-change activity (the attributable edit above), cycle the filter control through all four FeedFilterMode values, screenshotting each state before reading the rendered rows",
-        "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the objectui pin (recordActivityFeed.test.ts) and record the substitution"
+        "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the objectui pin (recordActivityFeed.test.ts) and record the substitution",
+        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). On a walled boot, repeat the note-shaped leg with the record in organization A and the mentioned user a member of organization B only"
       ],
       "acceptance": [
         {
@@ -2777,6 +2780,12 @@
           "oracle": "dom",
           "verify": "the planted custom-type row appears in the 'all' feed with the generic presentation (objectui recordActivityFeed.ts: ACTIVITY_TYPE_TO_FEED_TYPE is a SUPERSET pin over built-ins, unmapped values route to UNMAPPED_ACTIVITY_FEED_TYPE 'system' — objectui#5840/#5969 history); where the milestone channel is unavailable, the pin recordActivityFeed.test.ts is the fallback oracle — record which the verdict rests on",
           "evidence": "the 'all' feed screenshot showing the custom-type row (or the pin output + the substitution note)"
+        },
+        {
+          "clause": "an @mention notification reaches a mentioned user only when that user can READ the comment's record — whether the mention names them by user id or by email — and the author is never notified: the collab.mention notification carries the comment's preview and a deep link to the record, so it reaches exactly the readers the thread itself reaches. The gate sits at the producer (plugin-audit's mention writer), judged in each mentioned user's own envelope by the same grant resolver, organization-claim vetting and parent-read evaluator a request uses, so the tenant wall, sharing, RLS and object CRUD decide (#24785, fixed by #24794)",
+          "oracle": "api",
+          "verify": "step-14 inbox reads: the member gains NO collab.mention for either comment on the private note (by id, by email), gains exactly one for the account comment (data.notifications[] row of type collab.mention, actionUrl '/showcase_account/ID'), unreadCount up by one, with that deep link naming the account record and that record readable by the member (200); the admin's inbox gains none for any of the three, though the account comment named the admin. Each recipient reads only their own inbox, so the count is taken per user over GET /api/v1/notifications, never from sys_notification as admin alone. Each mentioned user withheld for want of read access is logged once at warn — '[audit] mention notification withheld' with reason cannot_read_source, the user id (the email mention resolved to it) and the comment id, never the comment text — record both lines; the author is dropped without a line. On a walled boot the cross-organization user's inbox is unchanged. Score the presence or absence of a collab.mention row per recipient and comment, not the notification's wording",
+          "evidence": "both users' inbox reads before and after, the member's two access reads, the three comment create responses, and the withheld-recipient log lines"
         }
       ],
       "negative": [
@@ -2785,7 +2794,8 @@
         "feeds:false must HIDE the panel, SKIP the sys_comment fetch, AND the server must reject new comments with 403 FEEDS_DISABLED — a silent no-op that accepts a comment nowhere-readable is a FAIL. The two server halves are now DRIVEN by acceptance clauses 6 and 7 against the qa-feeds-disabled recipe's qa_nofeeds parent; until #12118 this bullet was the only place the code appeared in this area, which made it read as covered while nothing provoked it",
         "a re-thread that is refused but LEAVES the row moved (or is accepted outright) is a FAIL — #10170 registered the gate on beforeUpdate precisely because a caller barred from creating a comment on a feeds-disabled object could otherwise re-point an existing one into it",
         "scoring either FEEDS_DISABLED clause from the ENABLED control alone is a FAIL — the control exists to prove the refusal is attributable to the capability gate rather than to record access (RECORD_NOT_ACCESSIBLE, comment-access-hooks.ts), so a run that reports the 403 without the 2xx control has not measured the gate",
-        "a filter mode showing a row of another mode's type — or dropping one of its own — is a FAIL; and an unknown activity type absent from the 'all' feed is a FAIL (the objectui#5840 shape: stored, queryable, invisible), while its absence from the three NARROWING modes is correct behavior a run must not file as the drop"
+        "a filter mode showing a row of another mode's type — or dropping one of its own — is a FAIL; and an unknown activity type absent from the 'all' feed is a FAIL (the objectui#5840 shape: stored, queryable, invisible), while its absence from the three NARROWING modes is correct behavior a run must not file as the drop",
+        "a collab.mention notification reaching a mentioned user who cannot read the comment's record is a FAIL in either spelling of the mention (user id or email): the notification is a copy of what the thread shows, preview and deep link included (#24785). A notification withheld from a mentioned user who CAN read the record is a FAIL the other way: the gate is read access, not organization membership or the author's own view"
       ],
       "variants": [
         "all — the full merged comment + activity feed",
@@ -2811,11 +2821,13 @@
         "framework: packages/spec/src/data/object.zod.ts#enable.feeds (enable.feeds default true → FEEDS_DISABLED — re-pointed #18104: FEEDS_DISABLED is named in this file only inside a describe() string and a comment; the key this item means is enable.feeds, 'a new comment and an update that re-threads an existing one alike'); PENDING-GAPS §B record-discussion-mentions",
         "framework: packages/plugins/plugin-audit/src/audit-writers.ts#enforceFeedsCapability (enforceFeedsCapability, registered on beforeInsert AND beforeUpdate per #10170), packages/plugins/plugin-audit/src/comment-access-hooks.ts#RECORD_NOT_ACCESSIBLE (RECORD_NOT_ACCESSIBLE — the sibling refusal the probes isolate against), packages/plugins/plugin-audit/src/objects/sys-comment.object.ts#thread_id (thread_id is conventionally `{object}:{record_id}`)",
         "framework: packages/spec/src/data/feed.zod.ts#FeedFilterMode (FeedFilterMode, 4 members — pinned above),+ (SYS_ACTIVITY_BUILTIN_TYPES + the #11507 open-vocabulary ruling: built-ins are the floor, never the ceiling); packages/plugins/plugin-audit/src/objects/sys-activity.object.ts#apiMethods (apiMethods ['get','list'] — why the probe cannot direct-POST)",
-        "objectui: packages/plugin-detail/src/RecordActivityTimeline.tsx (FeedFilterMode imported from the spec), (the four filter options), (filterItems); packages/plugin-detail/src/renderers/recordActivityFeed.ts (ACTIVITY_TYPE_TO_FEED_TYPE superset map + UNMAPPED_ACTIVITY_FEED_TYPE fallback + its diagnostic; drift held by the objectui#5969 two-directional pin, recordActivityFeed.test.ts)"
+        "objectui: packages/plugin-detail/src/RecordActivityTimeline.tsx (FeedFilterMode imported from the spec), (the four filter options), (filterItems); packages/plugin-detail/src/renderers/recordActivityFeed.ts (ACTIVITY_TYPE_TO_FEED_TYPE superset map + UNMAPPED_ACTIVITY_FEED_TYPE fallback + its diagnostic; drift held by the objectui#5969 two-directional pin, recordActivityFeed.test.ts)",
+        "framework: packages/plugins/plugin-audit/src/mention-recipient-gate.ts (the @mention recipient gate: each mentioned user judged by resolveUserAuthzGrants, vetOrganizationClaim and resolveReadableParentIds; fail-closed; #24794)",
+        "QA-source: #24783 · records-forms.record-discussion-mentions · acceptance[4]"
       ],
       "automated": {
         "kind": "api",
-        "ref": "The FEEDS_DISABLED clauses (6, 7) have engine/API pins that predate this item's coverage of them: packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts (describe '[#10170] enable.feeds is asked on the UPDATE verb too' — by-id and predicate re-thread onto `lead_walled`, plus the insert-verb control and the absent-thread_id boundary) and packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts (the create side over real REST against the `cmt_nofeeds` fixture, packages/qa/dogfood/test/fixtures/comments-fixture.ts). ⚠️ Those pins run against their OWN fixtures and the objectql/REST seams — they do NOT reach the console half of the negative (panel hidden, sys_comment fetch skipped), and they never exercised the showcase surface, which is why clauses 6 and 7 still carry their own steps and the qa-feeds-disabled recipe. The remaining clauses (1-5: optimistic reconcile, activity interleave, mention bell) are browser-only and have no pin."
+        "ref": "The FEEDS_DISABLED clauses (6, 7) have engine/API pins that predate this item's coverage of them: packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts (describe '[#10170] enable.feeds is asked on the UPDATE verb too' — by-id and predicate re-thread onto `lead_walled`, plus the insert-verb control and the absent-thread_id boundary) and packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts (the create side over real REST against the `cmt_nofeeds` fixture, packages/qa/dogfood/test/fixtures/comments-fixture.ts). ⚠️ Those pins run against their OWN fixtures and the objectql/REST seams — they do NOT reach the console half of the negative (panel hidden, sys_comment fetch skipped), and they never exercised the showcase surface, which is why clauses 6 and 7 still carry their own steps and the qa-feeds-disabled recipe. The remaining clauses (1-5: optimistic reconcile, activity interleave, mention bell) are browser-only and have no pin. The recipient read gate (acceptance[9]) is pinned by packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts (#24794: isolated, group and single cases, id and email spellings, author exclusion, the withheld-recipient log line), which reaches the ENGINE layer with plugin-security's read layer played by a middleware (knownGaps[2]); it scores that clause partial at most under RUNNER rule 6."
       },
       "history": [
         {
@@ -2841,6 +2853,12 @@
           "date": "2026-10-19",
           "change": "steps[3], steps[6], acceptance[3].verify, acceptance[4] (clause, verify) and source[2] corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. The bell is server-backed: plugin-audit's audit-writers.ts writes a collab.mention sys_notification per mentioned user and the console bell reads it through useInboxBell.ts (GET /api/v1/notifications); objectui's useMentionNotifications, which the item cited as the bell, has no console consumer. And no feed refetch follows a post within ~6 s, so the reconcile step reloads. Clause substance unchanged. Wave anchor #24579 round 2 §3 (6272314386)",
           "ref": "#24671"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "acceptance[9], steps[13], negative[6], fixtures.requires[2] and knownGaps[2] added, and automated.ref names the recipient-gate pin and the layer it drives — the clause #24802 deferred under RUNNER rule 2 until #24785's fix merged. #24785 (found by the walled pass of round 3, QA run #24783) let a collab.mention notification reach a mentioned user who could not read the comment's record; its fix #24794 (merged e5b3de06a6) gates recipients on read access at the producer. The clause asserts that gate: read access decides, by id or email alike, and the author is never notified. Its live legs are the stock `single` sharing-excluded member and, on a walled boot, the cross-organization user; the pin reaches the engine layer only (RUNNER rule 6). acceptance[4] is unchanged: it scores who else's bell gains the row, this clause who among the mentioned may",
+          "ref": "#24864"
         }
       ]
     },
@@ -3832,7 +3850,7 @@
       "title": "Cascade clear-semantics and the server boundary: stale-child clear on parent change, the WRITTEN-value server gate, and where cascade scope is client-only",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3869,7 +3887,7 @@
         {
           "clause": "SELECT server WRITTEN-value gate: a directly-POSTed child inconsistent with its parent (both in the payload) is rejected with code 'invalid_option' naming province; the consistent one is accepted — the objectql rule-validator, not the picker, is the boundary",
           "oracle": "api",
-          "verify": "{country:'cn',province:'ca'} → invalid_option (message key option_unavailable) on province; {country:'cn',province:'zj'} → 200. rule-validator.ts evaluateOptionVisibility re-evaluates the picked option's visibleWhen over the merged record. Pinned by packages/objectql/src/validation/rule-validator.option-visibility.test.ts",
+          "verify": "{country:'cn',province:'ca'} → invalid_option (message key option_unavailable) on province; {country:'cn',province:'zj'} → 200. rule-validator.ts evaluateOptionVisibility re-evaluates the picked option's visibleWhen over the merged record. Pinned at the HTTP door by objectui e2e/live/cascading-options.spec.ts 'the server rejects an out-of-set option value, and accepts an in-set one' ({country:'us', province:'zj'} → 400 VALIDATION_FAILED with invalid_option on province; {country:'cn', province:'zj'} → 201). packages/objectql/src/validation/rule-validator.option-visibility.test.ts calls evaluateValidationRules directly: validator-layer evidence only, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives)",
           "evidence": "both responses"
         },
         {
@@ -3910,7 +3928,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/cascading-options.spec.ts (acceptance[0]'s client clear-on-change, through its re-filter case: country cn offers gd and zj, us offers ca and tx, and the chosen Zhejiang leaves the province trigger. It never submits, so 'the stale province is not carried into the submit' is driven by hand); packages/objectql/src/validation/rule-validator.option-visibility.test.ts (server WRITTEN-value gate: acceptance[1], and acceptance[2]'s unwritten child through its 'does not check a field the patch never wrote' case)"
+        "ref": "objectui: e2e/live/cascading-options.spec.ts (acceptance[0]'s client clear-on-change, through its re-filter case: country cn offers gd and zj, us offers ca and tx, and the chosen Zhejiang leaves the province trigger. It never submits, so 'the stale province is not carried into the submit' is driven by hand. Its second case, 'the server rejects an out-of-set option value, and accepts an in-set one', is acceptance[1] at the HTTP door: it POSTs {country:'us', province:'zj'} to the live backend and asserts 400 VALIDATION_FAILED with an invalid_option field on province, then {country:'cn', province:'zj'} and asserts 201); packages/objectql/src/validation/rule-validator.option-visibility.test.ts (scores NO clause of this item: it calls evaluateValidationRules directly, so its written-value rejection and its 'does not check a field the patch never wrote' case are validator-layer evidence for acceptance[1] and acceptance[2], which score the POST and PATCH answers — RUNNER rule 6)"
       },
       "source": [
         "packages/objectql/src/validation/rule-validator.ts#evaluateOptionVisibility (evaluateOptionVisibility — WRITTEN-value only via `!(name in data) continue`; a predicate that cannot be evaluated refuses the write as rule_violation / unevaluable (ADR-0137 D2), except a system write with no acting user whose predicate reads one; invalid_option/option_unavailable)",
@@ -3950,6 +3968,12 @@
           "date": "2026-10-20",
           "change": "automated.stale removed and automated.ref scoped per pin — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired the cascading-options.spec.ts re-filter case the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 648d5c917d19 at the old pin 12dc7b47c340 and 5f65228948b7 at both 0b36ffa and 616df6598b42; the case now waits for the flat ModalForm's modal-form-footer instead of md-form-submit. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the case asserts acceptance[0]'s re-filter and cleared trigger but never submits, so the ref says the submit half is driven by hand. The objectql pin's scope (acceptance[1] and acceptance[2]), which only the stale record's runnerRule carried, moves into the ref unchanged. No clause changed",
           "ref": "#24857"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "automated.ref and acceptance[1].verify re-scored per RUNNER rule 6 — the sweep-wide rule-6 contradiction QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4) names at cascading-multilevel acceptance[1], round 15 of wave anchor #24579. acceptance[1] scores the direct POST's answer. Its verify and the ref (round 14 moved the objectql pin's scope into it) scored it, and acceptance[2], from rule-validator.option-visibility.test.ts, which calls evaluateValidationRules directly. By the rule (a pin scores only the layer it drives) that pin scores neither clause. Re-read at the console pin 616df6598b42 (blob 5f65228948b7 of cascading-options.spec.ts, unchanged since round 14), the ref's own objectui spec carries a second case, 'the server rejects an out-of-set option value, and accepts an in-set one', which POSTs to the live backend and asserts the out-of-set 400 VALIDATION_FAILED with invalid_option on province and the in-set 201. That is acceptance[1] at the HTTP door, so the ref and the verify cite it; no live run exists at that pin, so its verdict there is NOT MEASURED. acceptance[2] needs the run. No clause changed",
+          "ref": "#24891"
         }
       ]
     },
@@ -3958,7 +3982,7 @@
       "title": "Secret/encrypted field: ciphertext at rest, masked on every read, no-op mask re-submit, and fail-CLOSED without an ICryptoProvider (ADR-0100)",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3972,7 +3996,7 @@
         ],
         "knownGaps": [
           "f_secret is NOT seeded (the Specimen rows omit it) — drive a live UI/API write to exercise the encrypt path.",
-          "the fail-CLOSED path is PIN-ONLY of necessity (QA run #21784, parked on #22017 row 22). Every stock boot wires LocalCryptoProvider. The 'no OS_SECRET_KEY under the production guard' boot this note once suggested never comes up: LocalCryptoProvider refuses to start in production without a stable key, and serve.ts rethrows that refusal. A boot without @objectstack/service-settings is not a stock composition. Score acceptance[3] from packages/objectql/src/secret-fields.test.ts ('fail-closed: writing a secret field with no CryptoProvider throws': the write throws and neither store holds a row). The field-type-matrix's 'seed deliberately omits it' note is about SEEDING, not serve-time wiring.",
+          "the fail-CLOSED path has NO live leg on stock, of necessity (QA run #21784, parked on #22017 row 22). Every stock boot wires LocalCryptoProvider. The 'no OS_SECRET_KEY under the production guard' boot this note once suggested never comes up: LocalCryptoProvider refuses to start in production without a stable key, and serve.ts rethrows that refusal. A boot without @objectstack/service-settings is not a stock composition. So acceptance[3] is recorded blocked(fixture) on stock, citing this gap. packages/objectql/src/secret-fields.test.ts ('fail-closed: writing a secret field with no CryptoProvider throws': the write throws and neither store holds a row) is engine-layer evidence beside that verdict, never its pass (RUNNER rule 6, a pin scores only the layer it drives). The field-type-matrix's 'seed deliberately omits it' note is about SEEDING, not serve-time wiring.",
           "inspecting the raw business-row column / sys_secret ciphertext needs DB access (file:/tmp/<run>/data.db) — where the API is the only surface, assert the mask on read + the absence of plaintext in any API response instead."
         ]
       },
@@ -4007,7 +4031,7 @@
         {
           "clause": "fail-CLOSED without a provider: with no ICryptoProvider registered, a non-empty f_secret write is REFUSED ('Refusing to store cleartext … fail-closed') and NOTHING is persisted — cleartext never reaches the business row; a `password` write needs no provider (plaintext at rest, masked on read)",
           "oracle": "api",
-          "verify": "the unwired-boot POST throws the fail-closed error and the row is absent/unset; engine.ts encryptSecretFields (`if (!this.cryptoProvider) throw`). Pinned by packages/objectql/src/secret-fields.test.ts. No stock boot runs without a provider (fixtures.knownGaps), so this is a unit-pin verdict",
+          "verify": "the unwired-boot POST throws the fail-closed error and the row is absent/unset; engine.ts encryptSecretFields (`if (!this.cryptoProvider) throw`). No stock boot runs without a provider (fixtures.knownGaps[1]), so on stock this clause is recorded blocked(fixture); packages/objectql/src/secret-fields.test.ts 'fail-closed: writing a secret field with no CryptoProvider throws' is engine-layer evidence beside that verdict, never its pass (RUNNER rule 6, a pin scores only the layer it drives)",
           "evidence": "the refusal + a GET/list confirming no persisted cleartext"
         },
         {
@@ -4030,7 +4054,7 @@
       ],
       "automated": {
         "kind": "api",
-        "ref": "packages/objectql/src/secret-fields.test.ts (encrypt/mask/fail-closed); packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts masked vectors for f_secret & f_password)"
+        "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts masked vectors for f_secret & f_password) — acceptance[0] (its API oracle, the masked GET: knownGaps[2] makes the raw-column read the DB-inspectable extra), acceptance[1] and negative[0], at the HTTP door: the showcase is booted in-process, POST /data/showcase_field_zoo writes both fields, and GET /data/showcase_field_zoo/ID reads them back as SECRET_MASK, never the written value. packages/objectql/src/secret-fields.test.ts drives a real ObjectQL engine over a stub driver, with no HTTP, so it scores NO api clause of this item: it is engine-layer evidence beside acceptance[0]'s DB-inspectable leg ('encrypts on write: row stores a ref, sys_secret holds ciphertext, no cleartext on the row'), and for acceptance[2] ('update: echoing the read mask back does NOT overwrite the stored secret'), acceptance[3] ('fail-closed: writing a secret field with no CryptoProvider throws'), acceptance[4] (the 'objectql aggregate() rejects credential fields (ADR-0100 / #3171)' describe) and negative[1]–[3]. acceptance[2] and [4] are driven over the API; acceptance[3] is blocked(fixture) on every stock composition (knownGaps[1])"
       },
       "source": [
         "packages/objectql/src/secret-fields.ts#SECRET_REF_PREFIX (SECRET_MASK, SECRET_REF_PREFIX, collectSecretFields/collectMaskedReadFields/collectCredentialFields)",
@@ -4052,6 +4076,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 22). A4 was pin-only of necessity: an unwired-crypto boot refuses to start. Disposition: pin. The knownGap had offered a production boot without OS_SECRET_KEY as the unwired path; LocalCryptoProvider refuses to start there (serve.ts rethrows 'Refusing to start in production'), so the knownGap and A4's verify now name secret-fields.test.ts ('fail-closed: writing a secret field with no CryptoProvider throws') as the leg's only oracle",
           "ref": "#22017"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause; acceptance[3].verify and fixtures.knownGaps[1] rewritten — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: the acceptance[2] and [4] guards are pinned at the engine only), round 15 of wave anchor #24579. secret-fields.test.ts drives a real ObjectQL engine over a stub driver, with no HTTP. By RUNNER rule 6 (a pin scores only the layer it drives) it scores none of this item's api clauses, so the ref names it engine-layer evidence for acceptance[2]–[4] and negative[1]–[3], and names the dogfood pin's own clauses (acceptance[0]'s API oracle, acceptance[1], negative[0]). The same rule makes acceptance[3]'s 'unit-pin verdict' (the #22017 row 22 disposition) a rule-6 contradiction, located here beyond #24840's list: no stock composition runs without a provider, so the clause is now recorded blocked(fixture) with the pin beside it. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },
@@ -4168,7 +4198,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4192,7 +4222,7 @@
         "POST /api/v1/data/qa_unique {name:'r1', sku:'A-1'} → 2xx; POST {name:'r2', sku:'A-1'} → capture the refusal; count rows",
         "POST two rows with sku absent → both land (NULL-distinct)",
         "PATCH r2 to sku:'A-1' → capture the refusal and re-read r2; PATCH r1 touching only `nick` → 2xx (no self-collision)",
-        "predicate update stamping ONE value onto BOTH rows (the updateMany path — client data.updateMany / the batch door where exposed; otherwise score clause 4 from its unit pin and say so) → capture the refusal and prove neither row changed",
+        "predicate update stamping ONE value onto BOTH rows (the updateMany path — client data.updateMany / the batch door where exposed; otherwise record clause 4 blocked(fixture) naming the missing door — its unit pin is driver-level evidence beside that verdict, never its pass (RUNNER rule 6, a pin scores only the layer it drives)) → capture the refusal and prove neither row changed",
         "run the pinned suites: memory-unique-constraint.test.ts (driver-memory), sql-driver-8577-tenant-scoped-declared-unique.test.ts + sql-driver-declared-index-organization-respelling.test.ts (SQL family)"
       ],
       "acceptance": [
@@ -4205,19 +4235,19 @@
         {
           "clause": "NULLs are NULL-DISTINCT, exactly as under SQL UNIQUE: two rows whose unique field carries no value both land — an optional unique column does not refuse its second row",
           "oracle": "api",
-          "verify": "both no-sku POSTs return 2xx and both rows read back (module note memory-unique-constraint.ts; pin)",
+          "verify": "both no-sku POSTs return 2xx and both rows read back (module note memory-unique-constraint.ts). The memory-driver case 'NULL stays NULL-DISTINCT, exactly as under SQL UNIQUE' in memory-unique-constraint.test.ts is driver-level evidence beside that answer, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives)",
           "evidence": "the two creates + the list read"
         },
         {
           "clause": "the update paths are constrained too: an update onto a taken value is refused and the row keeps its old value; a row never collides with ITSELF (an update leaving the unique field alone passes)",
           "oracle": "api",
-          "verify": "the PATCH refusal + the unchanged re-read; the self-update 2xx (pins: packages/drivers/driver-memory/src/memory-unique-constraint.test.ts, the cases 'update onto a taken value is refused and the row keeps its old value' and 'a row does not collide with ITSELF — an update that leaves the unique field alone passes')",
+          "verify": "the PATCH refusal + the unchanged re-read; the self-update 2xx (driver-level evidence beside those answers, never this clause's pass, RUNNER rule 6, a pin scores only the layer it drives: packages/drivers/driver-memory/src/memory-unique-constraint.test.ts, the cases 'update onto a taken value is refused and the row keeps its old value' and 'a row does not collide with ITSELF — an update that leaves the unique field alone passes')",
           "evidence": "both responses + the re-read"
         },
         {
           "clause": "updateMany refuses the WHOLE batch BEFORE mutating anything — a predicate update stamping one value onto two rows leaves zero rows changed, never a half-applied batch",
           "oracle": "api",
-          "verify": "post-refusal re-reads of every matched row are byte-identical to before (packages/drivers/driver-memory/src/memory-driver.ts#updateMany 'Prepare and CHECK every row before mutating any of them'; pin). If no REST surface reaches updateMany on the boot under test, score from the pin and record the substitution",
+          "verify": "post-refusal re-reads of every matched row are byte-identical to before (packages/drivers/driver-memory/src/memory-driver.ts#updateMany 'Prepare and CHECK every row before mutating any of them'). The pin's 'updateMany refuses BEFORE mutating anything — no half-applied batch' is memory-driver evidence only, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives): if no REST door reaches a predicate update on the boot under test, record the clause blocked(fixture) naming the missing door, with the pin's output beside it",
           "evidence": "the refusal + full before/after row reads"
         },
         {
@@ -4244,7 +4274,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/drivers/driver-memory/src/memory-unique-constraint.test.ts (refusal shape, NULL-distinct, every write path, scope matrix, autonumber converge, boundary cases); packages/drivers/driver-sql/src/sql-driver-8577-tenant-scoped-declared-unique.test.ts + sql-driver-declared-index-organization-respelling.test.ts (SQL family, 409 UNIQUE_VIOLATION over real REST)"
+        "ref": "packages/drivers/driver-memory/src/memory-unique-constraint.test.ts — acceptance[4]'s memory-family legs (the \"[#13197] scoping matches driver-sql's ADR-0120 D1/D3 rule\" describe), acceptance[5] ('the refusal is recognisable to the ENGINE, so the autonumber resync converges'), negative[2] ('updateMany refuses BEFORE mutating anything — no half-applied batch') and negative[3]'s memory-family half, at the memory driver; + packages/drivers/driver-sql/src/sql-driver-8577-tenant-scoped-declared-unique.test.ts + packages/drivers/driver-sql/src/sql-driver-declared-index-organization-respelling.test.ts — acceptance[4]'s SQL-family legs and negative[3]'s SQL-family half, at SqlDriver over better-sqlite3. NO pin drives a REST door: the SQL pins map each driver refusal through a test-local createAsApi helper to the { status: 409, code: 'UNIQUE_VIOLATION' } envelope rest-server.ts derives, so acceptance[4]'s 'same 409 UNIQUE_VIOLATION over REST' wording rests on that mapping, and every pin is driver-level evidence for acceptance[0]–[3], never their pass: those clauses score the REST answer on the stock SQLite boot"
       },
       "source": [
         "packages/drivers/driver-memory/src/memory-unique-constraint.ts#scope (#13197/#13249, commit 56c093c — single judgment point; scope table read off driver-sql, arm for arm)",
@@ -4278,6 +4308,12 @@
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[2].verify cited line 141 of memory-unique-constraint.test.ts and acceptance[3].verify lines 627-631 of memory-driver.ts in the comma-range spelling (authored in 45397edf53 as the lists 135 and 141, and 611 and 627-631). Lines 135 and 141 are unchanged at this base: the cases 'update onto a taken value is refused and the row keeps its old value' and 'a row does not collide with ITSELF — an update that leaves the unique field alone passes', which acceptance[2].verify now names. Lines 627-631 held findOne even at that commit; the comment the verify quotes, 'Prepare and CHECK every row before mutating any of them', sat in updateMany then and does now, so acceptance[3].verify anchors memory-driver.ts#updateMany. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
           "ref": "#24752"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause; acceptance[1].verify, acceptance[2].verify, acceptance[3].verify and steps[4] rewritten — checklist-accuracy findings of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4), round 15 of wave anchor #24579. (1) The ref said the two SQL pins assert '409 UNIQUE_VIOLATION over real REST'. They drive SqlDriver over better-sqlite3 and map its refusal to that envelope through a test-local createAsApi helper, so no REST door is driven. (2) The sweep-wide rule-6 contradiction #24840 names at acceptance[1]–[3]: those clauses score the REST answer, and their verifies and steps[4] told the runner to score them from the memory-driver pin ('score from the pin'). By RUNNER rule 6 (a pin scores only the layer it drives) the pins are now cited as driver-level evidence only, and an updateMany door the boot does not expose is recorded blocked(fixture). The ref names the clauses each pin scores: acceptance[4] (test oracle) and [5], and negative[2] and [3]. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },

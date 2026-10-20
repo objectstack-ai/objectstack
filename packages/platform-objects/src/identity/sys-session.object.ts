@@ -234,6 +234,8 @@ export const SysSession = ObjectSchema.create({
       label: 'Active Team',
       required: false,
       group: 'Context',
+      // A team record derives no Sessions list: its only header action signs out the caller's own devices.
+      relatedList: false,
     }),
 
     // ── Client fingerprint ───────────────────────────────────────

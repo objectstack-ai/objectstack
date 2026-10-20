@@ -1557,7 +1557,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         description: "¿Rotar el secreto de este cliente OAuth? El secreto anterior dejará de funcionar de inmediato y cualquier integración que lo utilice fallará hasta que se actualice con el nuevo secreto. El nuevo secreto se muestra una sola vez.",
         resultDialog: {
           title: "Secreto de cliente rotado",
-          description: "Guarde el nuevo secreto ahora: se muestra una sola vez. Actualice todas las integraciones antes de que termine el periodo de gracia del secreto anterior.",
+          description: "Guarde el nuevo secreto ahora: se muestra una sola vez. El secreto anterior ya ha dejado de funcionar; actualice todas las integraciones con el nuevo secreto.",
           acknowledge: "He actualizado mis integraciones",
           fields: {
             client_secret: "Nuevo secreto de cliente"

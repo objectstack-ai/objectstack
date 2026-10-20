@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
+import type { CryptoAdapter } from '../crypto-adapter.js';
 import { SettingsService } from '../settings-service.js';
 import { en } from '../translations/index.js';
 import { authSettingsManifest } from './auth.manifest.js';
@@ -279,5 +280,84 @@ describe('authSettingsManifest', () => {
       expect(keys[key].label, `${key} label`).toBe(spec.label);
       expect(keys[key].help, `${key} help`).toBe(spec.description);
     }
+  });
+});
+
+/**
+ * A confidential stand-in, so the stored-credential control below can hold the
+ * `password`-typed secret: the write path refuses a secret-valued key on an
+ * adapter that declares no confidentiality.
+ */
+class ConfidentialTestAdapter implements CryptoAdapter {
+  readonly confidential = true;
+  async encrypt(plaintext: string): Promise<string> {
+    return 'kms:' + Buffer.from(plaintext, 'utf8').toString('base64');
+  }
+  async decrypt(ciphertext: string): Promise<string> {
+    return Buffer.from(ciphertext.replace(/^kms:/, ''), 'base64').toString('utf8');
+  }
+  digest(): string {
+    return 'fnv32:deadbeef';
+  }
+}
+
+// plugin-auth offers Google once the toggle is on and a client ID and secret
+// both resolve, saved here or from GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET,
+// with the env pair winning. The settings service reads only OS_* names, so
+// it cannot see that pair; a `required` on the two keys made it refuse
+// `google_enabled: true` on every deployment whose credentials come from it.
+describe('authSettingsManifest — Google credentials may come from the server (not required)', () => {
+  // FAKE values. This is the env map such a deployment hands the service.
+  const ENV_CREDENTIALS = {
+    GOOGLE_CLIENT_ID: 'fake-env-client-id.apps.googleusercontent.test',
+    GOOGLE_CLIENT_SECRET: 'fake-env-client-secret',
+  };
+  const serviceWith = (env: Record<string, string>) => {
+    const svc = new SettingsService({ env, crypto: new ConfidentialTestAdapter() });
+    svc.registerManifest(authSettingsManifest as any);
+    return svc;
+  };
+
+  it('declares neither credential key required', () => {
+    const specs = authSettingsManifest.specifiers as any[];
+    for (const key of ['google_client_id', 'google_client_secret']) {
+      expect(specs.find((s) => s.key === key).required, key).toBe(false);
+    }
+  });
+
+  it('saves Google ON with both credential fields empty, from unset and after an OFF', async () => {
+    const svc = serviceWith({ ...ENV_CREDENTIALS });
+
+    await expect(svc.setMany('auth', { google_enabled: true })).resolves.toBeDefined();
+    const { values } = await svc.getNamespace('auth');
+    expect(values.google_enabled).toMatchObject({ value: true, source: 'global' });
+    // Nothing is stored for the pair, so plugin-auth resolves it from the env.
+    expect(values.google_client_id?.source).toBe('default');
+    expect(values.google_client_secret?.source).toBe('default');
+
+    // The admin's round trip: OFF, then back ON.
+    await expect(svc.setMany('auth', { google_enabled: false })).resolves.toBeDefined();
+    await expect(svc.setMany('auth', { google_enabled: true })).resolves.toBeDefined();
+    expect(await svc.get('auth', 'google_enabled')).toMatchObject({ value: true, source: 'global' });
+  });
+
+  it('control: a stored credential pair still saves and reads back', async () => {
+    const svc = serviceWith({});
+
+    await expect(
+      svc.setMany('auth', {
+        google_enabled: true,
+        google_client_id: 'fake-stored-client-id',
+        google_client_secret: 'fake-stored-client-secret',
+      }),
+    ).resolves.toBeDefined();
+    expect(await svc.get('auth', 'google_client_id')).toMatchObject({
+      value: 'fake-stored-client-id',
+      source: 'global',
+    });
+    expect(await svc.get('auth', 'google_client_secret')).toMatchObject({
+      value: 'fake-stored-client-secret',
+      source: 'global',
+    });
   });
 });

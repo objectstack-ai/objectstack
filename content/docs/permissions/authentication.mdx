@@ -981,7 +981,12 @@ logged. While `mustChangePassword` is set, the user is blocked with
 `403 PASSWORD_RESET_REQUIRED` on every protected route until they complete a
 password change. It is the same gate as password expiry, under its own code,
 and like expiry it holds password sign-in only: the user's API keys are not
-held by it.
+held by it. Nor is an administrator's impersonation session, which is minted
+from the administrator's own session and is not the user's password sign-in:
+an administrator can impersonate the user to verify their access before the
+user has changed the password, while the user's own sign-in stays blocked.
+Enforced MFA (`MFA_REQUIRED`) holds the account, so it still holds an
+impersonation session of that user.
 
 #### Set / Reset a Password
 

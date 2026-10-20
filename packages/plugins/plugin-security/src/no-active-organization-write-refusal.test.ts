@@ -40,7 +40,9 @@
  * (system context, platform operator, non-tenant object, `single` posture, a
  * `group` membership set WITH an active organization) there is a sibling case
  * differing in that one fact where the refusal DOES fire. A file of controls
- * alone would pass on the pre-fix build.
+ * alone would pass on the pre-fix build. The platform operator's exemption is
+ * the crossing (ADR-0095 D3): it admits the operator's update, and its insert
+ * still needs an active organization to land in.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -230,31 +232,73 @@ describe('[ADR-0123 D2] tenant-scoped WRITES with no active organization are ref
     await h.run({ object: 'task', operation: 'insert', data: { name: 'A' }, context: { ...ORG_LESS } });
   });
 
-  it('CONTROL: a true PLATFORM operator crosses the wall on a posture-permitting object (ADR-0095 D3)', async () => {
+  describe('a true PLATFORM operator on a posture-permitting object (ADR-0095 D3)', () => {
     // `access.default: 'private'` is one of the postures that PERMITS the
     // crossing; the object still carries `organization_id`, so it is a tenant
     // object and the wall is live for everyone else — which the sibling case
     // below measures on the very same fixture.
-    const h = await boot({
-      schema: { ...TENANT_SCHEMA, access: { default: 'private' } },
-      sets: [PLATFORM_ADMIN],
-      fallback: 'admin_full_access',
+    const bootOperator = (findOneImpl?: (query: unknown) => unknown) =>
+      boot({
+        schema: { ...TENANT_SCHEMA, access: { default: 'private' } },
+        sets: [PLATFORM_ADMIN],
+        fallback: 'admin_full_access',
+        findOneImpl,
+      });
+
+    it('CONTROL: crosses the wall — its update with no active organization is not refused', async () => {
+      // Pre-image visible, as in the member's update case above, where the
+      // same write IS refused: crossing is what admits this one.
+      const h = await bootOperator(() => ({ id: 't1', organization_id: 'org-1' }));
+      await h.run({ object: 'task', operation: 'update', data: { id: 't1', name: 'renamed' }, context: { ...ORG_LESS } });
     });
-    await h.run({ object: 'task', operation: 'insert', data: { name: 'A' }, context: { ...ORG_LESS } });
+
+    it('…but its INSERT with no active organization is refused the same way — crossing is not somewhere to land', async () => {
+      // [ADR-0131 D9] Crossing exempts the operator from the wall's FILTER, not
+      // from needing an organization for a new row: the row would land with
+      // none, which the engine used to refuse as an organization-less system
+      // write (500). The stored image is judged — the terminal here runs the
+      // seam on the rows as sent. The real-stack twin, with the engine and a
+      // driver, is `no-active-organization-insert-platform-operator.test.ts`.
+      const h = await bootOperator();
+      const err = await refusalFrom(h.run, {
+        object: 'task', operation: 'insert', data: { name: 'A' }, context: { ...ORG_LESS },
+      });
+      expectConformingRefusal(err);
+    });
+
+    it('CONTROL: its insert of a row that NAMES an organization lands — the stored row is judged, not the session', async () => {
+      const h = await bootOperator();
+      await h.run({ object: 'task', operation: 'insert', data: { name: 'A', organization_id: 'org-2' }, context: { ...ORG_LESS } });
+    });
+
+    it('CONTROL: WITH an active organization its insert lands', async () => {
+      const h = await bootOperator();
+      await h.run({ object: 'task', operation: 'insert', data: { name: 'A' }, context: { ...ORG_BOUND } });
+    });
   });
 
   it('…but the SAME platform operator IS refused on an ordinary BUSINESS tenant object', async () => {
     // The control's control, and the half that matters: ADR-0095 D3's exemption
     // is POSTURE-scoped, never a property of the person. Drop the posture and
     // the identical caller — same superuser bits, same platform capabilities —
-    // meets the wall like everyone else. Without this pin, the case above would
-    // pass just as well if the exemption had been widened to "any platform
-    // admin, any object", which is the W2 hole ADR-0095 exists to keep shut.
-    const h = await boot({ sets: [PLATFORM_ADMIN], fallback: 'admin_full_access' });
+    // meets the wall like everyone else, on the update the crossing admits
+    // above as well as on the insert. Without this pin, the update control
+    // above would pass just as well if the exemption had been widened to "any
+    // platform admin, any object", which is the W2 hole ADR-0095 exists to
+    // keep shut.
+    const h = await boot({
+      sets: [PLATFORM_ADMIN],
+      fallback: 'admin_full_access',
+      findOneImpl: () => ({ id: 't1', organization_id: 'org-1' }),
+    });
     const err = await refusalFrom(h.run, {
       object: 'task', operation: 'insert', data: { name: 'A' }, context: { ...ORG_LESS },
     });
     expectConformingRefusal(err);
+    const updateErr = await refusalFrom(h.run, {
+      object: 'task', operation: 'update', data: { id: 't1', name: 'renamed' }, context: { ...ORG_LESS },
+    });
+    expectConformingRefusal(updateErr);
   });
 
   it('CONTROL: an object that opted OUT of tenancy is not tenant-scoped, so nothing is refused', async () => {
