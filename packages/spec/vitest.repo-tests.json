@@ -55,6 +55,7 @@
   "src/system/email-template-category-is-system-retirement.test.ts",
   "src/system/email-template-floor-locale-parity.pin.test.ts",
   "src/ui/action-requires-confirmation-docblock.pin.test.ts",
+  "src/ui/add-record-config-retirement.test.ts",
   "src/ui/component-action-row-patch-retirement.test.ts",
   "src/ui/component-marketplace-installed-list-retirement.test.ts",
   "src/ui/component-record-json-retirement.test.ts",
