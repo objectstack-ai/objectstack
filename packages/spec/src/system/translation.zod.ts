@@ -244,6 +244,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    * Convention (auto-resolved by `resolveViewLabel`):
    *   objects.<object>._views.<view_name>.label
    *   objects.<object>._views.<view_name>.description
+   *   objects.<object>._views.<view_name>.title   (a form view's heading)
    *   objects.<object>._views.<view_name>.emptyState.title
    *   objects.<object>._views.<view_name>.emptyState.message
    *   objects.<object>._views.<view_name>.bulkActions.<def_name>.*
@@ -252,7 +253,10 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     surface: 'this view translation',
     history: TRANSLATION_HISTORY,
     aliases: {
-      name: 'label', title: 'label', empty: 'emptyState', emptyMessage: 'emptyState',
+      // `title` is a declared key below (a form view's heading), so it is no
+      // longer named as a rename onto `label`; the heading-shaped neighbours
+      // are named as renames onto it.
+      name: 'label', heading: 'title', formTitle: 'title', empty: 'emptyState', emptyMessage: 'emptyState',
       // The authoring key is `bulkActionDefs`; the translation group drops the
       // `Defs` suffix the way `_actions` drops nothing and `_tabs` drops
       // `tabs[]`'s bracket — one address per surface, and the authoring
@@ -269,6 +273,24 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().optional().describe('Translated view label'),
     description: z.string().optional().describe('Translated view description'),
+    /**
+     * A FORM view's heading — overlays `FormViewSchema.title`, which a served
+     * form item carries at `config.title` (the title an anonymous public form
+     * shows above its sections).
+     *
+     * **Its own key, not the view's `label` key.** They are two authored
+     * strings on two layers: a view item's `label` names the view, and a
+     * form-family container entry (`formViews.<key>`, the default `form`)
+     * carries no `label` at all, while `title` is the heading the form itself
+     * draws. One translation cannot stand for two source strings, so the key
+     * mirrors the authored one, the way `emptyState.title` does.
+     *
+     * Applied by `translateView` only where the form AUTHORS a title: a form
+     * without one gains none, and its heading keeps falling back to the
+     * object label. A list view carries no title, so the key over one
+     * resolves nothing (`objectstack validate` refuses it).
+     */
+    title: z.string().optional().describe("Translated form view title — overlays a form view's own `title` (`FormViewSchema.title`); only a form that authors one is translated"),
     emptyState: strictObject({
       surface: 'this view empty-state translation',
       history: TRANSLATION_HISTORY,

@@ -345,6 +345,16 @@ const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
 interface ObjectFacts {
   fields: Map<string, AnyRec>;
   views: Set<string>;
+  /**
+   * The `_views` keys of the FORM views this object's containers serve — each
+   * `formViews.<key>` entry, the default `form`, and a `viewKind: 'form'`
+   * item — the views a `_views.<view>.title` key addresses (`translateView`
+   * overlays it onto the form's `config.title`). A list view carries no
+   * title, so a `title` key over one resolves nothing. The default form's key
+   * is legal for `title` alone: its other `_views` tails stay non-keys (see
+   * {@link collectViewRecord}).
+   */
+  forms: Set<string>;
   actions: Map<string, AnyRec>;
   sections: Set<string>;
   /**
@@ -467,6 +477,7 @@ function emptyFacts(): ObjectFacts {
   return {
     fields: new Map(),
     views: new Set(),
+    forms: new Set(),
     actions: new Map(),
     sections: new Set(),
     validations: new Set(),
@@ -525,6 +536,9 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   const addView = (objectName: string | undefined, name: string | undefined) => {
     if (objectName && name) factsFor(objectName).views.add(name);
   };
+  const addForm = (objectName: string | undefined, name: string | undefined) => {
+    if (objectName && name) factsFor(objectName).forms.add(name);
+  };
 
   /**
    * Register the `_sections` names one form-ish container declares.
@@ -545,6 +559,7 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   const listBinding = isRec(view.list) ? bindingOf(view.list) : undefined;
   if (isRec(view.list)) addView(listBinding, defaultListViewKey(listBinding, view));
   addView(recordObject ?? listBinding, strName(view.name));
+  if (view.viewKind === 'form') addForm(recordObject ?? listBinding, strName(view.name));
 
   const named = namedViewKeys(view);
   for (const family of ['listViews', 'formViews'] as const) {
@@ -560,6 +575,7 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
       if (!isRec(sub)) continue;
       const binding = bindingOf(sub) ?? listBinding;
       addView(binding, registryKey);
+      if (family === 'formViews') addForm(binding, registryKey);
       addSections(sub, binding);
     }
   }
@@ -578,7 +594,16 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   // A `_views` name registered here for the default form would make a key
   // legal that no consumer ever reads. Its SECTIONS are a different matter —
   // `ObjectForm` resolves those, which is exactly what #5415 established.
-  if (isRec(view.form)) addSections(view.form, bindingOf(view.form) ?? listBinding);
+  //
+  // One `_views` tail of the default form IS read: its `title`, which
+  // `translateView` overlays onto the served `<object>.form` item's
+  // `config.title`. So its runtime key is registered as a FORM key only
+  // (`forms`), legal for `title` and nothing else.
+  if (isRec(view.form)) {
+    const formBinding = bindingOf(view.form) ?? listBinding;
+    addSections(view.form, formBinding);
+    addForm(formBinding, defaultFormViewKey(formBinding, view));
+  }
 
   addSections(view, recordObject ?? listBinding);
 }
@@ -674,6 +699,22 @@ function defaultListViewKey(object: string | undefined, container: AnyRec): stri
   if (!object || !isRec(container.list)) return undefined;
   const item = expandViewContainer(object, container).find(
     (i) => i.viewKind === 'list' && i.isDefault,
+  );
+  if (!item) return undefined;
+  const prefix = `${object}.`;
+  return item.name.startsWith(prefix) ? item.name.slice(prefix.length) : item.name;
+}
+
+/**
+ * The bare `_views` key the RUNTIME assigns to a container's default `form` —
+ * `form`, or the author's `form.name`, renamed on a collision. Asked of the
+ * composer, like {@link defaultListViewKey}: the default form is the one form
+ * item the composer marks `isDefault`.
+ */
+function defaultFormViewKey(object: string | undefined, container: AnyRec): string | undefined {
+  if (!object || !isRec(container.form)) return undefined;
+  const item = expandViewContainer(object, container).find(
+    (i) => i.viewKind === 'form' && i.isDefault,
   );
   if (!item) return undefined;
   const prefix = `${object}.`;
@@ -1656,8 +1697,24 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         }
 
         // _views.<name>
-        for (const viewName of Object.keys(asRecord(rawNode._views))) {
+        for (const [viewName, rawView] of Object.entries(asRecord(rawNode._views))) {
+          const hasTitle = isRec(rawView) && 'title' in rawView;
+          const isForm = facts.forms.has(viewName);
+          // A `title` key translates a FORM view's heading only: over a list
+          // view it resolves nothing (a list view has no title), where the
+          // author most likely meant the tab's `label`.
+          if (hasTitle && !isForm && facts.views.has(viewName)) {
+            orphan(
+              `${inLocale} · object "${objectName}" · view "${viewName}"`,
+              `${objPath}._views.${viewName}.title`,
+              `View "${viewName}" of object "${objectName}" is not a form view, so no title resolves this key.`,
+              `A view's tab label is keyed \`_views.${viewName}.label\`; only a form view has a \`title\`.`,
+            );
+            continue;
+          }
           if (facts.views.has(viewName)) continue;
+          // The default form's key is legal for its `title` alone.
+          if (isForm && isRec(rawView) && Object.keys(rawView).every((k) => k === 'title')) continue;
           orphan(
             `${inLocale} · object "${objectName}" · view "${viewName}"`,
             `${objPath}._views.${viewName}`,

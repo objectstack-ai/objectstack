@@ -2890,6 +2890,70 @@ describe('validateTranslationReferences — the canonical view-record shape', ()
   });
 });
 
+/**
+ * `_views.<view>.title` — a FORM view's heading. `translateView` overlays it
+ * onto the served form item's `config.title`, keyed by the item's runtime
+ * identity: a `formViews.<key>` entry, the default `form` (`form`, or its
+ * `name`), or a `viewKind: 'form'` item. A list view has no title, so the key
+ * over one resolves nothing — refused, pointing at the tab's `label`.
+ */
+describe('validateTranslationReferences — a form view\'s title (`_views.<view>.title`)', () => {
+  const stack = (views: Record<string, unknown>) => ({
+    objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+    views: [
+      {
+        list: { type: 'grid', name: 'all_leads', label: 'All Leads', data: { provider: 'object', object: 'crm_lead' } },
+        form: { type: 'simple', title: 'New lead', data: { provider: 'object', object: 'crm_lead' } },
+        formViews: {
+          web_to_lead: { type: 'simple', title: 'Contact us', data: { provider: 'object', object: 'crm_lead' } },
+        },
+      },
+      {
+        name: 'quick_lead',
+        object: 'crm_lead',
+        viewKind: 'form',
+        config: { type: 'simple', title: 'Quick lead', data: { provider: 'object', object: 'crm_lead' } },
+      },
+    ],
+    translations: [{ 'zh-CN': { objects: { crm_lead: { label: '线索', _views: views } } } }],
+  });
+
+  it('accepts a title over a named form view, the default form and a form item', () => {
+    const findings = validateTranslationReferences(stack({
+      web_to_lead: { title: '联系我们' },
+      form: { title: '新建线索' },
+      quick_lead: { title: '快速线索' },
+    }));
+    expect(findings).toEqual([]);
+  });
+
+  it('the same fixture still reports a key nothing declares (the green above is not an empty run)', () => {
+    const findings = validateTranslationReferences(stack({
+      web_to_lead: { title: '联系我们' },
+      ghost_form: { title: 'x' },
+    }));
+    expect(findings.map((f) => f.path)).toEqual(['translations[0]["zh-CN"].objects.crm_lead._views.ghost_form']);
+  });
+
+  it('refuses a title over a LIST view by name, pointing at its `label`', () => {
+    const findings = validateTranslationReferences(stack({ all_leads: { title: '全部线索' } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0]["zh-CN"].objects.crm_lead._views.all_leads.title'],
+    ]);
+    expect(findings[0].message).toBe('View "all_leads" of object "crm_lead" is not a form view, so no title resolves this key.');
+    expect(findings[0].hint).toContain('`_views.all_leads.label`');
+  });
+
+  it('CONTROL: a list view\'s `label` key is accepted as before', () => {
+    expect(validateTranslationReferences(stack({ all_leads: { label: '全部线索' } }))).toEqual([]);
+  });
+
+  it('the default form\'s key stays a non-key for every tail but `title`', () => {
+    const findings = validateTranslationReferences(stack({ form: { label: '表单' } }));
+    expect(findings.map((f) => f.path)).toEqual(['translations[0]["zh-CN"].objects.crm_lead._views.form']);
+  });
+});
+
 describe('validateTranslationReferences — section anchors', () => {
   it('resolves a section named on a form view or a record:details page', () => {
     const stack = {
@@ -4027,6 +4091,7 @@ describe('[#22161] one-line verdicts — translation-target-unknown, translation
     '`screen` node; its heading is keyed',
     'declares no node for, so the step keeps',
     '`approval` node; its step label is keyed',
+    'is not a form view, so no title resolves this key',
     'Translations are keyed to parameter "',
     'does not declare in `outcomeMessages`',
     'declares no `outcomeMessages` at all',

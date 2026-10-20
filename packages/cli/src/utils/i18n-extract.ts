@@ -422,6 +422,39 @@ function pushViewEntries(out: ExpectedEntry[], objectName: string, viewName: str
 }
 
 /**
+ * Emit `_views.<view>.title` for every FORM view a view container serves —
+ * each `formViews.<key>` entry and the default `form` — the key
+ * `translateView` overlays a form's `title` (`FormViewSchema.title`) from.
+ *
+ * **The key is the composer's, asked, never re-derived.** A container form is
+ * served as the item `expandViewContainer` expands it to, and `translateView`
+ * keys its title by that item's registry name with the object prefix
+ * stripped: `formViews.<key>` is `<key>` (renamed on a collision, e.g.
+ * `default_2` beside a default list), the default `form` is its `name` or
+ * `form`. Reading the expanded items is the same discipline
+ * {@link defaultListViewKey} keeps for the default list, so the key written
+ * here is the key the runtime reads.
+ *
+ * **Title only.** The other `_views` tails stay unemitted for a form: a
+ * container's form entry carries no `label`, and its `description` is not
+ * overlaid by anything a form renders. A form that authors no title still
+ * records the key (`pushOptional`), so the coverage gate notices a bundle
+ * that translates one the source never wrote.
+ */
+function pushContainerFormTitles(out: ExpectedEntry[], containerObject: string, container: any): void {
+  if (!container?.form && !container?.formViews) return;
+  const prefix = `${containerObject}.`;
+  for (const item of expandViewContainer(containerObject, container)) {
+    if (item.viewKind !== 'form') continue;
+    const key = item.name.startsWith(prefix) ? item.name.slice(prefix.length) : item.name;
+    const config = item.config as { title?: unknown } | undefined;
+    pushOptional(out, ['objects', containerObject, '_views', key, 'title'], config?.title, 'view', {
+      objectName: containerObject,
+    });
+  }
+}
+
+/**
  * Emit `_views.<view>.bulkActions.<def>.*` for a list view's authored
  * `bulkActionDefs[]` (#14253's resolver, #14376's walk).
  *
@@ -1315,9 +1348,11 @@ export function collectExpectedEntries(
   // `i18n/missing-view` had zero producers repo-wide while the ratchet
   // reported green (#4123).
   //
-  // `formViews` stays uncovered: form views have no counterpart in the
-  // `viewLabel` / `_views.*` resolver convention, so emitting keys for them
-  // would expect translations nothing reads.
+  // A container's form views (`formViews.*`, the default `form`) emit one
+  // `_views` tail, `title` — the form heading `translateView` overlays (see
+  // `pushContainerFormTitles`). Their `label` / `description` stay
+  // unemitted: a container form entry carries no label, and nothing a form
+  // renders reads a `_views` description.
   const views: any[] = Array.isArray(config?.views) ? config.views : [];
   for (const view of views) {
     const containerObject = viewObjectName(view);
@@ -1325,8 +1360,16 @@ export function collectExpectedEntries(
 
     if (view.name) {
       pushViewEntries(out, containerObject, view.name, view);
+      // A `viewKind: 'form'` item carries its form under `config`, title included.
+      if (view.viewKind === 'form' && view.config && typeof view.config === 'object') {
+        pushOptional(out, ['objects', containerObject, '_views', view.name, 'title'], view.config.title, 'view', {
+          objectName: containerObject,
+        });
+      }
       continue;
     }
+
+    pushContainerFormTitles(out, containerObject, view);
 
     // The container's default list, keyed exactly as the runtime registry keys
     // it — see `defaultListViewKey`. `undefined` means the container declares

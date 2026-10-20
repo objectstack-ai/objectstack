@@ -458,7 +458,7 @@ function lookupViewText(
   bundle: TranslationBundle | undefined,
   objectName: string,
   viewKey: string,
-  attr: 'label' | 'description',
+  attr: 'label' | 'description' | 'title',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -1106,6 +1106,39 @@ function translateFormSections(
 }
 
 /**
+ * A served form view's translated `title` (`FormViewSchema.title`, at
+ * `config.title`), read from `objects.<object>._views.<viewKey>.title` —
+ * the SAME `_views` node, object and view key the view's own `label` is read
+ * from ({@link lookupViewText}), so the two strings of one view share one
+ * address and never a second key convention.
+ *
+ * Returns `title` itself (the same value) when nothing applies, so the caller
+ * can tell "unchanged" by identity:
+ *
+ *  - only an AUTHORED title is translated — a non-empty string, which is all
+ *    `FormViewSchema.title` admits. A form without one gains none, so its
+ *    heading keeps falling back to the object label (the anonymous form
+ *    page's `label ?? form.title ?? objectSchema.label`);
+ *  - an explicit override beats the catalog (ADR-0029 D9.2a): when the
+ *    packaged view's `config` is known and its `title` differs from the
+ *    served one, the served title was authored on top of the package, and the
+ *    catalog — the translation of the PACKAGED title — does not overwrite it;
+ *  - a missing key keeps the authored title.
+ */
+function translateFormTitle(
+  title: unknown,
+  bundle: TranslationBundle,
+  objectName: string,
+  viewKey: string,
+  opts: ResolveOptions | undefined,
+  packagedConfig: Record<string, unknown> | undefined,
+): unknown {
+  if (typeof title !== 'string' || title.length === 0) return title;
+  if (valueOverridesPackagedBase(packagedConfig, 'title', title)) return title;
+  return lookupViewText(bundle, objectName, viewKey, 'title', opts) ?? title;
+}
+
+/**
  * Apply the active locale to a view metadata document by overwriting `label`
  * and `description` with translated values when available, and overlaying the
  * selection-bar copy of the view's `config.bulkActionDefs[]`. The original
@@ -1174,6 +1207,19 @@ function translateFormSections(
  * locale chain and the same override rule as every other string here; a
  * container's form slot receives it through the same `config` projection its
  * bulk-action defs do.
+ *
+ * ## A form view's `title` is translated HERE too
+ *
+ * A served form view carries its heading at `config.title`
+ * (`FormViewSchema.title`), and it is addressed at
+ * `objects.<object>._views.<viewKey>.title` — the view's own `_views` node,
+ * beside its `label`, not the `label` key itself: a view item's `label` names
+ * the view and a container's form entries carry none, while `title` is what
+ * the form draws, so they are two strings with two keys. Before this the
+ * title had no key, and the anonymous public form — whose visitor cannot load
+ * the bundle — served it in the authoring language beside translated section
+ * headings and field labels. {@link translateFormTitle} applies it, on the
+ * same locale chain and the same override rule as every other string here.
  */
 export function translateView<T extends ViewLike>(
   view: T,
@@ -1209,11 +1255,20 @@ export function translateView<T extends ViewLike>(
       opts,
       packagedConfig,
     );
-    if (defs !== config.bulkActionDefs || sections !== config.sections) {
+    const title = translateFormTitle(
+      config.title,
+      bundle,
+      objectName,
+      viewTranslationKey(view, objectName),
+      opts,
+      packagedConfig,
+    );
+    if (defs !== config.bulkActionDefs || sections !== config.sections || title !== config.title) {
       config = {
         ...config,
         ...(defs !== config.bulkActionDefs ? { bulkActionDefs: defs } : {}),
         ...(sections !== config.sections ? { sections } : {}),
+        ...(title !== config.title ? { title } : {}),
       };
     }
   }
