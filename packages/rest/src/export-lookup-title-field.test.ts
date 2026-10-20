@@ -24,6 +24,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
+import { formatCellValue, withReferenceTitleFields, type ExportFieldMeta } from './export-format.js';
 import { loadXlsxWorkbook } from './xlsx-test-loader.js';
 
 const liveEngines: ObjectQL[] = [];
@@ -247,5 +248,45 @@ describe('export — a lookup cell names the target record by its declared title
     const json = makeRes();
     await route.handler({ params: { object: 'xt_case' }, query: { format: 'json', fields: 'id,contact' } } as any, json.res);
     expect(json.chunks.join('')).not.toContain('John Smith');
+  });
+});
+
+describe('withReferenceTitleFields + formatCellValue — the precedence, unit level', () => {
+  const lookup = (name: string, reference: string, displayField?: string): ExportFieldMeta =>
+    ({ name, type: 'lookup', reference, ...(displayField ? { displayField } : {}) });
+
+  it('reads each target schema once per export and stamps only reference fields', async () => {
+    const reads: string[] = [];
+    const meta = new Map<string, ExportFieldMeta>([
+      ['subject', { name: 'subject', type: 'text' }],
+      ['contact', lookup('contact', 'xt_contact')],
+      ['backup_contact', lookup('backup_contact', 'xt_contact')],
+    ]);
+    const out = await withReferenceTitleFields(meta, async (object) => {
+      reads.push(object);
+      return { name: object, nameField: 'full_name', fields: { full_name: { type: 'text' } } };
+    });
+    expect(reads).toEqual(['xt_contact']);
+    expect(out.get('contact')?.titleField).toBe('full_name');
+    expect(out.get('backup_contact')?.titleField).toBe('full_name');
+    expect(out.get('subject')).toEqual({ name: 'subject', type: 'text' });
+  });
+
+  it('a target schema read that throws leaves that column on the key list, and does not throw', async () => {
+    const meta = new Map<string, ExportFieldMeta>([['contact', lookup('contact', 'xt_contact')]]);
+    const out = await withReferenceTitleFields(meta, async () => { throw new Error('metadata offline'); });
+    expect(out.get('contact')?.titleField).toBeUndefined();
+    const rec = { id: 'c1', title: 'VP of Engineering', full_name: 'John Smith' };
+    expect(formatCellValue(rec, out.get('contact'))).toBe('VP of Engineering');
+  });
+
+  it('displayField, then titleField, then the id — the key list only without a titleField', () => {
+    const rec = { id: 'c1', title: 'VP of Engineering', full_name: 'John Smith' };
+    const titled = { ...lookup('contact', 'xt_contact'), titleField: 'full_name' };
+    expect(formatCellValue(rec, titled)).toBe('John Smith');
+    expect(formatCellValue(rec, { ...titled, displayField: 'title' })).toBe('VP of Engineering');
+    expect(formatCellValue({ id: 'c1', title: 'VP of Engineering' }, titled)).toBe('c1');
+    expect(formatCellValue([rec, { id: 'c2', full_name: 'Ann Lee' }], { ...titled, multiple: true }))
+      .toBe('John Smith, Ann Lee');
   });
 });
