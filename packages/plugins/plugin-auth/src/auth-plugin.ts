@@ -3624,7 +3624,17 @@ export class AuthPlugin implements Plugin {
             ...inProcessSessionReadInput(c.req.raw.headers),
           });
         } catch (err: any) {
-          const status = typeof err?.status === 'number' ? err.status : 500;
+          // [#24773] Answer the status the refusal DECLARED. better-call's
+          // `APIError` — every refusal better-auth raises — carries it twice:
+          // as the NUMBER `statusCode` (400) and as the NAME `status`
+          // ('BAD_REQUEST'). Reading only a numeric `status` answered each
+          // named refusal as 500 — an `invalid_redirect_uri` redirect URI, a
+          // request with no session (`UNAUTHORIZED`) — while the body-schema
+          // `ValidationError`, whose `status` is the number 400, answered 400
+          // from this same door. A throw that declares no status is a server
+          // fault and stays 500: nothing here guesses a client error.
+          const status =
+            typeof err?.statusCode === 'number' ? err.statusCode : typeof err?.status === 'number' ? err.status : 500;
           // better-auth's `body.error` is an arbitrary upstream string, so it
           // cannot be `error.code` — that field is a closed set (ADR-0112) and
           // an unbounded source defeats it. Keep the code ours and carry the
