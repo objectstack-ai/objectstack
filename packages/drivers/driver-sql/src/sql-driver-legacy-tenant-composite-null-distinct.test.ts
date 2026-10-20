@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { isUniqueViolationError } from '@objectstack/types';
 import { SqlDriver, classifyIndexKeyPart, parseIndexDdl } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * #23603 row 7 — the OLD hand-written table composite
@@ -83,6 +84,9 @@ describe('row 7 — the old table composite is NULL-distinct, field-level unique
     });
 
     it('refuses a duplicate on an UNTENANTED install too', async () => {
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(driver, 'kase');
       await driver.create('kase', { case_number: 'CASE-2' });
       const err = await refusal(driver.create('kase', { case_number: 'CASE-2' }));
       expect(isUniqueViolationError(err)).toBe(true);
@@ -116,6 +120,9 @@ describe('row 7 — the old table composite is NULL-distinct, field-level unique
     });
 
     it('ACCEPTS a duplicate untenanted number — SQL UNIQUE is NULL-distinct', async () => {
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(driver, 'kase');
       const first = await driver.create('kase', { case_number: 'CASE-11' });
       const second = await driver.create('kase', { case_number: 'CASE-11' });
       expect(second.id).not.toBe(first.id);

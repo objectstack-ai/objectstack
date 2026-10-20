@@ -51,6 +51,13 @@ import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dial
 
 const TABLE = 'os21227_stored_row';
 
+/**
+ * The organization every row in this file names: a fresh table's tenant column
+ * is NOT NULL (ADR-0131 D1), and this file's subject is the stored row, not
+ * tenancy — the two tenanted cases below say their own organization.
+ */
+const ORG = 'org_a';
+
 const OBJECT = {
   name: TABLE,
   fields: {
@@ -117,7 +124,7 @@ function suite(face: Face) {
     });
 
     it('create with a generated id answers the stored row', async () => {
-      const answer = await driver.create(TABLE, { title: 'generated', qty: 1, meta: { k: [1, 2] } });
+      const answer = await driver.create(TABLE, { organization_id: ORG, title: 'generated', qty: 1, meta: { k: [1, 2] } });
 
       expect(typeof answer.id).toBe('string');
       expect(answer.id).not.toBe('');
@@ -127,7 +134,7 @@ function suite(face: Face) {
     });
 
     it('create with a supplied id answers that row, in one statement or two by path', async () => {
-      const answer = await driver.create(TABLE, { id: 'given-1', title: 'supplied', qty: 2 });
+      const answer = await driver.create(TABLE, { id: 'given-1', organization_id: ORG, title: 'supplied', qty: 2 });
 
       expect(answer).toEqual(await stored('given-1'));
       expect(answer.title).toBe('supplied');
@@ -139,9 +146,9 @@ function suite(face: Face) {
 
     it('bulkCreate answers one stored row per written row, in the written order', async () => {
       const answer = await driver.bulkCreate(TABLE, [
-        { title: 'b1' },
-        { id: 'given-b2', title: 'b2', qty: 2 },
-        { title: 'b3', qty: 3 },
+        { organization_id: ORG, title: 'b1' },
+        { id: 'given-b2', organization_id: ORG, title: 'b2', qty: 2 },
+        { organization_id: ORG, title: 'b3', qty: 3 },
       ]);
 
       expect(answer).toHaveLength(3);
@@ -156,7 +163,7 @@ function suite(face: Face) {
     });
 
     it('bulkCreate of one row answers one stored row', async () => {
-      const answer = await driver.bulkCreate(TABLE, [{ id: 'only', title: 'single' }]);
+      const answer = await driver.bulkCreate(TABLE, [{ id: 'only', organization_id: ORG, title: 'single' }]);
 
       expect(answer).toHaveLength(1);
       expect(answer[0]).toEqual(await stored('only'));
@@ -200,8 +207,11 @@ function suite(face: Face) {
       let single!: Record<string, unknown>;
       let batch!: Record<string, unknown>[];
       try {
-        single = await driver.create(TABLE, { id: 'tx-1', title: 'in tx' }, { transaction: trx });
-        batch = await driver.bulkCreate(TABLE, [{ id: 'tx-2', title: 'in tx' }, { id: 'tx-3', title: 'in tx' }], {
+        single = await driver.create(TABLE, { id: 'tx-1', organization_id: ORG, title: 'in tx' }, { transaction: trx });
+        batch = await driver.bulkCreate(TABLE, [
+          { id: 'tx-2', organization_id: ORG, title: 'in tx' },
+          { id: 'tx-3', organization_id: ORG, title: 'in tx' },
+        ], {
           transaction: trx,
         });
       } finally {
@@ -220,7 +230,7 @@ function suite(face: Face) {
         );
         statements = [];
 
-        const err = await driver.create(TABLE, { id: 'gone', title: 'vanishes' }).then(
+        const err = await driver.create(TABLE, { id: 'gone', organization_id: ORG, title: 'vanishes' }).then(
           () => null,
           (e: unknown) => e as { code?: string; status?: number },
         );

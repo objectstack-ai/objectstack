@@ -68,6 +68,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { SqlDriver } from './index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const TABLE = 'os6792_account';
 const UNSCOPED_TABLE = 'os6792_ledger';
@@ -138,6 +139,9 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
     await driver.create(TABLE, { id: 'b2', organization_id: 'org_b', name: 'B2', balance: 40 } as any);
     // Platform row: belongs to no tenant, so it belongs to no OTHER tenant
     // either and must stay visible (#2734).
+    // p1, the NULL-org row, exists only on a database built before 18.x
+    // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+    await asPre18TenantColumn(driver, TABLE);
     await driver.create(TABLE, { id: 'p1', name: 'P1', balance: 50 } as any);
 
     await driver.create(UNSCOPED_TABLE, { id: 'l1', name: 'L1', balance: 1 } as any);

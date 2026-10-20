@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach, assert } from 'vitest';
 import { ObjectSchema } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * Tenant-scope (organization_id) isolation tests.
@@ -136,7 +137,10 @@ describe('SqlDriver tenant scope (organization_id)', () => {
   describe('NULL tenant column = GLOBAL/platform row (#2734)', () => {
     beforeEach(async () => {
       // A platform-seeded row with no organization (bootstrap positions,
-      // permission sets, business units, pre-org first-boot seeds).
+      // permission sets, business units, pre-org first-boot seeds) — which
+      // exists only on a database built before 18.x (ADR-0131 D1 makes a
+      // fresh tenant column NOT NULL).
+      await asPre18TenantColumn(driver, 'account');
       await driver.create('account', { id: 'g1', name: 'Global', tier: 'global' });
     });
 
@@ -465,6 +469,8 @@ describe('SqlDriver tenant scope (organization_id)', () => {
     });
 
     it('keeps the NULL-tenant global-row carve-out (#2734) on the union path', async () => {
+      // A pre-18 database's row with no organization (ADR-0131 D1).
+      await asPre18TenantColumn(driver, 'account');
       await driver.create('account', { id: 'g1', name: 'GLOBAL' });
       const rows = await driver.find(
         'account',

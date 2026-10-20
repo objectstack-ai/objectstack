@@ -2,6 +2,7 @@
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { isUniqueViolationError } from '@objectstack/types';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 import {
   SqlDriver,
   classifyIndexKeyPart,
@@ -381,6 +382,9 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
       // so every platform-seeded capability could be duplicated at will.
       const d = makeDriver();
       await d.initObjects(FIXED_APP as any);
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(d, 'sys_capability');
 
       expect((await createAsApi(d, 'sys_capability', { id: 'p1', name: 'manage_metadata' })).status).toBe(201);
       const duplicateSeed = await createAsApi(d, 'sys_capability', { id: 'p2', name: 'manage_metadata' });

@@ -121,7 +121,9 @@ describe(`${MATRIX}: rotation shards (SQLite)`, () => {
 
   it('a newly rotated shard refuses a NULL tenant value at the database, and reports no drift', async () => {
     await driver.initObjects([ROTATED as any]);
-    // The sweep-time entry point, a day later, carrying no `tenancy` block.
+    // The sweep-time entry point, carrying no `tenancy` block: today's shard,
+    // then the next day's.
+    await driver.rotateShards(ROTATED as any, T0);
     const { current, shards } = await driver.rotateShards(ROTATED as any, T0 + DAY);
     expect(shards.length).toBeGreaterThan(1);
 
