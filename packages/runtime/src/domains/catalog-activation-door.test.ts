@@ -664,13 +664,18 @@ describe('the catalog activation door — a declared sharing rule', () => {
 // that reader (`declared-webhooks.test.ts`).
 describe('the catalog activation door — a declared webhook', () => {
     const HOOK = 'crm_contact_changed';
-    const declaredWebhooks = (declared: Record<string, { packageId?: string }> = { [HOOK]: { packageId: 'crm' } }) => ({
+    const declaredWebhooks = (
+        declared: Record<string, { packageId?: string }> = { [HOOK]: { packageId: 'crm' } },
+        // [#24910] What the reader says about dispatch: `null`, the dispatcher runs.
+        dispatchUnavailable: () => string | null = () => null,
+    ) => ({
         declaredWebhooks: {
             async declaredWebhookNamed(name: string) {
                 return declared[name]
                     ? { webhook: { name }, active: true, ...declared[name] }
                     : null;
             },
+            dispatchUnavailable,
         },
     });
 
@@ -727,5 +732,78 @@ describe('the catalog activation door — a declared webhook', () => {
         const h = boot('single', {}, declaredWebhooks({ [HOOK]: {} }));
         expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`))).toBe(200);
         expect(h.tables[LEDGER][0].package_id ?? null).toBeNull();
+    });
+
+    // [#24910] A deployment whose webhook dispatcher is not running (the
+    // auto-enqueuer reads record events only from the realtime service) delivers
+    // no declared webhook, so `enabled: true` there would report a switch that
+    // switches nothing. The reader says so; the door refuses ON and keeps OFF.
+    describe('a deployment that delivers no declared webhook', () => {
+        const REASON = "the webhook auto-enqueuer is disabled because the realtime service is not available. Fix: add 'realtime' to `requires`, then restart.";
+        const undelivered = () => declaredWebhooks(undefined, () => REASON);
+
+        it('switching ON is refused 503 SERVICE_UNAVAILABLE naming the webhook and the reader\'s reason, and nothing is written', async () => {
+            const h = boot('single', {}, undelivered());
+            const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`, { enabled: true });
+            expect(statusOf(res)).toBe(503);
+            expect(codeOf(res)).toBe('SERVICE_UNAVAILABLE');
+            expect(messageOf(res)).toContain(`'${HOOK}'`);
+            expect(messageOf(res)).toContain(REASON);
+            expect(h.writes).toEqual([]);
+        });
+
+        it('an empty body (the default, ON) is refused the same way', async () => {
+            const h = boot('single', {}, undelivered());
+            const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`, {});
+            expect(statusOf(res)).toBe(503);
+            expect(codeOf(res)).toBe('SERVICE_UNAVAILABLE');
+            expect(h.writes).toEqual([]);
+        });
+
+        it('CONTROL: switching OFF on the same deployment is written — the refusal is about ON only', async () => {
+            const h = boot('single', {}, undelivered());
+            const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`, { enabled: false });
+            expect(statusOf(res)).toBe(200);
+            expect(h.tables[LEDGER]).toEqual([
+                expect.objectContaining({ metadata_type: 'webhook', name: HOOK, active: false }),
+            ]);
+        });
+
+        it('an undeclared name is still 404, not the dispatch refusal: the declaration is confirmed first', async () => {
+            const h = boot('single', {}, undelivered());
+            const res = await flip(h, TENANT_ADMIN(), '/_activation/webhook/our_own_hook', { enabled: true });
+            expect(statusOf(res)).toBe(404);
+            expect(h.writes).toEqual([]);
+        });
+
+        it('the authority gates still answer first: a walled tenant admin gets 403, not the 503', async () => {
+            const h = boot('group', {}, undelivered());
+            const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`, { enabled: true });
+            expect(statusOf(res)).toBe(403);
+            expect(codeOf(res)).toBe('PERMISSION_DENIED');
+            expect(h.writes).toEqual([]);
+        });
+    });
+
+    it('a reader that does not say whether its dispatcher runs: ON is refused 503 and nothing is written; OFF is written', async () => {
+        const h = boot('single', {}, {
+            declaredWebhooks: {
+                async declaredWebhookNamed(name: string) { return name === HOOK ? { webhook: { name } } : null; },
+            },
+        });
+        const on = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`, { enabled: true });
+        expect(statusOf(on)).toBe(503);
+        expect(codeOf(on)).toBe('SERVICE_UNAVAILABLE');
+        expect(h.writes).toEqual([]);
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`, { enabled: false }))).toBe(200);
+        expect(h.writes).toHaveLength(1);
+    });
+
+    it('a reader whose dispatch answer throws: ON is refused 503, never a write', async () => {
+        const h = boot('single', {}, declaredWebhooks(undefined, () => { throw new Error('state unreadable'); }));
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`, { enabled: true });
+        expect(statusOf(res)).toBe(503);
+        expect(codeOf(res)).toBe('SERVICE_UNAVAILABLE');
+        expect(h.writes).toEqual([]);
     });
 });

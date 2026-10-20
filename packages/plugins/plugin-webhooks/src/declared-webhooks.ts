@@ -137,6 +137,25 @@ export interface DeclaredWebhookReader {
 }
 
 /**
+ * [#24910] Whether a declared webhook switched ON is delivered on this
+ * deployment at all — the question the activation door asks before it answers
+ * `enabled: true`. Its own interface, beside {@link DeclaredWebhookReader}
+ * rather than inside it: the dispatcher and the redelivery veto read
+ * declarations, and only the door asks about dispatch.
+ */
+export interface DeclaredWebhookDispatch {
+    /**
+     * Why no declared webhook is delivered on this deployment — the
+     * auto-enqueuer is disabled because a service it needs is missing — in one
+     * sentence that names the composition fix; `null` when it runs. Also `null`
+     * when the host turned auto-enqueue off itself (`autoEnqueue: false`): that
+     * is a deliberate composition whose own code enqueues, and redelivery reads
+     * the switch there.
+     */
+    dispatchUnavailable(): string | null;
+}
+
+/**
  * The raw declared `webhook` items, registry first, metadata service second.
  * Never throws: a reader that cannot answer yields nothing from that reader.
  */
@@ -160,18 +179,44 @@ export function readDeclaredWebhookItems(engine: unknown, metadataService: unkno
 }
 
 /**
- * The reader the plugin binds: the declarations from
- * {@link readDeclaredWebhookItems}, the switch from the activation ledger.
+ * [#24910] The distinct `name`s of the raw declared items — what a boot report
+ * names when the declared webhooks cannot be dispatched. Read the way
+ * {@link readDeclaredWebhookItems} reads them; never throws.
  */
-export class DeclaredWebhookSource implements DeclaredWebhookReader {
+export function readDeclaredWebhookNames(engine: unknown, metadataService: unknown): string[] {
+    const names = new Set<string>();
+    for (const raw of readDeclaredWebhookItems(engine, metadataService)) {
+        const name = (raw as { name?: unknown })?.name;
+        if (typeof name === 'string' && name) names.add(name);
+    }
+    return [...names];
+}
+
+/**
+ * The reader the plugin binds: the declarations from
+ * {@link readDeclaredWebhookItems}, the switch from the activation ledger, and
+ * (for the activation door) whether this deployment dispatches them at all.
+ */
+export class DeclaredWebhookSource implements DeclaredWebhookReader, DeclaredWebhookDispatch {
     /** Names already reported as failing validation — said once per process. */
     private readonly invalidReported = new Set<string>();
 
+    /**
+     * @param dispatchGap - [#24910] Why the auto-enqueuer is not running on
+     *   this kernel, or `null` when it runs. The plugin decides it at
+     *   `kernel:ready`, BEFORE this reader is bound, so the door never reads a
+     *   verdict the boot has not reached yet.
+     */
     constructor(
         private readonly engine: unknown,
         private readonly metadataService: unknown,
         private readonly logger?: Logger,
+        private readonly dispatchGap: string | null = null,
     ) {}
+
+    dispatchUnavailable(): string | null {
+        return this.dispatchGap;
+    }
 
     async list(): Promise<DeclaredWebhook[]> {
         const parsed = this.parseDeclared();
