@@ -1914,12 +1914,9 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         };
     }
 
-    const notNull =
-        /not null constraint failed:\s*\S*?\.([a-z0-9_]+)/i.exec(raw) ||
-        /null value in column\s+["'`]([a-z0-9_]+)["'`]/i.exec(raw) ||
-        /column\s+["'`]([a-z0-9_]+)["'`]\s+cannot be null/i.exec(raw);
+    const notNull = notNullViolationSite(raw);
     if (notNull) {
-        const field = notNull[1];
+        const field = notNull.column;
         // The metadata required-check (`record-validator`) runs BEFORE the
         // driver and judges `required` only; nothing before the driver reads
         // `storage.notNull`. ADR-0113 D1 / D2 keep the write contract
@@ -1931,26 +1928,30 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // is NOT NULL and the metadata declares neither. This branch sees the
         // driver's text and the object's name, never the field map, and telling
         // the two apart would take a registry read, so the `hint` leads with the
-        // remedy that holds for both (the column requires a value: provide it, or
-        // declare the field `required`) and names drift only as the case that is
-        // conditional on the declaration.
+        // remedy that holds for both (the column requires a value: provide one)
+        // and names drift only as the case that is conditional on the
+        // declaration.
         // We keep the `VALIDATION_FAILED` / `required` envelope for back-compat
         // (form UIs key off it); `code`, `status`, `fields` and the sentence
         // are the same for both.
-        return {
-            status: 400,
-            body: {
-                error: `${field} is required`,
-                code: 'VALIDATION_FAILED',
-                fields: [{ field, code: 'required', message: `${field} is required` }],
-                hint:
-                    `The database column for '${field}' requires a value: provide it, or declare the field \`required\` in the object metadata. ` +
-                    `If the object declares neither \`required\` nor \`storage: { notNull: true }\` for '${field}', ` +
-                    `the physical schema has drifted from metadata instead: run 'os migrate' to reconcile ` +
-                    `(or reset the dev database).`,
-                ...(object ? { object } : {}),
-            },
+        //
+        // [#24715] …and the sentence names the COLUMN, because the column is
+        // all the driver's text carries. The caller that holds the object's
+        // field map names the field by its label instead, and gives a field
+        // declared `storage: { notNull: true }` its own hint
+        // ({@link relabelNotNullRefusal}). The hint here therefore prescribes
+        // nothing that is wrong for either case: it used to add "or declare the
+        // field `required`", which for a column an engine hook populates is the
+        // move ADR-0113 D1 / D2 rule out (it puts the demand back on the form).
+        const body: Record<string, unknown> = {
+            error: `${field} is required`,
+            code: 'VALIDATION_FAILED',
+            fields: [{ field, code: 'required', message: `${field} is required` }],
+            hint: notNullRefusalHint(field),
+            ...(object ? { object } : {}),
         };
+        NOT_NULL_REFUSAL_SITES.set(body, notNull);
+        return { status: 400, body };
     }
 
     // [#5462] A driver saying "that relation is missing" is an unknown-OBJECT
@@ -2062,6 +2063,137 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         return DATA_STORE_FAULT();
     }
     return UNCLASSIFIED_FAULT();
+}
+
+// ── The NOT NULL refusal, and the caller that names its field ([#24715]) ─────
+
+/**
+ * [#24715] Where a driver's NOT NULL refusal points: the column, and the table
+ * when the dialect's text names one.
+ *
+ * | dialect | text | `table` |
+ * |:--|:--|:--|
+ * | SQLite | `NOT NULL constraint failed: <table>.<column>` | yes |
+ * | Postgres | `null value in column "<column>" of relation "<table>" violates not-null constraint` | yes (the `of relation` clause) |
+ * | MySQL | `Column '<column>' cannot be null` | no |
+ *
+ * The three column captures are the ones the classification branch has always
+ * used, in the same order, so the column a refusal names is unchanged; the
+ * table is the only addition, and it is optional in every limb.
+ */
+export interface NotNullRefusalSite {
+    /** The column the driver named. */
+    readonly column: string;
+    /** The table the driver named, when its dialect names one. */
+    readonly table?: string;
+}
+
+function notNullViolationSite(raw: string): NotNullRefusalSite | undefined {
+    const sqlite = /not null constraint failed:\s*(\S*?)\.([a-z0-9_]+)/i.exec(raw);
+    if (sqlite) return sqlite[1] ? { column: sqlite[2], table: sqlite[1] } : { column: sqlite[2] };
+    const postgres = /null value in column\s+["'`]([a-z0-9_]+)["'`](?:\s+of\s+relation\s+["'`]([^"'`]+)["'`])?/i.exec(raw);
+    if (postgres) return postgres[2] ? { column: postgres[1], table: postgres[2] } : { column: postgres[1] };
+    const mysql = /column\s+["'`]([a-z0-9_]+)["'`]\s+cannot be null/i.exec(raw);
+    return mysql ? { column: mysql[1] } : undefined;
+}
+
+/**
+ * [#24715] The bodies the NOT NULL branch of {@link classifyDataError} built,
+ * keyed to the site the driver named.
+ *
+ * Why a brand and not a key on the body: the body IS the wire answer, and the
+ * caller that relabels it ({@link relabelNotNullRefusal}) must recognise THIS
+ * branch's answer exactly — never a lookalike with the same `code` and
+ * `fields[0].code` built by another branch (a record validator's own
+ * `required` refusal is one) — without the wire growing a key to say so. A
+ * body copied on the way out (the declared-`userMessage` wrapper builds a new
+ * one, and a driver error carries no such mark) is simply not recognised, and
+ * keeps the column's sentence: the safe way to be wrong.
+ */
+const NOT_NULL_REFUSAL_SITES = new WeakMap<object, NotNullRefusalSite>();
+
+/**
+ * The NOT NULL branch's hint, for a column whose field map this branch never
+ * sees. It holds for both ways in: a field declared `storage: { notNull: true }`
+ * (the column is NOT NULL on purpose, ADR-0113 D2) and drift (the metadata
+ * declares neither `required` nor `storage.notNull`). It prescribes no
+ * declaration, because the declaration that answers one case is wrong for the
+ * other.
+ */
+function notNullRefusalHint(field: string): string {
+    return `The database column for '${field}' requires a value: provide one. `
+        + `If the object declares neither \`required\` nor \`storage: { notNull: true }\` for '${field}', `
+        + `the physical schema has drifted from metadata instead: run 'os migrate' to reconcile `
+        + `(or reset the dev database).`;
+}
+
+/**
+ * The hint for a field the object declares `storage: { notNull: true }` — set
+ * by the caller that holds the field map, the one that can tell this case from
+ * drift. Nothing has drifted and nothing is missing from the metadata, so it
+ * names neither `os migrate` nor `required`: per ADR-0113 D1 / D2 the column
+ * constraint is deliberately not the write contract, and a field a hook or a
+ * default populates is not one the form should demand.
+ */
+function declaredNotNullHint(field: string): string {
+    return `The field '${field}' is declared \`storage: { notNull: true }\`, so its database column requires a value: `
+        + `send one, or omit the field when a default value or a hook populates it `
+        + `(an update that omits it keeps the stored value).`;
+}
+
+/**
+ * [#24715] The site of the NOT NULL refusal `answer` is — when, and only when,
+ * `answer` is the one {@link mapDataError} built for a driver's NOT NULL text.
+ * `undefined` for every other answer.
+ *
+ * Asked by the caller that holds the object's field map before it relabels the
+ * refusal ({@link relabelNotNullRefusal}). The `table` lets that caller decline
+ * a refusal the driver attributes to a table other than the object it holds:
+ * a hook's write to another object fails inside the request, and its column is
+ * not the requested object's field.
+ */
+export function notNullRefusalSite(answer: { body: Record<string, unknown> }): NotNullRefusalSite | undefined {
+    return NOT_NULL_REFUSAL_SITES.get(answer.body);
+}
+
+/**
+ * [#24715] Name the field of a NOT NULL refusal the way the caller's field map
+ * names it.
+ *
+ * The classification above sees the driver's text and the object's name, never
+ * the field map, so its sentence names the column (`unit_price is required`)
+ * and its hint must hold for every field. The caller that holds the field map
+ * hands in what only it can know:
+ *
+ *  - `message` — the field's `required` sentence, rendered the way the record
+ *    validator renders its own (the shared catalog, the caller's locale, the
+ *    field's label). It replaces `error` and `fields[0].message`.
+ *  - `declaresNotNull` — whether the field declares `storage: { notNull: true }`.
+ *    When it does, the hint is the declared column's, which prescribes neither
+ *    `required` nor `os migrate`. When it does not, the classification's hint
+ *    stands, drift remedy included.
+ *
+ * Everything else is byte-for-byte the classification's: `status`, `code`,
+ * `fields[0].field` (the column key a client maps to its input), `fields[0].code`,
+ * `object`, and the key set. An answer that is not the NOT NULL branch's is
+ * handed back untouched.
+ */
+export function relabelNotNullRefusal(
+    answer: { status: number; body: Record<string, unknown> },
+    field: { message: string; declaresNotNull: boolean },
+): { status: number; body: Record<string, unknown> } {
+    const site = notNullRefusalSite(answer);
+    if (!site) return answer;
+    const [first] = answer.body.fields as Array<Record<string, unknown>>;
+    return {
+        status: answer.status,
+        body: {
+            ...answer.body,
+            error: field.message,
+            fields: [{ ...first, message: field.message }],
+            ...(field.declaresNotNull ? { hint: declaredNotNullHint(site.column) } : {}),
+        },
+    };
 }
 
 // The members above that are not `export`ed where they are declared, but that

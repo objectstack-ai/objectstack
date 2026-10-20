@@ -1087,7 +1087,7 @@
       "title": "Chunked upload integrity on v18: complete with a missing chunk is 409 with details.missingChunks and the session stays in_progress, a re-sent chunk counts once, parallel chunks all record, and an org switch mid-upload answers 409 on chunk and complete, and on progress only once the session's expiry stamp is due",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1099,7 +1099,7 @@
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)"
         ],
         "knownGaps": [
-          "acceptance[0] names the org-switch guard among what the pins prove, but none of the three automated.ref files drives a CHUNKED door after an organization switch, so the door-level 409 of acceptance[3] (chunk PUT, chunked complete, a progress read whose expiry stamp is due) is unpinned. The guard is the doors' shared requireStartingOrganization (packages/services/service-storage/src/storage-routes.ts, asking packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach); the one door-level pin of it is the presigned COMMIT door's 409 RESOURCE_CONFLICT in packages/services/service-storage/src/error-envelope.conformance.test.ts, a sibling door, and chunk-part-record-concurrency.test.ts pins only the store-level miss. Score acceptance[0] on chunk accounting and the missing-chunk refusal alone, and do not cite the pins for the org-switch guard. acceptance[3]'s live leg, steps[3], needs a second organization the admin can make active. A stock boot holds one: POST /api/v1/auth/organization/create answers 403 ORGANIZATION_CREATION_DISABLED on every boot whose posture enforces no wall (packages/plugins/plugin-auth/src/auth-manager.ts#ORGANIZATION_CREATION_DISABLED_CODE; QA runs #24560 / #24558). Since 18.x step 4 (#24580) a walled boot provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own' creates it through that same door (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that provisions neither records acceptance[3] blocked(fixture) naming those entries, never fail. With no chunked-door pin of the guard either, such a run carries no verdict on it; a run that stages the second organization with a system write, as QA run #24560 did, scores a fixture of its own making and records that its verdict rests on it"
+          "acceptance[0] names the org-switch guard among what the pins prove, but none of the three automated.ref files drives a CHUNKED door after an organization switch, so the door-level 409 of acceptance[3] (chunk PUT, chunked complete, a progress read whose expiry stamp is due) is unpinned. The guard is the doors' shared requireStartingOrganization (packages/services/service-storage/src/storage-routes.ts, asking packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach); the one door-level pin of it is the presigned COMMIT door's 409 RESOURCE_CONFLICT in packages/services/service-storage/src/error-envelope.conformance.test.ts, a sibling door, and chunk-part-record-concurrency.test.ts pins only the store-level miss. Score acceptance[0] on chunk accounting and the missing-chunk refusal alone, and do not cite the pins for the org-switch guard. acceptance[3]'s live leg, steps[3], needs a second organization the admin can make active. A stock boot holds one: POST /api/v1/auth/organization/create answers 403 ORGANIZATION_CREATION_DISABLED on every boot whose posture enforces no wall (packages/plugins/plugin-auth/src/auth-manager.ts#ORGANIZATION_CREATION_DISABLED_CODE; QA runs #24560 / #24558). On 18.0.0, where 18.x step 4 (#24580) has deleted the walled boot refusal that of the published prereleases only 18.0.0-next.5 carries, a walled boot provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own' creates it through that same door (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that provisions neither records acceptance[3] blocked(fixture) naming those entries, never fail. With no chunked-door pin of the guard either, such a run carries no verdict on it; a run that stages the second organization with a system write, as QA run #24560 did, scores a fixture of its own making and records that its verdict rests on it"
         ]
       },
       "steps": [
@@ -1172,6 +1172,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0]'s second-organization leg re-pointed — 18.x step 4 (#24580) lets a walled boot create the second organization through the auth API, per RUNNER.md's renamed entries 'A walled boot is a fixture of its own' and 'A stock `single` boot holds exactly one organization…'; unprovisioned, acceptance[3] is blocked(fixture). No clause changed",
           "ref": "#24580"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line dated the walled boot's second organization 'Since 18.x step 4 (#24580)', so a runner on 18.0.0 could not tell whether its release boots the walled posture, and a runner on a prerelease was not told which one refuses it. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
+          "ref": "#24788"
         }
       ]
     }
