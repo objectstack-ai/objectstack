@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 70 — spawns the real producer once per single-cause fixture: two served-shape boots that run the real Archiver, and six spawns of the source CLI (dry run, --apply, re-run over the archive fixture; --apply on a project with no archive; a dry run with a runtime archive row; --apply with a declared archive that cannot connect); 54.7 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
+// test-budget: 85 — spawns the real producer once per single-cause fixture: two served-shape boots that run the real Archiver, and six spawns of the source CLI (dry run, --apply, re-run over the archive fixture; --apply on a project with no archive; a dry run with a runtime archive row; --apply with a declared archive that cannot connect); 67.8 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
 
 /**
  * [#24899] `os migrate audit-mail-bodies` masks the mail-log bodies the
@@ -281,12 +281,14 @@ beforeAll(async () => {
   }
   runtimeRowRun = await runCommand(runtimeRowDir, runtimeRowDb, ['--json']);
 
-  // A declared archive whose SQLite file cannot be opened: its directory is a
-  // regular file, so the connect fails on every attempt.
+  // A declared archive the boot cannot reach: a Postgres server on a port
+  // nothing listens on, so the connect is refused on every attempt. Not an
+  // unopenable SQLite file: the source entry pins NODE_ENV=development, under
+  // which the SQLite factory steps an unopenable file down to an in-memory
+  // engine instead of failing.
   unreachableDir = mkdtempSync(join(tmpdir(), 'os-24899-unreachable-'));
-  writeFileSync(join(unreachableDir, 'blocker'), 'not a directory');
   writeArtifact(unreachableDir, [
-    { name: 'archive', driver: 'sqlite', config: { filename: join(unreachableDir, 'blocker', 'archive.db') }, autoConnect: true },
+    { name: 'archive', driver: 'postgres', config: { host: '127.0.0.1', port: 1, database: 'archive', user: 'os24899' }, autoConnect: true },
   ]);
   unreachableRun = await runCommand(unreachableDir, join(unreachableDir, 'main.db'), ['--apply', '--yes', '--json']);
 }, HOOK_TIMEOUT_MS);
@@ -377,8 +379,7 @@ describe('[#24899] os migrate audit-mail-bodies over an archive datasource', () 
     expect(unreachableRun.code).toBe(1);
     const entry = archiveOf(unreachableRun);
     expect(entry).toMatchObject({ datasource: 'archive', objects: ['sys_audit_log'], status: 'not-connected' });
-    expect(typeof entry.connection?.status).toBe('string');
-    expect(entry.connection.status === 'connected' || entry.connection.status === 'already-registered').toBe(false);
+    expect(entry.connection?.status).toBe('failed-degraded');
     expect(entry.report).toBeUndefined();
   });
 });
