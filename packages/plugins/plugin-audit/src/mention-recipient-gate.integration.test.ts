@@ -125,7 +125,7 @@ describe('@mention notifications reach only mentioned users who can read the rec
     await engine.insert(
       'sys_comment',
       { thread_id: `${TASK}:${taskId}`, body: `note ${seq}`, mentions: JSON.stringify(mentions) },
-      { context: authorContext() } as any,
+      { context: authorContext() },
     );
     return emits.filter((e) => e.topic === 'collab.mention');
   };
@@ -182,14 +182,14 @@ describe('@mention notifications reach only mentioned users who can read the rec
     }, { object: TASK });
 
     for (const u of [ALICE, CAROL, BOB]) {
-      await engine.insert('sys_user', { id: u.id, name: u.id, email: u.email }, { context: SYS } as any);
+      await engine.insert('sys_user', { id: u.id, name: u.id, email: u.email }, { context: SYS });
     }
     for (const [user, org] of [[ALICE, ORG_A], [CAROL, ORG_A], [BOB, ORG_B]] as const) {
-      await engine.insert('sys_member', { user_id: user.id, organization_id: org, role: 'member' }, { context: SYS } as any);
+      await engine.insert('sys_member', { user_id: user.id, organization_id: org, role: 'member' }, { context: SYS });
     }
-    openTask = (await engine.insert(TASK, { name: 'open', organization_id: ORG_A, owner_id: ALICE.id, confidential: false }, { context: SYS } as any)).id;
+    openTask = (await engine.insert(TASK, { name: 'open', organization_id: ORG_A, owner_id: ALICE.id, confidential: false }, { context: SYS })).id;
     confidentialTask = (
-      await engine.insert(TASK, { name: 'confidential', organization_id: ORG_A, owner_id: ALICE.id, confidential: true }, { context: SYS } as any)
+      await engine.insert(TASK, { name: 'confidential', organization_id: ORG_A, owner_id: ALICE.id, confidential: true }, { context: SYS })
     ).id;
   }, 120_000);
 
@@ -203,8 +203,8 @@ describe('@mention notifications reach only mentioned users who can read the rec
 
   describe('isolated', () => {
     it('control: the other organization\'s user cannot read the record, the fellow member can', async () => {
-      const asBob = await engine.find(TASK, { where: { id: openTask }, context: { userId: BOB.id, tenantId: ORG_B } } as any);
-      const asCarol = await engine.find(TASK, { where: { id: openTask }, context: { userId: CAROL.id, tenantId: ORG_A } } as any);
+      const asBob = await engine.find(TASK, { where: { id: openTask }, context: { userId: BOB.id, tenantId: ORG_B } });
+      const asCarol = await engine.find(TASK, { where: { id: openTask }, context: { userId: CAROL.id, tenantId: ORG_A } });
       expect(asBob).toEqual([]);
       expect(asCarol.map((r: any) => r.id)).toEqual([openTask]);
     });
@@ -250,7 +250,7 @@ describe('@mention notifications reach only mentioned users who can read the rec
   describe('single', () => {
     it('withholds from a fellow member the record\'s own sharing excludes', async () => {
       tenancy.posture = 'single';
-      const asCarol = await engine.find(TASK, { where: { id: confidentialTask }, context: { userId: CAROL.id, tenantId: ORG_A } } as any);
+      const asCarol = await engine.find(TASK, { where: { id: confidentialTask }, context: { userId: CAROL.id, tenantId: ORG_A } });
       expect(asCarol).toEqual([]);
       expect(audiences(await comment(confidentialTask, [CAROL.id]))).toEqual([]);
       expect(audiences(await comment(openTask, [CAROL.id]))).toEqual([[CAROL.id]]);
