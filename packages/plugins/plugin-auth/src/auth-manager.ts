@@ -106,6 +106,7 @@ import {
 } from './impersonation-bearer-rotation.js';
 import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
 import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-verified-reset.js';
+import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
 import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
 import {
   applyPlatformAdminImpersonation,
@@ -2970,6 +2971,12 @@ export class AuthManager {
             }
             return;
           }
+
+          // ── #24750: invite-member's unknown-role refusal carries its code ──
+          // better-auth throws it with only a message; the spec promises
+          // `ROLE_NOT_FOUND` (see `invite-role-not-found-code.ts`). It throws
+          // on a match, so it stays after every section above.
+          await codeInviteRoleNotFound(ctx);
 
           if (ctx?.path !== '/sign-up/email') return;
           // ADR-0069 D1 — stamp password_changed_at for a newly-created local

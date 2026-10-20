@@ -195,7 +195,13 @@ describe('#8844 system-context writes — the runtime autonumber fork', () => {
     expect(refusal.code).toBe('ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
     expect(refusal.status).toBe(500);
     expect(refusal.message).toContain('dispatch_order');
-    expect(refusal.message).toContain(GLOBAL_TENANT);
+    // [ADR-0131 D9, 8d] The ENGINE's refusal, not the driver counter's twin
+    // (which carries the same code): it fires above the driver, before any
+    // autonumber is reserved. And it no longer offers the retired
+    // organization-less counter as what the write would have reached.
+    expect(refusal.message).toMatch(/^Insert on 'dispatch_order' was REFUSED/);
+    expect(refusal.message).toContain('ADR-0131 D9');
+    expect(refusal.message).not.toContain(GLOBAL_TENANT);
 
     // ⛔ Not defaulted: no row, and — the assertion that distinguishes "refused"
     // from "wrote it under `__global__` and then threw" — no `__global__`

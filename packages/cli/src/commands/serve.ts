@@ -4674,6 +4674,29 @@ export default class Serve extends Command {
           + "view, a share link, or `book.audience: 'public'`.",
         );
       }
+      // [ADR-0131 D9] The same case reached the other way: the `auth` tier is
+      // on, but a production boot resolved no secret, so AuthPlugin is not
+      // composed (rule 4 of `resolvePlatformAuthComposition`). A1's conclusion
+      // holds unchanged — no security model, so no data API — and it holds for
+      // a second reason too: with no AuthPlugin there is no organization
+      // object, so every write the boot makes (the inline seed first) would land
+      // with no organization and draw its autonumbers from an organization-less
+      // counter. Refused here, while the kernel has only been composed: no
+      // plugin has started, so nothing has been written. The `host-kernel`
+      // reason (the cloud runtime, where auth is each project's) is not this
+      // case and still only warns above.
+      if (flags.server && !authComposition.composes && authComposition.reason === 'no-secret') {
+        throw new Error(
+          'This stack enables auth, but no auth secret is set, so AuthPlugin was not composed and no caller '
+          + 'can authenticate — anonymous access to object data is always denied, so the data API would be '
+          + 'unusable, and with no organization every row this boot writes would have no owner.\n'
+          + 'Fix it one of two ways:\n'
+          + '  • set OS_AUTH_SECRET (a long random value, identical across restarts and nodes), e.g. '
+          + 'OS_AUTH_SECRET=$(openssl rand -hex 32);\n'
+          + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
+          + 'A local trial does not need the secret: `os dev` (or `os serve --dev`) uses a development fallback.',
+        );
+      }
 
       try {
         const { createRestApiPlugin } = await import('@objectstack/rest');

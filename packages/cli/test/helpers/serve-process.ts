@@ -792,6 +792,16 @@ export function portDriftError(
  */
 export const E2E_SECRET_KEY = '0e2e'.repeat(16);
 
+/**
+ * A fixed, obviously-synthetic auth secret for spawned PRODUCTION server boots
+ * (`bin/run.js`, `NODE_ENV` unset). Since ADR-0131 D9 such a boot is refused
+ * before the kernel starts when no secret composes AuthPlugin
+ * (`serve-no-auth-secret-refusal.integration.test.ts`), so a rig whose
+ * property is not about auth hands this in rather than steering around the
+ * refusal. ⛔ Test fixtures only; it signs nothing anyone keeps.
+ */
+export const E2E_AUTH_SECRET = 'os-e2e-auth-secret-not-a-real-credential-0e2e0e2e';
+
 export const VITEST_WORKER_ENV_KEYS = [
   'TEST',
   'VITEST',
