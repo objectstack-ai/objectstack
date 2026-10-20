@@ -400,7 +400,7 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -413,7 +413,8 @@
         ],
         "knownGaps": [
           "parallel_gateway / join_gateway / boundary_event are deliberately NOT in the matrix: BPMN-interop lowering targets whose author-facing forms are the ADR-0031 structured containers — waived with reasons in examples/app-showcase/src/coverage.ts FLOW_NODE_WAIVERS, and the coverage test enforces every OTHER enum member is authored",
-          "showcase_fan_out_notify (the parallel + http owner in the map above) posts to Slack and needs outbound egress. On an egress-denied runner, prove parallel on another run that carries it (showcase_nested_fan_out_reminders — a loop-body parallel), and record http as blocked(environment) rather than FAIL when its only located steps failed for want of egress (#21784 FE13). http itself is provable without egress on a SELF-PINGING scratch flow: register (POST /api/v1/automation) start → http {method: 'GET', url: 'http://127.0.0.1:<OS_PORT>/api/v1/health'} → end, trigger it (POST /api/v1/automation/<name>/trigger), read the run (http step success), then DELETE /api/v1/automation/<name> — measured on main c91af8ed6: 200, run completed, http success"
+          "showcase_fan_out_notify (the parallel + http owner in the map above) posts to Slack and needs outbound egress. On an egress-denied runner, prove parallel on another run that carries it (showcase_nested_fan_out_reminders — a loop-body parallel), and record http as blocked(environment) rather than FAIL when its only located steps failed for want of egress (#21784 FE13). http itself is provable without egress on a SELF-PINGING scratch flow: register (POST /api/v1/automation) start → http {method: 'GET', url: 'http://127.0.0.1:<OS_PORT>/api/v1/health'} → end, trigger it (POST /api/v1/automation/<name>/trigger), read the run (http step success), then DELETE /api/v1/automation/<name> — measured on main c91af8ed6: 200, run completed, http success",
+          "no pin scores a full clause of this item (RUNNER rule 6, a pin scores only the layer it drives; the theme-B rule), so the item carries no automated ref. packages/qa/dogfood/test/flow-node.dogfood.test.ts runs ONE update_record node over the HTTP trigger, with its input variable wired into the filter (the target stamped, the bystander untouched). That is one variant of acceptance[1]'s twenty, and no clause scores a single variant. automated may return when a pin drives the whole matrix, the palette feed or the unknown-type contract"
         ]
       },
       "variants": [
@@ -497,10 +498,6 @@
         "seed-data-thin",
         "automation-input"
       ],
-      "automated": {
-        "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/flow-node.dogfood.test.ts — covers ONE variant of acceptance[1] only: an update_record node runs over the HTTP trigger with its input variable wired into the filter (the target stamped, the bystander untouched); the matrix, the palette, the suspending types, the region tags and the unknown-type contract need the run"
-      },
       "source": [
         "packages/spec/src/automation/flow.zod.ts#FlowNodeAction (FlowNodeAction — the built-in seed set; type validated at registerFlow, not by a closed enum)",
         "packages/spec/src/automation/flow.zod.ts#FLOW_STRUCTURAL_NODE_TYPES (start / end: structural — no executor, no descriptor, so absent from GET /automation/actions; end logs no step)",
@@ -555,6 +552,12 @@
           "date": "2026-10-19",
           "change": "acceptance[1] (clause, verify), steps[1] and automated.ref corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24545, automation.flow-node-type-matrix acceptance[1] and steps[1]) and round 2's Tier 1 record (#24598, via wave anchor #24579 §3, comment 6272032736), which names this ref among those that over-claim clause coverage. \"end logs no step\" is true only of a taken end: an untaken branch's end is logged skipped (recordSkipped, service-automation engine.ts, at base 9a7838edf5); the palette has no Add node on the read-only package; and the one dogfood pin runs a single update_record node",
           "ref": "#24649"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "automated removed, fixtures.knownGaps[2] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: Tier 1 in name only), round 15 of wave anchor #24579. The ref already said its one dogfood pin covers ONE variant of acceptance[1]. A variant is not a clause, so no full clause is pinned: automated is dropped (theme-B rule), and the knownGap says what the pin asserts. Read at base b1676441ba. No clause changed",
+          "ref": "#PENDING-24579R15"
         }
       ],
       "enumSource": {
@@ -568,7 +571,7 @@
       "title": "Every flow trigger type fires and produces a run of its bound flow; the run's trigger block records the launch event",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -639,7 +642,7 @@
         }
       ],
       "negative": [
-        "anonymous POST /api/v1/automation/:name/trigger must be denied (401) with NO run row created — a 2xx or a run row is a FAIL (pinned by packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts)",
+        "anonymous POST /api/v1/automation/:name/trigger must be denied (401) with NO run row created — a 2xx or a run row is a FAIL (its 401 half is pinned at the HTTP door by packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts 'anonymous POST /automation/:name/trigger is denied (401)'; that case reads no run rows afterwards, so the no-run-row half is driven by hand)",
         "an intake POST with a wrong or missing HMAC signature must be refused (not 202) and create no task — a silent 202 on a bad signature is a FAIL"
       ],
       "traps": [
@@ -687,6 +690,12 @@
           "date": "2026-10-19",
           "change": "acceptance[4].verify and automated.ref corrected — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.trigger-type-matrix acceptance[4] / steps[5]: the screen flow launches through the action door, as screen-flow-roundtrip revision 4 already records) and round 2's Tier 1 record (#24598, via wave anchor #24579 §3, comment 6272032736), which names this ref among those that over-claim clause coverage: its two tests are the ledger ratchet only. Re-read at base 9a7838edf5. No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "negative[0]'s pin note narrowed, automated.ref unchanged — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: negative[0]'s pin is not in the ref), round 15 of wave anchor #24579. Read at base b1676441ba: the dogfood case asserts the anonymous trigger's 401 on the served showcase composition and never reads the runs after it. So it asserts half of negative[0] ('denied (401) with NO run row created'). A pin joins the ref only for a full clause at its layer, so it stays out, and negative[0] now says which half it pins. negative[0]'s FAIL condition is unchanged",
+          "ref": "#PENDING-24579R15"
         }
       ]
     },
