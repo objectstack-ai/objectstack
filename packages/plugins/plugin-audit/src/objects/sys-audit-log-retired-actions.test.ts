@@ -77,6 +77,16 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
   ['delete', 'plugin-audit/src/audit-writers.ts — actionFor(afterDelete)'],
   ['login', 'plugin-audit/src/auth-event-audit.ts — createAuthEventAuditSink (#8144)'],
   ['logout', 'plugin-audit/src/auth-event-audit.ts — createAuthEventAuditSink (#8144)'],
+  [
+    'login_failed',
+    'plugin-audit/src/auth-event-audit.ts — createAuthEventAuditSink, account event; called from '
+      + 'plugin-auth/src/auth-manager.ts on a refused password sign-in (auth-session-audit.ts)',
+  ],
+  [
+    'account_locked',
+    'plugin-audit/src/auth-event-audit.ts — createAuthEventAuditSink, account event; called from '
+      + 'plugin-auth/src/auth-manager.ts when the ADR-0069 D2 lockout is stamped (auth-session-audit.ts)',
+  ],
   ['config_change', 'service-settings/src/config-change-audit.ts — CONFIG_CHANGE_ACTION (#8145)'],
   ['import', 'plugin-auth/src/admin-import-users.ts — run-level row, record_id null'],
   [

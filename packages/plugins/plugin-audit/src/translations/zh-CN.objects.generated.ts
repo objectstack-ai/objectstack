@@ -33,6 +33,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           delete: "删除",
           login: "登录",
           logout: "登出",
+          login_failed: "登录失败",
+          account_locked: "账户锁定",
           config_change: "配置变更",
           import: "导入",
           platform_admin_standing_change: "平台管理员权限变更"
