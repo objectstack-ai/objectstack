@@ -153,10 +153,18 @@ const DROPPED_REASON_LABEL: Record<DroppedFieldsEvent['reason'], string> = {
     primary_key: "the field is the object's primary key and the value sent is not an identifier — the row(s) are identified by the id argument or the filter, so writing it would have overwritten their primary key (pass a scalar id, or put an id set in the filter)",
     // [#20805]
     computed: 'the field is a computed formula — its value is computed each time the record is read, so there is nothing to write (leave it out of the fields map)',
+    // [#24690] The field IS written — with the value its expression computes,
+    // not the one requested — so the closing sentence differs too (below).
+    stored_expression: 'the field is computed from its declared expression on every write, and the value requested differs from the computed one, which was stored instead (leave it out of the fields map, or change the fields its expression reads)',
 };
 
 function droppedFieldsWarning(nodeType: string, e: DroppedFieldsEvent): string {
-    return `${nodeType}(${e.object}): requested field(s) [${e.fields.join(', ')}] were NOT written — ${DROPPED_REASON_LABEL[e.reason] ?? e.reason}. The write succeeded without them.`;
+    // A `stored_expression` field was written — with its computed value — so
+    // "succeeded without them" would be false of it.
+    const outcome = e.reason === 'stored_expression'
+        ? 'The write succeeded with the computed value(s).'
+        : 'The write succeeded without them.';
+    return `${nodeType}(${e.object}): requested field(s) [${e.fields.join(', ')}] were NOT written — ${DROPPED_REASON_LABEL[e.reason] ?? e.reason}. ${outcome}`;
 }
 
 /**

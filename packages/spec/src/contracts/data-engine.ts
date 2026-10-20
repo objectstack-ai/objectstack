@@ -106,15 +106,18 @@ export interface WriteObservabilityOptions {
    * learns WHICH fields would go — but their result is discarded.
    *
    * It covers every drop `onFieldsDropped` reports — coverage DERIVED from the
-   * reported set, never an enumeration frozen at #5126. Today that is all four
+   * reported set, never an enumeration frozen at #5126. Today that is all five
    * `DroppedFieldsEvent['reason']` arms: static `readonly: true` (#2948, which
    * only runs for non-system callers), a TRUE `readonlyWhen` predicate (#3042,
    * which runs for every API-BOUNDARY caller, `isSystem` included — but judges
    * only the keys the caller supplied at engine entry, so a value a
    * `beforeUpdate` hook derived or overwrote is never stripped, #9107), the
    * `primary_key`
-   * strip (#6437), and the `computed` strip of a `formula` value (#20805, every
-   * context, `isSystem` included) — plus, since #5503, the implicitly-readonly runtime-owned
+   * strip (#6437), the `computed` strip of a `formula` value (#20805, every
+   * context, `isSystem` included), and the `stored_expression` replacement of
+   * a caller's value for a stored field the engine computes from its
+   * `expression` (#24690, every context, and only when the caller's value
+   * differs from the computed one) — plus, since #5503, the implicitly-readonly runtime-owned
    * strip, which reports under the same `'readonly'` arm rather than adding one
    * (see the INSERT section below). Covering only the static arm would leave a
    * trusted caller — the very caller this option exists for, one that already
