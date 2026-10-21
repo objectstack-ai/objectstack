@@ -127,14 +127,14 @@ describe('[#24981] import resolves a lookup cell by the target object\'s stored 
     expect(getMetaItem.mock.calls.map(([r]) => r.name)).toEqual(['xt_person']);
   });
 
-  for (const [cell, object, field, title] of [
+  for (const [cell, object, column, title] of [
     ['John Smith', 'xt_contact', 'contact', 'full_name'],
     ['Acme (EMEA)', 'xt_account', 'account', 'display_title'],
   ] as const) {
     it(`a formula title (${object}.${title}) is never asked by where: '${cell}' still answers reference_not_found`, async () => {
       const { p, findData, refusals } = protocol();
-      const summary = await run(p, [{ name: 'a', [field]: cell }]);
-      expect(summary.results.map(verdict)).toEqual([{ ok: false, code: 'reference_not_found', field }]);
+      const summary = await run(p, [{ name: 'a', [column]: cell }]);
+      expect(summary.results.map(verdict)).toEqual([{ ok: false, code: 'reference_not_found', field: column }]);
       const asked = askedOf(findData, object);
       expect(asked).not.toContain(title);
       // The fixed fallback keys are unchanged; only a member the target
