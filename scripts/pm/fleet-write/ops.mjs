@@ -84,11 +84,56 @@
  * neither is the first request of its action; `execute.mjs --self-test` pins
  * the fill, the refusal to send and the landing.
  *
+ * ## The governed-review follow-up — `pr_create` and `pr_ready` on a Tier H diff
+ *
+ * A Tier H governed surface (`GOVERNED_SURFACES` rows with tier `H` in
+ * `check-governed-merges.mjs`: `docs/adr/**`, `skills/**`, `AGENTS.md`,
+ * `CLAUDE.md`, `docs/NORTH-STAR.md`, `.github/workflows/**`) lands only on an
+ * APPROVED review by an account in `GOVERNED_APPROVERS`
+ * (`check-governed-queue-guard.mjs`, the ONE list of those accounts). The
+ * platform summons a code owner only when a pull is opened READY or marked
+ * ready for review — measured on this repository's own Tier H pulls, the
+ * CODEOWNERS request arrived at `ready_for_review` and never at the draft
+ * create — and every relay `pr_create` is a draft (forced above), held draft
+ * until that approval. So without this follow-up a seat-driven Tier H pull
+ * waits on an approver nobody told. The rows `pr_create` and `pr_ready`
+ * therefore carry `governedReview: true`, and the executor, once the row's own
+ * requests have landed, reads the pull's file list in full
+ * (`GOVERNED_REVIEW_FILES_PAGE_SIZE` per page, at most
+ * `GOVERNED_REVIEW_FILES_PAGE_CAP` pages — the endpoint's own ceiling; a walk
+ * that would need more is a truncated SUBSET and a FAILED action, never a
+ * quiet "not governed"), asks the register (`governedPathsIn` +
+ * `landingTierOf`, scoped to `payload.repo` through `repoIdForSlug`) and, on a
+ * Tier H hit, sends what `governedReviewRequests` spells: ONE
+ * `POST /repos/{o}/{r}/pulls/{n}/requested_reviewers` naming every
+ * `GOVERNED_APPROVERS` account not already requested, assigned or holding a
+ * submitted review (the union the H43 patrol reads as covered — so a re-run,
+ * a `pr_ready` after a `pr_create`, or the platform's own CODEOWNERS request
+ * landing first costs zero writes), and — because GitHub answers 422 to a
+ * request naming the pull's own author — ONE
+ * `POST /repos/{o}/{r}/issues/{n}/assignees` for the author when the author is
+ * itself a missing approver. Each answer is judged as the legs above are:
+ * `requested` against the pull's pending requests, `assigned` against its
+ * assignees; a 2xx lacking a login sent is a FAILED action naming it. A Tier
+ * S diff (`.claude/**` alone — it lands on a seat's review of record) and an
+ * ungoverned diff send nothing, and the row says which. The reads are unpaced
+ * GETs; the writes are paced like every other write verb and are outside the
+ * rule ⑤ count (`strokePacing` counts a stroke's spelled requests; these two
+ * are conditional and at most two per pull). Both rows spend `issues: write`
+ * for the assignee fallback (`alsoSpends`), a literal grant on every stroke.
+ * `execute.mjs --self-test` pins the plan, the writes and both refusals;
+ * `validate.mjs --self-test` pins the two rows and the two endpoints against
+ * the refused families. ⛔ This is an ACTION, not a judge: no gate, check-run
+ * or patrol row is added by it — the H43 row in `check-half-states.mjs` keeps
+ * reading the gap it closes.
+ *
  * ## The permissions the relay's token is narrowed to
  *
  * Read from GitHub's own permission ledger for server-to-server tokens
  * (`github/docs`, `src/github-apps/data/fpt-2022-11-28/server-to-server-permissions.json`):
- * every `/issues/**` write here is `issues: write`; `/pulls/**` and the
+ * every `/issues/**` write here is `issues: write` — `pr_create`'s assignees
+ * and labels legs and the governed-review follow-up's assignee fallback on
+ * `pr_create` and `pr_ready` spend it as `alsoSpends`; `/pulls/**` and the
  * ready / draft GraphQL mutations are `pull-requests: write`; the two
  * auto-merge mutations (`enablePullRequestAutoMerge` /
  * `disablePullRequestAutoMerge`) additionally require `contents: write` —
@@ -493,8 +538,15 @@ export function transferRemedy(source, target) {
  *   `alsoSpends`  (optional) grants the row spends beside `permission` —
  *                 each a literal mint input, never a stroke-scoped one
  *                 (`validate.mjs --self-test` pins it): `pr_create`'s
- *                 assignees and labels legs, LATER requests, and `automerge_enable` on
- *                 a pull that changes `.github/workflows/**` (header above);
+ *                 assignees and labels legs, LATER requests, the governed-review
+ *                 follow-up's assignee fallback on `pr_create` and `pr_ready`, and
+ *                 `automerge_enable` on a pull that changes `.github/workflows/**`
+ *                 (header above);
+ *   `governedReview` (optional) true for a row whose landed requests are followed
+ *                 by the governed-review follow-up (header above) — `pr_create`
+ *                 and `pr_ready`, the two moments a seat opens or readies a pull;
+ *                 the executor reads the pull's files and sends what
+ *                 `governedReviewRequests` spells, on a Tier H hit alone;
  *   `requests`    the request descriptors the executor issues, in order:
  *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, fromAnswer?, assigned?, labelled? }`
  *                 — a `graphql` descriptor names the mutation and the pull (or
@@ -581,6 +633,8 @@ export const OPS = Object.freeze({
     alsoSpends: Object.freeze(['issues']),
     required: Object.freeze(['title', 'head', 'base']),
     optional: Object.freeze(['body', 'assignees', 'labels']),
+    // The draft open is the moment the platform's CODEOWNERS is silent (header: "The governed-review follow-up").
+    governedReview: true,
     // `draft: true` is FORCED — a seat cannot open a ready PR through the relay.
     requests: (a, repo) => [
       { verb: 'POST', path: `/repos/${repo}/pulls`, body: { title: a.title, head: a.head, base: a.base, ...('body' in a ? { body: a.body } : {}), draft: true } },
@@ -611,10 +665,13 @@ export const OPS = Object.freeze({
     optional: Object.freeze([]),
     requests: (a, repo) => [{ verb: 'PUT', path: `${pulls(repo, a.pull)}/update-branch`, body: { expected_head_sha: a.expected_head_sha }, updateBranch: { pull: a.pull, expectedHeadSha: a.expected_head_sha } }],
   }),
+  // `issues` is the assignee fallback of the governed-review follow-up (header), a literal grant on every stroke.
   pr_ready: Object.freeze({
     permission: 'pull-requests',
+    alsoSpends: Object.freeze(['issues']),
     required: Object.freeze(['pull']),
     optional: Object.freeze([]),
+    governedReview: true,
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'markPullRequestReadyForReview', query: PR_MUTATIONS.pr_ready, pull: a.pull, landed: PR_LANDED_STATE.pr_ready } }],
   }),
   pr_draft: Object.freeze({
@@ -666,6 +723,25 @@ export const OPS = Object.freeze({
 });
 
 export const OP_NAMES = Object.freeze(Object.keys(OPS));
+
+/** The rows the governed-review follow-up runs after (header) — derived from the table, never listed. */
+export const GOVERNED_REVIEW_OPS = Object.freeze(OP_NAMES.filter((op) => OPS[op].governedReview === true));
+/** The page size the follow-up walks a pull's file list at — GitHub's maximum for `/pulls/{n}/files`. */
+export const GOVERNED_REVIEW_FILES_PAGE_SIZE = 100;
+/** The most pages it walks: the endpoint lists at most 3,000 files, so a walk past this cap is a truncated SUBSET. */
+export const GOVERNED_REVIEW_FILES_PAGE_CAP = 30;
+/**
+ * The requests the governed-review follow-up sends for ONE pull, spelled here so the validator's refused-family
+ * pin covers them: a `requested_reviewers` POST naming `reviewers` (its answer, the pull, must list every login
+ * sent — `requested`) and an issue-assignees POST naming `assignees` (its answer must list every login sent —
+ * `assigned`, the same judgment as `pr_create`'s assignees leg). An empty list sends nothing. Pure.
+ */
+export function governedReviewRequests(repo, pull, { reviewers = [], assignees = [] } = {}) {
+  return [
+    ...(reviewers.length ? [{ verb: 'POST', path: `${pulls(repo, pull)}/requested_reviewers`, body: { reviewers: [...reviewers] }, requested: [...reviewers] }] : []),
+    ...(assignees.length ? [{ verb: 'POST', path: `${issues(repo, pull)}/assignees`, body: { assignees: [...assignees] }, assigned: [...assignees] }] : []),
+  ];
+}
 
 /**
  * The families no row may ever reach — pinned by `validate.mjs --self-test`

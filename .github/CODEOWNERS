@@ -1,31 +1,52 @@
-# .github/CODEOWNERS — governance routing (#6785; ruling #6741).
+# .github/CODEOWNERS — governance routing: every Tier H governed surface to
+# every authorized approver.
 #
 # The ruling this file helps enforce (maintainer, verbatim):
 # 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」
 #
-# Routing docs/adr/ to the maintainer does two things: every PR touching an
-# ADR requests his review automatically, and a ruleset / branch-protection
-# rule "require review from Code Owners" has an entry to bind to (Half 2 of
-# #6785 — a repo-settings change only the maintainer can apply; the
-# button-by-button instructions are in the PR that added this file).
+# The owner list on EVERY row mirrors `GOVERNED_APPROVERS` in
+# scripts/pm/check-governed-queue-guard.mjs — the one list of accounts whose
+# APPROVED review lands a Tier H surface (「os-zhuang hotlong 批准算数」). The
+# rows mirror the Tier H rows of `GOVERNED_SURFACES` in
+# scripts/pm/check-governed-merges.mjs. This file is static and can import
+# neither, so the two stay in step the only way a static file can:
+# `node scripts/pm/check-governed-queue-guard.mjs --self-test` reads this file
+# (`codeownersMirrorVerdict`) and reds when a Tier H row has no line here, when
+# any line names fewer or other owners than that constant, or when a Tier S row
+# (`.claude/**`, which lands on a seat's review of record) is routed here.
+# Change the constant or the register first; this file follows in the same PR.
 #
-# The per-PR CI half that used to sit beside this file (`ADR maintainer
-# approval`) retired under the 2026-08-18 ruling (#9495): a human merge IS
-# the review record for a governed surface, the pre-merge line of defense is
-# seat discipline (no AI seat flips ready / enqueues / arms auto-merge on a
-# governed PR — AGENTS.md Prime Directive #14), and detection moved to the
-# report-only post-merge audit, scripts/pm/check-governed-merges.mjs, whose
-# header carries the incident history that used to live in the gate script.
+# What routing buys, and what it does not: GitHub requests a code owner's
+# review when a pull is opened READY or marked ready for review. A DRAFT open
+# requests nobody — measured on this repository's own Tier H pulls, where the
+# request arrived at `ready_for_review` and never at the draft create. Every
+# seat-driven Tier H pull is opened draft and stays draft until the approval,
+# so the fleet relay requests the same accounts itself at `pr_create` and
+# `pr_ready` (scripts/pm/fleet-write/ops.mjs, "The governed-review follow-up");
+# this file is the platform half — for a pull opened ready or readied by hand —
+# and the entry a ruleset's "require review from Code Owners" can bind to. A
+# code owner without write access is ignored by GitHub without a word:
+# `GET /repos/{owner}/{repo}/codeowners/errors` reads this file's own verdict.
 #
-# `hotlong` is verified against the repo history, not assumed: 2,153 commits
-# on main are authored as 50353452+hotlong@users.noreply.github.com — GitHub's
-# {id}+{login} noreply address form ties the login to the account.
+# Both logins are verified, not assumed: `hotlong` authors the bulk of main's
+# history as 50353452+hotlong@users.noreply.github.com (GitHub's {id}+{login}
+# noreply form ties the login to the account); `os-zhuang` is named by the
+# ruling above and has readied and reviewed this repository's pulls.
 #
-# The enforcement chain itself is routed the same way, deliberately: a PR
-# that edits the audit script or this file is a governance change — without
-# these entries the docs/adr/ rule could be lifted by editing the enforcers
-# instead of the ADRs.
+# The enforcement chain is routed the same way, deliberately: a PR that edits
+# the audit script, the approver constant or this file is a governance change —
+# without these entries the rule could be lifted by editing the enforcers
+# instead of the surfaces.
 
-/docs/adr/ @hotlong
-/.github/CODEOWNERS @hotlong
-/scripts/pm/check-governed-merges.mjs @hotlong
+# Tier H governed surfaces — the register's rows with tier H
+/docs/adr/ @os-zhuang @hotlong
+/skills/ @os-zhuang @hotlong
+/AGENTS.md @os-zhuang @hotlong
+/CLAUDE.md @os-zhuang @hotlong
+/docs/NORTH-STAR.md @os-zhuang @hotlong
+/.github/workflows/ @os-zhuang @hotlong
+
+# The enforcement chain
+/.github/CODEOWNERS @os-zhuang @hotlong
+/scripts/pm/check-governed-merges.mjs @os-zhuang @hotlong
+/scripts/pm/check-governed-queue-guard.mjs @os-zhuang @hotlong
