@@ -29,6 +29,8 @@ import {
   type MetadataRedactionResult,
   type MetadataTypeRedactor,
 } from './metadata-type-redaction';
+import { z } from 'zod';
+import { getMetadataTypeSchema as getMetadataTypeSchemaForTest, registerMetadataTypeSchema } from './metadata-type-schemas';
 
 describe('register/lookup round trip (the registry pattern of registerMetadataTypeSchema)', () => {
   it('a registered redactor is returned for its type', () => {
@@ -260,5 +262,104 @@ describe('stored metadata ROWS — the family-wide seam every exit routes throug
     expect(redactStoredMetadataBody('datasource', null)).toEqual({ ok: true, body: null });
     // A type with no redactor keeps its body even when unparseable.
     expect(redactStoredMetadataBody('view', '{broken')).toEqual({ ok: true, body: '{broken' });
+  });
+});
+
+describe('[ruling B+ on #24966] the third resolution: a redactor DERIVED from the credential markers on the type\'s schema', () => {
+  // Obviously-fake placeholders: the assertions name keys, never served values.
+  const declaredWebhook = () => ({
+    name: 'rule_webhook',
+    label: 'Rule webhook',
+    object: 'rule_task',
+    triggers: ['create'],
+    url: 'https://hooks.example/rule',
+    method: 'POST',
+    headers: { 'X-Placeholder': 'TEST_HEADER_VALUE' },
+    timeoutMs: 30000,
+    secret: 'TEST_SECRET',
+    isActive: true,
+    _packageId: 'rule.pkg',
+  });
+
+  it('webhook resolves a redactor with zero registration calls, and the snapshot lists it', () => {
+    expect(getMetadataTypeRedactor('webhook')).toBeDefined();
+    expect(listMetadataTypeRedactorTypes()).toContain('webhook');
+  });
+
+  it('drops both marked fields, names them in redactedKeys, and leaves every other key intact', () => {
+    const stored = declaredWebhook();
+    const result = getMetadataTypeRedactor('webhook')!(stored);
+    expect(result.redactedKeys).toEqual(['headers', 'secret']);
+    expect(Object.prototype.hasOwnProperty.call(result.item, 'secret')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(result.item, 'headers')).toBe(false);
+    const { secret: _s, headers: _h, ...rest } = stored;
+    expect(result.item).toEqual(rest);
+    // Pure: the stored body is never mutated.
+    expect(stored).toEqual(declaredWebhook());
+  });
+
+  it('serves the cleared forms as written and reports nothing: they hold no credential', () => {
+    const cleared = { ...declaredWebhook(), secret: '', headers: {} };
+    const result = getMetadataTypeRedactor('webhook')!(cleared);
+    expect(result.redactedKeys).toEqual([]);
+    expect(result.item).toBe(cleared);
+  });
+
+  it('a body without either field runs and finds nothing', () => {
+    const { secret: _s, headers: _h, ...bare } = declaredWebhook();
+    const result = getMetadataTypeRedactor('webhook')!(bare);
+    expect(result).toEqual({ item: bare, redactedKeys: [] });
+  });
+
+  it('the stored-row seam withholds both, plural spelling included', () => {
+    const outcome = redactStoredMetadataBody('webhooks', JSON.stringify(declaredWebhook()));
+    expect(outcome.ok).toBe(true);
+    const served = JSON.parse((outcome as { ok: true; body: string }).body) as Record<string, unknown>;
+    expect(Object.keys(served)).not.toContain('secret');
+    expect(Object.keys(served)).not.toContain('headers');
+  });
+
+  it('an unmarked type derives no redactor: undefined, "serve as is"', () => {
+    registerMetadataTypeSchema('zz_unmarked_rule_test', z.object({ name: z.string(), note: z.string().optional() }));
+    expect(getMetadataTypeRedactor('zz_unmarked_rule_test')).toBeUndefined();
+    expect(listMetadataTypeRedactorTypes()).not.toContain('zz_unmarked_rule_test');
+  });
+
+  it('walks nested declared object shapes and a value marker inside a wrapper', () => {
+    registerMetadataTypeSchema('zz_nested_rule_test', z.object({
+      name: z.string(),
+      auth: z.object({
+        user: z.string(),
+        key: z.string().meta({ credential: 'value' }).optional(),
+      }).optional(),
+    }));
+    const result = getMetadataTypeRedactor('zz_nested_rule_test')!({ name: 'n', auth: { user: 'u', key: 'TEST_SECRET' } });
+    expect(result).toEqual({ item: { name: 'n', auth: { user: 'u' } }, redactedKeys: ['auth.key'] });
+  });
+
+  it('precedence: an explicit registration wins over the derivation', () => {
+    registerMetadataTypeSchema('zz_marked_rule_test', z.object({ name: z.string(), token: z.string().meta({ credential: 'value' }) }));
+    const derived = getMetadataTypeRedactor('zz_marked_rule_test');
+    expect(derived).toBeDefined();
+    const explicit: MetadataTypeRedactor = (item) => ({ item, redactedKeys: [] });
+    registerMetadataTypeRedactor('zz_marked_rule_test', explicit);
+    expect(getMetadataTypeRedactor('zz_marked_rule_test')).toBe(explicit);
+  });
+
+  it('precedence: the datasource built-in is still the datasource redactor', () => {
+    const result = getMetadataTypeRedactor('datasource')!({ name: 'ds', driver: 'postgres', config: { host: 'h', password: 'TEST_SECRET' } });
+    expect(result.redactedKeys).toEqual(['config.password']);
+  });
+
+  it('derives through a registered schema wrapped in a second Proxy (an instrumented lazy schema)', () => {
+    const webhook = getMetadataTypeSchemaForTest('webhook');
+    const wrapped = new Proxy(webhook as object, { get: (t, p, r) => Reflect.get(t, p, r) });
+    registerMetadataTypeSchema('zz_proxied_rule_test', wrapped as never);
+    const result = getMetadataTypeRedactor('zz_proxied_rule_test')!(declaredWebhook());
+    expect(result.redactedKeys).toEqual(['headers', 'secret']);
+  });
+
+  it('the derivation is memoised per schema identity: one redactor across lookups', () => {
+    expect(getMetadataTypeRedactor('webhook')).toBe(getMetadataTypeRedactor('webhook'));
   });
 });

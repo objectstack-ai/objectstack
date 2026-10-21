@@ -296,7 +296,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Channel",
-        help: "このテンプレートを使用するチャネル：email または sms。アプリ内の受信トレイは使用しません。アプリ内の内容は、メールテンプレートを作成して通知ステップの template で指定してください。"
+        help: "このテンプレートを使用するチャネル：email または sms。その他の値は拒否されます。アプリ内の受信トレイは使用しません。アプリ内の内容は、メールテンプレートを作成して通知ステップの template で指定してください。"
       },
       locale: {
         label: "Locale",
@@ -344,7 +344,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       channel_renders_template: {
-        message: "このチャネルは通知テンプレートを使用しません。使用するのは email と sms だけなので、このテンプレートは送信されません。アプリ内（受信トレイ）の内容は、メールテンプレート（email_template）を作成して通知ステップの template で指定してください。メールと受信トレイの両方がそれを表示します。"
+        message: "通知テンプレートを使用するのは email と sms のチャネルだけなので、その他のチャネルのテンプレートは拒否されます。チャネルを email または sms に設定するか、テンプレートを削除してください。アプリ内（受信トレイ）の内容は、メールテンプレート（email_template）を作成して通知ステップの template で指定してください。メールと受信トレイの両方がそれを表示します。"
       }
     }
   },

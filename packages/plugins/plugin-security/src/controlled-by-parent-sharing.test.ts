@@ -665,11 +665,13 @@ describe('[#5815] getReadFilter enforces the same read scope as the engine middl
     expect(reads).not.toContain('crm_contact');
   });
 
-  it('a delegated (on-behalf-of) read still denies outright — unchanged by the added layer', async () => {
-    // [#2852] The D10 delegator intersection is not implemented on this path,
-    // so it fails closed BEFORE any layer is composed. Pinned here because the
+  it('a delegated (on-behalf-of) read whose delegator does not exist still denies outright — unchanged by the added layer', async () => {
+    // [ADR-0090 D10] getReadFilter composes the delegator intersection for a
+    // delegated context (ADR-0139 D5.1 as amended). This fixture stores no
+    // `sys_user` row, so the link names a delegator who does not exist and the
+    // read fails closed BEFORE any layer is composed. Pinned here because the
     // added layer must not become a reason to compute a scope for a context
-    // this method refuses to scope at all.
+    // whose delegator cannot be resolved.
     const h = await boot({ shareLevel: 'edit' });
     const delegated = { ...h.repContext(), onBehalfOf: { userId: OTHER } };
     expect(await h.analyticsVisibleContacts(delegated)).toEqual([]);

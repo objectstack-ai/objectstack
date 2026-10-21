@@ -1657,12 +1657,14 @@ describe('SecurityPlugin', () => {
       expect(filter).toEqual(RLS_DENY_FILTER);
     });
 
-    it('[#2852] fail-closed on an on-behalf-of (delegated) context — no D10 intersection on this path', async () => {
-      // getReadFilter resolves only the CALLER's ceiling; the delegator RLS
-      // intersection the engine middleware applies is absent here. A delegated
-      // read must DENY rather than silently return the agent's (wider) own
-      // scope. Latent today (no agent surface reaches analytics) but the
-      // invariant is enforced regardless.
+    it('[ADR-0090 D10] fail-closed on an on-behalf-of (delegated) context whose delegator does not exist', async () => {
+      // getReadFilter composes the D10 intersection for a delegated context
+      // (ADR-0139 D5.1 as amended; `readable-ids-delegated-compose.test.ts`
+      // measures it on the real stack). This harness answers no `sys_user`
+      // row, so the link names a delegator who does not exist: there is no
+      // leg to intersect against, and the read DENIES rather than serve the
+      // agent's own (wider) scope — the dangling-link rule every D10 gate
+      // shares, logged as the failure it is.
       const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
       const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet], orgScoping: true });
       await plugin.init(harness.ctx);

@@ -32,6 +32,7 @@
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
+    "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.6.3",
     "typescript": "^6.0.3",
