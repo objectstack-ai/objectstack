@@ -894,7 +894,8 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // interpret is written in a form that consumer reads as text, by the CSV
     // text-cell rule (`markCsvTextCell`, `./export-format.ts`), and the CSV
     // import parse reverses exactly that (`parseCsvToRows`), so the file
-    // re-imports to the stored value. xlsx and json are unaffected.
+    // re-imports to the stored value (one exception: `unmarkCsvTextCell`).
+    // xlsx and json are unaffected.
     //
     // [#24945] Boolean / toggle cells are written in the language of the
     // header row: `templateText(locale).booleanWords` (yes / no, or 是 / 否 for

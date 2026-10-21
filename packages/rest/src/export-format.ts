@@ -212,7 +212,8 @@ export function headerLabel(field: string, metaMap: Map<string, ExportFieldMeta>
 // ({@link markCsvTextCell}, called by the CSV writer `rowsToCsv` in
 // `./rest-server.ts`). The CSV import parse (`parseCsvToRows` in
 // `./import-prepare.ts`) reverses exactly that ({@link unmarkCsvTextCell}), so
-// an export → import round trip returns the stored value.
+// an export → import round trip returns the stored value, with the one
+// exception {@link unmarkCsvTextCell} states.
 //
 // Scope, by construction: CSV only — the xlsx and json formats and the json
 // import door never read this rule. Which cells are TEXT cells is the writer's
@@ -259,7 +260,10 @@ export function markCsvTextCell(text: string): string {
  * when the remainder satisfies {@link csvTextCellNeedsMark}, and returns every
  * other cell unchanged. Applied to every cell of a parsed CSV, header row
  * included, so a user-authored cell of that same shape loses its leading mark
- * too: the file cannot tell the two apart, and the rule is one rule.
+ * too: the file cannot tell the two apart, and the rule is one rule. The same
+ * holds for a STORED text value of that shape — the writer leaves it as is
+ * (its first character is the mark, not a trigger), so it is the one value an
+ * export → import round trip does not return unchanged.
  */
 export function unmarkCsvTextCell(cell: string): string {
   return cell.startsWith(CSV_TEXT_CELL_MARK) && csvTextCellNeedsMark(cell.slice(CSV_TEXT_CELL_MARK.length))
