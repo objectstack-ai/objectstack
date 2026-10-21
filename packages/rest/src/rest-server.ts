@@ -285,6 +285,8 @@ import {
     headerLabel,
     formatRowCells,
     exportContentDisposition,
+    isCsvTextColumn,
+    markCsvTextCell,
     type ExportBooleanWords,
     type ExportFieldMeta,
 } from './export-format.js';
@@ -1117,11 +1119,18 @@ export function importJobToSummary(row: any): Record<string, any> {
  * quotes doubled. `null` / `undefined` become an empty cell. Objects and
  * arrays are serialised as compact JSON so nested data round-trips
  * without flattening surprises.
+ *
+ * [#25078] `textCell` says whether the column is a TEXT column under the CSV
+ * text-cell rule (`isCsvTextColumn`, `./export-format.ts`, decided by the
+ * field's declared type). A string value in a text column is written through
+ * `markCsvTextCell` BEFORE the quoting below; every other value — a number,
+ * a boolean, a `Date`, serialised JSON, or a string in a numeric, boolean,
+ * date or datetime column — is written exactly as before.
  */
-function formatCsvCell(value: any): string {
+function formatCsvCell(value: any, textCell: boolean): string {
     if (value === null || value === undefined) return '';
     let s: string;
-    if (typeof value === 'string') s = value;
+    if (typeof value === 'string') s = textCell ? markCsvTextCell(value) : value;
     else if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') s = String(value);
     // [#14078] Total `Date` arm. An Invalid `Date` renders as `String(value)`,
     // which is exactly the visible text `Invalid Date` — the cell an operator
@@ -1144,8 +1153,13 @@ function formatCsvCell(value: any): string {
  * list of field names and a (possibly empty) field-metadata map. With metadata,
  * the header row uses field labels and cell values are formatted to readable
  * display values (lookup names, select labels, yes / no words, formatted
- * dates). With an empty map the output is byte-identical to the raw,
- * un-formatted behaviour.
+ * dates). With an empty map the cells carry the raw, un-formatted values.
+ *
+ * [#25078] On both paths every header label and every string cell of a text
+ * column passes through the CSV text-cell rule (`markCsvTextCell`,
+ * `./export-format.ts`), which `parseCsvToRows` reverses on import. On the raw
+ * path every column is a text column; with metadata, a column declared
+ * numeric, boolean, date or datetime is not (`isCsvTextColumn`).
  *
  * `timezone` (#8373) is the caller's business timezone, used to render
  * `datetime` cells in the same clock the UI shows; absent, they render in UTC.
@@ -1161,9 +1175,14 @@ export function rowsToCsv(
     booleanWords?: ExportBooleanWords,
 ): string {
     const lines: string[] = [];
-    if (includeHeader) lines.push(fields.map(f => formatCsvCell(headerLabel(f, metaMap))).join(','));
+    const textColumns = fields.map((f) => isCsvTextColumn(metaMap.get(f)));
+    if (includeHeader) lines.push(fields.map(f => formatCsvCell(headerLabel(f, metaMap), true)).join(','));
     for (const row of rows) {
-        lines.push(formatRowCells(row, fields, metaMap, timezone, booleanWords).map(formatCsvCell).join(','));
+        lines.push(
+            formatRowCells(row, fields, metaMap, timezone, booleanWords)
+                .map((cell, i) => formatCsvCell(cell, textColumns[i]))
+                .join(','),
+        );
     }
     return lines.join('\r\n') + (lines.length > 0 ? '\r\n' : '');
 }
