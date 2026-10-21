@@ -17,12 +17,15 @@
  *    provider's own rule applies unchanged: `web` needs https on a non-loopback
  *    host; `native` may use http only on exactly `localhost`, `127.0.0.1` or
  *    `[::1]`. Nothing in the door re-judges a URI.
- *  - Any other value (the form's `user-agent-based` and `public`, which have no
- *    `application_type`, or anything else) keeps the outcome it always had:
- *    registered, judged and stored as `web`. It is NOT refused — that would
- *    narrow what the door accepts — and the server logs exactly ONE warning
- *    per registration, naming the value.
- *  - No type at all is the provider's default, `web`, with no warning.
+ *  - Any other value present in the body (the form's former `user-agent-based`
+ *    and `public`, which have no `application_type`, an unknown string, an
+ *    empty string, a non-string) is REFUSED with the route's own
+ *    `400 INVALID_REQUEST`, before the provider is called: nothing is stored,
+ *    nothing is logged, and it is never registered as `web` or mapped to
+ *    another type. Until this refusal it was registered as `web` with one
+ *    server warning; that warning is gone.
+ *  - No type at all — absent, or JSON `null` — is the provider's default,
+ *    `web`, and is unchanged.
  *
  * Driven against REAL better-auth (OIDC provider on) behind the plugin's REAL
  * route registration on a real Hono app, over a REAL ObjectQL engine on SQLite
@@ -96,6 +99,7 @@ const AUTHZ_OBJECTS = [
 ];
 
 const warn = vi.fn();
+const logError = vi.fn();
 const mockCtx = (): PluginContext =>
   ({
     registerService: vi.fn(),
@@ -103,7 +107,7 @@ const mockCtx = (): PluginContext =>
     getServices: vi.fn(() => new Map()),
     hook: vi.fn(),
     trigger: vi.fn(),
-    logger: { info: vi.fn(), error: vi.fn(), warn, debug: vi.fn() },
+    logger: { info: vi.fn(), error: logError, warn, debug: vi.fn() },
     getKernel: vi.fn(),
   }) as unknown as PluginContext;
 
@@ -111,6 +115,8 @@ let engine: ObjectQL;
 let manager: AuthManager;
 let app: Hono;
 let cookie: string;
+/** A pass-through spy on the provider's `createOAuthClient`, the door's one call into it. */
+let providerCall: ReturnType<typeof vi.fn>;
 
 type Row = Record<string, unknown>;
 
@@ -136,18 +142,27 @@ type Answer = {
 };
 
 /**
- * One registration through the door. Returns the answer and the warnings the
- * plugin logged while serving THIS request (the mock is cleared first).
+ * One registration through the door. Returns the answer, the warnings and
+ * errors the plugin logged while serving THIS request, and the bodies the door
+ * handed the provider's `createOAuthClient` (every mock is cleared first).
  */
 async function register(body: Record<string, unknown>) {
   warn.mockClear();
+  logError.mockClear();
+  providerCall.mockClear();
   const res = await app.request(`${ORIGIN}${BASE}${DOOR}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin: ORIGIN, cookie },
     body: JSON.stringify(body),
   });
   const json = (await res.json()) as Answer;
-  return { status: res.status, body: json, warnings: [...warn.mock.calls] };
+  return {
+    status: res.status,
+    body: json,
+    warnings: [...warn.mock.calls],
+    errors: [...logError.mock.calls],
+    providerBodies: providerCall.mock.calls.map(([input]) => (input as { body?: Record<string, unknown> }).body),
+  };
 }
 
 /** Accepted: 200, a minted client, its row stored with `type`. */
@@ -155,6 +170,9 @@ async function expectStoredAs(answer: Awaited<ReturnType<typeof register>>, stor
   expect(answer.status, JSON.stringify(answer.body)).toBe(200);
   expect(envelopeViolations(answer.body)).toEqual([]);
   expect(answer.body.success).toBe(true);
+  // Forwarded unchanged: exactly one provider call, carrying the type it stored.
+  expect(answer.providerBodies).toHaveLength(1);
+  expect(answer.providerBodies[0]?.application_type).toBe(storedType);
   const clientId = answer.body.data?.client?.client_id;
   expect(typeof clientId).toBe('string');
   const row = await storedClient(clientId);
@@ -207,6 +225,9 @@ beforeAll(async () => {
     dataEngine: engine as never,
     plugins: { oidcProvider: true },
   } as unknown as ConstructorParameters<typeof AuthManager>[0]);
+  // `getApi()` hands out one api object per manager, so the door calls this spy.
+  const providerApi = (await manager.getApi()) as unknown as { createOAuthClient(input: unknown): Promise<unknown> };
+  providerCall = vi.spyOn(providerApi, 'createOAuthClient') as unknown as ReturnType<typeof vi.fn>;
 
   const direct = (path: string, body: unknown) =>
     manager.handleRequest(
@@ -307,28 +328,64 @@ describe('[#24773] web and native reach the provider as `application_type`', () 
     await expectStoredAs(answer, 'web');
     expect(answer.warnings).toEqual([]);
   });
+
+  it('type null: no type at all, so the provider\'s default, web — stored as web, no warning', async () => {
+    const answer = await register({ name: 'Null typed', redirectURLs: HTTPS, type: null });
+    await expectStoredAs(answer, 'web');
+    expect(answer.warnings).toEqual([]);
+  });
 });
 
-describe('[#24773] a type the provider has no `application_type` for keeps today\'s outcome, with one warning', () => {
-  const UNHONOURED = ['user-agent-based', 'public', 'spa'] as const;
+describe('[#24773] any other type is refused before the provider is called', () => {
+  // Every value present in the body other than `web` / `native`. Until this
+  // refusal each one was registered and judged as `web`, with a client secret
+  // and one server warning.
+  const REFUSED: ReadonlyArray<readonly [label: string, type: unknown]> = [
+    ['user-agent-based', 'user-agent-based'],
+    ['public', 'public'],
+    ['an unknown string', 'spa'],
+    ['an empty string', ''],
+    ['a number', 42],
+    ['a boolean', true],
+    ['an object', { application_type: 'native' }],
+  ];
 
-  it.each(UNHONOURED)('%s + https: accepted and stored as web; exactly one warning naming the value', async (type) => {
-    const answer = await register({ name: `Typed ${type}`, redirectURLs: HTTPS, type });
-    const row = await expectStoredAs(answer, 'web');
-    // The form's value is stored nowhere on the row, and no public client
-    // (no secret) was issued for `public`.
-    expect(Object.entries(row).filter(([, value]) => value === type)).toEqual([]);
-    expect(row.public === true || row.public === 1, 'the door registered a public client').toBe(false);
-    expect(row.token_endpoint_auth_method).not.toBe('none');
-    expect(answer.warnings).toHaveLength(1);
-    const [, meta] = answer.warnings[0] as [string, Record<string, unknown>];
-    expect(meta).toEqual({ requestedType: type, registeredAs: 'web' });
+  /** Refused by the door itself: 400 INVALID_REQUEST, no provider call, no row, nothing logged. */
+  async function expectTypeRefused(answer: Awaited<ReturnType<typeof register>>, rowsBefore: number) {
+    expect(answer.status, JSON.stringify(answer.body)).toBe(400);
+    expect(envelopeViolations(answer.body)).toEqual([]);
+    expect(answer.body.success).toBe(false);
+    expect(answer.body.error?.code).toBe('INVALID_REQUEST');
+    expect(answer.providerBodies, 'the door called the provider for a type it refuses').toEqual([]);
+    expect((await storedClients()).length, 'a refused registration wrote a client row').toBe(rowsBefore);
+    expect(answer.warnings, 'the door still warns instead of (or as well as) refusing').toEqual([]);
+    expect(answer.errors).toEqual([]);
+  }
+
+  it.each(REFUSED)('%s + https: 400 INVALID_REQUEST, the provider is never called, nothing is stored', async (_label, type) => {
+    const before = (await storedClients()).length;
+    await expectTypeRefused(await register({ name: 'Typed', redirectURLs: HTTPS, type }), before);
   });
 
-  it.each(UNHONOURED)('%s + http://localhost: judged as web — refused, nothing stored; exactly one warning', async (type) => {
+  it.each(REFUSED)('%s + http://localhost: refused for its type, before the provider\'s web rule can judge the URI', async (_label, type) => {
     const before = (await storedClients()).length;
-    const answer = await register({ name: `Local ${type}`, redirectURLs: LOOPBACK, type });
-    await expectRefused(answer, before);
-    expect(answer.warnings).toHaveLength(1);
+    await expectTypeRefused(await register({ name: 'Local typed', redirectURLs: LOOPBACK, type }), before);
+  });
+
+  it('the message names the value, truncated, and both accepted types, and points a loopback redirect at native', async () => {
+    const long = `${'a'.repeat(64)}TAIL-NEVER-ECHOED`;
+    const answer = await register({ name: 'Long typed', redirectURLs: HTTPS, type: long });
+    const message = answer.body.error?.message ?? '';
+    expect(answer.body.error?.code).toBe('INVALID_REQUEST');
+    expect(message).toContain('a'.repeat(64));
+    expect(message, 'the message echoes the value past its first 64 characters').not.toContain('TAIL');
+    for (const subject of ["'web'", "'native'", 'http://localhost', 'http://127.0.0.1', 'http://[::1]']) {
+      expect(message).toContain(subject);
+    }
+
+    const short = await register({ name: 'Short typed', redirectURLs: HTTPS, type: 'user-agent-based' });
+    expect(short.body.error?.message).toContain('"user-agent-based"');
+    const nonString = await register({ name: 'Number typed', redirectURLs: HTTPS, type: 42 });
+    expect(nonString.body.error?.message).toContain('(number)');
   });
 });
