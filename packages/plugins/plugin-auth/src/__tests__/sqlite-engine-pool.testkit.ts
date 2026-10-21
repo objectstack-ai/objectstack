@@ -21,7 +21,9 @@
  *  - the engine's memo of the install's organizations, which only an engine
  *    write to `sys_organization` invalidates: the rows are deleted below the
  *    engine, so a database that holds an organization row is refused rather
- *    than emptied;
+ *    than emptied — unless the pool KEEPS the rows its boot wrote
+ *    (`keepBootOrganizations`): they are then left in place, and a case that
+ *    changed them is refused, so the memo still describes the table;
  *  - the schema itself: a case that created or dropped a table leaves an
  *    engine a fresh boot would not give, and the next `take()` refuses it;
  *  - the write epoch and the log-once sets: counters and logging only, read by
@@ -54,6 +56,12 @@ export interface BootedSqliteEngine<E extends ObjectQL = ObjectQL> {
 export interface SqliteEnginePoolOptions<E extends ObjectQL> {
   /** Per-engine fixture state the suite keeps beside the database (a catalog set, say), reset with it. */
   onReset?: (engine: E) => void | Promise<void>;
+  /**
+   * Keep the `sys_organization` rows the boot wrote (a Default Organization, say)
+   * across resets instead of refusing them. A case that adds, changes or removes
+   * one is refused at the next `take()`, as a schema change is.
+   */
+  keepBootOrganizations?: boolean;
 }
 
 export interface SqliteEnginePool<E extends ObjectQL> {
@@ -72,6 +80,8 @@ interface Entry<E extends ObjectQL> {
   driver: SqlDriver;
   /** The tables the boot created, sorted. */
   tables: readonly string[];
+  /** The `sys_organization` rows the boot wrote, serialized, when the pool keeps them. */
+  bootOrganizations?: string;
   held: boolean;
 }
 
@@ -79,6 +89,11 @@ interface Entry<E extends ObjectQL> {
 const ORGANIZATION_TABLE = 'sys_organization';
 
 type Knex = ReturnType<SqlDriver['getKnex']>;
+
+async function organizationRows(knex: Knex): Promise<string> {
+  const rows = (await knex(ORGANIZATION_TABLE).select('*')) as Array<Record<string, unknown>>;
+  return JSON.stringify(rows.map((row) => JSON.stringify(row)).sort());
+}
 
 async function tableNames(knex: Knex): Promise<string[]> {
   const rows = (await knex('sqlite_master').where({ type: 'table' }).select('name')) as Array<{ name: string }>;
@@ -121,7 +136,11 @@ export function sqliteEnginePool<E extends ObjectQL>(
           'memory across a reset; boot that engine per case instead of pooling it.',
       );
     }
-    const entry: Entry<E> = { engine, driver, tables: await tableNames(driver.getKnex()), held: true };
+    const tables = await tableNames(driver.getKnex());
+    const entry: Entry<E> = { engine, driver, tables, held: true };
+    if (options.keepBootOrganizations && tables.includes(ORGANIZATION_TABLE)) {
+      entry.bootOrganizations = await organizationRows(driver.getKnex());
+    }
     entries.push(entry);
     return entry;
   }
@@ -138,7 +157,15 @@ export function sqliteEnginePool<E extends ObjectQL>(
           'Boot that case its own engine.',
       );
     }
-    if (tables.includes(ORGANIZATION_TABLE)) {
+    const keptOrganizations = entry.bootOrganizations !== undefined;
+    if (keptOrganizations && (await organizationRows(knex)) !== entry.bootOrganizations) {
+      throw new Error(
+        `sqliteEnginePool: a case changed the ${ORGANIZATION_TABLE} rows this pool keeps from the boot, and the ` +
+          'engine memoizes the organization set until an engine write to that object invalidates it. Boot that ' +
+          'case its own engine.',
+      );
+    }
+    if (tables.includes(ORGANIZATION_TABLE) && !keptOrganizations) {
       const [row] = (await knex(ORGANIZATION_TABLE).count({ n: '*' })) as Array<{ n: number | string }>;
       if (Number(row?.n ?? 0) > 0) {
         throw new Error(
@@ -151,7 +178,10 @@ export function sqliteEnginePool<E extends ObjectQL>(
     await knex.transaction(async (trx) => {
       // Checked at commit, when every table is empty: the delete order does not matter.
       await trx.raw('PRAGMA defer_foreign_keys = ON');
-      for (const table of tables) await trx(table).del();
+      for (const table of tables) {
+        if (keptOrganizations && table === ORGANIZATION_TABLE) continue;
+        await trx(table).del();
+      }
       const [sequence] = (await trx('sqlite_master').where({ type: 'table', name: 'sqlite_sequence' })) as unknown[];
       if (sequence) await trx('sqlite_sequence').del();
     });

@@ -59,7 +59,7 @@ const result = BulkDataEventSchema.parse(data);
 | **type** | `Enum<'data.record.created' \| 'data.record.updated' \| 'data.record.deleted'>` | ✅ | Event type |
 | **object** | `string` | ✅ | Object name |
 | **recordId** | `string` | ✅ | Record ID |
-| **organizationId** | `string` | optional | Organization the record belongs to (its organization_id), so a tenant-scoped consumer can discriminate the event's tenant without reading the record body. Absent when the record belongs to no organization: every event on a single-posture deployment (no organization wall, nothing stamps the column), and a row that carries no organization under a walled posture (environment-wide, or an object outside the wall) — read absence as "not behind any organization wall", never as "unknown". Present = exactly that organization; never fabricated, and the empty string is refused. |
+| **organizationId** | `string` | optional | Organization the record belongs to (its organization_id), so a tenant-scoped consumer can discriminate the event's tenant without reading the record body. Absent when the record belongs to no organization: a row of an object outside the wall (environment-wide, or no organization column), and every row of a composition that registers no organization object. A single-posture deployment stamps every tenant row with its Default Organization, so its events carry it — read absence as "not behind any organization wall", never as "unknown". Present = exactly that organization; never fabricated, and the empty string is refused. |
 | **changes** | `Record<string, any>` | optional | Changed fields |
 | **before** | `Record<string, any>` | optional | Before state |
 | **after** | `Record<string, any>` | optional | After state |

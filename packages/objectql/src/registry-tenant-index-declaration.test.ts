@@ -149,7 +149,8 @@ describe('#6810 — a registry-backed object reads back valid at both /meta exit
     expect(tenantIndexes(def)).toEqual([]);
     // And the COLUMN is still provisioned either way — that decoupling is
     // older than this fix and must survive it (sudo writers stamp the column
-    // on single-tenant stacks; it just stays NULL).
+    // on single-tenant stacks; org-scoping stamps it on insert under `single`
+    // with the Default Organization, and it is never NULL, ADR-0131 D1).
     expect(def.fields.organization_id).toBeDefined();
   });
 
