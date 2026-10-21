@@ -261,12 +261,14 @@ interface WriteImageCheckSeam {
   /** Set by the engine immediately before `evaluate` runs. */
   honoured?: boolean;
   /**
-   * [#24822] Set by step 3.7, and only by it: on an insert, `evaluate` holds
-   * every row's `organization_id` to the Layer 0 tenant wall's own parts. The
-   * engine then leaves a caller's explicit value on the row for that verdict
-   * instead of stripping it as `readonly`. Never set on a seam that carries the
-   * business `check` alone, or on a crossing platform operator's seam: neither
-   * judges the organization.
+   * [#24822] Set by step 3.7, and only by it: `evaluate` holds every stored
+   * row's `organization_id` to the Layer 0 tenant wall's own parts, on an
+   * insert and on a single-payload update (the by-id image, and every row the
+   * predicate path matched). The engine then leaves a caller's explicit value,
+   * or an update's re-point, on the row for that verdict instead of stripping
+   * it as `readonly`. Never set on a seam that carries the business `check`
+   * alone, on a crossing platform operator's seam, or on an update whose
+   * payload is an array: none of them judges the organization.
    */
   judgesOrganization?: boolean;
 }
@@ -3935,13 +3937,22 @@ export class SecurityPlugin implements Plugin {
       // Both close identically here: a SUPPLIED (non-empty) `organization_id` in
       // the write payload must satisfy the SAME Layer 0 filter the read side uses
       // (isolation active, tenant object, platform-admin posture exemption,
-      // fail-closed on a missing active org). For UPDATE this makes
-      // `organization_id` effectively immutable in non-platform user contexts: the
-      // only value that passes is the caller's active org (which — since the
-      // pre-image already scoped the target to that org — equals the row's current
-      // org), so a re-point to any OTHER tenant is denied. A bulk update carrying a
-      // cross-tenant `organization_id` change-set is caught too (the check inspects
-      // the change-set value here, and [#20013] every stored row in the engine).
+      // fail-closed on a missing active org). For UPDATE that bounds a re-point
+      // by the caller's organization scope, and [#24822] a re-point the wall
+      // admits is STORED as sent. Under `isolated` the only value that passes is
+      // the caller's active org (which, since the pre-image already scoped the
+      // target to that org, equals the row's current org), so a re-point to any
+      // OTHER tenant is denied. Under `group` a re-point to another organization
+      // of the membership set is admitted and stored there, and one outside the
+      // set is denied. On an app object's platform-injected column, the seam
+      // below declares `judgesOrganization`, so the engine's static-`readonly`
+      // strip leaves the admitted value on the row for this wall's verdict
+      // instead of taking it and keeping the row's own organization in silence.
+      // A `sys_` or platform-internal object, and an AUTHORED read-only
+      // `organization_id`, keep that strip. A bulk update carrying a
+      // cross-tenant `organization_id` change-set is caught too (the check
+      // inspects the change-set value here, and [#20013] every stored row in the
+      // engine).
       //
       // [#22278] The invariant, stated whole: wherever the wall applies to a
       // non-system UPDATE, the row's organization after the write is one the
@@ -4326,24 +4337,39 @@ export class SecurityPlugin implements Plugin {
                 if (emptiesOrganization(row)) denyOrganizationRemoval("the stored row's");
               }
             },
-            // ── [#24822 · ADR-0105 D5] The insert's organization is JUDGED here ──
+            // ── [#24822 · ADR-0105 D5] The write's organization is JUDGED here ──
             //
             // The loop above holds a stored row's `organization_id` to the wall
             // whenever the wall has parts, and the payload half above already
-            // refused every supplied value outside them. So on an insert the
-            // engine may leave a caller's explicit value on the row for this
-            // verdict instead of stripping it as `readonly` and storing the
-            // active organization in its place. That replacement was silent:
-            // a 2xx, with the row in another organization than the one the
-            // wall admitted. The member says so, and the engine reads nothing
-            // else. Set ONLY where the wall's own parts are composed in
-            // (`tenantParts` non-empty). The crossing operator's seam
+            // refused every supplied value outside them (and, on an update,
+            // every emptied one). So the engine may leave a caller's explicit
+            // value on the row for this verdict instead of stripping it as
+            // `readonly`: on an insert, rather than storing the active
+            // organization in its place; on an update, rather than keeping the
+            // row's own organization against a re-point the wall admitted.
+            // Both replacements were silent: a 2xx, with the row in another
+            // organization than the one the wall admitted. The member says so,
+            // and the engine reads nothing else.
+            //
+            // Set ONLY where the wall's own parts are composed in (`tenantParts`
+            // non-empty). The crossing operator's seam
             // (`operatorInsertLacksActiveOrganization` with no parts) judges no
             // organization: its loop admits every row. The business `check`
             // seam of step 3.6 never reaches this composition. Neither sets it,
-            // so the strip there runs as before. An update's organization is
-            // not this member's.
-            ...(opCtx.operation === 'insert' && tenantParts.length > 0 ? { judgesOrganization: true } : {}),
+            // so the strip there runs as before.
+            //
+            // And only on the two operations whose stored rows this loop is
+            // handed: an insert (its rows), and an update whose payload is ONE
+            // row (the by-id image, and every row the predicate path matched,
+            // each merged with that payload). An ARRAY update payload never
+            // reaches this composition (the condition above), so it is stated
+            // again here rather than inferred: the member is the seam's own
+            // claim about what it judges, and it must stay true if that
+            // condition ever moves.
+            ...(tenantParts.length > 0 &&
+            (opCtx.operation === 'insert' || (opCtx.operation === 'update' && !Array.isArray(opCtx.data)))
+              ? { judgesOrganization: true }
+              : {}),
           };
           opCtx.postHookWriteImageCheck = writeImageCheckSeam;
           tenantWallSeamInstalled = true;
@@ -9171,6 +9197,24 @@ export class SecurityPlugin implements Plugin {
    * asked is not asked again; and a predicate write that selects no row the
    * caller can read involves no master at all.
    *
+   * [#25049] …a BATCH create's included. Its body is one record per row and
+   * each row names its own master, so the same walk is asked of every master
+   * the rows name — once per master, in row order — before anything is
+   * written. The first refusal is the answer, in the by-id leg's own envelope,
+   * and nothing is written. The empty-master branch then answers the batch
+   * exactly as it did before, since it reads no master off an array: it
+   * stands down where required-field validation judges each row that names
+   * none, and refuses the batch whole otherwise.
+   *
+   * [#25049] And a write never EMPTIES the master reference. §1 derives a
+   * detail's access from exactly one required master, so a row whose
+   * reference an update sets to null has no master to derive it from, and no
+   * principal's read can match it. That is the empty-master condition below,
+   * met on an update's body, and it is answered the same way: handed to
+   * required-field validation where validation judges the same field, and
+   * refused `422` otherwise — after the stored masters' question, so a master
+   * the caller may not edit is still the answer there.
+   *
    * [#7474] SIX conditions refuse a write here, and they are NOT one verdict.
    * Three are genuine authorization answers (no object-level `update` on the
    * master, the master row outside the caller's write RLS, no `edit`-level
@@ -9184,8 +9228,8 @@ export class SecurityPlugin implements Plugin {
    *     INVALID_METADATA` ({@link MasterDetailRelationMissingError})
    *   - the target row does not exist → `404 RECORD_NOT_FOUND`
    *     ({@link DetailRecordNotFoundError})
-   *   - the detail's master reference is empty → `422 MISSING_REQUIRED_FIELD`
-   *     ({@link MasterReferenceMissingError})
+   *   - the detail's master reference is empty, or an update's body empties
+   *     it → `422 MISSING_REQUIRED_FIELD` ({@link MasterReferenceMissingError})
    *
    * [#8688] The last of those three has since NARROWED, by the maintainer
    * ruling of 2026-08-15: on an `insert` whose master FK is absent, this gate
@@ -9195,6 +9239,8 @@ export class SecurityPlugin implements Plugin {
    * platform's ordinary `400 VALIDATION_FAILED` with `fields[]` instead. It
    * keeps answering `422` for the three shapes validation does not cover, and
    * for the stored-row shape on any other by-id write. See the branch itself.
+   * An update whose body empties the reference is the insert shape's twin and
+   * is answered by the same rule (#25049).
    *
    * [#7505] A seventh outcome is not a leg of this gate at all: if the store
    * cannot be read, the engine's own error propagates (typically
@@ -9258,15 +9304,28 @@ export class SecurityPlugin implements Plugin {
     // so once the masters `judged` (the stored ones) have been asked, the SAME
     // walk is asked of the body's — unless it is one of them, which would ask
     // one master twice. Read as an OWN property, never through the prototype
-    // chain. A body that names no master (no such key, or a null) leaves this
-    // question nothing to ask about; that is not a master-edit verdict, and
-    // nothing here answers it.
+    // chain. A body without the key names no master and leaves this question
+    // nothing to ask about.
+    //
+    // [ADR-0055 §1 · #25049] A body WITH the key and a null value names no
+    // master either, but it is not silent: on an update it empties the
+    // reference the row's access derives from. That is the empty-master
+    // condition the branch below answers for an insert, answered by the same
+    // rule — handed to required-field validation where it provably judges the
+    // same field ({@link CbpRelation.omissionRefusedByValidation}: its update
+    // pass refuses a required field the body sets to null), and refused here
+    // otherwise, before anything is written. An insert never reaches here
+    // with an empty master: the branch below has answered it.
     const askBodyNamedMaster = async (judged: readonly unknown[]): Promise<void> => {
       const data = opCtx.data;
       if (data == null || typeof data !== 'object' || Array.isArray(data)) return;
       if (!Object.prototype.hasOwnProperty.call(data, rel.fk)) return;
       const named = (data as Record<string, unknown>)[rel.fk];
-      if (named == null || judged.includes(named)) return;
+      if (named == null) {
+        if (operation !== 'update' || rel.omissionRefusedByValidation) return;
+        throw new MasterReferenceMissingError(object, operation, rel.fk);
+      }
+      if (judged.includes(named)) return;
       await this.assertControlledByParentChainEditable(
         permissionSets, object, rel, named, context, opCtx, masterEditDenied, denyMasterEdit,
       );
@@ -9278,6 +9337,26 @@ export class SecurityPlugin implements Plugin {
     let detailRecordId: unknown;
     if (operation === 'insert') {
       const data = opCtx.data;
+      if (Array.isArray(data)) {
+        // [ADR-0055 §3 · #25049] A BATCH create: one body per row, and the
+        // middleware chain runs once for all of them, so every master the rows
+        // name is asked here — the same walk a single create runs, once per
+        // master, in row order — before anything is written. A row is read
+        // exactly as a single create's body is read below. A row that names no
+        // master is left to the empty-master branch, which this batch then
+        // meets exactly as it did before (`masterId` stays undefined for an
+        // array): it stands down where required-field validation judges each
+        // such row, and refuses the batch whole otherwise.
+        const asked: unknown[] = [];
+        for (const row of data as unknown[]) {
+          const rowMasterId = row && typeof row === 'object' && !Array.isArray(row) ? (row as any)[rel.fk] : undefined;
+          if (rowMasterId == null || asked.includes(rowMasterId)) continue;
+          asked.push(rowMasterId);
+          await this.assertControlledByParentChainEditable(
+            permissionSets, object, rel, rowMasterId, context, opCtx, masterEditDenied, denyMasterEdit,
+          );
+        }
+      }
       masterId = data && typeof data === 'object' && !Array.isArray(data) ? (data as any)[rel.fk] : undefined;
     } else {
       const targetId = this.extractSingleId(opCtx);
@@ -9426,6 +9505,9 @@ export class SecurityPlugin implements Plugin {
       // whose persisted FK is null) keeps its 422: the caller sent no such
       // field, so a `fields[]` naming it would name a field that was never in
       // the request, and there is no payload the caller could send to fix it.
+      // [#25049] An update whose BODY empties the reference is the insert
+      // shape's twin — the caller did send the field — and is answered by the
+      // same rule, in `askBodyNamedMaster` above.
       if (operation === 'insert' && rel.omissionRefusedByValidation) return;
       throw new MasterReferenceMissingError(object, operation, rel.fk, detailRecordId);
     }
@@ -9449,8 +9531,9 @@ export class SecurityPlugin implements Plugin {
    * ⚠️ Extraction, not a rewrite — the body is the walk the gate ran inline,
    * moved verbatim so that the gate can run it once per master: once for an
    * insert or a by-id write, once for each master a predicate write selects
-   * rows under ({@link controlledByParentPredicateWriteMasters}), and once more
-   * for a master the write's body names that is not among those (#25044).
+   * rows under ({@link controlledByParentPredicateWriteMasters}), once more
+   * for a master the write's body names that is not among those (#25044), and
+   * once for each master a batch create's rows name (#25049).
    * There must stay exactly one walk, for the reason
    * {@link assertMasterRowEditable} gives for its legs.
    *
