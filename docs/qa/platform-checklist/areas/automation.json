@@ -2108,7 +2108,7 @@
           "revision": 8,
           "date": "2026-10-21",
           "change": "acceptance[1].clause and acceptance[1].verify say which half of the Activation cell the clause judges. PR #25018's out-of-scope finding (round 18 of wave anchor #24579; ACCEPT 6305381435, landing record 6305762608): the clause read 'default all On, an obsolete-status flow excepted', which holds for the switch, the activation flag, and not for the badge beside it, which steps[3] (revision 7) reads as 'Not running here', switch still checked, for the two policy-unbound schedule flows on a default boot. The clause now names the switch, checked by default with the obsolete-status flow unchecked, and says the badge's 'Not running here' does not fail it. verify scores each switch against its _status row's enabled field: the field the page binds it to (joinPackagedFlows and the Switch's checked prop, read at the console pin cf153eb2e535, blobs a85c96d28e5a and f4aa90e11d32), and the one the engine sets false only for an obsolete or invalid status or a ledger toggle (isFlowEnabled, service-automation engine.ts, read at base 73432299c0, where allFlows still declares 32 flows with showcase_approver_bindings the one obsolete). It leaves the badge to steps[3]. The oracle (dom) and the evidence are unchanged. The live reading at the pin is NOT MEASURED",
-          "ref": "#PENDING-24579R19"
+          "ref": "#25027"
         }
       ]
     },
