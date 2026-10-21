@@ -839,7 +839,7 @@ export class CloudConnectionPlugin implements Plugin {
                 }
 
                 // Revoke cloud-side FIRST (the oscc_ bearer self-identifies;
-                // env-keyed bindings name the environment), then clear the
+                // a known environment id rides along), then clear the
                 // local credential regardless — a device signing out must not
                 // leave a live token behind when the control plane is up.
                 let revoked = false;
