@@ -196,17 +196,6 @@ describe('[#24523] statements per warm request: an organization-owned admin gran
 
 describe('[#24523 / #21868] a sys_organization write retires the memoised Default Organization', () => {
   it('⭐ the Default Organization deleted and recreated: the next request reads the new id', async () => {
-    // Deleting an organization runs the engine's referential cascade, whose
-    // `set_null` on every `organization_id` lookup a fresh, NOT NULL tenant
-    // column refuses (ADR-0131 D1). This test's subject is the memo, not the
-    // cascade, so the store is a pre-18 one: every tenant table it holds is
-    // relaxed through its driver's own drift apply door.
-    for (const o of (engine as any).registry.getAllObjects() as Array<{ name: string; fields?: Record<string, unknown>; tenancy?: { enabled?: boolean } }>) {
-      if (!o.fields?.organization_id || o.tenancy?.enabled === false) continue;
-      const driver = (engine as any).getDriver(o.name);
-      if (!(await driver?.knex?.schema.hasTable(o.name))) continue;
-      await relaxTenantColumns(driver, [o.name]);
-    }
     const [old] = await find('sys_organization', { slug: 'default' });
     await standing(); // the control above wrote the organization: read it once
     expect(await standing()).toEqual({ standing: true, organizationReads: 0 });
