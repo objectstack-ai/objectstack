@@ -46,8 +46,12 @@
  * package's exposed object on every shape, and once the gate read the protocol
  * (which refuses the by-name read of such an object) its `apiEnabled: false`
  * object too, where the copy had refused it `OBJECT_API_DISABLED`. The gate
- * now refuses that object itself, with the protocol's own error, so every verb
- * answers what REST answers.
+ * `callData` asks now refuses that object itself, with the protocol's own
+ * error, so every verb answers what REST answers. The dispatcher's `/data`
+ * door asks the same gate earlier too, before its request gate, as the twin of
+ * REST's `enforceApiAccess`; there it reads that refusal as REST's gate does,
+ * so a body that is not a record is answered by the request gate first, on
+ * both doors.
  *
  * ## The fix, and where these pins sit
  *
@@ -71,9 +75,9 @@
  * `init()` (during the boot, the way capability plugins register their
  * objects) or after the boot with `{ source: 'marketplace' }` (the way
  * marketplace install registers a package). The one seam not real is the MCP
- * service, which records the bridge it is handed. REST's answer for a disabled
- * package's objects is read off a `RestServer` served over the same kernel's
- * protocol.
+ * service, which records the bridge it is handed. What the two `/data` doors
+ * answer a disabled package's objects is read off a `RestServer` and the
+ * runtime dispatcher, both served over the same kernel's protocol.
  *
  * The negative control (red with the fix ablated) is a one-time ablation,
  * cited in the PR, not a permanent case.
@@ -89,6 +93,7 @@ import { MetadataPlugin } from '@objectstack/metadata';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { RestServer } from '@objectstack/rest';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const CALLER = { userId: 'u_mcp', isSystem: false, positions: [], permissions: [], systemPermissions: [] };
@@ -337,30 +342,46 @@ for (const { shape, environmentId } of SHAPES) {
 const PACKAGE_DISABLED = { code: 'OBJECT_PACKAGE_DISABLED', status: 404 } as const;
 
 /**
- * What `RestServer` answers on each of its `/data` record routes for `object`,
- * served over this kernel's own protocol (the request `plugin-hono-server`
- * hands a route handler, as `data-write-request-gate.test.ts` drives it).
- * REST has no aggregate route, so the five routes are its whole data face.
+ * The `/data` record requests both data doors serve: the five well-formed ones
+ * (REST has no aggregate route, so they are its whole data face), and three
+ * whose body is not what the request schema declares, which each door's
+ * request gate answers.
  */
-async function restDataAnswers(kernel: ObjectKernel, object: string): Promise<Array<{ route: string; status: unknown; code: unknown }>> {
+const DATA_REQUESTS: ReadonlyArray<{ method: string; route: string; id?: string; body: unknown; wellFormed: boolean }> = [
+    { method: 'GET', route: '/data/:object', body: undefined, wellFormed: true },
+    { method: 'GET', route: '/data/:object/:id', id: 'r_any', body: undefined, wellFormed: true },
+    { method: 'POST', route: '/data/:object/query', body: {}, wellFormed: true },
+    { method: 'POST', route: '/data/:object', body: { name: 'written' }, wellFormed: true },
+    { method: 'PATCH', route: '/data/:object/:id', id: 'r_any', body: { name: 'written' }, wellFormed: true },
+    { method: 'DELETE', route: '/data/:object/:id', id: 'r_any', body: undefined, wellFormed: true },
+    { method: 'POST', route: '/data/:object', body: [{ name: 'written' }], wellFormed: false },
+    { method: 'PATCH', route: '/data/:object/:id', id: 'r_any', body: [{ name: 'written' }], wellFormed: false },
+    { method: 'POST', route: '/data/:object/query', body: { limit: 'ten' }, wellFormed: false },
+];
+
+/** The refusal's `code` in either door's envelope: nested under `error`, or beside a string `error`. */
+const codeOf = (body: any): unknown => (body?.error && typeof body.error === 'object' ? body.error.code : body?.code);
+
+/**
+ * What each data door answers `object` on each of {@link DATA_REQUESTS}, both
+ * served over this kernel's own protocol: `RestServer` through its registered
+ * handler, and the runtime dispatcher's `/data` door through `dispatch()`, the
+ * way `data-write-request-gate.test.ts` drives the two.
+ */
+async function dataDoorAnswers(kernel: ObjectKernel, object: string) {
     const noop = () => {};
     const server = { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
     const rest: any = new RestServer(server as any, kernel.getService('protocol') as any, { api: { requireAuth: false } } as any);
     rest.resolveExecCtx = async () => ({ ...CALLER });
     rest.registerRoutes();
-    const data = '/api/v1/data';
-    const routes: ReadonlyArray<readonly [method: string, path: string, params: Record<string, string>, body: unknown]> = [
-        ['GET', `${data}/:object`, { object }, undefined],
-        ['GET', `${data}/:object/:id`, { object, id: 'r_any' }, undefined],
-        ['POST', `${data}/:object/query`, { object }, {}],
-        ['POST', `${data}/:object`, { object }, { name: 'written' }],
-        ['PATCH', `${data}/:object/:id`, { object, id: 'r_any' }, { name: 'written' }],
-        ['DELETE', `${data}/:object/:id`, { object, id: 'r_any' }, undefined],
-    ];
-    const answers: Array<{ route: string; status: unknown; code: unknown }> = [];
-    for (const [method, path, params, body] of routes) {
-        const route = rest.getRoutes().find((r: any) => r.method === method && r.path === path);
-        expect(route, `precondition: RestServer registers ${method} ${path}`).toBeTruthy();
+    const dispatcher = new HttpDispatcher(kernel as any, undefined, { enforceProjectMembership: false });
+    (dispatcher as any).timedResolveExecutionContext = async () => ({ ...CALLER });
+
+    const answers: Array<{ request: string; wellFormed: boolean; rest: unknown; dispatcher: unknown }> = [];
+    for (const { method, route, id, body, wellFormed } of DATA_REQUESTS) {
+        const path = `/data/${object}${route.endsWith('/query') ? '/query' : id ? `/${id}` : ''}`;
+        const handler = rest.getRoutes().find((r: any) => r.method === method && r.path === `/api/v1${route}`)?.handler;
+        expect(handler, `precondition: RestServer registers ${method} ${route}`).toBeTruthy();
         const res: any = { statusCode: 200, body: undefined };
         res.status = (code: number) => { res.statusCode = code; return res; };
         res.json = (out: unknown) => { res.body = out; return res; };
@@ -368,12 +389,27 @@ async function restDataAnswers(kernel: ObjectKernel, object: string): Promise<Ar
         res.setHeader = noop;
         res.send = () => res;
         res.end = () => res;
-        await route.handler({ method, path, params, headers: { 'content-type': 'application/json' }, query: {}, body }, res);
-        const out = res.body;
+        await handler({ method, path: `/api/v1${path}`, params: { object, ...(id ? { id } : {}) }, headers: { 'content-type': 'application/json' }, query: {}, body }, res);
+
+        let door: { status: unknown; code: unknown };
+        try {
+            const raw = new Request(`http://localhost/api/v1${path}`, {
+                method,
+                headers: { 'content-type': 'application/json' },
+                ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+            });
+            const out: any = await dispatcher.dispatch(method, path, body ?? {}, {}, { request: raw } as any, '/api/v1');
+            door = { status: out.response?.status, code: codeOf(out.response?.body) };
+        } catch (e) {
+            // A throw out of `dispatch()` is rendered by the host's exit, through this one rule.
+            const thrown = resolveThrownHttpError(e);
+            door = { status: thrown.status, code: thrown.code };
+        }
         answers.push({
-            route: `${method} ${path}`,
-            status: res.statusCode,
-            code: out?.error && typeof out.error === 'object' ? out.error.code : out?.code,
+            request: `${method} ${route} ${JSON.stringify(body) ?? ''}`,
+            wellFormed,
+            rest: { status: res.statusCode, code: codeOf(res.body) },
+            dispatcher: door,
         });
     }
     return answers;
@@ -418,10 +454,22 @@ for (const { shape, environmentId } of SHAPES) {
             expect(await bridge.describeObject(pkg.open)).toBeNull();
         });
 
-        it('REST answers both objects 404 OBJECT_PACKAGE_DISABLED on every /data record route: the answer the rows below give', async () => {
+        it('REST answers both objects 404 OBJECT_PACKAGE_DISABLED on every well-formed /data record request: the answer the rows below give', async () => {
             for (const object of [pkg.gated, pkg.open]) {
-                for (const answer of await restDataAnswers(booted!.kernel, object)) {
-                    expect(answer, `${answer.route} on ${object}`).toEqual({ route: answer.route, ...PACKAGE_DISABLED });
+                for (const answer of (await dataDoorAnswers(booted!.kernel, object)).filter((a) => a.wellFormed)) {
+                    expect(answer.rest, `${answer.request} on ${object}`).toEqual(PACKAGE_DISABLED);
+                }
+            }
+        });
+
+        it('the dispatcher\'s /data door answers each request what REST answers, a body that is not a record included', async () => {
+            // The door asks the exposure gate before its request gate, as the
+            // twin of REST's `enforceApiAccess`, which reads the disabled
+            // package's refusal as "no declaration": so a malformed body is
+            // answered by the request gate first on both doors.
+            for (const object of [pkg.gated, pkg.open]) {
+                for (const answer of await dataDoorAnswers(booted!.kernel, object)) {
+                    expect(answer.dispatcher, `${answer.request} on ${object}`).toEqual(answer.rest);
                 }
             }
         });

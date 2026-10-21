@@ -323,20 +323,17 @@ type ExposureDeclarationRead = Partial<Pick<MetadataProtocol, 'getMetaItem'>> & 
  * - nothing, or an item under another name → `undefined`: no declared
  *   exposure policy, and the data plane's registry gate answers existence
  *   (#3770), as before;
- * - refused `OBJECT_PACKAGE_DISABLED` → that refusal, THROWN, and
- *   {@link refuseUnexposedDataAction} lets it through its fail-open `catch`
- *   ({@link isObjectPackageDisabledRefusal}): a disabled package's object is
- *   refused at this gate, on every verb, with the protocol's own error (its
- *   `code`, `status` 404 and `object`). `RestServer`'s gate reads that refusal
- *   as "no declaration" (`loadObjectItem`) because every REST data route then
- *   reaches the protocol, whose registry gate (`assertObjectRegistered`)
- *   refuses with that same code. `callData`'s `aggregate` arm takes no
- *   protocol: it asks the engine, which serves a disabled package's objects.
- *   So reading the refusal as "no declaration" here served `aggregate_records`
- *   on such an object, one declared `apiEnabled: false` included, where the
- *   metadata service's copy had refused it `OBJECT_API_DISABLED`. Refused here,
- *   every arm answers the code and status REST answers, whether or not it
- *   reaches the protocol;
+ * - refused `OBJECT_PACKAGE_DISABLED` → that refusal, THROWN
+ *   ({@link isObjectPackageDisabledRefusal}): a refusal, not an outage, so it
+ *   never falls back to the copy. {@link refuseUnexposedDataAction} decides
+ *   who answers it. `RestServer`'s gate reads it as "no declaration"
+ *   (`loadObjectItem`) because every REST data route then reaches the
+ *   protocol, whose registry gate (`assertObjectRegistered`) refuses with that
+ *   same code. `callData`'s `aggregate` arm takes no protocol: it asks the
+ *   engine, which serves a disabled package's objects. So the reading this
+ *   gate first took from REST served `aggregate_records` on such an object,
+ *   one declared `apiEnabled: false` included, where the metadata service's
+ *   copy had refused it `OBJECT_API_DISABLED`;
  * - any other throw (the metadata store unreadable) → the metadata service's
  *   copy, the source this gate read before. An outage of the merged read must
  *   not WIDEN exposure: failing open at once would serve an object the copy
@@ -375,9 +372,9 @@ async function readExposureDeclaration(
  * package is disabled: the one constructor `@objectstack/metadata-protocol`
  * raises from its by-name reads and its data plane (`code`
  * `OBJECT_PACKAGE_DISABLED`, `status` 404, `object`). A refusal, not an outage
- * and not an absence: {@link readExposureDeclaration} throws it and
- * {@link refuseUnexposedDataAction} answers it, where every other read failure
- * falls back or falls open.
+ * and not an absence: {@link readExposureDeclaration} throws it, where every
+ * other read failure falls back to the copy, and
+ * {@link refuseUnexposedDataAction} decides who answers it.
  */
 function isObjectPackageDisabledRefusal(err: unknown): boolean {
     return (err as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED';
@@ -409,11 +406,25 @@ function isObjectPackageDisabledRefusal(err: unknown): boolean {
  * the same declaration `OBJECT_API_DISABLED` / `OBJECT_API_METHOD_NOT_ALLOWED`.
  * The statuses do not move, and neither does the message.
  *
- * [#25120] An object whose owning package is disabled is refused here too,
- * whatever it declares, with the protocol's own `404 OBJECT_PACKAGE_DISABLED`
- * error: the answer `RestServer` gives the same object, on every arm of
- * {@link callData}, the `aggregate` arm that never reaches the protocol
- * included.
+ * [#25120] An object whose owning package is disabled, whatever it declares:
+ * the protocol refuses its by-name read `404 OBJECT_PACKAGE_DISABLED`
+ * ({@link readExposureDeclaration}), and `disabledPackage` says who answers
+ * that refusal, so every door answers what `RestServer` answers:
+ *
+ * - `'defer'`, the default: the dispatcher's `/data` door, which asks this gate
+ *   BEFORE its request-schema gate as the twin of `RestServer`'s
+ *   `enforceApiAccess`. "No declaration", as `enforceApiAccess` reads it
+ *   (`loadObjectItem`), so a body that is not a record is answered `400
+ *   VALIDATION_FAILED` first, and a well-formed request is refused `404
+ *   OBJECT_PACKAGE_DISABLED` when it reaches {@link callData}, as REST's data
+ *   plane refuses it.
+ * - `'refuse'`: {@link callData}, which every data door reaches where REST
+ *   reaches the protocol, and which the `/mcp` bridge asks alone. The
+ *   protocol's own error, thrown, on every arm: the `aggregate` arm asks the
+ *   engine and never the protocol, and the engine serves a disabled package's
+ *   objects, so reading the refusal as "no declaration" there served
+ *   `aggregate_records` on such an object, one declared `apiEnabled: false`
+ *   included.
  */
 export async function refuseUnexposedDataAction(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
@@ -421,17 +432,17 @@ export async function refuseUnexposedDataAction(deps: ActionExecutionDeps,
     object: unknown,
     scopeId?: string,
     executionContext?: ExecutionContext,
+    disabledPackage: 'defer' | 'refuse' = 'defer',
 ): Promise<void> {
     if (executionContext?.isSystem || !object) return;
     let def: any;
     try {
         def = await readExposureDeclaration(deps, requestContext, String(object), scopeId);
     } catch (err) {
-        // [#25120] A disabled package's object is refused, on every verb, with
-        // the protocol's own `404 OBJECT_PACKAGE_DISABLED` (see
-        // {@link readExposureDeclaration}): `callData`'s `aggregate` arm never
-        // reaches the protocol that refuses it on the other arms.
-        if (isObjectPackageDisabledRefusal(err)) throw err;
+        // [#25120] The protocol's `404 OBJECT_PACKAGE_DISABLED` is a refusal,
+        // never a read failure to fall open on: thrown where this gate stands
+        // in for the data plane, "no declaration" where the data plane follows.
+        if (isObjectPackageDisabledRefusal(err) && disabledPackage === 'refuse') throw err;
         def = undefined; // fall open to schema defaults (apiEnabled=true)
     }
     const gate = checkApiExposure(def, action);
@@ -453,7 +464,9 @@ export async function callData(deps: ActionExecutionDeps,
     // condition's target, asked below on the two arms that hand the engine a
     // caller's `where` ({@link refuseUnservedRelationTargets}).
     const exposureGated = !executionContext?.isSystem;
-    await refuseUnexposedDataAction(deps, requestContext, action, params?.object, scopeId, executionContext);
+    // [#25120] `'refuse'`: a disabled package's object is refused here, on
+    // every arm, the `aggregate` arm that never reaches the protocol included.
+    await refuseUnexposedDataAction(deps, requestContext, action, params?.object, scopeId, executionContext, 'refuse');
 
     const protocol = await deps.resolveService(requestContext, 'protocol', scopeId);
     const qlService = dataDriver ?? await deps.getObjectQL(requestContext, scopeId);
