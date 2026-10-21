@@ -3,7 +3,27 @@
 
 /**
  * clause2-line — the fleet's ONE reader of the `Clause-②: yes | no`
- * declaration line, and nothing else.
+ * declaration line and of its sibling, the `Metadata-protocol:` line, and
+ * nothing else.
+ *
+ * ## The sibling line (maintainer ruling A, 2026-10-21, on #25105)
+ *
+ * The level of a changeset follows the METADATA PROTOCOL alone: `minor` when
+ * the protocol an author writes against is added to, narrowed or changed in
+ * meaning, `patch` otherwise. That kind is declared on a second line beside the
+ * `Clause-②:` line, in the PR body and in the changeset body alike:
+ *
+ *   Metadata-protocol: added | narrowed | semantic | none
+ *
+ * It is a SIBLING LINE rather than a third arm on the `Clause-②:` line, and the
+ * choice is structural: every declaration written before it — `Clause-②: no`,
+ * `yes (widening)`, `no (narrowing)` — keeps reading byte-identically through
+ * `readClause2Line`, whose predicate, value class and arm reader are untouched.
+ * `readMetadataProtocolLine` below reuses the same key-line shape, the same
+ * tolerated decoration, the same value-token calibration and the same
+ * describing/inline/spelling near-miss triage, parameterised on the key and the
+ * closed value set, so the two lines cannot drift in what they accept. It has
+ * no arm: the kind IS the whole value.
  *
  * ## Why this file exists, and what it deliberately does NOT carry
  *
@@ -170,16 +190,20 @@ const CLAUSE2_LINE_START_DECORATION = /^[ \t>\-*#`]*$/;
  * Does this line carry the fixed key, followed by its colon, at a position no
  * line-start decoration can explain?
  *
+ * `keyText` defaults to the `Clause-②` key; the sibling reader passes its own.
+ * The predicate is otherwise identical for both lines.
+ *
  * @param {string} line
+ * @param {string} [keyText]
  * @returns {boolean}
  */
-function hasInlineClause2Key(line) {
+function hasInlineClause2Key(line, keyText = CLAUSE2_KEY_TEXT) {
   const s = String(line ?? '');
   let from = 0;
   for (;;) {
-    const at = s.indexOf(CLAUSE2_KEY_TEXT, from);
+    const at = s.indexOf(keyText, from);
     if (at < 0) return false;
-    from = at + CLAUSE2_KEY_TEXT.length;
+    from = at + keyText.length;
     // The key alone is not the shape; it is the key AND its colon, so a bare
     // mention of `Clause-②` in a sentence is left to the pattern above.
     if (!CLAUSE2_KEY_COLON.test(s.slice(from))) continue;
@@ -219,11 +243,12 @@ function hasInlineClause2Key(line) {
  * allows may contain a pipe anywhere later — a table column, a shell
  * pipeline — and is untouched.
  */
-function matchValueToken(raw) {
+function matchValueToken(raw, values = CLAUSE2_VALUES) {
   const rest = String(raw ?? '').replace(/^[ \t]+/, '');
   // Built from CLAUSE2_VALUES so the closed set is declared once: adding a
-  // third reading would have to be a deliberate edit to that constant.
-  const token = new RegExp(`^(?:\\*\\*)?(?:\`)?[ \\t]*(${CLAUSE2_VALUES.join('|')})(?![A-Za-z0-9_])(?![ \\t]*\\|)`);
+  // third reading would have to be a deliberate edit to that constant. The
+  // sibling line hands in its own closed set; the token rule is the same.
+  const token = new RegExp(`^(?:\\*\\*)?(?:\`)?[ \\t]*(${values.join('|')})(?![A-Za-z0-9_])(?![ \\t]*\\|)`);
   const m = token.exec(rest);
   // `after` is the REST OF THE LINE, handed on so the arm is read from the same
   // single pass. ⛔ Not a second parser: the arm reader below never sees the key,
@@ -356,11 +381,11 @@ function readArmToken(after) {
  * @param {RegExpExecArray} m — this line's `CLAUSE2_KEY_LINE` match.
  * @returns {boolean}
  */
-function clause2LineDescribes(line, m) {
+function clause2LineDescribes(line, m, keyText = CLAUSE2_KEY_TEXT) {
   const s = String(line ?? '');
   // TWICE-NAMED. `indexOf` from the last hit, so an overlap cannot double-count.
   let seen = 0;
-  for (let at = s.indexOf(CLAUSE2_KEY_TEXT); at >= 0; at = s.indexOf(CLAUSE2_KEY_TEXT, at + CLAUSE2_KEY_TEXT.length)) {
+  for (let at = s.indexOf(keyText); at >= 0; at = s.indexOf(keyText, at + keyText.length)) {
     if (++seen > 1) return true;
   }
   // QUOTED-AND-CONTINUED. The span is open at the colon exactly when the key's
@@ -459,6 +484,101 @@ export function readClause2Line(text) {
   // rule a DESCRIBING line outranks both: it carries the key in the fixed
   // spelling AND at the start of a line, so of the three it is the one whose
   // remedy is a single line the seat can write without moving anything.
+  if (describing !== null) return { kind: 'near-miss', reason: 'describing', line: describing };
+  if (inlineKey !== null) return { kind: 'near-miss', reason: 'inline-key', line: inlineKey };
+  return nearMiss === null ? null : { kind: 'near-miss', reason: 'spelling', line: nearMiss };
+}
+
+// ---------------------------------------------------------------------------
+// The sibling line — `Metadata-protocol: added | narrowed | semantic | none`
+// ---------------------------------------------------------------------------
+
+/**
+ * The four kinds of change to the metadata protocol a declaration may name —
+ * the closed set the maintainer's ruling A table spells, in its order:
+ *
+ *   `added`     a new authorable key, a new accepted value or enum member, a
+ *               new metadata type                                  -> `minor`
+ *   `narrowed`  a key removed or tombstoned, a value refused, a requirement
+ *               tightened                                           -> `minor`
+ *   `semantic`  the meaning or default of an authorable key changes -> `minor`
+ *   `none`      everything else — description or error text, non-authorable
+ *               internal types and interfaces, and every non-protocol change
+ *               (REST, drivers, services, console, `feat:` and `fix!:` alike)
+ *                                                                   -> `patch`
+ *
+ * One token per line. Where more than one applies, the author names the one
+ * highest in that order's breaking-ness: `narrowed` over `semantic` over
+ * `added` — the gates that read the line enforce the level the token owes, and
+ * the release notes group the entry under the section the token names.
+ */
+export const METADATA_PROTOCOL_KINDS = Object.freeze(['added', 'narrowed', 'semantic', 'none']);
+
+const METADATA_PROTOCOL_KEY_TEXT = 'Metadata-protocol';
+
+/**
+ * The key line, with EXACTLY the decoration `CLAUSE2_KEY_LINE` tolerates — an
+ * optional blockquote `>`, an optional list bullet, backtick or bold wrapping
+ * on the key — and nothing else. Same three capture groups, for the same
+ * describing test. ⛔ A different key, a different case (`metadata-protocol`),
+ * a space (`Metadata protocol:`) or a full-width colon is a near miss, reported
+ * below and never read.
+ */
+const METADATA_PROTOCOL_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?(`?)Metadata-protocol(`?)(?:\*\*)?[ \t]*:(.*)$/;
+
+/**
+ * A line that MENTIONS the key without being the machine declaration — the
+ * vocabulary near miss, quoted back so a "no reading" row is actionable. It
+ * admits the case, space and underscore misspellings an author plausibly
+ * types; like its Clause-② sibling it never produces a verdict.
+ */
+const METADATA_PROTOCOL_NEAR_MISS_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*#][ \t]*)*(?:\*\*)?`?\s*Metadata[ \t_-]*protocol(?![\w]).*$/i;
+
+/**
+ * Read the metadata-protocol kind out of ONE comment or body.
+ *
+ * @param {string} text
+ * @returns {{ kind: 'declared', value: 'added'|'narrowed'|'semantic'|'none', line: string }
+ *          | { kind: 'malformed', value: string, line: string }
+ *          | { kind: 'near-miss', reason: 'describing'|'inline-key'|'spelling', line: string }
+ *          | null}
+ *
+ * Four-valued exactly as `readClause2Line` is, and for the same reason: a line
+ * that IS the key with an ungradeable value (`Metadata-protocol: minor`,
+ * `Metadata-protocol: <added|narrowed|semantic|none>`, an empty value, the
+ * unfilled alternation) is `malformed`; a line that nearly is the key is a
+ * `near-miss` with its reason; a body with neither reads `null`. ⛔ None of
+ * those three is a declaration of `none`: an absent kind is a reading that did
+ * not happen, and the gate that reads it decides what that costs.
+ *
+ * Trailing text after the token is the author's reasoning and is not read —
+ * `Metadata-protocol: added (the `confirm` slot on bulk actions)` declares
+ * `added`. There is no arm.
+ */
+export function readMetadataProtocolLine(text) {
+  const lines = String(text ?? '').split(/\r?\n/);
+  let read = null;
+  let describing = null;
+  let nearMiss = null;
+  let inlineKey = null;
+  for (const line of lines) {
+    const m = METADATA_PROTOCOL_KEY_LINE.exec(line);
+    if (m) {
+      if (clause2LineDescribes(line, m, METADATA_PROTOCOL_KEY_TEXT)) {
+        if (describing === null) describing = quoteLine(line);
+        continue;
+      }
+      if (read !== null) continue;
+      const hit = matchValueToken(m[3], METADATA_PROTOCOL_KINDS);
+      read = hit !== null
+        ? { kind: 'declared', value: hit.value, line: quoteLine(line) }
+        : { kind: 'malformed', value: quoteLine(m[3], 60), line: quoteLine(line) };
+      continue;
+    }
+    if (inlineKey === null && hasInlineClause2Key(line, METADATA_PROTOCOL_KEY_TEXT)) inlineKey = quoteLine(line);
+    if (nearMiss === null && METADATA_PROTOCOL_NEAR_MISS_LINE.test(line)) nearMiss = quoteLine(line);
+  }
+  if (read !== null) return read;
   if (describing !== null) return { kind: 'near-miss', reason: 'describing', line: describing };
   if (inlineKey !== null) return { kind: 'near-miss', reason: 'inline-key', line: inlineKey };
   return nearMiss === null ? null : { kind: 'near-miss', reason: 'spelling', line: nearMiss };
