@@ -35,6 +35,13 @@ import {
 } from './default-value-shape';
 import { AddressSchema, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES, SINGLE_OPTION_TYPES } from './field-value.zod';
 import { ValueDomainSchema } from '../shared/value-domain.zod';
+import { SystemObjectName } from '../system/constants/system-names';
+
+/**
+ * [#24952] The one object a `user` field links to — `IMPLICIT_REFERENCE_TARGETS`'s
+ * constant (`field-value.zod.ts`), read here by the refusal of any other name.
+ */
+const USER_FIELD_TARGET: string = SystemObjectName.USER;
 
 /**
  * Field Type Enum
@@ -2431,6 +2438,42 @@ export const FieldSchema = lazySchema(() => {
     });
   }
 
+  // [#24952 — #24808 ruled A on #24854; shipped in an 18.x minor under the
+  // amended 「甲」 ruling] A `user` field's target is FIXED to `sys_user` by the
+  // type (`IMPLICIT_REFERENCE_TARGETS`, `field-value.zod.ts`), so a
+  // `reference` naming any other object contradicts the type: every reader
+  // that follows the target would link the field to that object, while every
+  // reader that branches on the type (the person picker, a `current_user`
+  // default, a sharing rule over the users a field holds) takes its values for
+  // users. Refused here rather than on `ObjectSchema` (the
+  // `refuseForeignTreeReference` precedent needs the declaring object's name;
+  // this verdict needs only the field), so every door that parses a field map
+  // — objects, object extensions — refuses it alike. Absent, blank and
+  // `'sys_user'` are the spellings that name the constant or nothing.
+  //
+  // No ADR-0087 conversion carries it (the D3 entry
+  // `user-field-foreign-reference-refused` says why): rewriting the field to a
+  // `lookup` would add it to the referential delete walk with
+  // `deleteBehavior: 'set_null'`, which a `user` field never joined, and
+  // `deleteBehavior` has no value meaning "leave it", so the author decides.
+  if (
+    field.type === 'user'
+    && field.reference !== undefined
+    && field.reference.trim() !== ''
+    && field.reference !== USER_FIELD_TARGET
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['reference'],
+      message:
+        `A \`user\` field's target is fixed to \`${USER_FIELD_TARGET}\`, but this one names ` +
+        `\`reference: '${field.reference}'\`. To link records of \`${field.reference}\`, declare a ` +
+        `\`lookup\`: \`{ type: 'lookup', reference: '${field.reference}' }\` (\`Field.lookup('${field.reference}', …)\`), ` +
+        "and choose its `deleteBehavior` (a `lookup` defaults to `'set_null'` when the target record is " +
+        'deleted; a `user` field never did). If a person was meant, drop `reference`.',
+    });
+  }
+
   // A single-choice field (`select` / `radio`) with NO option source — neither
   // a non-empty `options` list nor a `picklist` reference — is a choice with
   // nothing to choose: the form control offers nothing, and server-side value
@@ -3033,19 +3076,17 @@ export type CurrencyValue = z.input<typeof CurrencyValueSchema>;
 export type FieldInput = Omit<Partial<Field>, 'type'>;
 
 /**
- * The `Field.user()` config: {@link FieldInput} with `reference` marked
- * deprecated. A `user` field's target is a constant of the type
- * (`IMPLICIT_REFERENCE_TARGETS`, `field-value.zod.ts`), so the key has nothing
- * to say; it is still ACCEPTED (an identical accept set — the narrowing waits
- * for the next protocol major), and a foreign value is warned on by
- * `user-field-foreign-reference`.
+ * The `Field.user()` config: {@link FieldInput} with `reference` narrowed to
+ * the one value a `user` field can carry. A `user` field's target is a constant
+ * of the type (`IMPLICIT_REFERENCE_TARGETS`, `field-value.zod.ts`), and
+ * `FieldSchema` refuses any other name (#24952), so the key has nothing to say.
  */
 type UserFieldInput = Omit<FieldInput, 'reference'> & {
   /**
    * @deprecated A `user` field always targets `sys_user`; omit this key. To
    * link another object, use `Field.lookup(reference, …)`.
    */
-  reference?: string;
+  reference?: 'sys_user';
 };
 
 /** `Field.select` with inline options — the array or `{ options }` forms. */
@@ -3217,21 +3258,17 @@ export const Field = {
    * @example Auto-fill the acting user on create
    * Field.user({ label: 'Reporter', defaultValue: 'current_user' })
    *
-   * ⚠️ [#24808] `config.reference` is deprecated, and naming any object but
-   * `sys_user` with it is the contradiction `os validate` / `os build` /
-   * `os lint` warn on (`user-field-foreign-reference`): such a field is
-   * resolved against the named object by every target-following reader while
-   * every user-only reader takes its values for users. A link to another
-   * object is `Field.lookup(reference, …)`. The spread stays LAST on purpose:
-   * moving `reference: 'sys_user'` after it would silently re-target a field
-   * an untyped caller wrote, the same unannounced behaviour change the 「甲」
-   * ruling keeps out of an 18.x minor — the refusal belongs to the next
-   * protocol major, and until then the warning is the loud half.
+   * [#24952] `config.reference` is deprecated and typed `'sys_user'`: a
+   * `user` field naming any other object is refused by `FieldSchema`, and a
+   * link to another object is `Field.lookup(reference, …)`. `reference` is
+   * written AFTER the spread, so even an untyped caller's foreign value never
+   * reaches the output — the parse would refuse it anyway. It keeps its second
+   * position (re-assigning an existing key does not move it), so the output's
+   * key order is what it always was.
    */
   user: (config: UserFieldInput = {}) => ({
-    type: 'user',
+    ...{ type: 'user', reference: 'sys_user', ...config },
     reference: 'sys_user',
-    ...config,
   } as const),
 
   // Enhanced Field Type Helpers
