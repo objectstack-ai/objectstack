@@ -89,9 +89,11 @@ async function seedDatabase(filename: string): Promise<void> {
 
 /**
  * The refused file holds the bytes it was found with, and nothing is left
- * beside it. The header still says WAL (this driver's journal mode), so SQLite
- * keeps its `-shm` and an empty `-wal` while the refused connection is open:
- * no `.corrupt-*` sibling then, and nothing at all once it is closed.
+ * beside it: no `.corrupt-*` sibling, and nothing at all after `disconnect()`.
+ * The header still says WAL (this driver's journal mode); the `-shm` and empty
+ * `-wal` SQLite keeps while a connection is open are gone already when
+ * `connect()` rejects, because the refusal closes its connection (#25084,
+ * pinned in `sql-driver-25084-sqlite-refused-connect-release.test.ts`).
  */
 async function expectLeftAsItWas(driver: SqlDriver, filename: string, before: Buffer): Promise<void> {
   expect(readdirSync(dir).filter((name) => name.includes('.corrupt-'))).toEqual([]);
