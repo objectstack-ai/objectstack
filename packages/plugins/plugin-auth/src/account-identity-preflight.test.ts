@@ -257,10 +257,14 @@ describe('#17440 the preflight REFUSES on the collision class', () => {
 
 describe('#17440 the preflight refuses what it CANNOT read — an unread table is not a clean one', () => {
   it('a read that throws refuses instead of reporting zero rows', async () => {
+    // [#25030] The probe reads through the driver the engine routes
+    // `sys_account` to, so the failing read is the driver's.
     const broken = {
-      find: async () => {
-        throw new Error('connection reset by peer');
-      },
+      getDriverForObject: () => ({
+        find: async () => {
+          throw new Error('connection reset by peer');
+        },
+      }),
     };
     let refusal: AccountIdentityPreflightRefusal | undefined;
     try {
@@ -301,7 +305,7 @@ describe('#17440 the preflight refuses what it CANNOT read — an unread table i
   });
 
   it('an engine that answers a non-array refuses rather than reading it as empty', async () => {
-    const enveloped = { find: async () => ({ records: [] }) };
+    const enveloped = { getDriverForObject: () => ({ find: async () => ({ records: [] }) }) };
     await expect(probeAccountIdentityCollisions(enveloped as never)).rejects.toThrow(
       /not an array/,
     );
