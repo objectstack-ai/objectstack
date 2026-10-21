@@ -12,7 +12,7 @@
       "app": "showcase",
       "requires": [
         "an admin session that holds the `manage_metadata` capability — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough (packages/rest/src/rest-route-ledger.ts, the `PUT /api/v1/meta/:type/:name` row)",
-        "an isolated boot (own port + file DB, dogfood skill §0) — this recipe authors metadata into the running app",
+        "a boot on its own port and file DB (dogfood skill §0) — this recipe authors metadata into the running app",
         "AuditPlugin active in the boot: it owns sys_comment AND registers the enable.feeds capability gate (packages/plugins/plugin-audit/src/audit-writers.ts). A boot without it accepts every comment and both probes go green for the wrong reason — confirm the gate is live before scoring either clause."
       ],
       "sequence": [
@@ -53,7 +53,7 @@
           "source": "`enable.feeds` is the #2707 opt-out, default true (packages/spec/src/data/object.zod.ts#Record: 'Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'). `sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts#sharingModel; ADR-0090 D4 — re-pointed #18104: query is not a key this schema declares, and sharingModel is the key this sentence is about). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts)"
         }
       ],
-      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.feeds (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or simply discard the isolated file DB, which is the cheaper path and the one an isolated boot makes free. Any throwaway qa_nofeeds record and any sys_comment row created against it go with the package.",
+      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.feeds (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or simply discard the run's own file DB, which is the cheaper path and the one a boot on its own port and DB makes free. Any throwaway qa_nofeeds record and any sys_comment row created against it go with the package.",
       "knownGaps": [
         "The recipe lands the OBJECT only. Each probe inserts its own throwaway qa_nofeeds record inline (it needs that record's id in the thread_id), exactly as attachments-storage's clause 5 does with qa_nofiles — no standing rows here.",
         "This recipe provisions the SERVER-side probe target. The `feeds:false must HIDE the panel` half of the negative is a console/objectui assertion: to score it, navigate to the qa_nofeeds record detail and confirm no discussion panel mounts and no sys_comment fetch is issued. If the console has no route for a scratch object in the running build, record that half blocked(fixture) and score the two API clauses — do not infer the UI half from the API refusal."
@@ -66,7 +66,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 13,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -82,7 +82,8 @@
           "why": "supplies the persona clause 7 (clone is RLS-gated) rests on, and the non-owner cloner clause 6's ownership half needs (cloning a seeded showcase_field_zoo row, acceptance[6].verify) — a reader for whom a SOURCE row is invisible. showcase_account, the object the rest of this item drives, is public_read_write, so no persona can fail to read a row on it and the clause is unscoreable there; clause 7 is driven on showcase_invoice against INV-1003 (linus@example.com's) instead. Without the recipe the clause scores blocked(fixture) — which is what the 17.1.0 sweep recorded after reaching for the seeded demo personas and cloning showcase_account as Mei, who reads it fine (#10236)."
         },
         "knownGaps": [
-          "Clause 7 (clone is RLS-gated) cannot be scored on showcase_account, the object every other clause here drives: it is public_read_write, so there is no persona for whom a source row is invisible. It needs showcase_invoice plus a contributor-bound member — the recipe qa-contributor-bound-member, which areas/search.json owns. That reference now lives in fixtures.provisioning as the AREA-QUALIFIED `search:qa-contributor-bound-member`, and check:platform-checklist RESOLVES it (#10593 gap 2, maintainer ruling 2026-08-22 — option A): both spellings are valid, an own-area key and `<area>:<recipe>` for one another area owns. So this is a real opt-in rather than a prose pointer — rename or move the recipe and this item fails the gate by name, instead of leaving a sentence aimed at nothing. ⛔ Replay it from areas/search.json; do not fork a second copy into this area."
+          "Clause 7 (clone is RLS-gated) cannot be scored on showcase_account, the object every other clause here drives: it is public_read_write, so there is no persona for whom a source row is invisible. It needs showcase_invoice plus a contributor-bound member — the recipe qa-contributor-bound-member, which areas/search.json owns. That reference now lives in fixtures.provisioning as the AREA-QUALIFIED `search:qa-contributor-bound-member`, and check:platform-checklist RESOLVES it (#10593 gap 2, maintainer ruling 2026-08-22 — option A): both spellings are valid, an own-area key and `<area>:<recipe>` for one another area owns. So this is a real opt-in rather than a prose pointer — rename or move the recipe and this item fails the gate by name, instead of leaving a sentence aimed at nothing. ⛔ Replay it from areas/search.json; do not fork a second copy into this area.",
+          "no pin scores a full clause of this item at its layer (RUNNER rule 6, a pin scores only the layer it drives), so the item carries no automated ref. packages/metadata-protocol/src/protocol.readonly-insert.test.ts ('cloneData forwards the copied row AND the caller overrides whole — and reports the engine’s verdict on both') drives cloneData over a stub engine: the source's readonly column travels to engine.insert whole, the 201 body's droppedFields names it, and the clone's record does not carry it, which pins the protocol's delegation. packages/objectql/src/engine-insert-static-readonly-strip.test.ts drives a real ObjectQL engine over a recording driver, with no HTTP: a non-system caller's readonly key is stripped on create and falls back to the field's defaultValue, which pins the engine's strip. That is evidence for acceptance[6]'s readonly half at those two layers, never its pass. automated may return when a pin clones a row carrying a readonly value through the HTTP clone door and reads the clone back"
         ]
       },
       "steps": [
@@ -125,7 +126,7 @@
         {
           "clause": "record History reflects the create and the update with display values (option labels, localized dates, real actor), not raw audit payloads or phantom value→null rows",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the History tab rendered, read its entries — same contract objectui e2e/live/record-history-display.spec.ts pins on showcase Project",
+          "verify": "after a screenshot confirms the History tab rendered, read its entries — same contract objectui e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object (its option labels, the localized Customer Since date and the resolved owner; objectui blob 7ebc45106cff at the console pin cf153eb2e535)",
           "evidence": "screenshot + entries"
         },
         {
@@ -135,10 +136,10 @@
           "evidence": "re-read JSON + search response"
         },
         {
-          "clause": "clone (POST /data/:object/:id/clone, gated by enable.clone default-on) returns 201 with a NEW id and the source's field VALUES copied, but engine-owned columns (id, audit, autonumber, formula, summary) and readonly columns RE-DERIVED not carried, and the clone is owned by the CLONER — not the source's owner. ⚠️ The readonly half is UNOBSERVABLE on the stock seed: showcase_account declares no readonly column, no showcase object has an approval_status, and the showcase's one readonly field (showcase_contact.lead_score) is null on every seeded row, so carried and re-derived read identically. Score that half from the pins in `automated`, never as blocked(fixture) and never off two reads that agree only because the column is null: no live run can stage it, because the server drops a readonly column set over HTTP (`x-objectstack-dropped-fields: lead_score;reason=readonly`, QA run #21782)",
+          "clause": "clone (POST /data/:object/:id/clone, gated by enable.clone default-on) returns 201 with a NEW id and the source's field VALUES copied, but engine-owned columns (id, audit, autonumber, formula, summary) and readonly columns RE-DERIVED not carried, and the clone is owned by the CLONER — not the source's owner. ⚠️ The readonly half is UNOBSERVABLE on the stock seed: showcase_account declares no readonly column, no showcase object has an approval_status, and the showcase's one readonly field (showcase_contact.lead_score) is null on every seeded row, so carried and re-derived read identically. Drive that half at this clause's own layer, the clone door, on a source row whose readonly value the run planted in its own file DB (verify). A run that does not plant one records that half blocked(fixture), never pass, and never off two reads that agree only because the column is null. The pins fixtures.knownGaps[1] names are evidence of their own layers only (RUNNER rule 6). The value has to be planted, because the server drops a readonly column a caller sets over HTTP (`x-objectstack-dropped-fields: lead_score;reason=readonly`, QA run #21782)",
           "oracle": "api",
-          "verify": "the 201 result carries {id (new ≠ sourceId), sourceId, record}; field-by-field diff shows business values copied and system/readonly columns re-derived (#3043 CLONE_STRIP_FIELDS + the engine's create-side static-readonly strip, #14147); owner_id resolves to the signed-in cloner (the clone is a create in the caller's context — packages/metadata-protocol/src/protocol.ts cloneData). ⚠ The owner half needs a cloner who is NOT the source's owner: the admin cloning a row the admin created reads the same owner_id either way (QA run #24572). Drive it as the provisioned contributor-bound member cloning a seeded showcase_field_zoo row (QA run #24572's suggestion, source-derived and not yet run — record the substitution): showcase_contributor grants allowCreate there (not on showcase_account, which it may only read; examples/app-showcase/src/security/permission-sets.ts), the zoo is public_read_write, and the same clone shows f_autonumber and f_formula re-derived",
-          "evidence": "clone response + source-vs-clone field diff + owner_id read"
+          "verify": "the 201 result carries {id (new ≠ sourceId), sourceId, record}; field-by-field diff shows business values copied and system/readonly columns re-derived (#3043 CLONE_STRIP_FIELDS + the engine's create-side static-readonly strip, #14147); owner_id resolves to the signed-in cloner (the clone is a create in the caller's context — packages/metadata-protocol/src/protocol.ts cloneData). ⚠ The owner half needs a cloner who is NOT the source's owner: the admin cloning a row the admin created reads the same owner_id either way (QA run #24572). Drive it as the provisioned contributor-bound member cloning a seeded showcase_field_zoo row (QA run #24572's suggestion, source-derived and not yet run — record the substitution): showcase_contributor grants allowCreate there (not on showcase_account, which it may only read; examples/app-showcase/src/security/permission-sets.ts), the zoo is public_read_write, and the same clone shows f_autonumber and f_formula re-derived. The readonly half: with the server stopped, write a value into one seeded showcase_contact row's lead_score in the run's own file DB with node:sqlite (no sqlite3 CLI in this container), `UPDATE showcase_contact SET lead_score = 42 WHERE id = 'ID'`, which reports one changed row; restart, read the row back over GET /api/v1/data/showcase_contact/ID (lead_score 42), then POST /api/v1/data/showcase_contact/ID/clone as the admin. The 201's droppedFields names lead_score with reason readonly (cloneData forwards the copy whole to engine.insert and reports the engine's onFieldsDropped verdict, packages/metadata-protocol/src/protocol.ts), and a GET of the clone carries no lead_score value: the field declares no defaultValue to fall back to (examples/app-showcase/src/data/objects/contact.object.ts). Derived from source, not replayed here",
+          "evidence": "clone response + source-vs-clone field diff + owner_id read; for the readonly half, the planted source read, the 201's droppedFields and the clone's lead_score read (or that half's blocked(fixture), with the knownGaps[1] pins beside it)"
         },
         {
           "clause": "clone is RLS-gated: the source is fetched in the caller's context (engine.findOne with context), so cloning a record the caller cannot SEE is refused with 404 RECORD_NOT_FOUND — never a silent duplicate of an invisible row",
@@ -157,10 +158,6 @@
         "hydration-race",
         "automation-input"
       ],
-      "automated": {
-        "kind": "test",
-        "ref": "acceptance[6]'s READONLY half ONLY. packages/metadata-protocol/src/protocol.readonly-insert.test.ts ('cloneData forwards the copied row AND the caller overrides whole — and reports the engine’s verdict on both'): the source's readonly column travels to engine.insert whole, the 201 body's droppedFields names it, and the clone's record does not carry it (the engine there is a stub, so this pins the delegation). packages/objectql/src/engine-insert-static-readonly-strip.test.ts pins the enforcement on a REAL engine: a non-system caller's readonly key is stripped on create and falls back to the field's defaultValue. Every other clause still needs the run"
-      },
       "source": [
         "dogfood-verification skill §3",
         "examples/app-showcase/src/data/objects/account.object.ts (requiredness + format/conditional validations)",
@@ -231,6 +228,18 @@
           "date": "2026-10-19",
           "change": "steps[2], acceptance[0].verify, acceptance[6].verify, negative[2] and fixtures.provisioning.why corrected from QA run #24572 (18.0 sweep, 5b14b7f3) and the P0 run #24556, re-read at objectstack f89d29e382. (1) The New form submits select defaults the step never touches (sales_region:'amer', default:true in account.object.ts), so the payload diff expects that key. (2) acceptance[6]'s ownership half is unobservable when the admin clones its own row; the provisioned contributor member cloning a seeded showcase_field_zoo row (allowCreate there, permission-sets.ts) is a non-owner cloner, and the same clone shows the autonumber and formula re-derived. (3) negative[2] named `status`, which defaults on showcase_account; the required field with no default there is `name`. The round-2 Tier 1 note that this item's automated.ref over-claims does not hold and is not taken: the ref already scopes itself to 'acceptance[6]'s READONLY half ONLY … Every other clause still needs the run'. Wave anchor #24579 (round 3 named this item)",
           "ref": "#24671"
+        },
+        {
+          "revision": 12,
+          "date": "2026-10-20",
+          "change": "acceptance[4].verify names the object the objectui spec drives. Round 14's out-of-scope finding (report 6289612504 on PR #24857, wave anchor #24579): it said the spec pins the History contract 'on showcase Project'. Read at objectstack's .objectui-sha pin 616df6598b42 (objectui blob 7ebc45106cff): e2e/live/record-history-display.spec.ts creates and patches a showcase_account, the showcase's enable.trackHistory object, and asserts its option labels, the localized signed_on date and the resolved owner. The live verdict at the pin is not measured here. No clause changed",
+          "ref": "#24963"
+        },
+        {
+          "revision": 13,
+          "date": "2026-10-20",
+          "change": "acceptance[6] (clause, verify, evidence) drives its readonly half at its own layer; automated is removed and fixtures.knownGaps[1] added. PR #24963's carried finding (round 16's acceptance notes): the P0 api clause said to score its readonly half from the pins in automated, never as blocked(fixture). Read at base e4d604efd3 under RUNNER rule 6: protocol.readonly-insert.test.ts drives cloneData over a stub engine and engine-insert-static-readonly-strip.test.ts a real engine over a recording driver, neither through HTTP, and no pin holds a full clause of this item. The live leg can be staged: a lead_score value written into the run's own file DB travels in the clone's copy, and cloneData reports the engine's readonly drop in the 201's droppedFields (packages/metadata-protocol/src/protocol.ts). So the half is driven at the clone door on a planted row, or recorded blocked(fixture) with the pins beside it as evidence of their own layers. Also PR #24982's pin finding: acceptance[4].verify now names the console pin cf153eb2e535, where e2e/live/record-history-display.spec.ts keeps blob 7ebc45106cff (it named 616df6598b42). acceptance[6].clause changed how its readonly half is scored and staged; what the clause asserts did not change",
+          "ref": "#25003"
         }
       ]
     },
@@ -239,7 +248,7 @@
       "title": "Field-type matrix: every FieldTypeSchema member renders its widget, accepts a valid value, round-trips over HTTP, and rejects invalid input",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -309,7 +318,7 @@
       ],
       "steps": [
         "run the pinned HTTP round-trip matrix: pnpm --filter @objectstack/dogfood exec vitest run test/field-zoo-roundtrip.dogfood.test.ts (write vectors + expected read shapes live in test/field-zoo.matrix.ts)",
-        "boot showcase isolated; open Field Zoo (/_console/apps/com.example.showcase/showcase_field_zoo) and open 'Specimen — Full' in edit mode; screenshot the form before reading DOM",
+        "boot the showcase on its own port and DB; open Field Zoo (/_console/apps/com.example.showcase/showcase_field_zoo) and open 'Specimen — Full' in edit mode; screenshot the form before reading DOM",
         "enumerate the rendered control for every f_* field and build a variant→widget table (date→date input, color→color input, richtext / markdown / html / code→their dedicated field widgets, select/multiselect→pickers, image/file→upload, location/address→structured inputs, rating/slider/progress→their own controls, formula→read-only). f_autonumber is NOT on the form at all: the field is readonly by construction (Field.autonumber sets readonly: true, packages/spec/src/data/field.zod.ts) and objectui's auto-form drops schema-readonly fields in create AND edit mode (plugin-form autoLayout.ts filterSystemFields) — read it on the record detail page instead. At the console pin the richtext, markdown, html and code widgets are textarea-based BY DESIGN (objectui packages/fields/src/widgets/RichTextField.tsx / CodeField.tsx: a Textarea inside the dedicated widget, with its own label and controls): record that as the dedicated widget, not as a generic text input",
         "through the form, change one representative value per family (a select, an array type, a temporal, a structured JSON), Save, and capture the PATCH",
         "re-read the record via GET /api/v1/data/showcase_field_zoo/<id> and diff against the submitted values (arrays compared as sets)",
@@ -406,6 +415,12 @@
           "date": "2026-10-19",
           "change": "steps[2], acceptance[1] (clause, evidence) and fixtures.knownGaps[2] corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. (1) acceptance[1] asked for all 49 members on the Full edit form, which cannot hold: summary has no zoo carrier (knownGaps[0]) and autonumber is readonly by construction (field.zod.ts) and dropped from create and edit forms by plugin-form autoLayout.ts filterSystemFields; it is read on the detail page. (2) knownGaps[2] said f_secret writes fail closed on stock; the CLI wires a LocalCryptoProvider on every boot (serve.ts), and the run's PATCH answered 200 and read back masked. Wave anchor #24579 round 2 §3 (6272314386)",
           "ref": "#24671"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[1] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ],
       "enumSource": {
@@ -1722,7 +1737,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1750,7 +1765,7 @@
         "empty-locations semantics probe — an action with NO locations key renders on NO surface, and `locations: []` likewise (objectui#3142 collapsed the renderers onto one membership predicate, `actionRendersAt`; placement is a declaration, which is why recalc_selection has to name record_more)"
       ],
       "steps": [
-        "boot the showcase isolated; sign in as admin; open the showcase_task list view",
+        "boot the showcase on its own port and DB; sign in as admin; open the showcase_task list view",
         "for each location variant, navigate to its surface (list header / row menu / a not-done task's Task Detail title bar / that title bar's ⋯ menu / the rows of the Tasks related list on a project's Project Detail Related tab, not the Tasks tab's line-items grid / the Task Detail quick-actions bar; fixtures.knownGaps names each record host), screenshot AFTER render settles, then read the rendered action buttons from the DOM",
         "record for every fixture action WHERE it rendered — building the full placement matrix (rendered locations vs declared locations)",
         "dispatch one action per location with a ref-targeted click: bulk_reassign from the list toolbar — select a row FIRST: with none selected it toasts 'This action runs on a single record — select a row first' and dispatches nothing — (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (a `form` action opens its FormView as a ROUTED PAGE, not a dialog: /_console/forms/showcase_task.form?recordId=…&recordObject=showcase_task — objectui core ActionRunner.ts, \"open a FormView as a routed page (/forms/:name)\"; QA run #24616), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
@@ -1885,6 +1900,12 @@
           "date": "2026-10-20",
           "change": "automated dropped and fixtures.knownGaps[0] rewritten — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 scored every clause not-run on list-row-action-cel.spec.ts and action-modal.spec.ts, both green at the sweep's console pin 4016370af3c9 and both adjacent (knownGaps[0] says what each asserts); QA run #24616 drove the item by hand after round 1's #24572 handed it over. The item is now Tier 2 (P1, no pin). No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 14,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot the showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ],
       "enumSource": {
@@ -1898,7 +1919,7 @@
       "title": "All six validation-rule types enforce on the write path with their exact per-type error codes — and advisory severities flag without blocking",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1926,7 +1947,7 @@
         "severity — 'error' (the default, validation.zod.ts) blocks; 'warning'/'info' rules that MATCH do not block: the write lands and the message is logged server-side (rule-validator.ts 'only error blocks')"
       ],
       "steps": [
-        "boot showcase isolated; sign in as admin",
+        "boot the showcase on its own port and DB; sign in as admin",
         "for each variant: POST/PATCH the violating payload over /api/v1/data/<object>; capture status + error body",
         "for each variant: send the happy-path twin (same shape, satisfying values) and capture success",
         "after every rejection, re-read the row set to confirm nothing persisted",
@@ -2018,6 +2039,12 @@
           "date": "2026-10-20",
           "change": "acceptance[5], steps[6], negative[3], fixtures.requires[2] and knownGaps[1] added for #24782, which QA run #24779 found beside the clauses (round 3 of the 18.0 sweep, 580fd4ed): an unevaluable warning rule lets the write land, as negative[1] requires, but its log says the write was rejected, and no clause read the log of the unevaluable path. The clause stays red until #24782's fix lands. fixtures.requires[2] is round 3's recipe — a scratch object authored through PUT /api/v1/meta/object carries an unevaluable script rule — and closes round 2's fixture gap (QA run #24616: negative[0] blocked(fixture), 'an unevaluable CEL validation cannot be authored through any door'); negative[0] now names its scratch object. No existing clause changed",
           "ref": "#24802"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -2686,12 +2713,12 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123) — the comment author",
-        "a second signed-up user — the @mention TARGET (sys_user rows come from sign-up, not seeds)"
+        "a second user, minted by the admin with POST /api/v1/auth/admin/create-user — the @mention TARGET. A stock showcase boot is invite_only, so a fresh POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED (steps[13]; RUNNER.md, 'A stock showcase boot refuses self-registration')"
       ],
       "fixtures": {
         "app": "showcase",
@@ -2705,7 +2732,7 @@
           "why": "unblocks acceptance clauses 6 and 7 — the create-side and re-thread-side FEEDS_DISABLED probes. Without the recipe there is no feeds-disabled parent anywhere in showcase (feeds is opt-out, default true), so both clauses score blocked(fixture) and FEEDS_DISABLED survives in this item's `negative` list alone: named, never driven. That is the exact gap #12118 records, one area over from the files-side twin #12116 repaired."
         },
         "knownGaps": [
-          "the @mention TARGET and the bell/notification clauses need a SECOND signed-up user — a fresh single-user boot cannot exercise them; record those clauses blocked(fixture) and run the optimistic-reconcile + sys_comment + activity-interleave clauses as the single author",
+          "the @mention TARGET and the bell/notification clauses need a SECOND user. A stock showcase boot is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the user with POST /api/v1/auth/admin/create-user, which answers mustChangePassword true, and the user calls POST /api/v1/auth/change-password and signs in again before it drives anything (steps[13]; RUNNER.md, 'A stock showcase boot refuses self-registration'). ⛔ Do not record those clauses blocked(fixture) on the 403: the refusal is the posture working, and the admin door mints the user on the same boot. The optimistic-reconcile, sys_comment and activity-interleave clauses need only the author",
           "CLOSED by the qa-feeds-disabled recipe (#12118) for the two FEEDS_DISABLED clauses: before it, no showcase object declared enable.feeds:false and there was no scratch recipe for this area, so the code appeared only in `negative`. Fall back to the pinned engine/API suites named in `automated` ONLY if the recipe cannot be replayed on the boot under test — and when you do, record WHICH of the two the verdict rests on, because the pins run against their own fixtures (cmt_nofeeds / lead_walled) and not against the showcase surface this item otherwise drives.",
           "acceptance[9]'s cross-organization leg runs live only on a walled boot (isolated or group), which the stock showcase does not provision. A run without one records that leg blocked(fixture) citing RUNNER.md's walled entry. Its pin (automated.ref, packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts) reaches the ENGINE layer, not HTTP: a real kernel, ObjectQL engine and SQLite driver with AuditPlugin and the real core grant resolver, while plugin-security's read layer is played by one middleware composing the posture's tenant clause and an owner-only rule, and messaging is played by an emit() recorder. Under RUNNER rule 6 the pin scores the clause partial at most, naming the HTTP layer and the real plugin-security as missing; the stock `single` leg is driven live"
         ]
@@ -2859,6 +2886,12 @@
           "date": "2026-10-20",
           "change": "acceptance[9], steps[13], negative[6], fixtures.requires[2] and knownGaps[2] added, and automated.ref names the recipient-gate pin and the layer it drives — the clause #24802 deferred under RUNNER rule 2 until #24785's fix merged. #24785 (found by the walled pass of round 3, QA run #24783) let a collab.mention notification reach a mentioned user who could not read the comment's record; its fix #24794 (merged e5b3de06a6) gates recipients on read access at the producer. The clause asserts that gate: read access decides, by id or email alike, and the author is never notified. Its live legs are the stock `single` sharing-excluded member and, on a walled boot, the cross-organization user; the pin reaches the engine layer only (RUNNER rule 6). acceptance[4] is unchanged: it scores who else's bell gains the row, this clause who among the mentioned may",
           "ref": "#24864"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "personas[1] and fixtures.knownGaps[0] mint the second user through the admin door. Anchor comment 6290946648 (round 16's carried finding, from #24864 / PR #24869): both said 'a second signed-up user', and knownGaps[0] recorded the mention and bell clauses blocked(fixture) without one. Read at base e4d604efd3: the showcase declares no auth.audience, so resolveAudience answers invite_only and an uninvited sign-up answers 403 SELF_REGISTRATION_CLOSED (packages/plugins/plugin-auth/src/audience-posture.ts), while runAdminCreateUser mints the user with mustChangePassword true by default (admin-user-endpoints.ts), as steps[13] (revision 5) already does. personas[1]'s 'sys_user rows come from sign-up, not seeds' goes too: the showcase seeds its demo personas (examples/app-showcase/src/security/demo-personas.ts), though none of them is this item's mention target. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -3500,7 +3533,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3542,7 +3575,7 @@
         "condition fails CLOSED (#4775) — SCRATCH: an unevaluable/uncompilable condition ABORTS the operation and is NOT softened by onError:'log' nor fire-and-forgotten (the gate runs OUTSIDE both); add a scratch hook with a broken condition (unit-pinned in hook-wrappers.ts)"
       ],
       "steps": [
-        "boot showcase isolated WITH OS_LOG_LEVEL=info exported (or --log-level info): the audit oracle is a ctx.log.info line, and `os dev` defaults the kernel logger to warn (packages/cli/src/utils/log-level.ts DEFAULT_LOG_LEVEL), so on a default boot a correct product prints no audit line and every 'fires' clause reads as a no-fire; sign in as seeded admin; confirm the four hooks this item drives actually registered before asserting any no-fire — GET /api/v1/meta/hook (or the boot log; ⛔ not /meta/types/hook — /meta/types is the type listing and /meta/types/hook answers 404) lists showcase_normalize_task_title / showcase_stamp_inquiry_defaults / showcase_audit_task_completion / showcase_warn_over_budget (a hook that never bound fakes every no-fire — seed-data-thin)",
+        "boot the showcase on its own port and DB WITH OS_LOG_LEVEL=info exported (or --log-level info): the audit oracle is a ctx.log.info line, and `os dev` defaults the kernel logger to warn (packages/cli/src/utils/log-level.ts DEFAULT_LOG_LEVEL), so on a default boot a correct product prints no audit line and every 'fires' clause reads as a no-fire; sign in as seeded admin; confirm the four hooks this item drives actually registered before asserting any no-fire — GET /api/v1/meta/hook (or the boot log; ⛔ not /meta/types/hook — /meta/types is the type listing and /meta/types/hook answers 404) lists showcase_normalize_task_title / showcase_stamp_inquiry_defaults / showcase_audit_task_completion / showcase_warn_over_budget (a hook that never bound fakes every no-fire — seed-data-thin)",
         "stamp defaults (beforeInsert): POST /api/v1/data/showcase_inquiry {name:'os-qa-<runid>', email, message} — email and message are required, so a name-only body answers 400 VALIDATION_FAILED before any hook runs — OMITTING status AND source; re-read via GET and confirm source == 'web' — the hook is the SOLE producer of that value (the source field carries no default), so a correct read proves the hook fired; status == 'new' corroborates but is NOT hook-attributable alone (the 'new' status option is default:true)",
         "title trim (beforeInsert + beforeUpdate): POST /api/v1/data/showcase_task with title '  os-qa-<runid>  ' (leading/trailing spaces) and valid required fields; re-read → title == 'os-qa-<runid>' (insert trim); then PATCH the same row's title to another padded value and re-read → trimmed again (update trim); ONE multi-event hook covered both",
         "completion audit — FIRES (transition): PATCH /api/v1/data/showcase_task/<Build homepage id> {done:true} (previous done:false); after the HTTP response resolves, settle briefly (the audit is async fire-and-forget, it runs after the write returns), then read the server log for 'task completed: Build homepage'",
@@ -3691,6 +3724,12 @@
           "date": "2026-10-20",
           "change": "fixture roster only, no clause moved — the showcase gained three hooks, the paid-invoice line guards on showcase_invoice_line (beforeInsert, beforeUpdate, beforeDelete; each throws a user-facing refusal when the line's invoice is paid). Three stated facts they made false ('the five seeded showcase hooks', 'beforeDelete has NO seeded showcase hook', 'the one seeded hook that throws') now name them, and say why they do not close this item's beforeDelete variant or abort-rollback clause: this item does not drive them, and the clauses' verify steps name scratch hooks.",
           "ref": "#24684"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -3699,7 +3738,7 @@
       "title": "Per-type CONSTRAINT enforcement on the write path (not just widget render): length/range/option/reference/computed limits, and where the platform deliberately does NOT enforce",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3743,7 +3782,7 @@
         "summary"
       ],
       "steps": [
-        "boot showcase isolated; sign in as the seeded admin; capture an API token for direct /api/v1/data/* POST/PATCH/GET",
+        "boot the showcase on its own port and DB; sign in as the seeded admin; capture an API token for direct /api/v1/data/* POST/PATCH/GET",
         "STRING length: POST /api/v1/data/showcase_field_zoo with name = a 201-char string (maxLength 200) and capture the refusal; then POST a 200-char name and capture success — confirm the long value was NOT silently truncated-and-stored",
         "NUMBER range: POST f_number = -1, then = 1001, then a non-number ('abc'); capture each refusal; POST f_number = 500 and re-read verbatim",
         "SCALE (gap probe): POST f_currency = 1234.567 (declared scale 2); GET the row and record whether the stored value is rounded (expected: stored 1234.567 verbatim — NOT enforced)",
@@ -3842,6 +3881,12 @@
           "date": "2026-10-20",
           "change": "acceptance[7].verify corrected — round 8's carried finding for wave anchor #24579 (18.0 sweep; round 8's report 6281776167, out_of_scope_findings[1], carried by the seat's ACCEPT 6281811723). It cited objectui e2e/live/summary-rollup.spec.ts for showcase_invoice.total, which that spec never reads: it rolls showcase_task up into showcase_project (byte-identical at the sweep's console pin 4016370af3c9 and at the shipped pin 12dc7b47c340). Tier 1 run #24598 scored acceptance[7] not-run (its summary half unpinned), and round 1's QA run #24572 scored the item pass on its API pins. The verify now says that no pin reads invoice.total. The spec was never in automated.ref, which names API pins only, so the ref is unchanged. Beside it, fixtures.knownGaps[0]'s line citation 'createColumn ~7354-7368', a tilde range no gate reads, became the sql-driver.ts#createColumn anchor that its own text already named. No clause changed",
           "ref": "#24752"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -3850,7 +3895,7 @@
       "title": "Cascade clear-semantics and the server boundary: stale-child clear on parent change, the WRITTEN-value server gate, and where cascade scope is client-only",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3869,7 +3914,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; sign in as the seeded admin; keep an API token for direct /api/v1/data/* writes",
+        "boot the showcase on its own port and DB; sign in as the seeded admin; keep an API token for direct /api/v1/data/* writes",
         "SELECT client clear: open a New Cascading Select (/_console/apps/showcase_app/showcase_cascade — the app name is the canonical segment; the console also accepts the package id com.example.showcase there); pick country=cn, province=zj; screenshot; switch country=us; screenshot; enumerate province options (expect {California,Texas}) and confirm zj CLEARED and not carried into the us submit",
         "SELECT server gate (written value): direct POST /api/v1/data/showcase_cascade {country:'cn', province:'ca'} → capture the refusal; then {country:'cn', province:'zj'} → capture success",
         "SELECT stale-child EDGE (gap probe): create {country:'cn', province:'zj'}; PATCH only {country:'us'} (omit province); GET the row and record whether province='zj' (now invalid for us) is still stored and the PATCH returned 200 — expected: accepted, stale value kept (server does not revalidate an unwritten child)",
@@ -3974,6 +4019,12 @@
           "date": "2026-10-20",
           "change": "automated.ref and acceptance[1].verify re-scored per RUNNER rule 6 — the sweep-wide rule-6 contradiction QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4) names at cascading-multilevel acceptance[1], round 15 of wave anchor #24579. acceptance[1] scores the direct POST's answer. Its verify and the ref (round 14 moved the objectql pin's scope into it) scored it, and acceptance[2], from rule-validator.option-visibility.test.ts, which calls evaluateValidationRules directly. By the rule (a pin scores only the layer it drives) that pin scores neither clause. Re-read at the console pin 616df6598b42 (blob 5f65228948b7 of cascading-options.spec.ts, unchanged since round 14), the ref's own objectui spec carries a second case, 'the server rejects an out-of-set option value, and accepts an in-set one', which POSTs to the live backend and asserts the out-of-set 400 VALIDATION_FAILED with invalid_option on province and the in-set 201. That is acceptance[1] at the HTTP door, so the ref and the verify cite it; no live run exists at that pin, so its verdict there is NOT MEASURED. acceptance[2] needs the run. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -3982,7 +4033,7 @@
       "title": "Secret/encrypted field: ciphertext at rest, masked on every read, no-op mask re-submit, and fail-CLOSED without an ICryptoProvider (ADR-0100)",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4001,7 +4052,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated on a provider-wired boot (`os serve`, LocalCryptoProvider); sign in as the seeded admin; keep an API token",
+        "boot the showcase on its own port and DB, on a provider-wired boot (`os serve`, LocalCryptoProvider); sign in as the seeded admin; keep an API token",
         "WRITE ciphertext: POST /api/v1/data/showcase_field_zoo {name:'sec-1', f_secret:'topsecret-value'}; GET the row over the API and confirm f_secret reads back as the SECRET_MASK, never 'topsecret-value'; where DB access exists, confirm the business-row column holds a 'secret:<handle>' ref and the plaintext lives only (encrypted) in sys_secret",
         "MASK on read for f_password too: POST f_password='p@ssw0rd!'; GET and confirm f_password reads back as the mask (generic password: plaintext-at-rest but masked-on-read)",
         "ECHOED-MASK no-op: PATCH the row's f_secret back as the SECRET_MASK sentinel; GET and confirm the stored secret is UNCHANGED (a form round-trip re-submitting the mask does not wipe it)",
@@ -4082,6 +4133,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause; acceptance[3].verify and fixtures.knownGaps[1] rewritten — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: the acceptance[2] and [4] guards are pinned at the engine only), round 15 of wave anchor #24579. secret-fields.test.ts drives a real ObjectQL engine over a stub driver, with no HTTP. By RUNNER rule 6 (a pin scores only the layer it drives) it scores none of this item's api clauses, so the ref names it engine-layer evidence for acceptance[2]–[4] and negative[1]–[3], and names the dogfood pin's own clauses (acceptance[0]'s API oracle, acceptance[1], negative[0]). The same rule makes acceptance[3]'s 'unit-pin verdict' (the #22017 row 22 disposition) a rule-6 contradiction, located here beyond #24840's list: no stock composition runs without a provider, so the clause is now recorded blocked(fixture) with the pin beside it. Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated on ' → 'boot the showcase on its own port and DB, on '. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -4090,7 +4147,7 @@
       "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4099,7 +4156,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an admin session holding `manage_metadata` (PUT /api/v1/meta/:type/:name is capability-gated, packages/rest/src/rest-route-ledger.ts) and an isolated boot — the item authors a scratch object",
+          "an admin session holding `manage_metadata` (PUT /api/v1/meta/:type/:name is capability-gated, packages/rest/src/rest-route-ledger.ts) and a boot on its own port and DB — the item authors a scratch object",
           "the stock fieldGroups declarations as authoring models: examples/app-showcase/src/data/objects/contact.object.ts and semantic-zoo.object.ts — NEITHER carries visibleWhen"
         ],
         "knownGaps": [
@@ -4108,7 +4165,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; sign in as the seeded admin; keep an API token",
+        "boot the showcase on its own port and DB; sign in as the seeded admin; keep an API token",
         "author the scratch carrier: install a scratch package, then PUT /api/v1/meta/object/qa_group_gate?package=<id> with a `kind` select (options basic|pro, basic default), two member fields declaring group: 'pro_details', fieldGroups: [{ key: 'pro_details', label: 'Pro details', visibleWhen: \"record.kind == 'pro'\" }], and highlightFields: ['kind'] — without highlightFields the derived detail page puts every field in its highlight strip and draws no body sections, so step 5's detail half has nothing to observe — the same call sequence the area's qa-feeds-disabled recipe grounds",
         "GET the object back over /api/v1/meta and read fieldGroups[0].visibleWhen — expect the body AS AUTHORED: a bare string comes back a bare string, because runtime-authored object metadata persists verbatim (ADR-0005 appendix (c)). Then PUT the envelope spelling and read it back the same way. The string → envelope normalization belongs to the schema parse and is proven by the batch20 pin (step 5), not by this read",
         "PUT a second draft spelling the key `visibleOn` and capture the refusal body",
@@ -4190,6 +4247,18 @@
           "date": "2026-10-16",
           "change": "steps[1] gains highlightFields (checklist-accuracy finding of QA run #23949, wave #23878): with none declared, the derived detail page for qa_group_gate puts every field in the highlight strip and draws no body sections, so the detail half of the console clause could not be observed; #23949 authored highlightFields ['kind']. The clauses are unchanged",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.requires[0]: 'and an isolated boot — the item' → 'and a boot on its own port and DB — the item'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
         }
       ]
     },
@@ -4198,7 +4267,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4207,7 +4276,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an isolated dev boot on the stock SQLite store (no boot door accepts the in-memory engine any more — every one refuses it and names SQLite, 9a4182a75) + a manage_metadata session — the item authors its own scratch object",
+          "a dev boot on its own port and DB, on the stock SQLite store (no boot door accepts the in-memory engine any more — every one refuses it and names SQLite, 9a4182a75) + a manage_metadata session — the item authors its own scratch object",
           "scratch qa_unique object authored inline: sku text unique:true, gsku text unique:'global', nick text (no unique) — NO showcase object declares field-level unique (grepped; invoice.object.ts only mentions the word in a comment)"
         ],
         "knownGaps": [
@@ -4218,7 +4287,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated on the stock SQLite store (the default — do not try to select the in-memory engine, every boot door refuses it); author qa_unique via the package-install + PUT /api/v1/meta/object/qa_unique pattern",
+        "boot the showcase on its own port and DB, on the stock SQLite store (the default — do not try to select the in-memory engine, every boot door refuses it); author qa_unique via the package-install + PUT /api/v1/meta/object/qa_unique pattern",
         "POST /api/v1/data/qa_unique {name:'r1', sku:'A-1'} → 2xx; POST {name:'r2', sku:'A-1'} → capture the refusal; count rows",
         "POST two rows with sku absent → both land (NULL-distinct)",
         "PATCH r2 to sku:'A-1' → capture the refusal and re-read r2; PATCH r1 touching only `nick` → 2xx (no self-collision)",
@@ -4227,7 +4296,7 @@
       ],
       "acceptance": [
         {
-          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), whose developerMessage NAMES THE OBJECT ('Duplicate record refused on 'qa_unique': …') and states 'No record was written.', while the user-facing `error` stays generic ('A record with this value already exists'); NEITHER carries a driver prefix, a driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named only when the driver reports a single offending column (a tenant-scoped unique index is composite, so the sentence reads 'a unique constraint already holds these values'); the `object.field` wording is the memory driver's and stays a memory-pin assertion",
+          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), whose developerMessage NAMES THE OBJECT by its declared label ('Duplicate record refused on 'LABEL': …'), by its API name ('qa_unique') only where the object declares no label, and states 'No record was written.', while the user-facing `error` stays generic ('A record with this value already exists'); NEITHER carries a driver prefix, a driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named only when the driver reports a single offending column (a tenant-scoped unique index is composite, so the sentence reads 'a unique constraint already holds these values'); the `object.field` wording is the memory driver's and stays a memory-pin assertion",
           "oracle": "api",
           "verify": "the refusal body — status, code, and the developerMessage naming the object, read from developerMessage, not from the generic `error` — + a post-refusal count; the SQL-family envelope is single-sourced at packages/objectql/src/duplicate-record-error.ts (buildDuplicateMessage / envelopeUniqueViolation); the memory driver's `object.field` sentence (memory-unique-constraint.ts uniqueViolationError) is asserted by memory-unique-constraint.test.ts, not live",
           "evidence": "refusal response + before/after counts"
@@ -4251,7 +4320,7 @@
           "evidence": "the refusal + full before/after row reads"
         },
         {
-          "clause": "the scope matrix matches ADR-0120 D1/D3 on BOTH families: bare `unique: true` ≡ 'organization' (per-tenant where a tenant column exists; NULL-organization rows fold to ONE bucket), 'global' is platform-wide even with a tenant column — and the SQL family materializes the same rule via uniqueIndexesFromFields (driver-sql/src/schema-drift.ts), answering the same 409 UNIQUE_VIOLATION over REST",
+          "clause": "the scope matrix matches ADR-0120 D1/D3 on BOTH families: bare `unique: true` ≡ 'organization' (per-tenant where a tenant column exists; NULL-organization rows fold to ONE bucket), 'global' is platform-wide even with a tenant column — and the SQL family materializes the same rule via uniqueIndexesFromFields (driver-sql/src/schema-drift.ts), its refusal satisfying isUniqueViolationError (packages/types/src/unique-violation.ts#isUniqueViolationError), the predicate the platform's 409 UNIQUE_VIOLATION envelope is built on (packages/objectql/src/duplicate-record-error.ts#envelopeUniqueViolation): measured at SqlDriver through the pins' createAsApi mapping, never over a REST door (the REST answers are acceptance[0]–[3]'s, on the stock SQLite boot)",
           "oracle": "test",
           "verify": "memory-unique-constraint.test.ts (scope legs) + sql-driver-8577-tenant-scoped-declared-unique.test.ts green; live two-org probe only if two organizations are provisioned (knownGaps)",
           "evidence": "test output (+ live scope probe where run)"
@@ -4274,7 +4343,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/drivers/driver-memory/src/memory-unique-constraint.test.ts — acceptance[4]'s memory-family legs (the \"[#13197] scoping matches driver-sql's ADR-0120 D1/D3 rule\" describe), acceptance[5] ('the refusal is recognisable to the ENGINE, so the autonumber resync converges'), negative[2] ('updateMany refuses BEFORE mutating anything — no half-applied batch') and negative[3]'s memory-family half, at the memory driver; + packages/drivers/driver-sql/src/sql-driver-8577-tenant-scoped-declared-unique.test.ts + packages/drivers/driver-sql/src/sql-driver-declared-index-organization-respelling.test.ts — acceptance[4]'s SQL-family legs and negative[3]'s SQL-family half, at SqlDriver over better-sqlite3. NO pin drives a REST door: the SQL pins map each driver refusal through a test-local createAsApi helper to the { status: 409, code: 'UNIQUE_VIOLATION' } envelope rest-server.ts derives, so acceptance[4]'s 'same 409 UNIQUE_VIOLATION over REST' wording rests on that mapping, and every pin is driver-level evidence for acceptance[0]–[3], never their pass: those clauses score the REST answer on the stock SQLite boot"
+        "ref": "packages/drivers/driver-memory/src/memory-unique-constraint.test.ts — acceptance[4]'s memory-family legs (the \"[#13197] scoping matches driver-sql's ADR-0120 D1/D3 rule\" describe), acceptance[5] ('the refusal is recognisable to the ENGINE, so the autonumber resync converges'), negative[2] ('updateMany refuses BEFORE mutating anything — no half-applied batch') and negative[3]'s memory-family half, at the memory driver; + packages/drivers/driver-sql/src/sql-driver-8577-tenant-scoped-declared-unique.test.ts + packages/drivers/driver-sql/src/sql-driver-declared-index-organization-respelling.test.ts — acceptance[4]'s SQL-family legs and negative[3]'s SQL-family half, at SqlDriver over better-sqlite3. NO pin drives a REST door: the SQL pins map each driver refusal through a test-local createAsApi helper to the { status: 409, code: 'UNIQUE_VIOLATION' } envelope rest-server.ts derives, so acceptance[4]'s SQL-family leg is that mapping, as its clause says, and every pin is driver-level evidence for acceptance[0]–[3], never their pass: those clauses score the REST answer on the stock SQLite boot"
       },
       "source": [
         "packages/drivers/driver-memory/src/memory-unique-constraint.ts#scope (#13197/#13249, commit 56c093c — single judgment point; scope table read off driver-sql, arm for arm)",
@@ -4314,6 +4383,30 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause; acceptance[1].verify, acceptance[2].verify, acceptance[3].verify and steps[4] rewritten — checklist-accuracy findings of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4), round 15 of wave anchor #24579. (1) The ref said the two SQL pins assert '409 UNIQUE_VIOLATION over real REST'. They drive SqlDriver over better-sqlite3 and map its refusal to that envelope through a test-local createAsApi helper, so no REST door is driven. (2) The sweep-wide rule-6 contradiction #24840 names at acceptance[1]–[3]: those clauses score the REST answer, and their verifies and steps[4] told the runner to score them from the memory-driver pin ('score from the pin'). By RUNNER rule 6 (a pin scores only the layer it drives) the pins are now cited as driver-level evidence only, and an updateMany door the boot does not expose is recorded blocked(fixture). The ref names the clauses each pin scores: acceptance[4] (test oracle) and [5], and negative[2] and [3]. Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "acceptance[4].clause states what its oracle measures, and automated.ref's sentence quoting the old wording follows it. PR #24891's carried finding (round 15 left the clause text, 'the same 409 UNIQUE_VIOLATION over REST', under a test oracle). Read at base feb09db14a: the SQL pins drive SqlDriver over better-sqlite3 and map each refusal through a test-local createAsApi helper with isUniqueViolationError (@objectstack/types), the predicate envelopeUniqueViolation (objectql duplicate-record-error.ts) builds the 409 on; no pin drives a REST door. acceptance[0]–[3] drive the REST door live, so no knownGaps line is owed. The scope matrix the clause asserts is unchanged",
+          "ref": "#24963"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated on ' → 'boot the showcase on its own port and DB, on '. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.requires[0]: 'an isolated dev boot on the stock SQLite store' → 'a dev boot on its own port and DB, on the stock SQLite store'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-21",
+          "change": "acceptance[0].clause: the developerMessage now NAMES THE OBJECT by its declared label ('Duplicate record refused on 'LABEL': …'), by its API name ('qa_unique') only where the object declares no label, where it named the object by its API name ('Duplicate record refused on 'qa_unique': …'). The engine's unique-refusal sentence (packages/objectql/src/duplicate-record-error.ts) names the object and field by label since #24951; the REST data route carries that sentence on developerMessage. Status 409, code UNIQUE_VIOLATION, the generic user-facing `error` and 'No record was written.' are unchanged",
+          "ref": "#25021"
         }
       ]
     },
@@ -4322,7 +4415,7 @@
       "title": "deleteBehavior matrix: set_null clears / member-removes, master_detail cascades, restrict answers 409 DELETE_RESTRICTED with the cascade remedy, required-FK set_null escalates to restrict",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4351,7 +4444,7 @@
         "NOT enumSource-pinnable: deleteBehavior is an inline z.enum(['set_null','cascade','restrict']) inside FieldSchema (field.zod.ts) with no named export — 3 members hand-pinned here; a fourth member will not trip a pin and must be caught by re-reading the enum"
       ],
       "steps": [
-        "boot showcase isolated; admin API token; work on rows created BY THIS RUN, not the seeds (the cascade probes destroy their parents)",
+        "boot the showcase on its own port and DB; admin API token; work on rows created BY THIS RUN, not the seeds (the cascade probes destroy their parents)",
         "set_null scalar: create an account + a contact pointing at it; DELETE the account; re-read the contact",
         "multi-value: create two accounts + a field-zoo row with f_lookups = [both]; DELETE one account; re-read the row",
         "cascade: create an invoice with two lines; DELETE the invoice; list the lines",
@@ -4428,6 +4521,12 @@
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[2] cited line 184 of the showcase invoice.object.ts in the comma-range spelling (authored in 45397edf53 as the list 69-71 and 184). At that commit 184 was deleteBehavior 'cascade' on the invoice line's invoice master_detail, and 69-71 the invoice's required account lookup, the required-FK escalation arm fixtures.requires names; at this base both have moved. source[2] now anchors invoice.object.ts#InvoiceLine and #Invoice. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
           "ref": "#24752"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -4436,7 +4535,7 @@
       "title": "Clone contract edges: enable.clone gate both ways (403 CLONE_DISABLED), overrides win but cannot forge readonly, bare-201 body per CloneDataResponseSchema, internal fields stripped from the response",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4455,7 +4554,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; admin token; author qa_noclone ({ enable: { clone: false } }, one text field) and create one row in it",
+        "boot the showcase on its own port and DB; admin token; author qa_noclone ({ enable: { clone: false } }, one text field) and create one row in it",
         "POST /api/v1/data/qa_noclone/<id>/clone → capture the refusal; then the control: clone a showcase_account row → 201",
         "clone WITH overrides: POST /api/v1/data/showcase_account/<id>/clone {overrides:{name:'os-qa-clone-override'}} — and include a readonly/system key in overrides (e.g. created_by, or a readonly field where one exists)",
         "diff the 201 body against CloneDataResponseSchema expectations: top-level {object, id, sourceId, record} with NO envelope wrapper",
@@ -4518,6 +4617,12 @@
           "date": "2026-08-30",
           "change": "initial — sweep gap (docs-claims angle): crud-roundtrip covers the clone happy path and RLS gate, but the CLONE_DISABLED refusal was only ever NAMED there, and the overrides-vs-readonly ordering, bare-201 body contract and #7823 response strip had no coverage anywhere. Also records that the docs' 'one-click cloning' has no console caller — API-only surface at the sweep pins",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -4526,7 +4631,7 @@
       "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the History tab and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4543,7 +4648,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; sign in as admin; open a seeded account record",
+        "boot the showcase on its own port and DB; sign in as admin; open a seeded account record",
         "edit the TRACKED select `industry` (e.g. Technology → Finance); save; read the record's sys_activity rows over the API and open the timeline",
         "edit an UNTRACKED field (e.g. website) alone; save; re-read sys_activity for the record",
         "open the account's History tab; then open a seeded task's detail and look for a History tab",
@@ -4631,6 +4736,12 @@
           "date": "2026-10-20",
           "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired record-history-display.spec.ts, the one spec the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 2c4d8a674f81 at the old pin 12dc7b47c340 and 7ebc45106cff at both 0b36ffa and 616df6598b42: it now targets showcase_account, the showcase's enable.trackHistory object, with no app-todo skip guard. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, it asserts the History tab's display values on showcase_account (crud-roundtrip's contract, per negative[3]) and opens no task detail, so it still claims no clause here, and the ref now says so. The two plugin-audit pins keep their scope. No clause changed",
           "ref": "#24857"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -4937,7 +5048,7 @@
       "title": "A script action whose server-side hook refuses the write with a user-facing sentence answers a 4xx, the console shows exactly one error toast carrying that sentence, and the record is left unchanged",
       "since": "v17.5",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -4958,7 +5069,7 @@
         ]
       },
       "steps": [
-        "re-read examples/app-showcase/src/data/hooks/index.ts and copy TASK_REOPEN_REFUSAL verbatim — the oracle string; boot the showcase isolated (RUNNER canonical boot line: own port, own file DB, --seed-admin) with the console built at .objectui-sha; sign in through the form as the seeded admin",
+        "re-read examples/app-showcase/src/data/hooks/index.ts and copy TASK_REOPEN_REFUSAL verbatim — the oracle string; boot the showcase with RUNNER's canonical checklist boot (own port, own file DB, --seed-admin) with the console built at .objectui-sha; sign in through the form as the seeded admin",
         "pick a finished task: GET /api/v1/data/showcase_task?where=... (or the list) and record its id, done, progress and modified timestamp — this is the before-image",
         "open the showcase_task list in the console (/_console/apps/showcase_app/showcase_task); screenshot after render settles; open the finished task's row menu ('Open menu' on its row) and confirm 'Reopen' is offered there",
         "start capturing the network log and, before clicking, count toast nodes: document.querySelectorAll('[data-sonner-toast]:not([data-removed=\"true\"])').length — the baseline (expected 0)",
@@ -5021,6 +5132,12 @@
           "date": "2026-10-03",
           "change": "initial — gives objectui#9151's re-observation a home: the status half was fixed (#17265 / PR #17679) and the console chain pinned correct with the transport stubbed (objectui#9252), but the symptom was never re-observed live on a current build. The showcase had no hook that refuses a write, so the fixture pair (showcase_guard_task_reopen + showcase_reopen_task) lands with it.",
           "ref": "#21596"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot the showcase isolated (RUNNER canonical boot line: own port, own file DB, --seed-admin)' → 'boot the showcase with RUNNER's canonical checklist boot (own port, own file DB, --seed-admin)'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },

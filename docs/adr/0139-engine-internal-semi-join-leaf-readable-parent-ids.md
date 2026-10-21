@@ -5,8 +5,14 @@
 D2's position sentence names the executor boundary — after the middleware chain and the before-hooks, immediately
 before each driver call — in place of the seam where `lowerRelationConditions` runs, which precedes the chain D4's
 emitters write into (ruling [`6121741984`](https://github.com/objectstack-ai/objectstack/issues/22861#issuecomment-6121741984)
-on [#22861](https://github.com/objectstack-ai/objectstack/issues/22861), letter A). **This record declares; it
-implements nothing.** It became **Accepted** on the maintainer's approval (`docs/adr/**` is Tier H, Prime
+on [#22861](https://github.com/objectstack-ai/objectstack/issues/22861), letter A). **Amended** (2026-10-21): O5 is
+answered — `controlled_by_parent` becomes the seventh consumer, in the end-state form — and D5.1 is amended from a
+refusal to a composition: the engine composes the leaf for a delegated (on-behalf-of) caller, the scope being the
+ADR-0090 D10 delegator intersection `getReadFilter` now answers for that context (ruling
+[`6303721609`](https://github.com/objectstack-ai/objectstack/issues/24932#issuecomment-6303721609) on
+[#24932](https://github.com/objectstack-ai/objectstack/issues/24932), letter B; the engine card
+[#25009](https://github.com/objectstack-ai/objectstack/issues/25009)). D6 and the execution plan carry the rest of that
+ruling. **This record declares; it implements nothing.** It became **Accepted** on the maintainer's approval (`docs/adr/**` is Tier H, Prime
 Directive #14); the execution cards under [Execution plan](#execution-plan-after-acceptance) are cut after acceptance
 and ⛔ never before it. Until then the platform stayed in the ruling's letter D state, and letter C (a located 400 at
 the bound, after objectui#12081 item 8) is the `domain:services` lane's interim on
@@ -26,7 +32,8 @@ keys on), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) D10 (del
 D5 (principal-less refusal), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove: why no
 capability bit returns), [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) (the refusal envelope),
 [ADR-0057](./0057-system-data-lifecycle-and-retention.md) (the `telemetry` datasource split that makes a parent federated).
-**Leaves unchanged**: ADR-0055 §2's chosen mechanism (b) for `controlled_by_parent`, its `rlsMembership` IN-form and
+**Leaves unchanged**: ADR-0055 §2's chosen mechanism (b) for `controlled_by_parent` (until the plugin-security switch
+the 2026-10-21 amendment of D6 orders lands, in its own Tier H edit of that record), its `rlsMembership` IN-form and
 the fail-closed RLS compiler and its closed pushdown form set (historically four, broader today); ADR-0053 D-D1
 (drivers receive lowered input) for every form but this one leaf.
 **Consumers**: `@objectstack/spec` (the leaf's declaration), `@objectstack/objectql` (composition and push-down),
@@ -198,16 +205,31 @@ restriction".
   `managedBy: 'append-only'`, so the backfill goes through the migration door, never the CRUD write path). A row the
   backfill cannot judge keeps the fail-closed answer it has today.
 
-### D5 — Three classes stay on the bounded fail-closed probe, by name
+### D5 — Two classes stay on the bounded fail-closed probe, by name; the delegated caller composes (amended 2026-10-21)
 
-Each is recognised by the engine, which **refuses to compose a leaf for it** (loud, as D3's envelope), and routed by the
-consumer to today's probe before the leaf is written. ⛔ No silent fallback: the probe is chosen up front, never
-reached by catching a refusal.
+Each of the two remaining classes is recognised by the engine, which **refuses to compose a leaf for it** (loud, as D3's
+envelope), and routed by the consumer to today's probe before the leaf is written. ⛔ No silent fallback: the probe is
+chosen up front, never reached by catching a refusal.
 
-1. **A delegated (on-behalf-of) caller** (ADR-0090 D10). `packages/plugins/plugin-security/src/security-plugin.ts#getReadFilter`
-   answers the deny sentinel for such a context because the delegator intersection is not threaded through the
-   read-scope path, while the CRUD middleware intersects it; a composed leaf would serve a delegated reader nothing.
-   The probe, which reads through the middleware, stays until the intersection reaches `getReadFilter`.
+1. **A delegated (on-behalf-of) caller** (ADR-0090 D10) — **composed, not refused** (amended 2026-10-21; as accepted
+   this class was refused "until the intersection reaches `getReadFilter`", and it has). The engine's boundary
+   (`packages/objectql/src/engine.ts#composeReadableIdsAtBoundary`) asks both halves — `canReadObject` and
+   `getReadFilter` — with the delegated context exactly as it stands, `onBehalfOf` intact, and composes what it is
+   answered; it reads no delegation link of its own
+   (`packages/objectql/src/engine.ts#refuseUncomposableReadableIdsClasses` judges the two classes below and nothing
+   about the caller). The security service answers each half for the delegated principal, which under ADR-0090 D10 is
+   the INTERSECTION of the principal's leg and the delegator's: `canReadObject` already intersected the object half;
+   `packages/plugins/plugin-security/src/security-plugin.ts#getReadFilter` now answers the row half through
+   `packages/plugins/plugin-security/src/security-plugin.ts#computeDelegatedReadFilter`, the six layers the engine
+   middleware chain ANDs into a delegated `find` of P — the principal's RLS and `controlled_by_parent` derivation, the
+   delegator's two (over the context `packages/plugins/plugin-security/src/explain-engine.ts#resolveDelegatorContext`
+   rebuilds), and plugin-sharing's visibility filter under each identity at its own depth. So a delegated read through
+   the leaf serves exactly the rows a delegated direct read of P serves (measured: `find`, `count`, one statement per
+   read, the parent inside the subquery). The closed doors are the chain's: a delegator who does not exist, one the
+   parent object does not admit, a principal that resolves no set, and any resolution failure answer `false` or the
+   deny sentinel, and the leaf is `$in: []`. ⛔ The engine derives no second intersection: it has one context, the
+   delegated one, and the delegator's grants are the security service's to resolve. The six consumers' up-front
+   `'delegated-caller'` probe routing (D4) is now a residue of the refusal, retired per consumer on its own card.
 2. **A parent whose rows are narrowed by an object-scoped read middleware** (`packages/objectql/src/engine.ts#registerMiddleware`
    with an `object`): `sys_attachment`, `sys_comment`, `sys_comment_reaction`, `sys_approval_request`, and the two
    gated objects themselves. Their WHERE is built at read time and is no part of `getReadFilter`, so a leaf over them
@@ -226,10 +248,27 @@ compiled output of the RLS compiler, whose closed pushdown form set (historicall
 IN-form and deliberate lack of a subquery form are unchanged
 (`packages/plugins/plugin-security/src/rls-compiler.ts#RLSCompiler`, `#compileExpression`: a subquery shape compiles to
 `null` and fails closed). §2's mechanism (b) for
-`controlled_by_parent` stands, set-size ceiling included; whether that id set becomes a seventh consumer is ⛔ not
+`controlled_by_parent` stands, set-size ceiling included; whether that id set becomes a seventh consumer was ⛔ not
 decided here. ADR-0056's non-goal stands as written for the compiler and is revisited only as the engine-side leaf.
 Each record carries one pointer to this one, landed with this record — ADR-0055's status line, ADR-0056's non-goal
 bullet; nothing else in either moves.
+
+**Amended 2026-10-21 — O5 is decided, by the maintainer's ruling
+[`6303721609`](https://github.com/objectstack-ai/objectstack/issues/24932#issuecomment-6303721609) on
+[#24932](https://github.com/objectstack-ai/objectstack/issues/24932) (letter B), recorded here verbatim:**
+
+> O5 is answered yes, in the end-state form. `controlled_by_parent` becomes the seventh consumer of the engine-internal
+> semi-join leaf, once for every shape: the engine first composes the leaf for a delegated (on-behalf-of) caller (the
+> exit condition D5.1 itself names) and for a nested master chain; then plugin-security switches the caller, the
+> delegator intersection and `getReadFilter` in one change, and the id-list pre-scan retires.
+
+The order the ruling binds: the delegated composition (D5.1 as amended, this revision's card), then the nested master
+chain (a leaf inside a composed scope is composed; its own `domain:engine` card), then the plugin-security switch,
+"which in the same Tier H edit corrects ADR-0055's 'cached within the request' sentence to what the code does". Two
+things the ruling ⛔ does not take: an interim with two spellings of one scope, and "interim removal of the predicate for
+an unrestricted master scope: it would expose rows with a null or dangling foreign key (measured)". ADR-0055 §2's
+mechanism (b) therefore stands until the switch lands, and ADR-0055's own text moves only in that switch's edit, never
+here.
 
 ## Consequences
 
@@ -269,7 +308,8 @@ bullet; nothing else in either moves.
 - **O3** — `driver-mongodb`: the cost of a pipeline form is unprototyped; it refuses until measured.
 - **O4** — `packages/plugins/plugin-sharing/src/sharing-service.ts` reads a caller's record-share grants at
   `limit: 5000` with no warning; that scope rides into the subquery unchanged. A separate finding, not this record's.
-- **O5** — whether `controlled_by_parent`'s id set becomes a seventh consumer (D6).
+- **O5** — whether `controlled_by_parent`'s id set becomes a seventh consumer (D6). **Answered** (2026-10-21): the
+  ruling is recorded verbatim in D6, as amended.
 
 ## Acceptance criteria
 
@@ -284,7 +324,7 @@ and none changes `packages/spec` before it.
 | Card | Decisions | What lands | Pins (red before, green after) | Order |
 |:--|:--|:--|:--|:--|
 | **E1** — the leaf | D1 | `ReadableIds` in `packages/spec/src/data/`; the comparand door admits the branded value and refuses the unbranded one | a JSON round-trip of a `where` holding the leaf is refused; the plain-object spelling is refused 400 | first |
-| **E2** — composition | D2, D5 | the engine seam composes the leaf, refuses it on write verbs and for D5's three classes, marks the scope `'policy'`; the conformance case-set | `canReadObject` false ⇒ no row; deny sentinel ⇒ no row; a delegated, middleware-gated or federated parent ⇒ the loud refusal | after E1 |
+| **E2** — composition | D2, D5 | the engine seam composes the leaf, refuses it on write verbs and for D5's three classes as accepted (D5.1 amended 2026-10-21: the delegated caller composes), marks the scope `'policy'`; the conformance case-set | `canReadObject` false ⇒ no row; deny sentinel ⇒ no row; a delegated caller composes (both halves asked with the delegation link intact, the closed doors still `$in: []`); a middleware-gated or federated parent ⇒ the loud refusal, a delegated context included | after E1 |
 | **E3** — SQL family | D3 | `driver-sql` compiles the leaf inside `packages/drivers/driver-sql/src/sql-driver.ts#applyTenantScope`; wasm and local Turso inherit; the remote transport compiles it | a reader with more than 2,000 readable candidates gets every visible row; an unreadable row stays hidden; a deleted parent is excluded; `count` equals the rows served | after E2 |
 | **E4** — memory and mongodb | D3 | memory implements; mongodb refuses with the envelope | the conformance table records both | with E3 |
 | **E5** — the activity and ledger switch | D4, D5 | `packages/plugins/plugin-audit/src/parent-record-read-gate.ts#computeParentRecordFilter` emits leaves, no pre-scan; D5's classes keep the probe; letter C's refusal retired from these two | the measured scenario answers 1,808 of 1,808; the exemption capability unchanged; the outside class as a predicate | after E3 |

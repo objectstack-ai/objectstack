@@ -746,6 +746,28 @@ function writeFailureLogMeta(
 }
 
 /**
+ * [#24948] The refusal of a predicate (`multi`) delete of `sys_organization`:
+ * the standard `DELETE_RESTRICTED`, saying to delete by id. Only the by-id
+ * delete runs the referential pass that refuses an organization still owning
+ * rows and keeps every row's reference to it.
+ */
+function organizationPredicateDeleteRefusal(): Error {
+  const err: any = new Error(
+    'Organizations are deleted one at a time, by id: a delete matching organizations by a filter is refused. ' +
+      'Delete each organization by its id.',
+  );
+  err.developerMessage =
+    `A predicate delete of ${ORGANIZATION_OBJECT} is refused: it runs no referential pass, so it could neither ` +
+    'refuse an organization that still owns rows nor keep the rows naming it. Delete each organization by id ' +
+    `(engine.delete('${ORGANIZATION_OBJECT}', { where: { id } })).`;
+  err.code = 'DELETE_RESTRICTED';
+  err.status = 409;
+  err.httpStatus = 409;
+  err.object = ORGANIZATION_OBJECT;
+  return err;
+}
+
+/**
  * Is this failure the security layer refusing the CALLER's read — the
  * ADR-0112 `PERMISSION_DENIED` code — rather than the read failing?
  *
@@ -2305,8 +2327,8 @@ function stripComputedWriteFields(
 
 /**
  * The strip report as `DroppedFieldsEvent`s: one event per reason, `computed`
- * before `readonly` — the order the strips run — and an empty list when
- * nothing was taken.
+ * before `readonly`, then `stored_expression` (#24690) — the order the passes
+ * run — and an empty list when nothing was taken.
  *
  * ONE builder for both channels the create-side strips report through, so
  * they cannot disagree on a reason or its order: the batch-level union (the
@@ -2321,10 +2343,13 @@ function droppedFieldEvents(
   object: string,
   computed: readonly string[],
   readonly: readonly string[],
+  storedExpression: readonly string[] = [],
 ): DroppedFieldsEvent[] {
   const events: DroppedFieldsEvent[] = [];
   if (computed.length > 0) events.push({ object, fields: [...computed], reason: 'computed' });
   if (readonly.length > 0) events.push({ object, fields: [...readonly], reason: 'readonly' });
+  // [#24690] Last: the stored-expression pass runs after every strip.
+  if (storedExpression.length > 0) events.push({ object, fields: [...storedExpression], reason: 'stored_expression' });
   return events;
 }
 
@@ -3020,6 +3045,45 @@ function applyStoredExpressionsToPatch(
   for (const [name, value] of Object.entries(computed)) {
     if (Object.prototype.hasOwnProperty.call(patch, name) || !Object.is(prior?.[name], value)) patch[name] = value;
   }
+}
+
+/**
+ * [#24690] The stored computed fields whose CALLER value this write replaced —
+ * reported through `onFieldsDropped` under `stored_expression`, so a client
+ * that sent `amount: 1` is told its value did not stand, as #3407 rules for
+ * every other write-path strip, rather than reading success over a row that
+ * holds the computed value.
+ *
+ * A field is reported when all three hold:
+ *  - the caller SENT it (`supplied`, the write's entry snapshot of the
+ *    caller's values — never the live payload, which the pre-hook pass and the
+ *    hooks have since written to);
+ *  - it is still on the payload the compute pass reads (`present`): a value
+ *    another strip took — a stored expression field also declared `readonly`
+ *    — is that strip's to report, under its own reason, never twice;
+ *  - the value STORED differs from the caller's on at least one row
+ *    (`stored`: the one row of an insert or a by-id update, every matched row
+ *    of a predicate update). A client that sends the computed value — the
+ *    console grid's consistent save — is told nothing, because nothing it
+ *    sent was replaced.
+ *
+ * `Object.is`, the comparison the compute passes themselves use: the caller's
+ * values were normalized (blank and numeric strings) before the snapshot.
+ */
+function replacedStoredExpressionFields(
+  plan: readonly FormulaPlanEntry[],
+  supplied: Readonly<Record<string, unknown>> | undefined,
+  present: Readonly<Record<string, unknown>> | null | undefined,
+  stored: ReadonlyArray<Readonly<Record<string, unknown>>>,
+): string[] {
+  if (!supplied || !present) return [];
+  const replaced: string[] = [];
+  for (const { name } of plan) {
+    if (!Object.prototype.hasOwnProperty.call(supplied, name)) continue;
+    if (!Object.prototype.hasOwnProperty.call(present, name)) continue;
+    if (stored.some((row) => !Object.is(row?.[name], supplied[name]))) replaced.push(name);
+  }
+  return replaced;
 }
 
 /**
@@ -6098,11 +6162,11 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Per parent object `P`, once per call, in this order:
    *
-   *  1. **D5's three classes are refused, by name** (`INTERNAL_ERROR` / 500),
-   *     before the security service is asked anything: a delegated
-   *     (on-behalf-of) caller; a parent an object-scoped read middleware
-   *     narrows ({@link hasObjectMiddleware}); a parent bound to another
-   *     datasource than `object` ({@link resolveDatasourceBinding}).
+   *  1. **D5's two remaining classes are refused, by name** (`INTERNAL_ERROR`
+   *     / 500), before the security service is asked anything: a parent an
+   *     object-scoped read middleware narrows ({@link hasObjectMiddleware}); a
+   *     parent bound to another datasource than `object`
+   *     ({@link resolveDatasourceBinding}).
    *  2. **A parent the registry does not hold** ⇒ `$in: []`, unasked.
    *  3. **The security service** — absent or unusable ⇒ `$in: []`.
    *  4. **`canReadObject(P)`** (its `explain` fallback when the method is
@@ -6112,6 +6176,17 @@ export class ObjectQL implements IObjectQLEngine {
    *     `$in: []`; any other filter ⇒ composed with it as the scope, marked
    *     `'policy'` and otherwise passed exactly as `P`'s own read passes its
    *     injected scope. The tenant wall is the driver's (D3).
+   *
+   * [ADR-0139 D5.1, as amended] A **delegated (on-behalf-of) caller** is
+   * composed, not refused: both halves are asked with the caller's context
+   * exactly as it stands — `onBehalfOf` intact — and the security service
+   * answers each half for the delegated principal, which under ADR-0090 D10
+   * is the INTERSECTION of the principal's leg and the delegator's. The
+   * engine composes what it is answered and derives no second intersection
+   * of its own: it has one context, the delegated one, and the delegator's
+   * grants are the security service's to resolve. A service that cannot
+   * answer that context answers the deny sentinel, and step 5 turns it into
+   * `$in: []`, closed.
    *
    * Nothing is memoised across calls. `aggregate`'s `having` and its
    * aggregations' own filters are judged here too, so a leaf a middleware
@@ -6132,7 +6207,7 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const sites = collectComposableReadableIds(object, operation, ast.where, 'where');
     if (sites.length === 0) return ast;
-    const parents = this.refuseUncomposableReadableIdsClasses(object, operation, sites, context);
+    const parents = this.refuseUncomposableReadableIdsClasses(object, operation, sites);
 
     const security = this.resolveReadableIdsSecurity();
     if (security.kind !== 'usable' && !this.readableIdsSecurityReported.has(security.kind)) {
@@ -6160,17 +6235,18 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * [ADR-0139 D5] Refuse D5's three classes, by name, and return the distinct
-   * parent objects of `sites` the security service is asked about, in walk
-   * order (every one but a parent the registry does not hold). Reads the
-   * context, the registry and the middleware registrations only — no security
-   * call.
+   * [ADR-0139 D5] Refuse D5's two remaining classes (D5.2 and D5.3), by name,
+   * and return the distinct parent objects of `sites` the security service is
+   * asked about, in walk order (every one but a parent the registry does not
+   * hold). Reads the registry and the middleware registrations only — no
+   * security call, and no reading of the caller's context: a delegated
+   * (on-behalf-of) caller is no longer a class of its own (D5.1, as amended),
+   * it is composed like any other through the security service's answers.
    */
   private refuseUncomposableReadableIdsClasses(
     object: string,
     operation: string,
     sites: readonly ComposableReadableIdsSite[],
-    context: ExecutionContext | undefined,
   ): string[] {
     const firstSite = new Map<string, ComposableReadableIdsSite>();
     for (const site of sites) if (!firstSite.has(site.leaf.object)) firstSite.set(site.leaf.object, site);
@@ -6180,11 +6256,6 @@ export class ObjectQL implements IObjectQLEngine {
       `such leaf ${why}. The query was NOT run and no driver was asked. Read this class through its bounded ` +
       'probe, chosen before the leaf is written.',
     );
-    const delegator = (context as { onBehalfOf?: { userId?: unknown } } | undefined)?.onBehalfOf?.userId;
-    if (delegator) {
-      throw refuse(sites[0], 'for a delegated (on-behalf-of) caller: the parent\'s read scope does not carry the ' +
-        'delegator intersection, so the composed leaf would not answer what a direct read answers');
-    }
     const outer = this.resolveDatasourceBinding(object)?.datasource;
     const composable: string[] = [];
     for (const [parent, site] of firstSite) {
@@ -8182,7 +8253,7 @@ export class ObjectQL implements IObjectQLEngine {
         // not a unique violation untouched (a deadlock, a NOT NULL, an
         // unreachable store), so only the recognised conflict changes shape.
         if (!this.isIssuedAutonumberCollision(error, issued)) {
-          throw envelopeUniqueViolation(error, object);
+          throw envelopeUniqueViolation(error, object, this.getSchema(object));
         }
         // Whatever happens next, the stale counter must not survive this call:
         // leaving it in place is what turned one collision into a storm.
@@ -8216,7 +8287,7 @@ export class ObjectQL implements IObjectQLEngine {
           try {
             return await driver.create(object, row, driverOptions);
           } catch (retryError) {
-            throw envelopeUniqueViolation(retryError, object);
+            throw envelopeUniqueViolation(retryError, object, this.getSchema(object));
           }
         }
       }
@@ -10791,6 +10862,54 @@ export class ObjectQL implements IObjectQLEngine {
       },
       options,
     );
+  }
+
+  /**
+   * [#24964] Read-only: every record a by-id {@link delete} of `object`/`id`
+   * would remove, the root first — the cascade set that delete collects for
+   * itself before it writes anything, read through the same walk.
+   *
+   * Exists for the operator's remover of the rows {@link inspectDanglingReferences}
+   * reports (`os db orphans`). Its dry run must list the deeper details the
+   * delete would reach, and it can only say that truthfully by asking the walk
+   * the delete runs. A copy of "which relations cascade" in the command would
+   * be free to disagree with the delete it previews.
+   *
+   * It reads, and does nothing else:
+   *
+   * - it issues no write and runs no hook;
+   * - it files no #12166 elevation record: that record says the platform read
+   *   an object as system for a delete, and none happens here;
+   * - it reads as SYSTEM with no organization, the probes a system-context
+   *   delete makes (`{ isSystem: true }`, no `tenantId`). A delete under any
+   *   other context can reach a different set.
+   *
+   * What it lists is the `cascade` relations' reach, the delete's phase 1.
+   * A `restrict` dependent outside the set refuses the delete when it runs,
+   * and a `set_null` reference to a member is cleared when it runs. Neither
+   * is listed here: neither removes a record.
+   *
+   * Like the delete's own walk, it propagates an unreadable registry or a
+   * dependents probe that fails for any reason but a table that was never
+   * provisioned. ⛔ Never treat a throw as "no deeper details".
+   */
+  async inspectCascadeDelete(
+    object: string,
+    id: string | number,
+  ): Promise<Array<{ object: string; id: string }>> {
+    const resolved = this.resolveObjectName(object);
+    const set = await this.collectCascadeDeleteSet(
+      resolved, id, undefined, this._registry.getAllObjects(), { fileElevations: false },
+    );
+    const root = { object: resolved, id: String(id) };
+    const members = [root];
+    for (const [memberObject, ids] of set.members) {
+      for (const memberId of ids) {
+        if (memberObject === root.object && memberId === root.id) continue;
+        members.push({ object: memberObject, id: memberId });
+      }
+    }
+    return members;
   }
 
   /**
@@ -16370,27 +16489,62 @@ export class ObjectQL implements IObjectQLEngine {
         // so `readonly` would lie about it. One event per reason, in the order
         // the strips ran; a payload with no `formula` key reports exactly what
         // it did before.
-        const insertDrops = droppedFieldEvents(object, computedDropped, insertDropped);
-        if (insertDrops.length > 0) {
-          if (options?.strictReadonlyWrites === true) {
-            // Before the driver write and before validation — nothing is
-            // written, and "you sent a runtime-owned field" should not depend on
-            // whether some other field also failed a business rule (#5126's
-            // ordering on the update path, mirrored).
-            throw new ReadonlyFieldRejectedError(
-              object, [...new Set(insertDrops.flatMap((d) => d.fields))], insertDrops, 'insert',
-            );
-          }
-          if (typeof options?.onFieldsDropped === 'function') {
-            // Under strict the listener deliberately does NOT fire (above):
-            // `DroppedFieldsEvent` is contracted as "dropped, and the write
-            // completed without them", and a refused write did not complete.
-            for (const drop of insertDrops) {
-              try {
-                options.onFieldsDropped(drop);
-              } catch (err) {
-                this.logger.warn('onFieldsDropped listener threw — ignored', { object, error: err });
-              }
+        //
+        // [#24619] The stored computed fields, computed over the FINAL rows —
+        // after every hook and strip, before validation judges them and the
+        // driver stores them — so the stored value is the declared expression
+        // over the stored row, whatever the caller or a hook put in the key.
+        // [#24690] Computed HERE, ahead of the report, because a caller value
+        // the computation replaces is reported too, under `stored_expression`
+        // (`replacedStoredExpressionFields`). A key a strip above already took
+        // is that strip's report.
+        //
+        // ⛔ NOT refused under `strictReadonlyWrites`, by the maintainer's
+        // ruling 「甲」: in 18.x only the loud half ships — the reason and its
+        // report. The refusal is runtime behaviour no conversion can carry, so
+        // it waits for 19.0. So the strict check judges the strips' drops
+        // alone, BEFORE the computation, exactly where it stood, and a
+        // `stored_expression` report reaches the listener under strict too.
+        const refusableInsertDrops = droppedFieldEvents(object, computedDropped, insertDropped);
+        if (refusableInsertDrops.length > 0 && options?.strictReadonlyWrites === true) {
+          // Before the driver write and before validation — nothing is
+          // written, and "you sent a runtime-owned field" should not depend on
+          // whether some other field also failed a business rule (#5126's
+          // ordering on the update path, mirrored).
+          throw new ReadonlyFieldRejectedError(
+            object, [...new Set(refusableInsertDrops.flatMap((d) => d.fields))], refusableInsertDrops, 'insert',
+          );
+        }
+        const storedExpressionReplaced: string[] = [];
+        const storedExpressionReplacedPerRow: string[][] = rows.map(() => []);
+        if (storedExpressionPlan.length > 0) {
+          const liveIndexes = rows
+            .map((row, i) => (rowErrors[i] === undefined && row != null && typeof row === 'object' ? i : -1))
+            .filter((i) => i >= 0);
+          const computed = await computeStoredExpressions(
+            storedExpressionPlan, liveIndexes.map((i) => rows[i] as Record<string, unknown>), opCtx.context, storedExpressionServing,
+          );
+          liveIndexes.forEach((i, k) => {
+            const row = rows[i] as Record<string, unknown>;
+            const taken = insertDroppedPerRow[i] ?? [];
+            const replaced = replacedStoredExpressionFields(storedExpressionPlan, suppliedPerRow[i], row, [computed[k]!])
+              .filter((name) => !taken.includes(name));
+            Object.assign(row, computed[k]);
+            storedExpressionReplacedPerRow[i] = replaced;
+            for (const name of replaced) if (!storedExpressionReplaced.includes(name)) storedExpressionReplaced.push(name);
+          });
+        }
+        const insertDrops = droppedFieldEvents(object, computedDropped, insertDropped, storedExpressionReplaced);
+        if (insertDrops.length > 0 && typeof options?.onFieldsDropped === 'function') {
+          // A strict write that reaches here had no refusable drop (above), so
+          // every event left is a `stored_expression` report on a write that
+          // completes — reported under strict as well. A REFUSED write never
+          // fires the listener: it did not complete.
+          for (const drop of insertDrops) {
+            try {
+              options.onFieldsDropped(drop);
+            } catch (err) {
+              this.logger.warn('onFieldsDropped listener threw — ignored', { object, error: err });
             }
           }
         }
@@ -16401,15 +16555,6 @@ export class ObjectQL implements IObjectQLEngine {
         // has to exist here too. Gated on the schema actually declaring such a
         // predicate, so an object with only `record`-scoped requirements pays
         // nothing; batched, so N rows under M masters cost ONE header read.
-        // [#24619] The stored computed fields, computed over the FINAL rows —
-        // after every hook and strip, before validation judges them and the
-        // driver stores them — so the stored value is the declared expression
-        // over the stored row, whatever the caller or a hook put in the key.
-        if (storedExpressionPlan.length > 0) {
-          const liveForExpressions = rows.filter((row, i) => rowErrors[i] === undefined && row != null && typeof row === 'object');
-          const computed = await computeStoredExpressions(storedExpressionPlan, liveForExpressions, opCtx.context, storedExpressionServing);
-          liveForExpressions.forEach((row, k) => Object.assign(row, computed[k]));
-        }
         const insertParentForRow = hasParentScopedRequiredWhen(schemaForValidation as any)
           ? await this.resolveMasterDetailParents(schemaForValidation, null, rows, opCtx.context)
           : undefined;
@@ -16521,7 +16666,7 @@ export class ObjectQL implements IObjectQLEngine {
                   object, fields: [...new Set(batchIssued.map((one) => one.field))],
                 });
               }
-              throw envelopeUniqueViolation(error, object);
+              throw envelopeUniqueViolation(error, object, this.getSchema(object));
             }
           }
         } else {
@@ -16667,6 +16812,7 @@ export class ObjectQL implements IObjectQLEngine {
                   if (rowErrors[i] !== undefined) return { ok: false as const, error: rowErrors[i] };
                   const droppedFields = droppedFieldEvents(
                     object, computedStrip.droppedPerRow[i] ?? [], insertDroppedPerRow[i] ?? [],
+                    storedExpressionReplacedPerRow[i] ?? [],
                   );
                   return {
                     ok: true as const,
@@ -17026,13 +17172,28 @@ export class ObjectQL implements IObjectQLEngine {
          // [#8093] The address the caller wrote to is not a field it lost.
          (k) => !(k in afterObj) && !(idAddressesThisRow && k === 'id'),
        );
+       emitDrop(fields, reason);
+     };
+     /** One drop to the channel this write reports through: the strict refusal, or the listener. */
+     const emitDrop = (fields: string[], reason: DroppedFieldsEvent['reason']): void => {
        if (fields.length === 0) return;
        if (strictReadonlyWrites) {
          strictDrops.push({ object, fields, reason });
          return;
        }
+       notifyDrop(fields, reason);
+     };
+     /**
+      * One drop to the listener ONLY, in every mode — never a strict refusal.
+      * [#24690] The `stored_expression` report goes here: by the maintainer's
+      * ruling 「甲」 18.x ships its report and not its refusal (runtime
+      * behaviour no conversion can carry waits for 19.0). Called after
+      * `assertNoStrictDrops()`, so a refused write never fires the listener.
+      */
+     const notifyDrop = (fields: string[], reason: DroppedFieldsEvent['reason']): void => {
+       if (fields.length === 0 || !onFieldsDropped) return;
        try {
-         onFieldsDropped!({ object, fields, reason });
+         onFieldsDropped({ object, fields, reason });
        } catch (err) {
          this.logger.warn('onFieldsDropped listener threw — ignored', { object, error: err });
        }
@@ -18014,10 +18175,15 @@ export class ObjectQL implements IObjectQLEngine {
                // with the FINAL payload — after the hooks and both strips, so a
                // locked input the `readonlyWhen` strip took back out feeds the
                // stored value, never the caller's — and before the statement.
+               // [#24690] A caller value the computation replaces is reported
+               // under `stored_expression`, to the listener only (`notifyDrop`):
+               // never refused under strict in 18.x (ruling 「甲」).
                if (storedExpressionPlan.length > 0) {
                    const patch = hookContext.input.data as Record<string, unknown>;
                    const [computed] = await computeStoredExpressions(storedExpressionPlan, [{ ...priorRecord, ...patch }], opCtx.context, storedExpressionServing);
-                   applyStoredExpressionsToPatch(patch, computed, priorRecord);
+                   const replaced = replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, [computed!]);
+                   applyStoredExpressionsToPatch(patch, computed!, priorRecord);
+                   notifyDrop(replaced, 'stored_expression');
                }
                // [#21663] The payload is FINAL here (see the seam below), so
                // every readonly value on it is one the driver will store: a
@@ -18093,7 +18259,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object);
+                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
                }
                // [#21613] The by-id update returns the driver's post-write
                // readback (`select *` on driver-sql), so a column no metadata
@@ -18295,12 +18461,21 @@ export class ObjectQL implements IObjectQLEngine {
                // a computed value only when it is the same on every row, and
                // refuses a patch that would compute different ones. The rows
                // are the D7 read (`readPriorRows` is a memo — no second fetch).
+               // [#24690] As on the by-id branch, to the listener only: a caller
+               // value differing from what any matched row then stores (the one
+               // computed value, or the column left as it is) is reported under
+               // `stored_expression`, and never refused under strict in 18.x.
                if (storedExpressionPlan.length > 0) {
                    const matched = ((await readPriorRows()) ?? []).filter((row) => row != null && typeof row === 'object');
                    const patch = hookContext.input.data as Record<string, unknown>;
                    const before = await computeStoredExpressions(storedExpressionPlan, matched, opCtx.context, storedExpressionServing);
                    const after = await computeStoredExpressions(storedExpressionPlan, matched.map((row) => ({ ...row, ...patch })), opCtx.context, storedExpressionServing);
-                   hookContext.input.data = settleBulkStoredExpressions(storedExpressionPlan, patch, before, after, object) as any;
+                   const settled = settleBulkStoredExpressions(storedExpressionPlan, patch, before, after, object);
+                   notifyDrop(
+                     replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, matched.map((row) => ({ ...row, ...settled }))),
+                     'stored_expression',
+                   );
+                   hookContext.input.data = settled as any;
                }
                // [#21663] The predicate-path twin of the by-id second pass, at the
                // same point and for the same reason: the readonly values left on
@@ -18425,7 +18600,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object);
+                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
                }
                isPredicateWrite = true;
            }
@@ -19211,12 +19386,18 @@ export class ObjectQL implements IObjectQLEngine {
    * `set_null` relations are not read here. Every probe here is an elevated
    * read, so it files its #12166 record before it runs, through the
    * once-per-record ledger the walk shares ({@link fileReferenceCheckElevation}).
+   *
+   * [#24964] …except for {@link inspectCascadeDelete}, which passes
+   * `fileElevations: false`: that record says "read as system FOR THE DELETE
+   * of" the record, and an inspection deletes nothing, so filing it there would
+   * put a delete that never happened in the log. The reads are the same.
    */
   private async collectCascadeDeleteSet(
     object: string,
     id: string | number,
     context: ExecutionContext | undefined,
     objects: ServiceObject[],
+    opts: { fileElevations: boolean } = { fileElevations: true },
   ): Promise<CascadeDeleteSet> {
     const set: CascadeDeleteSet = { members: new Map(), entered: new Map(), elevationsFiled: new Set() };
     cascadeSetAdd(set.members, object, id);
@@ -19247,7 +19428,9 @@ export class ObjectQL implements IObjectQLEngine {
     const queue: Array<{ object: string; id: string | number }> = [{ object, id }];
     for (const target of queue) {
       for (const { childName, fieldName, fdef } of cascadingInto(target.object)) {
-        this.fileReferenceCheckElevation(set, target.object, target.id, childName, fieldName, context);
+        if (opts.fileElevations) {
+          this.fileReferenceCheckElevation(set, target.object, target.id, childName, fieldName, context);
+        }
         const rows = await this.probeReferencingRows(
           childName, fieldName, fdef, target.id, this.referenceProbeFilter(fieldName, fdef, target.id), context,
         );
@@ -19498,6 +19681,11 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<void> {
     // Entered before the first nested `delete()` can come back here.
     cascadeSetAdd(cascadeSet.entered, object, id);
+    // [#24948] An organization that still owns rows is refused here, whole,
+    // before the first relation below is cascaded or cleared.
+    if (object === ORGANIZATION_OBJECT) {
+      await this.refuseOrganizationDeleteWhileOwned(id, context, objects, cascadeSet);
+    }
     for (const child of objects) {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
@@ -19505,6 +19693,14 @@ export class ObjectQL implements IObjectQLEngine {
       for (const [fieldName, fdef] of Object.entries(fields)) {
         const resolvedBehavior = this.cascadeRelationBehavior(object, child, fieldName, fdef);
         if (resolvedBehavior === undefined) continue;
+        // [#24948] Judged by `refuseOrganizationDeleteWhileOwned` above, which
+        // found no row outside the cascade set: there is nothing to clear, and
+        // clearing is not on offer for this column anyway.
+        if (this.isTenantColumnSetNull(object, child, fieldName, resolvedBehavior)) continue;
+        // [#24948] A reference the organization's delete keeps as it is,
+        // naming the deleted organization: never cleared, never counted.
+        if (object === ORGANIZATION_OBJECT && resolvedBehavior === 'set_null' &&
+            ObjectQL.keepsOrganizationReference(child, fieldName)) continue;
         let behavior: string = resolvedBehavior;
 
         // [#9689] (maintainer ruling 2026-08-19, Q3 = B): the judgement the
@@ -19856,6 +20052,267 @@ export class ObjectQL implements IObjectQLEngine {
     }
   }
 
+  /**
+   * [#24948] Is `fieldName` on `child` the TENANT column of `child`, pointing at
+   * the organization being deleted with the `set_null` behaviour?
+   *
+   * The tenant column is the one `resolveTenantFieldName` names: the column
+   * the engine stamps and scopes by, whether the registry injected it
+   * (`TENANT_SCOPE_FIELD_DEF`) or the object declared its own, as the identity
+   * tables do. Every such lookup resolves to `set_null` unless its author wrote
+   * something else, and ADR-0131 D1 leaves NULL nothing to mean: a cleared
+   * tenant column is an orphan, and on a store whose column is already NOT
+   * NULL the clear is a constraint failure halfway through a delete. So the
+   * engine never clears one. {@link refuseOrganizationDeleteWhileOwned} refuses
+   * the delete instead. An authored `cascade` or `restrict` keeps its own
+   * meaning.
+   */
+  private isTenantColumnSetNull(
+    object: string,
+    child: ServiceObject,
+    fieldName: string,
+    behavior: string | undefined,
+  ): boolean {
+    return (
+      object === ORGANIZATION_OBJECT &&
+      behavior === 'set_null' &&
+      resolveTenantFieldName(child) === fieldName
+    );
+  }
+
+  /**
+   * [#24948] Do `child`'s rows outlive the organization they name? Read from
+   * the declaration the object already carries, never from a list of names:
+   *
+   *   - `managedBy: 'append-only'`, a ledger (the audit bucket: `sys_activity`,
+   *     `sys_audit_log`, `sys_email` and their siblings). Such a row is history:
+   *     it ages out on its own retention, or is the delivery log of something
+   *     that already happened. The organization delete itself writes
+   *     `sys_activity` rows, so a ledger that counted would refuse every
+   *     organization delete, the empty ones included (seat decision 6305179819).
+   *   - `managedBy: 'engine-owned'`, a row the platform writes as a consequence
+   *     of records or activity (approval state, automation runs, notification
+   *     and HTTP deliveries, mirrored mail, record shares, import jobs,
+   *     settings values), which an administrator cannot delete over the data
+   *     API. Counting it would make any organization that has been used
+   *     undeletable through every door (seat decision 6307135388).
+   *
+   * Neither refusal counts such a row. It is kept, and so is every reference it
+   * holds to the organization: it goes on naming the deleted organization,
+   * never NULL (ADR-0131 D1) and never deleted (ADR-0131 §8), and under tenant
+   * scoping the row reads as no organization's.
+   */
+  private static outlivesOrganization(child: ServiceObject): boolean {
+    const managedBy = (child as { managedBy?: unknown })?.managedBy;
+    return managedBy === 'append-only' || managedBy === 'engine-owned';
+  }
+
+  /**
+   * [#24948] Does an organization delete keep `child.fieldName`, a `set_null`
+   * lookup into `sys_organization` that is not `child`'s tenant column, as it
+   * is? Two kinds of reference, and only these (seat decisions 6305179819,
+   * 6305996369 and 6307135388):
+   *
+   *   - every such lookup on an object whose rows outlive the organization
+   *     ({@link outlivesOrganization}): `sys_audit_log.tenant_id` is the audit
+   *     log's attribution, not its tenant column, and history outlives what it
+   *     audits;
+   *   - an attribution column named `organization_id` on an object whose
+   *     tenancy is disabled (`resolveTenantFieldName` answers null): neither
+   *     counted nor cleared. No object in this tree declares one today.
+   *
+   * Everything else keeps its `set_null`: a pointer such as a session's or an
+   * API key's `active_organization_id`, or a parent-organization lookup, is
+   * cleared exactly as before.
+   */
+  private static keepsOrganizationReference(child: ServiceObject, fieldName: string): boolean {
+    if (ObjectQL.outlivesOrganization(child)) return true;
+    return fieldName === SystemFieldName.ORGANIZATION_ID && resolveTenantFieldName(child) === null;
+  }
+
+  /**
+   * [#24948] How many rows of `childName` name the organization `id` through
+   * `fieldName`, leaving out the rows the cascade itself deletes. A system
+   * `count`, never a row read, for every table the cascade deletes no row of,
+   * which is every table but the cascading children of the organization (none
+   * on the platform). Only for such a table are the rows probed
+   * ({@link probeReferencingRows}), so the cascade's own members can be left
+   * out exactly. A table never provisioned holds none.
+   */
+  private async countReferencingRowsOutside(
+    childName: string,
+    fieldName: string,
+    fdef: any,
+    id: string | number,
+    cascadeSet: CascadeDeleteSet,
+    context: ExecutionContext | undefined,
+  ): Promise<{ where: Record<string, unknown>; count: number }> {
+    const where = this.referenceProbeFilter(fieldName, fdef, id);
+    if ((cascadeSet.members.get(childName)?.size ?? 0) > 0) {
+      const probed = await this.probeReferencingRows(childName, fieldName, fdef, id, where, context);
+      return { where, count: probed.filter((row) => !cascadeSetHas(cascadeSet.members, childName, row?.id)).length };
+    }
+    try {
+      return { where, count: await this.count(childName, { where, context: ObjectQL.organizationCountContext(context) }) };
+    } catch (error) {
+      if (isMissingTableError(error, childName)) return { where, count: 0 };
+      throw error;
+    }
+  }
+
+  /**
+   * [#24948] The context an organization's row counts run under: system
+   * identity, and nothing of the caller's scope. A `tenantId` carried in from
+   * a caller acting in another organization would scope the count to THAT
+   * organization and read 0 rows naming this one, so the refusal would pass on
+   * an undercount. Only the request's transaction and trace are kept: the
+   * count must see the request's own uncommitted writes. The ordinary
+   * reference probes keep the caller's scope ({@link referenceCheckContext}).
+   */
+  private static organizationCountContext(context?: ExecutionContext): ExecutionContext {
+    return {
+      isSystem: true,
+      ...(context?.transaction !== undefined ? { transaction: context.transaction } : {}),
+      ...(context?.traceId !== undefined ? { traceId: context.traceId } : {}),
+    } as ExecutionContext;
+  }
+
+  /**
+   * [#24948] May the refusal disclose `count` to the caller? Only when the
+   * caller's own identity counts the same rows: the elevated count read rows
+   * the caller may not see. (A system caller's own count is the elevated one.)
+   */
+  private async organizationCountIsDisclosable(
+    childName: string,
+    where: Record<string, unknown>,
+    count: number,
+    context: ExecutionContext | undefined,
+  ): Promise<boolean> {
+    try {
+      return (await this.count(childName, { where, context })) === count;
+    } catch (error) {
+      // The refusal stands either way; only the number is withheld.
+      this.logger.warn('[cascade-delete] disclosure count failed; the refusal names the table without a count', {
+        object: childName, error: (error as Error)?.message ?? String(error),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * [#24948] The engine half of organization delete: refuse while any row
+   * outside the cascade set still names the organization in its tenant column,
+   * a row that outlives the organization excepted ({@link outlivesOrganization}).
+   *
+   * Runs before the walk touches the first relation, and reads every tenant
+   * relation before it throws, so the one refusal names every table that holds
+   * rows, each with its count. It is the safety net under plugin-auth's own
+   * refusal, which answers the same question before better-auth deletes the
+   * organization's members: whatever path reaches a `sys_organization` delete,
+   * no row is orphaned to NULL, on a store born with a nullable tenant column
+   * or anywhere else.
+   *
+   * Each relation is COUNTED ({@link countReferencingRowsOutside}: system
+   * identity, its elevation filed first, a missing table read as no rows),
+   * never read row by row, so a large organization costs one `count` per
+   * table. A count reaches the refusal only when the caller's own identity
+   * counts the same ({@link organizationCountIsDisclosable}); otherwise the
+   * table is named without one. The wire code is the standard catalog's `DELETE_RESTRICTED`,
+   * because that is the condition: a delete refused while dependents exist.
+   */
+  private async refuseOrganizationDeleteWhileOwned(
+    id: string | number,
+    context: ExecutionContext | undefined,
+    objects: ServiceObject[],
+    cascadeSet: CascadeDeleteSet,
+  ): Promise<void> {
+    const owned: Array<{ object: string; count?: number }> = [];
+    for (const child of objects) {
+      const childName = (child as any)?.name as string | undefined;
+      const fields = (child as any)?.fields as Record<string, any> | undefined;
+      // An append-only or engine-owned object's rows outlive the organization: not counted, kept as they are.
+      if (!childName || !fields || ObjectQL.outlivesOrganization(child)) continue;
+      for (const [fieldName, fdef] of Object.entries(fields)) {
+        const behavior = this.cascadeRelationBehavior(ORGANIZATION_OBJECT, child, fieldName, fdef);
+        if (!this.isTenantColumnSetNull(ORGANIZATION_OBJECT, child, fieldName, behavior)) continue;
+        this.fileReferenceCheckElevation(cascadeSet, ORGANIZATION_OBJECT, id, childName, fieldName, context);
+        const { where, count } = await this.countReferencingRowsOutside(childName, fieldName, fdef, id, cascadeSet, context);
+        if (count === 0) continue;
+        const disclose = await this.organizationCountIsDisclosable(childName, where, count, context);
+        owned.push(disclose ? { object: childName, count } : { object: childName });
+      }
+    }
+    if (owned.length === 0) return;
+    const named = owned
+      .map((o) => (o.count === undefined ? o.object : `${o.object} (${o.count})`))
+      .join(', ');
+    const err: any = new Error(
+      `Cannot delete this organization: it still owns records in ${named}. ` +
+        'Delete or move those records first, then delete the organization.',
+    );
+    err.developerMessage =
+      `Cannot delete ${ORGANIZATION_OBJECT} (${id}): rows still reference it through their tenant column ` +
+      `in ${named}. The engine never clears a tenant column (ADR-0131 D1), so the delete is refused ` +
+      'until those rows are deleted or moved to another organization.';
+    err.code = 'DELETE_RESTRICTED';
+    err.status = 409;
+    err.httpStatus = 409;
+    err.object = ORGANIZATION_OBJECT;
+    // The first table in the `DELETE_RESTRICTED` envelope's own two keys, and
+    // every table in `dependents`.
+    err.dependentObject = owned[0].object;
+    if (owned[0].count !== undefined) err.dependentCount = owned[0].count;
+    err.dependents = owned;
+    throw err;
+  }
+
+  /**
+   * [#24948] How many rows each object holds for `organizationId` in its tenant
+   * column: the question plugin-auth's organization delete asks before
+   * anything is deleted. Only objects holding at least one row are listed.
+   *
+   * The relations read are the ones {@link refuseOrganizationDeleteWhileOwned}
+   * judges, through the same reader ({@link cascadeRelationBehavior}: a
+   * federated object's unprovisioned injected column is no relation), widened
+   * to every behaviour: a tenant column its author declared `restrict` blocks
+   * the delete too, and one declared `cascade` would delete records, which is
+   * not the organization's own structure either. A count, never a row: the
+   * read is a system-identity `count`, and a table never provisioned holds no
+   * row.
+   *
+   * `exclude` names the objects the caller removes as part of the delete
+   * itself. An append-only or engine-owned object is never counted ({@link
+   * outlivesOrganization}), the same set the engine's own refusal leaves out.
+   */
+  async organizationOwnedRowCounts(
+    organizationId: string,
+    options?: { exclude?: Iterable<string>; context?: ExecutionContext },
+  ): Promise<Array<{ object: string; count: number }>> {
+    const exclude = new Set(options?.exclude ?? []);
+    const counts: Array<{ object: string; count: number }> = [];
+    for (const child of this._registry.getAllObjects()) {
+      const childName = (child as any)?.name as string | undefined;
+      const fields = (child as any)?.fields as Record<string, any> | undefined;
+      if (!childName || !fields || exclude.has(childName) || ObjectQL.outlivesOrganization(child)) continue;
+      const tenantField = resolveTenantFieldName(child);
+      if (!tenantField || !fields[tenantField]) continue;
+      const fdef = fields[tenantField];
+      if (this.cascadeRelationBehavior(ORGANIZATION_OBJECT, child, tenantField, fdef) === undefined) continue;
+      let count: number;
+      try {
+        count = await this.count(childName, {
+          where: this.referenceProbeFilter(tenantField, fdef, organizationId),
+          context: ObjectQL.organizationCountContext(options?.context),
+        });
+      } catch (error) {
+        if (isMissingTableError(error, childName)) continue;
+        throw error;
+      }
+      if (count > 0) counts.push({ object: childName, count });
+    }
+    return counts;
+  }
+
   async delete(object: string, options?: EngineDeleteOptions): Promise<boolean | number> {
     object = this.resolveObjectName(object);
     // [#22782] An aborting `afterDelete` rolls this write back — see `opensAfterAbortUnit`.
@@ -20106,6 +20563,14 @@ export class ObjectQL implements IObjectQLEngine {
       // update twin says why; for every pre-#11009 input the two spellings
       // agree.
       const isPredicatePath = !isByIdDelete && dispatch.kind === 'multi' && typeof driver.deleteMany === 'function';
+      // [#24948] An organization is deleted by id or not at all. The predicate
+      // arm runs no referential cascade, so it could neither refuse an
+      // organization that still owns rows nor keep a single row from naming a
+      // deleted one; any delete not by id is refused here, whatever the driver
+      // offers, before any hook or write.
+      if (!isByIdDelete && object === ORGANIZATION_OBJECT) {
+        throw organizationPredicateDeleteRefusal();
+      }
       if (!isByIdDelete && !isPredicatePath) {
         // [#4550] The `reject` verdict of resolveEngineDeleteDispatch. It used
         // to be re-asked after the before phase because a hook could still bind

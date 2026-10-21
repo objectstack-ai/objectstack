@@ -1157,6 +1157,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       addRecord: {
         label: "レコードを追加"
       },
+      "addRecord.enabled": {
+        label: "有効"
+      },
+      "addRecord.position": {
+        label: "位置"
+      },
       showRecordCount: {
         label: "レコード数を表示"
       },
@@ -1303,6 +1309,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "interfaceConfig.addRecord": {
         label: "レコードを追加",
         helpText: "レコード追加の入口"
+      },
+      "interfaceConfig.addRecord.enabled": {
+        label: "有効"
+      },
+      "interfaceConfig.addRecord.position": {
+        label: "位置"
       },
       "interfaceConfig.emptyState": {
         label: "空の状態",

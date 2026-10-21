@@ -1241,6 +1241,32 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`action-block-endpoint-spelling-retired`.',
   },
   {
+    id: 'add-record-enabled-required',
+    order: 106,
+    text:
+      'It also makes a list view\'s `addRecord` block say what renders (ADR-0049 enforce-or-remove; '
+      + 'ruling letter B′). The block declared `enabled` `.default(true)` and `position` '
+      + '`.default(\'bottom\')`, while the renderer drew the Add button only for an explicit '
+      + '`enabled: true` and placed an absent position at the top, so `addRecord: {}` promised a '
+      + 'button and drew nothing. `enabled` is now required with no default and `position` defaults '
+      + 'to `top`. The D2 conversion `add-record-enabled-defaulted` writes the declared default, '
+      + '`enabled: true`, onto a stored or built block that omits it, so no such block is refused, '
+      + 'and is retired from the load path, so a live author is refused at parse with the '
+      + 'prescription. The D3 record is the semantic entry `add-record-enabled-required`.',
+  },
+  {
+    id: 'add-record-mode-form-view-retired',
+    order: 106,
+    text:
+      'It also retires `addRecord.mode` and `addRecord.formView` (ADR-0049 enforce-or-remove; '
+      + 'ruling letter B′): no renderer read either key, and the Add button always opens the '
+      + 'object\'s create form, chosen by convention as `formViews.create` when the object\'s view '
+      + 'container declares one, else the default form. The D2 conversion '
+      + '`add-record-mode-form-view-removed` strips both keys from every `addRecord` block as a '
+      + 'lossless delete and is retired from the load path. The D3 record is the semantic entry '
+      + '`add-record-mode-form-view-retired`.',
+  },
+  {
     id: 'admin-export-wildcard-removed',
     order: 4,
     text:
@@ -2748,6 +2774,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'the column as an orphan the boot drift report names, for the v18 ceremony to drop once its '
       + 'values are confirmed in `tenant_id`. The D3 record is the '
       + '`sys-audit-log-organization-column-retired` semantic entry.',
+  },
+  {
+    id: 'sys-notification-subscription-retired',
+    order: 106,
+    text:
+      'It also retires the `sys_notification_subscription` platform object (ADR-0030 Layer 3, '
+      + 'amended): no reader ever expanded a topic subscription into recipients — every producer '
+      + 'names its audience explicitly — so the Setup grid recorded subscriptions that made nobody '
+      + 'receive anything. The object, its registration and boot provisioning, its Setup navigation '
+      + 'item and its translations leave, and its name leaves the platform-object registry. Nothing '
+      + 'in stack metadata is rewritten; an existing database keeps the table, which no platform '
+      + 'path drops. The D3 record is the `sys-notification-subscription-retired` semantic entry.',
   },
   {
     id: 'sys-setting-global-rung-moved',

@@ -9,11 +9,11 @@
       "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 9,
       "priority": "P0",
       "surface": "mixed",
       "preconditions": [
-        "isolated run per dogfood-verification §0: own free port (not 3000/3001/3210, checked with lsof), own file DB (--seed-admin -d file:/tmp/<run>/data.db)"
+        "the run's own boot per dogfood-verification §0: own free port (not 3000/3001/3210, checked with lsof), own file DB (--seed-admin -d file:/tmp/<run>/data.db)"
       ],
       "steps": [
         "boot examples/app-showcase via `objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db`",
@@ -44,16 +44,22 @@
           "evidence": "the grepped log excerpt"
         },
         {
-          "clause": "the console shell is served at /_console/ and the seeded app's merged metadata resolves",
+          "clause": "the seeded app's merged metadata resolves",
           "oracle": "api",
-          "verify": "GET /_console/ → 200 text/html; GET /api/v1/meta/app?id=showcase_app returns the merged app/nav metadata (dogfood skill §1 names this exact endpoint)",
-          "evidence": "response statuses + top-level keys"
+          "verify": "GET /api/v1/meta/app?id=showcase_app returns the merged app/nav metadata (dogfood skill §1 names this exact endpoint). The console shell is acceptance[5], so a run with no console build scores this clause in full",
+          "evidence": "the response status + top-level keys"
         },
         {
           "clause": "the served nav matches the authored app: every grp_data object entry from src/ui/apps/index.ts appears in the meta/app response — nothing silently dropped at merge",
           "oracle": "api",
           "verify": "diff the nav object names in the response against examples/app-showcase/src/ui/apps/index.ts",
           "evidence": "the diff (empty)"
+        },
+        {
+          "clause": "the console shell is served at /_console/",
+          "oracle": "api",
+          "verify": "GET /_console/ → 200 text/html (steps[4]). It needs a built Console: `pnpm objectui:build` at the framework repo root, which writes packages/console/dist (`pnpm build` never does). On an unbuilt tree the boot still reaches health, and /_console/ answers 503 text/plain 'The ObjectStack Console is not built, so this server has no Console to serve at /_console/.' with the build remedy (packages/cli/src/utils/console.ts#createConsoleNotBuiltPlugin): record this clause blocked(environment), never a FAIL",
+          "evidence": "the /_console/ status and content type"
         }
       ],
       "negative": [
@@ -96,6 +102,18 @@
           "date": "2026-10-07",
           "change": "acceptance[2].verify quoted the per-flow banner line `⚠ flow '<name>' declares a '<type>' trigger but is NOT bound — disabled by deployment policy …`. The banner now prints one line per (trigger type, reason) class with the flows listed, and Boot diagnostics no longer repeats the automation plugin's per-flow line, so the quoted shape moved with it. The clause is unchanged",
           "ref": "#22073"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "acceptance[3] narrowed to its server half, with the console half appended as acceptance[5]. Checklist-accuracy finding of QA run #24838 (18.0 sweep round 4 at 307ce4c4): acceptance[3] bundled GET /_console/ with the app-metadata read, so a run with no console build (QA runs #24838 and #24786: /_console/ answered 503) could never pass it, although the metadata half held. The two halves now score apart, and acceptance[5] says what an unbuilt tree answers and that it is blocked(environment) (console.ts createConsoleNotBuiltPlugin, read at base feb09db14a). No other clause changed",
+          "ref": "#24963"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-21",
+          "change": "Respelled — preconditions[0]: 'isolated run per dogfood-verification §0:' → 'the run's own boot per dogfood-verification §0:'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
         }
       ]
     },
@@ -104,14 +122,14 @@
       "title": "Seed integrity: row counts match the authored seed, values land verbatim, replay is idempotent",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a FRESH isolated boot (new file DB) so first-boot seed behavior is what is measured, then a restart against the SAME DB for the idempotence clause"
+          "a FRESH boot on its own port and a new file DB so first-boot seed behavior is what is measured, then a restart against the SAME DB for the idempotence clause"
         ]
       },
       "steps": [
@@ -174,6 +192,12 @@
           "date": "2026-10-01",
           "change": "checklist-accuracy finding of QA run #21056: steps[4] and acceptance[2] grep the boot log for SeedLoader lines, but at the default warn level a healthy boot prints none — they now read the level-immune `Seeds:` banner row (or the --log-level info `[Seeder] Seed loading complete` line)",
           "ref": "#21060"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.requires[0]: 'a FRESH isolated boot (new file DB)' → 'a FRESH boot on its own port and a new file DB'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
         }
       ]
     },
@@ -1307,7 +1331,7 @@
       "title": "Boot-time migration-journal scan: an interrupted run (started ∧ ¬done) is reported at kernel:ready with the exact `os migrate resume` prescription, boot PROCEEDS without resuming, and the two quiet-degradation arms (no journal object → silent; scan THROWS → 'could not check' warning) stay distinguishable",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["operator (local shell)"],
@@ -1315,7 +1339,7 @@
         "app": "showcase",
         "requires": [
           "the app as shipped: every `os serve` boot (and so `os start` / `os dev`, which spawn it) composes MigrationRecoveryPlugin beside PlatformObjectsPlugin (the journal object) — serve.ts §5c and §5c-bis — so a stock config runs the scan; a config whose plugins array composes its own `new MigrationRecoveryPlugin()` keeps that instance instead",
-          "an isolated persistent sqlite DB (own port, -d file:/tmp/<run>/journal.db) whose base schema was synced by one prior boot, so sys_migration_journal exists as a table to seed — the same scratch-DB class of fixture cli.migrate-plan-apply-json uses",
+          "the run's own persistent sqlite DB (own port, -d file:/tmp/<run>/journal.db) whose base schema was synced by one prior boot, so sys_migration_journal exists as a table to seed — the same scratch-DB class of fixture cli.migrate-plan-apply-json uses",
           "a way to hand-insert rows into that sqlite file between boots (sqlite3 CLI or a small node script); the journal's API surface is read-only (apiMethods get/list), so REST cannot seed it"
         ]
       },
@@ -1387,6 +1411,12 @@
           "date": "2026-10-03",
           "change": "the composition gap the fixtures encoded is closed: every `os serve` boot now composes MigrationRecoveryPlugin beside PlatformObjectsPlugin, and the `os migrate` data boot composes its registry. The scratch-config fixture, the knownGaps entry and the stock-boot negative are rewritten to match; steps, oracles and clauses are otherwise unchanged",
           "ref": "#21498"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.requires[1]: 'an isolated persistent sqlite DB (own port,' → 'the run's own persistent sqlite DB (own port,'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
         }
       ]
     },
@@ -1395,7 +1425,7 @@
       "title": "The package manifest is enforced at the install boundary: an incompatible `engines` range is refused before the registry write, the namespace gate holds ownership, and a namespace-less runtime package has one derived",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1416,7 +1446,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; sign in as admin. Read the runtime's protocol version from the running server (the boot banner / GET /api/v1/meta), take its leading major as RT, and derive every range below from RT — never from a literal",
+        "boot the showcase on its own port and DB; sign in as admin. Read the runtime's protocol version from the running server (the boot banner / GET /api/v1/meta), take its leading major as RT, and derive every range below from RT — never from a literal",
         "BASELINE: POST /api/v1/packages with { manifest: { id: 'com.example.qa-manifest-probe-a', name: 'Manifest Probe A', version: '1.0.0', scope: 'project', type: 'app', namespace: 'qa_mfp', engines: { protocol: '^RT' } } }; capture status + body and GET it back — this is the compatible control every refusal below is judged against. Every probe manifest below carries the same scope 'project' (the manifest's scope enum is cloud | system | project, default project — packages/spec/src/kernel/manifest.zod.ts; a scope such as 'custom' is refused 400 VALIDATION_ERROR before any gate this item scores is reached)",
         "INCOMPATIBLE: POST id 'com.example.qa-manifest-probe-old' with engines: { protocol: '^(RT-1)' }; capture the refusal IN FULL (status, code, message, rangeSource, targetMajor, migrateCommand). Then GET /api/v1/packages/com.example.qa-manifest-probe-old and GET /api/v1/packages and confirm NO row exists for that id",
         "PRECEDENCE, both directions: POST 'com.example.qa-manifest-probe-prec-ok' with engines: { protocol: '^RT', platform: '^(RT-1)' } → expect install (protocol is consulted first, so the incompatible platform range is never reached); POST 'com.example.qa-manifest-probe-prec-no' with engines: { protocol: '^(RT-1)', platform: '^RT' } → expect refusal whose diagnostic names `engines.protocol` as the range source",
@@ -1425,7 +1455,7 @@
         "UNPARSED: POST 'com.example.qa-manifest-probe-wsrange' with engines: { protocol: 'workspace:*' } → expect install, plus the `declares an unrecognized engines.protocol range` warning. This is the direction that would break every workspace-linked package if it inverted",
         "NAMESPACE OWNERSHIP, three legs: (a) POST 'com.example.qa-manifest-probe-b' declaring namespace 'qa_mfp' — the one probe A already owns → expect refusal naming the namespace, the current owner and the incoming id; (b) re-POST probe A's OWN manifest unchanged (same id, same namespace) as a reinstall — POST /api/v1/packages?overwrite=true, since a plain re-POST of an installed id meets the install door's own already-installed refusal (api-backend.package-rest-lifecycle) before the namespace gate — → expect NO namespace conflict (reinstall/HMR is a normal path); (c) POST 'com.example.qa-manifest-probe-shared' declaring a shareable platform namespace (base / system / sys) → expect NO conflict (shareable namespaces are exempt)",
         "NAMESPACE DERIVATION: POST id 'com.example.leave' with NO namespace declared → GET it back and read manifest.namespace; then POST 'com.example.holiday' WITH an explicit namespace 'timeoff' → GET it back and confirm the declared value survived untouched",
-        "teardown: DELETE every scratch package created above, or simply discard the isolated file DB — the cheaper path an isolated boot makes free. ⚠️ Several legs here are NOT re-runnable in place (step 8b depends on probe A still being installed, and 8a stops being a conflict once probe A is gone), so a re-run starts from a clean DB rather than from the tail of the previous one"
+        "teardown: DELETE every scratch package created above, or simply discard the run's own file DB — the cheaper path a boot on its own port and DB makes free. ⚠️ Several legs here are NOT re-runnable in place (step 8b depends on probe A still being installed, and 8a stops being a conflict once probe A is gone), so a re-run starts from a clean DB rather than from the tail of the previous one"
       ],
       "acceptance": [
         {
@@ -1509,6 +1539,18 @@
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[3] and negative[2] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.manifest-install-contract; wave anchor #24579 §3): both said NamespaceConflictError has no `code`, so its wire mapping was unpinned. Since commit df657d9df the class carries code NAMESPACE_CONFLICT and status 422 (packages/objectql/src/registry.ts), and the run observed 422 NAMESPACE_CONFLICT on POST /api/v1/packages. knownGaps[3] is now marked CLOSED with that reading, and negative[2] scores a 5xx as a FAIL instead of a finding to record. No acceptance clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-21",
+          "change": "Respelled — steps[9]: 'or simply discard the isolated file DB' → 'or simply discard the run's own file DB'; steps[9]: 'the cheaper path an isolated boot makes free' → 'the cheaper path a boot on its own port and DB makes free'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
         }
       ]
     },
@@ -1517,14 +1559,14 @@
       "title": "The activation ledger's registration home: sys_metadata_activation is registered by PlatformObjectsPlugin under its OWN manifest, so packaged disable works with or without the automation service — one owner, datasource binding carried across the move",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the with-automation composition is any stock boot: `objectstack dev`/`os serve` composes AutomationServicePlugin whenever the app requires the 'automation' capability token (packages/cli/src/commands/serve.ts CAPABILITY_PROVIDERS), and the showcase does — so the live-boot legs below need nothing beyond an isolated stock boot",
+          "the with-automation composition is any stock boot: `objectstack dev`/`os serve` composes AutomationServicePlugin whenever the app requires the 'automation' capability token (packages/cli/src/commands/serve.ts CAPABILITY_PROVIDERS), and the showcase does — so the live-boot legs below need nothing beyond a stock boot on its own port and DB",
           "the NO-automation composition — the one #12359 measured the 503 on — is a showcase-derived configuration that does not declare automation, booted with `bootStack` from @objectstack/verify: the showcase with the 'automation' token taken out of its `requires`, and with the plugins of its own `plugins` array that depend on com.objectstack.service-automation left out, which is exactly how the pinned dogfood suite constructs it (packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts#showcaseWithoutAutomation). `bootStack(showcaseStack)` with the `automation` option omitted is NOT that composition: since #22301 bootStack composes what `os serve` composes, so the showcase's own `requires` mounts the automation service (packages/verify/src/harness.ts; the option only adds the service, never removes it)"
         ],
         "knownGaps": [
@@ -1533,7 +1575,7 @@
       },
       "steps": [
         "run the pinned suite: pnpm --filter @objectstack/dogfood exec vitest run test/packaged-activation-ledger-reach.dogfood.test.ts — BOTH describes: '#12359 — actions and NO automation service' (the 503-turnaround leg, booted on the showcase-derived configuration that does not declare automation) and '#12159 Part 1 — a composition WITH automation' (the move's second end); capture the full output",
-        "live with-automation boot (stock `objectstack dev`, isolated port/DB), as admin: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\":false} → 200; GET /api/v1/data/sys_metadata_activation and capture the row (metadata_type 'action', name showcase_mark_done, active false/0) together with its KEY SET — organization_id is ABSENT from it, the ledger having no tenant column at all (#15024 / ADR-0131 D7). ⛔ Never capture the tenant half as a value: `row.organization_id ?? null` answers `null` for a column that does not exist, so a value read passes while measuring nothing (the sibling item platform-core.activation-ledger-row-contract owns the schema-side probe)",
+        "live with-automation boot (stock `objectstack dev`, on its own port and DB), as admin: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\":false} → 200; GET /api/v1/data/sys_metadata_activation and capture the row (metadata_type 'action', name showcase_mark_done, active false/0) together with its KEY SET — organization_id is ABSENT from it, the ledger having no tenant column at all (#15024 / ADR-0131 D7). ⛔ Never capture the tenant half as a value: `row.organization_id ?? null` answers `null` for a column that does not exist, so a value read passes while measuring nothing (the sibling item platform-core.activation-ledger-row-contract owns the schema-side probe)",
         "same boot, the flow half: POST /api/v1/automation/showcase_task_completed/toggle {\"enabled\":false} → 200; re-read the ledger — a metadata_type 'flow' row for showcase_task_completed appears BESIDE the action row, and the flow-name and action-name lists never cross (the discriminator is load-bearing, not decorative)",
         "restore both switches ({\"enabled\":true} / toggle on) — both rows persist with active true (updated, not deleted); leave the boot as found",
         "ownership is proven by the boot itself plus the registry read: the stock boot composes BOTH PlatformObjectsPlugin (serve auto-injects it) and the automation service, and it comes up green — a second registrant of sys_metadata_activation would be a boot FAILURE (`registerObject` throws 'already owned by package …', ADR-0029 D3), never a benign duplicate; the dogfood suite additionally reads registry.getObjectOwner('sys_metadata_activation').packageId === 'com.objectstack.platform-objects.activation-ledger'",
@@ -1621,6 +1663,12 @@
           "date": "2026-10-16",
           "change": "acceptance[3].verify corrected (checklist-accuracy finding of QA run #23939, wave #23878). It called sys_automation_run 'the control proving the resolver is not answering undefined for everything', but the dogfood test asserts sys_automation_run is undefined as well — a same-answer parity check that cannot discriminate. The verify text now says so and rests the binding claim on the manifest-triple pin it already cited; the clause's assertion is unchanged",
           "ref": "#24036"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.requires[0]: 'need nothing beyond an isolated stock boot' → 'need nothing beyond a stock boot on its own port and DB'; steps[1]: '(stock `objectstack dev`, isolated port/DB)' → '(stock `objectstack dev`, on its own port and DB)'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
         }
       ]
     },
@@ -1629,14 +1677,14 @@
       "title": "sys_metadata_activation row contract: reads open / generic-data-API writes 405, one row per (metadata_type, name) with NO tenant column on the table at all, re-enable updates never deletes, and rows exist ONLY for the metadata types a shipped door writes — flow, action, position, permission, sharing_rule (the ADR-0126 scope wall, as ADR-0131 D3 and D6 widen it)",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an isolated boot on a file DB (-d file:/tmp/<run>/data.db) WITH direct sqlite access to that file between boots: the object declares apiMethods ['get','list'], so REST can never stage the org-row and duplicate-row probes — same scratch-DB class of fixture platform-core.interrupted-migration-boot-report uses. On a stock boot no 'cloud' datasource is registered, so the table rides the global default driver and lives in the run's own file DB",
+          "a boot on its own port and file DB (-d file:/tmp/<run>/data.db) WITH direct sqlite access to that file between boots: the object declares apiMethods ['get','list'], so REST can never stage the org-row and duplicate-row probes — same scratch-DB class of fixture platform-core.interrupted-migration-boot-report uses. On a stock boot no 'cloud' datasource is registered, so the table rides the global default driver and lives in the run's own file DB",
           "the shipped switches as row producers: the flow toggle (POST /api/v1/automation/showcase_task_completed/toggle), the action activation door (POST /api/v1/actions/_activation/showcase_task/showcase_mark_done), and the security catalog activation door POST /api/v1/security/_activation/:type/:name for :type position, permission and sharing_rule (packages/runtime/src/domains/catalog-activation.ts — e.g. position legal, permission set showcase_auditor and the declared sharing rule share_new_inquiries_with_field_ops; ⛔ never admin_full_access, which the last-admin guard refuses to switch off). Their own door contracts belong to automation.packaged-flow-disable-durable, api-backend.packaged-action-disabled-dispatch and access-security.security-catalog-activation-and-clone-doors — this item owns the ROWS they leave behind"
         ],
         "knownGaps": [
@@ -1645,7 +1693,7 @@
         ]
       },
       "steps": [
-        "boot isolated on the file DB; as admin flip EVERY shipped switch off — the flow toggle (showcase_task_completed), the action flip (showcase_mark_done), and the catalog door for one position, one permission set and one declared sharing rule (POST /api/v1/security/_activation/position/legal, /permission/showcase_auditor and /sharing_rule/share_new_inquiries_with_field_ops, body {\"enabled\": false}); capture the five 200s",
+        "boot on its own port with that file DB; as admin flip EVERY shipped switch off — the flow toggle (showcase_task_completed), the action flip (showcase_mark_done), and the catalog door for one position, one permission set and one declared sharing rule (POST /api/v1/security/_activation/position/legal, /permission/showcase_auditor and /sharing_rule/share_new_inquiries_with_field_ops, body {\"enabled\": false}); capture the five 200s",
         "read the ledger through the open read path: GET /api/v1/data/sys_metadata_activation — capture every row; each carries the four declared ledger columns (metadata_type, name, package_id, active) beside the driver's id and the injected audit family, and NO tenant column: organization_id is ABSENT from the row's key set, never present-and-NULL on it. ⛔ Assert the KEY SET, never a value read — a value assertion of the shape `row.organization_id ?? null` is `null` for a column that does not exist, so it passes while measuring nothing (the dogfood pin was inverted into a key-set assertion for exactly this reason)",
         "scope wall sweep: the distinct metadata_type set over ALL rows is exactly {'flow','action','position','permission','sharing_rule'} — the five values the shipped doors write. Any other value (hook/capability/tool/skill/…) is a FAIL of the model, not a coverage discovery: hooks are code-only by ADR-0126 §3 amendment ruling 1 (no ledger row, no disable switch), and a capability is code-only on the regime with no switch (catalog-activation.ts CATALOG_ACTIVATION_SUBJECTS). Then probe the door's own wall: POST /api/v1/security/_activation/capability/showcase.export_data {\"enabled\": false} answers 400 naming the three types it switches, and POST /api/v1/security/_activation/position/everyone {\"enabled\": false} answers 400 (an audience anchor) — re-read the ledger: neither left a row. Position and permission rows are no longer foreign here: ADR-0131 D3 moved the on/off switch of a position and of a permission set off the catalog row into this ledger (regime C as ADR-0131 D6 amends ADR-0126 §3; readDisabledCatalogNames in packages/core/src/security/resolve-authz-context.ts reads these two types and never the row's active column), which supersedes the 2026-08-26 #12159 ruling that a packaged permission set rides its kind's own active field. sharing_rule rows are not foreign either: ADR-0131 D6 charts a package-declared sharing rule under regime C, and the same door writes its row (packages/runtime/src/domains/catalog-activation.ts, CATALOG_ACTIVATION_SUBJECTS) — an organization-authored sys_sharing_rule row keeps its own switch and writes none",
         "write-refusal probes, all three verbs: POST /api/v1/data/sys_metadata_activation {metadata_type:'action',name:'qa_probe',package_id:'qa',active:false}, PATCH /api/v1/data/sys_metadata_activation/<existing id> {active:true}, DELETE /api/v1/data/sys_metadata_activation/<existing id> — each answers 405 naming the refused operation and the allowed set; re-read confirms every row unchanged",
@@ -1756,6 +1804,12 @@
           "date": "2026-10-19",
           "change": "the scope wall widened from four metadata_type values to five — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.activation-ledger-row-contract; wave anchor #24579 §3, which lists it under access-security). The security catalog activation door now also accepts :type sharing_rule (packages/runtime/src/domains/catalog-activation.ts CATALOG_ACTIVATION_SUBJECTS, ADR-0131 D6 regime C) and writes its row to this ledger through the same ObjectStoreMetadataActivationStore — a fifth writer the item's hand-enumerated variants did not carry, the case negative[4] says is a checklist defect. Title, steps[0] and [2], fixtures.requires[1], knownGaps[0], acceptance[4] (clause, verify) and negative[5] now name sharing_rule, variants gains it, and steps[0] flips the showcase's declared rule share_new_inquiries_with_field_ops. QA run #24601 drove that switch and read the row {metadata_type: sharing_rule, active: false}. No other clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.requires[0]: 'an isolated boot on a file DB (-d' → 'a boot on its own port and file DB (-d'; steps[0]: 'boot isolated on the file DB;' → 'boot on its own port with that file DB;'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
         }
       ]
     },
@@ -1843,7 +1897,7 @@
       "title": "Marketplace install-local: the wiring matrix mounts the right arms per OS_CLOUD_URL, the air-gapped inline install works with NO control plane, reseed/purge touch exactly the sample rows, every mutating door is manage_metadata-gated both sides, and the listing projects installedBy/storageDir per principal",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1855,7 +1909,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "TWO isolated boots of the same app: boot A = plain `objectstack dev` with NO OS_CLOUD_URL (resolveCloudUrl() falls back to DEFAULT_CLOUD_URL — truthy — so the CLOUD arm mounts: proxy + install-local + cloud-connection + runtime-config); boot B = the same line with OS_CLOUD_URL=off exported (the offline arm: install-local pinned to the 'off' control plane + runtime-config ONLY — nothing that dials out mounts). The matrix is decided by Serve.planMarketplaceWiring, pure and testable (packages/cli/src/commands/serve.ts). ⚠️ On showcase the boot-A cloud arm is the HOST's, not the CLI's: examples/app-showcase/objectstack.config.ts mounts MarketplaceProxyPlugin, MarketplaceInstallLocalPlugin and CloudConnectionPlugin itself whenever resolveCloudUrl() is truthy, and RuntimeConfigPlugin always, and planMarketplaceWiring checks presence — so on boot A the CLI wires none of the four, and on boot B its offline arm adds install-local alone (pinned to the 'off' control plane) beside the host's runtime-config. The observable route matrix is the same either way",
+          "TWO boots of the same app, each on its own port and DB: boot A = plain `objectstack dev` with NO OS_CLOUD_URL (resolveCloudUrl() falls back to DEFAULT_CLOUD_URL — truthy — so the CLOUD arm mounts: proxy + install-local + cloud-connection + runtime-config); boot B = the same line with OS_CLOUD_URL=off exported (the offline arm: install-local pinned to the 'off' control plane + runtime-config ONLY — nothing that dials out mounts). The matrix is decided by Serve.planMarketplaceWiring, pure and testable (packages/cli/src/commands/serve.ts). ⚠️ On showcase the boot-A cloud arm is the HOST's, not the CLI's: examples/app-showcase/objectstack.config.ts mounts MarketplaceProxyPlugin, MarketplaceInstallLocalPlugin and CloudConnectionPlugin itself whenever resolveCloudUrl() is truthy, and RuntimeConfigPlugin always, and planMarketplaceWiring checks presence — so on boot A the CLI wires none of the four, and on boot B its offline arm adds install-local alone (pinned to the 'off' control plane) beside the host's runtime-config. The observable route matrix is the same either way",
           "a compiled package artifact for the inline install: examples/app-crm/dist/objectstack.json. The tree's own `pnpm build` writes it (the root turbo build runs @objectstack/example-crm's `objectstack build` script), and the file is gitignored (examples/*/dist/), so only an unbuilt tree lacks it; then `pnpm -C examples/app-crm build` writes it. A run under a no-rebuild brief installs the existing file, as QA run #24779 did (the air-gapped path the #8343 fix exists for — `handleInstall`'s inline branch never reads the cloud URL). Both boots that install run from a SCRATCH COPY of the app, never the shared tree: install-local caches the manifest under the working directory's .objectstack/installed-packages (packages/cloud-connection/src/local-manifest-source.ts#DEFAULT_INSTALLED_PACKAGES_DIR, resolved against process.cwd()), which a per-boot OS_HOME / OS_STORAGE_LOCAL_ROOT does not redirect (RUNNER.md environment facts)",
           "admin credentials passed to the CLI door (--email/--password or OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) — the runtime refuses an unauthenticated install with a 401 that names exactly that remedy (packages/cli/src/commands/package/install.ts)"
         ],
@@ -1925,8 +1979,7 @@
         "runtime-config advertising marketplace:true on a boot whose browse namespace 404s (or installLocal:true where the route is absent) is the #8356/#8388 declared-vs-derived gap re-opening",
         "purge deleting a row the manifest's seed datasets do not declare is a data-loss FAIL — 'user-created records are never touched' is the handler's own contract",
         "a 2xx for the plain member or anonymous on ANY mutating door is a FAIL of the #8976 gate — UI absence is not the gate, the server refusal is",
-        "purged sample rows reappearing after a restart is a FAIL of the sampleDataPurged rehydrate guard",
-        "a browse-leg upstream fetch failure on an egress-blocked runner filed as a product defect is a false finding — the mount is this kernel's contract, the upstream's reachability is not (score blocked(environment))"
+        "purged sample rows reappearing after a restart is a FAIL of the sampleDataPurged rehydrate guard"
       ],
       "traps": ["dispatcher-vs-hono-route", "absence-inference", "destructive-in-place", "wrong-persona", "auth-state-leak"],
       "source": [
@@ -1972,6 +2025,18 @@
           "date": "2026-10-20",
           "change": "fixtures.requires[1], steps[2], steps[6]–[7] and acceptance[4].verify — checklist-accuracy findings of QA run #24779 (wave anchor #24579 round 12). The listing serves withSampleData, derived per request from the caller's rows (#21775), never sampleDataPurged, which lives in the ledger file (local-manifest-source.ts, marketplace-install-local-plugin.ts handleList at base 307ce4c4b4). The artifact step now says what a runner needs: the existing examples/app-crm/dist/objectstack.json the tree's build writes, rebuilt only when absent. No clause changed",
           "ref": "#24824"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "negative[5] removed. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): it stated a recording rule (a browse-leg upstream failure on an egress-blocked runner is not a product defect; score blocked(environment)) with no product expectation, so it could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). Its text already stands, unchanged in substance, in fixtures.knownGaps[0] (on an egress-blocked or air-gapped runner the leg scores blocked(environment), never a product FAIL; what this item scores about browse is the MOUNT), so nothing was added. No acceptance clause changed",
+          "ref": "#24963"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.requires[0]: 'TWO isolated boots of the same app:' → 'TWO boots of the same app, each on its own port and DB:'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
         }
       ]
     },
@@ -2090,23 +2155,24 @@
       "title": "Runtime config boot read: GET /api/v1/runtime/config answers 200 ANONYMOUSLY with cloud URL, capability flags, branding and telemetry posture; the legacy /api/v1/studio/runtime-config alias is byte-identical (same handler); nothing credential-shaped is in the body",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["anonymous", "seeded admin (control only)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "any stock isolated boot — a plain `objectstack dev` mounts RuntimeConfigPlugin through the marketplace wiring's cloud arm, and an OS_CLOUD_URL=off boot mounts it through the offline arm (#8389), so the route is served on BOTH stock shapes"
+          "any stock boot on its own port and DB — a plain `objectstack dev` mounts RuntimeConfigPlugin through the marketplace wiring's cloud arm, and an OS_CLOUD_URL=off boot mounts it through the offline arm (#8389), so the route is served on BOTH stock shapes"
         ]
       },
       "steps": [
-        "on a stock isolated boot, with NO session: GET /api/v1/runtime/config — capture status, headers and full body",
+        "on a stock boot on its own port and DB, with NO session: GET /api/v1/runtime/config — capture status, headers and full body",
         "confirm the payload shape: features (installLocal, marketplace, …), branding (productName, productShortName, pwaDescription and pwaThemeColor always; logoUrl, faviconUrl and brandColor ONLY when configured — by the plugin config or their env vars — since an unset one serialises as absent, which is not a missing key; `stage` likewise only when set — packages/cloud-connection/src/runtime-config-plugin.ts), telemetry (errorReporting when configured), and the cloud/control-plane URL field",
         "GET /api/v1/studio/runtime-config with the same (absent) auth — diff the two bodies byte for byte (the alias is mounted with the SAME handler instance; ledgered as its own row because it is its own wire path)",
         "scan the serialised body for credential-shaped content: no session token, no secret handle plaintext, no Authorization material, no sys_secret ciphertext; telemetry.errorReporting.dsn, when present, is a PUBLIC client key by design — record its presence, it is not a finding",
         "control: repeat the read WITH an admin session and confirm the payload is not silently enriched with anything the anonymous read withheld (the route is unauthenticated by construction — there is no per-principal projection to leak through)",
-        "repeat both reads on an OS_CLOUD_URL=off boot: still 200 anonymous, flags now reporting the offline truth (the flag/route agreement itself is scored by platform-core.marketplace-install-local-lifecycle clause 1 — here only that the route is served and anonymous on this boot shape too)"
+        "repeat both reads on an OS_CLOUD_URL=off boot: still 200 anonymous, flags now reporting the offline truth (the flag/route agreement itself is scored by platform-core.marketplace-install-local-lifecycle clause 1 — here only that the route is served and anonymous on this boot shape too)",
+        "filing, not a probe: flags asserted here that contradict the same boot's live route table belong to platform-core.marketplace-install-local-lifecycle's clause 1; do not double-file, cross-reference"
       ],
       "acceptance": [
         {
@@ -2137,8 +2203,7 @@
       "negative": [
         "a 401/403 on this route is a boot-breaking regression: the console reads it before any session exists — a client that must authenticate to learn where to authenticate is circular",
         "the alias drifting from the canonical body (or being dropped) breaks older Studio bundles silently — the ledger keeps them as separate rows precisely so a move is reported",
-        "session, secret-store, or credential material in this anonymous body is a security finding — capture and cross-file to access-security, do not tick past it",
-        "flags asserted here that contradict the same boot's live route table belong to the marketplace item's clause 1 — do not double-file, cross-reference"
+        "session, secret-store, or credential material in this anonymous body is a security finding — capture and cross-file to access-security, do not tick past it"
       ],
       "traps": ["dispatcher-vs-hono-route", "absence-inference", "cache-staleness"],
       "source": [
@@ -2160,6 +2225,18 @@
           "date": "2026-10-19",
           "change": "steps[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.runtime-config-boot-read steps[1]; wave anchor #24579 §3): the branding block carries logoUrl, faviconUrl and brandColor only when they are configured — runtime-config-plugin.ts reads each from the plugin config or its env var and serialises an unset one as undefined, which JSON drops — so their absence on a stock boot is the contract, not a missing key. No acceptance clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "negative[3] moved to steps[6]. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): it stated a filing rule (a flag/route contradiction belongs to the marketplace item's clause 1; do not double-file) with no product expectation, so it could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). Its text moved, unchanged in substance, to steps[6]. No acceptance clause changed",
+          "ref": "#24963"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.requires[0]: 'any stock isolated boot —' → 'any stock boot on its own port and DB —'; steps[0]: 'on a stock isolated boot, with NO session' → 'on a stock boot on its own port and DB, with NO session'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
         }
       ]
     },
@@ -2568,14 +2645,14 @@
       "title": "ADR-0057 lifecycle sweep: backdated telemetry rows past retention are reaped BOUNDED under a system context on the hourly sweep, onlyWhen scoping spares live rows, an archive-declaring object is NEVER hot-deleted unarchived (retained + reported archive-pending when no archive datasource exists), the transient class stays on the primary, and OS_LIFECYCLE_DISABLED=1 disarms the sweep",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["operator (local shell + direct sqlite access)", "seeded admin (API reads)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an isolated boot on a file DB (-d file:/tmp/<run>/data.db) WITH direct sqlite access between boots — retention judges created_at, which no REST write lets a caller backdate, so the crash-shaped fixtures are hand-seeded into the sqlite files (the same fixture class platform-core.interrupted-migration-boot-report proved). ⚠ TWO files: on `os dev` with a file-backed primary the CLI provisions a sibling telemetry datasource, data.telemetry.db beside data.db (packages/cli/src/utils/telemetry-datasource.ts#resolveTelemetryDbPath), and the engine routes every telemetry/audit/event-classed object there — so sys_automation_run and sys_audit_log rows are seeded into data.telemetry.db, while the transient sys_inbox_message stays in data.db",
+          "a boot on its own port and file DB (-d file:/tmp/<run>/data.db) WITH direct sqlite access between boots — retention judges created_at, which no REST write lets a caller backdate, so the crash-shaped fixtures are hand-seeded into the sqlite files (the same fixture class platform-core.interrupted-migration-boot-report proved). ⚠ TWO files: on `os dev` with a file-backed primary the CLI provisions a sibling telemetry datasource, data.telemetry.db beside data.db (packages/cli/src/utils/telemetry-datasource.ts#resolveTelemetryDbPath), and the engine routes every telemetry/audit/event-classed object there — so sys_automation_run and sys_audit_log rows are seeded into data.telemetry.db, while the transient sys_inbox_message stays in data.db",
           "stock lifecycle declarations as the subjects: sys_automation_run (class telemetry, retention 30d, onlyWhen status ∈ completed|failed — the MIXED-table scoping), sys_audit_log (class audit, archive after 90d to the 'archive' datasource — the never-hot-delete subject), sys_inbox_message (class transient)",
           "patience for the timer: the first sweep fires DEFAULT_LIFECYCLE_INITIAL_DELAY_MS = 60s after engine start, then hourly — every probe boot needs a ≥60s settle before reading results (eventual-consistency: do not read the absence of a reap before the sweep ran)"
         ],
@@ -2695,6 +2772,12 @@
           "date": "2026-10-20",
           "change": "automated.ref says which clause each part scores, and acceptance[5].verify names its check — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: 'acceptance[5] is checked by the item's enumSource gate, not a pin'), round 15 of wave anchor #24579. The pin drives LifecycleService.sweep over a fake engine: acceptance[2]'s pinned half, [3], and negative[0]–[1]. acceptance[5]'s count is held by the enumSource variants-freshness ratchet of check:platform-checklist (LifecycleClassSchema, expect 5), and its engine-set half by reading packages/objectql/src/engine.ts. Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.requires[0]: 'an isolated boot on a file DB (-d' → 'a boot on its own port and file DB (-d'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
         }
       ]
     },
@@ -2703,7 +2786,7 @@
       "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` is DECLARED delete-all-then-insert but IMPLEMENTED as bare insert (no caller clears the table): the posture is recorded, never ticked as scoped deletion",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2711,7 +2794,7 @@
         "app": "showcase",
         "requires": [
           "a runtime-created WRITABLE package (the metadata-authoring-roundtrip fixture) — `seed` is allowRuntimeCreate, so per-mode scratch seeds are authored as drafts (PUT /api/v1/meta/seed/<name> with an explicit `mode`) and applied by publish (applySeedBodies materializes published seed bodies through the SAME SeedLoaderService the boot path uses — packages/runtime/src/seed-loader.ts is a re-export shim of it). The seed BODY carries object, mode, records (and externalId when not the default) and NO `name` key — the URL names the seed, and SeedSchema is strict (packages/spec/src/data/seed.zod.ts#SeedSchema), so a body `name` answers 422 unrecognized_keys",
-          "a scratch target object in the same writable package (do NOT aim mode probes, least of all replace/insert replays, at seeded showcase objects — destructive-in-place)"
+          "a scratch target object in the same writable package (do NOT aim mode probes, least of all replace/insert replays, at seeded showcase objects — destructive-in-place: it contaminates platform-core.seed-integrity's baselines)"
         ],
         "knownGaps": [
           "the publish response's seedApplied summary surfaces inserted/updated/errors but not per-row skip detail — the `ignore says so` clause therefore reads the skip from effect (counts + untouched values) plus the loader's summary where surfaced, not from a UI report",
@@ -2720,14 +2803,14 @@
         ]
       },
       "steps": [
-        "author the scratch object (2 fields + a natural-key `name`, and a declared `sharingModel` — a draft without one is accepted, but its publish is refused (publish-drafts answers outcome 'refused', failed[0] code INVALID_METADATA, rule security-owd-unset) and so is an active save (422 INVALID_METADATA, rule security-owd-unset)) into the writable package and publish; note `externalId` defaults to 'name' and `defaultMode` to 'upsert' (SeedLoaderRequestSchema)",
+        "author the scratch object (2 fields + a natural-key `name`, and a declared `sharingModel` — a draft without one is accepted, but its publish is refused (publish-drafts answers outcome 'refused', failed[0] code INVALID_METADATA, rule security-owd-unset) and so is an active save (422 INVALID_METADATA, rule security-owd-unset)) into the writable package and publish, named with that package's namespace prefix: NS_SHORT, where NS is the package manifest's namespace, which a package created without one derives from its id's last segment (com.objectstack.qa.seedmodes gives seedmodes; packages/spec/src/kernel/namespace-prefix.ts#deriveNamespaceFromPackageId). An unprefixed draft is accepted, and its publish is refused 422 NAMESPACE_PREFIX with the spelling to use (packages/spec/src/kernel/namespace-prefix.ts#validateObjectNamespacePrefix, ADR-0129 D2); note `externalId` defaults to 'name' and `defaultMode` to 'upsert' (SeedLoaderRequestSchema)",
         "UPSERT: publish a seed draft (mode upsert) with rows A,B → both insert; edit the draft changing B's value and adding C; re-publish → A skipped (no-op replay — only seed-declared fields compared, so runtime edits to OTHER columns never block the skip), B updated in place (same id), C inserted; verify by id stability + values",
         "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
         "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
         "INSERT: seed draft (mode insert) re-declaring A → a SECOND A-named row appears (no matching in insert mode); record the duplication; if the object declares a unique key on the natural key instead, record the refusal — either shape is the mode's real contract",
         "REPLACE (expected-posture probe): add one row F by hand through /api/v1/data (a row the seed does NOT declare); publish a seed draft (mode replace) declaring only G → capture what happens to F. At head: F SURVIVES and G is inserted — the loader's replace case is bare insert with the comment 'caller should have cleared the table', and NO caller in the tree clears anything. Record the declared-vs-implemented gap; do NOT tick 'replace scoped to its own object' (there is no deletion to scope) and do NOT file F's survival as data loss (it is the opposite)",
         "idempotence tie-in: re-publish the upsert draft unchanged TWICE. The first replay may legitimately write, because steps 2–4 rewrote A's rows (update mode set A to a2, insert mode added a second A-named row), so it re-converges them to the seed; the SECOND replay is the idempotence probe — zero inserts and zero updates (all no-op skips), every row's updated_at untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
-        "teardown: the writable package's own delete, or discard the isolated DB"
+        "teardown: the writable package's own delete, or discard the run's own DB"
       ],
       "acceptance": [
         {
@@ -2769,9 +2852,7 @@
       ],
       "negative": [
         "an upsert replay that bumps updated_at on identical rows is the churn isNoOpReplay exists to prevent (phantom edits in history, state-machine re-validation) — FAIL the skip clause",
-        "update creating a row, or ignore rewriting one, is a mode doing another mode's verb — FAIL",
-        "ticking the replace clause as 'deletion correctly scoped' is a FALSE PASS twice over: nothing is deleted at head, and the clause exists to record exactly that",
-        "aiming replace/insert replays at seeded showcase objects contaminates platform-core.seed-integrity's baselines — destructive-in-place; scratch objects only"
+        "update creating a row, or ignore rewriting one, is a mode doing another mode's verb — FAIL"
       ],
       "variants": [
         "mode insert — no matching, always writes (duplicates on replay unless the object's own unique constraint refuses)",
@@ -2813,6 +2894,18 @@
           "date": "2026-10-20",
           "change": "knownGaps[2] is new — QA run #24779's observation on acceptance[3] (wave anchor #24579 round 12): after insert mode duplicated a natural key, upsert bound the newer duplicate and left the original unconverged. Read at base 307ce4c4b4 in seed-loader.ts loadExistingRecords, which keys an unordered find by externalId (last row wins). No clause changed",
           "ref": "#24824"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] names the namespace prefix; negative[2] and negative[3] removed. Checklist-accuracy findings of QA run #24841 (18.0 sweep round 4 at 307ce4c4). (1) The scratch object needs the package namespace prefix: QA run #24841's unprefixed qa_seedprobe draft saved 200, and its publish answered 422 NAMESPACE_PREFIX. Read at base feb09db14a: the publish doors judge objectNamespacePrefixViolation (protocol.ts, ADR-0129 D2), and a runtime-created package with no namespace takes deriveNamespaceFromPackageId. (2) negative[2] and negative[3] stated a recording rule and a fixture rule with no product expectation, so they could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). negative[2]'s text already stands, unchanged in substance, in steps[5] and acceptance[4] (do not tick 'replace scoped to its own object'; there is no deletion to scope). negative[3]'s stands in fixtures.requires[1], which now carries its reason as well (it contaminates platform-core.seed-integrity's baselines). No acceptance clause changed",
+          "ref": "#24963"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-21",
+          "change": "Respelled — steps[7]: 'or discard the isolated DB' → 'or discard the run's own DB'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#25018"
         }
       ]
     },
@@ -3077,7 +3170,7 @@
       "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming the tables and the ownership ceremony's plan and apply, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -3088,6 +3181,9 @@
         "requires": [
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
           "a v17-shaped SQLite file: a DB created by a 17.x showcase boot (npm `@objectstack/cli@17.7.0`) — or the guard pin's fixture shape planted into a scratch DB — copied, never the original"
+        ],
+        "knownGaps": [
+          "an 18.0 pre-release database (18.0.0-next.*) is refused by the same guard, with the same absent-marker refusal (or, once a generation-0 ceremony certified it, the shape-generation refusal). Its path through refusal, ceremony and served boot, with its data carried over, is cli.organization-ownership-ceremony acceptance[5], scored there on that item's own fixture (its fixtures.requires[2]); this item's clauses judge the v17-shaped copy only"
         ]
       },
       "steps": [
@@ -3167,6 +3263,12 @@
           "date": "2026-10-20",
           "change": "title and acceptance[1] (clause, verify) re-worded for the open ownership ceremony (#24581). `os migrate organization-ownership` plans and applies again, and the boot guard decides on the ownership marker (a birth marker a fresh datastore writes, or the ceremony's verified one): a v17 database has none, so the refusal opens \"This database carries no organization-ownership marker\", names the tables still carrying organization_id, and names the ceremony's plan and apply (`--out PLAN`, then `--apply --plan-file PLAN --backup-taken`). Revision 4 asserted the 18.0 sentence and the absence of the command, so a run against the new text would have recorded FAIL on a correct product. It now asserts the marker sentence, the tables and the two steps, and that the refusal says nothing of staying on 17.x. The ⛔ on the code literal is kept. acceptance[0], acceptance[2], acceptance[3] and both steps are unchanged",
           "ref": "#24681"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0] added, a cross-reference. Checklist-accuracy finding of QA run #24838 (18.0 sweep round 4 at 307ce4c4): neither ceremony item had a clause for a real 18.0 pre-release database. The clause is cli.organization-ownership-ceremony acceptance[5], because that item's title names an 18.0 pre-release database and this item's names a 17.x-shaped one; this item points at it. Its scope does not cover fresh installs, so the order #24827 fixed (os migrate apply before the first os serve) is not added here. Read at base feb09db14a. No clause changed",
+          "ref": "#24963"
         }
       ]
     },

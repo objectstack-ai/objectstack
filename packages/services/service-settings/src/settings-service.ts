@@ -594,6 +594,142 @@ function firstPatternMiss(declared: DeclaredPattern, value: unknown): { value: s
   return declared.re.test(value) ? null : { value };
 }
 
+/**
+ * The value format each format-bearing specifier TYPE declares — ADR-0007's
+ * specifier table: "`email` / `url` / `phone` | typed input | string | format
+ * validation" and "`color` | colour picker | hex string" (#24882).
+ *
+ * Keyed on the TYPE, unlike the bounds and the pattern next door, because here
+ * the type IS the declaration: a specifier authors no separate format property,
+ * so choosing `type: 'url'` is what declares the format. A `Map`, not an object
+ * literal, so a type string spelled like an `Object.prototype` member can never
+ * look one up.
+ *
+ * Each grammar is the platform's existing one for the same word, not a new
+ * dialect invented here:
+ *
+ *  - `email` — the address grammar of the record validator's `email` field type
+ *    and of `plugin-email`'s `isSendableAddress`, which is the live reader of
+ *    `mail.from_email`. So a value this judge passes is one the mail transport
+ *    will send from. It requires a dotted domain (`no-reply@localhost` is not
+ *    sendable there) and is linear-time (no ReDoS).
+ *  - `url` — the record validator's `url` field grammar: `scheme://…`, a
+ *    root-relative `/path`, a `data:` URI or a `blob:` URL. NOT http(s)-only:
+ *    the reader of `branding.logo_url` (`RuntimeConfigPlugin.logoUrl`) declares
+ *    "absolute or relative URL", and the platform's own storage hands back a
+ *    root-relative `/api/v1/storage/files/…` for an uploaded file, so a
+ *    narrower grammar would flag values the reader serves correctly.
+ *  - `phone` — the record validator's `phone` field grammar. No shipped settings
+ *    manifest authors a `phone` specifier today (`company.phone` is `text`);
+ *    the type is in ADR-0007's row, so it is judged rather than skipped.
+ *  - `color` — CSS hex colour notation (`#rgb`, `#rgba`, `#rrggbb`,
+ *    `#rrggbbaa`): ADR-0007 declares "hex string", the colour picker emits the
+ *    six-digit form, and the reader serves the value as a browser theme colour.
+ *
+ * `code` is the ADR-0114 `FieldErrorCode` the save door's refusal of this
+ * format carries (the catalog's closed set has no colour member, so `color`
+ * takes `invalid_format`, the member for "a declared pattern/format the value
+ * does not match"). It travels in the verdict so the call site reads it from
+ * here rather than choosing a second time.
+ */
+const DECLARED_VALUE_FORMATS: ReadonlyMap<
+  string,
+  {
+    re: RegExp;
+    code: 'invalid_email' | 'invalid_url' | 'invalid_phone' | 'invalid_format';
+    expected: string;
+  }
+> = new Map([
+  ['email', {
+    re: /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/,
+    code: 'invalid_email' as const,
+    expected: 'a well-formed email address (local@domain.tld, no spaces)',
+  }],
+  ['url', {
+    re: /^(?:[a-z][a-z0-9+.-]*:\/\/\S+|\/\S*|data:\S+|blob:\S+)$/i,
+    code: 'invalid_url' as const,
+    expected: 'a well-formed URL (scheme://…, a root-relative /path, a data: URI or a blob: URL)',
+  }],
+  ['phone', {
+    re: /^[+()\-\s\d.]{5,}$/,
+    code: 'invalid_phone' as const,
+    expected: 'a well-formed phone number (digits, spaces and + ( ) - . only, at least 5 characters)',
+  }],
+  ['color', {
+    re: /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i,
+    code: 'invalid_format' as const,
+    expected: 'a hex colour (#rgb, #rgba, #rrggbb or #rrggbbaa)',
+  }],
+]);
+
+/** A value that fails its type's declared format — see {@link firstFormatMiss}. */
+interface FormatMiss {
+  /** The specifier type whose format was missed (`email` / `url` / `phone` / `color`). */
+  type: string;
+  /** The `FieldErrorCode` (ADR-0114) the refusal of this format carries. */
+  code: 'invalid_email' | 'invalid_url' | 'invalid_phone' | 'invalid_format';
+  /** What the format expects, in prose that names no part of the value. */
+  expected: string;
+  /** The value's shape — its length — never its content. */
+  shape: string;
+}
+
+/**
+ * The format verdict for a value of this specifier type: a {@link FormatMiss}
+ * when the type declares a format (ADR-0007) and the value does not satisfy
+ * it, else `null`.
+ *
+ * ONE judgment, shared by both paths that produce an effective value — the
+ * save path ({@link SettingsService.validatePatch}) and the env path
+ * ({@link SettingsService.effectiveEnvOverride}) — for the reason the option,
+ * bounds and pattern judges next door are shared: one comparison living on one
+ * door only is how #5204 and #6580 happened.
+ *
+ * ## Both doors REFUSE a miss
+ *
+ * Refusing these values narrows what the settings door accepted, and no
+ * ADR-0087 conversion can carry that: stored values are runtime state in
+ * `sys_setting`, and an `OS_*` override is a deployment's environment. Under
+ * the standing rule 「甲」 as the maintainer amended it, such a narrowing ships
+ * now, as a breaking minor, rather than waiting on a later major. So a miss is
+ * refused at both doors: the save door answers one `FieldError` for the key,
+ * with `code` (`validatePatch`), and stores nothing; the env door rejects the
+ * override the way it rejects every other family's miss
+ * (`reportRejectedEnvOverride`), so it is not in force and the key resolves
+ * from the next layer of the cascade.
+ *
+ * Neither door judges a value it is not handed. A row already stored that
+ * misses its format is still served by every read, and it does not block a
+ * save that does not TOUCH its key — the gate `validatePatch` applies to every
+ * family, for the reason it gives there.
+ *
+ * A non-string value is left alone, as `firstPatternMiss` leaves it: a format
+ * constrains character shape, and policing the value's type is a different
+ * constraint (`invalid_type`) with a different owner. An empty or blank string
+ * is left alone too, because "no value" is the `required` check's business.
+ */
+function firstFormatMiss(type: string, value: unknown): FormatMiss | null {
+  const declared = DECLARED_VALUE_FORMATS.get(type);
+  if (!declared) return null;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  // Judged trimmed: both live readers trim before use (`plugin-email`'s
+  // address check, `RuntimeConfigPlugin`'s branding read), so surrounding
+  // whitespace is not a format any reader trips over. Inner whitespace is.
+  if (declared.re.test(value.trim())) return null;
+  return {
+    type,
+    code: declared.code,
+    expected: declared.expected,
+    shape: `a string of ${value.length} character${value.length === 1 ? '' : 's'}`,
+  };
+}
+
+/** The declared `type` of one specifier key, or `''` when the manifest declares no such key. */
+function declaredTypeOf(manifest: SettingsManifest, key: string): string {
+  const spec = (manifest.specifiers ?? []).find((s) => s.key === key);
+  return spec ? String(spec.type) : '';
+}
+
 interface RegisteredManifest {
   manifest: SettingsManifest;
   /** Resolved specifier scopes for fast lookup. */
@@ -1060,14 +1196,17 @@ export class SettingsService {
     if (!reg) return;
     // Only the keys that declare something enforceable can be rejected, so only
     // they are worth walking: an option table (#5131/#5204), a value window
-    // (#5932), a standard value domain (#5712) or a pattern (#6580).
-    // `effectiveEnvOverride` does the judging (and the reporting); the value it
-    // returns is of no interest here.
+    // (#5932), a standard value domain (#5712), a pattern (#6580), or a format
+    // its TYPE declares (#24882) — that last one has no per-key table, so its
+    // keys are found by type. `effectiveEnvOverride` does the judging (and the
+    // reporting); the value it returns is of no interest here.
     const enforceable = new Set([
       ...reg.optionTables.keys(),
       ...reg.bounds.keys(),
       ...reg.valueDomains.keys(),
       ...reg.patterns.keys(),
+      ...[...reg.scopes.keys()].filter((key) =>
+        DECLARED_VALUE_FORMATS.has(declaredTypeOf(reg.manifest, key))),
     ]);
     for (const key of enforceable) {
       this.effectiveEnvOverride(reg, namespace, key);
@@ -1110,7 +1249,9 @@ export class SettingsService {
    * still judged on one door only, now arrives through the same shared helper
    * the save path calls ({@link firstPatternMiss}), in the same family order
    * the save path applies — options → pattern → valueDomain → bounds — so the
-   * two doors report the same family for the same value.
+   * two doors report the same family for the same value. #24882 appends the
+   * format a key's TYPE declares (`email` / `url` / `phone` / `color`) to the
+   * end of that order, on both doors, through {@link firstFormatMiss}.
    */
   private effectiveEnvOverride(
     reg: RegisteredManifest,
@@ -1211,6 +1352,23 @@ export class SettingsService {
       }
     }
 
+    // The format the key's TYPE declares (#24882), judged LAST — after every
+    // family above, in the position it holds in `validatePatch`, so a value
+    // that breaks a declared bound and its format is rejected for the bound at
+    // both doors. Same helper as the save path ({@link firstFormatMiss}). The
+    // line never prints the value, for any key: it carries the value's length
+    // instead (`shape`).
+    const formatMiss = firstFormatMiss(declaredTypeOf(reg.manifest, key), value);
+    if (formatMiss) {
+      this.reportRejectedEnvOverride(reg, namespace, key, envName, value, {
+        what: `does not match the format its type '${formatMiss.type}' declares for`,
+        detail: `Allowed values: ${formatMiss.expected}.`,
+        fix: formatMiss.expected,
+        shape: formatMiss.shape,
+      });
+      return null;
+    }
+
     return { envName, value };
   }
 
@@ -1256,8 +1414,12 @@ export class SettingsService {
      * sentence template needs. Passed in rather than branched on here so a
      * third constraint family reuses the dedupe, the redaction rule and the
      * consequence/fix prose instead of growing a second reporter beside them.
+     *
+     * `shape`, when given, replaces the value in the line for EVERY key, not
+     * only an encrypted one: the format family (#24882) reports what the value
+     * looks like (its length) and never the value itself.
      */
-    rejection: { what: string; detail: string; fix: string },
+    rejection: { what: string; detail: string; fix: string; shape?: string },
   ): void {
     const dedupeAt = `${envName}=${String(offending)}`;
     if (this.reportedEnvOverrides.has(dedupeAt)) return;
@@ -1268,7 +1430,9 @@ export class SettingsService {
     // held encrypted, in a message that lands in logs. Same rule, same reason,
     // as the save path's `invalid_option` error.
     const secret = reg.encryptedKeys.has(key);
-    const rejected = secret ? '' : ` Rejected value: '${String(offending)}'.`;
+    const rejected = typeof rejection.shape === 'string'
+      ? ` The rejected value is ${rejection.shape}; it is not printed.`
+      : secret ? '' : ` Rejected value: '${String(offending)}'.`;
     const message =
       `[SettingsService] env override ${envName} ${rejection.what} ` +
       `setting '${namespace}.${key}' — IGNORED.${rejected} ${rejection.detail} ` +
@@ -2266,6 +2430,12 @@ export class SettingsService {
    * - `step` + non-empty numeric value that misses the declared grid
    *   (`min + k * step`, or `k * step` where no `min` is declared) → rejected
    *   (`invalid_value`, #6199).
+   * - The format the specifier TYPE declares (`email` / `url` / `phone` /
+   *   `color`, ADR-0007; #24882) + non-empty string value that misses it →
+   *   rejected (`invalid_email` / `invalid_url` / `invalid_phone` /
+   *   `invalid_format`, the code the verdict carries — see
+   *   {@link firstFormatMiss}). Judged after every other family, so a value
+   *   that also breaks one of those is refused for that one.
    * - All-null patches (namespace reset) skip validation rather than block the
    *   write.
    * - A `visible` predicate `evaluateVisibility` cannot parse → the write is
@@ -2284,7 +2454,9 @@ export class SettingsService {
    * for the same reason and one more: bounds get TIGHTENED over a product's
    * life (a `password_min_length` floor raised from 6 to 8), and a workspace
    * sitting below the new floor must still be able to edit its unrelated
-   * settings — it is told about the key only when it writes that key.
+   * settings — it is told about the key only when it writes that key. The
+   * format check (#24882) inherits it for the first reason: a value stored
+   * before that check existed is refused only by a patch that touches its key.
    *
    * At most one `FieldError` per offending key: every branch above `continue`s
    * once it has spoken, so a client is handed the first constraint the value
@@ -2596,6 +2768,30 @@ export class SettingsService {
             constraint: breach.constraint,
             ...(secret ? {} : { value }),
           });
+          continue;
+        }
+      }
+
+      // The format the specifier TYPE declares (ADR-0007; #24882), judged last
+      // so every family above keeps precedence. The code is the one the
+      // verdict carries (`firstFormatMiss`), the same helper the env door
+      // calls. The message names what the format expects and never the value,
+      // for any key, so neither `value` nor a `Received` echo is attached: the
+      // caller sent the value and needs only to be told what to send instead.
+      // `constraint.type` names the declaring property, so a client can tell a
+      // colour's `invalid_format` from a declared pattern's (`constraint.
+      // pattern`) without parsing the sentence (ADR-0114).
+      if (!empty) {
+        const miss = firstFormatMiss(type, value);
+        if (miss) {
+          errors.push({
+            field: key,
+            code: miss.code,
+            message: `${label} must be ${miss.expected}.`,
+            label,
+            constraint: { type: miss.type },
+          });
+          continue;
         }
       }
     }

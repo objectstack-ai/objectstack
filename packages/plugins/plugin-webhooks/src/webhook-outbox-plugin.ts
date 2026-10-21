@@ -23,6 +23,7 @@ import {
     DeclaredWebhookSource,
     DECLARED_WEBHOOK_NAME_GUARD_PACKAGE,
     bindDeclaredWebhookNameGuard,
+    readDeclaredWebhookNames,
 } from './declared-webhooks.js';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
 import { createWebhookRedeliverGuard } from './redeliver-guard.js';
@@ -119,6 +120,55 @@ function requestDoorContext(request: Request): RedeliverDoorContext<Response> {
             headers: { 'Content-Type': 'application/json' },
         }),
     };
+}
+
+/**
+ * [#24910] Which of the auto-enqueuer's three prerequisites this kernel holds:
+ * the data engine (it reads the subscriptions), the realtime service (its ONLY
+ * source of record events — nothing else feeds it) and messaging (the outbox
+ * it enqueues onto). Read once, at `kernel:ready`, when every plugin's
+ * `init()` has registered its services, so an absence is final.
+ */
+interface AutoEnqueueGap {
+    readonly hasEngine: boolean;
+    readonly hasRealtime: boolean;
+    readonly hasMessaging: boolean;
+}
+
+/** What the auto-enqueuer runs with on this kernel, decided once at `kernel:ready`. */
+type AutoEnqueueWiring =
+    /** The host turned it off itself (`autoEnqueue: false`) — deliberate, nothing to report. */
+    | { readonly kind: 'off' }
+    | {
+        readonly kind: 'ready';
+        readonly engine: IDataEngine;
+        readonly realtime: IRealtimeService;
+        readonly messaging: MessagingHttpSurface;
+    }
+    | { readonly kind: 'gap'; readonly gap: AutoEnqueueGap };
+
+/**
+ * [#24910] Why the auto-enqueuer is not running, and the composition change
+ * that starts it, as one sentence: the reason and the fix the boot report owes
+ * (AGENTS.md "Degradation log levels").
+ */
+function autoEnqueueGapReason(gap: AutoEnqueueGap): string {
+    const missing: string[] = [];
+    const fixes: string[] = [];
+    if (!gap.hasRealtime) {
+        missing.push('the realtime service (the only source of the record events it dispatches)');
+        fixes.push("add 'realtime' to `requires`");
+    }
+    if (!gap.hasMessaging) {
+        missing.push('the messaging service (the outbox it enqueues onto)');
+        fixes.push("add 'messaging' to `requires` (a `--preset minimal` boot mounts none of the always-on capabilities)");
+    }
+    if (!gap.hasEngine) {
+        missing.push('the ObjectQL data engine (it reads the subscriptions)');
+        fixes.push('mount the ObjectQL data engine');
+    }
+    return `the webhook auto-enqueuer is disabled because ${missing.join(' and ')} `
+        + `${missing.length === 1 ? 'is' : 'are'} not available. Fix: ${fixes.join('; ')}, then restart.`;
 }
 
 export interface WebhookOutboxPluginOptions {
@@ -360,21 +410,70 @@ export class WebhookOutboxPlugin implements Plugin {
         }
     }
 
+    /**
+     * [#24910] What the auto-enqueuer runs with on this kernel: off by the
+     * host's own choice, ready with its three prerequisites, or missing some of
+     * them. Read at `kernel:ready` — every `init()` has registered its services
+     * by then, so a missing one is a fact of this composition, not a boot that
+     * has not finished.
+     */
+    private resolveAutoEnqueueWiring(
+        ctx: PluginContext,
+        opt: boolean | AutoEnqueuerOptions,
+    ): AutoEnqueueWiring {
+        if (opt === false) return { kind: 'off' };
+        const engine = this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']);
+        const realtime = this.tryGetService<IRealtimeService>(ctx, ['realtime']);
+        const messaging = this.getMessaging(ctx);
+        if (engine && realtime && messaging) return { kind: 'ready', engine, realtime, messaging };
+        return { kind: 'gap', gap: { hasEngine: !!engine, hasRealtime: !!realtime, hasMessaging: !!messaging } };
+    }
+
+    /**
+     * [#24910] Say once that the auto-enqueuer is not running — at `error` when
+     * the stack DECLARES webhooks, `warn` when it declares none.
+     *
+     * By AGENTS.md's one question (Degradation log levels): with declarations
+     * present the system looks normal from outside — every record write answers
+     * 200, the declaration says the webhook is active — while not one delivery
+     * it claims is ever enqueued. That is the durability class, so the line
+     * owes the consequence and the fix, and says it here, once, before any
+     * write rather than once per lost event. With nothing declared the kernel
+     * is visibly smaller than it could be (no webhook to lose yet), which is the
+     * functional class: `warn`, as before.
+     */
+    private reportAutoEnqueueGap(ctx: PluginContext, gap: AutoEnqueueGap): void {
+        const declared = readDeclaredWebhookNames(
+            this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']),
+            this.tryGetService<IMetadataService>(ctx, ['metadata']),
+        );
+        if (declared.length > 0) {
+            ctx.logger.error?.(
+                `[webhook-auto-enqueuer] the ${declared.length} webhook${declared.length === 1 ? '' : 's'} this stack `
+                    + `declares (${declared.join(', ')}) will NEVER be delivered: record writes still succeed and nothing `
+                    + `else reports the loss, but no delivery is ever enqueued — ${autoEnqueueGapReason(gap)}`,
+                undefined,
+                { ...gap, declared },
+            );
+            return;
+        }
+        ctx.logger.warn?.(
+            '[webhook-auto-enqueuer] disabled — ObjectQL, Realtime, or Messaging service not available',
+            { ...gap },
+        );
+    }
+
     private async bootAutoEnqueue(
         ctx: PluginContext,
         opt: boolean | AutoEnqueuerOptions,
     ): Promise<void> {
-        if (opt === false) return;
-        const engine = this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']);
-        const realtime = this.tryGetService<IRealtimeService>(ctx, ['realtime']);
-        const messaging = this.getMessaging(ctx);
-        if (!engine || !realtime || !messaging) {
-            ctx.logger.warn?.(
-                '[webhook-auto-enqueuer] disabled — ObjectQL, Realtime, or Messaging service not available',
-                { hasEngine: !!engine, hasRealtime: !!realtime, hasMessaging: !!messaging },
-            );
+        const wiring = this.resolveAutoEnqueueWiring(ctx, opt);
+        if (wiring.kind === 'off') return;
+        if (wiring.kind === 'gap') {
+            this.reportAutoEnqueueGap(ctx, wiring.gap);
             return;
         }
+        const { engine, realtime, messaging } = wiring;
         if (!messaging.isHttpDeliveryReady()) {
             ctx.logger.warn?.(
                 '[webhook-auto-enqueuer] messaging HTTP outbox not ready (no data engine / reliableDelivery off) — webhook deliveries will not be durable',

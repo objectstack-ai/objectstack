@@ -88,6 +88,11 @@ describe('semantic type classes', () => {
     expect(referenceTargetOf({ type: 'user' })).toBe('sys_user');
     expect(referenceTargetOf({ type: 'user', reference: 'sys_user' })).toBe('sys_user');
     // An explicit target still wins — nothing here overrides authored metadata.
+    // [#24808] This pins the protocol-18 behaviour on purpose, not a producer:
+    // the shape is declared wrong (the target is fixed) and `@objectstack/lint`
+    // warns on it (`user-field-foreign-reference`), but no ADR-0087 conversion
+    // carries its refusal, so under the 「甲」 ruling it keeps resolving as
+    // written until the next protocol major refuses it at parse.
     expect(referenceTargetOf({ type: 'user', reference: 'my_people' })).toBe('my_people');
 
     // Genuinely targetless: the types whose target IS author-chosen, unwritten.

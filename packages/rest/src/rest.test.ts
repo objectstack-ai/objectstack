@@ -1202,7 +1202,8 @@ describe('RestServer', () => {
       const route = getExportRoute(rest);
 
       const { res, chunks, headers } = makeRes();
-      await route!.handler({ params: { object: 'task' }, query: { format: 'csv' } } as any, res);
+      // [#24945] A Chinese caller: the boolean cell follows the caller's language.
+      await route!.handler({ params: { object: 'task' }, query: { format: 'csv' }, headers: { 'accept-language': 'zh-CN' } } as any, res);
 
       expect(headers['Content-Type']).toBe('text/csv; charset=utf-8');
       const lines = chunks.join('').split('\r\n');
@@ -1220,7 +1221,7 @@ describe('RestServer', () => {
       const route = getExportRoute(rest);
 
       const { res, chunks } = makeRes();
-      await route!.handler({ params: { object: 'task' }, query: { format: 'csv', header: 'false' } } as any, res);
+      await route!.handler({ params: { object: 'task' }, query: { format: 'csv', header: 'false' }, headers: { 'accept-language': 'zh-CN' } } as any, res);
 
       const lines = chunks.join('').split('\r\n').filter(Boolean);
       // No label header — the first line is the data row.
@@ -1254,7 +1255,7 @@ describe('RestServer', () => {
       const route = getExportRoute(rest);
 
       const { res, chunks, headers } = makeRes();
-      await route!.handler({ params: { object: 'task' }, query: { format: 'json' } } as any, res);
+      await route!.handler({ params: { object: 'task' }, query: { format: 'json' }, headers: { 'accept-language': 'zh-CN' } } as any, res);
 
       expect(headers['Content-Type']).toBe('application/json; charset=utf-8');
       const parsed = JSON.parse(chunks.join(''));
@@ -1271,7 +1272,7 @@ describe('RestServer', () => {
       const route = getExportRoute(rest);
 
       const { res, getBuffer, headers } = makeBinRes();
-      await route!.handler({ params: { object: 'task' }, query: { format: 'xlsx' } } as any, res);
+      await route!.handler({ params: { object: 'task' }, query: { format: 'xlsx' }, headers: { 'accept-language': 'zh-CN' } } as any, res);
 
       expect(headers['Content-Type']).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       expect(headers['Content-Disposition']).toMatch(/attachment; filename="task-\d{8}-\d{6}\.xlsx"; filename\*=UTF-8''/);

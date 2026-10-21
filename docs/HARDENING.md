@@ -200,8 +200,8 @@ origins you name:
 | Configuration | What is admitted |
 | --- | --- |
 | No origin list (neither `OS_CORS_ORIGIN` nor the plugin's `cors.origins`) | **No cross-origin caller.** On a development boot (`NODE_ENV=development`, which `os dev` and `os serve --dev` set), loopback origins (`localhost`, `127.0.0.1`, `[::1]`, any port) are admitted too. |
-| A list (`OS_CORS_ORIGIN=https://app.example.com`, comma-separated; exact origins or patterns such as `https://*.example.com`) | Those origins, with credentials unless `OS_CORS_CREDENTIALS=false`. Loopback origins are admitted alongside any list. |
-| `*` while credentials are on | **Refused at boot** — the boot fails with a message naming the two remedies. |
+| A list (`OS_CORS_ORIGIN=https://app.example.com`, comma-separated; exact origins or patterns such as `https://*.example.com`) | Those origins, with credentials unless `OS_CORS_CREDENTIALS=false`. On a development boot, loopback origins are admitted beside the list too; on any other boot, only what the list names. |
+| `*`, or a pattern whose host part is the bare `*` (`https://*`, `*://*`), while credentials are on | **Refused at boot** — the boot fails with a message naming the entry and the two remedies. |
 
 Same-origin requests need no CORS answer, so the Console under
 `/_console` and any page the server itself serves work with no list at
@@ -219,7 +219,10 @@ variable covers a cross-origin front-end that signs in. A list given
 through the plugin's `cors.origins` option instead is not seen by
 auth, so such a front-end is then also named in `OS_TRUSTED_ORIGINS`.
 
-Composing the Hono adapter yourself, name the origins there as well:
+Composing the Hono adapter yourself, `createHonoApp` answers by the
+same rule — the table above holds for it too, with its own `cors.origin`
+option in place of `cors.origins` — so with no list it admits no
+cross-origin caller. Name the origins there:
 
 ```ts
 import { createHonoApp } from '@objectstack/hono';
@@ -235,9 +238,12 @@ const app = createHonoApp({
 ```
 
 Do **not** use `origin: '*'` with `credentials: true`: together they
-admit every origin for credentialed requests. `HonoServerPlugin`
-refuses the combination at boot; `*` is accepted only with credentials
-off (`OS_CORS_CREDENTIALS=false`), for an API that takes no cookies.
+admit every origin for credentialed requests. Both doors refuse the
+combination, and a pattern whose host part is the bare `*` with it —
+`HonoServerPlugin` at boot, `createHonoApp` when the app is created;
+such an entry is accepted only with credentials off
+(`OS_CORS_CREDENTIALS=false`), for an API that takes no cookies, and
+auth never trusts it from `OS_CORS_ORIGIN`.
 
 ## Auditing
 

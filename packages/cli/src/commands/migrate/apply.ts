@@ -18,7 +18,6 @@ import {
 import {
   bootSchemaStack,
   collectDriftApplyLimits,
-  describeWithApplyLimits,
   describeDatabaseSource,
   describeTelemetryDatabase,
   renderPlan,
@@ -37,12 +36,16 @@ import {
 } from '../../utils/schema-migration-plugins.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { ceremonyOrganizationColumnDrops } from '../../utils/organization-ownership-drop-gate.js';
 import {
-  COMMENT_OBJECT,
-  REACTIONS_COLUMN,
-  readCommentReactionsConversion,
-} from '../../utils/comment-reactions-conversion.js';
-import { ceremonyOrganizationColumnDrops, readOrganizationOwnershipMarker } from '../../utils/organization-ownership-drop-gate.js';
+  DropGateReads,
+  describeDriftEntries,
+  describeHeldDrops,
+  isAccountIssuerDrop,
+  isCommentReactionsDrop,
+  readHeldDrops,
+  type HeldDrops,
+} from '../../utils/apply-drop-gates.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -101,6 +104,13 @@ function describeNotApplied(entry: ManagedDriftEntry): string {
  *    The drift entries are applied as on any database, and **every entry the
  *    driver did not apply is named** by table, column and kind; a destructive
  *    one the operator confirmed makes the run PARTIAL and exit 1.
+ *
+ * [#24958] And it never offers `--allow-destructive` for a drop its own gates
+ * refuse here (`sys_account.issuer`, `sys_comment.reactions`, an
+ * `organization_id` drop ahead of the ceremony). The listing before the prompt
+ * names what each such drop waits for, the skip lines offer no re-run while
+ * one is held, and the gates' predicates and reads are the ones
+ * `utils/apply-drop-gates.ts` holds for `os migrate plan` too.
  */
 export default class MigrateApply extends Command {
   static override description =
@@ -337,23 +347,44 @@ export default class MigrateApply extends Command {
       // the --json document, `notApplied`, PARTIAL and the exit code never read
       // it. Empty for a driver that declares nothing, which reads as it always has.
       const limits = flags.json ? new Map<ManagedDriftEntry, string>() : collectDriftApplyLimits(stack, drift);
+      // [#24958] Each drop gate below reads at most once per run: the listing
+      // and the gate share that read, so they cannot answer differently.
+      const gateReads = new DropGateReads();
+      // [#24958] The drops those gates refuse on this database, each with the
+      // gate that refuses it — read for the human face only, like `limits`:
+      // the --json document, the gates' rule and the exit code never read it.
+      // Empty when nothing is held, and then everything below reads as it
+      // always has.
+      const kernel = stack.kernel as { getService?: (n: string) => unknown };
+      const gateHeld: HeldDrops = flags.json
+        ? new Map()
+        : await readHeldDrops(gateReads, () => kernel.getService?.call(kernel, 'objectql'), drift);
+      // A held-back entry no re-run with --allow-destructive could apply here:
+      // a driver's declared limit keeps it from any run. A gate-held entry is
+      // not one of these — it waits for the gate's own command.
+      const neverReRunnable = (d: ManagedDriftEntry) => limits.has(d) && !gateHeld.has(d);
 
       if (!flags.json) {
         // [#23925] An entry with a limit shows its finding and that limit, never
-        // --allow-destructive.
+        // --allow-destructive. [#24958] Nor does an entry a gate holds: it
+        // names what it waits for.
         await renderPendingSchemaWork(pending);
-        if (limits.size === 0) renderPlan(drift);
-        else renderPlan(drift, await describeWithApplyLimits(limits));
+        renderPlan(drift, await describeDriftEntries(limits, gateHeld));
         if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
         printInfo(summarize(drift));
         // [#23925] A re-run with --allow-destructive is offered only for the
         // held-back entries it could apply here; the rest are named as drift
-        // that re-run would leave as it is.
-        const reRunnable = deferred.filter((d) => !limits.has(d));
+        // that re-run would leave as it is. [#24958] While a gate holds a
+        // drop, that re-run is refused whole, so it is offered for nothing:
+        // each gate's line names the command that moves the database on.
+        const reRunnable = deferred.filter((d) => !neverReRunnable(d));
         const notReRunnable = deferred.length - reRunnable.length;
         if (reRunnable.length > 0) {
-          printWarning(`${reRunnable.length} destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).`);
+          printWarning(gateHeld.size === 0
+            ? `${reRunnable.length} destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).`
+            : `${reRunnable.length} destructive change(s) will be SKIPPED, and a re-run with --allow-destructive cannot include them yet:`);
         }
+        for (const line of describeHeldDrops(gateHeld, drift, limits)) printWarning(line);
         if (notReRunnable > 0) {
           printWarning(
             `${notReRunnable} destructive change(s) remain drift that a re-run with --allow-destructive cannot apply `
@@ -440,12 +471,11 @@ export default class MigrateApply extends Command {
       // rows indistinguishable and let a sign-in resolve onto the wrong user's
       // account — silently. Hence a row-level pre-flight, run against the live
       // database at the moment it matters.
-      const dropsAccountIssuer = intended.some(
-        (d) => d.op?.type === 'drop_column' && d.table === 'sys_account' && d.op.column === 'issuer',
-      );
+      // [#24958] Its predicate and read live in `utils/apply-drop-gates.ts`,
+      // where `os migrate plan` and the listing above ask them too.
+      const dropsAccountIssuer = intended.some(isAccountIssuerDrop);
       if (dropsAccountIssuer) {
-        const { probeAccountIdentityCollisions, formatAccountIdentityPreflightReport } =
-          await import('@objectstack/plugin-auth');
+        const { formatAccountIdentityPreflightReport } = await import('@objectstack/plugin-auth');
         const engine = (stack.kernel as { getService?: (n: string) => unknown }).getService?.call(
           stack.kernel,
           'objectql',
@@ -456,7 +486,7 @@ export default class MigrateApply extends Command {
         // caller gating on the status. Each emitted with 0 until this card.
         let preflight;
         try {
-          preflight = await probeAccountIdentityCollisions(engine as never);
+          preflight = await gateReads.accountIssuerPreflight(engine);
         } catch (e: any) {
           // A pre-flight that could not read is not a pre-flight that passed.
           const detail = e?.message ?? String(e);
@@ -513,16 +543,16 @@ export default class MigrateApply extends Command {
       // converted, a member may delete their own reaction, and a live probe
       // would read that as unconverted (`utils/comment-reactions-conversion.ts`
       // says why). The boot drift report and the retirement's upgrade note name
-      // this very command as the remedy, so both arrive here.
-      const dropsCommentReactions = intended.some(
-        (d) => d.op?.type === 'drop_column' && d.table === COMMENT_OBJECT && d.op.column === REACTIONS_COLUMN,
-      );
+      // this very command as the remedy, so both arrive here. [#24958] Its
+      // predicate and read live in `utils/apply-drop-gates.ts`, where
+      // `os migrate plan` and the listing above ask them too.
+      const dropsCommentReactions = intended.some(isCommentReactionsDrop);
       if (dropsCommentReactions) {
         const engine = (stack.kernel as { getService?: (n: string) => unknown }).getService?.call(
           stack.kernel,
           'objectql',
         );
-        const conversion = await readCommentReactionsConversion(engine as never);
+        const conversion = await gateReads.commentReactionsConversion(engine);
         if (!conversion.verified) {
           const detail = conversion.flag
             ? `The last run of "os migrate comment-reactions --apply" (${conversion.flag.last_run_at}) left `
@@ -569,7 +599,7 @@ export default class MigrateApply extends Command {
           stack.kernel,
           'objectql',
         );
-        const marker = await readOrganizationOwnershipMarker(engine as never);
+        const marker = await gateReads.organizationOwnershipMarker(engine);
         if (!marker.verified) {
           // The ceremony is the way on (18.x step 6): the refusal names its
           // steps, as the boot refusal does (`organizationOwnershipRefusalMessage`,
@@ -612,10 +642,19 @@ export default class MigrateApply extends Command {
       }
 
       // Confirmation gate. Nothing above this line has touched the database.
+      //
+      // [#24949] A confirmation the run needs and did not get — a non-TTY
+      // stdin, or `--json`, without `--yes` — applies nothing and exits 1, in
+      // both faces, as every other `os migrate` subcommand with a `--yes` gate
+      // does (`test/migrate-confirmation-exit.pin.test.ts` holds the family to
+      // it). It used to exit 0, so a deploy script reading `$?` took a run
+      // that applied nothing for an applied one. An operator who answers `n`
+      // at the prompt below declined on purpose: that path keeps exit 0.
       if (!flags.yes) {
         if (flags.json || !process.stdin.isTTY) {
-          if (flags.json) { await emitJson({ ...target, applied: [], skipped: drift, pending, message: 'confirmation_required', hint: 'pass --yes' }, 0, { compact: true }); return; }
+          if (flags.json) { await emitJson({ ...target, applied: [], skipped: drift, pending, message: 'confirmation_required', hint: 'pass --yes' }, 1, { compact: true }); return; }
           printWarning('Confirmation required. Re-run with --yes to apply, or use "os migrate plan" to preview.');
+          this.exit(1);
           return;
         }
         const targets = stack.telemetryDatabase !== null
@@ -679,12 +718,16 @@ export default class MigrateApply extends Command {
       printSuccess(`Applied ${applied.length} change(s).`);
       // [#23925] Split as the count before the prompt splits `deferred`: a re-run
       // is offered only for the held-back entries it could apply here, and the
-      // rest are named as drift it could not apply either.
+      // rest are named as drift it could not apply either. [#24958] While a
+      // gate holds a drop, no re-run is offered: the lines before the prompt
+      // name each gate's command.
       const heldBackEntries = skipped.filter((d) => held.has(d));
-      const heldBack = heldBackEntries.filter((d) => !limits.has(d)).length;
+      const heldBack = heldBackEntries.filter((d) => !neverReRunnable(d)).length;
       const heldBackNotReRunnable = heldBackEntries.length - heldBack;
       if (heldBack > 0) {
-        printWarning(`Skipped ${heldBack} destructive change(s) (re-run with --allow-destructive to include them).`);
+        printWarning(gateHeld.size === 0
+          ? `Skipped ${heldBack} destructive change(s) (re-run with --allow-destructive to include them).`
+          : `Skipped ${heldBack} destructive change(s); a re-run with --allow-destructive cannot include them yet (see above).`);
       }
       if (heldBackNotReRunnable > 0) {
         printWarning(

@@ -16,7 +16,11 @@ import {
   assessArtifactStaleness,
   formatMtimeGap,
 } from '../utils/dev-restart.js';
-import { isOrganizationOwnershipRequiredMessage, upgradeDevelopmentDatabase } from '../utils/dev-organization-ownership-upgrade.js';
+import {
+  isOrganizationOwnershipRequiredMessage,
+  upgradeDevelopmentDatabase,
+  type DevelopmentUpgradeResult,
+} from '../utils/dev-organization-ownership-upgrade.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 // THE artifact precedence, written once (#21501) — shared with `start`, and
@@ -245,6 +249,42 @@ export function forwardSeedSettledToParent(msg: unknown): boolean {
  */
 export function devWatchActive(opts: { watch: boolean; artifact?: string; configExists: boolean }): boolean {
   return opts.watch && !opts.artifact && opts.configExists;
+}
+
+/**
+ * What `os dev` prints when the organization-ownership boot guard refused its
+ * `serve` child, and the upgrade it then runs (ADR-0131 D10, development
+ * exception; `utils/dev-organization-ownership-upgrade.ts`). The coordinator's
+ * `recover` calls this once per session; `upgrade` copies the development
+ * database, runs the ceremony on it and answers its verdict.
+ *
+ * ⛔ The first line names no origin for the database. Every refusal the guard
+ * throws reaches this path — a marker absent, unverified, unreadable or from an
+ * older shape generation, a shape read that failed, a birth write that failed —
+ * and only the absent marker means "17.x or an 18.0 pre-release created it". The
+ * guard's own refusal, printed just above this line by the failed boot, already
+ * names what it found, so this line points at it rather than carrying a second
+ * copy of that wording, which would be wrong for the other five.
+ *
+ * The copy's path is printed by the verdict lines below, from the upgrade's own
+ * result.
+ *
+ * @returns whether the upgrade finished and the server may boot again.
+ */
+export async function upgradeRefusedDevelopmentDatabase(io: {
+  /** Writes one line for the developer. */
+  print: (line: string) => void;
+  /** Copies the development database, then plans and applies the ceremony on it. */
+  upgrade: () => Promise<DevelopmentUpgradeResult>;
+}): Promise<boolean> {
+  io.print(chalk.yellow(
+    '  ⟳ The organization-ownership boot guard refused this development database (the refusal above), so '
+      + 'os dev upgrades it in place, keeping a copy first…',
+  ));
+  const result = await io.upgrade();
+  for (const warning of result.warnings) io.print(chalk.yellow(`  ⚠ ${warning}`));
+  for (const line of result.lines) io.print(result.ok ? chalk.green(`  ✓ ${line}`) : chalk.red(`  ✗ ${line}`));
+  return result.ok;
 }
 
 export default class Dev extends Command {
@@ -725,11 +765,12 @@ export default class Dev extends Command {
       // load is the one path that applies the whole artifact, so the
       // coordinator restarts the serve child after each successful rebuild
       // (nodemon-style, default-on; opt out with --no-restart).
-      // [ADR-0131 D10, development exception] A serve child refused for the
-      // v17 organization-ownership shape says so before it exits; the
+      // [ADR-0131 D10, development exception] A serve child the
+      // organization-ownership boot guard refused says so before it exits; the
       // coordinator then asks `recover` below, which copies the development
       // database, runs the ceremony on it and boots the server again — once
-      // per session (`utils/dev-organization-ownership-upgrade.ts`).
+      // per session (`utils/dev-organization-ownership-upgrade.ts`,
+      // `upgradeRefusedDevelopmentDatabase` above for what it prints).
       let ownershipUpgrade: 'none' | 'pending' | 'attempted' = 'none';
       let upgradedBoot = false;
       const spawnServeChild = (info: { restartIndex: number }) => {
@@ -818,28 +859,27 @@ export default class Dev extends Command {
         recover: async () => {
           if (ownershipUpgrade !== 'pending') return false;
           ownershipUpgrade = 'attempted';
-          console.log(chalk.yellow(
-            '  ⟳ This development database is still in the v17 organization-ownership shape — upgrading it in place '
-              + '(a copy is kept first)…',
-          ));
-          const { resolveStandaloneDatabase } = await import('@objectstack/runtime');
-          let sqliteFile: string | null = null;
-          try {
-            sqliteFile = resolveStandaloneDatabase({ projectRoot: process.cwd(), databaseUrl: effectiveDb }).sqliteFile;
-          } catch {
-            sqliteFile = null;
-          }
-          const result = upgradeDevelopmentDatabase({
-            binPath,
-            databaseUrl: effectiveDb,
-            sqliteFile,
-            env: localEnv,
-            cwd: process.cwd(),
+          const ok = await upgradeRefusedDevelopmentDatabase({
+            print: (line) => console.log(line),
+            upgrade: async () => {
+              const { resolveStandaloneDatabase } = await import('@objectstack/runtime');
+              let sqliteFile: string | null = null;
+              try {
+                sqliteFile = resolveStandaloneDatabase({ projectRoot: process.cwd(), databaseUrl: effectiveDb }).sqliteFile;
+              } catch {
+                sqliteFile = null;
+              }
+              return upgradeDevelopmentDatabase({
+                binPath,
+                databaseUrl: effectiveDb,
+                sqliteFile,
+                env: localEnv,
+                cwd: process.cwd(),
+              });
+            },
           });
-          for (const warning of result.warnings) console.log(chalk.yellow(`  ⚠ ${warning}`));
-          for (const line of result.lines) console.log(result.ok ? chalk.green(`  ✓ ${line}`) : chalk.red(`  ✗ ${line}`));
-          if (result.ok) upgradedBoot = true;
-          return result.ok;
+          if (ok) upgradedBoot = true;
+          return ok;
         },
         log: (line) => {
           const trimmed = line.trimStart();

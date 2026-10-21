@@ -91,7 +91,7 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object; bulkActions?: Record<string, object> }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
@@ -114,6 +114,7 @@ Translation data for a single field
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated view label |
 | **description** | `string` | optional | Translated view description |
+| **title** | `string` | optional | Translated form view title — overlays a form view's own `title` (`FormViewSchema.title`); only a form that authors one is translated |
 | **emptyState** | `{ title?: string; message?: string }` | optional | Translated empty-state copy shown when the view has no rows |
 | **bulkActions** | `Record<string, { label?: string; confirmText?: string; confirmLabel?: string; params?: Record<string, object> }>` | optional | Selection-bar translations keyed by bulk-action def name (`BulkActionDefSchema.name`) |
 
@@ -191,7 +192,7 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object; bulkActions?: Record<string, object> }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
@@ -262,6 +263,7 @@ Translation data for a single object
 | **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
+| **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
 
 ### Nested Shape: `PlatformTranslationData.metadataForms[string]`
 
@@ -393,7 +395,7 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object; bulkActions?: Record<string, object> }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
@@ -464,6 +466,7 @@ Translation data for a single object
 | **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
+| **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
 
 ### Nested Shape: `TranslationData.metadataForms[string]`
 
@@ -555,7 +558,7 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object; bulkActions?: Record<string, object> }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
@@ -626,6 +629,7 @@ Translation data for a single object
 | **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
+| **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
 
 ### Nested Shape: `TranslationItem.metadataForms[string]`
 

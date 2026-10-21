@@ -13,12 +13,12 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
 import { NotificationTemplateStore } from './template-renderer.js';
+import { NotificationTextRenderer, type NotificationTextI18n } from './notification-text.js';
 import {
     InboxMessage,
     NotificationReceipt,
     NotificationDelivery,
     NotificationPreference,
-    NotificationSubscription,
     NotificationTemplate,
     HttpDelivery,
 } from './objects/index.js';
@@ -221,12 +221,6 @@ export class MessagingServicePlugin implements Plugin {
             }
         };
 
-        const service = new MessagingService({
-            logger: ctx.logger,
-            getData,
-            mandatoryTopics: this.options.mandatoryTopics,
-        });
-
         // Lazy `email` service resolver — shared by the email channel (send +
         // sendTemplate) and the inbox channel's render-only template path
         // (#9225): one resolver in plugin-email, two channels. Probed at
@@ -260,6 +254,33 @@ export class MessagingServicePlugin implements Plugin {
             }
         };
 
+        // [#24978] The `i18n` service whose catalog a keyed notification text
+        // is rendered from — probed at delivery time, never captured at boot,
+        // for the reasons `getDefaultTemplateLocale` above is.
+        const getI18n = (): NotificationTextI18n | undefined => {
+            try {
+                return ctx.getService<NotificationTextI18n>('i18n');
+            } catch {
+                return undefined;
+            }
+        };
+        // ONE renderer for both delivery paths: the service's inline fan-out
+        // and (below) the dispatcher, so a recipient's keyed text is rendered
+        // the same way whichever path delivers it.
+        const textRenderer = new NotificationTextRenderer({
+            getData,
+            getI18n,
+            getDefaultLocale: getDefaultTemplateLocale,
+            logger: ctx.logger,
+        });
+
+        const service = new MessagingService({
+            logger: ctx.logger,
+            getData,
+            mandatoryTopics: this.options.mandatoryTopics,
+            textRenderer,
+        });
+
         if (this.options.registerInbox) {
             service.registerChannel(createInboxChannel({ getData, getEmail, getDefaultTemplateLocale }));
         }
@@ -276,9 +297,13 @@ export class MessagingServicePlugin implements Plugin {
         ctx.registerService('notification', service);
 
         // Register the messaging objects so their rows can be written. The
-        // preference/subscription objects (ADR-0030 P2) are Studio-configurable,
-        // so contribute them to the Setup app's Configuration slot (ADR-0029 D7)
-        // — they appear in nav only when this plugin is installed.
+        // preference and template objects are Studio-configurable, so
+        // contribute them to the Setup app's Configuration slot (ADR-0029 D7)
+        // — they appear in nav only when this plugin is installed. ADR-0030's
+        // `sys_notification_subscription` is retired (ADR-0087 semantic entry
+        // `sys-notification-subscription-retired`): no reader ever expanded a
+        // subscription into recipients, so it is neither registered nor
+        // offered in nav; an existing database keeps the table untouched.
         ctx.getService<{ register(m: unknown): void }>('manifest').register({
             id: 'com.objectstack.service.messaging',
             name: 'Messaging Service',
@@ -291,7 +316,6 @@ export class MessagingServicePlugin implements Plugin {
                 NotificationReceipt,
                 NotificationDelivery,
                 NotificationPreference,
-                NotificationSubscription,
                 NotificationTemplate,
                 HttpDelivery,
             ],
@@ -302,7 +326,6 @@ export class MessagingServicePlugin implements Plugin {
                     priority: 120,
                     items: [
                         { id: 'nav_notification_preferences', type: 'object', label: 'Notification Preferences', objectName: 'sys_notification_preference', icon: 'bell-ring', requiresObject: 'sys_notification_preference' },
-                        { id: 'nav_notification_subscriptions', type: 'object', label: 'Notification Subscriptions', objectName: 'sys_notification_subscription', icon: 'rss', requiresObject: 'sys_notification_subscription' },
                         { id: 'nav_notification_templates', type: 'object', label: 'Notification Templates', objectName: 'sys_notification_template', icon: 'file-text', requiresObject: 'sys_notification_template' },
                     ],
                 },
@@ -429,6 +452,7 @@ export class MessagingServicePlugin implements Plugin {
                     intervalMs: this.options.dispatchIntervalMs,
                     maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
                     logger: ctx.logger,
+                    textRenderer,
                 });
                 this.dispatcher.start();
                 ctx.logger.info(
@@ -514,7 +538,6 @@ export class MessagingServicePlugin implements Plugin {
             NotificationReceipt,
             NotificationDelivery,
             NotificationPreference,
-            NotificationSubscription,
             NotificationTemplate,
             HttpDelivery,
         ];

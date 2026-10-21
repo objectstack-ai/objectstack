@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, isDevelopmentBoot } from '@objectstack/core';
+import { Plugin, PluginContext } from '@objectstack/core';
 import { RestServerConfig } from '@objectstack/spec/api';
 import { registerCurrentUserEndpoints } from './current-user-endpoints';
 import {
@@ -13,7 +13,7 @@ import { cors } from 'hono/cors';
 import { serveStatic } from '@hono/node-server/serve-static';
 import * as fs from 'fs';
 import * as path from 'path';
-import { createOriginMatcher, isLocalhostOrigin, normalizeOriginPatterns } from './pattern-matcher';
+import { resolveCorsAdmission } from './cors-admission';
 import type { HttpsListenerMaterial } from './adapter';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import {
@@ -76,13 +76,16 @@ export interface HonoPluginOptions {
      * Mounted by default. It admits the origins it is told about —
      * {@link HonoCorsOptions.origins}, else `OS_CORS_ORIGIN` — and, with
      * neither set, **no cross-origin caller**: a same-origin request needs no
-     * CORS answer, and a loopback origin (`localhost` / `127.0.0.1` / `[::1]`,
-     * any port) is admitted on a development boot only (`NODE_ENV` exactly
-     * `development`, which `os dev` and `os serve --dev` set).
+     * CORS answer. A loopback origin (`localhost` / `127.0.0.1` / `[::1]`, any
+     * port) is admitted, with a list or without one, on a development boot
+     * only (`NODE_ENV` exactly `development`, which `os dev` and
+     * `os serve --dev` set).
      *
-     * `'*'` together with credentials (on unless turned off) is refused at
-     * init, so the boot fails: name the origins instead, or turn credentials
-     * off to serve `'*'` to anonymous callers.
+     * `'*'`, or a pattern whose host part is the bare `*` (`https://*`),
+     * together with credentials (on unless turned off) is refused at init, so
+     * the boot fails: name the origins instead, or turn credentials off to
+     * serve it to anonymous callers. The rule is `resolveCorsAdmission`, which
+     * `@objectstack/hono`'s `createHonoApp` reads too.
      *
      * Can also be controlled via environment variables:
      *   OS_CORS_ENABLED, OS_CORS_ORIGIN, OS_CORS_CREDENTIALS, OS_CORS_MAX_AGE
@@ -370,70 +373,29 @@ export class HonoServerPlugin implements Plugin {
         // ─── CORS Middleware ──────────────────────────────────────────────────
         // Mounted by default. Controlled via options.cors or environment variables.
         //
-        // What it ADMITS is decided here, and the governing text is
-        // `docs/HARDENING.md` § CORS: never `'*'` with credentials, and an origin
-        // list that is explicit. So the answer follows what was configured, and
-        // nothing else:
-        //
-        //  - a list (`cors.origins`, else `OS_CORS_ORIGIN`) — the pattern matcher
-        //    admits exactly that list (its own loopback convenience included);
-        //  - no list — no cross-origin caller. Nothing here needs the host's own
-        //    origin: a browser applies CORS to cross-origin requests only, so the
-        //    Console and every page this server serves are untouched. A loopback
-        //    origin is admitted on a development boot only — `isDevelopmentBoot`,
-        //    the same reading the auth secret's development fallback uses; the
-        //    transport has no `--dev` flag of its own, and `os serve --dev` sets
-        //    `NODE_ENV=development` before any plugin initialises;
-        //  - `'*'` in the list while credentials are on — refused, here, so the
-        //    boot fails (`kernel.bootstrap()` rethrows an `init()` throw, the
-        //    route `@objectstack/plugin-dev`'s production guard takes). It used
-        //    to be turned into "reflect whatever origin asked", silently.
+        // What it ADMITS is not decided here: `resolveCorsAdmission`
+        // (`cors-admission.ts`) is the one rule, and `@objectstack/hono`'s
+        // `createHonoApp` reads it too, so one configuration gets one answer at
+        // both doors. The governing text is `docs/HARDENING.md` § CORS: a list
+        // (`cors.origins`, else `OS_CORS_ORIGIN`) admits exactly that list; no
+        // list admits no cross-origin caller; a loopback origin is admitted on
+        // a development boot only; and an entry that admits every host (`'*'`,
+        // `https://*`) while credentials are on is refused — here, in `init()`,
+        // so the boot fails (`kernel.bootstrap()` rethrows an `init()` throw,
+        // the route `@objectstack/plugin-dev`'s production guard takes).
         const corsDisabledByEnv = readEnvWithDeprecation('OS_CORS_ENABLED', 'CORS_ENABLED', { silent: true }) === 'false';
         if (this.options.cors !== false && !corsDisabledByEnv) {
             const corsOpts = typeof this.options.cors === 'object' ? this.options.cors : {};
             const enabled = corsOpts.enabled ?? true;
 
             if (enabled) {
-                // `undefined` = nobody named a list: the default described above.
-                let configuredOrigin: string | string[] | undefined;
-                const corsOriginEnv = readEnvWithDeprecation('OS_CORS_ORIGIN', 'CORS_ORIGIN', { silent: true });
-                if (corsOpts.origins) {
-                    configuredOrigin = corsOpts.origins;
-                } else if (corsOriginEnv) {
-                    const envOrigin = corsOriginEnv.trim();
-                    configuredOrigin = envOrigin.includes(',') ? envOrigin.split(',').map(s => s.trim()) : envOrigin;
-                }
-
-                const credentials = corsOpts.credentials ?? (readEnvWithDeprecation('OS_CORS_CREDENTIALS', 'CORS_CREDENTIALS', { silent: true }) !== 'false');
+                const admission = resolveCorsAdmission({
+                    door: { name: '@objectstack/plugin-hono-server', originsOption: 'cors.origins' },
+                    origins: corsOpts.origins,
+                    credentials: corsOpts.credentials,
+                });
                 const maxAgeEnv = readEnvWithDeprecation('OS_CORS_MAX_AGE', 'CORS_MAX_AGE', { silent: true });
                 const maxAge = corsOpts.maxAge ?? (maxAgeEnv ? parseInt(maxAgeEnv, 10) : 86400);
-
-                // Always a function, so `hono/cors` never sees a bare `'*'` and
-                // every answer passes through one of the two branches below.
-                let origin: (requestOrigin: string) => string | null;
-                let admits: string | string[];
-
-                if (configuredOrigin === undefined) {
-                    const developmentBoot = isDevelopmentBoot(undefined);
-                    origin = (requestOrigin: string) =>
-                        developmentBoot && isLocalhostOrigin(requestOrigin) ? requestOrigin : null;
-                    admits = developmentBoot ? 'loopback origins only (development boot)' : 'no cross-origin caller';
-                } else {
-                    if (credentials && normalizeOriginPatterns(configuredOrigin).includes('*')) {
-                        throw new Error(
-                            "@objectstack/plugin-hono-server refuses CORS origin '*' with credentials: together "
-                            + 'they admit every origin for credentialed cross-origin requests. Name the origins '
-                            + 'that may call with credentials (OS_CORS_ORIGIN=https://app.example.com, '
-                            + 'comma-separated, or the `cors.origins` option), or set OS_CORS_CREDENTIALS=false '
-                            + "(or `cors.credentials: false`) to serve '*' without credentials.",
-                        );
-                    }
-                    // Exact origins and wildcard patterns ("https://*.example.com",
-                    // "http://localhost:*") alike — one matcher, the one the
-                    // serverless preflight short-circuit shares.
-                    origin = createOriginMatcher(configuredOrigin);
-                    admits = configuredOrigin;
-                }
 
                 const rawApp = this.server.getRawApp();
                 // Both defaults come from `adapter.ts` (#3786). They used to be
@@ -447,15 +409,15 @@ export class HonoServerPlugin implements Plugin {
                 ]));
 
                 rawApp.use('*', cors({
-                    origin,
+                    origin: admission.origin,
                     allowMethods: corsOpts.methods || ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'],
                     allowHeaders,
                     exposeHeaders,
-                    credentials,
+                    credentials: admission.credentials,
                     maxAge,
                 }));
 
-                ctx.logger.debug('CORS middleware enabled', { origin: admits, credentials });
+                ctx.logger.debug('CORS middleware enabled', { origin: admission.admits, credentials: admission.credentials });
             }
         }
 

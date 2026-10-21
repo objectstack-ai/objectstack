@@ -60,20 +60,28 @@ export const esES: PlatformTranslationData = {
 
     branding: {
       title: 'Marca',
-      description: 'Nombre de la organización, logotipo y color de acento.',
+      description:
+        'El nombre, el logotipo y el color que muestran la consola y la página de inicio de sesión. ' +
+        'Un valor sin definir usa la marca propia de la implementación.',
       groups: {
         identity: { title: 'Identidad' },
         appearance: { title: 'Apariencia' },
       },
       keys: {
-        workspace_name: { label: 'Nombre de la organización' },
-        support_email: { label: 'Correo de soporte', help: 'Ejemplo: support@example.com' },
-        theme_mode: {
-          label: 'Tema predeterminado',
-          options: { light: 'Claro', dark: 'Oscuro', system: 'Según el sistema' },
+        workspace_name: {
+          label: 'Nombre de la organización',
+          help:
+            'El nombre del producto en la consola, en la página de inicio de sesión y en el título del navegador, ' +
+            'y en los correos de inicio de sesión, la aplicación de autenticación y el inicio de sesión de MCP.',
         },
-        accent_color: { label: 'Color de acento' },
-        logo_url: { label: 'URL del logotipo', help: 'Ejemplo: https://…/logo.svg' },
+        accent_color: {
+          label: 'Color de acento',
+          help: 'El color de tema del navegador y de la aplicación instalada. Cada aplicación conserva sus propios colores.',
+        },
+        logo_url: {
+          label: 'URL del logotipo',
+          help: 'Se muestra en la página de inicio de sesión, la pantalla de carga y el encabezado de inicio. Ejemplo: https://…/logo.svg',
+        },
       },
     },
 

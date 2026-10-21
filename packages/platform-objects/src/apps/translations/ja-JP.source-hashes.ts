@@ -114,7 +114,6 @@ export const jaJPSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_settings_knowledge.label': '140348539a50d9d5',
   'apps.setup.navigation.nav_settings_feature_flags.label': '4e7e9e879ea1bcc3',
   'apps.setup.navigation.nav_notification_preferences.label': '8869f324c1bd545a',
-  'apps.setup.navigation.nav_notification_subscriptions.label': '907cb60dda7b39c8',
   'apps.setup.navigation.nav_notification_templates.label': '9e270c87ef2578df',
   'apps.setup.navigation.nav_sessions.label': '673bde6e0c8a3ef9',
   'apps.setup.navigation.nav_audit_logs.label': 'b2fad40733012b18',

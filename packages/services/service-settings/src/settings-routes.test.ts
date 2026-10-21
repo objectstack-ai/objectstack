@@ -806,3 +806,87 @@ describe('settings-routes — the four retired Localization format keys (#21958)
     expect(await storedFormatRows()).toEqual(RETIRED_FORMAT_ROWS);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #24766 — `theme_mode` and `support_email` left the Branding manifest (the
+// maintainer's ruling B′: the runtime config has no counterpart for either, so
+// they are retired, not implemented). Under the standing rule that the manifest
+// version step carries a retirement, a save naming one of them must be refused
+// loudly, by name, through the same REST door an admin's Setup form uses:
+//
+//   - read: not offered and not resolved, even with a stored value;
+//   - write: refused `400 UNKNOWN_KEY` naming the key, the whole batch with it;
+//   - the stored row is KEPT and never blocks a save of the live keys.
+//
+// Seeded store-level, as the Localization rows above are: after the upgrade no
+// public write path can produce them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const RETIRED_BRANDING_ROWS: Record<string, string> = {
+  theme_mode: 'dark',
+  support_email: 'help@acme.test',
+};
+
+async function makeRetiredBrandingStack() {
+  const svc = new SettingsService({ env: {} });
+  svc.registerManifest(brandingSettingsManifest);
+  for (const [key, value] of Object.entries(RETIRED_BRANDING_ROWS)) {
+    await (svc as any).upsertRow({
+      namespace: 'branding', key, scope: 'tenant', user_id: null,
+      value, value_enc: null, encrypted: false,
+    });
+  }
+  const http = new MockHttp();
+  registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+  /** The store's own rows for the two keys, read the way every resolve reads them. */
+  const storedRetiredRows = async () => {
+    const rows = (await (svc as any).loadRows('branding', null, { kind: 'unwalled' })) as Array<{ key: string; value: unknown }>;
+    return Object.fromEntries(rows.filter((r) => r.key in RETIRED_BRANDING_ROWS).map((r) => [r.key, r.value]));
+  };
+  return { http, storedRetiredRows };
+}
+
+describe('settings-routes — the two retired Branding keys (#24766)', () => {
+  it('GET /api/settings/branding offers neither, even with a stored value', async () => {
+    const { http, storedRetiredRows } = await makeRetiredBrandingStack();
+    const { req, res, state } = makeReqRes({ params: { namespace: 'branding' } });
+    await http.routes.get('GET /api/settings/:namespace')!(req, res);
+
+    expect(state.status).toBe(200);
+    const offered = (state.body.data.manifest.specifiers as Array<{ key?: string }>).map((s) => s.key).filter(Boolean);
+    expect(state.body.data.manifest.version).toBe(2);
+    for (const key of Object.keys(RETIRED_BRANDING_ROWS)) {
+      expect(offered, `${key} must not be offered`).not.toContain(key);
+    }
+    expect(Object.keys(state.body.data.values).sort()).toEqual(['accent_color', 'logo_url', 'workspace_name']);
+    expect(await storedRetiredRows()).toEqual(RETIRED_BRANDING_ROWS);
+  });
+
+  it('PUT naming one of them is refused 400 UNKNOWN_KEY by name, and nothing in the batch lands', async () => {
+    const { http, storedRetiredRows } = await makeRetiredBrandingStack();
+    for (const key of Object.keys(RETIRED_BRANDING_ROWS)) {
+      const { req, res, state } = makeReqRes({
+        params: { namespace: 'branding' },
+        body: { [key]: 'anything', logo_url: 'https://acme.test/logo.svg' },
+      });
+      await http.routes.get('PUT /api/settings/:namespace')!(req, res);
+      expect(state.status).toBe(400);
+      expect(state.body.error.code).toBe('UNKNOWN_KEY');
+      expect(state.body.error.details).toEqual({ namespace: 'branding', key });
+    }
+    // The live key sent beside each refused one did not land.
+    const read = makeReqRes({ params: { namespace: 'branding' } });
+    await http.routes.get('GET /api/settings/:namespace')!(read.req, read.res);
+    expect(read.state.body.data.values.logo_url.source).toBe('default');
+    expect(await storedRetiredRows()).toEqual(RETIRED_BRANDING_ROWS);
+  });
+
+  it('a stored retired row never blocks saving the live keys', async () => {
+    const { http, storedRetiredRows } = await makeRetiredBrandingStack();
+    const put = makeReqRes({ params: { namespace: 'branding' }, body: { logo_url: 'https://acme.test/logo.svg' } });
+    await http.routes.get('PUT /api/settings/:namespace')!(put.req, put.res);
+    expect(put.state.status).toBe(200);
+    expect(put.state.body.data.values.logo_url).toMatchObject({ value: 'https://acme.test/logo.svg', source: 'tenant' });
+    expect(await storedRetiredRows()).toEqual(RETIRED_BRANDING_ROWS);
+  });
+});

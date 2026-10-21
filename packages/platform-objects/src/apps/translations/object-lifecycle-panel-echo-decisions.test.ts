@@ -1208,7 +1208,11 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // key (retired — declared as the `userFilters.fields` shorthand, read as a
       // Filter-panel whitelist), taking its label — authored in all three
       // locales — out of the catalog.
-      expect(translated.length, `${locale} positive control`).toBe(673);
+      // 677 since #24692: the view form's and the page form's `addRecord`
+      // composites spell out their two live sub-rows (`enabled`, `position`;
+      // `mode` / `formView` were retired), four new row labels authored in all
+      // three locales.
+      expect(translated.length, `${locale} positive control`).toBe(677);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

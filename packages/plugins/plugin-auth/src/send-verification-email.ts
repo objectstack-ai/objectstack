@@ -30,6 +30,7 @@
  */
 
 import type { AuthRequestHandler } from './register-sso-provider.js';
+import { carryForwardedClientAddress } from './client-address-forwarding.js';
 import { inProcessRedispatchUrl } from './in-process-redispatch.js';
 import { readJsonRequestBody } from './request-json-body.js';
 
@@ -62,6 +63,7 @@ async function resolveSessionEmail(
     if (cookie) h.set('cookie', cookie);
     const authz = headers.get('authorization');
     if (authz) h.set('authorization', authz);
+    carryForwardedClientAddress(headers, h);
     // [#22398] A cookie request reads without renewal: this response's cookie
     // is never sent (`in-process-redispatch.ts`).
     const resp = await handle(new Request(inProcessRedispatchUrl(sessionUrl, h), { method: 'GET', headers: h }));
@@ -131,6 +133,7 @@ export async function runResendVerificationEmail(
   const authz = request.headers.get('authorization');
   if (authz) headers.set('authorization', authz);
   headers.set('origin', request.headers.get('origin') || origin);
+  carryForwardedClientAddress(request.headers, headers);
 
   // Re-dispatch to the real better-auth route (the universal handler bypasses
   // this wrapper, so there is no recursion) with the resolved email.

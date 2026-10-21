@@ -373,7 +373,9 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
             // arm (#13881); the store walks its own ladder (`zh-CN` → `zh` →
             // DEFAULT_LOCALE) underneath, so a tag with no row still renders.
             const locale = recipientLocale ?? defaultLocale;
-            const template = await opts.store.load(n.topic ?? '', 'email', locale);
+            // The row is the recipient organization's: the delivery's own
+            // organization keys the read (see NotificationTemplateStore).
+            const template = await opts.store.load(n.topic ?? '', 'email', locale, n.organizationId);
             const rendered = renderNotification(template, {
                 topic: n.topic ?? '',
                 payload,

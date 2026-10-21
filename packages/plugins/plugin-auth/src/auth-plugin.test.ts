@@ -6,6 +6,7 @@ import { AuthManager } from './auth-manager';
 import type { PluginContext } from '@objectstack/core';
 import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
+import { SettingsService, brandingSettingsManifest } from '@objectstack/service-settings';
 
 describe('AuthPlugin', () => {
   let mockContext: PluginContext;
@@ -460,12 +461,21 @@ describe('AuthPlugin', () => {
     let hookCapture: ReturnType<typeof createHookCapture>;
     let setAppNameSpy: ReturnType<typeof vi.spyOn>;
 
-    const makeSettings = (resolved: { value: unknown; source: string } | Error) => ({
-      get: vi.fn(async () => {
+    // `listManifests` lists `branding`, as the settings service does where no
+    // organization wall stands — the binding is gated on that listing (#24766).
+    const makeSettings = (
+      resolved: { value: unknown; source: string } | Error,
+      opts: { brandingListed?: boolean } = {},
+    ) => ({
+      get: vi.fn(async (_namespace?: string, _key?: string, _ctx?: unknown) => {
         if (resolved instanceof Error) throw resolved;
         return resolved;
       }),
       subscribe: vi.fn(),
+      listManifests: vi.fn(() => [
+        { namespace: 'localization' },
+        ...(opts.brandingListed === false ? [] : [{ namespace: 'branding' }]),
+      ]),
     });
 
     const bootWithSettings = async (settings: unknown) => {
@@ -516,6 +526,45 @@ describe('AuthPlugin', () => {
       expect(mockContext.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('failed to apply branding.workspace_name'),
       );
+    });
+
+    // #24766 — under a walled tenancy posture service-settings does not offer
+    // the `branding` namespace. The binding then stays unbound: no read, no
+    // subscription, and no `warn` on a boot that is working as designed.
+    // The double's `get` would THROW for `branding` (as the real service does
+    // for an unregistered namespace), so a binding that skipped the listing
+    // check would log the warn this pins away.
+    it('a walled boot (branding not listed) neither reads it nor warns about it', async () => {
+      const settings = makeSettings({ value: undefined, source: 'default' }, { brandingListed: false });
+      settings.get.mockImplementation(async (namespace?: string) => {
+        if (namespace === 'branding') throw new Error("Unknown settings namespace: 'branding'");
+        return { value: undefined, source: 'default' };
+      });
+      await bootWithSettings(settings);
+
+      expect(settings.get).not.toHaveBeenCalledWith('branding', 'workspace_name', expect.anything());
+      expect(settings.subscribe).not.toHaveBeenCalledWith('branding', expect.any(Function));
+      const warns = (mockContext.logger.warn as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+      expect(warns.filter((w) => w.includes('branding'))).toEqual([]);
+      expect(setAppNameSpy).not.toHaveBeenCalled();
+    });
+
+    // The same two postures through the REAL settings service: withheld under a
+    // wall (the manifest never registered, so a read would throw
+    // UnknownNamespaceError), offered and saved under `single`.
+    it('real SettingsService: no branding registered → unbound and silent; registered and saved → applied', async () => {
+      const walled = new SettingsService({ env: {} });
+      await bootWithSettings(walled);
+      const warns = (mockContext.logger.warn as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+      expect(warns.filter((w) => w.includes('branding'))).toEqual([]);
+      expect(setAppNameSpy).not.toHaveBeenCalled();
+      setAppNameSpy.mockRestore();
+
+      const single = new SettingsService({ env: {} });
+      single.registerManifest(brandingSettingsManifest);
+      await single.set('branding', 'workspace_name', 'Acme Single');
+      await bootWithSettings(single);
+      expect(setAppNameSpy).toHaveBeenCalledWith('Acme Single');
     });
   });
 

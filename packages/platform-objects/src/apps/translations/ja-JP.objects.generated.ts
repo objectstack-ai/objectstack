@@ -930,7 +930,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "親ビジネスユニット",
-        help: "組織ツリーの自己参照。null = テナントのルート。"
+        help: "組織ツリーの自己参照。null = テナントのルート。子ユニットが残っているユニットは、子ユニットを別の親に付け替えるか削除するまで削除できません。"
       },
       timezone: {
         label: "タイムゾーン",
@@ -1530,15 +1530,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           redirectURLs: {
             label: "リダイレクト URL",
-            helpText: "1 行につき 1 つの URL。本番環境では https:// が必須です。"
+            helpText: "1 行につき 1 つの URL。Web アプリケーションでは、localhost やその他のループバックアドレス以外のホストで https:// を使用する必要があります。ネイティブアプリケーションでは、ホストが厳密に localhost、127.0.0.1、[::1] のいずれかであれば http:// も使用できます（ポートは任意）。"
           },
           type: {
             label: "アプリケーションタイプ",
+            helpText: "デスクトップアプリやモバイルアプリ、または http://localhost にリダイレクトするローカル開発中のアプリには「ネイティブ」を選択してください。",
             options: {
               web: "Web",
-              native: "ネイティブ",
-              "user-agent-based": "ユーザーエージェント型",
-              public: "パブリック"
+              native: "ネイティブ"
             }
           }
         },

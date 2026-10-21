@@ -64,7 +64,9 @@ const ORGANIZATION_DROP = {
   table: 'sys_platform_setting',
   column: 'organization_id',
   op: { type: 'drop_column', column: 'organization_id' },
-  description: 'sys_platform_setting.organization_id: column exists in the database but not in metadata (orphaned)',
+  // The differ's `message` (`ManagedDriftEntry`), remedy sentence included: the
+  // listing above the gate reads it (#24958).
+  message: 'sys_platform_setting.organization_id: column exists in the database but not in metadata (orphaned) — "os migrate apply --allow-destructive" to drop it.',
 };
 
 /** The ceremony's two steps, as the refusal prescribes them. */

@@ -3143,7 +3143,7 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'external or introspected schema), a hop through a registry-injected system column, a list ' +
       'view bound to a provider other than `object`, and the positions other rules own: `sort` ' +
       '(`sort-field-unknown`), `searchableFields` (`searchable-field-unknown`), the `chart` ' +
-      'bindings, action names, `conditionalFormatting` predicates and `addRecord.formView`. An ' +
+      'bindings, action names and `conditionalFormatting` predicates. An ' +
       'unresolvable binding skips the whole list view on `os validate`, `os build` and `os lint`, so one ' +
       'typo yields one finding; the runtime save door refuses it once instead, as `list-view-object-unknown` ' +
       'or, for a write into a package, `list-view-object-outside-closure`.',
@@ -3559,6 +3559,28 @@ const OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION: RuleExplanation = {
     'So check the spelling against the object the providing package registers (the approval request ' +
       'object is `sys_approval_request`); if a third-party package genuinely provides the name, the ' +
       'warning is expected.',
+  ],
+};
+
+const USER_FIELD_FOREIGN_REFERENCE_EXPLANATION: RuleExplanation = {
+  rule: 'user-field-foreign-reference',
+  covers: 'why a user field cannot point at another object',
+  paragraphs: [
+    'A `user` field is a person picker: its target is fixed to the `sys_user` object by the type, ' +
+      'which is why `Field.user()` takes no target argument. Writing `reference` with any other ' +
+      'object name contradicts the type, and today nothing refuses it.',
+    'Such a field is half one thing and half another. Every reader that follows the target ' +
+      '(`$expand`, imports, seed loading, field paths) treats it as a link to the named object, ' +
+      'while every reader that branches on the type treats its values as users: the person picker ' +
+      'searches people, a `current_user` default stores the acting user\'s id, and a sharing rule over ' +
+      'the users a field holds shares the record with those ids.',
+    'A link to another object is a `lookup`: `{ type: \'lookup\', reference: \'<object>\' }`, or ' +
+      '`Field.lookup(\'<object>\', …)`. If a person was meant, drop `reference`.',
+    'It warns rather than refuses because no automatic rewrite keeps the field\'s behaviour: a `lookup` ' +
+      'takes part in the delete walk with `deleteBehavior: \'set_null\'` by default, so it would start ' +
+      'clearing the column when the target record is deleted, which a `user` field never does. Make ' +
+      'the change by hand and check that delete behaviour is what you want. Refusing the shape at ' +
+      'parse is planned for the next major.',
   ],
 };
 
@@ -4858,6 +4880,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [OBJECT_FIELD_REF_UNKNOWN_EXPLANATION.rule]: OBJECT_FIELD_REF_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
+  [USER_FIELD_FOREIGN_REFERENCE_EXPLANATION.rule]: USER_FIELD_FOREIGN_REFERENCE_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,
   [LIST_VIEW_FILTERS_IN_VIEWS_MODE_EXPLANATION.rule]: LIST_VIEW_FILTERS_IN_VIEWS_MODE_EXPLANATION,
   [LIVENESS_LEDGER_UNREADABLE_EXPLANATION.rule]: LIVENESS_LEDGER_UNREADABLE_EXPLANATION,

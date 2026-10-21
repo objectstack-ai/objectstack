@@ -515,6 +515,11 @@ resolve-at-load only).
   **11-ledger** universe) and integration-system.datasource-admin-lifecycle (same
   "unledgered" claim, plus its "always-available static catalog" wording predating the
   #9391/#9593 uniform auth floor).
+- **§9c's `sys_notification_subscription` Setup grid row is RESOLVED** — retired by
+  #24923 (maintainer ruling D on #24770): the object, its Setup nav item and its
+  translations left service-messaging, its name left the platform-object registry, and
+  the table stays in place untouched (ADR-0087 semantic entry
+  `sys-notification-subscription-retired`; ADR-0030 amended 2026-10-20).
 
 ### 9e. Blocked-item re-audit
 

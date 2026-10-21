@@ -21,7 +21,7 @@ import {
   MONGODB_DRIVER_INSTALL_COMMAND,
   MONGODB_DRIVER_PACKAGE,
 } from '../default-datasource-driver-factory.js';
-import { isUnbuiltWorkspaceFailure } from '../connect-failure-remedy.js';
+import { isUnbuiltWorkspaceFailure, missingOptionalDriverPackage } from '../connect-failure-remedy.js';
 import { MissingDriverPackageError } from '../missing-driver-package-error.js';
 // [#23184] The first load of what the drivers stand on is paid HERE, at module
 // load, and not inside the first clocked case: clocked windows measure
@@ -50,6 +50,26 @@ import '@objectstack/driver-sql';
 import '@objectstack/driver-sqlite-wasm';
 
 const factory = () => createDefaultDatasourceDriverFactory({ dev: false });
+
+/**
+ * The import error an UNBUILT optional driver package raises in this monorepo:
+ * `pnpm install` links all three packages (they are optional peers AND, for
+ * two of them, `devDependencies` of this service), so a missing build names the
+ * PATH of the absent `dist/` entry, never the bare package name. Measured on a
+ * fresh worktree after `pnpm install` and before any build, for each of the
+ * three packages and both module systems (#24937). The bare name — `Cannot find
+ * package '@objectstack/driver-…'` — is what a project WITHOUT the package
+ * sees, and that is a missing install, not an unbuilt workspace.
+ */
+function unbuiltCause(pkg: string): Error {
+  return Object.assign(
+    new Error(
+      `Cannot find module '/w/packages/services/service-datasource/node_modules/${pkg}/dist/index.mjs' `
+      + 'imported from /w/packages/services/service-datasource/dist/index.js',
+    ),
+    { code: 'ERR_MODULE_NOT_FOUND' },
+  );
+}
 
 describe('createDefaultDatasourceDriverFactory — driver id surface', () => {
   it('supports the sqlite-wasm id and its alias', () => {
@@ -439,15 +459,23 @@ describe('createDefaultDatasourceDriverFactory — the missing libSQL package is
     expect(message(notInstalled)).toContain("datasource 'default'");
   });
 
-  it('keeps the import error verbatim, so the unbuilt-workspace classifier still fires', () => {
+  it('keeps the import error verbatim, so the classifier can tell an unbuilt workspace from a missing install', () => {
     // Load-bearing: this arm re-throws a NEW Error and therefore drops the
-    // original `code`, so `isUnbuiltWorkspaceFailure` can only recognise an
-    // unbuilt/uninstalled workspace from the `Cannot find package` TEXT the
+    // original `code`, so the connect-failure classifier can only read the
+    // cause from the `Cannot find module` / `Cannot find package` TEXT the
     // message carries. Drop the interpolation and a half-built worktree silently
     // goes back to being told "Fix the datasource configuration" (#5794).
     const text = message(notInstalled);
     expect(text).toContain(notInstalled.message);
-    expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(true);
+    // A half-built worktree names the PATH of the missing `dist/` entry, and
+    // that is still the unbuilt workspace…
+    const unbuilt = message(unbuiltCause(TURSO_DRIVER_PACKAGE));
+    expect(unbuilt).toContain(unbuiltCause(TURSO_DRIVER_PACKAGE).message);
+    expect(isUnbuiltWorkspaceFailure(new Error(unbuilt))).toBe(true);
+    // …while the bare package name is the missing install this message already
+    // names, so no build advice may follow it (#24937).
+    expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(false);
+    expect(missingOptionalDriverPackage(new Error(text))).toBe(TURSO_DRIVER_PACKAGE);
   });
 
   it('names no escape hatch and no host-boot knob — one fix, stated once', () => {
@@ -621,16 +649,23 @@ describe('createDefaultDatasourceDriverFactory — the missing WASM SQLite packa
     expect(message(cause)).toContain("datasource 'default'");
   });
 
-  it('keeps the import error verbatim, so the unbuilt-workspace classifier still fires', () => {
+  it('keeps the import error verbatim, so the classifier can tell an unbuilt workspace from a missing install', () => {
     // Load-bearing exactly as in the turso arm: this re-throw drops the original
-    // `code`, so `isUnbuiltWorkspaceFailure` can only recognise a half-built
-    // checkout from the `Cannot find package` TEXT carried here. That case is
-    // the COMMON one for this package — `@objectstack/runtime` and the CLI both
-    // depend on it outright, so a reader who hits this is usually unbuilt rather
-    // than uninstalled, and must not be told to install what they already have.
+    // `code`, so the classifier can only read the cause from the TEXT carried
+    // here. The unbuilt case is the COMMON one for this package —
+    // `@objectstack/runtime` and the CLI both depend on it outright, so a
+    // reader who hits this is usually unbuilt rather than uninstalled, and must
+    // not be told to install what they already have. That reader's import
+    // error names the PATH of the missing `dist/` entry (measured, #24937)…
+    const unbuilt = message(unbuiltCause(SQLITE_WASM_DRIVER_PACKAGE));
+    expect(unbuilt).toContain(unbuiltCause(SQLITE_WASM_DRIVER_PACKAGE).message);
+    expect(isUnbuiltWorkspaceFailure(new Error(unbuilt))).toBe(true);
+    // …and the bare package name is a missing install, which this message
+    // already names (#24937).
     const text = message(cause);
     expect(text).toContain(cause.message);
-    expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(true);
+    expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(false);
+    expect(missingOptionalDriverPackage(new Error(text))).toBe(SQLITE_WASM_DRIVER_PACKAGE);
   });
 
   it('names no escape hatch and no host-boot knob — one fix, stated once', () => {
@@ -686,10 +721,17 @@ describe('createDefaultDatasourceDriverFactory — the missing MongoDB package i
     expect(message(cause)).toContain("datasource 'default'");
   });
 
-  it('keeps the import error verbatim, so the unbuilt-workspace classifier still fires', () => {
+  it('keeps the import error verbatim, so the classifier can tell an unbuilt workspace from a missing install', () => {
+    const unbuilt = message(unbuiltCause(MONGODB_DRIVER_PACKAGE));
+    expect(unbuilt).toContain(unbuiltCause(MONGODB_DRIVER_PACKAGE).message);
+    expect(isUnbuiltWorkspaceFailure(new Error(unbuilt))).toBe(true);
+    // The bare name is reachable from a project installed with
+    // `--omit=optional`, where `@objectstack/runtime` skips this package: a
+    // missing install, which this message already names (#24937).
     const text = message(cause);
     expect(text).toContain(cause.message);
-    expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(true);
+    expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(false);
+    expect(missingOptionalDriverPackage(new Error(text))).toBe(MONGODB_DRIVER_PACKAGE);
   });
 
   it('names no escape hatch and no host-boot knob — one fix, stated once', () => {
@@ -738,6 +780,21 @@ describe('createDefaultDatasourceDriverFactory — all three optional-driver arm
   });
 
   it('every arm is classified as an unbuilt workspace when that is the real cause', () => {
-    for (const text of messages) expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(true);
+    // The real cause in a half-built worktree is the PATH of the missing
+    // `dist/` entry (#24937), whichever arm raised it.
+    const unbuilt = [
+      missingTursoDriverMessage({ datasource: 'd', cause: unbuiltCause(TURSO_DRIVER_PACKAGE) }),
+      missingSqliteWasmDriverMessage({ datasource: 'd', cause: unbuiltCause(SQLITE_WASM_DRIVER_PACKAGE) }),
+      missingMongodbDriverMessage({ datasource: 'd', cause: unbuiltCause(MONGODB_DRIVER_PACKAGE) }),
+    ];
+    for (const text of unbuilt) expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(true);
+  });
+
+  it("every arm's bare package name is classified as that package's missing install (#24937)", () => {
+    const packages = [TURSO_DRIVER_PACKAGE, SQLITE_WASM_DRIVER_PACKAGE, MONGODB_DRIVER_PACKAGE];
+    messages.forEach((text, i) => {
+      expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(false);
+      expect(missingOptionalDriverPackage(new Error(text))).toBe(packages[i]);
+    });
   });
 });

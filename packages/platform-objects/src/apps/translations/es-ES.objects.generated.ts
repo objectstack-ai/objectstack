@@ -930,7 +930,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "Unidad de negocio principal",
-        help: "Autorreferencia para el árbol organizativo. Null = raíz del tenant."
+        help: "Autorreferencia para el árbol organizativo. Null = raíz del tenant. Una unidad que aún tiene unidades hijas no se puede eliminar hasta que se reasignen a otro padre o se eliminen."
       },
       timezone: {
         label: "Zona horaria",
@@ -1530,15 +1530,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           redirectURLs: {
             label: "URLs de redirección",
-            helpText: "Una URL por línea. Debe usar https:// en producción."
+            helpText: "Una URL por línea. Las aplicaciones web necesitan https:// en un host que no sea localhost ni otra dirección de loopback. Las aplicaciones nativas también pueden usar http:// exactamente en localhost, 127.0.0.1 o [::1], en cualquier puerto."
           },
           type: {
             label: "Tipo de aplicación",
+            helpText: "Elija Nativa para una aplicación de escritorio o móvil, o para una aplicación en desarrollo local que redirige a http://localhost.",
             options: {
               web: "Web",
-              native: "Nativa",
-              "user-agent-based": "Basada en user-agent",
-              public: "Pública"
+              native: "Nativa"
             }
           }
         },
