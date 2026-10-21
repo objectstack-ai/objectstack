@@ -471,6 +471,117 @@ describe('TursoConfigSchema refuses what the turso driver refuses', () => {
     });
   });
 
+  // #25020 — a declared encryption nothing applies. The driver reads and writes
+  // a local or replica file through better-sqlite3, which has no encryption
+  // codec, so a datasource that declared `encryptionKey` was written in
+  // plaintext that any SQLite reader opened without the key. Both doors now
+  // refuse it, on `encryptionKey`, in one message per mode. A remote mode is
+  // not judged by this arm.
+  describe('a non-empty `encryptionKey` in a local or replica mode — refused on `encryptionKey`', () => {
+    const LOCAL_FIRST_SENTENCE =
+      "`encryptionKey` asks for this datasource's database file to be encrypted, but this datasource is a local "
+      + 'database, which runs every read and write through a local SQLite engine that has no encryption codec: '
+      + 'nothing would encrypt the file, so it would be written in plaintext that any SQLite reader opens without '
+      + 'the key — the turso driver refuses this configuration when it starts.';
+    const REPLICA_FIRST_SENTENCE =
+      "`encryptionKey` asks for this datasource's database file to be encrypted, but this datasource is an "
+      + 'embedded replica, which runs every read and write through a local SQLite engine that has no encryption '
+      + 'codec (the sync client shares that one file, and a file it encrypted could not be opened by that '
+      + 'engine): nothing would encrypt the file, so it would be written in plaintext that any SQLite reader '
+      + 'opens without the key — the turso driver refuses this configuration when it starts.';
+    const WAY_OUT = 'Drop `encryptionKey`, and encrypt the disk or volume the file lives on instead';
+    const KEY = 'test-key-25020';
+
+    it('a local database — a `file:` url in any case, `:memory:`, a forced local mode', () => {
+      for (const config of [
+        { url: 'file:./data/app.db', encryptionKey: KEY },
+        { url: 'FILE:./data/app.db', encryptionKey: KEY },
+        { url: ' file:./data/app.db', encryptionKey: KEY },
+        { url: ':memory:', encryptionKey: KEY },
+        { url: 'file:./data/app.db', mode: 'local', encryptionKey: KEY },
+        { url: 'file:./data/app.db', mode: 'local', syncUrl: '', encryptionKey: KEY },
+      ]) {
+        const { path, message } = refusal(config);
+        expect(path, JSON.stringify(config)).toBe('encryptionKey');
+        expect(message.startsWith(LOCAL_FIRST_SENTENCE), message).toBe(true);
+        expect(message).toContain(WAY_OUT);
+      }
+    });
+
+    it('an embedded replica — selected by `syncUrl` or forced, whatever it syncs from', () => {
+      for (const config of [
+        { url: 'file:./data/replica.db', syncUrl: 'libsql://db.turso.io', encryptionKey: KEY },
+        { url: 'file:./data/replica.db', syncUrl: 'libsql://db.turso.io', sync: { onConnect: false }, encryptionKey: KEY },
+        { url: 'file:./data/replica.db', syncUrl: 'wss://db.turso.io', timeoutMs: 5000, encryptionKey: KEY },
+        { url: 'file:./data/replica.db', mode: 'replica', syncUrl: 'libsql://db.turso.io', encryptionKey: KEY },
+      ]) {
+        const { path, message } = refusal(config);
+        expect(path, JSON.stringify(config)).toBe('encryptionKey');
+        expect(message.startsWith(REPLICA_FIRST_SENTENCE), message).toBe(true);
+        expect(message).toContain(WAY_OUT);
+      }
+    });
+
+    it('never echoes the key or either url', () => {
+      const { message } = refusal({
+        url: 'file:./private-dir/replica.db',
+        syncUrl: 'libsql://private-host.turso.io',
+        encryptionKey: 'private-key-value',
+      });
+      expect(message).not.toContain('private-dir');
+      expect(message).not.toContain('private-host');
+      expect(message).not.toContain('private-key-value');
+    });
+
+    it('comes last: a url, a forced mode or a lone `sync` another refusal takes keeps that refusal', () => {
+      for (const [config, onKey] of [
+        [{ url: './data/app.db', encryptionKey: KEY }, 'url'],
+        [{ url: 'libsql://db.turso.io', syncUrl: 'libsql://db.turso.io', encryptionKey: KEY }, 'url'],
+        [{ url: ':memory:', syncUrl: 'libsql://db.turso.io', encryptionKey: KEY }, 'url'],
+        [{ url: 'file:./data/replica.db', mode: 'replica', encryptionKey: KEY }, 'mode'],
+        [{ url: 'file:./data/app.db', mode: 'local', syncUrl: 'libsql://db.turso.io', encryptionKey: KEY }, 'mode'],
+      ] as const) {
+        const { path } = refusal(config);
+        expect(path, JSON.stringify(config)).toBe(onKey);
+      }
+      // A lone `sync` is the refinement's own first issue; this arm stands beside it, second.
+      const result = TursoConfigSchema.safeParse({ url: 'file:./data/app.db', sync: { intervalSeconds: 60 }, encryptionKey: KEY });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.map((i) => i.path.join('.'))).toEqual(['sync', 'encryptionKey']);
+    });
+
+    it('reaches both authoring doors: `DatasourceSchema` (re-pathed under `config`) and `validateDriverConfig`', () => {
+      const config = { url: 'file:./data/app.db', encryptionKey: KEY };
+      const datasource = DatasourceSchema.safeParse({ name: 'edge', driver: 'turso', config });
+      expect(datasource.success).toBe(false);
+      const issue = datasource.error!.issues.find((i) => i.path.join('.') === 'config.encryptionKey');
+      expect(issue, JSON.stringify(datasource.error!.issues)).toBeDefined();
+      expect(issue!.message.startsWith(LOCAL_FIRST_SENTENCE)).toBe(true);
+
+      const verdict = validateDriverConfig('turso', config);
+      expect(verdict.known).toBe(true);
+      expect(verdict.known && verdict.issues.map((i) => i.path.join('.'))).toEqual(['encryptionKey']);
+    });
+
+    it('controls: an empty `encryptionKey` is unset, and a local or replica config without one stays accepted', () => {
+      for (const config of [
+        { url: 'file:./data/app.db', encryptionKey: '' },
+        { url: 'file:./data/replica.db', syncUrl: 'libsql://db.turso.io', encryptionKey: '' },
+        { url: 'file:./data/app.db' },
+        { url: 'file:./data/replica.db', syncUrl: 'libsql://db.turso.io' },
+      ]) {
+        const result = TursoConfigSchema.safeParse(config);
+        expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      }
+    });
+
+    it('the describe no longer promises an encrypted file', () => {
+      const description = TursoConfigSchema.shape.encryptionKey.description ?? '';
+      expect(description).not.toMatch(/AES-256/);
+      expect(description).toContain('refused for a local or replica datasource');
+    });
+  });
+
   it('the pre-existing `sync`-without-`syncUrl` refusal is unchanged, and stands beside a transport refusal', () => {
     const result = TursoConfigSchema.safeParse({ url: './data/app.db', sync: { intervalSeconds: 60 } });
     expect(result.success).toBe(false);
