@@ -35,6 +35,10 @@
  * late-manifest bridge (a marketplace install, on any shape) copy the package's
  * objects, so they were already right and must stay right.
  *
+ * The same split showed the other way round for a DISABLED package on the
+ * shape that copies: the copy outlives the disable, so the bridge listed and
+ * described both objects while `GET /meta/object` listed neither.
+ *
  * ## The fix, and where these pins sit
  *
  * The bridge reads the protocol's MERGED listing (`getMetaItems`), the read
@@ -308,6 +312,39 @@ for (const { shape, environmentId } of SHAPES) {
         });
     }
 }
+
+describe('[#25120] a DISABLED package\'s objects: the bridge omits them as GET /meta/object does', () => {
+    // No `environmentId`, so the boot bridge HAS copied both objects into the
+    // `metadata` service: the copy outlives the disable, and the bridge used to
+    // list and describe both while REST listed neither.
+    const pkg = packageOf('qa_off');
+    const mcp = recordingMcp();
+    let booted: Booted | undefined;
+    let dispatcher: HttpDispatcher;
+
+    beforeAll(async () => {
+        booted = await bootKernel(undefined, 'boot', pkg, mcp);
+        expect((booted.engine as any).registry.disablePackage('com.qa.qa_off'), 'precondition: disabled').toBeTruthy();
+        expect(
+            await (booted.kernel.getService('metadata') as any).getObject(pkg.open),
+            'precondition: the metadata service still holds its copy',
+        ).toBeTruthy();
+        dispatcher = new HttpDispatcher(booted.kernel as any, undefined, { enforceProjectMembership: false });
+    }, 60_000);
+    afterAll(async () => {
+        await shutdown(booted);
+    }, 60_000);
+
+    it('neither listed nor described', async () => {
+        const bridge = await bridgeFor(dispatcher, mcp);
+        const listed = nonSystem((await bridge.listObjectsDiagnosed()).objects.map((o: any) => o.name));
+
+        expect(await restObjectNames(dispatcher), 'precondition: REST omits them').not.toContain(pkg.open);
+        expect(listed).not.toContain(pkg.open);
+        expect(listed).not.toContain(pkg.gated);
+        expect(await bridge.describeObject(pkg.open)).toBeNull();
+    });
+});
 
 describe('[#25120] two environments behind one host: each bridge reads its own environment\'s merged view', () => {
     const pkgA = packageOf('qa_a');
