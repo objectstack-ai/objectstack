@@ -482,3 +482,33 @@ describe('[#22726] P2 — the preview appends the same hits to the row\'s `warni
     ]);
   });
 });
+
+describe('[#24782] an unevaluable advisory rule: the write succeeds, and the log says so once', () => {
+  beforeEach(async () => {
+    await boot();
+    engine.registry.registerObject({
+      name: 'adv_unevaluable',
+      label: 'Probe',
+      fields: { title: { name: 'title', label: 'Title', type: 'text' } },
+      validations: [{
+        type: 'script' as const,
+        name: 'qa_unevaluable_warn',
+        severity: 'warning' as const,
+        message: 'x',
+        condition: 'int(record.title) > 1',
+      }],
+    } as never, 'com.objectstack.test.24782');
+  });
+
+  it('createData stores the row, answers no `warnings`, and logs one advisory line', async () => {
+    const res: any = await protocol.createData({ object: 'adv_unevaluable', data: { title: 'abc' } });
+
+    expect(storeFor('adv_unevaluable').get(res.id)).toMatchObject({ title: 'abc' });
+    // #22726: an unevaluable rule has no verdict, so it is not a hit.
+    expect(Object.keys(res)).not.toContain('warnings');
+    const ruleLines = warns.filter((l) => l.includes('qa_unevaluable_warn'));
+    expect(ruleLines).toHaveLength(1);
+    expect(ruleLines[0]).toMatch(/^Validation rule 'qa_unevaluable_warn' \(warning\): the rule could not be evaluated \(.+\) — write proceeded/);
+    expect(ruleLines[0]).not.toMatch(/write rejected|fails closed/);
+  });
+});
