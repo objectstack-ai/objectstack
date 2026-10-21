@@ -564,8 +564,8 @@ describe('every refusal site in defineStack carries the record — census, both 
     });
   }
 
-  it('the census reaches every code defineStack refuses with: eight distinct codes', () => {
-    expect(new Set(rows.map((r) => r.code)).size).toBe(8);
+  it('the census reaches every code defineStack refuses with: nine distinct codes', () => {
+    expect(new Set(rows.map((r) => r.code)).size).toBe(9);
   });
 });
 
