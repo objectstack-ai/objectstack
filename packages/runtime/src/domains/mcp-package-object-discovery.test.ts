@@ -39,6 +39,16 @@
  * shape that copies: the copy outlives the disable, so the bridge listed and
  * described both objects while `GET /meta/object` listed neither.
  *
+ * A disabled package's object is refused by the data plane `404
+ * OBJECT_PACKAGE_DISABLED` on every REST route, and on five of `callData`'s six
+ * arms. The sixth, `aggregate`, asks the engine and never the protocol, and the
+ * engine serves a disabled package's objects: `aggregate_records` served the
+ * package's exposed object on every shape, and once the gate read the protocol
+ * (which refuses the by-name read of such an object) its `apiEnabled: false`
+ * object too, where the copy had refused it `OBJECT_API_DISABLED`. The gate
+ * now refuses that object itself, with the protocol's own error, so every verb
+ * answers what REST answers.
+ *
  * ## The fix, and where these pins sit
  *
  * The bridge reads the protocol's MERGED listing (`getMetaItems`), the read
@@ -61,7 +71,9 @@
  * `init()` (during the boot, the way capability plugins register their
  * objects) or after the boot with `{ source: 'marketplace' }` (the way
  * marketplace install registers a package). The one seam not real is the MCP
- * service, which records the bridge it is handed.
+ * service, which records the bridge it is handed. REST's answer for a disabled
+ * package's objects is read off a `RestServer` served over the same kernel's
+ * protocol.
  *
  * The negative control (red with the fix ablated) is a one-time ablation,
  * cited in the PR, not a permanent case.
@@ -76,6 +88,7 @@ import type { IMetadataService } from '@objectstack/spec/contracts';
 import { MetadataPlugin } from '@objectstack/metadata';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const CALLER = { userId: 'u_mcp', isSystem: false, positions: [], permissions: [], systemPermissions: [] };
@@ -320,38 +333,119 @@ for (const { shape, environmentId } of SHAPES) {
     }
 }
 
-describe('[#25120] a DISABLED package\'s objects: the bridge omits them as GET /meta/object does', () => {
-    // No `environmentId`, so the boot bridge HAS copied both objects into the
-    // `metadata` service: the copy outlives the disable, and the bridge used to
-    // list and describe both while REST listed neither.
-    const pkg = packageOf('qa_off');
-    const mcp = recordingMcp();
-    let booted: Booted | undefined;
-    let dispatcher: HttpDispatcher;
+/** The refusal the data plane answers an object of a disabled package (`@objectstack/metadata-protocol`). */
+const PACKAGE_DISABLED = { code: 'OBJECT_PACKAGE_DISABLED', status: 404 } as const;
 
-    beforeAll(async () => {
-        booted = await bootKernel(undefined, 'boot', pkg, mcp);
-        expect((booted.engine as any).registry.disablePackage('com.qa.qa_off'), 'precondition: disabled').toBeTruthy();
-        expect(
-            await booted.kernel.getService<IMetadataService>('metadata').getObject(pkg.open),
-            'precondition: the metadata service still holds its copy',
-        ).toBeTruthy();
-        dispatcher = new HttpDispatcher(booted.kernel as any, undefined, { enforceProjectMembership: false });
-    }, 60_000);
-    afterAll(async () => {
-        await shutdown(booted);
-    }, 60_000);
+/**
+ * What `RestServer` answers on each of its `/data` record routes for `object`,
+ * served over this kernel's own protocol (the request `plugin-hono-server`
+ * hands a route handler, as `data-write-request-gate.test.ts` drives it).
+ * REST has no aggregate route, so the five routes are its whole data face.
+ */
+async function restDataAnswers(kernel: ObjectKernel, object: string): Promise<Array<{ route: string; status: unknown; code: unknown }>> {
+    const noop = () => {};
+    const server = { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
+    const rest: any = new RestServer(server as any, kernel.getService('protocol') as any, { api: { requireAuth: false } } as any);
+    rest.resolveExecCtx = async () => ({ ...CALLER });
+    rest.registerRoutes();
+    const data = '/api/v1/data';
+    const routes: ReadonlyArray<readonly [method: string, path: string, params: Record<string, string>, body: unknown]> = [
+        ['GET', `${data}/:object`, { object }, undefined],
+        ['GET', `${data}/:object/:id`, { object, id: 'r_any' }, undefined],
+        ['POST', `${data}/:object/query`, { object }, {}],
+        ['POST', `${data}/:object`, { object }, { name: 'written' }],
+        ['PATCH', `${data}/:object/:id`, { object, id: 'r_any' }, { name: 'written' }],
+        ['DELETE', `${data}/:object/:id`, { object, id: 'r_any' }, undefined],
+    ];
+    const answers: Array<{ route: string; status: unknown; code: unknown }> = [];
+    for (const [method, path, params, body] of routes) {
+        const route = rest.getRoutes().find((r: any) => r.method === method && r.path === path);
+        expect(route, `precondition: RestServer registers ${method} ${path}`).toBeTruthy();
+        const res: any = { statusCode: 200, body: undefined };
+        res.status = (code: number) => { res.statusCode = code; return res; };
+        res.json = (out: unknown) => { res.body = out; return res; };
+        res.header = () => res;
+        res.setHeader = noop;
+        res.send = () => res;
+        res.end = () => res;
+        await route.handler({ method, path, params, headers: { 'content-type': 'application/json' }, query: {}, body }, res);
+        const out = res.body;
+        answers.push({
+            route: `${method} ${path}`,
+            status: res.statusCode,
+            code: out?.error && typeof out.error === 'object' ? out.error.code : out?.code,
+        });
+    }
+    return answers;
+}
 
-    it('neither listed nor described', async () => {
-        const bridge = await bridgeFor(dispatcher, mcp);
-        const listed = nonSystem((await bridge.listObjectsDiagnosed()).objects.map((o: any) => o.name));
+for (const { shape, environmentId } of SHAPES) {
+    describe(`[#25120] a DISABLED package's objects — ${shape}: omitted as GET /meta/object omits them, refused as REST refuses them`, () => {
+        const pkg = packageOf('qa_off');
+        const mcp = recordingMcp();
+        let booted: Booted | undefined;
+        let dispatcher: HttpDispatcher;
 
-        expect(await restObjectNames(dispatcher), 'precondition: REST omits them').not.toContain(pkg.open);
-        expect(listed).not.toContain(pkg.open);
-        expect(listed).not.toContain(pkg.gated);
-        expect(await bridge.describeObject(pkg.open)).toBeNull();
+        beforeAll(async () => {
+            booted = await bootKernel(environmentId, 'boot', pkg, mcp);
+            expect((booted.engine as any).registry.disablePackage('com.qa.qa_off'), 'precondition: disabled').toBeTruthy();
+            if (environmentId === undefined) {
+                // No `environmentId`, so the boot bridge HAS copied both objects
+                // into the `metadata` service: the copy outlives the disable, so
+                // the bridge used to list and describe both while REST listed
+                // neither, and the gate judged the copy's declaration.
+                for (const name of [pkg.open, pkg.gated]) {
+                    expect(
+                        await booted.kernel.getService<IMetadataService>('metadata').getObject(name),
+                        `precondition: the metadata service still holds ${name}'s copy`,
+                    ).toBeTruthy();
+                }
+            }
+            dispatcher = new HttpDispatcher(booted.kernel as any, undefined, { enforceProjectMembership: false });
+        }, 60_000);
+        afterAll(async () => {
+            vi.restoreAllMocks();
+            await shutdown(booted);
+        }, 60_000);
+
+        it('neither listed nor described', async () => {
+            const bridge = await bridgeFor(dispatcher, mcp);
+            const listed = nonSystem((await bridge.listObjectsDiagnosed()).objects.map((o: any) => o.name));
+
+            expect(await restObjectNames(dispatcher), 'precondition: REST omits them').not.toContain(pkg.open);
+            expect(listed).not.toContain(pkg.open);
+            expect(listed).not.toContain(pkg.gated);
+            expect(await bridge.describeObject(pkg.open)).toBeNull();
+        });
+
+        it('REST answers both objects 404 OBJECT_PACKAGE_DISABLED on every /data record route: the answer the rows below give', async () => {
+            for (const object of [pkg.gated, pkg.open]) {
+                for (const answer of await restDataAnswers(booted!.kernel, object)) {
+                    expect(answer, `${answer.route} on ${object}`).toEqual({ route: answer.route, ...PACKAGE_DISABLED });
+                }
+            }
+        });
+
+        // The object declared `apiEnabled: false`, and the exposed one: a
+        // disabled package's object is refused at the gate whatever it
+        // declares, `aggregate_records` included (its `callData` arm asks the
+        // engine, never the protocol that refuses it on the other five).
+        for (const [declared, object] of [['apiEnabled: false', pkg.gated], ['exposed', pkg.open]] as const) {
+            for (const [tool, call] of DATA_VERBS) {
+                it(`${tool} refuses the ${declared} object — 404 OBJECT_PACKAGE_DISABLED, refused at the gate, the store never asked`, async () => {
+                    const bridge = await bridgeFor(dispatcher, mcp);
+                    const spies = storeSpies(booted!.kernel, booted!.engine);
+                    try {
+                        expect(await outcome(() => call(bridge, object))).toEqual(PACKAGE_DISABLED);
+                        for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+                    } finally {
+                        for (const spy of spies) spy.mockRestore();
+                    }
+                });
+            }
+        }
     });
-});
+}
 
 describe('[#25120] two environments behind one host: each bridge reads its own environment\'s merged view', () => {
     const pkgA = packageOf('qa_a');
