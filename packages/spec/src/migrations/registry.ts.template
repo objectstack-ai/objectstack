@@ -2900,6 +2900,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`try-catch-and-retry-policy-undeclared-keys-refused`.',
   },
   {
+    id: 'turso-config-encryption-key-retired',
+    order: 107,
+    text:
+      'It also retires `encryptionKey` from the turso datasource config (ADR-0049 enforce-or-remove). '
+      + 'The key promised an AES-256 key for the local database file and was honoured in no mode: the '
+      + 'local engine has no encryption codec, so it was already refused beside a local url, and on a '
+      + 'remote url the driver parsed it and never handed it on. It is a `retiredKey()` tombstone on '
+      + '`TursoConfigSchema`, a `z.never()` tombstone on `@objectstack/driver-turso`\'s mirror, and a '
+      + 'refusal in every mode in `new TursoDriver()`. The D2 conversion '
+      + '`turso-config-encryption-key-removed` strips it only where that changes nothing (an unset value, '
+      + 'or a remote url), and leaves a key beside a local url for the author; its D3 record is the '
+      + 'semantic entry `turso-config-encryption-key-retired`.',
+  },
+  {
     id: 'ui-action-group-menu-member-params-array-only',
     order: 83,
     text:

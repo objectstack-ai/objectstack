@@ -350,8 +350,8 @@ describe('passthrough secret redaction — the nested spellings the key-name scr
   });
 
   it('drops the binder-slotless client secrets too — proxy, TLS key material, AWS session token', () => {
-    // Still WRITABLE (the binder has exactly one secret slot — the turso-
-    // `encryptionKey` posture), but never SERVED: each is honoured (or, for
+    // Still WRITABLE (the binder has exactly one secret slot), but never
+    // SERVED: each is honoured (or, for
     // AWS_SESSION_TOKEN, refused loudly) by mongodb@7.5.0, so serving it back
     // is a leak under any boundary.
     const { config, redactedKeys } = redactDatasourceConfig('mongodb', {

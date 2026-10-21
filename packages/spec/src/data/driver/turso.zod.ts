@@ -109,22 +109,13 @@ export type TursoTransportMode = z.input<typeof TursoTransportModeSchema>;
 //    embedded replica, syncing with the remote on connect and on the interval
 //    while its sync-enabled check answered true. Authoring and the constructor
 //    now refuse it together, in this arm's words;
-//  - a non-empty `encryptionKey` in a local or replica mode (#25020): the
-//    driver runs every read and write of the file through better-sqlite3,
-//    which has no encryption codec (`PRAGMA key` is a silent no-op there), so
-//    the key encrypted nothing and the file was written in plaintext that any
-//    SQLite reader opened without it. An embedded replica is no different:
-//    only its sync client is handed the key, and a file that client encrypted
-//    is one better-sqlite3 cannot open. Authoring and the constructor now
-//    refuse it together, in this arm's words, last among the local-engine
-//    refusals;
-//  - the same key beside a `file:` url or `:memory:` under a forced
-//    `mode: 'remote'` (#25020, patch round 1): the key is judged by where the
-//    database lives, not by the mode. `connect()` hands that url to the
-//    libSQL client this driver builds, which is handed no key, so the file
-//    was written in plaintext all the same. Refused last in the remote arm,
-//    in its own words (one text for a file, one for an in-memory database).
-//    A remote url (`libsql://`, `https://`, `ws(s)://`) is not judged here.
+//
+// `encryptionKey` is no longer judged here. #25020 refused it on a local or
+// replica datasource and beside a `file:` url or `:memory:` under a forced
+// `mode: 'remote'`, and left a remote url, where the driver dropped it; #25050
+// retired the key outright (a `retiredKey()` tombstone on the shape below),
+// so every value is refused at the key itself, in every mode, before any of
+// these arms is reached.
 //
 // The predicates MIRROR the constructor's on `main` (`localEngineDefect`,
 // `refuseWebSocketTimeout` and `detectMode` in
@@ -180,12 +171,11 @@ interface TursoTransportKeys {
   syncUrl?: unknown;
   mode?: TursoTransportMode;
   timeoutMs?: unknown;
-  encryptionKey?: unknown;
 }
 
 /** One refusal: the key it sits on and its message. */
 interface TursoTransportIssue {
-  path: 'url' | 'syncUrl' | 'timeoutMs' | 'mode' | 'encryptionKey';
+  path: 'url' | 'syncUrl' | 'timeoutMs' | 'mode';
   message: string;
 }
 
@@ -301,26 +291,6 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
           + "`url: 'file:./data/replica.db'`. For a plain local database, drop `syncUrl` (and `sync`).",
       }];
     }
-    if (typeof cfg.encryptionKey === 'string' && cfg.encryptionKey.length > 0) {
-      // #25020. The url and the mode are coherent (every other shape met a
-      // refusal above), so what the runtime cannot honour is the KEY: the
-      // local engine has no encryption codec, so the issue sits on
-      // `encryptionKey`. An empty key is unset, as the loaders read it.
-      return [{
-        path: 'encryptionKey',
-        message:
-          `\`encryptionKey\` asks for this datasource's database file to be encrypted, but this datasource is ${arm}, `
-          + 'which runs every read and write through a local SQLite engine that has no encryption codec'
-          + (mode === 'replica'
-            ? ' (the sync client shares that one file, and a file it encrypted could not be opened by that engine)'
-            : '')
-          + ': nothing would encrypt the file, so it would be written in plaintext that any SQLite reader opens '
-          + 'without the key — the turso driver refuses this configuration when it starts. Nothing in this driver '
-          + 'encrypts a local or replica file. Drop `encryptionKey`, and encrypt the disk or volume the file lives '
-          + "on instead, or keep the data in a remote Turso database, whose storage encryption is the server's to "
-          + "configure, not this key's.",
-      }];
-    }
     return [];
   }
 
@@ -349,34 +319,27 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
         + "file beside `syncUrl`: `url: 'file:./data/replica.db'`.",
     });
   }
-  if (
-    (isFileTursoUrl(url) || url === ':memory:')
-    && typeof cfg.encryptionKey === 'string' && cfg.encryptionKey.length > 0
-  ) {
-    // #25020, patch round 1. Only a FORCED remote mode reaches here with a
-    // `file:` url or `:memory:` (with no `mode`, those urls select a local
-    // engine). The key is judged by where the database lives, not by the
-    // mode: `connect()` hands that url to the libSQL client this driver
-    // builds, which is handed no key, so the issue sits on `encryptionKey`,
-    // last, like the local-engine arm's.
-    issues.push({
-      path: 'encryptionKey',
-      message: namesInMemoryTursoDatabase(url)
-        ? "`encryptionKey` asks for this datasource's database to be encrypted, but `url` names an in-memory "
-          + "database, and `mode: 'remote'` runs every read and write of it through the libSQL client this "
-          + 'driver builds, which is handed no key: there is no file for the key to encrypt, so it would change '
-          + 'nothing — the turso driver refuses this configuration when it starts. Drop `encryptionKey`.'
-        : "`encryptionKey` asks for this datasource's database file to be encrypted, but `url` is a local "
-          + "`file:` url, and `mode: 'remote'` runs every read and write of that file through the libSQL client "
-          + 'this driver builds, which is handed no key: nothing would encrypt the file, so it would be written '
-          + 'in plaintext that any SQLite reader opens without the key — the turso driver refuses this '
-          + 'configuration when it starts. Nothing in this driver encrypts a local file. Drop `encryptionKey`, '
-          + 'and encrypt the disk or volume the file lives on instead, or point `url` at a remote Turso '
-          + "database, whose storage encryption is the server's to configure, not this key's.",
-    });
-  }
   return issues;
 }
+
+/**
+ * The prescription the retired `encryptionKey` raises (#25050), at the key on
+ * the shape below and through two guidance spellings. Copied byte for byte by
+ * `@objectstack/driver-turso` (its mirror and its constructor), which cannot
+ * import it: `retiredKey()` and this module are not on the spec's published
+ * entry points.
+ *
+ * ⛔ No internal issue id in the text: it reaches Studio's datasource form and
+ * an operator's boot log.
+ */
+const TURSO_ENCRYPTION_KEY_RETIRED =
+  '`turso config.encryptionKey` was removed in @objectstack/spec 18 and @objectstack/driver-turso 18 '
+  + '(ADR-0049) — it never encrypted anything, in any mode: a local or embedded-replica file is read and '
+  + 'written through a SQLite engine that has no encryption codec, and the driver never handed the key to '
+  + 'a remote database, whose storage encryption the server configures. Delete the key. A local file that '
+  + 'must be encrypted at rest belongs on an encrypted disk or volume. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for the unset and remote-url cases; '
+  + '`--write` applies the ones it can prove, and you delete the key from a local or replica datasource by hand.';
 
 export const TursoConfigSchema = lazySchema(() => strictObject(
   {
@@ -392,8 +355,8 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
     // row is a PIN on an answer the fallback happens to get right, not a
     // gap-filler, and it keeps answering `url` if this shape ever gains a key
     // within 2 of `uri`. `turso.test.ts` pins the distinction.
-    // Case and underscore variants of a DECLARED key (`encryption_key`,
-    // `sync_url`) are deliberately absent: the unknown-key probe already
+    // Case and underscore variants of a DECLARED key (`sync_url`) are
+    // deliberately absent: the unknown-key probe already
     // normalizes those onto the declared name, so entries for them would be
     // alias rows that never fire, and two of them collided with each other on
     // one probe (`auth_token`/`authtoken`, `sync_interval`/`syncinterval`) —
@@ -418,6 +381,12 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
       jwt: INLINE_CREDENTIAL_REFUSED('jwt'),
       auth_token: INLINE_CREDENTIAL_REFUSED('auth_token'),
       authtoken: INLINE_CREDENTIAL_REFUSED('authtoken'),
+      // #25050 — `encryptionKey` is tombstoned, so it left the probe's
+      // candidate list exactly as `authToken` did above, and its case and
+      // underscore variants would get no suggestion at all. They carry the
+      // retirement's prescription directly instead.
+      encryption_key: TURSO_ENCRYPTION_KEY_RETIRED,
+      encryptionkey: TURSO_ENCRYPTION_KEY_RETIRED,
       pool:
         '`pool` is not driver config — libSQL sizes remote concurrency with `concurrency`, and '
         + "every driver's pooling block lives next to `driver` on the datasource itself.",
@@ -488,26 +457,31 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
     authToken: refusedInlineCredentialKey('authToken', 'Auth token'),
 
     /**
-     * Encrypts nothing, in any mode — and is REFUSED in a local or replica
-     * mode since #25020, and beside a `file:` url or `:memory:` under a forced
-     * `mode: 'remote'`, whose libSQL client is handed no key (see
-     * {@link tursoTransportIssues}). This key used to
-     * promise "AES-256 key for the local database file", but the driver reads
-     * and writes that file through better-sqlite3, which has no encryption
-     * codec: a local datasource that declared it was written in plaintext that
-     * any SQLite reader opened without it (measured on the driver source), and
-     * an embedded replica fared no better, because only its sync client was
-     * handed the key. The driver does not forward it to a remote database,
-     * whose storage encryption is the server's.
+     * Tombstone for the REMOVED `encryptionKey` (#25050, ADR-0049
+     * enforce-or-remove). It promised "AES-256 key for the local database
+     * file" and was honoured in no mode: the driver reads and writes a local
+     * or replica file through better-sqlite3, which has no encryption codec,
+     * so #25020 refused it there (and beside a `file:` url or `:memory:` under
+     * a forced `mode: 'remote'`); on a remote url the driver never handed it
+     * to the libSQL client, so it was parsed and dropped. A declared key the
+     * runtime honours nowhere is the removal case, so the key goes — as a
+     * tombstone, so `tsc` sees `never` at every typed authoring site and the
+     * parse refuses every value with the prescription, in every mode.
      *
-     * Still declared (removing it is a key retirement this refusal does not
-     * make) and still placeholder-free (#8336); the datasource redaction set
-     * withholds it on every read (`STILL_WRITABLE_CREDENTIAL_KEYS` in
-     * `datasource-credential-redaction.ts`).
+     * The D2 conversion `turso-config-encryption-key-removed` strips it from a
+     * stored or built datasource only where removing it changes nothing: an
+     * unset value, or a remote url the driver never handed it to. A non-empty
+     * key beside a local url is left for the author (the D3 entry
+     * `turso-config-encryption-key-retired` says why). A stored row that still
+     * carries one is withheld on every read by `RETIRED_CREDENTIAL_KEYS` in
+     * `datasource-credential-redaction.ts`: a tombstone is not a credential to
+     * the schema-derived set, but the value a legacy row holds still is.
+     *
+     * `@objectstack/driver-turso` refuses the same key in its mirror and its
+     * constructor, in these words, byte for byte
+     * (`turso-config-constructor-parity.test.ts` there).
      */
-    encryptionKey: placeholderFree(z.string(), 'encryptionKey').optional()
-      .describe("Not honoured in any mode: refused for a local or replica datasource, whose SQLite engine cannot encrypt the file, and for a file: url or :memory: under a forced remote mode, whose libSQL client is handed no key; a remote database's storage encryption is the server's, not set by this key")
-      .meta({ title: 'Encryption key', format: 'password' }),
+    encryptionKey: retiredKey(TURSO_ENCRYPTION_KEY_RETIRED),
 
     /** Max concurrent requests to the remote database (replica/remote modes). */
     concurrency: z.number().int().positive().optional()
