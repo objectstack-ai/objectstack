@@ -246,10 +246,10 @@ export default class DbOrphans extends Command {
         const doc = buildOrphanDetailExport({ plan, rawRows, producedBy: `${this.config.bin} db orphans --delete` });
         // Owner-only, and CREATED here or not written at all: the existence check
         // above runs before the boot and the prompt, so it is a pre-check, never
-        // the guarantee. `wx` makes the guarantee atomic.
+        // the guarantee. `wx` makes the guarantee atomic. Then read back rather
+        // than trusting the write: a short or unreadable file would leave the
+        // delete with no copy at all, and look like a clean run.
         writeFileSync(exportPath!, `${JSON.stringify(doc, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-        // Read back rather than trusting the write: a short or unreadable file
-        // would leave the delete with no copy at all, and look like a clean run.
         verified = exportedKeys(JSON.parse(readFileSync(exportPath!, 'utf8')) as OrphanDetailExport);
       } catch (error) {
         const message =

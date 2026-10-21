@@ -85,6 +85,11 @@ const ARTIFACT = {
       fields: { name: { type: 'text' }, ghost: { type: 'master_detail', reference: 'od_ghost', required: true } },
     },
     {
+      // A `restrict` lookup to a member: a row of it refuses that member's delete.
+      name: 'od_hold',
+      fields: { name: { type: 'text' }, member: { type: 'lookup', reference: 'od_member', deleteBehavior: 'restrict' } },
+    },
+    {
       // No required master-detail field at all: not this command's to read.
       name: 'od_ref',
       fields: { name: { type: 'text' }, campaign_ref: { type: 'lookup', reference: 'od_campaign' } },
@@ -93,6 +98,8 @@ const ARTIFACT = {
 };
 
 const MISSING_CAMPAIGN = 'Spring Promo';
+/** Every row is stamped with one organization, as a tenant's rows are: the audit probes each under its own. */
+const ORG = { organization_id: 'org_od' };
 
 let dir: string;
 let templateDb: string;
@@ -114,7 +121,7 @@ async function idsOf(dbFile: string): Promise<Record<string, string[]>> {
   const k = (driver as any).knex;
   try {
     const out: Record<string, string[]> = {};
-    for (const table of ['od_campaign', 'od_member', 'od_member_note', 'od_ghost_member', 'od_ref']) {
+    for (const table of ['od_campaign', 'od_member', 'od_member_note', 'od_ghost_member', 'od_hold', 'od_ref']) {
       out[table] = ((await k(table).select('id').orderBy('id')) as Array<{ id: string }>).map((r) => r.id);
     }
     return out;
@@ -198,13 +205,13 @@ beforeAll(async () => {
   const stack = await bootSchemaStack({ jsonOutput: false, databaseUrl: `file:${templateDb}`, projectRoot: dir });
   try {
     const ql = stack.kernel.getService('objectql') as any;
-    await seedRow(ql, 'od_campaign', { id: 'c_live', name: 'Live' });
-    await seedRow(ql, 'od_member', { id: 'm_live', name: 'kept', amount: 5, campaign: 'c_live', referrer: 'Gone Campaign' });
-    await seedRow(ql, 'od_member', { id: 'm_orphan', name: 'orphan', amount: 7, campaign: MISSING_CAMPAIGN });
-    await seedRow(ql, 'od_member_note', { id: 'n_live', body: 'kept', member: 'm_live' });
-    await seedRow(ql, 'od_member_note', { id: 'n_orphan', body: 'goes with its member', member: 'm_orphan' });
-    await seedRow(ql, 'od_ghost_member', { id: 'g_row', name: 'unknown master', ghost: 'nobody_knows' });
-    await seedRow(ql, 'od_ref', { id: 'r_row', name: 'dangling lookup', campaign_ref: 'Gone Campaign' });
+    await seedRow(ql, 'od_campaign', { ...ORG, id: 'c_live', name: 'Live' });
+    await seedRow(ql, 'od_member', { ...ORG, id: 'm_live', name: 'kept', amount: 5, campaign: 'c_live', referrer: 'Gone Campaign' });
+    await seedRow(ql, 'od_member', { ...ORG, id: 'm_orphan', name: 'orphan', amount: 7, campaign: MISSING_CAMPAIGN });
+    await seedRow(ql, 'od_member_note', { ...ORG, id: 'n_live', body: 'kept', member: 'm_live' });
+    await seedRow(ql, 'od_member_note', { ...ORG, id: 'n_orphan', body: 'goes with its member', member: 'm_orphan' });
+    await seedRow(ql, 'od_ghost_member', { ...ORG, id: 'g_row', name: 'unknown master', ghost: 'nobody_knows' });
+    await seedRow(ql, 'od_ref', { ...ORG, id: 'r_row', name: 'dangling lookup', campaign_ref: 'Gone Campaign' });
   } finally {
     await stack.shutdown();
   }
@@ -215,6 +222,7 @@ beforeAll(async () => {
     od_member: ['m_live', 'm_orphan'],
     od_member_note: ['n_live', 'n_orphan'],
     od_ghost_member: ['g_row'],
+    od_hold: [],
     od_ref: ['r_row'],
   });
 }, 180_000);
@@ -297,6 +305,7 @@ describe('[#24964] os db orphans --delete', () => {
       od_member: ['m_live'],
       od_member_note: ['n_live'],
       od_ghost_member: ['g_row'],
+      od_hold: [],
       od_ref: ['r_row'],
     });
 
@@ -336,6 +345,33 @@ describe('[#24964] os db orphans --delete', () => {
     // Refused, so nothing went.
     expect((await idsOf(c.dbFile)).od_member).toEqual(['m_live', 'm_orphan']);
     expect((await idsOf(c.dbFile)).od_member_note).toEqual(['n_live', 'n_orphan']);
+  }, CASE_TIMEOUT_MS);
+});
+
+describe('[#24964] os db orphans --delete — the delete is the engine\'s own', () => {
+  it('a restrict dependent refuses the orphan\'s delete, and nothing of its cascade is removed', async () => {
+    const c = prepareCase();
+    const exportPath = join(c.caseDir, 'export.json');
+    // A row outside the cascade that holds the orphan through a `restrict` lookup.
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: c.dbFile }, useNullAsDefault: true });
+    try {
+      await (driver as any).knex('od_hold').insert({ id: 'h_row', name: 'holds it', member: 'm_orphan' });
+    } finally {
+      await driver.disconnect();
+    }
+
+    const { payload, exitCode } = await runJson(['--delete', '--export', exportPath, '--yes', '--database-url', c.url, '--json']);
+
+    expect(exitCode).toBe(1);
+    expect(payload.deleted).toEqual([]);
+    expect(payload.failed).toEqual([expect.objectContaining({
+      object: 'od_member', recordId: 'm_orphan', code: 'DELETE_RESTRICTED',
+      remaining: [{ object: 'od_member', id: 'm_orphan' }, { object: 'od_member_note', id: 'n_orphan' }],
+    })]);
+    // One unit of work: the note its cascade reached first is back too.
+    expect(await idsOf(c.dbFile)).toMatchObject({
+      od_member: ['m_live', 'm_orphan'], od_member_note: ['n_live', 'n_orphan'], od_hold: ['h_row'],
+    });
   }, CASE_TIMEOUT_MS);
 });
 
