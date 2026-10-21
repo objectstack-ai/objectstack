@@ -998,7 +998,6 @@
     "data/TursoConfig": {
       "sites": [
         "",
-        "encryptionKey",
         "syncUrl",
         "url"
       ]
