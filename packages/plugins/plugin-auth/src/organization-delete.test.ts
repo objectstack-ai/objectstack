@@ -32,6 +32,7 @@ function makeEngine(tables: Record<string, Row[]>, owned: Array<{ object: string
   const asked: Array<{ organizationId: string; exclude: string[] }> = [];
   const matches = (row: Row, where: Row = {}): boolean =>
     Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`test double: combinator ${k} is not implemented`);
       if (v && typeof v === 'object' && Array.isArray(v.$in)) return v.$in.includes(row[k]);
       return (row[k] ?? null) === (v ?? null);
     });
