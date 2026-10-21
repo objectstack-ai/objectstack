@@ -207,9 +207,34 @@ describe('sys_organization admin actions follow the membership grade, and every 
       );
     }
     expect(await findRows(ql, 'sys_organization', { id: org.doomed.id }, 1)).toHaveLength(1);
+    // [#24948] The doomed organization was created through the door, so it owns
+    // its default team, the team member and the owner's organization-admin
+    // grant besides three members. That is its own auth structure, and the
+    // delete removes all of it: none of it is a record that refuses the delete.
+    const teamIds = (await findRows(ql, 'sys_team', { organization_id: org.doomed.id })).map((t) => t.id);
+    expect(teamIds, 'PREMISE: the door gave the organization its default team').toHaveLength(1);
+    expect(await findRows(ql, 'sys_team_member', { team_id: { $in: teamIds } })).toHaveLength(1);
     const deleted = await stack.apiAs(tokens.owner, 'POST', '/auth/organization/delete', { organizationId: org.doomed.id });
     expect(deleted.status, await deleted.clone().text()).toBe(200);
     expect(await findRows(ql, 'sys_organization', { id: org.doomed.id }, 1)).toEqual([]);
+    for (const object of ['sys_member', 'sys_team', 'sys_user_permission_set']) {
+      expect(await findRows(ql, object, { organization_id: org.doomed.id }), object).toEqual([]);
+    }
+    expect(await findRows(ql, 'sys_team_member', { team_id: { $in: teamIds } })).toEqual([]);
+    // Nothing was orphaned to NULL on the way.
+    expect(await findRows(ql, 'sys_team', { organization_id: null })).toEqual([]);
+
+    // CONTROL: the organization the grades are measured in owns a record, and
+    // the same owner's delete of it is refused with the count, changing nothing.
+    await ql.insert('showcase_category', { name: 'Reach', organization_id: org.main.id }, { context: SYSTEM_CTX });
+    const membersBefore = await findRows(ql, 'sys_member', { organization_id: org.main.id });
+    const held = await stack.apiAs(tokens.owner, 'POST', '/auth/organization/delete', { organizationId: org.main.id });
+    expect(held.status, await held.clone().text()).toBe(409);
+    const body = (await held.json()) as { code?: string; dependents?: unknown };
+    expect(body.code).toBe('DELETE_RESTRICTED');
+    expect(body.dependents).toEqual([{ object: 'showcase_category', count: 1 }]);
+    expect(await findRows(ql, 'sys_organization', { id: org.main.id }, 1)).toHaveLength(1);
+    expect(await findRows(ql, 'sys_member', { organization_id: org.main.id })).toEqual(membersBefore);
   }, 60_000);
 
   it('every api action the record serves reaches a door this composition mounts — none answers ENDPOINT_NOT_FOUND', async () => {

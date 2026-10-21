@@ -24,8 +24,13 @@ import { MessagingServicePlugin } from './messaging-service-plugin.js';
 import { NOTIFICATION_EVENT_OBJECT } from './messaging-service.js';
 
 /** Capture what the plugin hands the `manifest` service during `init()`. */
-async function collectManifest(): Promise<{ objects: Array<{ name: string }> }> {
-  let captured: { objects?: Array<{ name: string }> } | undefined;
+interface CapturedManifest {
+  objects: Array<{ name: string }>;
+  navigationContributions: Array<{ items?: Array<{ id?: string; objectName?: string }> }>;
+}
+
+async function collectManifest(): Promise<CapturedManifest> {
+  let captured: Partial<CapturedManifest> | undefined;
   const ctx = {
     logger: { info() {}, warn() {}, error() {}, debug() {} },
     registerService() {},
@@ -34,7 +39,7 @@ async function collectManifest(): Promise<{ objects: Array<{ name: string }> }> 
     // undefined and the plugin's own optional-service guards handle it.
     getService(name: string) {
       if (name === 'manifest') {
-        return { register(m: { objects?: Array<{ name: string }> }) { captured = m; } };
+        return { register(m: Partial<CapturedManifest>) { captured = m; } };
       }
       return undefined;
     },
@@ -42,7 +47,7 @@ async function collectManifest(): Promise<{ objects: Array<{ name: string }> }> 
   };
 
   await new MessagingServicePlugin().init(ctx as never);
-  return { objects: captured?.objects ?? [] };
+  return { objects: captured?.objects ?? [], navigationContributions: captured?.navigationContributions ?? [] };
 }
 
 describe('MessagingServicePlugin declares the object it writes (#4154)', () => {
@@ -66,10 +71,24 @@ describe('MessagingServicePlugin declares the object it writes (#4154)', () => {
       'sys_notification_receipt',
       'sys_notification_delivery',
       'sys_notification_preference',
-      'sys_notification_subscription',
       'sys_notification_template',
     ]) {
       expect(names).toContain(name);
     }
+  });
+
+  // ADR-0087 semantic entry `sys-notification-subscription-retired`: no reader
+  // ever expanded a subscription into recipients (`EmitInput.audience` is
+  // required), so the object is neither registered nor offered in Setup nav.
+  // The positive halves above are the vacuity control: the same capture sees
+  // the surviving siblings and the surviving nav items.
+  it('registers no sys_notification_subscription and offers no nav item for it', async () => {
+    const { objects, navigationContributions } = await collectManifest();
+    expect(objects.map((o) => o?.name)).not.toContain('sys_notification_subscription');
+
+    const items = navigationContributions.flatMap((c) => c.items ?? []);
+    expect(items.map((i) => i.objectName)).toContain('sys_notification_preference');
+    expect(items.map((i) => i.objectName)).not.toContain('sys_notification_subscription');
+    expect(items.map((i) => i.id)).not.toContain('nav_notification_subscriptions');
   });
 });

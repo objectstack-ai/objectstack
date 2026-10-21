@@ -21,6 +21,54 @@ in one major (its D14) instead of spreading them across 17.x minors. While the
 line was open, every other breaking change that landed on `main` shipped on it
 too, under the same rules.
 
+## Upgrading a database to 18.0.0
+
+An existing database moves to 18.0.0 through the **organization-ownership
+ceremony**, `os migrate organization-ownership` (ADR-0131 D10).
+
+- **A fresh install writes a birth marker.** The first boot that creates a
+  datastore from empty writes a `sys_migration` row
+  (`adr-0131-organization-ownership`) naming the ownership shape generation it
+  was born in. A fresh 18.0.0 install never needs the ceremony, under any
+  tenancy posture.
+- **A database without one is refused at boot.** A database 17.x or an 18.0
+  pre-release (`18.0.0-next.*`) created carries no birth marker, so an 18.0.0
+  server refuses it and names the ceremony command. Start 18.0.0 against it
+  once (the refused boot still creates the tables 18.0.0 adds), take a backup,
+  run `os migrate organization-ownership --out plan.json`, review the plan, run
+  `os migrate organization-ownership --apply --plan-file plan.json --backup-taken`,
+  and start the server again. The ceremony writes the same marker, verified,
+  when its post-check passes.
+- **A development boot passes `--dev`.** On a deployment served with `--dev`
+  (`os dev`, `os serve --dev`), for example a local one with no
+  `OS_AUTH_SECRET`, both ceremony commands take `--dev`, as the refusal
+  `os serve --dev` prints names them. `os dev` runs the ceremony itself for a
+  local SQLite development database, once `os build` has replaced the artifact
+  17.x compiled: with that artifact in `dist/`, its in-place upgrade refused its
+  plan and changed nothing.
+- **Walled postures boot.** `OS_TENANCY_POSTURE=group` and `isolated` (and
+  `OS_MULTI_ORG_ENABLED=true`) boot on a fresh install and on a database the
+  ceremony upgraded, under the same prerequisites as 17.x: the enterprise
+  `@objectstack/organizations` runtime and `OS_PLATFORM_OWNER_EMAIL`. The
+  18.0 pre-releases refused them; 18.0.0 does not. 18.0.0 also refuses a walled
+  boot until a membership policy is declared
+  (`OS_AUTH_MEMBERSHIP_POLICY=invite-only`, or `auto` chosen knowingly):
+  `✖ FATAL: tenancy posture 'group' is walled, but this deployment never declared a membership policy.`
+- **A production `os serve` needs an auth secret.** A production `os serve`
+  whose stack enables auth and which resolves no `OS_AUTH_SECRET` is refused
+  before any plugin starts: with no AuthPlugin, no caller can
+  authenticate and every row the boot wrote would have no owner. Set the
+  secret, or serve without the data API (`--no-server`). `os dev` and
+  `os serve --dev` use a development fallback and need none, and `os start`
+  generates an auth secret on its first run and persists it to
+  `<home>/auth-secret`.
+
+The step-by-step is [Upgrading to 18.0](/docs/upgrading#upgrading-to-180), each
+step's measured output is in the walked
+[18.0.0 upgrade checklist](/docs/releases/v18/18-0#2-upgrade-the-database), and
+every flag is in
+[`os migrate organization-ownership`](/docs/deployment/cli#os-migrate-organization-ownership).
+
 ## How a breaking stage lands on this line
 
 - **Through `next` before `latest`.** Every major is published to the `next`
@@ -55,13 +103,25 @@ too, under the same rules.
   npx skills remove objectstack-ai objectstack-api objectstack-automation \
     objectstack-data objectstack-formula objectstack-i18n objectstack-platform \
     objectstack-pm-dispatch objectstack-query objectstack-ui objectstack-upgrade -y
-  npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+  pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
   npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
   ```
 
-  `npx skills remove --all` replaces the first command when these are the only
-  skills the project has.
+  Add the package with the manager that installed the project: in a pnpm
+  project, `npm install --save-dev` fails (`npm error Cannot read properties of
+  null (reading 'edgesOut')`, measured on the [18.0.0 upgrade
+  walk](/docs/releases/v18/18-0#1-move-the-pins)). `npx skills remove --all`
+  replaces the first command when these are the only skills the project has:
+  run `npx skills list` first, because `--all` removes every installed skill
+  without asking.
 - **18.0.0 ends the prerelease.** It is the GA cut: it leaves pre mode and
-  publishes the line to `latest`. Curated notes for the line's releases are
-  compiled at release time and are not written yet; until then, the changesets
-  are the record.
+  publishes the line to `latest`.
+
+## Per-release notes
+
+Each release below is a self-contained page: what it changed, what breaks, and
+its own upgrade checklist.
+
+- **[18.0.0](/docs/releases/v18/18-0)** — current; the GA cut. Its
+  [upgrade checklist](/docs/releases/v18/18-0#upgrade-checklist) moves a 17.x
+  app and its database to 18.0.0, and was walked from 17.7.0.

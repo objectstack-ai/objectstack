@@ -82,6 +82,7 @@ predicate/schema/binding mistakes that fail silently at runtime), and `os dev --
 | `os dev [package]` | | Start development mode with hot reload |
 | `os serve [config]` | | Start the ObjectStack server with plugin auto-detection |
 | `os db clean` | | Reclaim SQLite free space with a one-time `VACUUM` (ADR-0057) |
+| `os db orphans` | | Report detail rows whose required master-detail master does not exist; delete them only with `--delete` |
 
 #### `os init`
 
@@ -423,6 +424,48 @@ os db clean --database file:./data/app.db        # explicit target
 **Options:**
 - `-d, --database <url>` — SQLite database URL/path (defaults to `$OS_DATABASE_URL`, then the per-project dev DB)
 
+#### `os db orphans`
+
+Reports the detail rows whose **required** `master_detail` master does not exist, and —
+only behind `--delete` — deletes them. **Report-only by default: without `--delete` it
+writes no row or table and creates no file.** It is never run for you; nothing on any
+boot, upgrade, migrate or lifecycle path invokes it.
+
+Such a row is written by an elevated (system-context) writer, which the write-time
+reference check exempts. Its access derives from a master that does not exist, so no
+user door reads or deletes it — an administrator's `GET` and `DELETE` answer 404 — and
+the platform's integrity audit reports it without ever rewriting it. This command is
+where an operator acts on that report.
+
+The report lists each orphan's object, record id, field and missing master id, and the
+deeper detail rows its delete removes with it (the master-detail's own cascade). It
+also names, without ever deleting them, the dangling references on those objects that
+are not a required master-detail, and counts the references whose target could not be
+checked at all: unknown is not missing, and none of those rows is listed or deleted.
+
+```bash
+os db orphans                                       # report (writes no rows)
+os db orphans --json                                # the same report, machine-readable
+os db orphans --delete --export ./orphans-backup.json
+```
+
+**Options:**
+- `--delete` — delete the listed orphans and their cascade (default off)
+- `--export <path>` — **mandatory with `--delete`**: every record the run deletes, as stored, written
+  owner-only and read back before the first delete; refuses to overwrite an existing file
+- `--max-rows <n>` — rows read per object and in total (default 100000); the report names every object it
+  could not read in full
+- `-y, --yes` — skip the confirmation prompt
+- `--database-url <url>`, `--json`
+
+`--delete` deletes only what the same run listed. Just before deleting it reads the
+report again and skips an orphan whose master now exists, and it skips one whose cascade
+now reaches a record the export does not hold. Each delete is the engine's own
+system-context delete, so a `restrict` dependent refuses it (reported as failed, with
+nothing of that orphan removed) and a `set_null` reference to a deleted row is cleared.
+A roll-up on the missing master cannot be recomputed, and the run says so. Keep the
+export until you are certain the sweep was right: it is the only copy.
+
 #### Console UI
 
 Launch the development server with the Console UI:
@@ -701,7 +744,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (49)...
+  → Running author-time rules (50)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -1204,7 +1247,7 @@ where the data lives.
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
 | `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. It upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created; a v18 server refuses to start on one until it has run. See [below](#os-migrate-organization-ownership) |
 | `os migrate activity-changed-fields` | Stamp the two read-rule columns (`changed_fields`, `milestone_key`) on the `sys_activity` rows written before they existed. Until it runs, those rows are withheld from every reader but the system, so run it at once after upgrading. No flag; idempotent |
-| `os migrate audit-mail-bodies` | Mask the mail bodies (`body_text`, `body_html`) that `sys_audit_log` and `sys_activity` copies of `sys_email` / `sys_identity_email` rows still hold in clear, written before the audit writer masked them. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-mail-bodies) |
+| `os migrate audit-mail-bodies` | Mask the mail bodies (`body_text`, `body_html`) that `sys_audit_log` and `sys_activity` copies of `sys_email` / `sys_identity_email` rows still hold in clear, written before the audit writer masked them. Covers the `archive` datasource `sys_audit_log` archives to as well. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-mail-bodies) |
 | `os migrate comment-parent-pair` | Stamp the parent pair (`object_name`, `record_id`) on the `sys_comment` rows written before it existed. Until it runs, a broad comment read past 2,000 candidate rows omits comments the reader may see, and its total agrees with the short list, so run it at once after upgrading. No flag; idempotent |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate security-catalog-overlays` | List the environment-wide permission-set and position rows (the legacy plurals `permissions` / `positions` included) stored over a name a configured package holds — the rows a v18 cold boot refuses — each with the package that holds its name; `--apply` deletes them, one history tombstone per row. Run it before the first v18 boot, with the flags and environment the deployment boots with: the platform security plugin's sets are held only where `os serve` composes it (an auth secret set, and the `auth` tier on), and the step takes `serve`'s `--preset` and `--dev` with `serve`'s meaning. Adopts nothing; exits 1 while it lists a row |
@@ -1501,9 +1544,55 @@ value.
 
 **Idempotent**: a masked body is the mask, so a second run masks nothing, and
 re-running is how an interrupted run is finished. A failed read or write exits
-`1`. The copies age out with each table's retention (14 days for activity, 90
-for the audit log, unless the deployment lengthens it); run it once after
-upgrading rather than wait for that.
+`1`. Activity copies age out with its 14-day retention. Audit-log copies do not
+age out: with no archive datasource they are retained hot, and with one they
+are moved there after 90 days and kept for seven years. Run it once after
+upgrading.
+
+**Run it with the server stopped**, or re-run it once and read 0 to mask in
+both halves. A live server's Archiver sweeps on its own schedule, and a row it
+moves between the hot run and the archive run can land in the archive
+unmasked.
+
+**The archive datasource too.** `sys_audit_log` declares
+`lifecycle.archive: { after: '90d', to: 'archive', keep: '7y' }`: past the hot
+window, the lifecycle Archiver copies its rows to the datasource named
+`archive` as they are, and deletes them hot. A copy archived before the writer
+masked still holds the body there, for up to seven years. After the hot run,
+the command reads the archive target `sys_audit_log` declares and runs the same
+mask, in the same dry-run or `--apply` mode, over that datasource. Its rows keep
+every other column, `updated_at` included. A hot copy masked first is archived
+masked, so one run covers both the copies already archived and the ones still
+to be. `sys_activity` declares no archive: its copies are only ever hot.
+
+The command connects the managed datasources the stack config declares through
+the same connect service `os serve` uses. A managed datasource nothing routes
+to is connected only with `autoConnect: true`, which is how an archive
+datasource is declared:
+
+```ts
+datasources: [
+  { name: 'archive', driver: 'sqlite', config: { filename: './data/archive.db' }, autoConnect: true },
+],
+```
+
+The `--json` document carries one `archive` entry per declared target, with a
+`status`:
+
+| `status` | Meaning | Exit |
+| :--- | :--- | :--- |
+| `examined` | Connected and masked (or counted); `report` holds the counts | `0`, or `1` on a failed read or write |
+| `none` | No datasource of that name is declared and connected on this boot, none was attempted, and no active runtime datasource row names one. That is all it checked | `0` |
+| `not-connected` | The archive was **not** examined. Either the stack config declares it and this boot did not connect it (`connection` carries the connect status and reason), or the database holds an active runtime datasource of that name (one created in Setup → Datasources), which `os serve` connects and this command does not | `1` |
+| `unknown` | Not connected, and the datasource rows could not be read | `1` |
+
+On `not-connected` for a runtime datasource, declare the archive datasource in
+the stack config's `datasources` (with `autoConnect: true`), then re-run. For a
+declared one, make it reachable from where the command runs, then re-run.
+
+An archive that a host registers in code outside the stack config (a plugin
+that publishes the driver itself) is not reached and reads `none`. To mask it,
+declare it in the stack config's `datasources` with `autoConnect: true`.
 
 #### `os migrate organization-ownership`
 

@@ -209,6 +209,15 @@ import {
   retireHeldKeyrings,
   UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS,
 } from './signing-key-read-cache.js';
+import {
+  ORGANIZATION_DELETE_PATH,
+  ORGANIZATION_DELETE_REFUSAL_CODE,
+  defaultOrganizationDeleteRefusal,
+  isDefaultOrganizationTarget,
+  organizationDeleteRefusal,
+  organizationNotEmptyBody,
+  removeOrganizationAuthStructure,
+} from './organization-delete.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -1637,6 +1646,18 @@ export class AuthManager {
    * into scope — so the map is not reachable from `ctx` at that point.
    */
   private orgRolesMap: Record<string, any> | undefined;
+  /**
+   * [#24948] The last-administrator guard's question about an organization
+   * delete (`LastAdminGuardHandle.judgeOrganizationDelete`), handed over by
+   * `AuthPlugin` once the guard is registered. Absent on a composition without
+   * the guard, where the Default Organization has no such protection to move.
+   */
+  private organizationDeleteStandingJudge?: (organizationId: string) => Promise<void>;
+
+  /** [#24948] See {@link organizationDeleteStandingJudge}. */
+  setOrganizationDeleteStandingJudge(judge: (organizationId: string) => Promise<void>): void {
+    this.organizationDeleteStandingJudge = judge;
+  }
   // ADR-0069 — cached "does any org require MFA" flag (per-org tightening).
   // Refreshed lazily with a TTL so isAuthGateActive() stays synchronous + cheap.
   private _orgMfaCache: { value: boolean; at: number } = { value: false, at: 0 };
@@ -1778,8 +1799,9 @@ export class AuthManager {
       // The deployment's product name, from the one authority every auth
       // email already reads (`getAppName()`: the `branding.workspace_name`
       // override, else the configured `appName`, else 'ObjectStack').
-      // better-auth 1.7.3 reads this key once, into its context's `appName`
-      // (unset ⇒ "Better Auth"), and reads that in exactly two places: the
+      // better-auth 1.7.12 (re-read 2026-10-21 for #25096) reads this key once,
+      // into its context's `appName` (unset ⇒ "Better Auth"), and reads that
+      // in exactly two places: the
       // issuer and label prefix of the otpauth URI that `/two-factor/enable`
       // and `/two-factor/get-totp-uri` answer. No cookie name derives from it
       // (the prefix is the literal "better-auth") and nothing stores it, so an
@@ -2037,8 +2059,8 @@ export class AuthManager {
             );
           }
           // The lifetime the token in `url` really has: better-auth mints it
-          // with `resetPasswordTokenExpiresIn || 3600` seconds (installed
-          // 1.7.3 `routes/password.mjs`) — `||`, so a configured `0` is its
+          // with `resetPasswordTokenExpiresIn || 3600` seconds (better-auth
+          // 1.7.12 `routes/password.mjs`, re-measured 2026-10-21 for #25096) — `||`, so a configured `0` is its
           // default too, and the mail must not say "0 minutes" for it.
           const ttlSec = this.config.emailAndPassword?.resetPasswordTokenExpiresIn || 60 * 60;
           // [#23343] An account an administrator created (the identity
@@ -2060,7 +2082,8 @@ export class AuthManager {
           // commit 35e94c96b — the ladder's stored rung. It matters most HERE: an
           // admin-initiated send (`admin-import-users.ts` calls
           // `requestPasswordReset` server-side) reaches this callback with NO
-          // request at all (measured on 1.7.3, #23343), so without this rung
+          // request at all (measured on 1.7.3, #23343; unchanged on 1.7.12,
+          // re-read for #25096), so without this rung
           // the user's mail carries only the deployment default. Best-effort;
           // `undefined` leaves the #14319 ladder exactly as it was.
           const storedLocale = await this.storedRecipientLocale({ id: user.id });
@@ -2422,6 +2445,16 @@ export class AuthManager {
           if (ctx?.path === '/organization/remove-member') {
             await this.assertRemoveMemberPermitted(ctx);
             // fall through — the vendor still re-decides everything it owns
+          }
+
+          // ── #24948: organization delete refuses while records remain ──
+          // Before the vendor's handler, so a refused delete writes nothing:
+          // the vendor clears the caller's active organization and deletes the
+          // members before its own `beforeDeleteOrganization` hook runs.
+          // `organization-delete.ts` carries the contract.
+          if (ctx?.path === ORGANIZATION_DELETE_PATH) {
+            await this.assertOrganizationDeletable(ctx);
+            // fall through — the vendor still authorizes and deletes
           }
 
           // ── #9714: a revoke that identifies NO record must not report ──
@@ -3020,11 +3053,20 @@ export class AuthManager {
       // Auto-includes origins from OS_CORS_ORIGIN env var so CORS and CSRF stay in sync.
       ...(() => {
         const origins: string[] = [...(this.config.trustedOrigins || [])];
-        // Sync with OS_CORS_ORIGIN env var (comma-separated)
+        // Sync with OS_CORS_ORIGIN env var (comma-separated), judged ENTRY BY
+        // ENTRY: an entry that admits every host never enters the trusted set,
+        // however the list around it is spelled. That is `*`, or a pattern whose
+        // host part is the bare `*` (`https://*`, `*://*`, `http://*:*`) —
+        // better-auth's own matcher reads each of them as every origin — the
+        // same narrow class the CORS transport refuses with credentials
+        // (`isAllHostOriginPattern`, `@objectstack/plugin-hono-server`, which
+        // this package does not depend on). `docs/HARDENING.md` § CORS governs;
+        // `@objectstack/http-conformance`'s CORS-doors pin holds the two equal.
         const corsOrigin = readEnvWithDeprecation('OS_CORS_ORIGIN', 'CORS_ORIGIN', { silent: true });
-        if (corsOrigin && corsOrigin !== '*') {
+        if (corsOrigin) {
+          const admitsEveryHost = (entry: string) => /^(?:[^:/]+:\/\/)?\*+(?::(?:\d+|\*))?$/.test(entry);
           corsOrigin.split(',').map(s => s.trim()).filter(Boolean).forEach(o => {
-            if (!origins.includes(o)) origins.push(o);
+            if (!admitsEveryHost(o) && !origins.includes(o)) origins.push(o);
           });
         }
         // When CORS allows all origins (default) and no explicit trustedOrigins,
@@ -3854,6 +3896,21 @@ export class AuthManager {
               });
             }
           },
+          // [#24948] The teams, their members and the organization-admin
+          // grants are the organization's own auth structure, and better-auth's
+          // delete leaves them behind. They go here, inside the request's
+          // transaction (`handleRequest`), after the `hooks.before` refusal has
+          // found no records left. The Default Organization is the
+          // last-administrator guard's to answer, so its structure is not
+          // touched: when that guard admits the delete, the engine's own
+          // refusal still holds while anything names it.
+          beforeDeleteOrganization: async ({ organization }: any) => {
+            const engine = this.getDataEngine();
+            const organizationId = organization?.id;
+            if (!engine || typeof organizationId !== 'string' || !organizationId) return;
+            if (await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()))) return;
+            await removeOrganizationAuthStructure(engine, organizationId);
+          },
         },
         // No mailer is wired in framework yet — log the accept URL so
         // operators / UI can fall back to copy-paste flows. Replace this
@@ -4668,8 +4725,8 @@ export class AuthManager {
     //
     // Handing better-auth no `database` makes it build its own in-memory store
     // in `getBaseAdapter`, and that store is keyed by the schema KEY while
-    // every read resolves by `modelName`. Re-measured 2026-09-11 on the
-    // installed better-auth 1.7.3, unchanged from the 1.7.2 reading it replaces
+    // every read resolves by `modelName`. Re-measured 2026-10-21 for #25096 on
+    // better-auth 1.7.12, unchanged since the 1.7.2 reading
     // (`db/adapter-base.mjs` builds the store by schema KEY;
     // `@better-auth/memory-adapter` throws on the lookup, naming the model):
     //
@@ -6453,6 +6510,14 @@ export class AuthManager {
    * gets exactly the deployment default, as before commit 35e94c96b. #14641 made the
    * SMS invite path a passer rather than an abstainer; it is no longer the
    * standing example of a caller that names nothing.
+   *
+   * The template row is read in the organization this deployment-level act
+   * resolves to — `tenancy.defaultOrgId()`, the same answer the membership
+   * reconciler binds a new user to (ADR-0093 D3): the Default Organization
+   * when no wall is requested, `null` under a requested wall, where no row is
+   * read and the built-in text is sent (`phone-sms-texts.ts`, "Which
+   * organization's row"). No tenancy service, or a failed resolution, is
+   * `null` too: the built-in text, never a blocked send.
    */
   private async renderPhoneSmsBody(
     topic: string,
@@ -6460,7 +6525,13 @@ export class AuthManager {
     storedLocale?: string,
   ): Promise<string> {
     const locale = storedLocale ?? this.smsLocale;
-    const template = await resolvePhoneSmsTemplateBody(this.getDataEngine(), topic, locale);
+    let organizationId: string | null = null;
+    try {
+      organizationId = (await this.config.getTenancy?.()?.defaultOrgId()) ?? null;
+    } catch {
+      organizationId = null;
+    }
+    const template = await resolvePhoneSmsTemplateBody(this.getDataEngine(), topic, locale, organizationId);
     return interpolatePhoneSms(template, data);
   }
 
@@ -6660,8 +6731,14 @@ export class AuthManager {
           return scimRequestScope.run({ scim: true }, runHandler);
         }
       : runHandler;
+    // [#24948] An organization delete is one unit of work on the same terms:
+    // better-auth clears the caller's active organization and deletes the
+    // members and invitations before the organization row, with no
+    // transaction, and the engine's refusal on that last row used to leave the
+    // organization standing with no owner.
     const vendorResponse =
-      endpointPath !== undefined && SESSION_ERASURE_PATHS.has(endpointPath)
+      endpointPath !== undefined &&
+      (SESSION_ERASURE_PATHS.has(endpointPath) || endpointPath === ORGANIZATION_DELETE_PATH)
         ? await this.runSubjectErasureAtomically(runRequest)
         : await runRequest();
 
@@ -6945,6 +7022,11 @@ export class AuthManager {
    * - side effects outside the datasource (a sent email, secondary-storage
    *   session state) are not transactional and are not undone by a rollback.
    *   `/admin/remove-user` sends nothing, so no path here relies on it.
+   *
+   * [#24948] `/organization/delete` runs here too, on the same terms and for
+   * the same reason: the vendor's member, invitation and organization deletes
+   * are separate adapter calls, and the teams and grants removed by
+   * `beforeDeleteOrganization` must roll back with them.
    */
   private async runSubjectErasureAtomically(
     run: () => Promise<Response>,
@@ -8021,6 +8103,94 @@ export class AuthManager {
    *    the same roles map we hand the org plugin, so this never becomes a second
    *    spelling of the authorization question.
    */
+  /**
+   * [#24948] `/organization/delete` admission: refuse 409 `DELETE_RESTRICTED`,
+   * naming every table and its row count, while the organization still owns
+   * records (`organization-delete.ts` carries the contract and the exclusion
+   * set).
+   *
+   * Only for a caller the vendor itself admits — a member whose role holds
+   * `organization: ['delete']`, asked of the vendor's own `hasPermission`, as
+   * {@link assertRemoveMemberPermitted} does — so a caller it refuses gets its
+   * refusal, and no count. Everything this cannot decide falls through to the
+   * vendor: no session, no organization id, no membership, a lookup that
+   * failed. The COUNT does not fall through: it is the guard, and a guard that
+   * could not be evaluated must not pass, so its failure propagates, and so
+   * does a failure deciding whether the target is the Default Organization.
+   * The Default Organization is asked the last-administrator guard's question
+   * first (a 403), then its own record count (the same 409), both here, before
+   * the first write.
+   */
+  private async assertOrganizationDeletable(ctx: any): Promise<void> {
+    const engine = this.getDataEngine();
+    if (!engine) return;
+    const organizationId = typeof ctx?.body?.organizationId === 'string' ? ctx.body.organizationId : '';
+    if (!organizationId) return;
+
+    let organization: any;
+    try {
+      const actor = await this.resolveActor(ctx);
+      if (!actor?.userId) return; // the vendor answers 401
+      const sys = withSystemReadContext(engine);
+      const callerRow: any = await sys.findOne('sys_member', {
+        where: { organization_id: organizationId, user_id: actor.userId },
+      });
+      if (!callerRow) return; // the vendor answers USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION
+      const { hasPermission } = await import('better-auth/plugins/organization');
+      const permitted = await hasPermission(
+        {
+          role: callerRow.role,
+          options: (this.orgRolesMap ? { roles: this.orgRolesMap } : {}) as any,
+          permissions: { organization: ['delete'] },
+          organizationId,
+        } as any,
+        ctx,
+      );
+      if (!permitted) return; // the vendor answers YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_ORGANIZATION
+      organization = await sys.findOne('sys_organization', { where: { id: organizationId } });
+      if (!organization) return; // the vendor answers 400
+    } catch {
+      // A lookup that did not complete hands the request back to the vendor,
+      // which re-reads everything it decides; the engine's own refusal still
+      // stands under the delete.
+      return;
+    }
+
+    // Which of the two refusals below applies is part of the guard, so it is
+    // decided outside the fall-through above: a lookup that fails here
+    // refuses, never hands the request to the vendor unasked.
+    const defaultOrganization = await isDefaultOrganizationTarget(
+      engine, organization, postureEnforcesWall(resolveTenancyPosture()),
+    );
+
+    // The Default Organization is asked the last-administrator guard's
+    // question first, HERE, before the vendor's first write, so its refusal
+    // leaves every member and invitation as it was on any driver, with or
+    // without transactions. The guard fails closed on a lookup it cannot
+    // complete, so this never passes for want of an answer. When it admits
+    // the delete, the record count below is asked before the vendor's first
+    // write too, leaving out only what the vendor removes (members and
+    // invitations): plugin-auth removes none of the Default Organization's
+    // structure, so its teams and grants count.
+    if (defaultOrganization && this.organizationDeleteStandingJudge) {
+      try {
+        await this.organizationDeleteStandingJudge(organizationId);
+      } catch (err) {
+        if ((err as { code?: unknown } | null)?.code !== 'PERMISSION_DENIED') throw err;
+        const { APIError } = await import('better-auth/api');
+        throw new APIError('FORBIDDEN', { message: (err as Error).message, code: 'PERMISSION_DENIED' });
+      }
+    }
+
+    const owned = defaultOrganization
+      ? await defaultOrganizationDeleteRefusal(engine, organizationId)
+      : await organizationDeleteRefusal(engine, organizationId);
+    if (owned && owned.length > 0) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError('CONFLICT', { code: ORGANIZATION_DELETE_REFUSAL_CODE, ...organizationNotEmptyBody(owned) });
+    }
+  }
+
   private async assertRemoveMemberPermitted(ctx: any): Promise<void> {
     const engine = this.getDataEngine();
     if (!engine) return;
@@ -9530,7 +9700,8 @@ export class AuthManager {
    * (plus `id`), or `undefined` when the identifier names no account.
    *
    * It asks exactly what better-auth's `/sign-in/email` credential check asks
-   * (1.7.3: `internalAdapter.findUserByEmail(email.toLowerCase())`, an
+   * (1.7.12, re-read 2026-10-21 for #25096:
+   * `internalAdapter.findUserByEmail(email.toLowerCase())`, an
    * equality match of the `email` column against the lower-cased address,
    * which is also the spelling `internalAdapter.createUser` stores), so the
    * gate, the counter, the ledger and the credential check name one account

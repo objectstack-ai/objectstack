@@ -245,48 +245,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
-  sys_notification_subscription: {
-    label: "通知订阅",
-    pluralLabel: "通知订阅",
-    description: "主体(角色/团队/用户)对通知主题的长期订阅。",
-    fields: {
-      id: {
-        label: "订阅 ID"
-      },
-      display_title: {
-        label: "Title",
-        help: "Record title: the subscribing principal and the topic (computed on read)"
-      },
-      topic: {
-        label: "主题",
-        help: "该主体订阅的通知主题。"
-      },
-      principal: {
-        label: "主体",
-        help: "订阅者选择器:'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | 邮箱地址 | 裸用户 ID。"
-      },
-      enabled: {
-        label: "启用",
-        help: "为 false 时,订阅不生效。"
-      },
-      created_at: {
-        label: "创建时间"
-      }
-    },
-    _views: {
-      all: {
-        label: "全部",
-        emptyState: {
-          title: "尚无通知订阅",
-          message: "订阅记录某个角色、团队或用户关注某个通知主题。"
-        }
-      }
-    }
-  },
   sys_notification_template: {
     label: "通知模板",
     pluralLabel: "通知模板",
-    description: "每个通知主题在各通道、各语言下发送的标题和正文。",
+    description: "每个通知主题按语言发送的邮件和短信文本。站内信从不使用这些模板。",
     fields: {
       id: {
         label: "模板 ID"
@@ -296,7 +258,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "通道",
-        help: "本模板渲染的通道 ID(email/inbox/push/…)。"
+        help: "使用本模板的通道：email 或 sms，其他值会被拒绝。站内信从不使用；站内信内容请编写邮件模板，并在通知步骤的 template 中指定它。"
       },
       locale: {
         label: "语言",
@@ -307,7 +269,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       subject: {
         label: "主题 / 标题",
-        help: "渲染为邮件主题 / 站内信标题。支持 {{ payload.x }}。"
+        help: "邮件主题；短信仅在正文为空时发送它。支持 {{ payload.x }}。"
       },
       body: {
         label: "正文",
@@ -338,8 +300,13 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "全部",
         emptyState: {
           title: "尚无通知模板",
-          message: "按主题、通道和语言添加模板；在此之前，通知会使用发送方提供的标题和正文发送。"
+          message: "按主题、通道（邮件或短信）和语言添加模板；在此之前，这些通道发送通知自带的标题和正文。站内信内容来自邮件模板：指定了邮件模板的通知会通过邮件和站内信发送该模板，短信仍使用这里的模板。"
         }
+      }
+    },
+    _validations: {
+      channel_renders_template: {
+        message: "只有 email 和 sms 通道使用通知模板，因此其他通道的模板会被拒绝：请将通道设为 email 或 sms，或删除该模板。站内信内容请编写邮件模板（email_template），并在通知步骤的 template 中指定它；邮件和站内信都会渲染它。"
       }
     }
   },

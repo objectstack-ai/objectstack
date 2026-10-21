@@ -364,9 +364,23 @@ export const SysUserDetailPage: Page = {
           // (DRY — definitions stay on the object) and filters by
           // `location: 'record_section'` so they only render here, not
           // in the global header row.
+          //
+          // The whole tab is self-service, so the whole tab carries the
+          // own-record gate. Every action it names is gated to the viewer's
+          // own record on the object (`record.id == ctx.user.id`), so on
+          // another user's record each `record:quick_actions` draws nothing
+          // and only the "your account" headings would remain — speaking to
+          // an administrator about an account that is not theirs. An
+          // item-level `visibleWhen` omits the tab header AND panel (the
+          // renderer falls back to the first visible tab); a per-node gate
+          // would leave an empty Security tab behind. Same `P` envelope and
+          // `has()` guard as the unverified-email alert above, for the same
+          // reasons: this raw `Page` literal reaches the wire verbatim, and
+          // only the `{ dialect: 'cel' }` envelope routes to CEL.
           {
             label: { en: 'Security', 'zh-CN': '安全', 'ja-JP': 'セキュリティ', 'es-ES': 'Seguridad' },
             icon: 'shield',
+            visibleWhen: P`has(record.id) && record.id == ctx.user.id`,
             children: [
               {
                 type: 'element:text',

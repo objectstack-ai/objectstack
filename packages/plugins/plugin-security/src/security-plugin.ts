@@ -260,6 +260,17 @@ interface WriteImageCheckSeam {
   evaluate(rows: readonly Record<string, unknown>[]): void;
   /** Set by the engine immediately before `evaluate` runs. */
   honoured?: boolean;
+  /**
+   * [#24822] Set by step 3.7, and only by it: `evaluate` holds every stored
+   * row's `organization_id` to the Layer 0 tenant wall's own parts, on an
+   * insert and on a single-payload update (the by-id image, and every row the
+   * predicate path matched). The engine then leaves a caller's explicit value,
+   * or an update's re-point, on the row for that verdict instead of stripping
+   * it as `readonly`. Never set on a seam that carries the business `check`
+   * alone, on a crossing platform operator's seam, or on an update whose
+   * payload is an array: none of them judges the organization.
+   */
+  judgesOrganization?: boolean;
 }
 
 /**
@@ -485,8 +496,11 @@ interface RlsFilterOptions {
    *     the walk covers that master's write is stated once, at that call site's
    *     `masterGateCoversThisWrite` bullet — not restated here;
    *   • the BULK write path does NOT, and must not: with no single id,
-   *     `assertControlledByParentWrite` returns early and nothing replaces the
-   *     floor. Reading the posture alone here would have widened bulk writes on
+   *     `assertControlledByParentWrite` judges every master the write reaches
+   *     and refuses on the first the caller may not edit, but that is a
+   *     verdict, not a row scope, so the floor stays — dropping it here would
+   *     widen the rows a member writes, a separate decision. Reading the
+   *     posture alone here would have widened bulk writes on
    *     every `controlled_by_parent` detail to "any row under a READABLE
    *     master", which no gate had authorized;
    *   • `getReadFilter` and `checkAuthoredRowWrite` do not, and need not: the
@@ -902,9 +916,25 @@ interface SecurityReportSink {
  * (#10706), so a degraded boot reports through the host too.
  */
 /**
- * [#13419 执行要点 3] The stable event name stamped on every position-name-fold
- * report — the structured half of {@link SecurityPlugin.reportNameFoldCollisions},
- * so an operator can grep one token for every ungoverned same-name grant.
+ * [#13419 执行要点 3; #24757 under 「甲」] The stable event name stamped on every
+ * position-name-fold report — the structured half of
+ * {@link SecurityPlugin.reportNameFoldCollisions}, so an operator can grep one
+ * token for every grant that exists only because a position and a permission
+ * set share a name.
+ *
+ * ## The 18.x loud half of the fold's retirement
+ *
+ * The standing ruling 「甲」 (ruling record 6292005854 on #6015) splits a
+ * narrowing that no ADR-0087 conversion can carry: 18.x ships only its loud
+ * half, and the refusal waits for 19.0. Retiring the position-name fold is
+ * such a narrowing: the platform cannot write `permissionSets` into a sealed
+ * managed position definition (ADR-0131 D6), so nothing rewrites an author's
+ * reliance on it (triage's derivation for #24757, record 6292072572). This
+ * event is that loud half's REPORTED EVENT. Every report carries the retirement
+ * as data, `removedIn: 'next_major'`, beside the fields it has always carried
+ * (`event`, `position`, `permissionSet`), which stay unchanged because a log
+ * consumer may already key on them. 19.0 removes the fold, and with it this
+ * event and its reporter (the card's 19.0 half).
  *
  * Deliberately NOT exported from this package. The maintainer ruling this
  * serves permits a warning and nothing more; adding a published symbol would
@@ -3055,7 +3085,8 @@ export class SecurityPlugin implements Plugin {
           // master gate (step 2.8, immediately below) run on the same middleware
           // pass, and 2.8's condition is a strict SUPERSET of this one: the same
           // `permissionSets.length > 0 && userId && this.ql` triple, the same
-          // single target id (`extractSingleId`, or it returns early), and one
+          // single target id (`extractSingleId`; with none, 2.8 judges every
+          // master the write reaches instead), and one
           // additional operation (`insert`, which has no pre-image and so no
           // floor to drop). Reaching this line therefore PROVES the master gate
           // will answer the same write — the maintainer's precondition, held
@@ -3214,7 +3245,9 @@ export class SecurityPlugin implements Plugin {
       // path by checking the master instead — and the master's own write
       // filter, since #7665, derives from its SELECT narrowing when no
       // write-class policy applies, so a select-only master gates its details
-      // by visibility too.
+      // by visibility too. [#25012] The same gate answers a write that
+      // addresses no single row: the masters of the rows it selects are each
+      // judged, and one the caller may not edit refuses the whole write.
       if (
         ['insert', 'update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation) &&
         permissionSets.length > 0 &&
@@ -3904,13 +3937,22 @@ export class SecurityPlugin implements Plugin {
       // Both close identically here: a SUPPLIED (non-empty) `organization_id` in
       // the write payload must satisfy the SAME Layer 0 filter the read side uses
       // (isolation active, tenant object, platform-admin posture exemption,
-      // fail-closed on a missing active org). For UPDATE this makes
-      // `organization_id` effectively immutable in non-platform user contexts: the
-      // only value that passes is the caller's active org (which — since the
-      // pre-image already scoped the target to that org — equals the row's current
-      // org), so a re-point to any OTHER tenant is denied. A bulk update carrying a
-      // cross-tenant `organization_id` change-set is caught too (the check inspects
-      // the change-set value here, and [#20013] every stored row in the engine).
+      // fail-closed on a missing active org). For UPDATE that bounds a re-point
+      // by the caller's organization scope, and [#24822] a re-point the wall
+      // admits is STORED as sent. Under `isolated` the only value that passes is
+      // the caller's active org (which, since the pre-image already scoped the
+      // target to that org, equals the row's current org), so a re-point to any
+      // OTHER tenant is denied. Under `group` a re-point to another organization
+      // of the membership set is admitted and stored there, and one outside the
+      // set is denied. On an app object's platform-injected column, the seam
+      // below declares `judgesOrganization`, so the engine's static-`readonly`
+      // strip leaves the admitted value on the row for this wall's verdict
+      // instead of taking it and keeping the row's own organization in silence.
+      // A `sys_` or platform-internal object, and an AUTHORED read-only
+      // `organization_id`, keep that strip. A bulk update carrying a
+      // cross-tenant `organization_id` change-set is caught too (the check
+      // inspects the change-set value here, and [#20013] every stored row in the
+      // engine).
       //
       // [#22278] The invariant, stated whole: wherever the wall applies to a
       // non-system UPDATE, the row's organization after the write is one the
@@ -4295,6 +4337,39 @@ export class SecurityPlugin implements Plugin {
                 if (emptiesOrganization(row)) denyOrganizationRemoval("the stored row's");
               }
             },
+            // ── [#24822 · ADR-0105 D5] The write's organization is JUDGED here ──
+            //
+            // The loop above holds a stored row's `organization_id` to the wall
+            // whenever the wall has parts, and the payload half above already
+            // refused every supplied value outside them (and, on an update,
+            // every emptied one). So the engine may leave a caller's explicit
+            // value on the row for this verdict instead of stripping it as
+            // `readonly`: on an insert, rather than storing the active
+            // organization in its place; on an update, rather than keeping the
+            // row's own organization against a re-point the wall admitted.
+            // Both replacements were silent: a 2xx, with the row in another
+            // organization than the one the wall admitted. The member says so,
+            // and the engine reads nothing else.
+            //
+            // Set ONLY where the wall's own parts are composed in (`tenantParts`
+            // non-empty). The crossing operator's seam
+            // (`operatorInsertLacksActiveOrganization` with no parts) judges no
+            // organization: its loop admits every row. The business `check`
+            // seam of step 3.6 never reaches this composition. Neither sets it,
+            // so the strip there runs as before.
+            //
+            // And only on the two operations whose stored rows this loop is
+            // handed: an insert (its rows), and an update whose payload is ONE
+            // row (the by-id image, and every row the predicate path matched,
+            // each merged with that payload). An ARRAY update payload never
+            // reaches this composition (the condition above), so it is stated
+            // again here rather than inferred: the member is the seam's own
+            // claim about what it judges, and it must stay true if that
+            // condition ever moves.
+            ...(tenantParts.length > 0 &&
+            (opCtx.operation === 'insert' || (opCtx.operation === 'update' && !Array.isArray(opCtx.data)))
+              ? { judgesOrganization: true }
+              : {}),
           };
           opCtx.postHookWriteImageCheck = writeImageCheckSeam;
           tenantWallSeamInstalled = true;
@@ -5405,6 +5480,14 @@ export class SecurityPlugin implements Plugin {
     object: string,
     context: any,
     resolvedSets?: PermissionSet[],
+    /**
+     * [ADR-0090 D10] The depth to stamp instead of the one `getEffectiveScope`
+     * answers for `resolvedSets` — what step 2.6 stamps on a DELEGATED read,
+     * where the agent leg carries the intersected depth and the delegator leg
+     * its own ({@link computeDelegatedReadFilter}). Absent on every
+     * non-delegated call, which resolves the depth here as before.
+     */
+    depth?: string,
   ): Promise<Record<string, unknown> | null> {
     const sharing = this.resolveKernelService?.('sharing') as
       | { buildReadFilter?: (o: string, c: any) => Promise<unknown | null> }
@@ -5416,23 +5499,25 @@ export class SecurityPlugin implements Plugin {
     // [#5386] `resolvedSets` lets an in-middleware caller (the
     // controlled_by_parent derivation) pass the sets it already resolved for
     // THIS identity, instead of re-resolving them from the context.
-    let readScope: string | undefined;
-    try {
-      const permissionSets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context));
-      if (permissionSets.length > 0) {
-        const meta = await this.getObjectSecurityMeta(object);
-        readScope = this.permissionEvaluator.getEffectiveScope(
-          'read',
-          object,
-          permissionSets,
-          { isPrivate: meta.isPrivate },
-        );
+    let readScope: string | undefined = depth;
+    if (readScope === undefined) {
+      try {
+        const permissionSets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context));
+        if (permissionSets.length > 0) {
+          const meta = await this.getObjectSecurityMeta(object);
+          readScope = this.permissionEvaluator.getEffectiveScope(
+            'read',
+            object,
+            permissionSets,
+            { isPrivate: meta.isPrivate },
+          );
+        }
+      } catch {
+        // Depth is a WIDENING input: failing to resolve it leaves the owner-match
+        // at its narrowest ('own'), which is the safe direction. The sharing call
+        // below still runs — and its own failure still denies.
+        readScope = undefined;
       }
-    } catch {
-      // Depth is a WIDENING input: failing to resolve it leaves the owner-match
-      // at its narrowest ('own'), which is the safe direction. The sharing call
-      // below still runs — and its own failure still denies.
-      readScope = undefined;
     }
     const filter = await sharing.buildReadFilter(object, {
       ...context,
@@ -5845,6 +5930,14 @@ export class SecurityPlugin implements Plugin {
    *   3. {@link resolveSharingReadFilter} — plugin-sharing's OWD / record-share
    *      visibility filter, contributed by the sibling middleware.
    *
+   * [ADR-0090 D10] On a DELEGATED (on-behalf-of) context the chain composes
+   * each of the three twice — once for the delegated principal's leg, once for
+   * the delegator's — and so does this method ({@link computeDelegatedReadFilter}):
+   * the delegated read is scoped to the intersection, exactly as a delegated
+   * `find` is. ADR-0139 D5.1 named that intersection reaching this method as
+   * the condition under which the engine composes its `ReadableIds` leaf for a
+   * delegated caller; it does, so the engine does.
+   *
    * Each layer has been missing here at some point, and each absence had the
    * same shape: a caller who cannot read a row through `/data` could still
    * `COUNT(*)` / `GROUP BY` it through `/analytics`. Layer 3 was #4467; layer 2
@@ -5883,6 +5976,28 @@ export class SecurityPlugin implements Plugin {
     // refusal, mirrored: zero rows, read off the same predicate, before any
     // layer resolves. This used to answer the sharing predicate alone.
     if (isPrincipalLessContext(context)) return RLS_DENY_FILTER;
+    // [ADR-0090 D10 / ADR-0139 D5.1 as amended] A DELEGATED (on-behalf-of)
+    // context is scoped to the intersection of its own leg and its delegator's,
+    // composed as the engine middleware chain composes a delegated find
+    // ({@link computeDelegatedReadFilter}). This path used to answer the deny
+    // sentinel for every such context, because the intersection was threaded
+    // through the chain only; the engine's `ReadableIds` composition asks this
+    // method with the delegated context as it stands, so the intersection
+    // reaches here now. Fails CLOSED on every throw: a delegated read is never
+    // scoped wider than its delegator's own, and never served with a layer
+    // dropped.
+    if (context?.onBehalfOf?.userId) {
+      try {
+        return await this.computeDelegatedReadFilter(object, context);
+      } catch (e) {
+        this.logger.error?.(
+          `[security] getReadFilter failed for object '${object}' (principal ${context?.userId ?? 'unknown'} ` +
+            `on behalf of ${context.onBehalfOf.userId}) — denying (fail-closed)`,
+          e instanceof Error ? e : new Error(String(e)),
+        );
+        return RLS_DENY_FILTER;
+      }
+    }
     // [#4467] The OWD/sharing predicate is resolved for EVERY non-system caller,
     // ahead of the RLS branches below, because it is a SEPARATE middleware in
     // the chain this method mirrors: none of the RLS stand-downs below is a
@@ -5897,28 +6012,6 @@ export class SecurityPlugin implements Plugin {
           `'${object}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed: a path that bypasses ` +
           `the engine middleware never runs without the owner and share scope a direct read applies)`,
         e instanceof Error ? e : new Error(String(e)),
-      );
-      return RLS_DENY_FILTER;
-    }
-    // [#2852] D10 delegator intersection is NOT implemented on this path.
-    // The engine middleware (find/count/aggregate) intersects an on-behalf-of
-    // read with the DELEGATOR's own RLS (resolveDelegatorContext, ~L689), but
-    // getReadFilter — the read-scope provider bound by the analytics/raw-SQL
-    // path — resolves only the CALLER's ceiling. Computing a filter here for a
-    // delegated (agent) context would therefore SILENTLY WIDEN the read past
-    // the delegator's scope (the confused-deputy widening D10 prevents on the
-    // CRUD path). Until the intersection is threaded through computeRlsFilter
-    // (tracked with #2920 B1 / ADR-0095 D1), FAIL CLOSED: a delegated read on
-    // this path denies rather than under-scopes. System on-behalf-of already
-    // returned above; today no agent surface reaches analytics, so this is a
-    // latent-invariant guard, not a live-traffic change.
-    if (context?.onBehalfOf?.userId) {
-      this.logger.error?.(
-        `[security] getReadFilter received an on-behalf-of context for object ` +
-          `'${object}' (agent ${context?.userId ?? 'unknown'} on behalf of ` +
-          `${context.onBehalfOf.userId}) — the D10 delegator intersection is not ` +
-          `implemented on the read-scope path; denying (fail-closed: a delegated read is never scoped ` +
-          `wider than its delegator's own)`,
       );
       return RLS_DENY_FILTER;
     }
@@ -5960,6 +6053,88 @@ export class SecurityPlugin implements Plugin {
       );
       return RLS_DENY_FILTER;
     }
+  }
+
+  /**
+   * [ADR-0090 D10 / ADR-0139 D5.1 as amended] The read scope of a DELEGATED
+   * (on-behalf-of) principal: the INTERSECTION of the principal's own leg and
+   * the delegator's — never the union — composed here exactly as the engine
+   * middleware chain composes a delegated `find` of `object`, layer for layer:
+   *
+   *   1. {@link computeRlsFilter} over the principal's sets, with the delegated
+   *      context AS IT STANDS — {@link collectRLSPolicies} reads that context as
+   *      the delegated principal's own leg (`isDelegatedPrincipalLeg`), so the
+   *      ceiling's silence contributes no object default row scope;
+   *   2. {@link computeControlledByParentFilter} for the principal;
+   *   3. {@link computeRlsFilter} over the DELEGATOR's sets, with the context
+   *      {@link resolveDelegatorContext} rebuilds for them (the middleware's
+   *      D10 half, step 3);
+   *   4. {@link computeControlledByParentFilter} for the delegator;
+   *   5. plugin-sharing's visibility filter for the principal's identity, at
+   *      the agent-leg depth step 2.6 stamps as `__readScope`
+   *      (`intersectDelegatedScope` of the ceiling's DECLARED depth and the
+   *      delegator's effective one);
+   *   6. the same filter re-run under the DELEGATOR's identity at the
+   *      delegator's own depth — plugin-sharing's second call, with `userId`
+   *      swapped to the delegator and no delegation link.
+   *
+   * Fails CLOSED where the chain refuses, with the deny sentinel by identity:
+   * a principal that resolves no set (ADR-0056 D2); a delegator the link names
+   * who does not exist (the chain's `PERMISSION_DENIED`; `canReadObject`'s
+   * `false`); a delegator who resolves no set (object admission refuses them);
+   * a sharing scope that cannot be resolved. A throw anywhere propagates to the
+   * caller's catch, which denies.
+   *
+   * ⛔ Not a second intersection rule: every leg is the primitive the
+   * middleware calls, in the middleware's spelling, and the delegator's context
+   * comes from the one resolver the middleware and `canReadObject` share.
+   */
+  private async computeDelegatedReadFilter(
+    object: string,
+    context: any,
+  ): Promise<Record<string, unknown> | undefined> {
+    const permissionSets = await this.resolvePermissionSetsForContext(context);
+    if (permissionSets.length === 0) return RLS_DENY_FILTER;
+    const del = await resolveDelegatorContext(this.ql, context);
+    if (del.kind !== 'resolved') {
+      this.logger.error?.(
+        `[security] getReadFilter received an on-behalf-of context for object '${object}' whose delegator ` +
+          `'${String(context?.onBehalfOf?.userId)}' does not exist — denying (fail-closed: a delegated read is ` +
+          `never scoped wider than its delegator's own) — with no delegator to intersect against it is not ` +
+          `scoped at all (ADR-0090 D10)`,
+      );
+      return RLS_DENY_FILTER;
+    }
+    const delegatorContext = del.context;
+    const delegatorSets = await this.resolvePermissionSetsForContext(delegatorContext);
+    if (delegatorSets.length === 0) return RLS_DENY_FILTER;
+
+    // Step 2.6's two depth stamps, from the same two evaluator calls.
+    const meta = await this.getObjectSecurityMeta(object);
+    const delegatorScope = this.permissionEvaluator.getEffectiveScope('read', object, delegatorSets, { isPrivate: meta.isPrivate });
+    const declared = this.permissionEvaluator.getDeclaredScope('read', object, permissionSets, { isPrivate: meta.isPrivate });
+    const agentLegScope = intersectDelegatedScope(declared, delegatorScope).agentLegScope;
+
+    // Layers 5 and 6 — the sibling middleware's two calls. Resolved first, as
+    // the non-delegated path resolves its one sharing layer first: a sharing
+    // outage denies before any RLS layer is composed.
+    const sharingFilter = await this.resolveSharingReadFilter(object, context, permissionSets, agentLegScope);
+    const delegatorSharingFilter = await this.resolveSharingReadFilter(
+      object,
+      { ...context, userId: delegatorContext.userId, onBehalfOf: undefined },
+      delegatorSets,
+      delegatorScope,
+    );
+
+    // Layers 1 to 4 — the security middleware's own four, in its order.
+    const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
+    const cbpFilter = await this.computeControlledByParentFilter(permissionSets, object, context);
+    const delFilter = await this.computeRlsFilter(delegatorSets, object, 'find', delegatorContext);
+    const delCbpFilter = await this.computeControlledByParentFilter(delegatorSets, object, delegatorContext);
+
+    const securityLayers = andComposeLayers(andComposeLayers(filter, cbpFilter), andComposeLayers(delFilter, delCbpFilter));
+    const sharingLayers = andComposeLayers(sharingFilter, delegatorSharingFilter);
+    return andComposeLayers(securityLayers, sharingLayers) ?? undefined;
   }
 
   /**
@@ -6330,11 +6505,6 @@ export class SecurityPlugin implements Plugin {
       //    empty list grants nothing, which is the middleware's step 2 answer.
       if (permissionSets.length === 0) return false;
 
-      const { isPrivate, unresolved, requiredPermissions } =
-        await this.getObjectSecurityMeta(objectName);
-      // 3. [#3545] Posture unresolvable → deny.
-      if (unresolved) return false;
-
       // [ADR-0090 D10] Resolve the delegator ONCE — arms 4 and 6 both need it,
       // and a dangling link denies before either runs.
       let delegatorSets: PermissionSet[] | null = null;
@@ -6346,36 +6516,9 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
-      // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
-      //    principals — a caller missing any required capability is denied
-      //    however permissive their grants are.
-      const required = requiredCapsForOperation(requiredPermissions, 'find');
-      if (required.length > 0) {
-        const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
-        if (required.some((cap) => !held.has(cap))) return false;
-        if (delegatorSets && delegatorSets.length > 0) {
-          const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
-          if (required.some((cap) => !delHeld.has(cap))) return false;
-        }
-      }
-
-      // 5. The object-level CRUD grant.
-      if (!this.permissionEvaluator.checkObjectPermission('find', objectName, permissionSets, { isPrivate })) {
-        return false;
-      }
-
-      // 6. [ADR-0090 D10] The delegator must independently grant the same read.
-      //    [#21079] Asked over the delegator's list whatever its length, as the
-      //    middleware asks it: a delegator who resolves NO set grants nothing,
-      //    the deny baseline for the second principal too.
-      if (
-        delegatorSets &&
-        !this.permissionEvaluator.checkObjectPermission('find', objectName, delegatorSets, { isPrivate })
-      ) {
-        return false;
-      }
-
-      return true;
+      // 3–6. The posture and grant arms, over the resolved sets — the one
+      // predicate the ADR-0055 master-derived read scope asks as well.
+      return await this.objectReadAdmission(objectName, permissionSets, delegatorSets);
     } catch (e) {
       this.logger.error?.(
         `[security] canReadObject could not resolve the object-level read admission for ` +
@@ -6384,6 +6527,81 @@ export class SecurityPlugin implements Plugin {
       );
       return false;
     }
+  }
+
+  /**
+   * Arms 3–6 of {@link canReadObject} — the OBJECT-level read admission over
+   * permission sets the caller has ALREADY resolved: the posture arm, the
+   * ADR-0066 D3/⑤ capability AND-gate, the `allowRead` CRUD grant, and the
+   * ADR-0090 D10 delegator's same two questions when `delegatorSets` is given.
+   * Each is the primitive the middleware's own read gate calls (steps 1, 1.5
+   * and 2), in that order.
+   *
+   * Two askers, one rule:
+   *
+   *   - {@link canReadObject}, which resolves the context first (system bypass,
+   *     principal-less refusal, sets, delegator) and then asks this;
+   *   - [ADR-0055 §3] {@link computeControlledByParentFilter}, which asks it of
+   *     the MASTER for the principal whose sets it was handed — the caller's on
+   *     the caller half, the delegator's on the D10 half — before it scopes the
+   *     master's rows. "Reading a detail requires read access to its master",
+   *     and the object-level admission is the first half of that access.
+   *
+   * ⛔ There is no second copy of this rule: a reader that needs the object-level
+   * read answer for sets it already holds asks this, and one that holds only a
+   * context asks {@link canReadObject}.
+   *
+   *   - [#21079] An empty list grants nothing (ADR-0056 D2).
+   *   - 3. [#3545] An unresolvable posture denies.
+   *   - 4. The capabilities the object requires for a read, held by the caller
+   *     and (D10) by a delegator who resolved any set.
+   *   - 5. The caller's `find` grant, with the posture's `isPrivate` (ADR-0066 D2).
+   *   - 6. [ADR-0090 D10] The delegator's `find` grant, asked over its list
+   *     whatever its length, as the middleware asks it: a delegator who resolves
+   *     NO set grants nothing, the deny baseline for the second principal too.
+   *
+   * ⛔ Object-level ONLY, like {@link canReadObject}: `true` never means
+   * "unrestricted". A throw propagates; each asker fails closed on it.
+   */
+  private async objectReadAdmission(
+    objectName: string,
+    permissionSets: PermissionSet[],
+    delegatorSets: PermissionSet[] | null,
+  ): Promise<boolean> {
+    if (permissionSets.length === 0) return false;
+
+    const { isPrivate, unresolved, requiredPermissions } =
+      await this.getObjectSecurityMeta(objectName);
+    // 3. [#3545] Posture unresolvable → deny.
+    if (unresolved) return false;
+
+    // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
+    //    principals — a caller missing any required capability is denied
+    //    however permissive their grants are.
+    const required = requiredCapsForOperation(requiredPermissions, 'find');
+    if (required.length > 0) {
+      const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+      if (required.some((cap) => !held.has(cap))) return false;
+      if (delegatorSets && delegatorSets.length > 0) {
+        const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
+        if (required.some((cap) => !delHeld.has(cap))) return false;
+      }
+    }
+
+    // 5. The object-level CRUD grant.
+    if (!this.permissionEvaluator.checkObjectPermission('find', objectName, permissionSets, { isPrivate })) {
+      return false;
+    }
+
+    // 6. [ADR-0090 D10] The delegator must independently grant the same read.
+    if (
+      delegatorSets &&
+      !this.permissionEvaluator.checkObjectPermission('find', objectName, delegatorSets, { isPrivate })
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -6989,20 +7207,48 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [#13419 执行要点 3, warning half] Report a permission-set name that collides
-   * with a POSITION name and has NO junction row — the ungoverned half of the
-   * position→set binding, said out loud.
+   * [#13419 执行要点 3; #24757 under 「甲」] Report a permission set granted to a
+   * position's holders only because the two share a NAME — a grant the
+   * position's definition does not declare — and say what happens to it when
+   * the fold is retired.
    *
    * ## What is being reported
    *
    * {@link resolvePermissionSetsForContextUnmemoized} builds its request as
    * `[...positions, ...explicitPermissionSets]`. That fold means a position
-   * called `sales_rep` resolves a permission set called `sales_rep` — with no
-   * `sys_position_permission_set` row, no audit line, and nothing declaring
-   * that it happens. The maintainer ruling (2026-08-31, 「同意」) makes the
-   * junction table the one governed channel and retires the fold; the fold's
-   * DELETION is not this method (see the boundary note below), so until it
-   * lands the grant is at least no longer silent.
+   * called `sales_rep` resolves a permission set called `sales_rep` although
+   * the definition of `sales_rep` names no such set in `permissionSets`, the
+   * one binding spec and docs declare (ADR-0131 D3/D4; `position.zod.ts`,
+   * `positions.mdx`). Nothing declares that it happens, and Setup cannot show
+   * it: both the position's Permission Sets field and the set's Assigned Users
+   * read the declared binding. The maintainer ruling on #13419 (2026-08-31,
+   * 「同意」 to B) retires the fold; ADR-0131 later made the definition's
+   * `permissionSets` the binding in place of the junction table that ruling
+   * named.
+   *
+   * ## The 18.x loud half (「甲」, #24757)
+   *
+   * The fold's retirement is a narrowing no ADR-0087 conversion can carry, so
+   * under 「甲」 (ruling record 6292005854 on #6015) 18.x ships its loud half
+   * and the removal waits for 19.0. This warning IS that loud half, and its
+   * text says three things the 17.x wording did not: the grant is in force
+   * today only because the names match; that name-based grant is deprecated
+   * and is removed in the next major version, after which holders of `P` do
+   * not receive set `P` unless `P`'s definition names it; and the fix,
+   * `permissionSets: ['P']` on position `P` (or renaming one of the two). The
+   * structured payload carries the same consequence as `removedIn:
+   * 'next_major'` beside its unchanged `event`, `position` and `permissionSet`
+   * ({@link POSITION_NAME_FOLD_EVENT}). The string says "the next major
+   * version" and not a number, and carries no tracker id: an operator reading
+   * the log can resolve neither a ruling record nor `#NNNN`.
+   *
+   * ## When it fires
+   *
+   * Lazily, on the first resolution that meets an undeclared pair — never at
+   * boot, so a deployment where no holder of `P` has made a request has not
+   * been told yet. Once per position NAME per plugin instance
+   * ({@link nameFoldWarned}): not per holder, and not per organization, since
+   * the key is the name alone. A restart reports again.
    *
    * ## The predicate, and why each clause is there
    *
@@ -7030,14 +7276,18 @@ export class SecurityPlugin implements Plugin {
    * anything?" would report neither of the two real name-folds in the repo
    * while looking complete.
    *
-   * ## Boundary (#13419 slice 2)
+   * ## Boundary (#13419 slice 2, kept by #24757)
    *
    * ⛔ Purely additive. The resolution result is READ, never rewritten — 要点 5
    * of the ruling: 「任何行为差异只能表现为拒绝/告警,永不静默改变解析结果」, and a
-   * warning is the permitted half. ⛔ Deleting the fold is NOT this change: the
-   * vendored HotCRM artifact carries that app's permission sets but not its
-   * position roster, so HotCRM's own same-name folds are NOT MEASURED rather
-   * than zero, and deleting the fold would silently revoke them.
+   * warning is the permitted half. Under 「甲」 the grant does not change in 18.x
+   * either: a holder of `P` still resolves set `P`, and
+   * `position-name-fold-warning.test.ts` pins that beside the text. ⛔ Deleting
+   * the fold is NOT this change. It is #24757's 19.0 half, with
+   * {@link dropDeactivatedFoldedSets} and the delegated walk, explain and
+   * collision-gate follow-ups. The reliance it would revoke, as measured on the
+   * card, is HotCRM's: 5 of its 12 positions at `f22dfa52`, which
+   * objectstack-ai/hotcrm#2200 declares in `permissionSets`.
    */
   private reportNameFoldCollisions(
     positions: unknown,
@@ -7066,15 +7316,21 @@ export class SecurityPlugin implements Plugin {
       // ruling 2026-08-12). The card anchor lives in the docblock above, where the reader
       // who can resolve it is already looking.
       this.logger.warn?.(
-        `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' was granted ` +
-          `because a POSITION of the same name resolved by name — the position's definition ` +
-          `does not name it in its permissionSets. This grant is in force and ungoverned: ` +
-          `no position declares it. Declare it explicitly (position '${position}': ` +
-          `permissionSets: ['${position}']) or rename one of the two.`,
+        `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' is in force for ` +
+          `holders of position '${position}' only because the two share a name — the definition ` +
+          `of position '${position}' does not name it in its permissionSets. This name-based ` +
+          `grant is deprecated and is removed in the next major version: from then on, holders ` +
+          `of position '${position}' do not receive permission set '${position}' unless the ` +
+          `position's definition names it. To keep the grant, declare it (position ` +
+          `'${position}': permissionSets: ['${position}']); if the shared name is a ` +
+          `coincidence, rename one of the two.`,
         {
           event: POSITION_NAME_FOLD_EVENT,
           position,
           permissionSet: position,
+          // The consequence as data, for a consumer that keys on fields rather
+          // than prose. The three fields above are unchanged on purpose.
+          removedIn: 'next_major',
         },
       );
     }
@@ -8493,6 +8749,14 @@ export class SecurityPlugin implements Plugin {
    * `buildReadFilter` returns null for a non-`private` master — so the derived
    * set stays point-for-point equal to what a direct find of the master returns.
    *
+   * [ADR-0055 §3] Both halves scope ROWS. Ahead of them the master's OBJECT-level
+   * read admission is asked ({@link objectReadAdmission}, the predicate
+   * `canReadObject` asks), for the principal whose sets this call was handed: a
+   * principal the master's own read door refuses at the object gate gets the
+   * empty master set, so the equality with a direct find of the master holds for
+   * that principal too, and with the engine's ReadableIds leaf, which asks
+   * `canReadObject` before it scopes a parent's rows.
+   *
    * An empty set yields `{ masterFK: { $in: [] } }`, which matches no rows (fail
    * closed), as does a failure to resolve the sharing half. A misconfigured
    * object (not exactly one required master_detail to derive from, ADR-0055 §1)
@@ -8538,9 +8802,10 @@ export class SecurityPlugin implements Plugin {
     context: any,
     /**
      * [ADR-0055 amendment] The `controlled_by_parent` objects already being resolved on
-     * this branch of the walk, outermost first. Empty at every real call site
-     * — the four are the CRUD middleware (caller and D10 delegator) and
-     * `getReadFilter` — and grown by one on each recursive hop.
+     * this branch of the walk, outermost first. Empty at five of the six call
+     * sites — the CRUD middleware (caller and D10 delegator), `getReadFilter`
+     * and `computeDelegatedReadFilter` (principal and delegator) — and grown by
+     * one at the sixth, the recursive hop.
      */
     ancestors: readonly string[] = [],
   ): Promise<Record<string, unknown> | null> {
@@ -8574,6 +8839,32 @@ export class SecurityPlugin implements Plugin {
       );
       return { [rel.fk]: { $in: [] } };
     }
+
+    // [ADR-0055 §3] "Reading a detail requires READ access to its master", and
+    // the OBJECT-level read admission is the first half of that access — the
+    // half the master's own read door asks before any row filter, and the half
+    // the engine's ADR-0139 ReadableIds leaf asks (`canReadObject`). Asked here
+    // through the one predicate both read ({@link objectReadAdmission}), for
+    // the principal whose sets this call was handed, before the master's rows
+    // are scoped below under a system context. A principal the master's own
+    // door does not admit reads no master, so the master set is empty and no
+    // detail is read; at every hop of a chain alike, since the recursion below
+    // asks the same question of the next master. A throw denies too
+    // (fail-closed), as the sharing half's resolution failure does.
+    let masterObjectReadable: boolean;
+    try {
+      masterObjectReadable = await this.objectReadAdmission(rel.master, permissionSets, null);
+    } catch (e) {
+      this.logger.error?.(
+        `[security] controlled_by_parent derivation could not resolve the object-level read admission ` +
+          `of master '${rel.master}' for '${object}' (user ${context?.userId ?? 'unknown'}) ` +
+          `— denying (fail-closed: a child is readable only where its master is, so a master whose ` +
+          `admission cannot be resolved admits no child)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return { [rel.fk]: { $in: [] } };
+    }
+    if (!masterObjectReadable) return { [rel.fk]: { $in: [] } };
 
     const masterRlsFilter = await this.computeRlsFilter(permissionSets, rel.master, 'find', context);
     // [#5386] The OWD / record-share half, resolved through the SAME helper
@@ -8668,6 +8959,19 @@ export class SecurityPlugin implements Plugin {
    *   link (delegator deleted) fails CLOSED — see resolveDelegatorContext for
    *   why "empty sets" would be wrong (the additive baseline would resurrect
    *   access for a non-existent user).
+   * - [#25063 · ADR-0090 D10] A delegated operation runs in the LIVE principal's
+   *   active organization, and the delegator context inherits that organization
+   *   (`resolveDelegatorContext`: the agent and its delegator are in the same
+   *   organization). On a walled posture that is a precondition, never an
+   *   assumption: when the delegator's own membership does not back the live
+   *   organization, the operation is REFUSED here, for every verb. Left to run,
+   *   the delegator's leg could not bound it: the inherited organization feeds
+   *   the delegator's own wall, and a new row is placed in the live one, so an
+   *   on-behalf-of write could land outside every organization the delegator
+   *   belongs to. The test is `vetOrganizationClaim`, the one spelling of "a
+   *   membership backs this organization", which answers the claim unchanged
+   *   under `single`. A context with no active organization is not this
+   *   rule's: its answers stay with ADR-0123 D2.
    */
   private async resolveOperationPrincipals(
     operation: string,
@@ -8707,6 +9011,26 @@ export class SecurityPlugin implements Plugin {
         );
       }
       if (del.kind === 'resolved') {
+        const liveOrganization =
+          context.tenantId != null && context.tenantId !== '' ? String(context.tenantId) : undefined;
+        if (
+          liveOrganization !== undefined &&
+          vetOrganizationClaim(liveOrganization, del.context?.accessible_org_ids ?? [], this.tenancyPosture) === undefined
+        ) {
+          this.logger.warn?.(
+            `[Security] on-behalf-of ${operation} '${object}' REFUSED — the delegator is not a member of the ` +
+              `organization the request runs in (ADR-0090 D10, fail-closed)`,
+          );
+          throw new PermissionDeniedError(
+            `[Security] Access denied: on-behalf-of principal acts in organization '${liveOrganization}', which ` +
+              `delegator '${String(context.onBehalfOf.userId)}' is not a member of — refusing to act (ADR-0090 D10 fail-closed)`,
+            { operation, object },
+            `[ADR-0090 D10] tenancy posture '${this.tenancyPosture}' walls organizations, and a delegated operation is ` +
+              `bounded by the delegator's scope: it runs in the live principal's active organization, which the ` +
+              `delegator's own membership must back. Build the on-behalf-of context in an organization the delegator ` +
+              `is a member of. System contexts and the single posture are unaffected.`,
+          );
+        }
         delegatorContext = del.context;
         delegatorSets = await this.resolvePermissionSetsForContext(delegatorContext);
       }
@@ -8880,9 +9204,49 @@ export class SecurityPlugin implements Plugin {
    * ⛔ Not a blanket refusal for chained declarations: the single-level case is
    * the loop's first iteration and its answer is byte-for-byte the old one.
    *
-   * v1 scope: single-id writes. Bulk writes flow through the AST and are already
-   * scoped by the controlled-by-parent READ filter (to readable masters) — which
-   * since the ADR-0055 amendment is itself chain-composed, so the two faces still agree.
+   * [#25012] EVERY write shape asks it. A write that addresses no single row —
+   * the engine's predicate path, which `extractSingleId` cannot name a target
+   * for — is judged per MASTER: the gate collects the masters of the detail
+   * rows the caller's own predicate selects and the caller can read
+   * ({@link controlledByParentPredicateWriteMasters}), and runs the same chain
+   * walk on each ({@link assertControlledByParentChainEditable}). The first
+   * refusal is the answer, in the by-id leg's own envelope, and nothing is
+   * written. It is a VERDICT, never a scope: no master set is composed into the
+   * write's predicate (ADR-0055 §2's master id set is the READ scope, and its
+   * mechanism is decided on its own record), so a write that selects one such
+   * row writes none of them. A write whose rows all sit under masters the caller
+   * may edit lands exactly as before: the read scope, the platform ownership
+   * floor and the detail's own write policy still decide which of them it
+   * writes, and nothing here vouches the floor away.
+   *
+   * [#25044] …and on every shape it asks EVERY master the write involves, not
+   * one of them. §3 reads a create's master from "the master id in the
+   * incoming body"; on every other shape that id, when the body carries one,
+   * is a master the write involves beside the one (on the predicate path, the
+   * ones) its rows are stored under, so the same walk is asked of it too,
+   * after the stored master's question, which is unchanged. The refusal is
+   * the by-id leg's own envelope and nothing is written. An insert's master
+   * already IS its body's and is asked once; a body naming a master already
+   * asked is not asked again; and a predicate write that selects no row the
+   * caller can read involves no master at all.
+   *
+   * [#25049] …a BATCH create's included. Its body is one record per row and
+   * each row names its own master, so the same walk is asked of every master
+   * the rows name — once per master, in row order — before anything is
+   * written. The first refusal is the answer, in the by-id leg's own envelope,
+   * and nothing is written. The empty-master branch then answers the batch
+   * exactly as it did before, since it reads no master off an array: it
+   * stands down where required-field validation judges each row that names
+   * none, and refuses the batch whole otherwise.
+   *
+   * [#25049] And a write never EMPTIES the master reference. §1 derives a
+   * detail's access from exactly one required master, so a row whose
+   * reference an update sets to null has no master to derive it from, and no
+   * principal's read can match it. That is the empty-master condition below,
+   * met on an update's body, and it is answered the same way: handed to
+   * required-field validation where validation judges the same field, and
+   * refused `422` otherwise — after the stored masters' question, so a master
+   * the caller may not edit is still the answer there.
    *
    * [#7474] SIX conditions refuse a write here, and they are NOT one verdict.
    * Three are genuine authorization answers (no object-level `update` on the
@@ -8897,8 +9261,8 @@ export class SecurityPlugin implements Plugin {
    *     INVALID_METADATA` ({@link MasterDetailRelationMissingError})
    *   - the target row does not exist → `404 RECORD_NOT_FOUND`
    *     ({@link DetailRecordNotFoundError})
-   *   - the detail's master reference is empty → `422 MISSING_REQUIRED_FIELD`
-   *     ({@link MasterReferenceMissingError})
+   *   - the detail's master reference is empty, or an update's body empties
+   *     it → `422 MISSING_REQUIRED_FIELD` ({@link MasterReferenceMissingError})
    *
    * [#8688] The last of those three has since NARROWED, by the maintainer
    * ruling of 2026-08-15: on an `insert` whose master FK is absent, this gate
@@ -8908,6 +9272,8 @@ export class SecurityPlugin implements Plugin {
    * platform's ordinary `400 VALIDATION_FAILED` with `fields[]` instead. It
    * keeps answering `422` for the three shapes validation does not cover, and
    * for the stored-row shape on any other by-id write. See the branch itself.
+   * An update whose body empties the reference is the insert shape's twin and
+   * is answered by the same rule (#25049).
    *
    * [#7505] A seventh outcome is not a leg of this gate at all: if the store
    * cannot be read, the engine's own error propagates (typically
@@ -8966,16 +9332,93 @@ export class SecurityPlugin implements Plugin {
     // (`rel!.fk`) were the load-bearing half of the same defect.
     if (!rel) throw new MasterDetailRelationMissingError(object, operation);
 
+    // [ADR-0055 §3 · #25044] Every master the write involves is asked, not one
+    // of them. A body that names a master reference involves that master too,
+    // so once the masters `judged` (the stored ones) have been asked, the SAME
+    // walk is asked of the body's — unless it is one of them, which would ask
+    // one master twice. Read as an OWN property, never through the prototype
+    // chain. A body without the key names no master and leaves this question
+    // nothing to ask about.
+    //
+    // [ADR-0055 §1 · #25049] A body WITH the key and a null value names no
+    // master either, but it is not silent: on an update it empties the
+    // reference the row's access derives from. That is the empty-master
+    // condition the branch below answers for an insert, answered by the same
+    // rule — handed to required-field validation where it provably judges the
+    // same field ({@link CbpRelation.omissionRefusedByValidation}: its update
+    // pass refuses a required field the body sets to null), and refused here
+    // otherwise, before anything is written. An insert never reaches here
+    // with an empty master: the branch below has answered it.
+    const askBodyNamedMaster = async (judged: readonly unknown[]): Promise<void> => {
+      const data = opCtx.data;
+      if (data == null || typeof data !== 'object' || Array.isArray(data)) return;
+      if (!Object.prototype.hasOwnProperty.call(data, rel.fk)) return;
+      const named = (data as Record<string, unknown>)[rel.fk];
+      if (named == null) {
+        if (operation !== 'update' || rel.omissionRefusedByValidation) return;
+        throw new MasterReferenceMissingError(object, operation, rel.fk);
+      }
+      if (judged.includes(named)) return;
+      await this.assertControlledByParentChainEditable(
+        permissionSets, object, rel, named, context, opCtx, masterEditDenied, denyMasterEdit,
+      );
+    };
+
     // Resolve the master id: from the incoming body on insert, else from the
     // target row (read as system — we only need its FK value).
     let masterId: unknown;
     let detailRecordId: unknown;
     if (operation === 'insert') {
       const data = opCtx.data;
+      if (Array.isArray(data)) {
+        // [ADR-0055 §3 · #25049] A BATCH create: one body per row, and the
+        // middleware chain runs once for all of them, so every master the rows
+        // name is asked here — the same walk a single create runs, once per
+        // master, in row order — before anything is written. A row is read
+        // exactly as a single create's body is read below. A row that names no
+        // master is left to the empty-master branch, which this batch then
+        // meets exactly as it did before (`masterId` stays undefined for an
+        // array): it stands down where required-field validation judges each
+        // such row, and refuses the batch whole otherwise.
+        const asked: unknown[] = [];
+        for (const row of data as unknown[]) {
+          const rowMasterId = row && typeof row === 'object' && !Array.isArray(row) ? (row as any)[rel.fk] : undefined;
+          if (rowMasterId == null || asked.includes(rowMasterId)) continue;
+          asked.push(rowMasterId);
+          await this.assertControlledByParentChainEditable(
+            permissionSets, object, rel, rowMasterId, context, opCtx, masterEditDenied, denyMasterEdit,
+          );
+        }
+      }
       masterId = data && typeof data === 'object' && !Array.isArray(data) ? (data as any)[rel.fk] : undefined;
     } else {
       const targetId = this.extractSingleId(opCtx);
-      if (targetId == null) return; // bulk write — scoped by the read filter on the AST
+      if (targetId == null) {
+        // [#25012] No single target row. Either the engine refuses this shape
+        // itself before anything is written (its `reject` verdict — nothing to
+        // judge here), or it is the engine's predicate path, read from the
+        // engine's own dispatch predicates exactly as the write doors read them
+        // ({@link addressedPredicateWrite}), and every master the write would
+        // write details under is judged by the same walk a by-id write runs.
+        const predicatePath =
+          operation === 'update'
+            ? opCtx.data != null &&
+              typeof opCtx.data === 'object' &&
+              resolveEngineUpdateDispatch(opCtx.data as EngineUpdateDispatchData, opCtx.options).kind === 'multi'
+            : operation === 'delete' &&
+              resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
+        if (!predicatePath) return;
+        const predicateMasters = await this.controlledByParentPredicateWriteMasters(object, operation, rel, opCtx);
+        for (const predicateMasterId of predicateMasters) {
+          await this.assertControlledByParentChainEditable(
+            permissionSets, object, rel, predicateMasterId, context, opCtx, masterEditDenied, denyMasterEdit,
+          );
+        }
+        // [#25044] A write that selects no row the caller can read writes
+        // nothing, so it involves no master — the body's included.
+        if (predicateMasters.length > 0) await askBodyNamedMaster(predicateMasters);
+        return;
+      }
       detailRecordId = targetId;
       const row = await this.readRowById(object, targetId, { isSystem: true });
       if (!row) throw new DetailRecordNotFoundError(object, operation, targetId);
@@ -9095,10 +9538,53 @@ export class SecurityPlugin implements Plugin {
       // whose persisted FK is null) keeps its 422: the caller sent no such
       // field, so a `fields[]` naming it would name a field that was never in
       // the request, and there is no payload the caller could send to fix it.
+      // [#25049] An update whose BODY empties the reference is the insert
+      // shape's twin — the caller did send the field — and is answered by the
+      // same rule, in `askBodyNamedMaster` above.
       if (operation === 'insert' && rel.omissionRefusedByValidation) return;
       throw new MasterReferenceMissingError(object, operation, rel.fk, detailRecordId);
     }
 
+    await this.assertControlledByParentChainEditable(
+      permissionSets, object, rel, masterId, context, opCtx, masterEditDenied, denyMasterEdit,
+    );
+    // [#25044] An insert's master was read from its body, so it is the one
+    // just asked and is not asked again.
+    await askBodyNamedMaster([masterId]);
+  }
+
+  /**
+   * [ADR-0055 amendment / #25012] The chain walk of
+   * {@link assertControlledByParentWrite}: the three master-edit legs
+   * ({@link assertMasterRowEditable}) run on ONE master row, then on that
+   * master's own master, hop by hop, until a master that governs its own rows
+   * is reached — with the cycle guard and the depth bound
+   * ({@link CBP_MAX_CHAIN_DEPTH}), each failing closed.
+   *
+   * ⚠️ Extraction, not a rewrite — the body is the walk the gate ran inline,
+   * moved verbatim so that the gate can run it once per master: once for an
+   * insert or a by-id write, once for each master a predicate write selects
+   * rows under ({@link controlledByParentPredicateWriteMasters}), once more
+   * for a master the write's body names that is not among those (#25044), and
+   * once for each master a batch create's rows name (#25049).
+   * There must stay exactly one walk, for the reason
+   * {@link assertMasterRowEditable} gives for its legs.
+   *
+   * `masterEditDenied` / `denyMasterEdit` are the gate's own refusal builders,
+   * passed in rather than rebuilt so every refusal, at every hop and for every
+   * write shape, names the CALLER's object and operation (#7474's envelope)
+   * and records its leg ({@link MASTER_EDIT_DENIAL_LEG}).
+   */
+  private async assertControlledByParentChainEditable(
+    permissionSets: PermissionSet[],
+    object: string,
+    rel: CbpRelation,
+    masterId: unknown,
+    context: any,
+    opCtx: any,
+    masterEditDenied: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => PermissionDeniedError,
+    denyMasterEdit: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => never,
+  ): Promise<void> {
     // [ADR-0055 amendment] Walk the `controlled_by_parent` chain, one hop at a time, and run
     // the SAME three master-edit legs on every hop.
     //
@@ -9162,7 +9648,7 @@ export class SecurityPlugin implements Plugin {
         );
       }
       // Read as SYSTEM — we only need this row's master FK, exactly as the
-      // detail's own FK was read above. A throw here is a store fault and
+      // gate reads the detail's own. A throw here is a store fault and
       // propagates (#7505): an outage must not be reported as an access verdict.
       const masterRow = await this.readRowById(masterObject, hopMasterId, { isSystem: true });
       if (!masterRow) {
@@ -9184,6 +9670,93 @@ export class SecurityPlugin implements Plugin {
       hopRel = nextRel;
       hopMasterId = nextMasterId;
     }
+  }
+
+  /**
+   * [#25012 / ADR-0055 §3] The masters a write that addresses no single row
+   * would write details under — what {@link assertControlledByParentWrite}
+   * judges on the engine's predicate path, one chain walk per master.
+   *
+   * WHICH ROWS. The detail rows the caller's own predicate selects AND the
+   * caller can read, asked through the read door under the request's context —
+   * the read question the write doors narrow a predicate write's matched set to
+   * ({@link readableRowsScopeForPredicateWrite}), so every row that write can
+   * reach is among them. They can be MORE than it writes: the write-class
+   * scopes (the platform ownership floor, the detail's own write policy) still
+   * leave some of them unwritten, and a row among them under a master the
+   * caller may not edit refuses the write all the same. The caller named that
+   * row and can read it, and its master too (the detail's read scope is the
+   * readable-master set), so the refusal discloses nothing the read door does
+   * not. A row the caller cannot read is never judged: it is not matched.
+   *
+   * Three outcomes:
+   *
+   *  - the distinct master ids of those rows — an empty list when the predicate
+   *    selects no row the caller can read, and nothing is refused;
+   *  - ABOVE {@link PREDICATE_WRITE_READABLE_ID_CAP} rows, the refusal the read
+   *    narrowing answers for the same count ({@link predicateWriteReadableCapError}):
+   *    masters of rows that were never enumerated cannot be judged;
+   *  - the read door's own refusal, PROPAGATED as raised — a declared 4xx (the
+   *    detail's read grant withheld, a predicate the read guard or the driver
+   *    refuses) or a store fault. ⛔ Never read as "no rows": a write whose rows
+   *    cannot be enumerated cannot have their masters judged, and admitting it
+   *    would be the unjudged write this leg exists to close.
+   *
+   * Each row's master reference is then read as SYSTEM, as the by-id leg reads
+   * its one target row's: only the reference's value is needed, and a field
+   * rule hiding it from the caller must not hide the master from this gate. A
+   * row whose reference is empty answers the by-id leg's stored-row refusal
+   * ({@link MasterReferenceMissingError}, `422`).
+   */
+  private async controlledByParentPredicateWriteMasters(
+    object: string,
+    operation: string,
+    rel: CbpRelation,
+    opCtx: any,
+  ): Promise<unknown[]> {
+    if (typeof this.ql?.find !== 'function') {
+      // Unreachable in a real deployment — `start()` registers no security
+      // middleware at all without a query engine — but a non-conforming engine
+      // double fails closed rather than admitting an unjudged write.
+      throw new Error(
+        `[Security] Cannot judge the ${operation} on '${object}' against the masters of the records it ` +
+          `selects: no query engine is available to read them.`,
+      );
+    }
+    const callerWhere = (opCtx.options as { where?: unknown } | undefined)?.where;
+    const readable = await this.ql.find(object, {
+      ...(callerWhere != null ? { where: copyOfCallerPredicate(callerWhere) } : {}),
+      fields: ['id'],
+      limit: PREDICATE_WRITE_READABLE_ID_CAP + 1,
+      // The request's envelope minus the operation-private keys, as the read
+      // narrowing asks it: on a delegated write that is the agent's context with
+      // the delegation link on it, so the rows are the ones both may read.
+      context: withoutOperationPrivateKeys((opCtx.context ?? {}) as Record<string, unknown>),
+    });
+    const rows: unknown[] = Array.isArray(readable) ? readable : [];
+    if (rows.length > PREDICATE_WRITE_READABLE_ID_CAP) {
+      throw predicateWriteReadableCapError(object, operation);
+    }
+    const ids = rows
+      .map((r) => (r && typeof r === 'object' ? (r as { id?: unknown }).id : undefined))
+      .filter((id) => id !== undefined && id !== null);
+    if (ids.length === 0) return [];
+    const stored = await this.ql.find(object, {
+      where: { id: { $in: ids } },
+      fields: ['id', rel.fk],
+      limit: ids.length,
+      context: { isSystem: true },
+    });
+    const masterIds = new Set<unknown>();
+    for (const row of Array.isArray(stored) ? stored : []) {
+      if (!row || typeof row !== 'object') continue;
+      const masterId = (row as Record<string, unknown>)[rel.fk];
+      if (masterId == null) {
+        throw new MasterReferenceMissingError(object, operation, rel.fk, (row as { id?: unknown }).id);
+      }
+      masterIds.add(masterId);
+    }
+    return [...masterIds];
   }
 
   /**
@@ -9211,7 +9784,35 @@ export class SecurityPlugin implements Plugin {
   ): Promise<void> {
     // Master edit access = CRUD update on the master AND the master row reachable
     // under BOTH halves of its own write gate (write RLS + record sharing).
-    if (!this.permissionEvaluator.checkObjectPermission('update', rel.master, permissionSets)) {
+    //
+    // [ADR-0055 §3] The object-level half asks the question the master's own
+    // write door asks of an `update` on the master, with that door's own
+    // inputs, read from the one source each door reads them from
+    // ({@link getObjectSecurityMeta}): the posture must resolve (#3545 — an
+    // unresolved posture would read as `isPrivate: false`), the capabilities
+    // the master requires for `update` must be held (ADR-0066 D3/⑤), and the
+    // CRUD grant is asked under the master's posture (ADR-0066 D2). The leg
+    // used to ask the CRUD grant alone, with no posture, so a principal the
+    // master's own door refuses at its object gate could still write the
+    // master's details. Every refusal here is this leg's, `object_permission`.
+    // ⛔ Nothing here re-derives a rule: each is the evaluator's or the
+    // posture's own answer, asked as the door asks it.
+    const masterPosture = await this.getObjectSecurityMeta(rel.master);
+    if (masterPosture.unresolved) {
+      denyMasterEdit('object_permission', `the security posture of master '${rel.master}' could not be resolved`, masterId);
+    }
+    const masterUpdateCaps = requiredCapsForOperation(masterPosture.requiredPermissions, 'update');
+    if (masterUpdateCaps.length > 0) {
+      const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+      if (masterUpdateCaps.some((cap) => !held.has(cap))) {
+        denyMasterEdit('object_permission', `master '${rel.master}' requires a capability this user does not hold`, masterId);
+      }
+    }
+    if (
+      !this.permissionEvaluator.checkObjectPermission('update', rel.master, permissionSets, {
+        isPrivate: masterPosture.isPrivate,
+      })
+    ) {
       denyMasterEdit('object_permission', `no edit permission on master '${rel.master}'`, masterId);
     }
     // [commit 498f4e884] The master's own write RLS — composed with the SAME ownership

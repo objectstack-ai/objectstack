@@ -69,7 +69,7 @@ import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
-import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain } from './register-sso-provider.js';
+import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain, type AuthRequestHandler } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
 import { readJsonRequestBody } from './request-json-body.js';
@@ -1112,12 +1112,36 @@ export class AuthPlugin implements Plugin {
                 );
               }
             };
-            await applyBrand();
-            if (typeof settings.subscribe === 'function') {
-              settings.subscribe('branding', () => {
-                void applyBrand();
-              });
-              ctx.logger.info('Auth: bound appName to settings namespace=branding');
+            // [#24766] Bound only where the settings service LISTS the
+            // `branding` namespace — the test the runtime-config door makes.
+            // Under a walled tenancy posture service-settings withholds it
+            // (`UNWALLED_ONLY_NAMESPACES`): there is no value to bind, and
+            // the read would fail into the warn above on every correct walled
+            // boot. The configured `appName` (e.g. `OS_APP_NAME`) stays in
+            // force, which is all a walled read of organization-less rows
+            // ever produced. A service with no listing is treated the same.
+            let brandingOffered = false;
+            try {
+              const listManifests = (settings as {
+                listManifests?: () => ReadonlyArray<{ namespace?: unknown } | undefined>;
+              }).listManifests;
+              brandingOffered = typeof listManifests === 'function'
+                && listManifests.call(settings).some((m) => m?.namespace === 'branding');
+            } catch (err: any) {
+              // Kept local so the locale bindings below still run.
+              ctx.logger.warn(
+                'Auth: could not list settings namespaces, branding.workspace_name not bound: ' +
+                  (err?.message ?? err),
+              );
+            }
+            if (brandingOffered) {
+              await applyBrand();
+              if (typeof settings.subscribe === 'function') {
+                settings.subscribe('branding', () => {
+                  void applyBrand();
+                });
+                ctx.logger.info('Auth: bound appName to settings namespace=branding');
+              }
             }
 
             // #2815 — bind the auth SMS locale to the deployment default
@@ -1668,10 +1692,13 @@ export class AuthPlugin implements Plugin {
         // then switch the guard off for all of the above. Every hook registers
         // at priority 20 so the ADR-0092 checks above (10) still answer first
         // for user-context callers. See last-admin-guard.ts.
-        registerLastAdminGuard(engine, {
+        const lastAdminGuard = registerLastAdminGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.last-admin-guard',
           logger: ctx.logger,
         });
+        // [#24948] The same question, asked before an organization delete's
+        // first write (`AuthManager.assertOrganizationDeletable`).
+        this.authManager?.setOrganizationDeleteStandingJudge(lastAdminGuard.judgeOrganizationDelete);
         // [#15784] The COURTESY half of #15409's ruling: when a membership
         // ends, the session's claim on THAT organization ends with it —
         // re-pointed if the user still belongs somewhere, revoked if not.
@@ -2960,6 +2987,21 @@ export class AuthPlugin implements Plugin {
       return verdict.actor;
     };
 
+    // ── [#24877] ADR-0069 D5/D7 — better-auth's universal handler for the
+    // request a raw mount below serves, WITH that request's transport. Every
+    // in-process bridge re-dispatches through `AuthManager.handleRequest` with
+    // the transport of the request it serves — a bridge that hands a helper a
+    // handler takes it from here; one that delegates the request itself passes
+    // `transportOf(c)` inline, as the catch-all at the end of this method
+    // does — so `handleRequest` establishes the re-dispatched request's client
+    // address by the platform's trust rule (`resolveClientAddress`): forwarded
+    // headers only when the deployment declares `server.trustProxy`, the
+    // connection peer otherwise. `handleRequest(req)` alone leaves the rule no
+    // peer to judge on. Pinned per bridge by
+    // `bridge-redispatch-transport.pin.test.ts`.
+    const handleWithTransportOf = (c: any): AuthRequestHandler => (request) =>
+      this.authManager!.handleRequest(request, transportOf(c));
+
     // ────────────────────────────────────────────────────────────────────
     // SSO admin: register an external OIDC IdP from the flat metadata form
     // (ADR-0135 D6). `@better-auth/sso`'s POST /sso/register expects the protocol
@@ -2993,7 +3035,7 @@ export class AuthPlugin implements Plugin {
         const gated = await gateAdmin(c);
         if (gated instanceof Response) return gated;
         const { status, body } = await runRegisterSsoProviderFromForm(
-          (req) => this.authManager!.handleRequest(req),
+          handleWithTransportOf(c),
           c.req.raw,
         );
         return c.json(body, status as any);
@@ -3293,7 +3335,7 @@ export class AuthPlugin implements Plugin {
         try {
           const gated = await gateAdmin(c);
           if (gated instanceof Response) return gated;
-          return await this.authManager!.handleRequest(c.req.raw);
+          return await this.authManager!.handleRequest(c.req.raw, transportOf(c));
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/remove-user failed', err);
@@ -3370,7 +3412,7 @@ export class AuthPlugin implements Plugin {
               return c.json(answer, 200);
             }
           }
-          return await this.authManager!.handleRequest(c.req.raw);
+          return await this.authManager!.handleRequest(c.req.raw, transportOf(c));
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/has-permission failed', err);
@@ -3493,7 +3535,7 @@ export class AuthPlugin implements Plugin {
         const gated = await gateAdmin(c);
         if (gated instanceof Response) return gated;
         const { status, body } = await runRegisterSamlProviderFromForm(
-          (req) => this.authManager!.handleRequest(req),
+          handleWithTransportOf(c),
           c.req.raw,
         );
         return c.json(body, status as any);
@@ -3521,7 +3563,7 @@ export class AuthPlugin implements Plugin {
         const gated = await gateAdmin(c);
         if (gated instanceof Response) return gated;
         const { status, body } = await runRequestDomainVerification(
-          (req) => this.authManager!.handleRequest(req),
+          handleWithTransportOf(c),
           c.req.raw,
           { domainVerificationEnabled: this.authManager!.isSsoDomainVerificationEnabled() },
         );
@@ -3539,7 +3581,7 @@ export class AuthPlugin implements Plugin {
         const gated = await gateAdmin(c);
         if (gated instanceof Response) return gated;
         const { status, body } = await runVerifyDomain(
-          (req) => this.authManager!.handleRequest(req),
+          handleWithTransportOf(c),
           c.req.raw,
           { domainVerificationEnabled: this.authManager!.isSsoDomainVerificationEnabled() },
         );
@@ -3598,8 +3640,46 @@ export class AuthPlugin implements Plugin {
           return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'redirectURLs must contain at least one URL' } }, 400);
         }
 
-        const allowedTypes = new Set(['web', 'native', 'user-agent-based']);
-        const safeType = typeof type === 'string' && allowedTypes.has(type) ? type : 'web';
+        // [#24773] The form's Application Type reaches the provider as the OIDC
+        // `application_type` its `/oauth2/create-client` body declares (`web` |
+        // `native`). It was forwarded as `type`, a member that body does not
+        // declare, so the provider stripped it and judged and stored every
+        // client as `web`: a `native` client could not register the RFC 8252
+        // loopback redirect URI the provider grants native clients. The
+        // provider's own rule is the one authority — `web` needs https on a
+        // non-loopback host, `native` may use http only on exactly `localhost`,
+        // `127.0.0.1` or `[::1]` — and nothing here re-judges a URI.
+        //
+        // The door accepts exactly those two types. Any other value present in
+        // the body — the form's former `user-agent-based` and `public`, which
+        // have no `application_type`, an empty string, a non-string, anything
+        // else — is refused here with the route's own 400 `INVALID_REQUEST`,
+        // before the provider is called, so nothing is stored. It is never
+        // registered as `web` and never mapped to another type: that silent
+        // substitution issued a confidential web client, with a secret, for a
+        // request that asked for something else. The refusal ships in 18.x as
+        // a breaking minor (the standing post-GA rule as amended, #6015
+        // `6303865025`). No type at all — absent, or JSON `null` — is the
+        // provider's own default, `web`, and is unchanged.
+        let applicationType: 'web' | 'native' = 'web';
+        if (type === 'web' || type === 'native') {
+          applicationType = type;
+        } else if (type !== undefined && type !== null) {
+          const shown =
+            typeof type === 'string'
+              ? JSON.stringify(type.length > 64 ? `${type.slice(0, 64)}…` : type)
+              : `(${typeof type})`;
+          return c.json({
+            success: false,
+            error: {
+              code: 'INVALID_REQUEST',
+              message:
+                `type ${shown} is not an application type the OAuth provider judges: send 'web' or 'native', ` +
+                "or no type for 'web'. Choose 'native' for an http://localhost, http://127.0.0.1 or http://[::1] " +
+                "redirect URI; 'web' needs https on a host that is not a loopback address.",
+            },
+          }, 400);
+        }
 
         const authApi: any = await this.authManager!.getApi();
         if (!authApi?.createOAuthClient) {
@@ -3619,7 +3699,7 @@ export class AuthPlugin implements Plugin {
             body: {
               client_name: name.trim(),
               redirect_uris: redirectUris,
-              type: safeType,
+              application_type: applicationType,
             },
             ...inProcessSessionReadInput(c.req.raw.headers),
           });
@@ -3671,10 +3751,25 @@ export class AuthPlugin implements Plugin {
     // judge). Same family as `sys-oauth-application/register` above: an
     // object-scoped mount outside `/admin/`, because it admits the owner.
     // See `sys-session-revoke.ts` for the lanes and refusals.
+    //
+    // [#24877] The owner lane's re-dispatch goes through the manager slice's
+    // `handleRequest`, so the slice handed over is the manager's own seams
+    // with `handleRequest` bound to this request's transport
+    // (`handleWithTransportOf` above) — the same handler every other bridge
+    // re-dispatches through.
     rawApp.post(`${basePath}/sys-session/revoke`, async (c: any) => {
       try {
+        const manager = this.authManager!;
         const { status, body } = await runSysSessionRevoke(
-          sysSessionRevokeDepsFor(this.authManager!, basePath),
+          sysSessionRevokeDepsFor(
+            {
+              getApi: () => manager.getApi(),
+              getAuthContext: () => manager.getAuthContext(),
+              getDataEngine: () => manager.getDataEngine(),
+              handleRequest: handleWithTransportOf(c),
+            },
+            basePath,
+          ),
           c.req.raw,
         );
         return c.json(body, status as any);
@@ -3702,7 +3797,7 @@ export class AuthPlugin implements Plugin {
     rawApp.post(`${basePath}/send-verification-email`, async (c: any) => {
       try {
         const { status, body } = await runResendVerificationEmail(
-          (req) => this.authManager!.handleRequest(req),
+          handleWithTransportOf(c),
           c.req.raw,
         );
         return c.json(body, status);

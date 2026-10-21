@@ -445,9 +445,16 @@ async function bootBaseline(declared: boolean) {
   // two administrators hold — each owned by `org_x`, the organization every
   // agent's request runs in and so the one its delegator's grants are resolved
   // in (an organization-less grant applies nowhere, ADR-0131 D10).
+  //
+  // [#25063] Every delegator is a member of `org_x`, the platform administrator
+  // included: a delegated request runs in its live organization only where the
+  // delegator's membership backs it, and is refused at the prologue otherwise
+  // (`delegated-organization-membership.test.ts`). The one door that builds an
+  // agent context vets that organization against the same membership.
   const member = objects.get('sys_member')!;
   await knex('sys_member').insert([
     ['u_x', 'org_x', 'member'], ['u_x2', 'org_x', 'member'], ['a_x', 'org_x', 'admin'], ['u_y', 'org_y', 'member'],
+    ['p_admin', 'org_x', 'member'],
   ].map(([user, org, role]) => rowOf(member, { id: `mem:${user}`, user_id: user, organization_id: org, role })));
   await knex('sys_user_permission_set').insert([
     { id: 'ups:u_x2', user_id: 'u_x2', permission_set: 'viewer_readonly', organization_id: 'org_x' },

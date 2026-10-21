@@ -986,6 +986,27 @@ describe('translation unknown-key strictness', () => {
       expect(declared).toEqual([...PAGE_COMPONENT_COPY_KEYS].sort());
     });
 
+    it('accepts a `page:tabs` item label keyed by the item `value` under the tabs component id', () => {
+      const result = parse({
+        home_tabs: { label: 'Work', items: { my_leads: { label: 'My Leads' }, my_deals: { label: 'My Open Deals' } } },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('keeps the tab-item entry closed — `label` is its one key', () => {
+      const result = parse({ home_tabs: { items: { my_leads: { label: 'My Leads', icon: 'user' } } } });
+      expect(result.success).toBe(false);
+      const issue = result.error?.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(issue?.message).toContain('this page tab item translation');
+      expect(issue?.path).toEqual(['pages', 'sales_home_page', 'components', 'home_tabs', 'items', 'my_leads']);
+    });
+
+    it('names `title` and `name` on a tab item as renames onto `label`', () => {
+      const result = parse({ home_tabs: { items: { my_leads: { title: 'My Leads' } } } });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('`title` → `label`');
+    });
+
     it('carries the `label`/`title` trap alias the dashboard widget face carries', () => {
       // A page's headline is `label`; a component's is `title`. One level
       // apart, opposite spellings — the same trap `dashboards.widgets` names.
@@ -1472,6 +1493,45 @@ describe('translation unknown-key strictness', () => {
     });
   });
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // An approval node's step label has a key: `flows.<flow>.approvals.<node_id>.label`
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('flow approvals — `flows.<flow>.approvals.<node_id>.label`', () => {
+    const parse = (flows: unknown) => TranslationDataSchema.safeParse({ flows });
+
+    it('accepts and keeps a translated approval-step label, at both doors', () => {
+      const flows = { opportunity_approval: { approvals: { manager_review: { label: '销售经理审批' } } } };
+      const result = parse(flows) as { success: boolean; data: any; error?: unknown };
+      expect(result.success, JSON.stringify(result.error)).toBe(true);
+      expect(result.data.flows.opportunity_approval.approvals.manager_review.label).toBe('销售经理审批');
+      expect(TranslationItemSchema.safeParse({ locale: 'zh-CN', flows }).success).toBe(true);
+    });
+
+    it('accepts an empty label — the untranslated skeleton slot', () => {
+      expect(parse({ f: { approvals: { n: { label: '' } } } }).success).toBe(true);
+    });
+
+    it('names `title` as the rename onto `label` it is — the spelling a screen key carries', () => {
+      const result = parse({ f: { approvals: { n: { title: 'x' } } } });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys')!;
+      expect(issue.path).toEqual(['flows', 'f', 'approvals', 'n']);
+      expect(issue.message).toContain('`title` → `label`');
+    });
+
+    it('closes the entry: a key the approval node does not declare is refused', () => {
+      const result = parse({ f: { approvals: { n: { instructions: 'x' } } } });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+    });
+
+    it('names `approval` as the rename onto the `approvals` group', () => {
+      const result = parse({ f: { approval: { n: { label: 'x' } } } });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('`approval` → `approvals`');
+    });
+  });
+
   it('names which action surface the key landed on', () => {
     const onObject = TranslationDataSchema.safeParse({
       objects: { account: { _actions: { merge: { confirm: 'ok?' } } } },
@@ -1934,5 +1994,33 @@ describe('retired translation.validationMessages', () => {
       messages: { 'common.save': '保存' },
       apps: { crm: { label: 'CRM' } },
     })).not.toThrow();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// `_views.<view>.title` — a form view's heading (`FormViewSchema.title`)
+// ──────────────────────────────────────────────────────────────────────────
+describe('`objects.<object>._views.<view>.title`, the key a form view\'s title is translated through', () => {
+  const parse = (view: unknown) =>
+    ObjectTranslationDataSchema.safeParse({ label: 'Lead', _views: { web_to_lead: view } });
+
+  it('accepts `title` as its own key, beside the view\'s `label`', () => {
+    const result = parse({ label: '网页线索', title: '联系我们' });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    expect(result.success && result.data._views?.web_to_lead).toEqual({ label: '网页线索', title: '联系我们' });
+  });
+
+  it('a heading-shaped neighbour is named as a rename onto `title`, not onto `label`', () => {
+    const result = parse({ heading: '联系我们' });
+    expect(result.success).toBe(false);
+    const issue = result.error?.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue?.message).toContain('this view translation');
+    expect(issue?.message).toContain('`heading` → `title`');
+  });
+
+  it('CONTROL: the entry stays closed — a key it does not declare is still refused', () => {
+    const result = parse({ subtitle: 'x' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
   });
 });

@@ -285,6 +285,7 @@ import {
     headerLabel,
     formatRowCells,
     exportContentDisposition,
+    type ExportBooleanWords,
     type ExportFieldMeta,
 } from './export-format.js';
 // [#23050 slice 1] The data-action routes' body moved to its own module — see its header.
@@ -1142,11 +1143,14 @@ function formatCsvCell(value: any): string {
  * Serialise a list of rows to RFC-4180 CSV text. Caller supplies the ordered
  * list of field names and a (possibly empty) field-metadata map. With metadata,
  * the header row uses field labels and cell values are formatted to readable
- * display values (lookup names, select labels, 是/否, formatted dates). With an
- * empty map the output is byte-identical to the raw, un-formatted behaviour.
+ * display values (lookup names, select labels, yes / no words, formatted
+ * dates). With an empty map the output is byte-identical to the raw,
+ * un-formatted behaviour.
  *
  * `timezone` (#8373) is the caller's business timezone, used to render
  * `datetime` cells in the same clock the UI shows; absent, they render in UTC.
+ * `booleanWords` (#24945) are the words of the caller's language that a boolean
+ * cell is written as (`ExportBooleanWords` in `./export-format.ts`).
  */
 export function rowsToCsv(
     fields: string[],
@@ -1154,11 +1158,12 @@ export function rowsToCsv(
     includeHeader: boolean,
     metaMap: Map<string, ExportFieldMeta>,
     timezone?: string,
+    booleanWords?: ExportBooleanWords,
 ): string {
     const lines: string[] = [];
     if (includeHeader) lines.push(fields.map(f => formatCsvCell(headerLabel(f, metaMap))).join(','));
     for (const row of rows) {
-        lines.push(formatRowCells(row, fields, metaMap, timezone).map(formatCsvCell).join(','));
+        lines.push(formatRowCells(row, fields, metaMap, timezone, booleanWords).map(formatCsvCell).join(','));
     }
     return lines.join('\r\n') + (lines.length > 0 ? '\r\n' : '');
 }
@@ -5528,6 +5533,8 @@ export class RestServer {
             translateMetaItem: (...a) => this.translateMetaItem(...a),
             resolveMessageTranslator: (...a) => this.resolveMessageTranslator(...a),
             resolveSecurityService: (...a) => this.resolveSecurityService(...a),
+            resolveI18nService: (...a) => this.resolveI18nService(...a),
+            extractLocale: (...a) => this.extractLocale(...a),
             answerImportTemplate: (...a) => this.answerImportTemplate(...a),
         };
         registerDataActionEndpoints.call(host, basePath);

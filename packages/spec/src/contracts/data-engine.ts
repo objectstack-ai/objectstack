@@ -106,21 +106,33 @@ export interface WriteObservabilityOptions {
    * learns WHICH fields would go — but their result is discarded.
    *
    * It covers every drop `onFieldsDropped` reports — coverage DERIVED from the
-   * reported set, never an enumeration frozen at #5126. Today that is all four
+   * reported set, never an enumeration frozen at #5126. Today that is all five
    * `DroppedFieldsEvent['reason']` arms: static `readonly: true` (#2948, which
    * only runs for non-system callers), a TRUE `readonlyWhen` predicate (#3042,
    * which runs for every API-BOUNDARY caller, `isSystem` included — but judges
    * only the keys the caller supplied at engine entry, so a value a
    * `beforeUpdate` hook derived or overwrote is never stripped, #9107), the
    * `primary_key`
-   * strip (#6437), and the `computed` strip of a `formula` value (#20805, every
-   * context, `isSystem` included) — plus, since #5503, the implicitly-readonly runtime-owned
+   * strip (#6437), the `computed` strip of a `formula` value (#20805, every
+   * context, `isSystem` included), and the `stored_expression` replacement
+   * (#24690 reported it; #25000 refuses it) — plus, since #5503, the implicitly-readonly runtime-owned
    * strip, which reports under the same `'readonly'` arm rather than adding one
    * (see the INSERT section below). Covering only the static arm would leave a
    * trusted caller — the very caller this option exists for, one that already
    * passes `{ context: { isSystem: true } }` and is therefore exempt from the
    * static strip — still losing `readonlyWhen` fields in silence, which is the
    * bug this option exists to abolish.
+   *
+   * `stored_expression` (#24690) is a caller's value for a stored field the
+   * engine computes from its `expression`, replaced by the computed one. The
+   * field IS written, but not with the caller's value, so a strict caller is
+   * told exactly as it is for a strip: since #25000 (18.x, a BREAKING minor
+   * under the amended ruling 「甲」) such a write is REFUSED, on insert
+   * (single, batch, `insertMany`), update by id and predicate update, and
+   * nothing is written. Before it, the write completed with the computed value
+   * and was only reported. A caller that sends the computed value, or no value
+   * for the field, is never refused: nothing it sent was replaced. Remedy: leave
+   * the field out of the payload, or send the value its expression computes.
    *
    * ⚠️ **A new `reason` therefore adds a new REFUSAL, by construction** — the
    * price of the derived coverage above, paid deliberately when `primary_key`

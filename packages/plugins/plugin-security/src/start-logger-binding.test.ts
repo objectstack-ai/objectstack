@@ -77,11 +77,13 @@ const sinkOf = (plugin: SecurityPlugin) => (plugin as any).logger;
  * Drive a REAL report through `this.logger` and return whether it landed.
  *
  * `getReadFilter` is a public instance method whose on-behalf-of refusal
- * (`this.logger.error?.(…)`, the ADR-0095/#2852 fail-closed branch) depends on
- * NONE of the handles captured below the bail-outs — no `this.ql`, no
- * `this.metadata`. That makes it the one report site that is genuinely
- * reachable on a bailed-out instance, which is what makes it the right probe
- * for "the sink RECEIVES something".
+ * (`this.logger.error?.(…)`, the ADR-0090 D10 fail-closed branch for a
+ * delegator who does not exist — on a bailed-out instance the delegator's
+ * `sys_user` row cannot be read, so the link dangles) depends on NONE of the
+ * handles captured below the bail-outs — no `this.ql`, no `this.metadata`.
+ * That makes it the one report site that is genuinely reachable on a
+ * bailed-out instance, which is what makes it the right probe for "the sink
+ * RECEIVES something".
  *
  * Pre-fix this call is silent: `{}.error` is `undefined` and `?.()` no-ops.
  */

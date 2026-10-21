@@ -71,6 +71,21 @@ export {
 } from './recipient-locale.js';
 export type { SmsChannelOptions, SmsSenderSurface } from './sms-channel.js';
 
+// [#24978] Keyed notification text — `EmitInput.keyedText`, rendered per
+// recipient at delivery from the `i18n` service's catalog.
+export {
+    NotificationTextRenderer,
+    assertNotificationTextKeys,
+} from './notification-text.js';
+export type {
+    NotificationTextKeys,
+    NotificationTextParam,
+    NotificationTextI18n,
+    NotificationTextItem,
+    NotificationTextRendererOptions,
+    RenderedNotificationText,
+} from './notification-text.js';
+
 // Templates + renderer (ADR-0030 P3)
 export {
     NotificationTemplateStore,
@@ -190,7 +205,6 @@ export {
     NotificationReceipt,
     NotificationDelivery,
     NotificationPreference,
-    NotificationSubscription,
     NotificationTemplate,
     HttpDelivery,
     SYS_HTTP_DELIVERY,

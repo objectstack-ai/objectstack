@@ -52,8 +52,8 @@ GET    /api/v1/automation/:name/runs/:runId    — Get single execution run
 ## TypeScript Usage
 
 ```typescript
-import { AutomationApiErrorCode, AutomationFlowPathParamsSchema, AutomationRunPathParamsSchema, CreateFlowRequestSchema, CreateFlowResponseSchema, DeleteFlowRequestSchema, DeleteFlowResponseSchema, GetFlowRequestSchema, GetFlowResponseSchema, GetRunRequestSchema, GetRunResponseSchema, ListRunsRequestSchema, ListRunsResponseSchema, ResumeFailureDetailsSchema, ToggleFlowRequestSchema, ToggleFlowResponseSchema, TriggerFlowRequestSchema, TriggerFlowResponseSchema, UpdateFlowRequestSchema, UpdateFlowResponseSchema } from '@objectstack/spec/api';
-import type { AutomationApiErrorCode, AutomationFlowPathParams, AutomationRunPathParams, CreateFlowRequest, CreateFlowResponse, DeleteFlowRequest, DeleteFlowResponse, GetFlowRequest, GetFlowResponse, GetRunRequest, GetRunResponse, ListRunsRequest, ListRunsResponse, ResumeFailureDetails, ToggleFlowRequest, ToggleFlowResponse, TriggerFlowRequest, TriggerFlowResponse, UpdateFlowRequest, UpdateFlowResponse } from '@objectstack/spec/api';
+import { AutomationApiErrorCode, AutomationFlowPathParamsSchema, AutomationRunPathParamsSchema, CreateFlowRequestSchema, CreateFlowResponseSchema, DeleteFlowRequestSchema, DeleteFlowResponseSchema, FlowFailureDetailsSchema, FlowInnerRefusalSchema, GetFlowRequestSchema, GetFlowResponseSchema, GetRunRequestSchema, GetRunResponseSchema, ListRunsRequestSchema, ListRunsResponseSchema, ResumeFailureDetailsSchema, ToggleFlowRequestSchema, ToggleFlowResponseSchema, TriggerFlowRequestSchema, TriggerFlowResponseSchema, UpdateFlowRequestSchema, UpdateFlowResponseSchema } from '@objectstack/spec/api';
+import type { AutomationApiErrorCode, AutomationFlowPathParams, AutomationRunPathParams, CreateFlowRequest, CreateFlowResponse, DeleteFlowRequest, DeleteFlowResponse, FlowFailureDetails, FlowInnerRefusal, GetFlowRequest, GetFlowResponse, GetRunRequest, GetRunResponse, ListRunsRequest, ListRunsResponse, ResumeFailureDetails, ToggleFlowRequest, ToggleFlowResponse, TriggerFlowRequest, TriggerFlowResponse, UpdateFlowRequest, UpdateFlowResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = AutomationApiErrorCode.parse(data);
@@ -309,6 +309,402 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Name of the deleted flow |
 | **deleted** | `boolean` | ✅ | Whether the flow was deleted |
+
+
+---
+
+## FlowFailureDetails
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **errorMessage** | `string` | optional | The flow author's own failure text (`flow.errorMessage`), copied verbatim from `AutomationResult.errorMessage`; absent when the author wrote none |
+| **summary** | `{ selected: integer; acted: integer; skipped: integer; unmeasured?: integer; … }` | optional | The run's per-node accounting (`AutomationResult.summary`) - which node failed; absent when the engine measured none |
+| **innerRefusal** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; message: string }` | optional | The refusal a node's write met inside the run (`AutomationResult.innerRefusal`): `{ code, message }`, `code` in its wire spelling (e.g. `UNIQUE_VIOLATION`). Absent when the failure met no refusal |
+
+### Nested Shape: `FlowFailureDetails.summary`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **selected** | `integer` | ✅ | Total records read by the run |
+| **acted** | `integer` | ✅ | Total records written / effects dispatched by the run |
+| **skipped** | `integer` | ✅ | Total node executions a closed gate prevented |
+| **unmeasured** | `integer` | optional | Total executions that may have caused an effect the platform cannot count. Absent = not tracked (an older run), which is not the same as zero. |
+| **failed** | `integer` | optional | Total node executions that failed — a fold of `nodes[].failures`, INCLUDING what a delegating node (`subflow` / `map`) rolled up from a child run that COMPLETED while containing failures: this total answers "what did this run cause", subflows included, so a parent whose child lost rows does not read `failed: 0`. A child that FAILED — whether or not it also contained failures before it failed — counts once, as the delegating step's own failure, and its own `failed` stays on its row (unlike `acted`, which carries a failed child's writes). On a run that completed every one of them was contained (caught by a `try_catch` or routed down a `fault` edge) and the run went on. Absent = not tracked (an older run), which is not the same as zero. |
+| **nodes** | `{ nodeId: string; nodeType: string; nodeLabel?: string; status: Enum<'success' \| 'failure' \| 'skipped'>; … }[]` | ✅ | Per-node breakdown, in first-execution order |
+| **gates** | `{ nodeId: string; targetNodeId: string; edgeId?: string; label?: string; … }[]` | ✅ | Gates that closed during the run, most-skipped first |
+| **detailOmitted** | `boolean` | optional | Set when persistence dropped `nodes`/`gates` to keep the stored row bounded — the totals are still exact. Declared so empty arrays are never mistaken for "nothing ran". |
+
+### Nested Shape: `FlowFailureDetails.innerRefusal`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
+| **message** | `string` | ✅ | The inner refusal's own diagnostic text, verbatim, without the node and operation prefixes the run's failure text adds |
+
+
+---
+
+## FlowInnerRefusal
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +341 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
+| **message** | `string` | ✅ | The inner refusal's own diagnostic text, verbatim, without the node and operation prefixes the run's failure text adds |
+
+### Allowed Values: `FlowInnerRefusal.code`
+
+* `VALIDATION_ERROR`
+* `INVALID_FIELD`
+* `MISSING_REQUIRED_FIELD`
+* `INVALID_FORMAT`
+* `VALUE_TOO_LONG`
+* `VALUE_TOO_SHORT`
+* `VALUE_OUT_OF_RANGE`
+* `INVALID_REFERENCE`
+* `DUPLICATE_VALUE`
+* `INVALID_QUERY`
+* `INVALID_FILTER`
+* `INVALID_SORT`
+* `MAX_RECORDS_EXCEEDED`
+* `UNAUTHENTICATED`
+* `INVALID_CREDENTIALS`
+* `EXPIRED_TOKEN`
+* `INVALID_TOKEN`
+* `SESSION_EXPIRED`
+* `MFA_REQUIRED`
+* `EMAIL_NOT_VERIFIED`
+* `PERMISSION_DENIED`
+* `INSUFFICIENT_PRIVILEGES`
+* `FIELD_NOT_ACCESSIBLE`
+* `RECORD_NOT_ACCESSIBLE`
+* `LICENSE_REQUIRED`
+* `IP_RESTRICTED`
+* `TIME_RESTRICTED`
+* `RESOURCE_NOT_FOUND`
+* `OBJECT_NOT_FOUND`
+* `RECORD_NOT_FOUND`
+* `FIELD_NOT_FOUND`
+* `ENDPOINT_NOT_FOUND`
+* `RESOURCE_CONFLICT`
+* `CONCURRENT_MODIFICATION`
+* `DELETE_RESTRICTED`
+* `DUPLICATE_RECORD`
+* `LOCK_CONFLICT`
+* `METHOD_NOT_ALLOWED`
+* `PRECONDITION_REQUIRED`
+* `RATE_LIMIT_EXCEEDED`
+* `QUOTA_EXCEEDED`
+* `INTERNAL_ERROR`
+* `DATABASE_ERROR`
+* `TIMEOUT`
+* `SERVICE_UNAVAILABLE`
+* `NOT_IMPLEMENTED`
+* `EXTERNAL_SERVICE_ERROR`
+* `INTEGRATION_ERROR`
+* `WEBHOOK_DELIVERY_FAILED`
+* `ACCOUNT_LOCKED`
+* `ACTION_CONFIRMATION_REQUIRED`
+* `ACTION_DISABLED`
+* `ALREADY_REVERTED`
+* `AMBIGUOUS_MATCH`
+* `ANALYTICS_DATE_RANGE_UNRECOGNIZED`
+* `ANALYTICS_QUERY_FAILED`
+* `API_KEY_EXPIRED`
+* `API_KEY_EXPIRY_TOO_LONG`
+* `API_KEY_INACTIVE`
+* `API_KEY_REVOKED`
+* `APPROVAL_ACTIONS_FAILED`
+* `APPROVAL_APPROVE_FAILED`
+* `APPROVAL_COMMENT_FAILED`
+* `APPROVAL_REASSIGN_FAILED`
+* `APPROVAL_RECALL_FAILED`
+* `APPROVAL_REJECT_FAILED`
+* `APPROVAL_REMIND_FAILED`
+* `APPROVAL_REQUEST_GET_FAILED`
+* `APPROVAL_REQUEST_INFO_FAILED`
+* `APPROVAL_REQUEST_LIST_FAILED`
+* `APPROVAL_RESUBMIT_FAILED`
+* `APPROVAL_REVISE_FAILED`
+* `ASYNC_NOT_SUPPORTED`
+* `ATTACHMENT_DELETE_DENIED`
+* `ATTACHMENT_DOWNLOAD_DENIED`
+* `ATTACHMENT_PARENT_ACCESS`
+* `AUDIENCE_NOT_ALLOWED`
+* `AUDIT_TYPE_NOT_CANONICAL`
+* `AUTH_CONFIG_ERROR`
+* `AUTH_REQUIRED`
+* `AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`
+* `BATCH_ABORTED`
+* `BATCH_NOT_ATOMIC`
+* `BATCH_TOO_LARGE`
+* `BATCH_UNRESOLVED_REF`
+* `BLANK_MATCH_KEY`
+* `CLONE_DISABLED`
+* `CLOUD_FETCH_FAILED`
+* `CLOUD_UNCONFIGURED`
+* `COMMIT_NOT_FOUND`
+* `CONCURRENT_UPDATE`
+* `CONFLICT`
+* `CONFLICTING_MAPPING`
+* `CONNECTOR_UPSTREAM_UNAVAILABLE`
+* `CREATE_FAILED`
+* `CUBE_NOT_FOUND`
+* `DATASET_INVALID`
+* `DATASOURCE_ADMIN_ERROR`
+* `DEFAULT_RECORD_PAGE_CONFLICT`
+* `DELEGABLE_SCOPE_FAILED`
+* `DELETE_HOOK_RESULT_NOT_WRITE_SHAPE`
+* `DELIVERY_NEVER_SENT`
+* `DELIVERY_NOT_ELIGIBLE`
+* `DESTRUCTIVE_CHANGE`
+* `DEVICE_CODE_FAILED`
+* `DOMAIN_VERIFICATION_DISABLED`
+* `DOMAIN_VERIFICATION_FAILED`
+* `DRIVER_UNAVAILABLE`
+* `DUPLICATE_ARTIFACT_OBJECT_NAME`
+* `DUPLICATE_ARTIFACT_PACKAGE`
+* `DUPLICATE_REQUEST`
+* `DUPLICATE_SOURCE_NOT_A_BASE`
+* `ELIGIBILITY_UNEVALUABLE`
+* `EMAIL_DOMAIN_NOT_ALLOWED`
+* `EMAIL_SEND_FAILED`
+* `EMAIL_SERVICE_REQUIRED`
+* `ENQUEUE_FAILED`
+* `ENVIRONMENT_BIND_FAILED`
+* `ENVIRONMENT_NOT_FOUND`
+* `ENV_ACCESS_DENIED`
+* `ERR_AUTONUMBER_COLLISION`
+* `ERR_BULK_RESULT_MISMATCH`
+* `ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`
+* `ERR_DATASOURCE_UNAVAILABLE`
+* `ERR_DRIVER_CONNECT`
+* `ERR_FILE_CONSTRAINT`
+* `ERR_FILE_REFERENCE_COPY`
+* `ERR_HOOK_TARGET_REBIND`
+* `ERR_READONLY_FIELD_REJECTED`
+* `ERR_SUMMARY_RECOMPUTE`
+* `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`
+* `ERR_TRANSACTION_UNSUPPORTED`
+* `EXECUTION_ERROR`
+* `EXPIRED_OR_REVOKED`
+* `EXPIRY_IN_PAST`
+* `EXPIRY_TOO_LONG`
+* `EXPLAIN_FAILED`
+* `EXPORT_NOT_PERMITTED`
+* `EXTERNAL_DATASOURCE_ERROR`
+* `EXTERNAL_IMPORT_ERROR`
+* `EXTERNAL_SCHEMA_MISMATCH`
+* `EXTERNAL_SCHEMA_MODE_VIOLATION`
+* `EXTERNAL_WRITE_FORBIDDEN`
+* `FEEDS_DISABLED`
+* `FIELD_VISIBILITY_UNRESOLVED`
+* `FILES_DISABLED`
+* `FILE_DOWNLOAD_DENIED`
+* `FILE_FIELD_BULK_WRITE_REFUSED`
+* `FILE_NOT_FOUND`
+* `FILTER_TOKEN_UNKNOWN`
+* `FILTER_TOKEN_UNRESOLVED`
+* `FIND_HOOK_RESULT_NOT_ARRAY`
+* `FIND_ONE_HOOK_RESULT_NOT_RECORD`
+* `FLOW_DISABLED`
+* `FLOW_FAILED`
+* `FLOW_INPUT_SCHEMA_INVALID`
+* `FLOW_NO_START_NODE`
+* `FORBIDDEN`
+* `FORM_NOT_FOUND`
+* `FORM_RESOLVE_FAILED`
+* `HOOK_UNSCOPED_DATA_ACCESS`
+* `IMPORT_JOB_CREATE_FAILED`
+* `IMPORT_ROW_FAILED`
+* `INSTALL_MODE_NOT_PERMITTED`
+* `INTERNAL`
+* `INVALID_ARTIFACT_PACKAGES`
+* `INVALID_ARTIFACT_PACKAGE_ENTRY`
+* `INVALID_EMAIL`
+* `INVALID_EXPIRY`
+* `INVALID_METADATA`
+* `INVALID_OR_EXPIRED`
+* `INVALID_PHONE`
+* `INVALID_REQUEST`
+* `INVALID_RESUME_TOKEN`
+* `INVALID_SCREEN_INPUT`
+* `INVALID_SIGNAL`
+* `INVALID_SIGNATURE`
+* `INVALID_STATE`
+* `INVITE_EMAIL_FAILED`
+* `INVITE_ISSUER_MEMBER_ONLY`
+* `INVITE_ISSUER_UNVERIFIED`
+* `INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE`
+* `INVITE_PLACEMENT_UNSUPPORTED`
+* `INVITE_REQUIRES_EMAIL`
+* `INVITE_ROLE_ABOVE_ISSUER`
+* `INVITE_SMS_FAILED`
+* `IP_NOT_ALLOWED`
+* `ITEM_LOCKED`
+* `LAST_LOCAL_CREDENTIAL`
+* `LEGACY_ORGANIZATION_ROWS_UNREADABLE`
+* `MANIFEST_CONFLICT`
+* `MAPPING_FORMAT_MISMATCH`
+* `MAPPING_FORMAT_UNSUPPORTED`
+* `MAPPING_NOT_FOUND`
+* `MAPPING_TARGET_MISMATCH`
+* `MARKETPLACE_PROXY_FAILED`
+* `MARKETPLACE_STORAGE_FAILED`
+* `MARKETPLACE_UNAVAILABLE`
+* `MEMORY_MULTI_TENANT_UNSUPPORTED`
+* `METADATA_BRANCH`
+* `METADATA_CONFLICT`
+* `METADATA_NOT_FOUND`
+* `METADATA_SCHEMA_INVALID`
+* `MIXED_ARTIFACT_COLLECTION_SHAPE`
+* `MONGODB_MULTI_TENANT_UNSUPPORTED`
+* `MULTI_UPDATE_HOOK_KEY_DIVERGENCE`
+* `NAMESPACE_CONFLICT`
+* `NAMESPACE_PREFIX`
+* `NEEDS_PASSWORD`
+* `NODE_FAILURE`
+* `NOTHING_TO_PURGE`
+* `NOT_ATTEMPTED`
+* `NOT_COMPENSABLE`
+* `NOT_CREATABLE`
+* `NOT_FOUND`
+* `NOT_OVERRIDABLE`
+* `NOT_UNDOABLE`
+* `NO_DRAFT`
+* `NO_EXECUTOR`
+* `NO_IDENTITY`
+* `NO_MATCH`
+* `NO_PENDING_VERIFICATION`
+* `NO_SUCH_RUN`
+* `OAUTH_REGISTER_FAILED`
+* `OBJECT_API_DISABLED`
+* `OBJECT_API_METHOD_NOT_ALLOWED`
+* `OBJECT_OVERLAY_PACKAGE_MISMATCH`
+* `OBJECT_OWNERSHIP_CONFLICT`
+* `OBJECT_PACKAGE_DISABLED`
+* `OPENAPI_UNAVAILABLE`
+* `ORGANIZATION_CREATION_DISABLED`
+* `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`
+* `ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS`
+* `OS_PROTOCOL_INCOMPATIBLE`
+* `PACKAGE_DELETE_FAILED`
+* `PACKAGE_DELETE_PARTIAL`
+* `PACKAGE_MANIFEST_INVALID`
+* `PACKAGE_PUBLISH_FAILED`
+* `PASSWORD_ALREADY_SET`
+* `PASSWORD_EXPIRED`
+* `PASSWORD_POLICY_VIOLATION`
+* `PASSWORD_RESET_REQUIRED`
+* `PASSWORD_REUSE`
+* `PAYLOAD_TOO_LARGE`
+* `PERMISSION_NOT_ALLOWED`
+* `PHONE_NOT_ENABLED`
+* `PLAN_CHANGED`
+* `PLUGIN_CONTRACT_VIOLATION`
+* `PLUGIN_INSTALL_FAILED`
+* `PLUGIN_MANIFEST_INVALID`
+* `PLUGIN_REGISTER_FAILED`
+* `PLUGIN_UI_REQUIRED_KEY_MISSING`
+* `PREFLIGHT_FAILED`
+* `PROJECT_MEMBERSHIP_REQUIRED`
+* `PROJECT_NOT_FOUND`
+* `PROJECT_PROVISIONING`
+* `PROJECT_PROVISIONING_FAILED`
+* `QUERY_OBJECT_MISMATCH`
+* `RAW_SQL_UNSUPPORTED`
+* `READ_BACK_FAILED`
+* `READ_SCOPE_COMPILE_FAILED`
+* `RECORD_GONE`
+* `RECORD_LOCKED`
+* `RECORD_NOT_ELIGIBLE`
+* `REGISTRY_TYPE_NOT_CANONICAL`
+* `REQUEST_NOT_FOUND`
+* `RESEED_NO_ROWS`
+* `RESEED_SKIPPED`
+* `RESUME_FAILED`
+* `RESUME_IN_PROGRESS`
+* `RESUME_TARGET_LOST`
+* `ROLE_NOT_FOUND`
+* `ROLLED_BACK`
+* `ROUTE_NOT_FOUND`
+* `RULE_DEFINE_FAILED`
+* `RULE_DELETE_FAILED`
+* `RULE_EVALUATE_FAILED`
+* `RULE_GET_FAILED`
+* `RULE_LIST_FAILED`
+* `RULE_NOT_FOUND`
+* `RUN_NOT_FOUND`
+* `SAML_REGISTER_FAILED`
+* `SELF_REGISTRATION_CLOSED`
+* `SERVICE_NOT_REGISTERED`
+* `SETTINGS_ACTION_FAILED`
+* `SETTINGS_CRYPTO_UNAVAILABLE`
+* `SETTINGS_ENGINE_NOT_BOUND`
+* `SETTINGS_FORBIDDEN`
+* `SETTINGS_LOCKED`
+* `SETTINGS_UNKNOWN_KEY`
+* `SETTINGS_UNKNOWN_NAMESPACE`
+* `SETTINGS_VALIDATION`
+* `SHARES_LIST_FAILED`
+* `SHARE_GRANT_FAILED`
+* `SHARE_REVOKE_FAILED`
+* `SHARING_NOT_ENABLED`
+* `SIGN_IN_REQUIRED`
+* `SMS_SERVICE_REQUIRED`
+* `SQL_DIALECT_EMISSION_UNSUPPORTED`
+* `SSO_REGISTER_FAILED`
+* `SSO_REGISTER_FORBIDDEN`
+* `STACK_CAPABILITY_UNKNOWN`
+* `STACK_COMPOSE_ACTION_KEY_COLLISION`
+* `STACK_COMPOSE_COLLECTION_CONFLICT`
+* `STACK_COMPOSE_FUNCTIONS_SHAPE_CONFLICT`
+* `STACK_COMPOSE_FUNCTION_CONFLICT`
+* `STACK_COMPOSE_KEY_CONFLICT`
+* `STACK_COMPOSE_OBJECT_CONFLICT`
+* `STACK_CROSS_REFERENCE_INVALID`
+* `STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED`
+* `STACK_NAMESPACE_PREFIX_INVALID`
+* `STACK_PROVENANCE_MISSING`
+* `STACK_SCHEMA_INVALID`
+* `STACK_SINGLE_APP_VIOLATION`
+* `STACK_TRIGGER_CAPABILITY_REQUIRED`
+* `STACK_UNMANAGED_INSTALL_UNCOPYABLE`
+* `STACK_WEBHOOK_CAPABILITY_REQUIRED`
+* `STORED_TYPE_NOT_CANONICAL`
+* `STORE_UNAVAILABLE`
+* `SUGGESTION_CONFIRM_FAILED`
+* `SUGGESTION_DISMISS_FAILED`
+* `SUGGESTION_LIST_FAILED`
+* `SUGGESTION_NOT_FOUND`
+* `SUGGESTION_STATE`
+* `SUMMARY_RECOMPUTE_FAILED`
+* `THROTTLED`
+* `UNAUTHORIZED`
+* `UNIQUE_SCOPE_CONFIRMATION_REQUIRED`
+* `UNIQUE_VIOLATION`
+* `UNKNOWN_KEY`
+* `UNKNOWN_NAMESPACE`
+* `UNMANAGED_INSTALL_UNCOPYABLE`
+* `UNMANAGED_INSTALL_WALLED_POSTURE`
+* `UNSUPPORTED`
+* `UNSUPPORTED_QUERY_PARAM`
+* `UNSUPPORTED_TRANSFORM`
+* `UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE`
+* `UPDATE_ID_MISMATCH`
+* `UPLOAD_SESSION_EXPIRED`
+* `UPLOAD_SESSION_NOT_FOUND`
+* `USER_ALREADY_EXISTS`
+* `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`
+* `VALIDATION_FAILED`
+* `VERSION_NOT_FOUND`
+* `VERSION_NOT_RESTORABLE`
+* `WALLED_MEMBERSHIP_POLICY_UNDECLARED`
+* `WRITABLE_PACKAGE_REQUIRED`
+* `WRONG_PASSWORD`
 
 
 ---
@@ -650,6 +1046,8 @@ const result = AutomationApiErrorCode.parse(data);
 | **screen** | `{ nodeId: string; title?: string; description?: string; fields: object[]; … }` | optional | The screen to render - set when the run paused at a `screen` node awaiting user input. The client collects values for `screen.fields` and resumes the run with them. |
 | **successMessage** | `string` | optional | Friendly terminal message copied from the flow definition on terminal success, so a screen-flow runner can show a meaningful toast |
 | **errorMessage** | `string` | optional | Friendly terminal message copied from the flow definition on failure |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, of the refusal a node met inside the run - present exactly when that refusal's producer opted in at throw time (`ApiErrorSchema.userMessage` semantics). Never replaces `error` |
+| **innerRefusal** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; message: string }` | optional | The refusal a node's write met inside the run, structured: `{ code, message }`, `code` in its wire spelling. Set on a failed run only when a refusal was met; `code` above and `error` are unchanged by it |
 | **flowLabel** | `string` | optional | The flow definition's authored `label`, copied verbatim so a runner can name the flow (header, completion toast) and translate it against `flows.<flow>.label`. Set on every result of an evaluation of a registered flow (paused and terminal alike); absent on a refusal carrying `code`. For a subflow chain it is the addressed (parent) run's flow. Never defaulted to the API name |
 | **refusalMessage** | `string` | optional | Rendered refusal, set when `status` is `refused` - the `end` node's `message` template interpolated against the run's variables, so it names the record. Authored per-record text (not a flow-level copy like the two above); absent on every other status. A runner shows it with Close only |
 | **summary** | `{ selected: integer; acted: integer; skipped: integer; unmeasured?: integer; … }` | optional | What the run did - records selected / acted on, gate skips, per-node status. Set on a TERMINAL result (a paused run has not finished doing it yet). |

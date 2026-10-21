@@ -252,7 +252,8 @@ export const EngineUpdateOptionsSchema = lazySchema(() => BaseEngineOptionsSchem
  * (#2948) or a TRUE `readonlyWhen` predicate (#3042)), the primary-key strip
  * that keeps a ruled-non-key payload value out of the id column (#6437), or the
  * computed-field strip of a value no store has a column for (#20805) — and
- * completed the write without them. The write itself still succeeds —
+ * completed the write without them; or it STORED a field's computed value in
+ * place of the caller's (`stored_expression`, #24690). The write itself still succeeds —
  * stripping is legitimate semantics, not an error — but callers that report
  * success per requested field (e.g. a flow's `update_record` step) need to know
  * which fields never landed (#3407).
@@ -276,8 +277,12 @@ export const EngineUpdateOptionsSchema = lazySchema(() => BaseEngineOptionsSchem
 export const DroppedFieldsEventSchema = lazySchema(() => z.object({
   /** Object the write targeted (resolved object name). */
   object: z.string().describe('Object the write targeted (resolved object name)'),
-  /** Caller-supplied field names the engine removed from the write payload. */
-  fields: z.array(z.string()).describe('Caller-supplied field names the engine removed from the write payload'),
+  /**
+   * Caller-supplied field names whose value the engine did not store: removed
+   * from the write payload, or — under `stored_expression` — written with the
+   * engine's computed value in place of the caller's.
+   */
+  fields: z.array(z.string()).describe('Caller-supplied field names whose value the engine did not store: removed from the write payload, or (`stored_expression`) written with the computed value in place of the caller\'s'),
   /**
    * Why the fields were dropped:
    * - `readonly` — static `readonly: true` fields, caller-supplied writes are
@@ -301,16 +306,34 @@ export const DroppedFieldsEventSchema = lazySchema(() => z.object({
    *   every context, `isSystem` included (#20805). NOT a read-only lock:
    *   `isSystem` does not exempt it, because there is nowhere for the value to
    *   land.
+   * - `stored_expression` — the field is STORED (not a `formula`) and declares
+   *   an `expression`, so the engine computes its value on every write, in
+   *   every context, `isSystem` included (#24619). The key is NOT dropped: the
+   *   field is written, with the computed value in place of the caller's, so
+   *   `computed` (no column, nothing written) would lie about it (#24690).
+   *   Reported only when the caller's value DIFFERS from the value stored — a
+   *   client that sends the computed value, or none, is told nothing — and
+   *   only for a value no other strip took (a stored expression field also
+   *   declared `readonly` is reported once, as `readonly`). On a predicate
+   *   update the value stored is the one computed value, or the column left
+   *   as it is when the patch moves no input; a caller value that differs
+   *   from what any matched row stores is reported. Under
+   *   `strictReadonlyWrites` it is REFUSED like every other arm, and nothing
+   *   is written (#25000, 18.x, under the amended ruling 「甲」; before it the
+   *   write completed and was only reported — see `WriteObservabilityOptions`).
    *
    * `primary_key` names the FIELD's role, not the offending value's shape, on
    * purpose: `not_a_primary_key` would describe the value and become false the
    * day the strip widens to the same-value truthy-scalar no-op the engine
    * currently leaves alone. `primary_key` stays true either way, and sits in
    * the same register as the two read-only arms — each answers "what about this
-   * FIELD caused the strip?".
+   * FIELD caused the strip?". `stored_expression` answers it the same way —
+   * the field is a stored column computed from its `expression` — rather than
+   * naming what happened to the value (`recomputed`, `overwritten`), so it
+   * stays true whatever the engine does with a caller's value for such a field.
    */
-  reason: z.enum(['readonly', 'readonly_when', 'primary_key', 'computed']).describe('Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for'),
-}).describe('A write-path strip event: caller-supplied fields legally dropped from the payload'));
+  reason: z.enum(['readonly', 'readonly_when', 'primary_key', 'computed', 'stored_expression']).describe('Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, a computed (formula) field no driver has a column for, or a stored field whose declared expression the engine computes on every write, so the caller\'s different value was replaced by the computed one'),
+}).describe('A write-path strip event: caller-supplied fields legally dropped from the payload, or written with the engine\'s computed value in place of the caller\'s'));
 
 // --------------------------------------------------------------------------
 // Write observability: advisory validation-rule hits (#22726)

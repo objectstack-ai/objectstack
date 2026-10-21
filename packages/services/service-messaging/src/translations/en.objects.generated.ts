@@ -245,48 +245,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
-  sys_notification_subscription: {
-    label: "Notification Subscription",
-    pluralLabel: "Notification Subscriptions",
-    description: "Standing subscription of a principal (role/team/user) to a notification topic.",
-    fields: {
-      id: {
-        label: "Subscription ID"
-      },
-      display_title: {
-        label: "Title",
-        help: "Record title: the subscribing principal and the topic (computed on read)"
-      },
-      topic: {
-        label: "Topic",
-        help: "Notification topic this principal subscribes to."
-      },
-      principal: {
-        label: "Principal",
-        help: "Subscriber selector: 'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | an email | a bare user id."
-      },
-      enabled: {
-        label: "Enabled",
-        help: "When false, the subscription is inactive."
-      },
-      created_at: {
-        label: "Created At"
-      }
-    },
-    _views: {
-      all: {
-        label: "All",
-        emptyState: {
-          title: "No subscriptions yet",
-          message: "A subscription records that a role, a team or a user follows a notification topic."
-        }
-      }
-    }
-  },
   sys_notification_template: {
     label: "Notification Template",
     pluralLabel: "Notification Templates",
-    description: "The subject and body each notification topic sends, per channel and language.",
+    description: "The email and SMS text each notification topic sends, per language. The in-app inbox never uses these templates.",
     fields: {
       id: {
         label: "Template ID"
@@ -296,7 +258,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Channel",
-        help: "Channel id this template renders for (email/inbox/push/…)."
+        help: "Which channel uses this template: email or sms; any other value is refused. The in-app inbox never does; for in-app content, write an email template and name it in a notify step's template."
       },
       locale: {
         label: "Locale",
@@ -307,7 +269,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       subject: {
         label: "Subject / Title",
-        help: "Rendered into the email subject / inbox title. Supports {{ payload.x }}."
+        help: "The email subject; an SMS sends it only when the body is empty. Supports {{ payload.x }}."
       },
       body: {
         label: "Body",
@@ -338,8 +300,13 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "All",
         emptyState: {
           title: "No templates yet",
-          message: "Add a template per topic, channel and locale; until then, a notification is sent with the title and body its sender provides."
+          message: "Add a template per topic, channel (email or SMS) and language; until then, those channels send the title and body the notification carries. In-app content comes from an email template: a notification that names one sends it by email and in the inbox, and SMS still uses the template here."
         }
+      }
+    },
+    _validations: {
+      channel_renders_template: {
+        message: "Only the email and sms channels use a notification template, so a template for any other channel is refused: set channel to email or sms, or delete the template. For in-app (inbox) content, write an email template (email_template) and name it in the notify step's template; email and the inbox both render it."
       }
     }
   },

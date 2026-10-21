@@ -47,6 +47,39 @@
           "message": "Object literal may only specify known properties, and 'status' does not exist in type '{ \"[REMOVED] Key retired: run `os validate` for its migration.\": never; }'."
         }
       ]
+    },
+    {
+      "retired": "the list view's and the page `list-view` node's `addRecord.mode` and `addRecord.formView`, retired as keys -- retiredKey() tombstones on the one AddRecordConfig every list-view door shares, with ADR-0087 drop conversions (`add-record-mode-form-view-removed`) -- objectui still authors both keys in two spec-alignment tests in `packages/types` that type a value carrying them (an `AddRecordConfig` in p2-spec-exports, a `ListViewSchema` in p1-spec-alignment); the entry is deleted when the downstream card closes",
+      "objectstack_pr": 24970,
+      "objectstack_commit": "fde7456352318872704c24feadaa6660b9bc649b",
+      "downstream_card": "objectstack-ai/objectui#13308",
+      "registered_at": "2026-10-21",
+      "matches": [
+        {
+          "file": "packages/types/src/__tests__/p2-spec-exports.test.ts",
+          "code": "TS2322",
+          "message": "Type 'string' is not assignable to type '{ '[REMOVED] Key retired: run `os validate` for its migration.': never; }'."
+        },
+        {
+          "file": "packages/types/src/__tests__/p1-spec-alignment.test.ts",
+          "code": "TS2322",
+          "message": "Type 'string' is not assignable to type '{ '[REMOVED] Key retired: run `os validate` for its migration.': never; }'."
+        }
+      ]
+    },
+    {
+      "retired": "nothing retired -- the spec WIDENED a union: `DroppedFieldsEvent['reason']` gained a fifth arm, `stored_expression` (a stored field whose declared expression the engine computes on every write). objectui's batch-6 spec-symbol pin `_ReasonIsTheEnum` asserts the exact four-member union (`readonly`, `readonly_when`, `primary_key`, `computed`) with a TS2344 `Equal` pin, so the widened union reds it; the entry is deleted when the downstream card closes",
+      "objectstack_pr": 24778,
+      "objectstack_commit": "7532ea3c0893a08a518739aebfe7c0751211f53d",
+      "downstream_card": "objectstack-ai/objectui#13309",
+      "registered_at": "2026-10-21",
+      "matches": [
+        {
+          "file": "packages/data-objectstack/src/spec-symbol-batch6.test.ts",
+          "code": "TS2344",
+          "message": "Type 'false' does not satisfy the constraint 'true'."
+        }
+      ]
     }
   ]
 }

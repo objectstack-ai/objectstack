@@ -8,8 +8,9 @@
 // `appName`, so better-auth fell back to its own name, and every user's
 // authenticator app listed the account under "Better Auth".
 //
-// What better-auth 1.7.3 does with the name, read off its dist rather than its
-// docs, decides what these pins have to cover:
+// What better-auth 1.7.12 does with the name (re-read 2026-10-21 for #25096,
+// unchanged since 1.7.3), read off its dist rather than its docs, decides
+// what these pins have to cover:
 //   - the config's `appName` is read ONCE, into the context's `appName`
 //     (`context/create-context.mjs`, unset ⇒ "Better Auth");
 //   - that context value is read in exactly TWO places, both otpauth URIs:

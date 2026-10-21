@@ -189,8 +189,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "用户已创建",
-          description: "请立即复制临时密码——它只显示一次，不会被保存。",
-          acknowledge: "我已保存该密码",
+          description: "如果生成了临时密码，请立即复制——它只显示一次，不会被保存。",
+          acknowledge: "完成",
           fields: {
             "user.email": "邮箱",
             "user.phoneNumber": "手机号",
@@ -930,7 +930,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "上级业务单元",
-        help: "组织树的自关联字段。Null 表示租户根节点。"
+        help: "组织树的自关联字段。Null 表示租户根节点。仍有下级单元的业务单元无法删除，须先将下级单元改挂到其他上级或删除。"
       },
       timezone: {
         label: "时区",
@@ -1389,9 +1389,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "客户端类型",
         options: {
           web: "Web 应用",
-          native: "原生应用",
-          useragentbased: "基于用户代理",
-          public: "公开"
+          native: "原生应用"
         }
       },
       public: {
@@ -1530,15 +1528,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           },
           redirectURLs: {
             label: "回调 URL",
-            helpText: "每行一个 URL。生产环境必须使用 https://。"
+            helpText: "每行一个 URL。Web 应用必须使用 https://，且主机不能是 localhost 或其他回环地址。原生应用还可以使用 http://，但主机必须恰好是 localhost、127.0.0.1 或 [::1]，端口不限。"
           },
           type: {
             label: "应用类型",
+            helpText: "桌面或移动应用，以及在本地开发中回调到 http://localhost 的应用，请选择“原生应用”。",
             options: {
               web: "Web 应用",
-              native: "原生应用",
-              "user-agent-based": "基于 User-Agent",
-              public: "公共客户端"
+              native: "原生应用"
             }
           }
         },
@@ -3248,13 +3245,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "代码"
       },
       lock_state: {
-        label: "锁定状态",
-        options: {
-          none: "无",
-          nooverlay: "禁止叠加",
-          nodelete: "禁止删除",
-          full: "完全锁定"
-        }
+        label: "锁定状态"
       },
       lock_overridden: {
         label: "锁定已被覆盖"

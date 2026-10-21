@@ -10,11 +10,27 @@ import {
 import type { IDatasourceDriverFactory } from '../contracts/datasource-driver-factory.js';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import type { DatasourceConnectPolicy } from '../contracts/connect-policy.js';
+import { readFileSync } from 'node:fs';
 import {
   GENERIC_CONNECT_FAILURE_REMEDY,
+  OPTIONAL_DRIVER_PACKAGES,
+  UNBUILT_WORKSPACE_REMEDY,
   isUnbuiltWorkspaceFailure,
+  missingDriverClient,
+  missingDriverClientRemedy,
+  missingOptionalDriverPackage,
+  missingOptionalDriverPackageRemedy,
 } from '../connect-failure-remedy.js';
-import { missingSqliteWasmDriverMessage } from '../default-datasource-driver-factory.js';
+import {
+  MONGODB_DRIVER_PACKAGE,
+  SQLITE_WASM_DRIVER_PACKAGE,
+  TURSO_DRIVER_INSTALL_COMMAND,
+  TURSO_DRIVER_PACKAGE,
+  missingMongodbDriverMessage,
+  missingSqliteWasmDriverMessage,
+  missingTursoDriverMessage,
+} from '../default-datasource-driver-factory.js';
+import { MissingDriverPackageError } from '../missing-driver-package-error.js';
 
 /** One `markDatasourceUnavailable` call, as the engine would receive it. */
 type UnavailableCall = { name: string; kind: 'blocked' | 'failed'; publicDetail?: string };
@@ -589,6 +605,191 @@ describe('fail-fast remedy is chosen by CAUSE (#5794)', () => {
         .then(() => undefined, (e: Error) => e);
       expect(err!.message.endsWith(GENERIC)).toBe(true);
     });
+
+    // The driver-level codes a real refused or rejected connection carries:
+    // neither is a module-resolution failure, so neither may reach the
+    // missing-client branch (#24909) any more than the unbuilt one.
+    it.each([
+      ['ECONNREFUSED', 'connect ECONNREFUSED 127.0.0.1:5432'],
+      ['28P01', 'password authentication failed for user "app"'],
+    ])('a driver error with code %s still ends on it, byte for byte', async (code, text) => {
+      const err = await failFast(factoryThrowing(withCode(new Error(text), code)));
+      expect(err.message.endsWith(GENERIC)).toBe(true);
+      // `\b`: "pnpm install" contains "npm install" as a substring.
+      expect(err.message).not.toMatch(/\bnpm install\b/);
+      expect(err.message).not.toContain('pnpm build');
+    });
+  });
+
+  // #24909: `@objectstack/driver-sql` reaches PostgreSQL, MySQL and native
+  // SQLite through knex, and knex loads a database client the PROJECT
+  // installs. A missing one is a missing install, not an unbuilt workspace:
+  // `pnpm install && pnpm build` adds no package the project never declared, so
+  // a scaffolded app that followed the build advice was refused again.
+  describe('a missing database client is answered with ITS install (#24909)', () => {
+    /**
+     * knex's own wrapper (`Client.initializeDriver`), in the shape measured on
+     * the real factory arms: a NEW Error that keeps the text and drops `code`.
+     * The genuine article is pinned on the real path in
+     * `missing-driver-client-boot-refusal.test.ts`.
+     */
+    const knexMissingClient = (client: string, dialect: string) =>
+      new Error(
+        `Knex: run\n$ npm install ${client} --save\nCannot find module '${client}'\n` +
+        `Require stack:\n- /app/node_modules/knex/lib/dialects/${dialect}/index.js`,
+      );
+
+    it.each([
+      ['pg', 'postgres'],
+      ['mysql2', 'mysql2'],
+      ['better-sqlite3', 'better-sqlite3'],
+    ])('%s: the refusal ends on the install of that client and names no build', async (client, dialect) => {
+      const err = await failFast(factoryThrowing(knexMissingClient(client, dialect)));
+      const remedy = missingDriverClientRemedy(client);
+      expect(err.message.endsWith(remedy)).toBe(true);
+      // The install of THAT module, named once in the remedy (the earlier
+      // `npm install … --save` belongs to knex's interpolated text).
+      expect(remedy.split(`npm install ${client}`)).toHaveLength(2);
+      expect(err.message).not.toContain('pnpm build');
+      expect(err.message).not.toContain(UNBUILT_WORKSPACE_REMEDY);
+      expectNoHarmfulAdvice(err.message);
+    });
+
+    it("ESM's `Cannot find package 'pg'`, code intact, is the same missing install", async () => {
+      const err = await failFast(
+        factoryThrowing(withCode(new Error("Cannot find package 'pg' imported from /app/x.js"), 'ERR_MODULE_NOT_FOUND')),
+      );
+      expect(err.message.endsWith(missingDriverClientRemedy('pg'))).toBe(true);
+    });
+
+    it('names no environment variable and no configuration key', () => {
+      for (const client of ['pg', 'mysql2', 'better-sqlite3']) {
+        const remedy = missingDriverClientRemedy(client);
+        expect(remedy).not.toMatch(/\bOS_[A-Z_]+/);
+        expect(remedy).not.toContain('--database');
+        expect(remedy).not.toContain('pnpm build');
+      }
+    });
+
+    // The other side of the split: only a BARE specifier on the closed list is
+    // a missing client. Each of these is still the unbuilt/broken-install case.
+    it.each([
+      ['the driver package itself, not installed', "Cannot find package '@objectstack/driver-sql' imported from /w/x.js"],
+      ['the driver package, unbuilt', "Cannot find module '/w/node_modules/@objectstack/driver-sql/dist/index.mjs'"],
+      ['a file inside an installed client', "Cannot find module '/w/node_modules/pg/lib/index.js'"],
+      ['a subpath of an installed client', "Cannot find module 'pg/lib/native'"],
+      ['a hard dependency of the driver (a broken install)', "Cannot find module 'knex'"],
+    ])('%s keeps the unbuilt-workspace remedy', async (_label, text) => {
+      const err = await failFast(factoryThrowing(new Error(text)));
+      expect(err.message.endsWith(UNBUILT_WORKSPACE_REMEDY)).toBe(true);
+      expect(err.message).not.toMatch(/\bnpm install\b/);
+    });
+  });
+
+  // #24937: the shared factory's `turso`, `mongodb` and `sqlite-wasm` arms load
+  // a package this service declares only as an OPTIONAL peer. When it is
+  // absent the arm already names its install, and the refusal used to append
+  // "a build precondition … Run `pnpm install && pnpm build`" after it — two
+  // fixes that contradict each other. Measured on the published release with a
+  // declared `turso` datasource and no `@objectstack/driver-turso`.
+  describe("a missing optional driver package defers to the factory's install (#24937)", () => {
+    /**
+     * Each arm's import failure, wrapped exactly as that arm wraps it: the turso
+     * arm raises the typed `MissingDriverPackageError`, the other two a plain
+     * `Error`, and all three interpolate the import error at the END of their
+     * own message (the factory's real builders, not a copy of their wording).
+     */
+    const arms: Array<[pkg: string, wrap: (cause: Error) => Error]> = [
+      [
+        TURSO_DRIVER_PACKAGE,
+        (cause) =>
+          new MissingDriverPackageError({
+            driverType: 'turso',
+            packageName: TURSO_DRIVER_PACKAGE,
+            installCommand: TURSO_DRIVER_INSTALL_COMMAND,
+            message: missingTursoDriverMessage({ datasource: 'analytics', cause }),
+          }),
+      ],
+      [MONGODB_DRIVER_PACKAGE, (cause) => new Error(missingMongodbDriverMessage({ datasource: 'analytics', cause }))],
+      [
+        SQLITE_WASM_DRIVER_PACKAGE,
+        (cause) => new Error(missingSqliteWasmDriverMessage({ datasource: 'analytics', cause })),
+      ],
+    ];
+
+    /** The two module systems' answers for a package that is not installed, as the published build raises them. */
+    const bareImportErrors: Array<[system: string, error: (pkg: string) => Error]> = [
+      [
+        'ESM',
+        (pkg) =>
+          withCode(
+            new Error(`Cannot find package '${pkg}' imported from /app/node_modules/@objectstack/service-datasource/dist/index.js`),
+            'ERR_MODULE_NOT_FOUND',
+          ),
+      ],
+      [
+        'CJS',
+        (pkg) =>
+          withCode(
+            new Error(
+              `Cannot find module '${pkg}'\nRequire stack:\n- /app/node_modules/@objectstack/service-datasource/dist/index.cjs`,
+            ),
+            'MODULE_NOT_FOUND',
+          ),
+      ],
+    ];
+
+    const cases = arms.flatMap(([pkg, wrap]) =>
+      bareImportErrors.map(([system, error]) => [pkg, system, wrap, error] as const),
+    );
+
+    it.each(cases)('%s absent (%s): the refusal ends on one sentence deferring to the install', async (pkg, _system, wrap, error) => {
+      const err = await failFast(factoryThrowing(wrap(error(pkg))));
+      expect(err.message.endsWith(missingOptionalDriverPackageRemedy(pkg))).toBe(true);
+      // ONE fix in the whole refusal: the factory's install command, once. The
+      // remedy adds no second spelling and no build.
+      expect(err.message.match(/\bnpm install\b/g)).toHaveLength(1);
+      expect(err.message).toContain(`npm install ${pkg}`);
+      expect(err.message).not.toContain('pnpm build');
+      expect(err.message).not.toContain('pnpm install');
+      expect(err.message).not.toContain(UNBUILT_WORKSPACE_REMEDY);
+      expectNoHarmfulAdvice(err.message);
+    });
+
+    it.each(arms)('%s unbuilt — a PATH into the package — keeps the unbuilt-workspace remedy', async (pkg, wrap) => {
+      const unbuilt = withCode(
+        new Error(`Cannot find module '/w/node_modules/${pkg}/dist/index.mjs' imported from /w/x.js`),
+        'ERR_MODULE_NOT_FOUND',
+      );
+      const err = await failFast(factoryThrowing(wrap(unbuilt)));
+      expect(err.message.endsWith(UNBUILT_WORKSPACE_REMEDY)).toBe(true);
+    });
+
+    it('a subpath of an optional driver package (the package IS installed) keeps the unbuilt-workspace remedy', async () => {
+      const err = await failFast(
+        factoryThrowing(new Error(`Cannot find module '${TURSO_DRIVER_PACKAGE}/dist/index.js'`)),
+      );
+      expect(err.message.endsWith(UNBUILT_WORKSPACE_REMEDY)).toBe(true);
+    });
+
+    it('the remedy is one sentence naming no command, environment variable or configuration key', () => {
+      for (const pkg of OPTIONAL_DRIVER_PACKAGES) {
+        const remedy = missingOptionalDriverPackageRemedy(pkg);
+        expect(remedy).toContain(pkg);
+        expect(remedy.match(/[.!?](?=\s|$)/g)).toHaveLength(1);
+        expect(remedy).not.toMatch(/\bnpm install\b/);
+        expect(remedy).not.toMatch(/\b(?:pnpm|yarn) (?:add|install|build)\b/);
+        expect(remedy).not.toMatch(/\bOS_[A-Z_]+/);
+        expect(remedy).not.toContain('--database');
+      }
+    });
+
+    it('the escape hatch still boots degraded instead of refusing', async () => {
+      process.env[ENV] = '1';
+      const { service } = svc({ factory: factoryThrowing(arms[0][1](bareImportErrors[0][1](TURSO_DRIVER_PACKAGE))) });
+      const result = await service.connect(analytics, { objects: ['visit'], context: { trigger: 'declared-auto' } });
+      expect(result.status).toBe('failed-degraded');
+    });
   });
 
   // "Diagnostic classification, zero behaviour change" is the whole claim of
@@ -679,7 +880,79 @@ describe('isUnbuiltWorkspaceFailure (#5794)', () => {
   it('classifies nothing when there was no thrown value to read', () => {
     expect(isUnbuiltWorkspaceFailure(undefined)).toBe(false);
   });
+
+  it('leaves a missing database client alone — an install, not an unbuilt workspace (#24909)', () => {
+    const knexPg = new Error("Knex: run\n$ npm install pg --save\nCannot find module 'pg'\nRequire stack:\n- /a/knex.js");
+    expect(isUnbuiltWorkspaceFailure(knexPg)).toBe(false);
+    expect(missingDriverClient(knexPg)).toBe('pg');
+  });
 });
+
+describe('missingDriverClient (#24909)', () => {
+  it('names the client only for a module-resolution failure', () => {
+    expect(missingDriverClient(new Error("Cannot find module 'mysql2'"))).toBe('mysql2');
+    // The same name in a message that is NOT a module-not-found is not this case.
+    expect(missingDriverClient(new Error('mysql2: connect ECONNREFUSED'))).toBeUndefined();
+    expect(missingDriverClient(undefined)).toBeUndefined();
+  });
+
+  it('reads the FIRST unresolved specifier — the wrapper words come first, the import error after', () => {
+    expect(
+      missingDriverClient(new Error("Cannot find module 'pg'\nRequire stack:\n- /w/node_modules/knex/lib/x.js")),
+    ).toBe('pg');
+    expect(
+      missingDriverClient(new Error("Cannot find package '@objectstack/driver-sql' (… 'pg' …)")),
+    ).toBeUndefined();
+  });
+
+  it('a module-not-found carrying only its code names no client', () => {
+    expect(missingDriverClient(withCodeOnly('MODULE_NOT_FOUND'))).toBeUndefined();
+  });
+});
+
+describe('missingOptionalDriverPackage (#24937)', () => {
+  it('is exactly the optional peers this package declares', () => {
+    // The list promises a remedy that defers to the factory's install, so it
+    // must name the packages this service really declares optional — read from
+    // its own manifest, not restated here.
+    const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+      peerDependencies?: Record<string, string>;
+      peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+    };
+    const declaredOptional = Object.keys(manifest.peerDependencies ?? {}).filter(
+      (name) => manifest.peerDependenciesMeta?.[name]?.optional === true,
+    );
+    expect([...OPTIONAL_DRIVER_PACKAGES].sort()).toEqual(declaredOptional.sort());
+  });
+
+  it('names the package only for a module-resolution failure on its bare name', () => {
+    expect(missingOptionalDriverPackage(new Error(`Cannot find package '${MONGODB_DRIVER_PACKAGE}'`))).toBe(
+      MONGODB_DRIVER_PACKAGE,
+    );
+    // The same name in a message that is NOT a module-not-found is not this case.
+    expect(missingOptionalDriverPackage(new Error(`${MONGODB_DRIVER_PACKAGE}: connect ECONNREFUSED`))).toBeUndefined();
+    // A path into the package, or a subpath of it, is not a missing install.
+    expect(
+      missingOptionalDriverPackage(new Error(`Cannot find module '/w/node_modules/${TURSO_DRIVER_PACKAGE}/dist/index.mjs'`)),
+    ).toBeUndefined();
+    expect(missingOptionalDriverPackage(new Error(`Cannot find module '${TURSO_DRIVER_PACKAGE}/dist/x.js'`))).toBeUndefined();
+    // A required driver package is not on the list: it stays the unbuilt workspace.
+    expect(missingOptionalDriverPackage(new Error("Cannot find package '@objectstack/driver-sql'"))).toBeUndefined();
+    expect(missingOptionalDriverPackage(withCodeOnly('ERR_MODULE_NOT_FOUND'))).toBeUndefined();
+    expect(missingOptionalDriverPackage(undefined)).toBeUndefined();
+  });
+
+  it('leaves the unbuilt-workspace classifier off for that case only', () => {
+    expect(isUnbuiltWorkspaceFailure(new Error(`Cannot find package '${SQLITE_WASM_DRIVER_PACKAGE}'`))).toBe(false);
+    expect(
+      isUnbuiltWorkspaceFailure(new Error(`Cannot find module '/w/node_modules/${SQLITE_WASM_DRIVER_PACKAGE}/dist/index.js'`)),
+    ).toBe(true);
+  });
+});
+
+function withCodeOnly(code: string): Error {
+  return Object.assign(new Error('the entry point is not on disk'), { code });
+}
 
 describe('D3 credential resolution — fail-closed', () => {
   const credExternal: ConnectableDatasource = {

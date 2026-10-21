@@ -790,7 +790,10 @@ async function exportOnce(query: Record<string, string>, security?: Record<strin
   try {
     const { route, findData } = await bootExportFixture(security);
     const out = makeRes();
-    await route.handler({ params: { object: 'task' }, query } as any, out.res);
+    // [#24945] A Chinese caller: a boolean cell follows the caller's language
+    // now, and the recorded bytes below are this Chinese fixture's `是` / `否`
+    // file — the bytes every caller got before, and a zh-CN caller still gets.
+    await route.handler({ params: { object: 'task' }, query, headers: { 'accept-language': 'zh-CN' } } as any, out.res);
     return { ...out, findData };
   } finally {
     vi.useRealTimers();

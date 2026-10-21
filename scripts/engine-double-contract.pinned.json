@@ -1567,6 +1567,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.select-shorthand-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.select-shorthand-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.select-shorthand-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.served-content-hash.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3109,6 +3124,11 @@
     {
       "file": "packages/plugins/plugin-auth/src/organization-add-member.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-delete.test.ts",
+      "verb": "delete",
       "pinned": 1
     },
     {

@@ -100,6 +100,38 @@ A webhook reaches the dispatcher one of two ways:
 - **Authored by an organization** — a `sys_webhook` row (§3.1), switched by its
   own `active` field.
 
+**The capabilities a declared webhook needs.** A stack that declares a webhook
+must name two tokens in `requires`, `'webhooks'` and `'realtime'`, beside
+whatever else it declares. A stack that declares one while `requires` lacks
+either token is **refused**: `defineStack` throws
+`STACK_WEBHOOK_CAPABILITY_REQUIRED` (status 422), naming each declared webhook
+and the missing token or tokens, so `os validate`, `os build`, `os serve` /
+`os dev` and an app's own `bootStack` tests all stop at load with the same
+sentence. Neither token is added for you:
+
+```ts
+requires: ['automation', 'triggers', 'webhooks', 'realtime'],
+```
+
+- `'webhooks'` mounts `plugin-webhooks`: the declared-webhook reader, the
+  auto-enqueuer and the redeliver door. Without it nothing reads the
+  declaration at all.
+- `'realtime'` mounts the realtime service, which is the auto-enqueuer's only
+  source of record events: the engine publishes `data.record.*` through it, and
+  nothing else feeds the enqueuer (§4.1). With `'webhooks'` and without
+  `'realtime'` the declaration would be read but never dispatched: record
+  writes would succeed and no delivery would ever be enqueued. That is why
+  `defineStack` refuses the stack. A host that wires a stack by hand, past
+  `defineStack`, still gets one boot `error` that names each declared webhook
+  and the missing token; switching a declared webhook on through the activation
+  door delivers nothing on such a deployment.
+
+The outbox itself comes from `messaging`, which every boot mounts unless it runs
+with `--preset minimal`. A scaffolded app's `requires` is
+`['automation', 'triggers']`, so it carries neither of the two tokens above:
+add both before you declare its first webhook. Every declared webhook counts,
+`isActive: false` included, because the activation door can switch it on.
+
 On a database an 18.0 pre-release (`18.0.0-next.*`) created, the rows that release's boot seeder
 wrote for declared webhooks (`managed_by: 'package'`) are still there. Until the
 ownership migration removes them, a pristine one is ignored in favour of its

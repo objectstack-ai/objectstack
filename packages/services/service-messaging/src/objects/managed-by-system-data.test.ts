@@ -5,7 +5,7 @@
  * `'system-data'` equivalence pin. See the sibling file in `plugin-security` for
  * the full rationale; the contract asserted here is identical.
  *
- * These three are the clearest members of the bucket the rename creates: the
+ * These two are the clearest members of the bucket the rename creates: the
  * SCHEMA ships with the platform (an admin cannot add a column to
  * `sys_notification_template`), while the DATA is authored by an admin — or, for
  * `sys_notification_preference`, by the end user muting their own topics — through
@@ -16,7 +16,6 @@
 import { describe, expect, it } from 'vitest';
 import { resolveCrudAffordances } from '@objectstack/spec/data';
 import { NotificationTemplate } from './notification-template.object.js';
-import { NotificationSubscription } from './notification-subscription.object.js';
 import { NotificationPreference } from './notification-preference.object.js';
 
 const V16_EXPECTED = { create: true, import: false, edit: true, delete: true, exportCsv: true };
@@ -47,7 +46,6 @@ const asV16 = (obj: { userActions?: unknown }) => ({
 
 const OBJECTS = [
   ['sys_notification_template', NotificationTemplate],
-  ['sys_notification_subscription', NotificationSubscription],
   ['sys_notification_preference', NotificationPreference],
 ] as const;
 

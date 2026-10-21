@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The record title of the four notification objects that declared a
+ * The record title of the notification objects that declared a
  * `titleFormat` and no title pointer (#20044): `sys_notification_delivery`,
- * `sys_notification_preference`, `sys_notification_subscription` and
- * `sys_notification_receipt`.
+ * `sys_notification_preference` and `sys_notification_receipt` (the fourth,
+ * `sys_notification_subscription`, is retired).
  *
  * ADR-0079 resolves a record's title as `nameField ?? displayNameField ??
  * derivation`, and an explicit `nameField` takes precedence over the
@@ -15,7 +15,7 @@
  * A renderer honouring the order therefore drew the raw id as the record
  * page's H1.
  *
- * The three composite titles now point at `display_title`, a text formula over
+ * The two composite titles now point at `display_title`, a text formula over
  * the columns `titleFormat` names. `sys_notification_receipt`'s title is one
  * column (`{state}`), so its `nameField` names that column directly — the
  * describe's own migration for a single-field title. An explicit pointer is
@@ -49,7 +49,6 @@ import { resolveDisplayField } from '@objectstack/spec/data';
 import { NotificationDelivery } from './notification-delivery.object.js';
 import { NotificationPreference } from './notification-preference.object.js';
 import { NotificationReceipt } from './notification-receipt.object.js';
-import { NotificationSubscription } from './notification-subscription.object.js';
 import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as any;
@@ -93,14 +92,6 @@ const CASES: Case[] = [
     refused: ['user_id'],
     // `topic` / `channel` default to the '*' wildcard (ADR-0030 Layer 3).
     defaulted: { topic: 'usr_alice · * · email', channel: 'usr_alice · billing.invoice · *' },
-  },
-  {
-    schema: NotificationSubscription,
-    pointer: 'display_title',
-    row: () => ({ topic: 'billing.invoice', principal: 'role:sales_manager', created_at: NOW }),
-    title: 'role:sales_manager · billing.invoice',
-    refused: ['principal', 'topic'],
-    defaulted: {},
   },
   {
     schema: NotificationReceipt,

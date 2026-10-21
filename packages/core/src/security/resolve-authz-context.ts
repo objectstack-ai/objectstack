@@ -361,11 +361,18 @@ async function tryFind(
    * what a `single`-posture deployment wants everywhere.
    */
   organizationId?: string,
+  /**
+   * The columns to read. Omitted reads every column — and computes every
+   * formula field the object declares, a formula that reads through a lookup
+   * paying its own read for the hop. Named, the engine computes only the
+   * formulas named (none, for a list of stored columns).
+   */
+  fields?: readonly string[],
 ): Promise<any[]> {
   if (!ql || typeof ql.find !== 'function') return [];
   try {
     const context = organizationId ? { isSystem: true, tenantId: organizationId } : { isSystem: true };
-    let rows = await ql.find(object, { where, limit, context } as any);
+    let rows = await ql.find(object, { where, limit, context, ...(fields ? { fields: [...fields] } : {}) } as any);
     if (rows && (rows as any).value) rows = (rows as any).value;
     return Array.isArray(rows) ? rows : [];
   } catch (err) {
@@ -869,6 +876,19 @@ export interface ResolveUserAuthzGrantsOptions {
 function grantAppliesInTenant(organizationId: string | null, tenantId: string | undefined): boolean {
   return organizationId !== null && organizationId === tenantId;
 }
+
+/**
+ * The columns of a `sys_user_permission_set` grant row this resolver decides
+ * on, and the only ones its grant read asks for: the set it names
+ * ({@link grantSetNameOf}), its organization ({@link grantOrganizationOf}) and
+ * its validity window (`isGrantActive`, `nextGrantValidityBoundary`). The read
+ * runs in every request's prelude, and a read naming no columns computes every
+ * formula field the object declares — its record title included, which may
+ * read through a lookup at the cost of a read and a round trip — for values
+ * nothing here reads. A helper below that learns to read another column of a
+ * grant row adds it here; the read returns nothing it does not name.
+ */
+const GRANT_ROW_COLUMNS = ['permission_set', 'organization_id', 'valid_from', 'valid_until'] as const;
 
 /**
  * [ADR-0131 D4] The permission set a stored `sys_user_permission_set` grant
@@ -1463,7 +1483,7 @@ export async function resolveUserAuthzGrants(
     tryFind(ql, 'sys_member', { user_id: userId }, 200),
     tryFind(ql, 'sys_user_position', { user_id: userId }, 200),
     tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, 1000) : Promise.resolve([] as any[]),
-    tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100),
+    tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100, undefined, GRANT_ROW_COLUMNS),
   ]);
 
   // Resolve the caller's unique email for `current_user.email` RLS owner

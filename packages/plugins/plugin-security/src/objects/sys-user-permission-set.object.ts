@@ -36,13 +36,14 @@ export const SysUserPermissionSet = ObjectSchema.create({
   // needed — the DelegatedAdminGate is the authz.
   managedBy: 'system-data',
   description: 'Direct assignment of a permission set to a user (optionally scoped to an organization).',
-  // [ADR-0079] The record title is `display_title`, a text formula over the
-  // same two columns `titleFormat` names. With no pointer declared, the
-  // registry's designate-only pass stamped `nameField: 'id'` (the first
-  // title-eligible field), so a renderer honouring ADR-0079's order (an
-  // explicit `nameField` wins over `titleFormat`) drew the raw id as the record
-  // page's H1. `titleFormat` stays for renderers that still read it first;
-  // `sys-security-assignment-display-title.test.ts` holds the two to the same text.
+  // [ADR-0079] The record title is `display_title`, a text formula naming the
+  // user and the set. With no pointer declared, the registry's designate-only
+  // pass stamped `nameField: 'id'` (the first title-eligible field), so a
+  // renderer honouring ADR-0079's order (an explicit `nameField` wins over
+  // `titleFormat`) drew the raw id as the record page's H1. `titleFormat` is
+  // the rung below the pointer: a renderer reaches it only where the title has
+  // no value (the user is not readable by this reader, or no longer exists).
+  // `sys-user-permission-set-person-title.test.ts` pins the title.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{user_id} → {permission_set}',
@@ -57,17 +58,23 @@ export const SysUserPermissionSet = ObjectSchema.create({
     }),
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. It reads only this row's own columns —
-    // the user and the set's name, never a field of a looked-up record — and
-    // neither is hidden, permission-guarded or masked on this object, so the
-    // title carries nothing the declared read path withholds. Both are
-    // required (the set by name, ADR-0131 D4), so the expression needs no null
-    // guard; a legacy grant the v18 ceremony's rewrite names is the only row
-    // that ever stored the name NULL.
+    // read and has no stored column. It names the PERSON, not the raw user id:
+    // the user's `name`, or their `email` where the name is blank (the
+    // platform's own `name || email` rule for a person's handle), read ONE hop
+    // through `user_id` (ADR-0079 addendum, 2026-10-18). That hop is read
+    // under the READER's own authority, through every layer a direct read of
+    // `sys_user` applies, so the title carries nothing that reader could not
+    // read on the user itself: a user the reader may not read, or one that no
+    // longer exists, leaves the title null — never a value computed in its
+    // place — and a renderer falls to `titleFormat` below it.
+    // `user_id` is read only through the hop (a bare read beside a traversal
+    // is refused, `traversal-bare-and-traversed`). Both columns are required
+    // (the set by name, ADR-0131 D4); a legacy grant the v18 ceremony's
+    // rewrite names is the only row that ever stored the set's name NULL.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.user_id + ' → ' + record.permission_set`,
+      expression: F`(isBlank(trim(record.user_id.name)) ? record.user_id.email : record.user_id.name) + ' → ' + record.permission_set`,
       description: 'Record title: the user and the permission set assigned to them (computed on read)',
     }),
 

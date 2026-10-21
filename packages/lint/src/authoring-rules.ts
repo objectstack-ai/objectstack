@@ -113,6 +113,7 @@ import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 import { validateComponentProps } from './validate-component-props.js';
 import { validateComponentTypes } from './validate-component-types.js';
 import { validatePrintPageBlocks } from './validate-print-page-blocks.js';
+import { validatePagePredicateBounds } from './validate-page-predicate-bounds.js';
 import { validateResponsiveStyles } from './validate-responsive-styles.js';
 import { validateJsxPages } from './validate-jsx-pages.js';
 import { validateReactPages } from './validate-react-pages.js';
@@ -1703,6 +1704,28 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['view', 'page'],
     run: (stack) => validatePredicatePathRefs(stack),
+  },
+  // #24953 — the CEL slots INSIDE a page component's `properties` bag (a
+  // `page:tabs` item `visibleWhen`, `object-form` section / field predicates,
+  // `record:alert` / `action:*` `visible` and `disabled`), judged for the
+  // platform's parse bounds with `validateExpression`'s verdict. The component
+  // node's own `visibleWhen` is the visibility family's above, an error; these
+  // slots were judged by no rule at any door. `gating` since #25002: the
+  // finding is an `error`, so a page carrying such a slot fails all three
+  // commands and its next save is refused at the page door. It first shipped
+  // as an advisory; the amended standing ruling for post-GA narrowings
+  // (「甲」, record 6303865025) ships a narrowing no ADR-0087 conversion can
+  // carry now, as a BREAKING minor. Page-local, so the per-write snapshot is
+  // the whole input.
+  {
+    name: 'validatePagePredicateBounds',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-page-predicate-bounds.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['page'],
+    run: (stack) => validatePagePredicateBounds(stack),
   },
   // #1874 — flow authoring anti-patterns. Advisory by default; a finding marked
   // `error` gates. Three do today: `flow-runas-unscoped` (#3760 — metadata the

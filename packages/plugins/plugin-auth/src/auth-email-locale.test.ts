@@ -867,8 +867,8 @@ describe("#14641 — an invitation reads the INVITEE's own sys_user.locale", () 
  * recipient-keyed engine, not by asserting it about this send alone.
  *
  * Two branches, because a magic link is BOTH a sign-in for an existing account
- * and a sign-up for a new address (re-measured 2026-09-11 in the installed
- * better-auth 1.7.3, unchanged from 1.7.2: the `/sign-in/magic-link` handler
+ * and a sign-up for a new address (re-measured 2026-10-21 for #25096 on
+ * better-auth 1.7.12, unchanged since 1.7.2: the `/sign-in/magic-link` handler
  * takes `email` straight off the body, stores a verification value and calls
  * `sendMagicLink` — no user lookup on that path at all — while
  * `/magic-link/verify` reads `findUserByEmail` and, finding nobody, calls
@@ -1003,8 +1003,8 @@ describe("#15106 — the magic link reads the recipient's own sys_user.locale", 
   });
 
   it('matches the address better-auth itself will resolve the link with — lowercased', async () => {
-    // ⚠️ Measured against the installed better-auth 1.7.3 (2026-09-11), not
-    // assumed, and unchanged from the 1.7.2 reading this replaces:
+    // ⚠️ Measured against better-auth 1.7.12 (2026-10-21, #25096), not
+    // assumed, and unchanged since the 1.7.2 reading:
     // `signInMagicLinkBodySchema` declares `email: z.email()` with no case
     // transform, so a typed `Ada@Example.com` arrives here verbatim, while
     // `internalAdapter.findUserByEmail` — what `/magic-link/verify` resolves

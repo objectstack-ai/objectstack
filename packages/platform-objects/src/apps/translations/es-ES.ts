@@ -90,7 +90,6 @@ export const esES: TranslationData = {
         nav_settings_knowledge: { label: 'Conocimiento' },
         nav_settings_feature_flags: { label: 'Indicadores de Funcionalidad' },
         nav_notification_preferences: { label: 'Preferencias de Notificación' },
-        nav_notification_subscriptions: { label: 'Suscripciones de Notificación' },
         nav_notification_templates: { label: 'Plantillas de Notificación' },
 
         nav_sessions: { label: 'Sesiones' },

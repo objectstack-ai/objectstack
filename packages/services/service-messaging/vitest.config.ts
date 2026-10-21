@@ -30,6 +30,10 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // [#24983] The template channel refusal pins drive the real data
+      // protocol (create / update / bulk update / the import runner's writes),
+      // so it is read from source for the same reason as core above.
+      { find: /^@objectstack\/metadata-protocol$/, replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts') },
     ],
   },
 });

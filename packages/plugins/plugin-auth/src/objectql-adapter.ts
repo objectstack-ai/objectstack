@@ -581,9 +581,28 @@ function isReferentialDeleteRestriction(
   developerMessage?: string;
   dependentObject?: string;
   dependentCount?: number;
+  dependents?: unknown;
 } {
   if (!err || typeof err !== 'object') return false;
   return (err as { code?: unknown }).code === 'DELETE_RESTRICTED';
+}
+
+/**
+ * [#24948] The per-table list an organization-delete refusal carries
+ * (`dependents: [{ object, count }]`, the count absent where it is withheld),
+ * re-read from the engine error so the wire 409 names every table, not only the
+ * first. `undefined` for any other refusal, which carries no list.
+ */
+function wireDependents(raw: unknown): Array<{ object: string; count?: number }> | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: Array<{ object: string; count?: number }> = [];
+  for (const d of raw) {
+    const object = (d as { object?: unknown } | null)?.object;
+    if (typeof object !== 'string' || object === '') continue;
+    const count = (d as { count?: unknown }).count;
+    out.push(typeof count === 'number' ? { object, count } : { object });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -628,6 +647,7 @@ async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
         : {}),
       ...(err.dependentObject ? { dependentObject: err.dependentObject } : {}),
       ...(typeof err.dependentCount === 'number' ? { dependentCount: err.dependentCount } : {}),
+      ...(wireDependents(err.dependents) ? { dependents: wireDependents(err.dependents) } : {}),
     });
   }
   throw err;

@@ -36,7 +36,10 @@ const stack = {
       name: 'crm_account',
       fields: {
         region: { type: 'text', label: 'Region' },
-        owner: { type: 'user', label: 'Owner', reference: 'crm_person' },
+        // [#24808] A link to a person OBJECT is a `lookup`: a `user` field's
+        // target is fixed to `sys_user`, and naming another object with it is
+        // what `user-field-foreign-reference` warns on.
+        owner: { type: 'lookup', label: 'Owner', reference: 'crm_person' },
       },
     },
     { name: 'crm_person', fields: { email: { type: 'email', label: 'Email' } } },
@@ -418,9 +421,18 @@ describe('[#19289] object-graph — a `user` field takes its target from the TYP
 
   it('control: an EXPLICIT carrier still wins over the constant', () => {
     // `reference` MATERIALIZES the constant for `user`; where an author named a
-    // different object the arbiter returns what they wrote, unchanged. The
-    // module fixture above relies on this (`owner` → `crm_person`).
-    expect(resolveFieldPath(graph, 'crm_opportunity', 'account.owner.email'))
+    // different object the arbiter returns what they wrote, unchanged.
+    // [#24808] The shape is declared wrong and warned on
+    // (`user-field-foreign-reference`); this pins its protocol-18 resolution
+    // until the next major refuses it, so it is built here rather than kept as
+    // an incidental module fixture.
+    const foreign = indexObjectGraph({
+      objects: [
+        { name: 'crm_account', fields: { owner: { type: 'user', label: 'Owner', reference: 'crm_person' } } },
+        { name: 'crm_person', fields: { email: { type: 'email', label: 'Email' } } },
+      ],
+    });
+    expect(resolveFieldPath(foreign, 'crm_account', 'owner.email'))
       .toMatchObject({ kind: 'ok', object: 'crm_person', field: 'email' });
   });
 

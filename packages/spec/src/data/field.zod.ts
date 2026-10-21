@@ -3032,15 +3032,30 @@ export type CurrencyValue = z.input<typeof CurrencyValueSchema>;
  */
 export type FieldInput = Omit<Partial<Field>, 'type'>;
 
+/**
+ * The `Field.user()` config: {@link FieldInput} with `reference` marked
+ * deprecated. A `user` field's target is a constant of the type
+ * (`IMPLICIT_REFERENCE_TARGETS`, `field-value.zod.ts`), so the key has nothing
+ * to say; it is still ACCEPTED (an identical accept set — the narrowing waits
+ * for the next protocol major), and a foreign value is warned on by
+ * `user-field-foreign-reference`.
+ */
+type UserFieldInput = Omit<FieldInput, 'reference'> & {
+  /**
+   * @deprecated A `user` field always targets `sys_user`; omit this key. To
+   * link another object, use `Field.lookup(reference, …)`.
+   */
+  reference?: string;
+};
+
 /** `Field.select` with inline options — the array or `{ options }` forms. */
 function selectWithOptions(optionsOrConfig: Array<SelectOption | string> | Omit<FieldInput, 'options'> & { options: Array<SelectOption | string> }, config?: FieldInput) {
-  // Helper function to convert string to lowercase snake_case
-  const toSnakeCase = (str: string): string => {
-    return str
-      .toLowerCase()
-      .replace(/\s+/g, '_')  // Replace spaces with underscores
-      .replace(/[^a-z0-9_]/g, ''); // Remove invalid characters (keeping underscores only)
-  };
+  // The shorthand's whole transform: lower-case, and whitespace runs → `_`.
+  // Every other character stays as written, so a string that is no system
+  // identifier (`'no-overlay'`, `'v2-beta'`) reaches `SelectOptionSchema.value`
+  // and is refused there, by the same rule an explicit `{ value: 'no-overlay' }`
+  // meets — never rewritten into a value the author did not write (#25013).
+  const toSnakeCase = (str: string): string => str.toLowerCase().replace(/\s+/g, '_');
 
   // Support both old and new signatures:
   // Old: Field.select(['a', 'b'], { label: 'X' })
@@ -3147,6 +3162,12 @@ export const Field = {
    * Field.select(['In Progress', 'Closed Won'], { label: 'Status' })
    * // Results in: [{ label: 'In Progress', value: 'in_progress' }, { label: 'Closed Won', value: 'closed_won' }]
    *
+   * Lower-casing and whitespace → `_` are the shorthand's only transforms; any
+   * other character is kept, so `Field.select(['no-overlay'])` yields the value
+   * `no-overlay`, which `SelectOptionSchema.value` refuses (a system identifier
+   * holds letters, digits, `_` and `.`). Write such an option explicitly:
+   * `{ label: 'no-overlay', value: 'no_overlay' }`.
+   *
    * @example Shared picklist — the options come from the named `picklist` item
    * Field.select({ picklist: 'industry', label: 'Industry' })
    * // Results in: { type: 'select', picklist: 'industry', label: 'Industry' } — no `options`
@@ -3200,8 +3221,19 @@ export const Field = {
    * Field.user({ label: 'Watchers', multiple: true })
    * @example Auto-fill the acting user on create
    * Field.user({ label: 'Reporter', defaultValue: 'current_user' })
+   *
+   * ⚠️ [#24808] `config.reference` is deprecated, and naming any object but
+   * `sys_user` with it is the contradiction `os validate` / `os build` /
+   * `os lint` warn on (`user-field-foreign-reference`): such a field is
+   * resolved against the named object by every target-following reader while
+   * every user-only reader takes its values for users. A link to another
+   * object is `Field.lookup(reference, …)`. The spread stays LAST on purpose:
+   * moving `reference: 'sys_user'` after it would silently re-target a field
+   * an untyped caller wrote, the same unannounced behaviour change the 「甲」
+   * ruling keeps out of an 18.x minor — the refusal belongs to the next
+   * protocol major, and until then the warning is the loud half.
    */
-  user: (config: FieldInput = {}) => ({
+  user: (config: UserFieldInput = {}) => ({
     type: 'user',
     reference: 'sys_user',
     ...config,

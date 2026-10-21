@@ -194,7 +194,8 @@ const READBACK_FIELDS: Readonly<Record<string, readonly ReadbackColumn[]>> = {
   // that no generic exit — the data path, and the compliance ledger's CRUD
   // mirror that honours the same flag — carries it, and each is here because a
   // better-auth route reads it back OFF a row its storage adapter returned
-  // (traced in the installed better-auth / @better-auth/* dist, 1.7.3):
+  // (traced in the then-installed better-auth / @better-auth/* dist, 1.7.3;
+  // ⚠️ [#25096] NOT re-stamped for 1.7.12 — see the `identifier` note below):
   //
   //  - `sys_jwks.private_key` — the jwt plugin's key read (`findMany`, no
   //    projection) feeds signing. MEASURED before this row existed: the flag
@@ -206,6 +207,11 @@ const READBACK_FIELDS: Readonly<Record<string, readonly ReadbackColumn[]>> = {
   //    adapter's `consumeOne` re-attaches through this table too).
   //    `required: true`. `identifier` is deliberately absent: no flow reads it
   //    back off a row — it is only ever the lookup key.
+  //    ⚠️ [#25096] That census is wrong, on 1.7.3 and on 1.7.12 alike:
+  //    `@better-auth/sso`'s `/sso/verify-domain` builds the TXT record it
+  //    expects from `identifier` read back off the row, so on this store it
+  //    expects `undefined=TOKEN`. Measured and reported on #25096; nothing
+  //    here is changed by that card.
   //  - `sys_two_factor.secret` (`required: true`) and `.backup_codes` (empty
   //    until generated) — TOTP and backup-code verification read both off the
   //    enrolment row.

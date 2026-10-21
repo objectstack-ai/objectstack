@@ -155,7 +155,11 @@ describe('[ADR-0139 D2 step 2] every getReadFilter deny return is the spec senti
     expect(logger.error).toHaveBeenCalled();
   });
 
-  it('an on-behalf-of context (the D10 intersection is not on this path)', async () => {
+  it('an on-behalf-of context whose delegator does not exist (the D10 intersection fails closed on a dangling link)', async () => {
+    // This rig's engine double answers no `sys_user`, so the delegator the link
+    // names is `missing`: the intersection cannot be composed, and the deny is
+    // the sentinel by reference. A delegator who exists is scoped to the
+    // intersection instead (`readable-ids-delegated-compose.test.ts`).
     const { plugin } = await boot({ sets: [OPEN_SET] });
     expect(await plugin.getReadFilter('task', { ...MEMBER, onBehalfOf: { userId: 'u_delegator' } })).toBe(SPEC_RLS_DENY_FILTER);
   });

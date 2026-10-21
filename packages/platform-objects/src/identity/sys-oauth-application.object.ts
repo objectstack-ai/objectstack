@@ -147,15 +147,39 @@ export const SysOauthApplication = ObjectSchema.create({
       target: '/api/v1/auth/sys-oauth-application/register',
       requiresFeature: 'oidcProvider',
       refreshAfter: true,
+      // [#24773] The form offers exactly the two application types the OAuth
+      // provider judges (`@better-auth/oauth-provider` 1.7.3 declares
+      // `application_type` as `web` | `native`), and the redirect-URL help
+      // states that provider's redirect-URI rule per type, which the register
+      // route forwards the type to. The route accepts only those two: in 18.x it
+      // refuses any other present type (`user-agent-based`, `public`, ...) with
+      // 400 before the provider runs; no type (absent or null) registers `web`.
+      // Nothing on the server reads these options: the generic action door
+      // refuses a `type: 'api'` action before its param contract runs. The
+      // stored `type` column below declares the same two values [#25053]:
+      // 1.7.3 writes only `web` or `native` (null for a client-metadata-document
+      // client), and a row an earlier provider line stored as `user-agent-based` still reads.
       params: [
         { name: 'name', label: 'Application Name', type: 'text', required: true },
-        { name: 'redirectURLs', label: 'Redirect URLs', type: 'textarea', required: true, helpText: 'One URL per line. Must use https:// in production.' },
-        { name: 'type', label: 'Application Type', type: 'select', required: true, defaultValue: 'web', options: [
-          { label: 'Web', value: 'web' },
-          { label: 'Native', value: 'native' },
-          { label: 'User-agent based', value: 'user-agent-based' },
-          { label: 'Public', value: 'public' },
-        ] },
+        {
+          name: 'redirectURLs',
+          label: 'Redirect URLs',
+          type: 'textarea',
+          required: true,
+          helpText: 'One URL per line. Web applications need https:// on a host other than localhost or another loopback address. Native applications may also use http:// on exactly localhost, 127.0.0.1 or [::1], on any port.',
+        },
+        {
+          name: 'type',
+          label: 'Application Type',
+          type: 'select',
+          required: true,
+          defaultValue: 'web',
+          helpText: 'Choose Native for a desktop or mobile app, or for an app in local development that redirects to http://localhost.',
+          options: [
+            { label: 'Web', value: 'web' },
+            { label: 'Native', value: 'native' },
+          ],
+        },
       ],
       resultDialog: {
         title: 'OAuth application registered',
@@ -422,7 +446,20 @@ export const SysOauthApplication = ObjectSchema.create({
     // (#3002). The column keeps its name and its data; the rename is absorbed
     // by the `applicationType: 'type'` mapping in plugin-auth's
     // `auth-schema-config.ts`.
-    type: Field.select(['web', 'native', 'user-agent-based', 'public'], {
+    //
+    // [#25053, ADR-0049 enforce-or-remove] The options are exactly the values
+    // the column's one writer produces. `@better-auth/oauth-provider` 1.7.3
+    // writes `application_type` `web` or `native` on every creation and
+    // update path, and the generic data API cannot write this table
+    // (`apiMethods` is `get` / `list`). It can also write `null` (a
+    // client-metadata-document client that names no type), so the column
+    // stays optional. The former `useragentbased` and `public` options had no
+    // writer. Rows are not rewritten: a row an earlier provider line stored as
+    // `user-agent-based` (never a declared value, because the string shorthand
+    // strips hyphens) still reads and lists, and takes every write that leaves
+    // `type` out, because the record validator judges only the keys a write
+    // sends. Neither value has a hyphen, so the shorthand stores each as written.
+    type: Field.select(['web', 'native'], {
       label: 'Client Type',
       required: false,
       defaultValue: 'web',

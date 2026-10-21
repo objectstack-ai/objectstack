@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Setup's Notification Preferences, Subscriptions and Templates lists draw
- * their OWN empty state.
+ * Setup's Notification Preferences and Templates lists draw their OWN empty
+ * state.
  *
- * These three objects shipped no list view at all, so the console synthesized
+ * These objects shipped no list view at all, so the console synthesized
  * an "All records" tab and drew the generic "Nothing here yet — Create your
  * first record" under it. A list view's `emptyState` is the only place the
  * spec carries per-list empty copy, so each object now ships one view, `all`,
@@ -23,7 +23,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { NotificationPreference, NotificationSubscription, NotificationTemplate } from './index.js';
+import { NotificationPreference, NotificationTemplate } from './index.js';
 import { enObjects } from '../translations/en.objects.generated.js';
 import { zhCNObjects } from '../translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../translations/ja-JP.objects.generated.js';
@@ -43,7 +43,7 @@ interface ObjectLike {
   listViews?: Record<string, ViewLike>;
 }
 
-const OBJECTS = [NotificationPreference, NotificationSubscription, NotificationTemplate] as unknown as ObjectLike[];
+const OBJECTS = [NotificationPreference, NotificationTemplate] as unknown as ObjectLike[];
 
 const BUNDLES = { en: enObjects, 'zh-CN': zhCNObjects, 'ja-JP': jaJPObjects, 'es-ES': esESObjects } as const;
 

@@ -64,20 +64,28 @@ export const en: PlatformTranslationData = {
 
     branding: {
       title: 'Branding',
-      description: 'Organization name, logo, and accent colour.',
+      description:
+        'The name, logo and colour the console and the sign-in page show. ' +
+        'A value left unset falls back to the deployment\'s own branding.',
       groups: {
         identity: { title: 'Identity' },
         appearance: { title: 'Appearance' },
       },
       keys: {
-        workspace_name: { label: 'Organization name' },
-        support_email: { label: 'Support email', help: 'Example: support@example.com' },
-        theme_mode: {
-          label: 'Default theme',
-          options: { light: 'Light', dark: 'Dark', system: 'Match system' },
+        workspace_name: {
+          label: 'Organization name',
+          help:
+            'The product name in the console, on the sign-in page and in the browser title, ' +
+            'and in sign-in emails, the authenticator app and MCP sign-in.',
         },
-        accent_color: { label: 'Accent colour' },
-        logo_url: { label: 'Logo URL', help: 'Example: https://…/logo.svg' },
+        accent_color: {
+          label: 'Accent colour',
+          help: 'The browser and installed-app theme colour. Each app keeps its own colours.',
+        },
+        logo_url: {
+          label: 'Logo URL',
+          help: 'Shown on the sign-in page, the loading screen and the home header. Example: https://…/logo.svg',
+        },
       },
     },
 

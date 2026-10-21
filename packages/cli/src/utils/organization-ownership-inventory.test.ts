@@ -93,6 +93,14 @@ const CENSUS_2026_08_31_EXAMPLES = [
 const RETIRED_BEFORE_CENSUS = { sys_scim_provider: 'scim-provider-object-retired' } as const;
 
 /**
+ * Platform objects the first census counted that have since retired by an
+ * ADR-0087 entry leaving their table in place untouched: the registry no
+ * longer names them, yet an upgraded database still holds the table. Frozen,
+ * keyed to the entry each row's citation names.
+ */
+const RETIRED_AFTER_FIRST_CENSUS = { sys_notification_subscription: 'sys-notification-subscription-retired' } as const;
+
+/**
  * #14570 and #15086, read in: each population's table has its own fate, citing
  * the record that read it in (a runtime string carries no tracker number).
  */
@@ -141,6 +149,24 @@ describe('ADR-0131 D10 inventory — every censused object has one fate and a ci
     expect(
       ORGANIZATION_OWNERSHIP_INVENTORY.filter((e) => e.census.includes('retired-before-census')).map((e) => e.object).sort(),
     ).toEqual([...retired].sort());
+  });
+
+  it('counted by the first census, retired since with the table left in place: fate 4, citing its ADR-0087 entry', () => {
+    const counted = [...CENSUS_2026_08_31_PLATFORM_WITH_COLUMN, ...CENSUS_2026_08_31_PLATFORM_WITHOUT_COLUMN] as readonly string[];
+    const registered = new Set(Object.values(PLATFORM_OBJECTS_BY_PACKAGE).flat());
+    for (const [object, adr0087Entry] of Object.entries(RETIRED_AFTER_FIRST_CENSUS)) {
+      // The population's premise: the first census counted it and the tree no longer declares it.
+      expect(counted, object).toContain(object);
+      expect(registered.has(object), object).toBe(false);
+      // The entry the citation names exists, and its ruling is what licenses fate 4: the table stays untouched.
+      const semantic = Object.values(MIGRATIONS_BY_MAJOR).flatMap((step) => step.semantic).find((s) => s.id === adr0087Entry);
+      expect(semantic?.acceptanceCriteria, adr0087Entry).toContain('left in place untouched');
+      const entry = inventoryEntryFor(object)!;
+      expect(entry, object).toMatchObject({ census: ['platform-census-2026-08-31'], fate: 'report' });
+      expect(entry.citation, object).toContain(adr0087Entry);
+      expect(entry.citation, object).not.toMatch(/#\d/);
+      expect(entry.notNullExempt, object).toBeTruthy();
+    }
   });
 
   it('the cloud supplement: listed as cloud-carried, fate 4, never a guessed fate', () => {

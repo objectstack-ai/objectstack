@@ -92,7 +92,9 @@ export const OrganizationSchema = lazySchema(() => z.object({
    * produced by better-auth's own serializer and its documented shape carries
    * no `updatedAt`, then for those routes the spec aligns to the documented
    * wire (`updatedAt` optional there)」. Both halves measured against the
-   * installed better-auth 1.7.3, so fallback A applies:
+   * installed better-auth 1.7.3 (re-measured on 1.7.12 for #25096: the
+   * organization plugin schema is byte-identical and `transformOutput` still
+   * projects declared fields only), so fallback A applies:
    *
    *  - **The serializer is the vendor's.** The `organization/*` routes are
    *    better-auth's own endpoints, mounted through plugin-auth's single

@@ -17,7 +17,9 @@
  * disposition:
  *
  *  - `keyed`      — the slot's key in `TranslationDataSchema.flows`, which must
- *                   exist in the face (parsed and kept, not stripped);
+ *                   exist in the face (parsed and kept, not stripped); a slot
+ *                   one node type reads under one key and another under a
+ *                   second (`node.label`) lists the second as `also`;
  *  - `noReader`   — no person running the flow reads it as text (a machine
  *                   name, a predicate, a value the run binds, design-time copy
  *                   only Studio draws), with the reason;
@@ -65,12 +67,19 @@ import { TranslationDataSchema } from './translation.zod';
 type FacePath = string;
 
 type Disposition =
-  | { readonly keyed: FacePath; readonly note?: string }
+  | { readonly keyed: FacePath; readonly also?: readonly FacePath[]; readonly note?: string }
   | { readonly noReader: string }
   | { readonly elsewhere: string }
   | { readonly owed: string };
 
-const keyed = (path: FacePath, note?: string): Disposition => ({ keyed: path, ...(note ? { note } : {}) });
+const keyed = (path: FacePath, note?: string, also?: readonly FacePath[]): Disposition => ({
+  keyed: path,
+  ...(also ? { also } : {}),
+  ...(note ? { note } : {}),
+});
+
+/** Every face key a `keyed` row names: its own, then its `also` keys. */
+const keysOf = (d: Disposition): FacePath[] => ('keyed' in d ? [d.keyed, ...(d.also ?? [])] : []);
 const noReader = (reason: string): Disposition => ({ noReader: reason });
 
 const FRAMEWORK_FIELD =
@@ -108,12 +117,14 @@ const RUNNER_SLOTS: Readonly<Record<string, Disposition>> = {
   'flow._lockDocsUrl': noReader(FRAMEWORK_FIELD),
 
   // FlowNodeSchema (its `config` is judged per type below)
-  'node.id': noReader('the node id — the address of `screens.<node_id>` and `refusals.<node_id>`'),
+  'node.id': noReader('the node id — the address of `screens.<node_id>`, `refusals.<node_id>` and `approvals.<node_id>`'),
   'node.type': noReader('a node-type token'),
   'node.label': keyed(
     'screens.NODE.title',
-    "a screen's fallback heading (`config.title ?? node.label`), which the one `title` key covers; on any other node "
-      + 'it is designer-canvas text',
+    "a screen's fallback heading (`config.title ?? node.label`), which the one `title` key covers; an `approval` "
+      + "node's step name, which the approval request it opens shows its submitter and approvers "
+      + '(`approvals.NODE.label`); on any other node it is designer-canvas text',
+    ['approvals.NODE.label'],
   ),
   'node.connectorConfig': noReader('connector and action ids, and input values the engine resolves'),
   'node.inputSchema': noReader("design-time parameter declarations for the designer's input mapping"),
@@ -173,9 +184,9 @@ const OTHER_NODE_SLOTS: Readonly<Record<string, Disposition>> = {
   'http.headers': noReader('the request headers sent to the endpoint — values with `{{ }}` holes, not copy'),
   [`${APPROVAL_NODE_TYPE}.decisionOutputs[].label`]: {
     owed:
-      "the approver reads it as an input label in the approval decision dialog. No translation face addresses an "
-      + "approval node's copy — a surface of its own, outside the screen-flow runner's `flows` face, and a decision "
-      + 'for that surface.',
+      "the approver reads it as an input label in the approval decision dialog. The `approvals.<node_id>` group keys "
+      + "only the step's label; the decision dialog's field labels are a surface of their own, and wait on a reader "
+      + 'for that dialog.',
   },
 };
 
@@ -350,10 +361,12 @@ describe('the flows translation face covers every user-read flow slot (#22507)',
     for (const [row, disposition] of Object.entries(RUNNER_SLOTS)) {
       if (!('keyed' in disposition)) continue;
       expect(runner.has(row), `keyed row ${row} must name a leaf exactly, not a sub-tree`).toBe(true);
-      const entry = sampleEntry(disposition.keyed);
-      const result = TranslationDataSchema.safeParse({ flows: { f: entry } });
-      expect(result.success, `${row} → flows.<flow>.${disposition.keyed}: ${JSON.stringify(result.error?.issues)}`).toBe(true);
-      expect(readAt((result as { data: any }).data.flows.f, disposition.keyed), `${row}: the key was stripped`).toBe('x');
+      for (const key of keysOf(disposition)) {
+        const entry = sampleEntry(key);
+        const result = TranslationDataSchema.safeParse({ flows: { f: entry } });
+        expect(result.success, `${row} → flows.<flow>.${key}: ${JSON.stringify(result.error?.issues)}`).toBe(true);
+        expect(readAt((result as { data: any }).data.flows.f, key), `${row}: the key was stripped`).toBe('x');
+      }
     }
   });
 
@@ -362,7 +375,7 @@ describe('the flows translation face covers every user-read flow slot (#22507)',
     // The face walk is a record over flow names; its leaves start `*.`.
     const keys = [...faceLeaves].map((leaf) => leaf.replace(/^\*\./, ''));
     const filled = new Set(
-      Object.values(RUNNER_SLOTS).flatMap((d) => ('keyed' in d ? [facePattern(d.keyed)] : [])),
+      Object.values(RUNNER_SLOTS).flatMap((d) => keysOf(d).map(facePattern)),
     );
     expect(keys.sort()).toEqual([...filled].sort());
   });

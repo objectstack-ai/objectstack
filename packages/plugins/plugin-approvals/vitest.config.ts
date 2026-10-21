@@ -41,6 +41,15 @@ export default defineConfig({
         find: /^@objectstack\/lint$/,
         replacement: path.resolve(__dirname, '../../lint/src/index.ts'),
       },
+      // [#24978] `approval-notification-keyed-text.integration.test.ts` hands
+      // the REAL approval notifications to the REAL messaging service, which
+      // renders them per recipient at delivery — so the verdict must be the
+      // current renderer's, not a `service-messaging/dist` build's. Same
+      // #7668/#7778 reason as the entries above; anchored, as they are.
+      {
+        find: /^@objectstack\/service-messaging$/,
+        replacement: path.resolve(__dirname, '../../services/service-messaging/src/index.ts'),
+      },
     ],
   },
   test: {

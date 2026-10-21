@@ -100,20 +100,24 @@ export const zhCN: PlatformTranslationData = {
 
     branding: {
       title: '品牌',
-      description: '组织名称、Logo 与主题色。',
+      description: '控制台与登录页显示的名称、Logo 与颜色。未设置的值沿用部署自身的品牌。',
       groups: {
         identity: { title: '身份' },
         appearance: { title: '外观' },
       },
       keys: {
-        workspace_name: { label: '组织名称' },
-        support_email: { label: '客服邮箱', help: '示例:support@example.com' },
-        theme_mode: {
-          label: '默认主题',
-          options: { light: '浅色', dark: '深色', system: '跟随系统' },
+        workspace_name: {
+          label: '组织名称',
+          help: '控制台、登录页与浏览器标题中的产品名,也用于登录邮件、身份验证器应用与 MCP 登录。',
         },
-        accent_color: { label: '主题色' },
-        logo_url: { label: 'Logo 链接', help: '示例:https://…/logo.svg' },
+        accent_color: {
+          label: '主题色',
+          help: '浏览器与已安装应用的主题色。各应用保留自己的颜色。',
+        },
+        logo_url: {
+          label: 'Logo 链接',
+          help: '显示在登录页、加载页与首页顶栏。示例:https://…/logo.svg',
+        },
       },
     },
 

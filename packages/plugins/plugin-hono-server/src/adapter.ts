@@ -131,11 +131,13 @@ export interface HonoCorsOptions {
      * array or one comma-separated string. Wins over `OS_CORS_ORIGIN`.
      *
      * No default list. With neither this nor `OS_CORS_ORIGIN` set, no
-     * cross-origin caller is admitted — a loopback origin excepted, on a
-     * development boot only (`NODE_ENV=development`). Same-origin requests
-     * need no CORS answer and are unaffected either way.
+     * cross-origin caller is admitted. A loopback origin is admitted beside
+     * the list, or without one, on a development boot only
+     * (`NODE_ENV=development`). Same-origin requests need no CORS answer and
+     * are unaffected either way.
      *
-     * `'*'` (alone or in a list) is refused at init while
+     * `'*'`, or a pattern whose host part is the bare `*` (`https://*`,
+     * `*://*`), alone or in a list, is refused at init while
      * {@link HonoCorsOptions.credentials} is on; it is accepted with
      * credentials off.
      */

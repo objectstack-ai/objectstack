@@ -157,13 +157,12 @@ import {
   type UndeliveredAttribute,
 } from './builtin-column-collision.js';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
-import { makeDatabaseDirectory, SqliteDatabaseFileError } from './sqlite-database-file.js';
+import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { currentPerfTiming, perfNow, type PerfTiming } from '@objectstack/observability';
 // [#21007] The JSON-column gate's operator set and refusal text — shared with
 // `@objectstack/objectql`'s per-aggregation `filter`, which refuses the same
@@ -5176,7 +5175,10 @@ export type SqliteJournalMode = 'wal' | 'delete';
  *   database instead, which introspects as a database with zero tables — the
  *   same thing a freshly-created empty file introspects as. For a read-only
  *   caller (`os migrate plan`) the report is therefore identical while the
- *   filesystem is left untouched.
+ *   filesystem is left untouched. Only a file that `'create'` could bring into
+ *   existence counts as absent: one that can be neither opened nor created is
+ *   refused, as `'create'`'s connect refuses it (#24961) — see
+ *   {@link resolveSqliteAbsentFileTarget}.
  *
  * `'empty-in-memory'` is for callers that only ever READ. A caller that may
  * write MUST leave it at `'create'`: writes land in the ephemeral database and
@@ -5199,6 +5201,24 @@ export type SqliteAbsentFileMode = 'create' | 'empty-in-memory';
  *
  * Pseudo-filenames (`:memory:` and anything else `:`-prefixed) and non-file
  * dialects are already fileless, so they are returned untouched.
+ *
+ * ## Absent is not the same as unopenable (#24961)
+ *
+ * Only a file a boot that may write could bring into existence is absent. One
+ * that can be neither opened nor created — a path under a regular file, a
+ * directory this process may not write — is refused here with the
+ * `SqliteDatabaseFileError` naming the file and the operating system's answer,
+ * the refusal `SqlDriver.connect()` gives the same path on a boot that writes.
+ * The judgement writes nothing: see `probeAbsentSqliteDatabaseFile`
+ * (`sqlite-database-file.ts`), which also names the one shape it cannot see
+ * without a write. It used to be
+ * `existsSync`, which answers `false` for every path it cannot stat, so a
+ * read-only boot opened an empty in-memory database over a file that cannot
+ * exist and reported the datasource connected.
+ *
+ * @throws SqliteDatabaseFileError under `'empty-in-memory'`, for a file that
+ *   can be neither opened nor created. Both callers get the same answer: the
+ *   driver's constructor, and the service layer's wasm rung.
  */
 export function resolveSqliteAbsentFileTarget(
   filename: string,
@@ -5208,7 +5228,7 @@ export function resolveSqliteAbsentFileTarget(
   if (typeof filename !== 'string' || filename === '' || filename.startsWith(':')) {
     return { filename, openedEmptyInMemory: false };
   }
-  if (existsSync(filename)) return { filename, openedEmptyInMemory: false };
+  if (probeAbsentSqliteDatabaseFile(filename) === 'exists') return { filename, openedEmptyInMemory: false };
   return { filename: ':memory:', openedEmptyInMemory: true };
 }
 
@@ -6454,12 +6474,22 @@ export class SqlDriver implements IDataDriver {
    * the Knex instance at construction, and better-sqlite3 opens (and therefore
    * creates) the file on the first statement — which for this driver is the
    * `PRAGMA auto_vacuum` in {@link connect}.
+   *
+   * A file the judgement refuses — one that can be neither opened nor created
+   * (#24961) — throws its `SqliteDatabaseFileError` out of the constructor, so
+   * no Knex instance is ever built over it.
+   *
+   * Only a SQLite client is asked (#24961). A server dialect's `connection`
+   * string is a URL, never a filename: handed to the judgement it read as an
+   * absent file, and a `pg` driver given this option had its connection string
+   * rewritten to `:memory:` — against {@link SqlDriverConfig.sqliteAbsentFile}'s
+   * "ignored for non-SQLite dialects".
    */
   private knexConfigFor(
     knexConfig: Knex.Config,
     mode: SqliteAbsentFileMode | undefined,
   ): Knex.Config {
-    if (mode !== 'empty-in-memory') return knexConfig;
+    if (mode !== 'empty-in-memory' || !this.isSqlite) return knexConfig;
     const conn = (knexConfig as { connection?: unknown }).connection;
     const declared = typeof conn === 'string' ? conn : (conn as { filename?: unknown })?.filename;
     if (typeof declared !== 'string') return knexConfig;
@@ -7046,6 +7076,9 @@ export class SqlDriver implements IDataDriver {
    * @returns whether the connection answered. The read is the first statement
    * any connection runs, so `false` says the connection itself is not answering —
    * not merely that space hygiene is unavailable.
+   * @throws {SqliteDatabaseFileError} when that first statement's answer is a
+   * verdict on the file itself ({@link SQLITE_FILE_REFUSALS}): it cannot be
+   * opened, it is not a SQLite database, or its header or schema is damaged.
    */
   private async applyAutoVacuumIncremental(): Promise<boolean> {
     try {
@@ -7069,15 +7102,34 @@ export class SqlDriver implements IDataDriver {
       // let the step-down message that follows explain the outcome. Any OTHER
       // PRAGMA failure keeps the full warning (with stack) as before.
       const code = (e as { code?: string } | null | undefined)?.code;
-      // The file itself cannot be opened or created (#23696): a directory that
-      // exists but refuses the file, a path SQLite cannot open. Every later
-      // statement would answer the same, so the connect fails here, naming the
-      // file — before, it logged and resolved, and the datasource counted as
-      // connected while it could not answer one query.
-      if (code === 'SQLITE_CANTOPEN') {
+      // The file itself is refused, and every later statement would answer the
+      // same, so the connect fails here, naming the file. Before, each of these
+      // logged and resolved, and the datasource counted as connected while it
+      // could not answer one query:
+      //   • SQLITE_CANTOPEN (#23696) — a directory that exists but refuses the
+      //     file, a path SQLite cannot open;
+      //   • SQLITE_NOTADB (#24960) — the file exists and opens, but its bytes
+      //     are not a SQLite database (plain text, a foreign format, a file
+      //     encrypted by another engine). On a development boot the step-down
+      //     used to answer it with wasm SQLite, whose open moved the
+      //     operator's file aside and wrote an empty database in its place.
+      //     The refusal is issued before anything is written: the file is left
+      //     exactly as it was found;
+      //   • SQLITE_CORRUPT (#25019) — the file is a SQLite database SQLite
+      //     cannot read: its header or its schema is damaged (a file truncated
+      //     inside its 100-byte header, or short of the pages its schema
+      //     names). At the FIRST statement this is a verdict on the whole
+      //     file, measured: `SELECT 1` answers the same code. A database
+      //     damaged deeper inside answers this read and connects; its damage
+      //     surfaces on the read that reaches it, as before. A development
+      //     boot used to take the same step-down to wasm SQLite as for
+      //     SQLITE_NOTADB, and the same rename; it is refused the same way,
+      //     before anything is written.
+      const refusal = code === undefined ? undefined : SqlDriver.SQLITE_FILE_REFUSALS.get(code);
+      if (refusal !== undefined) {
         const declared = (this.config as any).connection;
         const filename = this.sqliteFilename() ?? String(typeof declared === 'string' ? declared : declared?.filename);
-        throw new SqliteDatabaseFileError(filename, 'cannot be opened or created', e);
+        throw new SqliteDatabaseFileError(filename, refusal, e);
       }
       const msg = e instanceof Error ? e.message : String(e);
       const isNativeLoadFailure =
@@ -7095,6 +7147,20 @@ export class SqlDriver implements IDataDriver {
       return false;
     }
   }
+
+  /**
+   * The SQLite codes the connection's first statement can answer that are a
+   * verdict on the FILE, each with the words {@link SqliteDatabaseFileError}
+   * names it with. Only a loaded addon answers with a SQLite code, so none of
+   * these is a native-addon load failure; and every rung of a step-down opens
+   * the same file, so no other engine can cure one (`resolveSqliteDriver` in
+   * `@objectstack/service-datasource` re-throws them).
+   */
+  private static readonly SQLITE_FILE_REFUSALS: ReadonlyMap<string, string> = new Map([
+    ['SQLITE_CANTOPEN', 'cannot be opened or created'],
+    ['SQLITE_NOTADB', 'is not a SQLite database, and was left as it is'],
+    ['SQLITE_CORRUPT', 'is damaged (SQLite cannot read its header or its schema), and was left as it is'],
+  ]);
 
   /** What `PRAGMA auto_vacuum` answers for INCREMENTAL (0 is NONE, 1 is FULL). */
   private static readonly SQLITE_AUTO_VACUUM_INCREMENTAL = 2;

@@ -18,7 +18,6 @@ import { SysEmailTemplate, SysNotification } from '@objectstack/platform-objects
 import { NotificationDelivery } from './notification-delivery.object.js';
 import { NotificationPreference } from './notification-preference.object.js';
 import { NotificationReceipt } from './notification-receipt.object.js';
-import { NotificationSubscription } from './notification-subscription.object.js';
 import { NotificationTemplate } from './notification-template.object.js';
 
 /**
@@ -49,7 +48,6 @@ describe('sys_notification_* keyed-text bounds carry their producers’ widths (
     // Vacuity control: the producer itself must be a real declared bound.
     expect(typeof eventTopic).toBe('number');
     expect(bound(NotificationPreference, 'topic')).toBe(eventTopic);
-    expect(bound(NotificationSubscription, 'topic')).toBe(eventTopic);
     expect(bound(NotificationTemplate, 'topic')).toBe(eventTopic);
   });
 
@@ -74,13 +72,5 @@ describe('sys_notification_* keyed-text bounds carry their producers’ widths (
     const emailLocale = bound(SysEmailTemplate, 'locale');
     expect(typeof emailLocale).toBe('number');
     expect(bound(NotificationTemplate, 'locale')).toBe(emailLocale);
-  });
-
-  it('principal covers the widest declared selector arm: owner_of:<object>:<id>', () => {
-    // 'owner_of:' (9) + object API name (<= 255, storage-owned by
-    // `sys_metadata.name`, commit 3a04b0125) + ':' (1) + record id (<= 255, the physical
-    // id width above). Every other arm of the grammar commit 44738f7af documented
-    // is narrower (an email is <= 254; 'user:' + id is 260).
-    expect(bound(NotificationSubscription, 'principal')).toBe(9 + 255 + 1 + PHYSICAL_ID_WIDTH);
   });
 });

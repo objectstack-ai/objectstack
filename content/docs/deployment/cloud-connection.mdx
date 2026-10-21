@@ -5,9 +5,9 @@ description: Connect your own ObjectStack server to an ObjectStack Cloud account
 ---
 
 A self-hosted ObjectStack server can be connected to an ObjectStack Cloud
-account. You start the connection on your own server, in **Setup → Apps →
-Cloud Connection**, and approve it in the cloud account with a one-time code.
-Nothing is typed into the server: no id, no key, no password. Under the hood
+account. You start the connection on your own server, in **Setup →
+Integrations → Cloud Connection**, and approve it in the cloud account with a
+one-time code. Nothing is typed into the server: no id, no key, no password. Under the hood
 this is the OAuth 2.0 device authorization grant
 ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)), run by the
 `@objectstack/cloud-connection` package on your server.
@@ -56,6 +56,13 @@ const cloudUrl = resolveCloudUrl(); // OS_CLOUD_URL; '' when declared off
 To check a running server, request `GET /api/v1/cloud-connection/status`. It
 needs no sign-in, and a `200` means the plugin is mounted.
 
+**The server does not hold the environment service key.** A server that holds
+`OS_CLOUD_API_KEY` (the cloud sets it on every environment it hosts) is
+connected by the platform, not from Setup. It registers no Cloud Connection page
+or Setup entry, says so once in its boot log, and refuses a disconnect with
+`409` (`RESOURCE_CONFLICT`): nothing is revoked and nothing is cleared. A
+self-hosted server leaves `OS_CLOUD_API_KEY` unset.
+
 **The server can reach the cloud.** Every call to the cloud is made by the
 server, not by your browser: the code request, the polling, the connection
 itself and the disconnect. The server needs outbound HTTPS to the control-plane
@@ -77,7 +84,9 @@ the server reads as not connected until you connect it again.
   organization-administrator permission sets carry it. The connect and
   disconnect requests take the same permission: a signed-in user without
   Setup Access is refused with `403` (`PERMISSION_DENIED`) before the server
-  calls the cloud. A session
+  calls the cloud. The page's Setup entry sits in the **Integrations** group,
+  which Setup shows only to users who also hold `manage_platform_settings`; the
+  default platform-administrator permission set carries both. A session
   that the authentication policy is holding (an expired password, or
   multi-factor sign-in required but not yet set up) is refused with `403`
   until it is fixed.
@@ -88,9 +97,9 @@ the server reads as not connected until you connect it again.
 
 ## Connect [#connect]
 
-1. **Open the page.** Sign in to your server and go to **Setup → Apps →
-   Cloud Connection**. The header reads *Cloud Connection — Connect this
-   runtime to an ObjectStack control plane to browse your organization's
+1. **Open the page.** Sign in to your server and go to **Setup →
+   Integrations → Cloud Connection**. The header reads *Cloud Connection —
+   Connect this runtime to an ObjectStack control plane to browse your organization's
    private packages and install them here.* The panel shows *Checking
    connection…*, then **Not connected** and a **Connect** button.
 2. **Click Connect.** The server asks the cloud for a device code and hands
@@ -214,15 +223,16 @@ The routes the Cloud Connection page uses, all on the server's own origin:
 | `GET /api/v1/cloud-connection/status` | not required | Every caller gets `bound`, `runtimeId` and `provider`. A signed-in user with Setup Access (`setup.access`) also gets `environmentId` and `connection`, the connection as the cloud reports it (the approving account and the organization). `bound` is `true` whenever the server holds a credential; `connection` is `null` when the cloud cannot be reached. |
 | `POST /api/v1/cloud-connection/bind/start` | required | Asks the cloud for a device code; answers with `user_code`, `verification_uri`, `verification_uri_complete`, `interval`, `expires_in`. |
 | `POST /api/v1/cloud-connection/bind/poll` | required | Body `{ "device_code": "…" }`. Answers `{ "pending": true }` while the cloud waits for approval, and the connection once it is approved. |
-| `POST /api/v1/cloud-connection/unbind` | required | Disconnects; answers `{ "revoked", "cleared" }`. |
+| `POST /api/v1/cloud-connection/unbind` | required | Disconnects; answers `{ "revoked", "cleared" }`. On a server holding `OS_CLOUD_API_KEY`, refused with `409` (`RESOURCE_CONFLICT`) and nothing changes. |
 
 The settings that shape the flow are listed in
 [Environment variables](/docs/deployment/environment-variables#multi-tenant--cloud-control-plane):
 `OS_CLOUD_URL` picks the cloud, `OS_CLI_CLIENT_ID` overrides the OAuth client
 id the server presents (default `objectstack-cli`), and `OS_RUNTIME_VERSION`
 sets the version it reports. `OS_CLOUD_API_KEY` and `OS_ENVIRONMENT_ID` belong
-to cloud-hosted runtimes; a self-hosted server leaves both unset, and a set
-`OS_CLOUD_API_KEY` is used instead of the stored credential.
+to cloud-hosted runtimes; a self-hosted server leaves both unset. A set
+`OS_CLOUD_API_KEY` is used instead of the stored credential, and makes the
+connection platform-managed: no Cloud Connection page, and no disconnect.
 
 The Setup app itself, and how plugins add entries to it, is described in
 [Setup app](/docs/ui/setup-app). Running the server is covered in

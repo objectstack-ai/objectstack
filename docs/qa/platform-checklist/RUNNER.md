@@ -257,7 +257,7 @@ contradicts it, and correct it here when it does.
   **Check:** fetch `/api/v1/meta/app` with no query first and read the names it actually
   returns, then filter.
 
-- **An isolated boot on a non-3000 port breaks the showcase's self-pinging connectors
+- **A boot on its own non-3000 port breaks the showcase's self-pinging connectors
   unless you export `OS_PORT` — `-p` alone is not enough, and the symptom impersonates an
   egress block.** The showcase's REST/OpenAPI connector instances point at the running
   server itself, resolved by `resolveShowcaseSelfUrl()`
@@ -266,7 +266,7 @@ contradicts it, and correct it here when it does.
   reads. The CLI's `-p` flag is only a *default sourced from* `OS_PORT`
   (`packages/cli/src/commands/serve.ts`: `port: Flags.string({ char: 'p', … default:
   readEnvWithDeprecation('OS_PORT','PORT') ?? '3000' })`) and nothing writes the variable
-  back, so the dogfood §0 isolated boot — `objectstack dev … -p <port>` with the env
+  back, so the dogfood §0 boot on its own port — `objectstack dev … -p <port>` with the env
   untouched — listens on `<port>` while every declarative connector dials **3000**. Every
   dispatch then fails `connector_action(showcase_status_api.request) failed: fetch failed`.
   ⚠️ **That string is not evidence of a sandbox network restriction**, and reading it as
@@ -340,6 +340,8 @@ contradicts it, and correct it here when it does.
   `curl -s -o /dev/null -w '%{http_code}' http://localhost:PORT/api/v1/health` (substitute
   the real port). This is "zero hits needs a positive control" applied to one tool: a
   negative from a command that never ran is not evidence.
+
+- **`rsync` is not installed in these containers — copy a scratch app with `tar` or `cp -a`.** QA run #24841 met it.
 
 - **A SIGTERM to the `pnpm` wrapper does not stop the server under it — start a
   backgrounded boot with `setsid` and stop its process group.** The canonical boot (in the

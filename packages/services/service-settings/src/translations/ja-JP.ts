@@ -60,20 +60,28 @@ export const jaJP: PlatformTranslationData = {
 
     branding: {
       title: 'ブランディング',
-      description: '組織名・ロゴ・アクセントカラー。',
+      description:
+        'コンソールとサインインページに表示される名前・ロゴ・カラー。' +
+        '未設定の値はデプロイメント自身のブランディングに従います。',
       groups: {
         identity: { title: 'アイデンティティ' },
         appearance: { title: '外観' },
       },
       keys: {
-        workspace_name: { label: '組織名' },
-        support_email: { label: 'サポートメール', help: '例: support@example.com' },
-        theme_mode: {
-          label: 'デフォルトテーマ',
-          options: { light: 'ライト', dark: 'ダーク', system: 'システムに従う' },
+        workspace_name: {
+          label: '組織名',
+          help:
+            'コンソール、サインインページ、ブラウザのタイトルに表示される製品名。' +
+            'サインインメール、認証アプリ、MCP サインインでも使われます。',
         },
-        accent_color: { label: 'アクセントカラー' },
-        logo_url: { label: 'ロゴ URL', help: '例: https://…/logo.svg' },
+        accent_color: {
+          label: 'アクセントカラー',
+          help: 'ブラウザとインストール済みアプリのテーマカラー。各アプリは独自のカラーを保持します。',
+        },
+        logo_url: {
+          label: 'ロゴ URL',
+          help: 'サインインページ、読み込み画面、ホームのヘッダーに表示されます。例: https://…/logo.svg',
+        },
       },
     },
 

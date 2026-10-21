@@ -189,8 +189,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "User Created",
-          description: "Copy the temporary password now — it is shown only once and never stored.",
-          acknowledge: "I have saved this password",
+          description: "If a temporary password was generated, copy it now — it is shown only once and never stored.",
+          acknowledge: "Done",
           fields: {
             "user.email": "Email",
             "user.phoneNumber": "Phone Number",
@@ -930,7 +930,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "Parent Business Unit",
-        help: "Self-reference for the org tree. Null = root of tenant."
+        help: "Self-reference for the org tree. Null = root of tenant. A unit that still has child units cannot be deleted until they are re-parented or deleted."
       },
       timezone: {
         label: "Timezone",
@@ -1389,9 +1389,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Client Type",
         options: {
           web: "web",
-          native: "native",
-          useragentbased: "user-agent-based",
-          public: "public"
+          native: "native"
         }
       },
       public: {
@@ -1530,15 +1528,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           redirectURLs: {
             label: "Redirect URLs",
-            helpText: "One URL per line. Must use https:// in production."
+            helpText: "One URL per line. Web applications need https:// on a host other than localhost or another loopback address. Native applications may also use http:// on exactly localhost, 127.0.0.1 or [::1], on any port."
           },
           type: {
             label: "Application Type",
+            helpText: "Choose Native for a desktop or mobile app, or for an app in local development that redirects to http://localhost.",
             options: {
               web: "Web",
-              native: "Native",
-              "user-agent-based": "User-agent based",
-              public: "Public"
+              native: "Native"
             }
           }
         },
@@ -3248,13 +3245,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Code"
       },
       lock_state: {
-        label: "Lock State",
-        options: {
-          none: "none",
-          nooverlay: "no-overlay",
-          nodelete: "no-delete",
-          full: "full"
-        }
+        label: "Lock State"
       },
       lock_overridden: {
         label: "Lock Overridden"

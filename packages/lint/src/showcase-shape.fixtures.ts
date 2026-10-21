@@ -411,7 +411,7 @@ export const SnapshotContactViews = defineView({
       { field: 'company' },
       { field: 'stage' },
     ],
-    addRecord: { enabled: true, mode: 'form', formView: 'create' },
+    addRecord: { enabled: true },
   },
 
   form: {

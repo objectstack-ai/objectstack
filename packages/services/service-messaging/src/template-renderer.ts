@@ -39,17 +39,44 @@ export interface RenderInput {
 
 const TOKEN = /\{\{\s*([\w.$]+)\s*\}\}/g;
 
+/** How one hole's value is encoded for the face it lands in. */
+type HoleEncoder = (value: string) => string;
+
+const verbatim: HoleEncoder = (value) => value;
+
+/**
+ * Encode a value for an HTML face: element text and quoted attribute values
+ * both, so a hole is safe in either position. Every character survives — a
+ * mail client decodes the entity back on display — so nothing a user typed is
+ * stripped or refused; it is only kept from being read as markup.
+ */
+const escapeHtml: HoleEncoder = (value) =>
+    value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
 /**
  * Declarative `{{ path.to.value }}` interpolation over a context object. No
  * logic, no conditionals — templates stay auditable metadata (a deliberate
  * low-code constraint). An unknown path renders to an empty string. This is the
  * single, linear-time substitution pass; it never evaluates template code.
+ *
+ * Values render verbatim: this is the PLAIN-TEXT face (a subject, a text body,
+ * an SMS). An HTML face goes through {@link renderNotification}, which encodes
+ * every hole for markup.
  */
 export function interpolate(template: string, context: Record<string, unknown>): string {
+    return substitute(template, context, verbatim);
+}
+
+function substitute(template: string, context: Record<string, unknown>, encode: HoleEncoder): string {
     if (!template) return '';
     return template.replace(TOKEN, (_m, path: string) => {
         const v = lookup(context, path);
-        return v == null ? '' : String(v);
+        return v == null ? '' : encode(String(v));
     });
 }
 
@@ -67,6 +94,21 @@ function lookup(ctx: Record<string, unknown>, path: string): unknown {
  * interpolated and `body` is routed to `html` (html/mjml) or `text`
  * (markdown/text). With no template, fall back to the notification's
  * `title`/`body` (the P0/P1 behavior) as `subject`/`text`.
+ *
+ * ## Each face is encoded for its own context (ruling 3C on #25040)
+ *
+ * A payload carries text fields — a person's display name, a record title, a
+ * comment — and a display name may contain any character. The rule is that the
+ * stored text is never stripped or refused; the OUTLET that renders it into
+ * HTML escapes it, by default. So:
+ *
+ *  - an `html` / `mjml` body is markup: every hole's value is HTML-escaped. The
+ *    template's own markup is the author's and renders as written; only the
+ *    values are encoded. There is no unescaped hole form here — a template that
+ *    needs a pre-rendered fragment is an email template (`sys_email_template`,
+ *    named in a notify step's `template`), whose renderer has one.
+ *  - the subject and a `markdown` / `text` body are plain text: values render
+ *    verbatim, because an entity in plain text is a corrupted character.
  */
 export function renderNotification(
     template: NotificationTemplateRow | null | undefined,
@@ -82,8 +124,8 @@ export function renderNotification(
 
     if (template && (template.subject || template.body)) {
         const subject = interpolate(String(template.subject ?? ''), ctx) || String(ctx.title ?? input.topic);
-        const renderedBody = interpolate(String(template.body ?? ''), ctx);
         const isHtml = template.format === 'html' || template.format === 'mjml';
+        const renderedBody = substitute(String(template.body ?? ''), ctx, isHtml ? escapeHtml : verbatim);
         return isHtml ? { subject, html: renderedBody } : { subject, text: renderedBody };
     }
 
@@ -100,10 +142,31 @@ export interface NotificationTemplateStoreOptions {
 }
 
 /**
- * Loads `sys_notification_template` rows by `(topic, channel, locale)`, with a
- * locale fallback (`en-US` → `en` → {@link DEFAULT_LOCALE}). Best-effort: no
- * data engine or a lookup error yields `null` (→ the renderer's generic
- * fallback), never a throw — a template outage must not block delivery.
+ * Loads `sys_notification_template` rows by `(topic, channel, locale)` in the
+ * recipient's organization, with a locale fallback (`en-US` → `en` →
+ * {@link DEFAULT_LOCALE}). Best-effort: no data engine or a lookup error yields
+ * `null` (→ the renderer's generic fallback), never a throw — a template outage
+ * must not block delivery.
+ *
+ * ## A template is resolved in the recipient's organization (ADR-0131)
+ *
+ * `sys_notification_template` is organization-owned: a row is the organization
+ * that authored it (ADR-0131 D1/D3), so the row a delivery renders is one its
+ * OWN organization authored — `organizationId` is the delivery's
+ * (`Notification.organizationId`, the organization the event row carries). The
+ * read is keyed `where: { organization_id }`, the same spelling
+ * `PreferenceResolver.loadRows` scopes its rows by.
+ *
+ *  - ⛔ Never drop the `organization_id` term. The read runs under the explicit
+ *    system opt-in ({@link FAN_OUT_SYSTEM_CONTEXT}), which names no
+ *    organization: here the term IS the organization boundary, as the
+ *    `user_id` term is under `INBOX_SYSTEM_CONTEXT`.
+ *  - A call that names no organization reads NO row and answers `null`, so the
+ *    channel renders the producer's own title and body. There is no row with no
+ *    organization (ADR-0131 D1), so there is no row such a delivery could own.
+ *    The composed fan-out never hands a channel such a delivery: the event row
+ *    takes its organization from the producer or from the engine's system-write
+ *    rule (ADR-0131 D9), and an emit with neither is refused.
  */
 export class NotificationTemplateStore {
     private readonly objectName: string;
@@ -111,16 +174,23 @@ export class NotificationTemplateStore {
         this.objectName = opts.objectName ?? TEMPLATE_OBJECT;
     }
 
-    async load(topic: string, channel: string, locale?: string): Promise<NotificationTemplateRow | null> {
+    async load(
+        topic: string,
+        channel: string,
+        locale?: string,
+        organizationId?: string,
+    ): Promise<NotificationTemplateRow | null> {
         const data = this.opts.getData();
         if (!data) return null;
+        if (!organizationId) return null;
         const candidates = localeCandidates(locale);
         for (const loc of candidates) {
             try {
                 // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the
-                // platform's own template row, read to render a delivery.
+                // recipient organization's template row, read to render a
+                // delivery to that recipient.
                 const row = await data.findOne(this.objectName, {
-                    where: { topic, channel, locale: loc, is_active: true },
+                    where: { organization_id: organizationId, topic, channel, locale: loc, is_active: true },
                     fields: ['subject', 'body', 'format'],
                 }, { context: FAN_OUT_SYSTEM_CONTEXT });
                 if (row) return row as NotificationTemplateRow;

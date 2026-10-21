@@ -119,6 +119,43 @@ expect allow 'echo "never feed a working-tree glob into git show origin/main:"'
 expect allow 'git grep -n "ls-tree --name-only origin/main"'
 expect allow 'cat .claude/hooks/guard-tree-enum.sh'
 
+echo "== a \"…\" string ends only where bash ends it (#24901) =="
+# Two shapes inside "…" whose `"` does NOT close the outer string, and this pass read both as
+# closing it, so a pure read split into an enumeration segment and an origin/main read. Every
+# allow-case below was BLOCKED before the fix; the single-level forms next door never were.
+# (1) an escaped `\"`, the #11804 repair its two siblings already carried:
+expect allow 'echo "say \"; ls *.yml; git show origin/main:x\" ok"'
+expect allow 'echo "say ; ls *.yml; git show origin/main:x ok"'
+# (2) a `"` inside a `$(…)`, a backtick or a `${…}`, which opens a context of its own:
+expect allow 'echo "a $(echo "x; ls *.yml")" && git show origin/main:README.md'
+expect allow 'echo "a `echo "; find ."`"; git grep foo origin/main'
+expect allow 'echo "${x:-"; ls *.yml"}" && git show origin/main:README.md'
+expect allow 'echo "x; ls *.yml" && git show origin/main:README.md'
+# Recall: the sweep this guard exists for is still caught when a quoted expansion sits in it.
+expect block 'for f in "${dir:-"docs"}"/*.md; do git show "origin/main:$f"; done'
+expect block 'for f in .github/workflows/*.yml; do git show "origin/main:${f}"; done'
+expect block 'echo "${x:-"a"}" ; for f in *.yml; do git show "origin/main:$f"; done'
+# The fail-OPEN mirror of (1): the escaped quotes paired up and left the region hanging, so
+# the real sweep behind them rode through as text. ALLOWED before the fix.
+expect block 'echo "he said \"x\"" ; for f in *.yml; do git show "origin/main:$f"; done'
+
+echo "== the shared quoting rules are copies, byte for byte (#24901) =="
+# split_segments() is guard-shared-stash.sh's and subst_end() is guard-main-checkout-bash.sh's.
+# This pass's header called it identical while it lacked the in-quote escape rule — exactly
+# the drift a prose claim cannot catch and this pin does.
+fn_text() { sed -n "/^$1() {\$/,/^}\$/p" "$2"; }
+same_fn() { # same_fn <function> <file holding the copy this hook must equal>
+  local mine theirs
+  mine="$(fn_text "$1" "$hook")"; theirs="$(fn_text "$1" "$2")"
+  if [ -n "$mine" ] && [ "${mine%%$'\n'*}" = "$1() {" ] && [ "$mine" = "$theirs" ]; then
+    pass=$((pass + 1)); printf '  ok   same   %s() as %s\n' "$1" "${2##*/}"
+  else
+    fail=$((fail + 1)); printf '  FAIL %s() is missing here or differs from %s\n' "$1" "${2##*/}"
+  fi
+}
+same_fn split_segments "$here/guard-shared-stash.sh"
+same_fn subst_end "$here/guard-main-checkout-bash.sh"
+
 echo "== unrelated commands are untouched =="
 expect allow 'pnpm --filter @objectstack/spec test'
 expect allow 'git status'

@@ -9,7 +9,7 @@
       "title": "Per-group sign-off (会签) needs one approval from EACH group",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": ["approver holding exactly one group (e.g. manager)", "second approver holding the other group (e.g. finance/auditor)"],
@@ -25,7 +25,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin (the manager-group holder; NOT in the finance group of this node)",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin (the manager-group holder; NOT in the finance group of this node)",
         "GET /api/v1/approvals/requests?status=pending and locate the EXP-2001 request opened by showcase_expense_signoff's per_group node (groups manager + finance)",
         "GET /api/v1/approvals/requests/:id — record status, pending_approvers, pending_approver_names, pending_approver_groups, and the per-group tallies",
         "open the inbox the way a user reaches it — the Approvals entry in the account app's Inbox group, i.e. /_console/apps/com.objectstack.account/component/approvals/inbox (待我审批 tab) — NOT the bare /system/approvals deep-link route (#7234; that route stays supported and is exercised by approvals.notification-deep-link); open the request drawer; screenshot the server-computed group chips",
@@ -96,6 +96,12 @@
           "date": "2026-10-19",
           "change": "acceptance[3].verify corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24542, approvals.per-group-signoff acceptance[3]; wave anchor #24579 §3): it asked for 'the approve branch taken' in the run read, but end nodes log no step and showcase_expense_signoff's approve edge ends at an end node, so no run read can show the branch. The verify now scores the run status transition and the request status, as approvals.quorum-m-of-n already words the same evidence. Clause text unchanged",
           "ref": "#24632"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -104,7 +110,7 @@
       "title": "M-of-N quorum approves at the threshold; one rejection vetoes",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": ["three DISTINCT users each holding one of the approver positions"],
@@ -120,7 +126,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "runnable today (the clamp contrast): GET the seeded showcase_committee_quorum request on EXP-DEMO (behavior quorum, minApprovals 2 over manager/finance/legal — all resolving to the admin); record the collapsed pending slate",
         "approve it ONCE as the admin and re-read: it finalizes immediately — the documented runtime clamp (minApprovals can never exceed the resolvable approver count), recorded as the CONTRAST, never as M-of-N proof",
         "apply the runtime fixture (fixtures.requires, steps 1-4) and open a FRESH quorum request; then as approver 1, POST /api/v1/approvals/requests/:id/approve — re-read: status STILL pending (1 of 2), approver 1 dropped from the slate",
@@ -188,6 +194,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24542, approvals.quorum-m-of-n; wave anchor #24579 §3): in a shared boot an earlier item (approvals.account-app-entry's runtime persona) had bound another member to 'finance', so the committee slate resolved four distinct holders; the run deleted that binding before opening the quorum requests. The fixture now says to clear such bindings first. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -196,7 +208,7 @@
       "title": "Inbox actions are metadata-driven and gated by the viewer's relationship",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": ["an approver who is NOT the submitter and NOT an override actor (no platform-admin or tenant-admin standing), so record.viewer.can_override is false on the request", "the dev admin: the submitter of the invoice request (the own-request case) and an OVERRIDE actor (a platform admin — record.viewer.can_override is true on any PENDING request), for the override half of clause 2"],
@@ -209,7 +221,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin for the own-request case and the override half, and as the non-override approver (personas) for the other-submitter case",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin for the own-request case and the override half, and as the non-override approver (personas) for the other-submitter case",
         "other-submitter case, as the NON-override approver: reach the inbox the way a user does — the Approvals entry in the account app's Inbox group (/_console/apps/com.objectstack.account/component/approvals/inbox), NOT the bare /system/approvals deep link (#7234) — open the other-submitter request from the 待我审批 tab; screenshot, then read the rendered action set from the drawer DOM. Then open the SAME pending request as the dev admin and read its action set too (the override half)",
         "own-request case: open the invoice request from the 我发起的 tab; screenshot, then read its action set",
         "GET /api/v1/approvals/requests/:id for both requests, as each viewer, and record the server-computed viewer flags (can_act, is_submitter, can_override) and status",
@@ -264,7 +276,8 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run (7-action table proven after #3411 stamped real submitters)", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed: the inbox is reached through the account app's Approvals nav entry (component route) instead of the bare /system/approvals deep link, so the item exercises the post-#7213 user path", "ref": "#7331" },
-        { "revision": 4, "date": "2026-10-05", "change": "clause 2 re-pointed, with the personas, steps 1, 2 and 4, the clause-3 verify and a fixtures line (stale, #21782 VF4). In sys-approval-request.object.ts, approval_recall's visible is the submitter arm OR record.viewer.can_override == true (the #3424 override lever, button added by #12716), which platform/tenant admins hold on any pending request (isOverrideActor); approval_remind stays submitter-only. Revision 3 (2026-08-10) predates #12716. The verifier's wording is used for the clause. The run's approver persona was the dev admin, an override actor, so against that persona the old clause also read as an invalid pairing. The personas now name a non-override approver, and the admin's override view is asserted as its own leg", "ref": "#21797" }
+        { "revision": 4, "date": "2026-10-05", "change": "clause 2 re-pointed, with the personas, steps 1, 2 and 4, the clause-3 verify and a fixtures line (stale, #21782 VF4). In sys-approval-request.object.ts, approval_recall's visible is the submitter arm OR record.viewer.can_override == true (the #3424 override lever, button added by #12716), which platform/tenant admins hold on any pending request (isOverrideActor); approval_remind stays submitter-only. Revision 3 (2026-08-10) predates #12716. The verifier's wording is used for the clause. The run's approver persona was the dev admin, an override actor, so against that persona the old clause also read as an invalid pairing. The personas now name a non-override approver, and the admin's override view is asserted as its own leg", "ref": "#21797" },
+        { "revision": 5, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -343,7 +356,7 @@
       "title": "An approval notification deep-links straight into the request drawer",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "browser",
       "personas": ["any pending approver"],
@@ -352,7 +365,7 @@
         "requires": ["at least one pending request on which the signed-in approver can be notified — through the OPENING (since PR #22625 opening a request emits approval.requested to each concrete approver on the slate it opens on) or through REASSIGN (POST /api/v1/approvals/requests/:id/reassign {to}). ⚠ REMIND is SUBMITTER-only: POST …/:id/remind answers 403 'FORBIDDEN: only the submitter may send reminders' to anyone else (packages/plugins/plugin-approvals/src/approval-service.ts remind), and the dev admin is an APPROVER on the seeded demo requests, not their submitter — so as the admin, mint the notification by opening a fresh request (or by reassign), never by remind; the three seeded demo requests still suffice as a reassign source"]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin (a pending approver on the seeded requests)",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin (a pending approver on the seeded requests)",
         "mint the notification: open a fresh request the admin approves (the opening emits approval.requested to each concrete approver on its slate, PR #22625) — or POST /api/v1/approvals/requests/:id/reassign {to: <self>} on a pending request. Not /remind: it is submitter-only and answers the admin 403 'FORBIDDEN: only the submitter may send reminders' on the seeded requests, which a run must not score as a deep-link FAIL",
         "read the resulting notification row and record its actionUrl — it must carry /system/approvals?request=<id> (#2678 P1.5; ApprovalService.notify rewrites the bare /system/approvals into the deep link centrally, so every emitting topic inherits it)",
         "cold-load that exact URL in a fresh page (no prior navigation); wait for settle; capture the drawer that opens",
@@ -409,7 +422,8 @@
         { "revision": 3, "date": "2026-08-10", "change": "added the route-parity clause: after #7213 the same ?request= link must open the drawer on BOTH /system/approvals (what notifications carry) and the component route the account app mounts", "ref": "#7331" },
         { "revision": 4, "date": "2026-08-11", "change": "fixtures re-anchored on the remind/reassign path — the old requires rested on a request's OPEN notifying somebody, and no approval.opened topic exists; and the cold-load clause's evidence restated observably (drawer field-matched against the API instead of 'screenshots with the URL visible', which the console's consumption of the query param makes unmeetable)", "ref": "#7530" },
         { "revision": 5, "date": "2026-10-10", "change": "the open-time gap is closed: since PR #22625 (#22607) openNodeRequest publishes approval.requested to each concrete approver on the slate the request opens on, through the same notify() deep-link rewrite — the knownGaps entry that said opening notifies nobody is removed, the source note names the topic, step 2 and the fixture note say the opening is a second source; the fixtures stay on remind/reassign (deterministic on demand) and the revision-4 row stands as history", "ref": "#22631" },
-        { "revision": 6, "date": "2026-10-13", "change": "fixtures.requires[0] and steps[1] stop sending the admin through /remind (assertion defect, #23163 A0; parked on #23121, carried by #23169). ApprovalService.remind refuses every caller but the request's submitter, 'FORBIDDEN: only the submitter may send reminders', and the dev admin is an approver on the seeded requests. QA run #23163 met the 403 and minted the notification through the opening path instead, then passed every clause. The opening path (PR #22625) and /reassign are the two notification sources an approver can drive", "ref": "#23169" }
+        { "revision": 6, "date": "2026-10-13", "change": "fixtures.requires[0] and steps[1] stop sending the admin through /remind (assertion defect, #23163 A0; parked on #23121, carried by #23169). ApprovalService.remind refuses every caller but the request's submitter, 'FORBIDDEN: only the submitter may send reminders', and the dev admin is an approver on the seeded requests. QA run #23163 met the 403 and minted the notification through the opening path instead, then passed every clause. The opening path (PR #22625) and /reassign are the two notification sources an approver can drive", "ref": "#23169" },
+        { "revision": 7, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -417,7 +431,7 @@
       "title": "Every approval action executes its REST route and produces the expected state transition plus a timeline entry",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["dev admin (pending approver on the seeded requests; submitter of the invoice request)"],
@@ -434,7 +448,7 @@
       },
       "variants": ["approve", "reject", "reassign", "revise (send-back)", "resubmit", "recall", "remind", "request-info", "comment"],
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "approve: POST /api/v1/approvals/requests/:id/approve {comment} on the EXP-DEMO request; re-read status + run",
         "reject: raise a fresh budget-approval request (PATCH a project budget to e.g. 200000); POST /:id/reject {comment}; re-read — the flow resumes down its reject edge",
         "revise: raise another budget-approval request; POST /:id/revise {comment} as the pending manager — re-read status; GET the flow run (parked at the approval_revise node 'wait_revision')",
@@ -542,6 +556,12 @@
           "date": "2026-10-20",
           "change": "automated removed; fixtures.knownGaps[0] rewritten and fixtures.knownGaps[1] added; acceptance[9].verify's envelope corrected — QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: the sweep-wide rule-6 contradiction at approvals acceptance[9], and 'the pin also asserts negative[1]'), round 15 of wave anchor #24579. (1) The ref claimed acceptance[9] from approval-service.test.ts's #12769 describe, and knownGaps[0] said that pin is how acceptance[9] is scored. The pin drives ApprovalService over a fake engine, and the clause scores the wire answer, so by RUNNER rule 6 (a pin scores only the layer it drives) it is evidence beside a blocked(fixture) verdict. (2) Its throttle cases assert negative[1] at the service, and rest-approvals-wire-codes.test.ts maps THROTTLED to 429 over a mocked service; neither drives the remind door, so negative[1] joins no ref. (3) No full clause is pinned, so automated is dropped (theme-B rule). (4) Located while rewriting knownGaps[0]: acceptance[9].verify said READ_BACK_FAILED rides the generic template-generated 500 and is deliberately absent from handleApprovalError's prefix map. It has been a named 500 row there since 5b3ff63cc (packages/rest/src/approvals-routes.ts), pinned by rest-approvals-wire-codes.test.ts. Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -550,7 +570,7 @@
       "title": "An approval-parked run cannot be resumed through the generic automation route — decisions go through the approvals service only",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (holds finance + legal, so the seeded unanimous request is decidable)"],
@@ -559,7 +579,7 @@
         "requires": ["showcase_invoice_signoff parked at its aggregating approval node (the seeded invoice request, or a fresh one via PATCHing an invoice draft→sent)"]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "locate the paused run: GET /api/v1/automation/showcase_invoice_signoff/runs — status=paused at the dual_signoff approval node; note the runId and the matching approval request id",
         "forge the generic resume: POST /api/v1/automation/showcase_invoice_signoff/runs/:runId/resume with {} and again with {branchLabel: 'approve'}",
         "re-read the run and the approval request after each forged attempt",
@@ -603,7 +623,8 @@
         "packages/spec/src/automation/approval.zod.ts#APPROVAL_NODE_TYPE (APPROVAL_NODE_TYPE; ADR-0039 Track A aggregating node)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — pins the #3801 resume-authority gate as a both-sides item (approval 403 + screen 2xx contrast)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "initial — pins the #3801 resume-authority gate as a both-sides item (approval 403 + screen 2xx contrast)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -611,7 +632,7 @@
       "title": "A decision's typed outputs route the next stage: expression approvers resolve from the previous decision at node entry",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["dev admin (org-membership owner — the stage-1 approver of the dynamic-approval demo)"],
@@ -626,7 +647,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "PATCH a showcase_announcement's title over /api/v1/data — showcase_dynamic_approval opens its stage-1 Lead Review request routed at the org owner",
         "GET /api/v1/approvals/requests/:id — record status and the declared decisionOutputs contract on the request/node",
         "open the request drawer; screenshot the decision dialog's next_reviewers control — it must be a sys_user MULTI-SELECT picker, not a free-text box",
@@ -680,7 +701,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — covers the #3447 dynamic-routing chain (typed decision outputs → vars → expression approvers) with the required-output gate", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "the vars clause now names an oracle that is actually readable: stage-2 pending_approvers cardinality + order across a 1-pick and a 2-pick run, instead of 'the outputs present in the run variables snapshot' — a paused run's detail carries no variables key at all (structural), which was the sole reason #7517 scored this item PARTIAL. Gap recorded in knownGaps rather than left to be rediscovered", "ref": "#7530" }
+        { "revision": 2, "date": "2026-08-11", "change": "the vars clause now names an oracle that is actually readable: stage-2 pending_approvers cardinality + order across a 1-pick and a 2-pick run, instead of 'the outputs present in the run variables snapshot' — a paused run's detail carries no variables key at all (structural), which was the sole reason #7517 scored this item PARTIAL. Gap recorded in knownGaps rather than left to be rediscovered", "ref": "#7530" },
+        { "revision": 3, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -688,7 +710,7 @@
       "title": "An active out-of-office delegation reroutes an individually-routed approver to the delegate; expiring the window hands the slot back",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["dev admin — the DELEGATOR A: the delegation row is written BY them FOR them (sys_approval_delegation is self-service-only, so the delegator must be whoever is authenticated)", "a SECOND REAL runtime account — the DELEGATE B (Ada Auditor usr_showcase_auditor_demo, provisioned as a real login per knownGaps), who holds their own bearer token and decides the rerouted request as themselves"],
@@ -705,7 +727,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); provision B as a real login — a stock boot already does it, see knownGaps — and hold B's bearer token separately from the admin's",
+        "boot the showcase on its own port and DB (dogfood §0); provision B as a real login — a stock boot already does it, see knownGaps — and hold B's bearer token separately from the admin's",
         "sign in as the dev admin (the delegator A)",
         "register (POST /api/v1/automation) a flow whose start is record-triggered on a stock object (start config objectName 'showcase_field_zoo' + triggerType 'record-after-create') and whose single approval node has approvers=[{type:'user', value:'<A = the admin's sys_user id>'}], behavior first_response",
         "baseline (no delegation): start a run by creating one record of the trigger object (POST /api/v1/data/showcase_field_zoo {name, f_master_detail: <a showcase_project id>}); GET /api/v1/approvals/requests?status=pending, find the new request, GET /:id — pending_approvers must be [A]; GET /:id/actions shows NO ooo_substitute row",
@@ -768,83 +790,89 @@
         { "revision": 3, "date": "2026-08-18", "change": "delegate B needs no hand-provisioning any more: the showcase gives Ada Auditor a real better-auth credential account on a stock boot, so the issuer knownGap is rewritten as closed-by-fixture. The OTHER two gaps are untouched and still bind — the self-service-only delegation guard (#4839) and the writable/scratch package the individually-routed flow needs", "ref": "#9308" },
         { "revision": 4, "date": "2026-09-19", "change": "same re-anchoring as the sibling items: the retired plugin-auth backfill citation is replaced by the retirement's migration entry in packages/spec and the reason is kept, the parenthetical 'issuer derived from the dev admin's own row' is withdrawn as false, and the step that told a runner to check issuer=local:credential when provisioning delegate B goes with it — that field no longer exists", "ref": "#17453" },
         { "revision": 5, "date": "2026-10-13", "change": "fixtures.requires[0] and steps[2], [3], [5] and [8] start the scratch flow from a record instead of POST …/trigger (assertion defect, #23166 A0; parked on #23121, carried by #23169). The trigger route cannot open an approval: buildAutomationContext maps the body's record into params only, the approval node reads its record id from $record, which the engine seeds from context.record, and the run answers 400 'no record id in $record'. QA run #23166 drove the item through a record-triggered start (the approver-bindings.flow.ts shape) and passed every clause. Read from source at 6d7f4df3c: runtime domains/automation.ts buildAutomationContext, plugin-approvals approval-node.ts", "ref": "#23169" },
-        { "revision": 6, "date": "2026-10-16", "change": "the knownGap 'authoring the scratch flow needs a writable/scratch package' is stale (#23878 checklist-accuracy finding): POST /api/v1/automation registers a runtime flow on the stock boot. The fixture line and step 3 now register the user-routed flow that way, record-triggered on the stock showcase_field_zoo, and the run steps create a showcase_field_zoo row to start it. Full re-run on main c91af8ed6 with B = Ada Auditor: baseline pending [A]; an active self-service A→B delegation reroutes the next request to [B] with one ooo_substitute row (actor null, 'A → B — Annual leave'); B's /notifications row is type approval.ooo_substituted with actionUrl /system/approvals?request=ID; B approves with her own token (actor B, via_override false); with valid_until in the past the next request routes back to [A] with no substitution", "ref": "#24036" }
+        { "revision": 6, "date": "2026-10-16", "change": "the knownGap 'authoring the scratch flow needs a writable/scratch package' is stale (#23878 checklist-accuracy finding): POST /api/v1/automation registers a runtime flow on the stock boot. The fixture line and step 3 now register the user-routed flow that way, record-triggered on the stock showcase_field_zoo, and the run steps create a showcase_field_zoo row to start it. Full re-run on main c91af8ed6 with B = Ada Auditor: baseline pending [A]; an active self-service A→B delegation reroutes the next request to [B] with one ooo_substitute row (actor null, 'A → B — Annual leave'); B's /notifications row is type approval.ooo_substituted with actionUrl /system/approvals?request=ID; B approves with her own token (actor B, via_override false); with valid_until in the past the next request routes back to [A] with no substitution", "ref": "#24036" },
+        { "revision": 7, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
       "id": "approvals.record-page-decisions",
-      "title": "Approve/Reject render in the record header; Reject fires after ONE dialog; a locking approval hides inline edit",
+      "title": "Approve/Reject render on the record page from sys_approval_request's declared actions; Reject fires after ONE dialog; a locking approval hides inline edit",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": ["dev admin (holds the manager position, so showcase_budget_approval's manager_review routes to them — a pending approver standing on the record page)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_budget_approval raised on a showcase_project by PATCHing budget above 100000 (budget != previous.budget) — parks at manager_review (approvers position 'manager' = the admin), lockRecord:false; driving budget above 500000 reaches exec_review, lockRecord:true (the locking contrast, objectui#2902)",
-          "the record page surface: objectui packages/app-shell RecordDetailView + useRecordApprovals + buildApprovalDecisionActions"
+          "showcase_budget_approval raised on a showcase_project by PATCHing budget above 100000 (budget != previous.budget) — parks at manager_review (approvers position 'manager' = the admin), lockRecord:false; on a budget above 500000, approving manager_review routes through needs_exec to exec_review (approvers position 'exec', which the admin also holds: examples/app-showcase/src/security/seed-approval-demo.ts#ADMIN_APPROVAL_POSITIONS), lockRecord:true (the locking contrast, objectui#2902). The admin's PATCH triggers the run, so the admin is each request's submitter as well (the approval node passes its trigger user)",
+          "the record page surface: objectui packages/app-shell RecordDetailView (DeclaredActionsBar over the record's pending sys_approval_request row, location record_section) + useRecordApprovals (the record's approvals read) + recordApprovalActions.ts; the actions themselves are the server's declarations in packages/plugins/plugin-approvals/src/sys-approval-request.object.ts, each gated by its visible predicate over the row's server-computed viewer block"
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
-        "PATCH a showcase_project budget to e.g. 200000 over /api/v1/data — showcase_budget_approval opens and parks at manager_review (routed to manager = admin), lockRecord:false",
-        "open that project's record page — /_console/apps/showcase_app/showcase_project/record/:id, the served record route (the shorthand /apps/showcase_app/showcase_project/:id still lands there: the console's ShorthandRecordRedirect rewrites it); screenshot the header — Approve and Reject must render in the primary slot (buildApprovalDecisionActions: Approve variant 'primary' order -100, Reject variant 'destructive' order -99, both locations ['record_header'])",
-        "because manager_review is lockRecord:false, confirm inline-edit affordances remain live on this record (the editable contrast)",
-        "click Reject: assert exactly ONE dialog opens — the param dialog carrying the comment textarea inline, titled by the Reject label with the confirm question as its description; there is NO separate confirm-then-comment second dialog (objectui#3126)",
-        "fill the comment and Confirm; capture POST /api/v1/approvals/requests/:id/reject and re-read the request (status=rejected)",
-        "approve path: raise another budget-approval request; on its record page click Approve → one dialog with an optional comment → Confirm → POST /:id/approve → re-read (status=approved)",
-        "lock contrast: drive a >500000 budget to exec_review (lockRecord:true) on a project record page; screenshot — the inline-edit affordances are HIDDEN (recordLockedByApproval → canEdit suppressed)",
-        "both-sides gate: open the same project's record page as a member who can READ the project but is NOT a pending approver and holds no override — e.g. a contributor-bound member — the header offers NO Approve/Reject (approvals.canDecide false). ⛔ Not the dev admin: on a record whose approval routes away from them the admin still sees 'Override Approve' / 'Override Reject' (the organization-administrator override path), so the admin cannot prove the gate's closed side"
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
+        "PATCH a showcase_project budget to e.g. 200000 over /api/v1/data — showcase_budget_approval opens and parks at manager_review (routed to manager = admin), lockRecord:false; the admin is the request's submitter as well as its approver",
+        "open that project's record page — /_console/apps/showcase_app/showcase_project/record/:id, the served record route (the shorthand /apps/showcase_app/showcase_project/:id still lands there: the console's ShorthandRecordRedirect rewrites it); once it settles, screenshot the decision bar ABOVE the page body, not the record header: DeclaredActionsBar renders sys_approval_request's declared record_section actions against the pending request row. For the admin (pending approver and submitter) that is Approve (approval_approve, declared variant 'primary' → filled), Reject (approval_reject, 'danger' → destructive), Reassign, Send back, Request info, Recall and Reply, in declaration order, each a button whose data-testid is declared-action- plus the action name; Send reminder is left to the approvals panel (approval_remind is excluded) and Resubmit stays hidden (the request is not 'returned'). Capture the read the bar ran on: GET /api/v1/approvals/requests?object=showcase_project&recordId=:id answers the pending row with viewer.can_act true and viewer.is_submitter true",
+        "because manager_review is lockRecord:false (the request row reads lock_record: false), confirm inline-edit affordances remain live on this record (the editable contrast)",
+        "click Reject (declared-action-approval_reject): assert exactly ONE dialog opens — the param dialog titled by the declared label, Reject, with the declared confirm question as its description ('Reject this request? A rejection is final for every approver.'), carrying the optional Comment textarea and Attachments file input inline; there is NO confirm dialog in front of it and no second comment dialog after it (approval_reject declares its question as description and no confirmText, so the runtime chains nothing, #7278; objectui#3126)",
+        "fill the comment and Confirm; capture POST /api/v1/approvals/requests/:id/reject — :id is the REQUEST's id, never the project's — with the comment in its body; re-read GET /api/v1/approvals/requests/:id (status=rejected) and GET /api/v1/approvals/requests/:id/actions (the reject row carries the comment). The bar re-reads the approvals after the decision (refreshAfter) and draws nothing once no request is pending",
+        "approve path: PATCH another project's budget to e.g. 200000; on its record page click Approve → one dialog (titled Approve, described 'Approve this request? Your approval is recorded, and the request moves on once this step has the approvals it requires.', optional Comment and Attachments) → Confirm → POST /api/v1/approvals/requests/:id/approve → re-read (status=approved; at or under 500000, needs_exec ends the run at approved)",
+        "lock contrast: PATCH a third project's budget above 500000 (e.g. 600000) and approve its manager_review from the record page as in step 7 — needs_exec routes the run to exec_review (position 'exec', the admin again; lockRecord:true), a NEW pending request whose row reads lock_record: true; once the page re-reads (the decision's refresh, or a reload), screenshot — the inline-edit affordances are HIDDEN (approvalLocked, from resolveApprovalLock over recordLockedByApproval of the pending request → canEdit suppressed) and the approval band shows its locked state",
+        "both-sides gate, closed side: open the step-8 project's record page (its exec_review is pending) as a member who can READ the project but is not on the slate, did not submit and holds no override — e.g. a contributor-bound member (the search:qa-contributor-bound-member recipe; RUNNER.md's self-registration entry says how to mint one). Capture the member's own GET /api/v1/approvals/requests?object=showcase_project&recordId=:id: it serves no row for this record (the approvals door serves a request to its participants and the override actor, and the record-reader tier is off: no showcase object declares enable.approvalsVisibleToReaders), so the page draws no declared decision action at all. Then forge the decision: as the member, POST /api/v1/approvals/requests/:id/approve with the id from the admin's read → 403, code FORBIDDEN ('is not a pending approver'), and the request re-reads still pending. ⛔ Not the dev admin: the admin holds the override (step 10), so the admin cannot prove the gate's closed side",
+        "override contrast (the admin off the slate): on a pending manager_review (PATCH a fourth project to e.g. 200000), Reassign the step to another user through the bar's New approver picker — e.g. the seeded Ada Auditor (demo) persona (examples/app-showcase/src/security/demo-personas.ts) — so the request waits on that user and the admin holds no slot. Re-read the row (viewer.can_act false, viewer.can_override true) and screenshot the bar: Approve, Reject and Reassign render as 'Override Approve' / 'Override Reject' / 'Override Reassign' (amber outline, a shield icon, data-override-decision='true'), Send back and Request info are gone (their predicate reads can_act alone), and Recall and Reply stay plain (the admin holds them as the submitter). That is the override arm of the same declared predicates, not the gate failing"
       ],
       "acceptance": [
         {
-          "clause": "Approve and Reject render in the record header primary slot for the pending approver",
+          "clause": "the pending approver is offered the request's declared decisions on the record page: Approve and Reject, with the other declared record_section levers the viewer block admits, render in the decision bar above the page body, not in the record header",
           "oracle": "screenshot",
-          "verify": "after the header renders, screenshot shows Approve (primary) ahead of app record_header actions and Reject (destructive) — the strongly-negative order floats the decision buttons into the primary slot (buildApprovalDecisionActions #2670/objectui#2339)",
-          "evidence": "record-header screenshot"
+          "verify": "after the page settles, the screenshot shows the bar DeclaredActionsBar draws over the pending sys_approval_request row: Approve filled (declared variant 'primary') and Reject destructive ('danger'), then Reassign, Send back, Request info, Recall and Reply for the admin who is approver and submitter, and no decision button in the header (objectui#3055 retired the header pair, buildApprovalDecisionActions). The set is the server's declarations at location record_section, approval_remind excluded (recordApprovalActions.ts), each kept or dropped by its own visible predicate over the row's viewer block — read that block in the approvals read the bar ran on",
+          "evidence": "record-page screenshot (the bar and the header) + the GET /api/v1/approvals/requests read and its viewer block"
         },
         {
-          "clause": "Reject fires after exactly ONE dialog: the comment param is collected INLINE in that single dialog and Confirm POSTs the reject — no second, unexpected comment dialog",
+          "clause": "Reject fires after exactly ONE dialog: the declared Comment (and Attachments) params are collected INLINE in that single dialog, which carries the declared confirm question as its description, and Confirm POSTs the reject — no confirm dialog before it and no second comment dialog after it",
           "oracle": "network",
-          "verify": "one param dialog (no chained confirm dialog) precedes exactly one POST /api/v1/approvals/requests/:id/reject; the objectui#3126 double-dialog bug (confirm then a second comment dialog, decision silently not sent) must not reproduce",
+          "verify": "one param dialog — titled Reject (the declared label) and described by approval_reject's declared question; the action declares no confirmText, so the runtime chains no confirm (#7278) — precedes exactly one POST /api/v1/approvals/requests/:id/reject, :id being the request's id; the objectui#3126 double-dialog bug (confirm then a second comment dialog, decision silently not sent) must not reproduce",
           "evidence": "screenshot of the single dialog + the reject network trace"
         },
         {
-          "clause": "the decision POSTs the approvals route and the request re-reads with the new status",
+          "clause": "the decision POSTs the approvals route for the REQUEST and the request re-reads with the new status; the comment the dialog collected round-trips onto the decision's action row",
           "oracle": "api",
-          "verify": "reject → GET /:id status=rejected; approve → status=approved; the record header collected the comment (rides actionParams, not the dead collectParams #2955) and it round-trips onto the action row",
-          "evidence": "before/after request reads + the decision action row"
+          "verify": "reject → GET /api/v1/approvals/requests/:id answers status=rejected; approve → status=approved; the POST went to the request's id (never the project's) with the declared comment param in its body, and GET /api/v1/approvals/requests/:id/actions lists the decision row carrying that comment",
+          "evidence": "before/after request reads + the POST body + the decision action row"
         },
         {
           "clause": "a LOCKING pending approval hides the record's inline-edit affordances; a non-locking one keeps them",
           "oracle": "screenshot",
-          "verify": "under exec_review (lockRecord:true) the inline-edit affordances are absent (recordLockedByApproval(pendingRequest) → canEdit false, objectui#2902); under manager_review (lockRecord:false) they remain — both sides, on the same flow",
-          "evidence": "two record-page screenshots (locked vs editable)"
+          "verify": "under exec_review (lockRecord:true) the request row reads lock_record: true and the inline-edit affordances are absent (approvalLocked from resolveApprovalLock over recordLockedByApproval of the pending request → canEdit false, objectui#2902; the approval band shows its locked state); under manager_review (lockRecord:false) the row reads lock_record: false and they remain — both sides, on the same flow",
+          "evidence": "two record-page screenshots (locked vs editable) + the two request rows' lock_record"
         },
         {
-          "clause": "the decision buttons are gated by the viewer's approver relationship — a viewer who is neither a pending approver nor an override holder is offered neither Approve nor Reject; an organization administrator off the slate is offered the OVERRIDE pair instead, which is a different control, not this gate failing",
-          "oracle": "dom",
-          "verify": "after confirming render via screenshot, the header DOM of the non-approver, non-override member (e.g. a contributor-bound member) has no approve_request/reject_request actions when approvals.canDecide is false (the current user is not in pending_approvers); record, separately, that the admin routed away sees 'Override Approve' / 'Override Reject'",
-          "evidence": "screenshot + header action DOM list"
+          "clause": "the decision actions are gated by the SERVER's viewer block, not by a client check: a viewer who is not a pending approver, not the submitter and holds no override is offered no decision action, and the server refuses the decision a forged request makes; an organization administrator off the slate is offered the OVERRIDE framing of the levers the override arm admits, which is a different control, not this gate failing",
+          "oracle": "api",
+          "verify": "as the member (step 9): the member's GET /api/v1/approvals/requests?object=showcase_project&recordId=:id serves no row for the record; after a screenshot confirms the page rendered, its DOM holds no declared-action-* button; a forged POST /api/v1/approvals/requests/:id/approve answers 403 with code FORBIDDEN, and the request re-reads pending. As the admin off the slate (step 10): the row's viewer block reads can_act false and can_override true, and the bar shows the Override framing on Approve, Reject and Reassign (data-override-decision='true') with Send back and Request info absent — record it separately",
+          "evidence": "the member's approvals read + the record-page screenshot and its declared-action DOM list + the forged POST's 403 body; the admin's off-slate row read + bar screenshot"
         }
       ],
       "negative": [
         "a Reject that opens a SECOND dialog (a confirm dialog followed by a separate comment dialog) and silently no-ops after the first Confirm is a FAIL — the objectui#3126 regression: the param dialog IS the confirmation, and nothing posts until its own Confirm",
         "an inline-edit affordance offered while a lockRecord:true approval is pending is a FAIL — the server would reject the save RECORD_LOCKED, and offering the edit is exactly the objectui#2902 mislabel",
-        "Approve/Reject rendered on the header for a viewer who is not a pending approver (canDecide false) is a FAIL even if the eventual POST would 403"
+        "a declared decision action rendered for a viewer whose viewer block admits none — not a pending approver (can_act false), not the submitter, no override (can_override false) — is a FAIL even though its POST would answer 403 FORBIDDEN; the bar holds no client-side approver test (objectui#3055), so the cause is in the row's viewer block or the declared predicate"
       ],
       "traps": ["automation-input", "hydration-race"],
       "source": [
-        "objectui packages/app-shell/src/views/RecordDetailView.tsx (buildApprovalDecisionActions — record_header Approve/Reject, single-dialog Reject #3126, actionParams comment #2955; approvalLocked/canEdit gating #2902)",
-        "objectui packages/app-shell/src/hooks/useRecordApprovals.ts (recordLockedByApproval, canDecide, /approvals/requests decide routes)",
-        "objectui packages/app-shell/src/views/RecordDetailView.approvalDecisionActions.test.tsx (the param-contract pin)",
-        "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (BudgetApprovalFlow — manager_review lockRecord:false / exec_review lockRecord:true on showcase_project)"
+        "objectui packages/app-shell/src/views/RecordDetailView.tsx (blob 64a7c675e50d at the console pin cf153eb2e535): the pending sys_approval_request row's declared actions render through DeclaredActionsBar above the page body, not in the header (objectui#3055) — the request row is the dispatch record, at location record_section with approval_remind excluded (recordApprovalActions.ts), and a decision re-reads the approvals and the record; approvalLocked (resolveApprovalLock over recordLockedByApproval of the pending request) gates canEdit (objectui#2902)",
+        "objectui packages/app-shell/src/views/DeclaredActionsBar.tsx (blob f27b4ab0efff): each declared action's visible predicate evaluated fail-closed against the row's viewer block, the declared variant mapped (primary → filled, danger → destructive), the override framing (isOverrideDecision in utils/approvalOverride.ts: 'Override' plus the label, amber outline, data-override-decision) and the data-testid declared-action- plus the action name; + hooks/useRecordApprovals.ts (blob b65a91f4a9a4): the record's read, GET /api/v1/approvals/requests?object=…&recordId=… then GET …/requests/:id, with no client-side canDecide; + hooks/useConsoleActionRuntime.tsx: the param dialog takes its title from the action's label and its description from the declared description",
+        "objectui packages/app-shell/src/views/RecordDetailView.approvalDeclaredActions.test.tsx (objectui#3055, blob 9519ae70f743 at the console pin cf153eb2e535: the record page runs sys_approval_request's declared decision actions, and 'folds a declared decision output into the nested `outputs` body' asserts that a decision's comment and declared outputs reach the POST to the request) + packages/plugins/plugin-approvals/src/sys-approval-request.object.test.ts ('the confirm question rides `description`, not `confirmText`, so one decision opens one dialog (#7278)'). Between them they hold what the deleted RecordDetailView.approvalDecisionActions.test.tsx pinned, the decision params and one dialog per decision; objectui 99782f961 deleted that file before both console pins",
+        "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (BudgetApprovalFlow — manager_review lockRecord:false / exec_review lockRecord:true on showcase_project)",
+        "packages/plugins/plugin-approvals/src/sys-approval-request.object.ts#approval_reject (the declared actions: approval_approve 'primary' and approval_reject 'danger', each with optional comment and attachments params and its confirm question as description, never confirmText, #7278; approval_reassign, approval_send_back, approval_request_info, approval_remind, approval_recall, approval_resubmit and approval_comment; all at record_section, every visible predicate over record.viewer, the attachedOnRead block) + packages/plugins/plugin-approvals/src/approval-service.ts#attachViewers (can_act: pending and the caller takes a slot; is_submitter; can_override: pending and isOverrideActor)",
+        "packages/plugins/plugin-approvals/src/request-read-gate.ts (header: the approvals door serves a request to its participants and the override actor, and to a record reader only where the object declares enable.approvalsVisibleToReaders, which no showcase object does) + packages/plugins/plugin-approvals/src/approval-service.ts#decide (a caller who takes no slot and holds no override: FORBIDDEN, answered 403 by packages/rest/src/approvals-routes.ts)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — the record-page approval surface (distinct from the inbox-drawer items): header Approve/Reject, one-dialog Reject (#3126), decision round-trip, and the lockRecord-driven inline-edit hide (#2902)", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-10-17", "change": "the both-sides clause and step 9 named no persona, and the natural choice — the dev admin on a record routed away from them — sees 'Override Approve' / 'Override Reject' (#23878 checklist-accuracy finding), so it can never show the closed side; the step and clause 5 now name a non-override member. The record route in step 3 is the served /_console/apps/showcase_app/showcase_project/record/:id (the shorthand form redirects to it). Re-run on main c91af8ed6 with the console at objectui f8267df93aba: on a project whose budget approval is pending for the admin, the admin's header shows Approve and Reject; a contributor-bound member's header shows neither; with the admin's slot reassigned away the admin's header shows Override Approve and Override Reject", "ref": "#24036" }
+        { "revision": 2, "date": "2026-10-17", "change": "the both-sides clause and step 9 named no persona, and the natural choice — the dev admin on a record routed away from them — sees 'Override Approve' / 'Override Reject' (#23878 checklist-accuracy finding), so it can never show the closed side; the step and clause 5 now name a non-override member. The record route in step 3 is the served /_console/apps/showcase_app/showcase_project/record/:id (the shorthand form redirects to it). Re-run on main c91af8ed6 with the console at objectui f8267df93aba: on a project whose budget approval is pending for the admin, the admin's header shows Approve and Reject; a contributor-bound member's header shows neither; with the admin's slot reassigned away the admin's header shows Override Approve and Override Reject", "ref": "#24036" },
+        { "revision": 3, "date": "2026-10-20", "change": "source[2] re-pointed, and fixtures.knownGaps[0] added. PR #24982's pin finding: source[2] cited objectui's RecordDetailView.approvalDecisionActions.test.tsx, absent at both console pins. Read in a full objectui clone: objectui 99782f961 (objectui#3055) deleted it, and that commit is an ancestor of 616df6598b42 and of cf153eb2e535 (exit 0 both; control, cf153eb2e535 as an ancestor of 99782f961: exit 1). The same commit retired buildApprovalDecisionActions and moved the record page's decisions onto sys_approval_request's declared actions. At cf153eb2e535, RecordDetailView.approvalDeclaredActions.test.tsx holds the params half (the comment and declared outputs reach the POST to the request), and this repository's sys-approval-request.object.test.ts holds the one-dialog half. The knownGap tells a runner that the rest of the item still describes the retired header buttons. steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" },
+        { "revision": 4, "date": "2026-10-21", "change": "Re-derived against the shipped record page. PR #25003's carried finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): the steps, clauses, fixtures.requires[1] and source[0]–[1] still described the record header's hand-written Approve/Reject — buildApprovalDecisionActions, approve_request / reject_request in record_header, ordered -100 / -99, behind a client-side canDecide — which objectui 99782f961 (objectui#3055) retired before both console pins. Read at objectui cf153eb2e535 (RecordDetailView.tsx, DeclaredActionsBar.tsx, recordApprovalActions.ts, useRecordApprovals.ts, useConsoleActionRuntime.tsx, approvalOverride.ts) and at base 93e6c1a5f8 (sys-approval-request.object.ts; approval-service.ts attachViewers and decide; request-read-gate.ts; approvals-routes.ts; the showcase budget flow and approval seed): the record page runs sys_approval_request's declared record_section actions through DeclaredActionsBar above the page body, each gated by its visible predicate over the server's viewer block. title, fixtures.requires[0]–[1], steps[1]–[8], the verify and evidence of every clause, clauses [0], [1], [2] and [4] (whose oracle moves dom → api: the gate is the server's), negative[2] and source[0]–[1] rewritten; steps[9] (the off-slate admin's override framing) and source[4]–[5] (the server's declarations, viewer block, read gate and refusal) added; fixtures.knownGaps[0] removed, the retired text it warned about being gone. No automated ref is added: neither pin holds a clause whole at its layer (the objectui test mounts the page in jsdom over a fetch double, with a hand-written definition and the param dialog mocked; sys-approval-request.object.test.ts reads the declarations). The live verdicts at the pin are NOT MEASURED: the sources were read, not run", "ref": "#25018" }
       ]
     },
     {
@@ -852,7 +880,7 @@
       "title": "A node's SLA escalation fires once past its timeout — the declared action runs and an escalate timeline row lands",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": ["dev admin"],
@@ -870,7 +898,7 @@
       },
       "variants": ["reassign", "auto_approve", "auto_reject", "notify"],
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "start the server with the wall-clock offset shim loaded (NODE_OPTIONS=--require <path-to-shim>, offset 0 — see fixtures.requires); as the admin, register one flow per variant through POST /api/v1/automation (no writable package needed) whose approval node config.escalation = {enabled:true, timeoutHours:1, action:<the variant>, notifySubmitter:true}, plus escalateTo:'<position machine name or user id>' on the reassign flow",
         "trigger the flow; GET /api/v1/approvals/requests/:id — status=pending and the request carries sla_due_at = created_at + timeoutHours (the SLA is materialized on open)",
         "advance the shim's offset to +2h (past sla_due_at) and let ONE escalation sweep run: wait for the next 5-minute periodic sweep, or restart the server with the shim and offset kept so the boot catch-up sweep runs",
@@ -930,7 +958,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — pins the ADR-0042 SLA escalation (declared action fires once past timeout + escalate timeline row); blocked on a clock-control timing harness (hour granularity), with the sla_due_at materialization and the strict-schema build clause runnable today", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-10-03", "change": "the escalate row's expected actor corrected: step 5 and the single-shot clause asserted actor SLA_ACTOR_ID, but under ADR-0118 D1 the sweep records no actor (actor_id null, absent on the GET /:id/actions read) and the escalate row is the attribution, so a run following the old text would report a false failure. Nothing else in the item changes", "ref": "#21517" },
-        { "revision": 3, "date": "2026-10-05", "change": "blocked lifted: run #21845 drove every clause under a wall-clock offset shim loaded with NODE_OPTIONS=--require (Date and Date.now offset from a file, timers untouched, no product logic changed). The shim is written into fixtures.requires as a recipe, not committed as code; the clock knownGap is marked CLOSED-for-runs, not deleted. The item now registers its flows through POST /api/v1/automation (no writable package needed), one flow per escalation action, and names the 5-minute sweep interval plus the boot catch-up sweep that the advance-the-clock and idempotency steps wait on (card #21851 entry 2)", "ref": "#21845" }
+        { "revision": 3, "date": "2026-10-05", "change": "blocked lifted: run #21845 drove every clause under a wall-clock offset shim loaded with NODE_OPTIONS=--require (Date and Date.now offset from a file, timers untouched, no product logic changed). The shim is written into fixtures.requires as a recipe, not committed as code; the clock knownGap is marked CLOSED-for-runs, not deleted. The item now registers its flows through POST /api/v1/automation (no writable package needed), one flow per escalation action, and names the 5-minute sweep interval plus the boot catch-up sweep that the advance-the-clock and idempotency steps wait on (card #21851 entry 2)", "ref": "#21845" },
+        { "revision": 4, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -938,7 +967,7 @@
       "title": "A non-admin reaches the full Approvals Inbox from the account app's Approvals entry",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "browser",
       "personas": ["a NON-ADMIN business user who is a pending approver and has no Setup access"],
@@ -951,7 +980,7 @@
         ]
       },
       "steps": [
-        "build the console at the pin and verify the stamp; boot showcase isolated (dogfood §0)",
+        "build the console at the pin and verify the stamp; boot the showcase on its own port and DB (dogfood §0)",
         "grep the BUILT bundle for the registration key: `grep -o 'approvals:inbox' packages/console/dist/assets/index-*.js` — the entry chunk must carry the register call, because the unit pin (#7231) stubs the page at its module boundary and does not assert main.tsx performs the side-effect import",
         "sign in as the non-admin persona; GET /api/v1/meta/app and record which apps the server returns for this session",
         "open the account app and click the Approvals entry in the Inbox group; screenshot",
@@ -1023,6 +1052,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[2] and acceptance[6].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24542, approvals.account-app-entry; wave anchor #24579 §3). 'Make that invoice one the persona OWNS' did not say which field owns it: showcase_invoice's contributor RLS reads the text field `owner` against current_user.email (invoice_own_rows), so a persona-created invoice is unreadable to its creator until an admin sets `owner`. acceptance[6] did not say where the language switch is: at the console pin 4016370a it is the avatar menu's Preferences › Language row (AppHeader.tsx). No clause text changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -1031,7 +1066,7 @@
       "title": "Setup → Approvals leads with Approvals Inbox, above the raw tables",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": ["platform admin with Setup access"],
@@ -1043,7 +1078,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; sign in as the dev admin",
+        "boot the showcase on its own port and DB; sign in as the dev admin",
         "GET /api/v1/meta/app and read the setup app's group_approvals children in declared order",
         "open the Setup app, expand the Approvals group, screenshot the expanded group",
         "read the group's child links in DOM order with their hrefs",
@@ -1079,7 +1114,8 @@
         "packages/plugins/plugin-approvals/src/nav-contribution.test.ts"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-10", "change": "initial — the Setup-side Approvals Inbox entry had no checklist coverage", "ref": "#7331" }
+        { "revision": 1, "date": "2026-08-10", "change": "initial — the Setup-side Approvals Inbox entry had no checklist coverage", "ref": "#7331" },
+        { "revision": 2, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -1087,7 +1123,7 @@
       "title": "The bell badge and Home's action card agree on the pending-approval count and lead to an app the user can open",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": ["a non-admin pending approver", "an admin with >9 combined unread notifications + pending approvals"],
@@ -1102,7 +1138,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; seed >9 combined notifications + pending approvals for a NON-ADMIN member (knownGaps: a runtime flow routing {type:'user', value:<the member>} on showcase_field_zoo, one create per approval — coalesced notifications count once, so the pending approvals carry the total); sign in as that member through the form",
+        "boot the showcase on its own port and DB; seed >9 combined notifications + pending approvals for a NON-ADMIN member (knownGaps: a runtime flow routing {type:'user', value:<the member>} on showcase_field_zoo, one create per approval — coalesced notifications count once, so the pending approvals carry the total); sign in as that member through the form",
         "open the bell popover; screenshot the header line and read the button badge",
         "open /_console/home; screenshot the 'Needs your attention' card",
         "click the card's pending-approvals row and record the URL it navigates to",
@@ -1140,7 +1176,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-10", "change": "initial — the bell breakdown (objectui#4073) and Home's card target had no checklist coverage", "ref": "#7331" },
-        { "revision": 2, "date": "2026-10-17", "change": "knownGaps[0] said a plain member's notification count is structurally 0, so the >9 case was admin-only (#7344); #7344 closed on 2026-08-11 and the #23878 run saw a member read 2 notifications. Re-run on main c91af8ed6 with the console at objectui f8267df93aba as a baseline-only member seeded with 10 pending approvals and 2 notification groups: the bell button read 9+, the popover header '12 total · 2 notifications + 10 pending approvals', Home's Awaiting approval card 10, the inbox's My Pending tab 10 and the approvals API 10; the card's View all opened /_console/apps/com.example.showcase/system/approvals inside the Showcase app. The knownGap, step 1 and clause 3's verify now say so", "ref": "#24036" }
+        { "revision": 2, "date": "2026-10-17", "change": "knownGaps[0] said a plain member's notification count is structurally 0, so the >9 case was admin-only (#7344); #7344 closed on 2026-08-11 and the #23878 run saw a member read 2 notifications. Re-run on main c91af8ed6 with the console at objectui f8267df93aba as a baseline-only member seeded with 10 pending approvals and 2 notification groups: the bell button read 9+, the popover header '12 total · 2 notifications + 10 pending approvals', Home's Awaiting approval card 10, the inbox's My Pending tab 10 and the approvals API 10; the card's View all opened /_console/apps/com.example.showcase/system/approvals inside the Showcase app. The knownGap, step 1 and clause 3's verify now say so", "ref": "#24036" },
+        { "revision": 3, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -1148,7 +1185,7 @@
       "title": "The anonymous /approvals/act door: a minted one-tap token renders a confirm page and one POST decides as exactly the bound approver — every dead-token shape is a designed refusal page with no state change",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (submitter of the seeded invoice request — remind is submitter-only). Since PR #24620 the remind fan-out mints no token, so the admin drives only the live legs: the reminder at-rest read and the server reads beside the anonymous probes", "the ANONYMOUS bearer of an action link: a clean HTTP client holding NO session cookie and NO bearer token"],
@@ -1159,13 +1196,13 @@
           "the pinned tests in automated.ref, run with the plugin's own vitest (`pnpm --filter @objectstack/plugin-approvals exec vitest run --maxWorkers=2 FILE`, never through a bare `--`). They mint with issueActionTokens in-process and hold the raw token in memory, which is the only place a live token exists now: sys_approval_token stores SHA-256 hashes, and since PR #24620 no persisted row (a notification payload, an audit row, a log line) holds a raw token or a URL built from one — issueActionTokens' caller contract (approval-service.ts)"
         ],
         "knownGaps": [
-          "NO STOCK DOOR MINTS AN ACTION TOKEN since PR #24620 (65a8eeb7d4, 2026-10-19). remind() no longer calls issueActionTokens or attaches a link (no channel ever read payload.actions, so no recipient received one), issueActionTokens has no production caller, and no REST route reaches it. So every leg that needs a live raw token — the per-approver mint, the confirm page, the redemption, the replay, the not_pending / not_approver pages, the expiry and the bearer probe — is blocked(fixture) on a live boot and is scored from the pins in automated.ref. QA run #24542's capture (the raw links read out of sys_notification.payload.actions after a remind) no longer exists: the absence of a link there is now this item's at-rest leg, not a fixture failure. ⛔ Never plant a token row or patch remind() to get a live link",
+          "NO STOCK DOOR MINTS AN ACTION TOKEN since PR #24620 (65a8eeb7d4, 2026-10-19). remind() no longer calls issueActionTokens or attaches a link (no channel ever read payload.actions, so no recipient received one), issueActionTokens has no production caller, and no REST route reaches it. So every leg that needs a live raw token — the per-approver mint, the confirm page, the redemption, the replay, the not_pending / not_approver pages, the expiry and the bearer probe — is blocked(fixture) on a live boot. Each such leg is scored as its clause's verify names it, at that clause's own oracle layer (RUNNER rule 6, a pin scores only the layer it drives): the test-oracle clauses acceptance[0]–[3] (the mint, the confirm page, the redemption, the replay) from the pins in automated.ref; acceptance[4]'s expired and consumed pages from action-page-member.integration.test.ts, which renders them through the plugin's page member and mount on a started kernel over a real Hono app; and acceptance[4]'s not_pending / not_approver pages and acceptance[5]'s bearer probe, which no pin drives at their door, stay blocked(fixture) with the lower pins beside them. QA run #24542's capture (the raw links read out of sys_notification.payload.actions after a remind) no longer exists: the absence of a link there is now this item's at-rest leg, not a fixture failure. ⛔ Never plant a token row or patch remind() to get a live link",
           "the EMAIL-RENDERING leg (the Approve/Reject links arriving as buttons in an actual message) has NO stock producer at all: a reminder names no channel, so messaging materializes it in the in-app inbox only, no approval.reminder email template exists, and since PR #24620 the payload carries no link — the dev log mail transport the forgot-password item uses (EMAIL_TRANSPORT_PROVIDERS 'log' → LogTransport, identity-auth.self-service-password-reset fixtures) would capture nothing to render. Record the leg blocked(fixture), never a defect",
-          "the EXPIRED leg has no live door on this build: ACTION_TOKEN_TTL_MS is 72h (approval-service.ts), issueActionTokens' ttlMs override is not REST-reachable, the service clock is a constructor option the plugin never threads (approvals-plugin.ts constructs ApprovalService without one), and since PR #22633 (#22616) sys_approval_token declares apiEnabled: false + apiMethods: [], so every data-API verb answers 404 OBJECT_API_DISABLED to every caller, the administrator included — the old recipe (backdate expires_at over the data API) is gone, and update was never in the object's whitelist even before. Score the expired shape from the pinned unit test instead: approval-service.test.ts 'redeem: dead tokens — invalid, expired, decided request, reassigned slot' mints with ttlMs: 1 under the fake clock and pins reason 'expired' (RESULT_COPY.expired in action-link-pages.ts is the page that reason renders); a live run records this one leg as blocked(fixture), never as a defect"
+          "the EXPIRED leg has no live door on this build: ACTION_TOKEN_TTL_MS is 72h (approval-service.ts), issueActionTokens' ttlMs override is not REST-reachable, the service clock is a constructor option the plugin never threads (approvals-plugin.ts constructs ApprovalService without one), and since PR #22633 (#22616) sys_approval_token declares apiEnabled: false + apiMethods: [], so every data-API verb answers 404 OBJECT_API_DISABLED to every caller, the administrator included — the old recipe (backdate expires_at over the data API) is gone, and update was never in the object's whitelist even before. The expired shape is pinned below the live door instead: approval-service.test.ts 'redeem: dead tokens — invalid, expired, decided request, reassigned slot' mints with ttlMs: 1 under the fake clock and pins reason 'expired' (the service layer; RESULT_COPY.expired in action-link-pages.ts is the page that reason renders), and action-page-member.integration.test.ts renders the expired page through the page member (knownGaps[0]). A live run records this one leg as blocked(fixture), never as a defect, with those pins beside it"
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "at-rest leg: POST /api/v1/approvals/requests/:id/remind on the admin-submitted invoice request — the answer's notified is positive and GET /:id/actions gains one remind row (notified counts the pending SLOTS fanned out to: a slot listed twice counts twice while messaging dedups the second emit, so read it as a positive count, never as distinct people — QA run #24542, PR #24620's acceptance notes); then GET /api/v1/data/sys_notification (topic approval.reminder, source_id = the request id) as the admin and confirm each reminder payload carries NO actions list and no /api/v1/approvals/act URL — only its title, its body and the /system/approvals deep link. ⛔ Do NOT read sys_approval_token through the data API: since PR #22633 the object is apiEnabled: false with apiMethods: [], so GET /api/v1/data/sys_approval_token answers 404 OBJECT_API_DISABLED for every caller (the administrator included) — that 404 is the designed answer, not a finding",
         "the live-token legs — the per-approver mint (one approve + one reject row per concrete pending approver, SHA-256 at rest, FORBIDDEN for a non-pending approver), the confirm page that never mutates, the redemption as the bound approver (comment 'Via action link'), the replay, the dead-slot and expired shapes and the bearer probe — need a raw token no stock door mints (knownGaps[0]): run the pins in automated.ref and cite each file's summary line, per clause as each verify names them",
         "switch to a CLEAN anonymous client (no cookies, no Authorization header — prove it: GET /api/v1/approvals/requests from the same client answers 401); GET and then POST (form body token=garbage) /api/v1/approvals/act?token=garbage — both answer the 'Invalid link · 链接无效' page, 200 text/html, with no request summary rows, and the admin's before/after reads of the invoice request show no change. It is the one dead-token shape a live boot can still produce without a minted token",
@@ -1238,7 +1275,9 @@
         { "revision": 3, "date": "2026-10-16", "change": "step 7's dead-slot leg said 'reassign the bound approver away first' without saying who can (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 on a two-slot request [admin, Ada] minted by remind: the admin's reassign without `from` moved the admin's own slot ([OTHER, Ada]) and Ada's approve token still peeked as the 'Approve · 通过' confirm page; the admin's reassign with from: Ada moved Ada's slot and the same token then rendered 'No longer your approval · 已不在你名下'. The step now passes `from` (or has the bound approver reassign their own slot); the clause is unchanged", "ref": "#24036" },
         { "revision": 4, "date": "2026-10-19", "change": "re-pointed to main after PR #24620 (65a8eeb7d4, the fix of #24564) took the one-tap link off the reminder payload — wave anchor #24579 §1, the row round 2 added (comment 6272314386), resting on QA runs #24542 and #24558. The live mint leg read raw tokens out of sys_notification.payload.actions after a remind; on main remind() mints no token and attaches no link, issueActionTokens has no production caller and no REST door reaches it, so no stock boot holds a live token. Every live-token leg moves to the pins, now named per clause in a new automated.ref, each measured at base 9a7838edf5 under os-verify-lock (plugin-approvals vitest: approval-service.test.ts 367, action-page-member.integration.test.ts 12, sys-approval-token-generic-door.integration.test.ts 6, reminder-action-link-at-rest.integration.test.ts 4, approval-token-internal-hash.integration.test.ts 1, all passed). The live run keeps the at-rest read (the reminder row carries no link), the token=garbage page and the anonymous-client proof. acceptance[1]–[3] move to oracle test; acceptance[4] keeps its live invalid capture and records the not_pending / not_approver pages as unpinned; acceptance[5]'s bearer probe has no live token and no pin and reads blocked(fixture). The ten steps become five: the mint, capture, confirm-page, redemption, replay, dead-slot and bearer-probe steps fold into one pin step (steps[2]) and the garbage step joins the anonymous-client step (steps[3]); #24542's finding that notified counts slots rides along in steps[1]; knownGaps[0] is new, the email-rendering gap now says no stock producer exists, and personas[0], fixtures.requires and source[2]/[4] follow, plus the at-rest pin in source", "ref": "#24649" },
         { "revision": 5, "date": "2026-10-20", "change": "automated.ref narrowed per clause — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12, round 6's theme-B rule): acceptance[4]'s summary-rendering split and acceptance[5]'s bearer probe have no pin, so the ref claims acceptance[0]–[3] whole and names the halves of [4] and the converse of [5] it does pin. Re-measured at base 307ce4c4b4: remind() mints no token and attaches no link, issueActionTokens' callers are test files only, and no step harvests a token from sys_notification.payload.actions; a runner's token comes only from the pins' in-process issueActionTokens, as fixtures.requires[1] already says. No clause changed", "ref": "#24824" },
-        { "revision": 6, "date": "2026-10-20", "change": "automated.ref names a pin for negative[2] — carried finding 2 of round 12's report on PR #24824 (wave anchor #24579 round 13), against QA run #24779's 'unpinned' score. action-page-member.integration.test.ts's dead-link case compares the invalid, expired and consumed pages, through GET and POST, byte for byte with renderResultPage(kind) and no request, which renders no summary rows (action-link-pages.ts at base 7697ddcf94); a page leaking the summary fails it. That is negative[2]'s full clause on the member door, and the file's parity cases hold the mount to the same bytes. No clause changed", "ref": "#24850" }
+        { "revision": 6, "date": "2026-10-20", "change": "automated.ref names a pin for negative[2] — carried finding 2 of round 12's report on PR #24824 (wave anchor #24579 round 13), against QA run #24779's 'unpinned' score. action-page-member.integration.test.ts's dead-link case compares the invalid, expired and consumed pages, through GET and POST, byte for byte with renderResultPage(kind) and no request, which renders no summary rows (action-link-pages.ts at base 7697ddcf94); a page leaking the summary fails it. That is negative[2]'s full clause on the member door, and the file's parity cases hold the mount to the same bytes. No clause changed", "ref": "#24850" },
+        { "revision": 7, "date": "2026-10-20", "change": "fixtures.knownGaps[0] and knownGaps[2] score each live-token leg at its own clause's layer. PR #24891's carried finding (round 15's acceptance notes: legs scored from pins, mixed clause oracles), read under RUNNER rule 6. Read at base feb09db14a: acceptance[0]–[3] are test-oracle clauses and their pins are their oracle; acceptance[4] is a network clause, and action-page-member.integration.test.ts renders its invalid, expired and consumed pages through the plugin's page member and mount on a started kernel (driver-sql over in-memory SQLite, a real Hono app), while its not_pending / not_approver pages and acceptance[5]'s bearer probe have no pin at their door. knownGaps[0] said every such leg is scored from the pins, and knownGaps[2] scored the expired shape from the service test; both now say this, as acceptance[4].verify already did. No clause changed", "ref": "#24963" },
+        { "revision": 8, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -1246,7 +1285,7 @@
       "title": "Every approver type resolves the slate it declares — department includes all descendants, deprecated role warns and resolves, and a slate with no concrete person takes the declared onEmptyApprovers fork, never a fake approval",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (authors the scratch flows; org owner)", "Ada Auditor / Mei Phone (real logins since #9308 — directory rows the graph legs resolve to)"],
@@ -1266,7 +1305,7 @@
       "enumSource": { "file": "packages/spec/src/automation/approval.zod.ts", "export": "ApproverType", "expect": 10 },
       "variants": ["manager", "position", "department (+ ALL descendant units)", "team", "field (multi-value fan-out)", "expression", "org_membership_level", "role (deprecated → org_membership_level: warn + resolve)", "user", "queue (dead slot, #3508)"],
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin; provision the directory rows — BU memberships over the data API, a team and its members through the organization team doors, a manager chain through set-user-manager (fixtures.requires names each door) — and record their ids",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin; provision the directory rows — BU memberships over the data API, a team and its members through the organization team doors, a manager chain through set-user-manager (fixtures.requires names each door) — and record their ids",
         "author + register the scratch flows through POST /api/v1/automation (fixtures.requires: a record trigger on a stock object, no writable package); per leg: trigger the flow by creating one record of its trigger object, GET /api/v1/approvals/requests?status=pending, GET /:id and read pending_approvers (and pending_approver_names); deregister the flow before the next leg",
         "department leg: point the approver at a PARENT unit whose descendant units hold the members — the slate must union the parent's members with every descendant's, deduped; deactivate a descendant and re-trigger: its members drop out (inactive units are skipped)",
         "field leg: a multi-select user field naming two users — two slots, in order, never one 'u1,u2' literal",
@@ -1351,6 +1390,12 @@
           "date": "2026-10-19",
           "change": "steps[6]–[7] and acceptance[3]–[5] verify corrected — three checklist-accuracy findings of the 18.0 QA sweep (QA run #24542, approvals.approver-resolution-matrix; wave anchor #24579 §3). node_config_json, and so __resolvedFrom, is not on GET /api/v1/approvals/requests/:id — rowFromRequest in approval-service.ts projects no node_config_json — and the run read it through GET /api/v1/data/sys_approval_request/ID as the admin, so the steps and verifies now name that door. output.autoApproved is not surfaced by the automation runs read (no step output, run output {}), so the auto_approve leg proves the approve edge with a marker node, as the run did. acceptance[3]'s quoted warn was a paraphrase of the live line; the verify now matches the two names it carries instead of a sentence. No clause text changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -1359,7 +1404,7 @@
       "title": "approvalStatusField mirrors every request transition onto the business record — through the record lock's whitelist, attributed to the acting user",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": ["dev admin (authors the scratch flow; decides and recalls)", "a second real login (Ada) as submitter where the recall/pending attribution needs a non-deciding identity"],
@@ -1375,7 +1420,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); register the scratch flows through POST /api/v1/automation (one at a time, fixtures.requires); trigger the mirrored flow by creating a record of its trigger object (e.g. POST /api/v1/data/showcase_field_zoo {name, f_master_detail})",
+        "boot the showcase on its own port and DB (dogfood §0); register the scratch flows through POST /api/v1/automation (one at a time, fixtures.requires); trigger the mirrored flow by creating a record of its trigger object (e.g. POST /api/v1/data/showcase_field_zoo {name, f_master_detail})",
         "submit: while the request is pending, GET the trigger record — the mirror field reads 'pending', and the record's updated_by is the SUBMITTER (the pending stamp is attributed to whoever the row calls submitter, #3783)",
         "decide: approve — the field flips to 'approved' with updated_by = the decider; re-trigger and reject — 'rejected'; re-trigger and recall as the submitter — 'recalled'; re-trigger, send back (revise) — 'returned' (NOTE: the service writes this fifth value though the spec docblock lists only four — assert the actual behavior); drive the revise loop past maxRevisions — the auto-reject stamps 'rejected'",
         "lock contrast: with lockRecord true (the default) and the request pending, PATCH the record as the submitter — refused (RECORD_LOCKED class); yet the 'pending' mirror already landed on that same locked record — the lock hook whitelists a write whose ONLY change is the configured approvalStatusField",
@@ -1431,7 +1476,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "initial — the opt-in status mirror had no coverage. Grounded in the six service write sites (including 'returned', which the spec docblock omits — recorded so a run asserts actual behavior), the lock hook's mirror-field-only whitelist, and the #3783 acting-user attribution the existing integration test pins; no showcase flow declares the key, so the fixture rides the scratch-flow route (knownGaps)", "ref": "#sweep-2026-08-30" },
-        { "revision": 2, "date": "2026-10-16", "change": "the scratch-flow route re-pointed: the flows no longer need a writable package (the approvals.ooo-delegation-reroute finding of #23878 names this item too). POST /api/v1/automation registers them on the stock boot, record-triggered on showcase_field_zoo. Scoped re-run on main c91af8ed6 (approvalStatusField f_textarea): submit stamps 'pending' with updated_by the submitter; the submitter's PATCH while pending answers 409 RECORD_LOCKED while the mirror already sits on the record; approve → 'approved', reject → 'rejected', recall → 'recalled'; a flow without the key leaves the field null at every read; a flow naming f_text (no such field) still finalizes approved and logs WARN '[approvals] mirrorStatusField failed: Unknown field …'. The returned / maxRevisions and cascade legs were not re-run", "ref": "#24036" }
+        { "revision": 2, "date": "2026-10-16", "change": "the scratch-flow route re-pointed: the flows no longer need a writable package (the approvals.ooo-delegation-reroute finding of #23878 names this item too). POST /api/v1/automation registers them on the stock boot, record-triggered on showcase_field_zoo. Scoped re-run on main c91af8ed6 (approvalStatusField f_textarea): submit stamps 'pending' with updated_by the submitter; the submitter's PATCH while pending answers 409 RECORD_LOCKED while the mirror already sits on the record; approve → 'approved', reject → 'rejected', recall → 'recalled'; a flow without the key leaves the field null at every read; a flow naming f_text (no such field) still finalizes approved and logs WARN '[approvals] mirrorStatusField failed: Unknown field …'. The returned / maxRevisions and cascade legs were not re-run", "ref": "#24036" },
+        { "revision": 3, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -1439,7 +1485,7 @@
       "title": "Inbox keyboard flow: j/k and arrows move focus, Enter opens, x selects, ←/→ walk the drawer — and a/r quick-decide through the SAME server transition as the buttons, gated by quick-decidability",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": ["dev admin (pending approver on the seeded demo requests — several quick-decidable rows plus the dynamic-approval stage-1 row as the NOT-quick-decidable contrast)"],
@@ -1451,7 +1497,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin; open the inbox via the account app's Approvals entry; confirm the hint bar renders ('Keyboard: j/k move · Enter open · x select · a approve · r reject')",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin; open the inbox via the account app's Approvals entry; confirm the hint bar renders ('Keyboard: j/k move · Enter open · x select · a approve · r reject')",
         "press j/j/k and ArrowDown/ArrowUp — the focus ring walks the FILTERED list order; press Enter — the focused row's drawer opens (verify the drawer's request identity against GET /api/v1/approvals/requests/:id, not the highlight)",
         "with the drawer OPEN press ArrowLeft/ArrowRight — the drawer walks to the previous/next visible row without returning to the list; close the drawer",
         "focus a quick-decidable row and press r — the shared confirm dialog opens (nothing posted yet); confirm — capture POST /api/v1/approvals/requests/:id/reject and re-read the request + /:id/actions",
@@ -1504,7 +1550,8 @@
         "examples/app-showcase/src/automation/flows/dynamic-approval.flow.ts#decisionOutputs (the stock decisionOutputs row the gating contrast rides)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-30", "change": "initial — the inbox's keyboard surface (documented in the page's own header and advertised by its hint bar) had no checklist coverage; the load-bearing halves are that r/a land the same server transition as the buttons and that quick-decidability gates hotkeys off rows whose decisions require typed outputs", "ref": "#sweep-2026-08-30" }
+        { "revision": 1, "date": "2026-08-30", "change": "initial — the inbox's keyboard surface (documented in the page's own header and advertised by its hint bar) had no checklist coverage; the load-bearing halves are that r/a land the same server transition as the buttons and that quick-decidability gates hotkeys off rows whose decisions require typed outputs", "ref": "#sweep-2026-08-30" },
+        { "revision": 2, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -1602,7 +1649,7 @@
       "title": "Approvals on v18: the email action door /approvals/act works through the dispatcher exactly as the self-hosted mount (GET renders, POST redeems, a PUT neither door claims an ordinary 404 miss with no Allow header, a dead link a 200 page, a policy-held session not 403'd before the token), and an approval over an unstaffed position opens on the org administrators as ordinary approvers",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1613,7 +1660,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "a live action token for the GET-renders / POST-redeems legs — which no stock door mints since PR #24620 (65a8eeb7d4): a stock boot sends no approval email, and a reminder now carries no link (approvals.email-action-token-door knownGaps[0]), so those two legs are scored from the pins in automated.ref. The PUT and dead-link legs need no live token: any non-token string (token=garbage) drives them",
+          "a live action token for the GET-renders / POST-redeems legs — which no stock door mints since PR #24620 (65a8eeb7d4): a stock boot sends no approval email, and a reminder now carries no link (approvals.email-action-token-door knownGaps[0]), so those two legs are scored at the layer their pins drive, never lower (RUNNER rule 6): the hosted dispatcher door's GET-renders and POST-redeems by packages/qa/http-conformance/src/hono-approvals-act.conformance.test.ts (the real createHonoApp catch-all hands the request to the real HttpDispatcher and the real ApprovalService member over in-memory SQLite, with a token minted in-process: that door's answer), and the self-hosted mount's by action-page-member.integration.test.ts (the plugin's own mount on a real Hono app over a started kernel). approvals-act.test.ts drives the real dispatcher over a stub member, so it is evidence of the forwarding only. The PUT and dead-link legs need no live token: any non-token string (token=garbage) drives them",
           "an approval process whose approver is a position nobody holds (scratch process, default onEmptyApprovers)"
         ]
       },
@@ -1631,8 +1678,8 @@
         {
           "clause": "GET renders the action page, POST redeems, a dead token → a 200 page (not an error envelope), and PUT — a method neither wire door claims — is that door's ordinary miss: 404 with no Allow header, never reaching the member (ENDPOINT_NOT_FOUND on the self-hosted `os dev` boot, whose raw-app mount registers only GET and POST; ROUTE_NOT_FOUND on the hosted dispatcher door, whose `/approvals/act` domain claims only GET, HEAD and POST). 405 with Allow: GET, POST is the in-process ApprovalService.handleActionPage member's answer only, which no wire request reaches with a PUT",
           "oracle": "api",
-          "verify": "status + headers per verb; for the PUT also error.code and the absence of an Allow header. The PUT and the dead-link legs run live with token=garbage; the GET-renders and POST-redeems halves need a live token no stock door mints since PR #24620, so they are scored from packages/runtime/src/domains/approvals-act.test.ts (the dispatcher forwards GET and POST to the member, the form body unread) and packages/plugins/plugin-approvals/src/action-page-member.integration.test.ts (the member renders and redeems). The member's 405 is not a wire leg: it is pinned in-process by action-page-member.integration.test.ts, and the dispatcher's 404 miss by approvals-act.test.ts (both in automated.ref)",
-          "evidence": "the live PUT line (its error.code and its headers) and the dead-link page, plus the two pins' summary lines for the live-token halves"
+          "verify": "status + headers per verb; for the PUT also error.code and the absence of an Allow header. The PUT and the dead-link legs run live with token=garbage; the GET-renders and POST-redeems halves need a live token no stock door mints since PR #24620, so they are scored at the layer their pins drive (fixtures.requires[1]): the hosted door's from packages/qa/http-conformance/src/hono-approvals-act.conformance.test.ts ('GET renders the confirm page for a live token; a form POST redeems it — the body crossed the catch-all unread'), and the self-hosted mount's from packages/plugins/plugin-approvals/src/action-page-member.integration.test.ts (the member renders and redeems, and its parity cases hold the mount to the member's bytes). packages/runtime/src/domains/approvals-act.test.ts (the real dispatcher forwards GET and POST to a stub member, the form body unread) is evidence of the forwarding only. The member's 405 is not a wire leg: it is pinned in-process by action-page-member.integration.test.ts, and the dispatcher's 404 miss by approvals-act.test.ts (both in automated.ref)",
+          "evidence": "the live PUT line (its error.code and its headers) and the dead-link page, plus the pins' summary lines for the live-token halves"
         },
         {
           "clause": "the unstaffed request appears in each org admin's pending list and the decision is recorded via_override:false",
@@ -1643,7 +1690,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/runtime/src/domains/approvals-act.test.ts + packages/plugins/plugin-approvals/src/action-page-member.integration.test.ts + packages/plugins/plugin-approvals/src/admin-rescue-named-slate.integration.test.ts + packages/qa/dogfood/test/approval-admin-rescue-slate.dogfood.test.ts"
+        "ref": "packages/runtime/src/domains/approvals-act.test.ts + packages/plugins/plugin-approvals/src/action-page-member.integration.test.ts + packages/qa/http-conformance/src/hono-approvals-act.conformance.test.ts + packages/plugins/plugin-approvals/src/admin-rescue-named-slate.integration.test.ts + packages/qa/dogfood/test/approval-admin-rescue-slate.dogfood.test.ts"
       },
       "source": [
         "packages/runtime/src/domains/approvals.ts",
@@ -1669,6 +1716,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[1], steps[0] and acceptance[1] (verify, evidence) follow PR #24620 (65a8eeb7d4) — wave anchor #24579 §1, round 2's out-of-scope note (report 6274548573) that #24620 refutes QA run #24542's reading (\"no mail harness needed — the raw links sit in sys_notification.payload.actions after a remind\"); QA run #24558 recorded that a stock boot sends no approval email. No stock door mints an action token now, so the GET-renders / POST-redeems legs are scored from the pins already in automated.ref, and the PUT and dead-link legs run live with a non-token string. Re-derived at base 9a7838edf5: issueActionTokens has no production caller. No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "fixtures.requires[1] and acceptance[1] (verify, evidence) score the live-token legs at the layer their pins drive, and automated.ref gains the hosted door's pin. PR #24891's carried finding (round 15's acceptance notes: legs scored from pins, mixed clause oracles), read under RUNNER rule 6. Read at base feb09db14a: approvals-act.test.ts drives the real HttpDispatcher over a stub member (the forwarding); action-page-member.integration.test.ts drives the member and the plugin's mount on a started kernel over a real Hono app; packages/qa/http-conformance/src/hono-approvals-act.conformance.test.ts drives the hosted door end to end (createHonoApp's catch-all, the HttpDispatcher, the real ApprovalService member over in-memory SQLite), and its case 'GET renders the confirm page for a live token; a form POST redeems it' is the hosted door's GET-renders and POST-redeems at that door's layer, which the ref missed. No clause changed",
+          "ref": "#24963"
         }
       ]
     }

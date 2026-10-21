@@ -1,6 +1,6 @@
 # ADR-0069: Enterprise authentication hardening — password policy, enforced MFA, SSO, session controls, network gating, and anti-brute-force, all enforcement-wired
 
-**Status**: Accepted — **P1 + P2 implemented** (2026-07-04); P3 partially landed (see Addendum). Original proposal 2026-06-24. Session-of-record question settled 2026-08-04 (#4785): sessions live in `sys_session`; the kernel `cache` service backs D2's rate-limit counters only. · **Amended** (2026-10-14, ruling C′ on [#23287](https://github.com/objectstack-ai/objectstack/issues/23287), [`6159450584`](https://github.com/objectstack-ai/objectstack/issues/23287#issuecomment-6159450584), maintainer 「同意」) — D3 states what the gate holds for an API key, for password expiry and for a forced reset; see the note under D3.
+**Status**: Accepted — **P1 + P2 implemented** (2026-07-04); P3 partially landed (see Addendum). Original proposal 2026-06-24. Session-of-record question settled 2026-08-04 (#4785): sessions live in `sys_session`; the kernel `cache` service backs D2's rate-limit counters only. · **Amended** (2026-10-14, ruling C′ on [#23287](https://github.com/objectstack-ai/objectstack/issues/23287), [`6159450584`](https://github.com/objectstack-ai/objectstack/issues/23287#issuecomment-6159450584), maintainer 「同意」) — D3 states what the gate holds for an API key, for password expiry and for a forced reset; see the note under D3. · **Amended** (2026-10-20, PR [#24795](https://github.com/objectstack-ai/objectstack/pull/24795), no decision changes) — D5's client-address mechanism follows the shared `server.trustProxy` rule; see the note under D5.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (**the governing constraint** — a security property that isn't enforced at runtime is forbidden; no toggle may be a "false surface"), [ADR-0007](./0007-settings-manifest-and-kv-store.md) (settings manifest + cascade KV store), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (`sys_role` is platform-native, decoupled from better-auth; org scoping), [ADR-0066](./0066-unified-authorization-model.md) (capability/assignment split), [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) (`current_user` contract, built-in roles)
 **Consumers**: `@objectstack/plugin-auth` (better-auth wiring, `bindAuthSettings`/`applyConfigPatch`, auth route middleware), `@objectstack/service-settings` (`auth.manifest.ts`), `@objectstack/platform-objects` (identity objects `sys_user`/`sys_session`/`sys_account`), `@objectstack/rest` (auth request middleware seam), `../objectui` (settings UI rendering)
@@ -132,11 +132,24 @@ Legend: **[native]** = a better-auth config/plugin does the enforcing; **[custom
 
 | Setting | Default | Seam | Mechanism |
 |---|---|---|---|
-| `sys_organization.allowed_ip_ranges` (CIDR[]) | — | auth request middleware (Hono, **before** the better-auth handler in `plugin-auth` route registration) | **[custom]** extract client IP (`x-forwarded-for` / `cf-connecting-ip`, trust-proxy aware); reject login/session outside the org's ranges with `IP_NOT_ALLOWED` |
+| `sys_organization.allowed_ip_ranges` (CIDR[]) | — | auth request middleware (Hono, **before** the better-auth handler in `plugin-auth` route registration) | **[custom]** extract client IP (`x-forwarded-for` / `cf-connecting-ip`, trust-proxy aware); reject login/session outside the org's ranges with `IP_NOT_ALLOWED` *(client-address mechanism amended 2026-10-20 — see the note below)* |
 | `sys_user.allowed_ip_ranges` (optional override) | — | same | **[custom]** per-user override, evaluated before org |
 | `require_ip_match` (toggle) | off | session refresh | **[custom]** detect `request IP != session.ip_address` (already captured) -> re-verify or revoke |
 
 > IP is already captured on `sys_session.ip_address`; the only missing piece is the **gate** — a middleware seam exists in the auth route registration, before requests reach better-auth.
+>
+> **How the client address is established (amended 2026-10-20: PR [#24795](https://github.com/objectstack-ai/objectstack/pull/24795),
+> `25e16ab00c`, for [#24739](https://github.com/objectstack-ai/objectstack/issues/24739)).** The header list in the
+> first row's mechanism cell no longer describes the code. The address the allow-list judges is the one the server
+> establishes by the platform's single client-address rule, `resolveClientAddress`, published as
+> `@objectstack/plugin-auth/client-address` and imported back by the runtime's inbound rate limiter, so both apply it
+> identically: `X-Forwarded-For` (its leftmost entry), then `X-Real-IP`, are believed **only** when the deployment
+> declares `server.trustProxy` (`objectstack serve` passes the authored value to `AuthPlugin`); otherwise the address is
+> the transport's own peer address. `CF-Connecting-IP` is no longer read. An address that cannot be established is
+> refused like one outside the ranges — `403 IP_NOT_ALLOWED` while any range is set (with no ranges set, nothing is
+> judged). The D7 login audit stamps that same established address as `last_login_ip`, and stamps none when it is
+> undetermined. The decision itself — a gate ahead of the better-auth handler, refusing with `IP_NOT_ALLOWED` — is
+> unchanged.
 
 ### D6 — Enterprise SSO (P2/P3)
 

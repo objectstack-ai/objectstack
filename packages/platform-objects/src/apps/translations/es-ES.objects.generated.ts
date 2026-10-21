@@ -189,8 +189,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "Usuario creado",
-          description: "Copie la contraseña temporal ahora: se muestra una sola vez y no se almacena.",
-          acknowledge: "He guardado esta contraseña",
+          description: "Si se generó una contraseña temporal, cópiela ahora: se muestra una sola vez y no se almacena.",
+          acknowledge: "Hecho",
           fields: {
             "user.email": "Correo electrónico",
             "user.phoneNumber": "Número de teléfono",
@@ -930,7 +930,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "Unidad de negocio principal",
-        help: "Autorreferencia para el árbol organizativo. Null = raíz del tenant."
+        help: "Autorreferencia para el árbol organizativo. Null = raíz del tenant. Una unidad que aún tiene unidades hijas no se puede eliminar hasta que se reasignen a otro padre o se eliminen."
       },
       timezone: {
         label: "Zona horaria",
@@ -1389,9 +1389,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Tipo de cliente",
         options: {
           web: "Web",
-          native: "Nativa",
-          useragentbased: "Basada en agente de usuario",
-          public: "Público"
+          native: "Nativa"
         }
       },
       public: {
@@ -1530,15 +1528,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           redirectURLs: {
             label: "URLs de redirección",
-            helpText: "Una URL por línea. Debe usar https:// en producción."
+            helpText: "Una URL por línea. Las aplicaciones web necesitan https:// en un host que no sea localhost ni otra dirección de loopback. Las aplicaciones nativas también pueden usar http:// exactamente en localhost, 127.0.0.1 o [::1], en cualquier puerto."
           },
           type: {
             label: "Tipo de aplicación",
+            helpText: "Elija Nativa para una aplicación de escritorio o móvil, o para una aplicación en desarrollo local que redirige a http://localhost.",
             options: {
               web: "Web",
-              native: "Nativa",
-              "user-agent-based": "Basada en user-agent",
-              public: "Pública"
+              native: "Nativa"
             }
           }
         },
@@ -3248,13 +3245,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Código"
       },
       lock_state: {
-        label: "Estado de bloqueo",
-        options: {
-          none: "Ninguno",
-          nooverlay: "Sin superposición",
-          nodelete: "Sin eliminación",
-          full: "Bloqueo total"
-        }
+        label: "Estado de bloqueo"
       },
       lock_overridden: {
         label: "Bloqueo anulado"

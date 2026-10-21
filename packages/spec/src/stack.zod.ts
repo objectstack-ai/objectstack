@@ -3268,6 +3268,22 @@ class StackTriggerCapabilityRequiredError extends StackRefusalError {
 }
 
 /**
+ * [ADR-0112 · ruling A on #24910] A webhook is declared while `requires` omits
+ * `webhooks`, `realtime`, or both — the pair that dispatches it —
+ * {@link validateWebhookCapability}, the third declared-capability refusal and,
+ * like its trigger sibling, of the class that fails SILENT. One code for every
+ * arm: which token is missing is in the finding, not in the code. Same
+ * `_REQUIRED` spelling as its trigger and hierarchy siblings.
+ */
+class StackWebhookCapabilityRequiredError extends StackRefusalError {
+  readonly code = 'STACK_WEBHOOK_CAPABILITY_REQUIRED';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackWebhookCapabilityRequiredError', message, issues);
+  }
+}
+
+/**
  * [ADR-0131 D6 · ADR-0112] A package permits the `unmanaged` install mode
  * while it carries what an unmanaged install cannot copy —
  * {@link validateUnmanagedInstallMode}. Spelled in this family's `STACK_*`
@@ -4549,6 +4565,95 @@ function validateTriggerCapability(data: unknown): string[] {
 }
 
 /**
+ * Declared webhooks are the THIRD declared-capability class (ruling A on
+ * #24910), beside the hierarchy scopes and the auto-launched flows above, and
+ * of the fail-SILENT kind, like the flows. A declared webhook is dispatched by
+ * the PAIR `requires: ['webhooks', 'realtime']`:
+ *
+ *   · `webhooks` mounts `@objectstack/plugin-webhooks`
+ *     (`PLATFORM_CAPABILITY_PROVIDERS.webhooks`), whose auto-enqueuer turns a
+ *     record event into a `sys_http_delivery` row. Without it nothing reads
+ *     the declaration at all: no reader is bound, and the activation door
+ *     answers that it cannot verify the webhook.
+ *   · `realtime` mounts `@objectstack/service-realtime`, the auto-enqueuer's
+ *     ONLY source of record events. Without it the plugin boots, the
+ *     activation door answers `enabled: true`, every record write answers
+ *     200 — and no delivery is ever enqueued. The plugin's boot `error`
+ *     (`[webhook-auto-enqueuer] disabled …`) is the only trace, after deploy,
+ *     and it stays: it is what a host that wires a stack by hand, past this
+ *     producer, still sees.
+ *
+ * Neither token implies the other on any runtime's resolver (`os serve`
+ * expands neither), and the messaging outbox the auto-enqueuer writes to is on
+ * the always-on slate (`PLATFORM_ALWAYS_ON_CAPABILITIES`), so it is owed by
+ * nobody's `requires`. A stack that declares a webhook while `requires` omits
+ * either token validates, builds, boots and never delivers. Refuse it here, at
+ * authoring, so every door that loads the stack (`os validate`, `os build`,
+ * `os serve` / `os dev`, an app's own `bootStack` tests) refuses it with the
+ * same sentence. ⛔ Neither token is IMPLIED or added here: that would switch
+ * on a service the author did not name.
+ *
+ * One line per declared webhook, and its prescription is the WHOLE fix for the
+ * `requires` it was given, so following it once is enough:
+ *
+ *   `realtime` present, `webhooks` missing → add `'webhooks'`;
+ *   `webhooks` present, `realtime` missing → add `'realtime'`;
+ *   neither                                → add both, `['webhooks', 'realtime']`
+ *                                            — never `['webhooks']` alone,
+ *                                            which the arm above would refuse.
+ *
+ * An ABSENT `requires` counts as omitting both tokens, for the reason the
+ * trigger rule gives: the CLI reads it as `[]` plus the always-on slate, which
+ * carries neither token.
+ *
+ * Every declared webhook counts, `isActive: false` included — unlike a retired
+ * flow, an inactive declaration is one activation-door write away from being
+ * switched on (the ledger row overrides the declared `isActive`, ADR-0131 D6),
+ * and the switch it would then flip delivers nothing. A stack with no webhook
+ * owes neither token. Only the top-level `webhooks:` collection is read: it is
+ * the one the declared-webhook reader dispatches (a connector's nested
+ * `webhooks[]` is retired under ADR-0049 and never dispatched).
+ */
+function validateWebhookCapability(data: unknown): string[] {
+  const errors: string[] = [];
+  const d = data as { requires?: unknown; webhooks?: unknown };
+  const requires = Array.isArray(d?.requires) ? (d.requires as string[]) : [];
+  const hasWebhooks = requires.includes('webhooks');
+  const hasRealtime = requires.includes('realtime');
+  if (hasWebhooks && hasRealtime) return errors;
+  const webhooks = Array.isArray(d?.webhooks) ? (d.webhooks as unknown[]) : [];
+  for (const webhook of webhooks) {
+    const w = webhook as { name?: unknown } | null;
+    const name = typeof w?.name === 'string' ? w.name : '?';
+    const subject = `webhook '${name}' is declared but \`requires\` does not include`;
+    if (!hasWebhooks && hasRealtime) {
+      errors.push(
+        `${subject} 'webhooks' — ` +
+          `no webhook dispatcher would be mounted, so a record write would never enqueue a delivery. ` +
+          `Add 'webhooks' to requires: ['webhooks', 'realtime'] ` +
+          `(@objectstack/plugin-webhooks dispatches the webhook).`,
+      );
+    } else if (hasWebhooks) {
+      errors.push(
+        `${subject} 'realtime' — ` +
+          `the webhook dispatcher's only source of record events is the realtime service, and without it ` +
+          `a record write would never enqueue a delivery. ` +
+          `Add 'realtime' to requires: ['webhooks', 'realtime'] ` +
+          `(@objectstack/service-realtime publishes the record events; @objectstack/plugin-webhooks only dispatches them).`,
+      );
+    } else {
+      errors.push(
+        `${subject} 'webhooks' or 'realtime' — ` +
+          `no webhook dispatcher would be mounted, so a record write would never enqueue a delivery. ` +
+          `Add requires: ['webhooks', 'realtime'] (@objectstack/plugin-webhooks dispatches the webhook from the ` +
+          `record events @objectstack/service-realtime publishes — 'webhooks' alone enqueues nothing).`,
+      );
+    }
+  }
+  return errors;
+}
+
+/**
  * Reject `requires` tokens that are not part of the platform capability
  * vocabulary (framework#3265). An unknown token is a genuine typo or a stale
  * reference that NO runtime provides, so every runtime would otherwise SILENTLY
@@ -4981,6 +5086,13 @@ function buildDefinedStack(
     const header = `defineStack trigger capability validation failed (${triggerErrors.length} issue${triggerErrors.length === 1 ? '' : 's'}):`;
     const lines = triggerErrors.map((e) => `  ✗ ${e}`);
     throw new StackTriggerCapabilityRequiredError(`${header}\n\n${lines.join('\n')}`, triggerErrors);
+  }
+
+  const webhookErrors = validateWebhookCapability(data);
+  if (webhookErrors.length > 0) {
+    const header = `defineStack webhook capability validation failed (${webhookErrors.length} issue${webhookErrors.length === 1 ? '' : 's'}):`;
+    const lines = webhookErrors.map((e) => `  ✗ ${e}`);
+    throw new StackWebhookCapabilityRequiredError(`${header}\n\n${lines.join('\n')}`, webhookErrors);
   }
 
   const unmanagedErrors = validateUnmanagedInstallMode(data);

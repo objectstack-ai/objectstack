@@ -41,8 +41,7 @@ export type KernelManager = any;
  */
 export type EnvironmentDriverRegistry = any;
 import {
-  createOriginMatcher,
-  hasWildcardPattern,
+  resolveCorsAdmission,
   DEFAULT_CORS_ALLOW_HEADERS,
   DEFAULT_CORS_EXPOSE_HEADERS,
   declaredEnvelopeForThrow,
@@ -51,11 +50,25 @@ import {
 export interface ObjectStackHonoCorsOptions {
   /** Enable or disable CORS. Defaults to true. */
   enabled?: boolean;
-  /** Allowed origins. Defaults to env `OS_CORS_ORIGIN` (or legacy `CORS_ORIGIN`) or '*'. Comma-separated string or array. */
+  /**
+   * The origins admitted to cross-origin requests: exact origins and wildcard
+   * patterns (`https://*.example.com`), as an array or one comma-separated
+   * string. Wins over `OS_CORS_ORIGIN` (or legacy `CORS_ORIGIN`).
+   *
+   * No default list. With neither set, no cross-origin caller is admitted. A
+   * loopback origin (`localhost`, `127.0.0.1`, `[::1]`, any port) is admitted
+   * beside the list, or without one, on a development boot only
+   * (`NODE_ENV=development`).
+   *
+   * `'*'`, or a pattern whose host part is the bare `*` (`https://*`), is
+   * refused by {@link createHonoApp} while credentials are on; it is served
+   * with credentials off. The rule is `@objectstack/plugin-hono-server`'s
+   * `resolveCorsAdmission`, the one `HonoServerPlugin` reads.
+   */
   origin?: string | string[];
   /** Allowed methods. */
   methods?: string[];
-  /** Allow credentials (cookies, authorization headers). */
+  /** Allow credentials (cookies, authorization headers). Defaults to `OS_CORS_CREDENTIALS !== 'false'`, i.e. on. */
   credentials?: boolean;
   /** Preflight cache max-age in seconds. */
   maxAge?: number;
@@ -607,54 +620,32 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
   // ─── CORS Middleware ──────────────────────────────────────────────────────
   // Enabled by default. Controlled via options.cors or environment variables:
   //   OS_CORS_ENABLED     – "false" to disable (default: true)
-  //   OS_CORS_ORIGIN      – comma-separated origins or "*" (default: "*")
+  //   OS_CORS_ORIGIN      – comma-separated origins (default: none)
   //   OS_CORS_CREDENTIALS – "false" to disallow credentials (default: true)
   //   OS_CORS_MAX_AGE     – preflight cache seconds (default: 86400)
   // (legacy CORS_* names still honoured with a deprecation warning)
+  //
+  // What it ADMITS is `resolveCorsAdmission` from `@objectstack/plugin-hono-server`
+  // — the rule `HonoServerPlugin` reads — so one configuration gets one answer at
+  // both doors (`docs/HARDENING.md` § CORS): a list admits exactly that list, no
+  // list admits no cross-origin caller, a loopback origin is admitted on a
+  // development boot only, and an entry that admits every host (`'*'`,
+  // `https://*`) while credentials are on is refused HERE, when the app is
+  // created. Its answer is always a matcher function, which is also what keeps
+  // wildcard patterns working: Hono's `cors()` matches strings exactly.
   const corsDisabledByEnv = readEnvWithDeprecation('OS_CORS_ENABLED', 'CORS_ENABLED', { silent: true }) === 'false';
   if (options.cors !== false && !corsDisabledByEnv) {
     const corsOpts = typeof options.cors === 'object' ? options.cors : {};
     const enabled = corsOpts.enabled ?? true;
 
     if (enabled) {
-      // Resolve origins: options > env > default '*'
-      let configuredOrigin: string | string[];
-      const corsOriginEnv = readEnvWithDeprecation('OS_CORS_ORIGIN', 'CORS_ORIGIN', { silent: true });
-      if (corsOpts.origin) {
-        configuredOrigin = corsOpts.origin;
-      } else if (corsOriginEnv) {
-        const envOrigin = corsOriginEnv.trim();
-        configuredOrigin = envOrigin.includes(',') ? envOrigin.split(',').map(s => s.trim()) : envOrigin;
-      } else {
-        configuredOrigin = '*';
-      }
-
-      const credentials = corsOpts.credentials ?? (readEnvWithDeprecation('OS_CORS_CREDENTIALS', 'CORS_CREDENTIALS', { silent: true }) !== 'false');
+      const admission = resolveCorsAdmission({
+        door: { name: '@objectstack/hono', originsOption: 'cors.origin' },
+        origins: corsOpts.origin,
+        credentials: corsOpts.credentials,
+      });
       const maxAgeEnv = readEnvWithDeprecation('OS_CORS_MAX_AGE', 'CORS_MAX_AGE', { silent: true });
       const maxAge = corsOpts.maxAge ?? (maxAgeEnv ? parseInt(maxAgeEnv, 10) : 86400);
-
-      // When credentials is true, browsers reject wildcard '*' for Access-Control-Allow-Origin.
-      // For wildcard patterns (like "https://*.example.com" or "http://localhost:*") we must
-      // use a matcher function — Hono's cors() middleware does exact-string matching only and
-      // treats '*' in patterns as a literal character, so passing wildcard strings straight
-      // through would silently drop the Access-Control-Allow-Origin header on every real
-      // request (preflight can still succeed via the short-circuit in `apps/objectos`,
-      // which lives in the separate `objectstack-ai/cloud` repo and is NOT a path in
-      // this one, but the subsequent POST/GET would be blocked by the browser).
-      //
-      // This mirrors `plugin-hono-server`'s CORS wiring and uses the shared pattern matcher
-      // from `@objectstack/plugin-hono-server` so all Hono-based code paths stay in sync.
-      let origin: string | string[] | ((origin: string) => string | undefined | null);
-      if (configuredOrigin === '*' && credentials) {
-        // Credentials mode with '*' — reflect the request origin
-        origin = (requestOrigin: string) => requestOrigin || '*';
-      } else if (hasWildcardPattern(configuredOrigin)) {
-        // Wildcard patterns (e.g., "https://*.objectui.org", "http://localhost:*")
-        origin = createOriginMatcher(configuredOrigin);
-      } else {
-        // Exact origin(s) — pass through as-is
-        origin = configuredOrigin;
-      }
 
       // Both CORS defaults are imported from `@objectstack/plugin-hono-server`,
       // which this package already depends on (#3786). The three Hono-based CORS
@@ -671,11 +662,11 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       ]));
 
       app.use('*', cors({
-        origin: origin as any,
+        origin: admission.origin,
         allowMethods: corsOpts.methods || ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'],
         allowHeaders: corsOpts.allowHeaders || [...DEFAULT_CORS_ALLOW_HEADERS],
         exposeHeaders,
-        credentials,
+        credentials: admission.credentials,
         maxAge,
       }));
     }

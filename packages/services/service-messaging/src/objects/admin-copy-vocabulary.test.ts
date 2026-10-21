@@ -4,8 +4,8 @@
  * Admin-facing copy of the messaging objects carries no design-record
  * vocabulary.
  *
- * Setup opens four of these objects from its nav (Notification Preferences,
- * Subscriptions and Templates, and HTTP Deliveries under Integrations); the
+ * Setup opens three of these objects from its nav (Notification Preferences
+ * and Templates, and HTTP Deliveries under Integrations); the
  * sentence under each page title is the object's `description`, a field's
  * help tooltip is the field's `description`, and the generated bundles carry
  * both into every locale. An ADR number, a decision id ("D2"), a
@@ -97,7 +97,7 @@ describe('messaging objects: admin-facing copy carries no design-record vocabula
     const objects: ObjectLike[] = (Object.values(MessagingObjects) as unknown[]).filter(isObjectSchema);
     const names = objects.map((o) => o.name);
     for (const name of [
-      'sys_notification_preference', 'sys_notification_subscription', 'sys_notification_template',
+      'sys_notification_preference', 'sys_notification_template',
       'sys_http_delivery', 'sys_notification_delivery',
     ]) {
       expect(names, `${name} is in the population`).toContain(name);

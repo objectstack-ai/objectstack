@@ -19,7 +19,10 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
  * implicitly-readonly runtime-owned types (#5503), and the `primary_key` strip
  * of a payload `id` the update dispatch ruled is not an identifier (#6437); on
  * both verbs, in every context, the `computed` strip of a `formula` value
- * (#20805); on INSERT the runtime-owned ones and, since the 2026-09-03 ruling (#14147)
+ * (#20805) and, since #25000, the `stored_expression` replacement of a caller
+ * value a stored field's `expression` computes differently (#24690 reported
+ * it; the write is now refused, on insert, update by id and predicate update);
+ * on INSERT the runtime-owned ones and, since the 2026-09-03 ruling (#14147)
  * superseded the create-side exemption #3413 had granted, static `readonly`
  * too — judged over `staticReadonlyInsertSubject`, which leaves a
  * `sys_`-prefixed object, and one in a PLATFORM-INTERNAL `managedBy` bucket, to
@@ -87,6 +90,13 @@ const REASON_PHRASE: Record<DroppedFieldsEvent['reason'], string> = {
   computed:
     'a computed `formula` field — the engine computes it on every read, so no driver has a ' +
     'column for a written value',
+  // [#24690 / #25000] NOT in READONLY_CLASS_REASONS: the field is written,
+  // with the computed value, and `isSystem` does not exempt the computation.
+  // Refused under strict since #25000 (the amended ruling 「甲」 ships it in
+  // 18.x); #24690 wrote this wording ahead of that refusal.
+  stored_expression:
+    'a stored field the engine computes from its declared `expression` on every write — the ' +
+    'value sent differs from the computed one, so it would have been replaced',
 };
 
 /**
@@ -158,6 +168,13 @@ function buildRefusalMessage(
     ? `for 'computed', leave the formula field out of the payload — the engine computes it ` +
       `on every read, and isSystem does not exempt it; `
     : '';
+  // [#25000] Same rule: spoken ONLY when a `stored_expression` drop is
+  // present, so every payload without one reads its earlier text byte for byte.
+  const storedExpressionRemedy = drops.some((d) => d.reason === 'stored_expression')
+    ? `for 'stored_expression', leave the field out of the payload or send the value its ` +
+      `expression computes — the engine computes it on every write, and isSystem does not ` +
+      `exempt it; `
+    : '';
   return (
     head +
     `${fields.length} caller-supplied field(s) ` +
@@ -169,7 +186,7 @@ function buildRefusalMessage(
     `statically 'readonly' columns (that exempts NEITHER a TRUE 'readonlyWhen' predicate ` +
     `NOR the primary-key strip — both apply to every API-boundary caller, isSystem included; ` +
     `a 'readonlyWhen' value DERIVED by a beforeUpdate hook is not a caller write and is never ` +
-    `stripped); ${computedRemedy}for ` +
+    `stripped); ${computedRemedy}${storedExpressionRemedy}for ` +
     `'primary_key', pass a SCALAR id to update ONE row (\`update(object, { id, ...fields })\` ` +
     `or \`{ where: { id } }\`), or put the id set in \`where\` to SELECT rows ` +
     `(\`{ where: { id: { $in: [...] } }, multi: true }\`). ` +

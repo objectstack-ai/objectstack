@@ -20,6 +20,7 @@ import type { ConnectorDescriptor } from '../integration/connector-descriptor';
 import type { ConversionNotice, ConversionTodoNotice } from '../conversions/types';
 import type { ExecutionContext } from '../kernel/execution-context.zod';
 import type { FlowRegistration } from '../api/protocol.zod';
+import type { FlowInnerRefusal } from '../api/automation-api.zod';
 
 /**
  * Context passed to a flow/script execution
@@ -547,6 +548,36 @@ export interface AutomationResult {
      */
     successMessage?: string;
     errorMessage?: string;
+    /**
+     * The producer-marked END-USER text of the refusal a node met inside the
+     * run, verbatim (ruling B′ on #24914, decision batch #379 item 5; #24996).
+     *
+     * The semantics are `ApiErrorSchema.userMessage`'s (`api/contract.zod.ts`)
+     * and nothing else: presence IS the marking — set exactly when the inner
+     * refusal's producer (an application hook, a platform refusal that carries
+     * static guidance) opted in at throw time, read through the one
+     * `declaredUserMessage` read; absent otherwise, so a runner keeps its own
+     * substitution for anything unmarked. It never replaces {@link error}: the
+     * diagnostic channel keeps its own wording, and a door serving this run's
+     * failure carries this text as its envelope's top-level `userMessage`
+     * beside an unchanged `message`.
+     */
+    userMessage?: string;
+    /**
+     * The refusal a node's write met inside the run, structured —
+     * `{ code, message }`, `code` in its WIRE spelling (`UNIQUE_VIOLATION`
+     * for a unique refusal), the shape a record save of the same write
+     * answers with (ruling B′ on #24914; #24996).
+     *
+     * Declared once as `FlowInnerRefusalSchema` (`api/automation-api.zod.ts`),
+     * and every flow door's `400 FLOW_FAILED` details carry it under the same
+     * name (`FlowFailureDetailsSchema`). It rides BESIDE the run's failure and
+     * moves none of it: {@link error} keeps its wording, and {@link code} stays
+     * the closed union above — the inner code is nested here precisely so no
+     * new member is minted there. Set on a failed run only when a refusal was
+     * met; ⛔ never synthesised from the message text.
+     */
+    innerRefusal?: FlowInnerRefusal;
     /**
      * The flow definition's authored `label`, copied verbatim the same way as
      * the two messages above, so a flow runner can name the flow it is running
