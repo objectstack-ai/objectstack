@@ -296,7 +296,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Channel",
-        help: "Qué canal usa esta plantilla: email o sms. La bandeja de entrada de la aplicación nunca la usa; para el contenido de la aplicación, escribe una plantilla de correo electrónico e indícala en el template de un paso de notificación."
+        help: "Qué canal usa esta plantilla: email o sms; cualquier otro valor se rechaza. La bandeja de entrada de la aplicación nunca la usa; para el contenido de la aplicación, escribe una plantilla de correo electrónico e indícala en el template de un paso de notificación."
       },
       locale: {
         label: "Locale",
@@ -344,7 +344,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       channel_renders_template: {
-        message: "Este canal nunca usa una plantilla de notificación: solo email y sms la usan, así que esta plantilla nunca se enviará. Para el contenido de la aplicación (bandeja de entrada), escribe una plantilla de correo electrónico (email_template) e indícala en el template del paso de notificación; el correo electrónico y la bandeja de entrada la muestran."
+        message: "Solo los canales email y sms usan una plantilla de notificación, así que se rechaza una plantilla para cualquier otro canal: establece el canal en email o sms, o elimina la plantilla. Para el contenido de la aplicación (bandeja de entrada), escribe una plantilla de correo electrónico (email_template) e indícala en el template del paso de notificación; el correo electrónico y la bandeja de entrada la muestran."
       }
     }
   },

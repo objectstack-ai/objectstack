@@ -4,9 +4,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 /**
  * The channels that READ a `sys_notification_template` row (the maintainer's
- * ruling D on #24770: narrow templates to the channels that render them). In
- * 18.x a write naming any other channel is accepted with a warning — see the
- * `channel_renders_template` rule below; its refusal waits for 19.0.
+ * ruling D on #24770: narrow templates to the channels that render them). A
+ * write that leaves a row naming any other channel is refused — see the
+ * `channel_renders_template` rule below, which is built from this list and is
+ * its only reader on the write path.
  *
  * Measured, not assumed — the readers are exactly three, all keyed on one of
  * these two values:
@@ -22,10 +23,13 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * The inbox reads no row on any path (`createInboxChannel` takes no store); its
  * localised content is the `email_template` a notify step names in `template`,
  * rendered through `IEmailService.renderTemplate`. So a row naming any other
- * channel is stored and rendered nowhere — a silent no-op until this rule made
- * it loud.
+ * channel would be stored and rendered nowhere — a silent no-op, which is why
+ * the rule refuses it.
+ *
+ * Exported for this package's own tests, which iterate it rather than spell the
+ * two values again; it is not on the package index.
  */
-const TEMPLATE_CHANNELS = ['email', 'sms'] as const;
+export const TEMPLATE_CHANNELS = ['email', 'sms'] as const;
 
 /**
  * `sys_notification_template` — the email / SMS render template (ADR-0030
@@ -107,11 +111,11 @@ export const NotificationTemplate = ObjectSchema.create({
             // `MessagingChannel.id`s, 64 per the landed machine-vocabulary
             // precedent (sys_session.revoke_reason, maxLength: 64).
             maxLength: 64,
-            // [#24924] The values a row is read for are TEMPLATE_CHANNELS; any
-            // other value is warned about by the `channel_renders_template`
-            // rule below. The field stays `text` on purpose — see that rule for
-            // why a `select` is not the spelling.
-            description: 'Which channel uses this template: email or sms. The in-app inbox never does; for in-app content, write an email template and name it in a notify step\'s template.',
+            // [#24983] The values a row is read for are TEMPLATE_CHANNELS; a
+            // write that leaves any other value on the row is refused by the
+            // `channel_renders_template` rule below. The field stays `text` on
+            // purpose — see that rule for why a `select` is not the spelling.
+            description: 'Which channel uses this template: email or sms; any other value is refused. The in-app inbox never does; for in-app content, write an email template and name it in a notify step\'s template.',
         }),
 
         locale: Field.text({
@@ -173,46 +177,54 @@ export const NotificationTemplate = ObjectSchema.create({
         { fields: ['topic'] },
     ],
 
-    // [#24924] The WARNING half of ruling D for 18.x. The ruling record reads
-    // "② refuses stored or new non-email/sms rows. If no stored-row
-    // conversion carries that, 18.x warns on write and corrects the copy, and
-    // the refusal is filed for 19.0." — and no ADR-0087 conversion carries
-    // stored DATA rows, so under the standing rule for narrowings after 18.0
-    // GA this rule warns and never refuses. ⛔ Do not raise it to `error` in
-    // 18.x; the refusal is a 19.0 card.
+    // [#24983] Ruling D ② on #24770: "② refuses stored or new non-email/sms
+    // rows." Under the amended standing rule for narrowings after 18.0 GA, a
+    // narrowing no conversion carries ships now as a BREAKING minor — and no
+    // ADR-0087 conversion reaches stored DATA rows of a platform object — so the
+    // refusal is this rule, at `severity: 'error'`, with no stored row rewritten.
     //
-    // `severity: 'warning'` is objectql's advisory path: the write goes
-    // through, the engine logs one `Validation rule 'channel_renders_template'
-    // (warning): …` line per write and hands the hit to that write's
-    // `onValidationAdvisory` listener, which the data protocol answers as the
-    // single-record create / clone / update answer's `warnings`. The rule runs
-    // on insert, by-id update and bulk update.
+    // WHY `cross_field` AND NOT A `format` RULE. The ruling refuses STORED rows
+    // as well as new ones, and the two spellings answer a stored row
+    // differently (measured on a real ObjectQL over SqlDriver):
     //
-    // A `format` rule judges the WRITE, never the stored row: it reads only a
-    // payload that names `channel` (`checkFormat` returns early otherwise), so
-    // a row already stored with another channel is read, listed, edited in any
-    // other column and deleted without a warning — and keeps rendering
-    // nowhere, as it always did. A write that NAMES another channel (a new
-    // row, a change of channel, or a client re-sending the stored value) is
-    // warned about.
+    //  - A `format` rule judges the WRITE: it reads `channel` only when the
+    //    payload names it (`checkFormat` returns early otherwise). An edit of a
+    //    stored `inbox` row's body or `is_active` — which is what Setup's edit
+    //    form sends, since it writes only the fields the user changed — would be
+    //    accepted, and the row would stay stored and rendered nowhere, silently.
+    //  - A `cross_field` (or `script`) rule is an INVARIANT: objectql evaluates
+    //    its condition over the MERGED record (the stored row overlaid with the
+    //    write) on insert, by-id update and per row of a predicate update. So a
+    //    row naming another channel is refused on ANY edit that leaves it there,
+    //    until an edit moves it to email or sms — frozen, not bricked: it is
+    //    still read, listed and deleted (a delete runs no validation rule), and
+    //    delivery is unchanged (no channel ever read it). `fields: ['channel']`
+    //    attaches the refusal to `channel`, so an import row and the console
+    //    point at that column.
     //
-    // Why not a `select` with options `email` / `sms`: option membership is a
-    // field CONSTRAINT in objectql's record validator, which refuses and has
-    // no advisory severity, so it is the 19.0 refusal and not the 18.x
-    // warning. (For 19.0, measured at this commit: its refusal is the generic
-    // catalog sentence with no per-field override; an import's kept option
-    // values admit a value outside the options; and Setup's select widget
-    // clears on load a stored value its options do not offer.)
+    // Why not a `select` with options `email` / `sms` (measured at this
+    // commit): its refusal is the generic catalog sentence ("Channel must be one
+    // of: email, sms", code `invalid_option`) with no per-field override to
+    // carry the email-template prescription; an insert carrying an import's
+    // kept option values admits `inbox`; it moves the column from `varchar(64)`
+    // to `varchar(255)`; and it judges only the written value, so a stored row
+    // passes every edit that does not name `channel`.
+    //
+    // The refusal is a `400 VALIDATION_FAILED` at the REST data door, a failed
+    // row (`field: 'channel'`, `code: 'rule_violation'`) in an import commit and
+    // a failed `VALIDATION_FAILED` row in a bulk update.
     validations: [
         {
-            type: 'format',
+            type: 'cross_field',
             name: 'channel_renders_template',
             label: 'Channel renders the template',
             description: 'Only the email and SMS channels read a notification template, so a template for any other channel would never be sent.',
-            field: 'channel',
-            regex: `^(?:${TEMPLATE_CHANNELS.join('|')})$`,
-            severity: 'warning',
-            message: 'This channel never uses a notification template: only email and sms do, so this template will never be sent. For in-app (inbox) content, write an email template (email_template) and name it in the notify step\'s template; email and the inbox both render it.',
+            fields: ['channel'],
+            // TRUE ⇒ violated. Built from TEMPLATE_CHANNELS, so the list is
+            // spelled once: a CEL list of the two string literals.
+            condition: `!(record.channel in ${JSON.stringify(TEMPLATE_CHANNELS)})`,
+            severity: 'error',
+            message: 'Only the email and sms channels use a notification template, so a template for any other channel is refused: set channel to email or sms, or delete the template. For in-app (inbox) content, write an email template (email_template) and name it in the notify step\'s template; email and the inbox both render it.',
         },
     ],
 });
