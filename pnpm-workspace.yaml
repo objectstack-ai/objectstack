@@ -251,8 +251,8 @@ overrides:
   # requires the declared range to be exact and to export what we import).
   # Move all eleven together, in one commit, or better-auth init throws and
   # every auth endpoint 500s.
-  'better-auth@<2.0.0': '1.7.3'
-  '@better-auth/core@<2.0.0': '1.7.3'
+  'better-auth@<2.0.0': '1.7.12'
+  '@better-auth/core@<2.0.0': '1.7.12'
   # scim carries the family's target — see the @better-auth/scim note
   # above. It was held at 1.7.1 EXACT, one deliberate step behind `^1.7.1`,
   # because `^1.7.1` then resolved scim to 1.7.2 while the installed family
@@ -283,15 +283,15 @@ overrides:
   # a lift whose new version drops a symbol `plugin-auth` imports.
   # What stays true: the whole family still moves as ONE line, and a bump that
   # moves scim alone is still the mistake the #3653 ruling named.
-  '@better-auth/scim@<2.0.0': '1.7.3'
-  '@better-auth/oauth-provider@<2.0.0': '1.7.3'
-  '@better-auth/sso@<2.0.0': '1.7.3'
-  '@better-auth/drizzle-adapter@<2.0.0': '1.7.3'
-  '@better-auth/kysely-adapter@<2.0.0': '1.7.3'
-  '@better-auth/memory-adapter@<2.0.0': '1.7.3'
-  '@better-auth/mongo-adapter@<2.0.0': '1.7.3'
-  '@better-auth/prisma-adapter@<2.0.0': '1.7.3'
-  '@better-auth/telemetry@<2.0.0': '1.7.3'
+  '@better-auth/scim@<2.0.0': '1.7.12'
+  '@better-auth/oauth-provider@<2.0.0': '1.7.12'
+  '@better-auth/sso@<2.0.0': '1.7.12'
+  '@better-auth/drizzle-adapter@<2.0.0': '1.7.12'
+  '@better-auth/kysely-adapter@<2.0.0': '1.7.12'
+  '@better-auth/memory-adapter@<2.0.0': '1.7.12'
+  '@better-auth/mongo-adapter@<2.0.0': '1.7.12'
+  '@better-auth/prisma-adapter@<2.0.0': '1.7.12'
+  '@better-auth/telemetry@<2.0.0': '1.7.12'
   'uuid@<12.0.0': '^11.1.1'
   'postcss@<9.0.0': '^8.5.10'
   'cookie@<0.8.0': '^0.7.0'
