@@ -32,6 +32,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { SysImportJob } from '@objectstack/platform-objects/audit';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const liveEngines: ObjectQL[] = [];
 afterEach(async () => {
@@ -91,6 +92,9 @@ async function boot(values: string[]) {
   engine.registry.registerObject(noteObject('note_copy') as any);
   engine.registry.registerObject(SysImportJob as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   for (let i = 0; i < values.length; i++) {
     await engine.insert('note', { id: `r${i + 1}`, body: values[i], memo: values[i] });
   }
