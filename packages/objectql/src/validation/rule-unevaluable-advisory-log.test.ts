@@ -172,7 +172,7 @@ describe('[#24782] CONTROL — an unevaluable `error` rule is refused, and its l
     expect(fields[0]!.message).toMatch(/^Validation rule 'qa_unevaluable' could not be evaluated \(.+\) — write rejected\./);
     expect(warns).toHaveLength(1);
     expect(warns[0]).toMatch(
-      /^Validation rule 'qa_unevaluable' predicate failed to evaluate \(.+\) — write rejected: a rule that cannot be evaluated fails closed, it is never skipped$/,
+      /^Validation rule 'qa_unevaluable' predicate failed to evaluate \(.+\) — write rejected: a rule that cannot be evaluated fails closed, it is never skipped$/s,
     );
   });
 
@@ -181,7 +181,7 @@ describe('[#24782] CONTROL — an unevaluable `error` rule is refused, and its l
 
     expect(refusalOf(thrown)[0]).toMatchObject({ constraint: { rule: 'qa_unevaluable_when', reason: 'unevaluable' } });
     expect(warns).toHaveLength(1);
-    expect(warns[0]).toMatch(/^Validation rule 'qa_unevaluable_when' when-predicate failed to evaluate \(.+\) — write rejected: a rule that cannot be evaluated fails closed/);
+    expect(warns[0]).toMatch(/^Validation rule 'qa_unevaluable_when' when-predicate failed to evaluate \(.+\) — write rejected: a rule that cannot be evaluated fails closed/s);
   });
 
   it('the relationship-traversal refusal', () => {
