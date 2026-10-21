@@ -1,6 +1,6 @@
 ---
-'@objectstack/driver-sql': patch
-'@objectstack/service-datasource': patch
+'@objectstack/driver-sql': minor
+'@objectstack/service-datasource': minor
 ---
 
 fix(driver-sql): a SQLite file whose bytes are not a SQLite database fails `connect()` at once, naming the file, and a development boot no longer moves it aside and replaces it with an empty database (#24960)
@@ -13,7 +13,7 @@ Clause-②: no (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed (`SqliteDatabaseFileError` keeps its shape; only the set of codes it is raised with grows by one), so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer `SqlDriver.connect()` gives for a SQLite file that is not a database: a rejection where it resolved. The remedy is the datasource's file, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
 
-**BREAKING** (`SqlDriver.connect()`'s accept set narrows): a connect that resolved over a SQLite file that is not a database now rejects. It ships as `patch`: no public surface changes, and during the launch window breaking-ness is carried by this banner and the disposition above, not by the level.
+**BREAKING** (`SqlDriver.connect()`'s accept set narrows): a connect that resolved over a SQLite file that is not a database now rejects. It ships as `minor` under the launch-window convention for accept-set narrowings: during the launch window a breaking change does not take `major`, so the level does not say it breaks, and breaking-ness is carried by this banner and the disposition above.
 
 - **Before:** `connect()` resolved; in production the first query failed with `DATABASE_ERROR`, and on a development boot the file was renamed to `<file>.corrupt-<timestamp>` and an empty database was written in its place.
 - **Now:** `connect()` rejects with `SqliteDatabaseFileError`, `code: 'SQLITE_NOTADB'`, naming the file; the file is untouched.
