@@ -2273,6 +2273,76 @@
           "ref": "#24850"
         }
       ]
+    },
+    {
+      "id": "cli.fresh-install-migrate-apply-first",
+      "title": "A fresh install whose first command is `os migrate apply` boots on its first `os serve` (18.1.0): the apply creates the tables on an empty database and writes the organization-ownership birth marker (the sys_migration row `adr-0131-organization-ownership`), so the serve reaches its serving line with no ownership refusal",
+      "since": "v18.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": [
+        "operator (local shell) whose deploy script runs `os migrate apply` before the first `os serve` of a fresh install"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an EMPTY database: a file DB path under /tmp/RUN/ that does not exist yet — `test ! -e` on it and on its `-wal` and `-shm` before steps[0]. ⛔ Never a file an earlier command touched: `os dev`, `os serve` and `os migrate plan` each create tables in it, and a database that held a declared table before the apply was not created from empty, so it gets no birth marker by design",
+          "one environment for both commands, as a deploy script has: OS_DATABASE_URL=file:/tmp/RUN/fresh.db and OS_HOME=/tmp/RUN/home, plus OS_AUTH_SECRET and OS_SECRET_KEY (32-byte hex), because a production `os serve` composes the auth family only when an auth secret resolves and refuses to boot with no stable encryption key (RUNNER environment facts, the walled-boot entry). `os migrate apply` composes what `serve` mounts (packages/cli/src/utils/schema-migrate.ts header), so it gets the same environment. Add OS_PORT=PORT for the boot (RUNNER environment facts: the showcase's self-pinging connectors read it, `-p` alone does not set it)",
+          "a showcase directory no other runner boots: your own worktree, or a scratch copy. Both commands load its objectstack.config.ts and its compiled dist/objectstack.json, and both write .objectstack/data/ (the showcase_external fixture, local uploads) into the directory they run in. Delete that .objectstack after the run"
+        ],
+        "knownGaps": [
+          "18.0.0 does not carry the fix. There `os migrate apply` on an empty database creates the tables and writes no birth marker, and the first `os serve` refuses the database as one 17.x or an 18.0 pre-release created: the refusal platform-core.v18-boot-refusals acceptance[1] reads, opening \"This database carries no organization-ownership marker\". A run whose subject is 18.0.0 records that refusal as 18.0.0's known behaviour, never as a FAIL of this item. The fix (#24827) is .changeset/24827-migrate-apply-birth-marker.md, a minor changeset pending on main, so it ships in 18.1.0. Read at base 688052e147: the fix commit 19484af538 is not an ancestor of the @objectstack/cli@18.0.0 tag commit 06cab4849a (exit 1; control leg, a commit 50 behind the tag, exit 0)",
+          "the fix's pins score no clause here (RUNNER rule 6, a pin scores only the layer it drives): packages/cli/src/commands/migrate/apply.organization-ownership-birth.integration.test.ts runs `MigrateApply` in-process and judges the guard through `assertOrganizationOwnershipMigrated` on a boot that creates nothing, and packages/cli/src/utils/schema-migrate.birth-after-flush.test.ts holds the failed-write refusal with no kernel at all. Neither spawns the CLI, so neither answers acceptance[0]'s exit code, and neither boots `os serve`, so neither reaches acceptance[1]'s serving line. The item carries no automated ref and both clauses are driven live",
+          "a Turso remote (`libsql://`) primary is outside this item: `os migrate apply` creates no tables there (its schema sync is skipped), so the first serving boot creates them and writes the birth marker itself, as it did before the fix"
+        ]
+      },
+      "steps": [
+        "in the showcase directory, with the environment of fixtures.requires[1] exported and the DB path absent: `os migrate apply --yes; echo $?`. Keep the full output and the exit code",
+        "before any boot, read the marker through SQLite (node:sqlite, so a `-wal` is read too; there is no sqlite3 CLI here): `SELECT id, verified_at, applied_at, blocking, advisory, details FROM sys_migration WHERE id = 'adr-0131-organization-ownership'`",
+        "the first boot, in the same environment: `os serve -p PORT`, started with `setsid` and its output kept in a file (RUNNER environment facts: stop its process group, never the pnpm pid). Poll GET /api/v1/health until it answers 200 or the process exits, then read the output",
+        "read the marker row again with the steps[1] query, then stop the server's process group and confirm the port is free"
+      ],
+      "acceptance": [
+        {
+          "clause": "`os migrate apply --yes` on an empty database creates the tables, exits 0, and writes the organization-ownership birth marker: exactly one sys_migration row `adr-0131-organization-ownership`, verified, whose details carry the birth at this release's ownership shape generation. The apply wrote it, before any boot",
+          "oracle": "build",
+          "verify": "steps[0] exits 0 and its output reports the tables it created. steps[1] returns exactly one row with verified_at set, applied_at null, blocking 0, and details.birth.shapeGeneration equal to ORGANIZATION_OWNERSHIP_SHAPE_GENERATION (packages/spec/src/system/migration.zod.ts#ORGANIZATION_OWNERSHIP_SHAPE_GENERATION, 1 at base 688052e147). The apply's output also prints `[organization-ownership] a datastore created from empty: birth marker written (shape generation N, platform V).` (packages/runtime/src/organization-ownership-boot-guard.ts#recordOrganizationOwnershipBirth); that line is supporting evidence only, the row is the oracle. steps[3] reads the same single row unchanged, so the boot found the apply's marker and wrote none of its own",
+          "evidence": "the apply's exit code and its created-tables line, and both reads of the marker row"
+        },
+        {
+          "clause": "the first `os serve` over that database boots: it reaches its serving line, with no organization-ownership refusal",
+          "oracle": "log",
+          "verify": "steps[2]'s output carries `✓ Server is ready` (packages/cli/src/utils/format.ts#printServerReady), not its DEGRADED variant, and GET /api/v1/health answers 200 while the process runs. The output has 0 hits for `carries no organization-ownership marker`, for `refuses to start` and for `os migrate organization-ownership`. A boot that exits 1 with that refusal is a FAIL on 18.1.0 or later, and 18.0.0's known behaviour (fixtures.knownGaps[0])",
+          "evidence": "the serving line and the boot's Mode row, the health status, and the three refusal greps with their counts"
+        }
+      ],
+      "negative": [
+        "on a release that carries the fix, a fresh install whose first `os serve` after `os migrate apply` is refused as an earlier release's database is the defect #24827 fixed: FAIL",
+        "the other side of the birth decision, a database the apply did not create from empty, must get NO marker and stay refused until the ceremony runs. It is not this item's fixture: the fix's pin holds it (apply.organization-ownership-birth.integration.test.ts, case b), and the refusal itself is platform-core.v18-boot-refusals"
+      ],
+      "traps": [
+        "destructive-in-place",
+        "first-boot-cold-start"
+      ],
+      "source": [
+        ".changeset/24827-migrate-apply-birth-marker.md (minor, pending on main at base 688052e147: ships in 18.1.0)",
+        "packages/cli/src/utils/schema-migrate.ts#recordBirthOfFlushedStore",
+        "packages/runtime/src/organization-ownership-boot-guard.ts#recordOrganizationOwnershipBirth",
+        "packages/runtime/src/organization-ownership-boot-guard.ts#ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE",
+        "packages/cli/src/commands/migrate/apply.organization-ownership-birth.integration.test.ts",
+        "docs/adr/0131-total-organization-ownership-no-null-organization-id.md",
+        "#24827 (the fixed p1), #25054 (the checklist gap: QA run #24838, round 16 of wave anchor #24579)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-21",
+          "change": "initial, for #25054: no checklist clause drove the fresh-install order #24827 fixed (QA run #24838, 18.0 sweep round 4; confirmed in round 16 of wave anchor #24579). A new item, because no existing item's scope covers a fresh install's first `os serve` after `os migrate apply`: platform-core.v18-boot-refusals scopes a 17.x-shaped database (its revision 6 says the order is not added there), cli.organization-ownership-ceremony the upgrade of a database 17.x or an 18.0 pre-release created, cli.migrate-plan-apply-json an apply on a database a prior `os dev` boot already synced (its fixtures.requires[0]), platform-core.boot-health and cli.dev-boot-contract the `os dev` boot, which creates the tables and writes the birth marker itself, and cli.scaffold-first-run the published scaffold booted by `os start --artifact`, with no `os migrate apply` in it. First evidence, driven live at base 688052e147 (the showcase in this PR's worktree, its own file DB, OS_PORT 41873): `os migrate apply --yes` exited 0, printed '✓ Created/extended 107 table(s)' and '[organization-ownership] a datastore created from empty: birth marker written (shape generation 1, platform 18.0.0).'; the marker row read verified_at 2026-10-21T06:54:23.840Z, applied_at null, blocking 0, advisory 0, details birth shapeGeneration 1, platformVersion 18.0.0; the first `os serve -p 41873` printed '✓ Server is ready' with Mode production, /api/v1/health and /api/v1/ready answered 200 (health 10 s after the start), the three refusal greps counted 0, and the row read back unchanged after the boot",
+          "ref": "#25075"
+        }
+      ]
     }
   ]
 }

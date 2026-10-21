@@ -29,7 +29,7 @@ import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/
 // [#22646] The ADR-0112 catalog — `rejectCredentialAggregation`'s refusal
 // envelope carries `INVALID_FIELD` from it rather than a bare `Error`.
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 import type { FileRefusedValue } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
@@ -2411,6 +2411,47 @@ function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined):
 }
 
 /**
+ * [#24822] The fields ONE insert's static-`readonly` passes may judge: the
+ * {@link staticReadonlyInsertSubject} view, without `organization_id` when the
+ * Layer 0 wall judges that column on this insert's stored rows AND the column
+ * is the platform's injected tenant column.
+ *
+ * The wall says so itself, on the seam it installs
+ * (`PostHookWriteImageCheck.judgesOrganization`). The caller passes that
+ * member's answer, for a non-system caller only. Nothing here derives it:
+ * where no wall judged the column, the strip takes a caller's value exactly
+ * as before.
+ *
+ * Why the column is left on the row: the wall has already refused, before
+ * this engine ran, every supplied value it does not admit. It judges the
+ * stored row again after the hooks. So a value that reaches the strip is one
+ * the wall admitted, and taking it stored the active organization in its
+ * place. That is a silent replacement of an admitted input, which ADR-0105 D5
+ * and the organizations runtime's stamp rule out.
+ *
+ * ONE function for both passes that read the subject, the pre-hook withhold
+ * and the post-hook strip, so the hook view and the stored row cannot
+ * disagree about the column.
+ */
+function insertStaticReadonlySubject(
+  schema: unknown,
+  wallJudgesOrganization: boolean,
+): ReturnType<typeof staticReadonlyInsertSubject> {
+  const subject = staticReadonlyInsertSubject(schema as any);
+  if (!subject || !wallJudgesOrganization) return subject;
+  if (!Object.prototype.hasOwnProperty.call(subject.fields, SystemFieldName.ORGANIZATION_ID)) return subject;
+  // An AUTHORED `organization_id` declared `readonly: true` is the author's
+  // own declaration, and declaration is enforcement: it keeps the strip. Only
+  // the platform's injected tenant column is spared, the one
+  // `TENANT_SCOPE_FIELD_DEF` declares read-only on the platform's behalf. Which
+  // one this is, is the registry's own provenance reader, never a second copy.
+  if (resolveInjectedColumnProvenance(schema, SystemFieldName.ORGANIZATION_ID) === 'author') return subject;
+  const fields = { ...subject.fields };
+  delete fields[SystemFieldName.ORGANIZATION_ID];
+  return Object.keys(fields).length > 0 ? { name: subject.name, fields } : null;
+}
+
+/**
  * [#22306] The insert side of the #16344 invariant — a hook is never handed a
  * value that will not be stored. Takes out of ONE caller row every value the
  * create-side static-`readonly` strip will take, before the defaults and
@@ -2472,6 +2513,10 @@ function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined):
  * Pure: neither the caller's row nor `supplied` is touched. The row keeps its
  * reference when nothing was taken, else it is a shallow copy without the keys.
  *
+ * [#24822] `wallJudgesOrganization` spares `organization_id` here exactly as
+ * the post-hook strip spares it ({@link insertStaticReadonlySubject}). A value
+ * the wall judges will be stored, so the hook is shown it.
+ *
  * @returns the row the hook view is built from, and the withheld keys with the
  *   caller's values (`undefined` when nothing was withheld) — handed back after
  *   the hooks by {@link handBackWithheldInsertReadonly}.
@@ -2481,8 +2526,9 @@ function withholdInsertReadonlyFromHooks(
   row: Record<string, unknown>,
   supplied: Readonly<Record<string, unknown>>,
   preserveAudit: boolean,
+  wallJudgesOrganization: boolean,
 ): { row: Record<string, unknown>; withheld: Record<string, unknown> | undefined } {
-  let subject = staticReadonlyInsertSubject(schema as any);
+  let subject = insertStaticReadonlySubject(schema, wallJudgesOrganization);
   if (subject && preserveAudit) {
     const fields = { ...subject.fields };
     for (const name of AUDIT_PROVENANCE_FIELDS) delete fields[name];
@@ -3720,6 +3766,29 @@ export interface OperationContext {
 export interface PostHookWriteImageCheck {
   evaluate(rows: readonly Record<string, unknown>[]): void | Promise<void>;
   honoured?: boolean;
+  /**
+   * [#24822] Declared by the installer, and only by it: on an `insert`,
+   * `evaluate` holds every row's `organization_id` to the Layer 0 tenant wall.
+   * It admits the value or refuses the write by throwing.
+   * `@objectstack/plugin-security` sets it at step 3.7, only where it
+   * composes the wall's own parts into the insert's seam. A seam that carries
+   * a business `check` alone does not judge the organization, and neither
+   * does a platform operator's seam that crosses the wall, so neither sets it.
+   *
+   * {@link ObjectQL.insert} reads this member, and nothing else, to decide one
+   * thing: whether a non-system caller's explicit `organization_id` stays on
+   * the row for that judgement or is taken by the static-`readonly` strip
+   * (the platform's tenant column declares `readonly: true`). Set, the value
+   * is stored as sent where the wall admits it and refused where it does not.
+   * It is never silently replaced by the active organization (ADR-0105 D5).
+   * Only the platform's injected column is spared. An AUTHORED
+   * `organization_id` declared `readonly: true` keeps the strip.
+   * Absent or `false`, the strip runs exactly as before. The engine never
+   * sets it, and never derives it from the posture or the context: that
+   * would be a mirror of the wall, and a mirror is wider than the wall
+   * wherever the wall is not mounted.
+   */
+  judgesOrganization?: boolean;
 }
 
 /**
@@ -4649,6 +4718,49 @@ function stampObjectPackage(def: ServiceObject, packageId: string, packageVersio
  * `allowed` of its `explain`.
  */
 type ReadableIdsSecurity = Pick<ISecurityService, 'getReadFilter'> & Partial<Pick<ISecurityService, 'canReadObject' | 'explain'>>;
+
+/** The three resolutions of the `security` service (`ObjectQL#resolveReadableIdsSecurity`). */
+type ReadableIdsSecurityResolution =
+  | { kind: 'usable'; svc: ReadableIdsSecurity }
+  | { kind: 'absent' }
+  | { kind: 'unusable'; why: string };
+
+/**
+ * [ADR-0139 D2, D6 as amended] One read's `ReadableIds` composition, carried
+ * through the chain of composed scopes (`ObjectQL#composeReadableIdsChain`):
+ * the read's object and verb (every refusal names them), the security
+ * resolution made once for the read, the caller's context handed to every
+ * level as it stands, and the answers — per parent object, `{ scope }` with
+ * the scope already composed, or `null` for `$in: []` — so a parent is asked
+ * once per read at whichever level it first appears.
+ */
+interface ReadableIdsChain {
+  readonly object: string;
+  readonly operation: 'find' | 'findOne' | 'count' | 'aggregate';
+  readonly security: ReadableIdsSecurityResolution;
+  readonly context: ExecutionContext | undefined;
+  readonly answers: Map<string, { scope: FilterCondition | undefined } | null>;
+}
+
+/**
+ * [ADR-0139 D6, as amended — the nested master chain] How deep a chain of
+ * composed scopes the engine composes: the scope answered for a leaf in the
+ * read's own `where` is one scope deep, the scope answered for a leaf inside
+ * it is two, and so on down a master-detail chain whose every master is
+ * itself `controlled_by_parent`. A chain deeper than this is refused by name.
+ *
+ * A COST ceiling, not a semantic rule, and the same cut as the
+ * `controlled_by_parent` derivation's (`CBP_MAX_CHAIN_DEPTH`,
+ * `packages/plugins/plugin-security`): a detail with seven derived masters
+ * above it composes, an eighth derived master is refused there and here.
+ * Every authored chain in this repository is one hop, the deepest any consumer
+ * has asked for is two, and 8 is four times that. Termination needs no bound —
+ * the chain refuses a parent already on its branch — so what this caps is the
+ * statement the driver compiles, one nested subquery per level. At the bound
+ * the read is REFUSED, loud (D5's envelope), ⛔ never composed partway and
+ * never answered "no restriction".
+ */
+const READABLE_IDS_MAX_CHAIN_DEPTH = 8;
 
 /**
  * [ADR-0139 D2] The engine slot where `ObjectQLPlugin` puts the SOURCE the
@@ -6124,10 +6236,7 @@ export class ObjectQL implements IObjectQLEngine {
    *    nor `explain`;
    *  - **usable** — ask it.
    */
-  private resolveReadableIdsSecurity():
-    | { kind: 'usable'; svc: ReadableIdsSecurity }
-    | { kind: 'absent' }
-    | { kind: 'unusable'; why: string } {
+  private resolveReadableIdsSecurity(): ReadableIdsSecurityResolution {
     // Read from the engine slot at use (see SECURITY_SERVICE_SOURCE_SLOT), never cached.
     const source = (this as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT];
     if (source === undefined || source === null) return { kind: 'absent' };
@@ -6188,6 +6297,21 @@ export class ObjectQL implements IObjectQLEngine {
    * answer that context answers the deny sentinel, and step 5 turns it into
    * `$in: []`, closed.
    *
+   * [ADR-0139 D6, as amended — the nested master chain] A scope the service
+   * answers in step 5 may itself carry a leaf: a parent whose own read scope
+   * is derived from ITS master (a `controlled_by_parent` detail whose master
+   * is `controlled_by_parent` too) is scoped `{ master_fk: { $in:
+   * ReadableIds.of(G) } }`, and a leaf handed to a driver uncomposed is
+   * refused there (D3), never read as "no restriction". So every leaf a
+   * composed scope carries is composed the same way, BEFORE the leaf that
+   * encloses it — the same five steps, the same caller context at every level,
+   * recursively ({@link composeReadableIdsChain}). The driver then receives one
+   * composed leaf whose scope holds composed leaves, and compiles one statement
+   * with the subqueries nested. Each parent is asked once per read, at
+   * whichever level it first appears; a chain that returns to a parent already
+   * on its branch, or runs deeper than {@link READABLE_IDS_MAX_CHAIN_DEPTH}
+   * scopes, is refused by name (D5's envelope), not composed partway.
+   *
    * Nothing is memoised across calls. `aggregate`'s `having` and its
    * aggregations' own filters are judged here too, so a leaf a middleware
    * wrote there is refused rather than evaluated in memory.
@@ -6207,7 +6331,6 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const sites = collectComposableReadableIds(object, operation, ast.where, 'where');
     if (sites.length === 0) return ast;
-    const parents = this.refuseUncomposableReadableIdsClasses(object, operation, sites);
 
     const security = this.resolveReadableIdsSecurity();
     if (security.kind !== 'usable' && !this.readableIdsSecurityReported.has(security.kind)) {
@@ -6219,19 +6342,100 @@ export class ObjectQL implements IObjectQLEngine {
         'Reported once for this engine; later leaves are answered the same way.',
       );
     }
-    const answers = new Map<string, { scope: FilterCondition | undefined } | null>();
+    const chain: ReadableIdsChain = { object, operation, security, context, answers: new Map() };
+    const where = await this.composeReadableIdsChain(chain, ast.where, sites, []);
+    return { ...ast, where };
+  }
+
+  /**
+   * [ADR-0139 D2, D6 as amended] Compose the leaves at `sites` in `node` —
+   * the read's `where` at the top level, a parent's composed scope below it —
+   * and, first, every leaf a scope answered for one of their parents carries,
+   * recursively. Returns `node` rewritten copy-on-write, every leaf replaced
+   * by its composed form or `[]`.
+   *
+   * `ancestors` are the parents whose scopes enclose `node`, outermost first:
+   * empty for the read's own `where`, `[P]` inside P's scope, `[P, G]` inside
+   * the scope G answered within it. Per distinct parent of `sites`, in walk
+   * order:
+   *
+   *  1. D5's two classes are refused by name, exactly as at the top level
+   *     ({@link refuseUncomposableReadableIdsClasses}): a nested parent an
+   *     object-scoped middleware narrows, or one bound to another datasource
+   *     than the read's object, is refused — the whole chain compiles into the
+   *     read's one statement, on the read's datasource.
+   *  2. A parent already answered on this read — at any level — is not asked
+   *     again: its composed scope is reused by reference.
+   *  3. A parent already on `ancestors` is a cycle (its own scope, or a scope
+   *     inside it, reaches back to it); a parent whose scope would be the
+   *     chain's scope number {@link READABLE_IDS_MAX_CHAIN_DEPTH} + 1 is past
+   *     the bound. Both are refused by name, `INTERNAL_ERROR` / 500, before
+   *     the service is asked about that parent: a chain the engine cannot
+   *     compose whole is not composed partway, and ⛔ never answered "no
+   *     restriction".
+   *  4. The parent is asked both halves ({@link readableIdsScopeOf}) with the
+   *     read's context as it stands; a scope that carries leaves is composed
+   *     through this method first, under `[...ancestors, parent]`, and the
+   *     rewritten scope is what the parent's leaf is composed with. The
+   *     provenance mark the scope carries (`'policy'`) survives the rewrite.
+   *
+   * A nested leaf outside a `$in` comparand, or a composed leaf the engine did
+   * not compose, inside an answered scope is refused by the same walk that
+   * refuses it in a caller's `where` ({@link collectComposableReadableIds}):
+   * the scope is the `where` of a read of its parent and is judged as one.
+   */
+  private async composeReadableIdsChain<N>(
+    chain: ReadableIdsChain,
+    node: N,
+    sites: readonly ComposableReadableIdsSite[],
+    ancestors: readonly string[],
+  ): Promise<N> {
+    const { object, operation } = chain;
+    const parents = this.refuseUncomposableReadableIdsClasses(object, operation, sites);
     for (const parent of parents) {
-      answers.set(parent, security.kind === 'usable'
-        ? await this.readableIdsScopeOf(object, operation, parent, security.svc, context)
-        : null);
+      if (chain.answers.has(parent)) continue;
+      const site = sites.find((s) => s.leaf.object === parent)!;
+      const branch = [object, ...ancestors, parent];
+      if (ancestors.includes(parent)) {
+        throw readableIdsRefusalError(
+          object,
+          `${operation}('${object}'): ${describeReadableIdsLeaf(site.at, site.leaf)}, inside the read scope of ` +
+          `'${ancestors[ancestors.length - 1]}', and the engine composes no such leaf: the chain of read scopes ` +
+          `${branch.join(' -> ')} returns to '${parent}', a cycle. The query was NOT run and no driver was asked. ` +
+          `A parent's read scope cannot be derived from its own readable ids; fix the read scope the security ` +
+          `service answers for '${ancestors[ancestors.length - 1]}'.`,
+        );
+      }
+      if (ancestors.length >= READABLE_IDS_MAX_CHAIN_DEPTH) {
+        throw readableIdsRefusalError(
+          object,
+          `${operation}('${object}'): ${describeReadableIdsLeaf(site.at, site.leaf)}, and the engine composes no ` +
+          `such leaf: the chain of read scopes ${branch.join(' -> ')} is ${ancestors.length + 1} scopes deep, and the ` +
+          `engine composes a chain at most ${READABLE_IDS_MAX_CHAIN_DEPTH} scopes deep. The query was NOT run and ` +
+          `no driver was asked. A master-detail chain this deep is not one the engine composes; read '${parent}' as ` +
+          'the caller first and match its ids with a list, or shorten the chain.',
+        );
+      }
+      const answer = chain.security.kind === 'usable'
+        ? await this.readableIdsScopeOf(object, operation, parent, chain.security.svc, chain.context)
+        : null;
+      if (answer === null || answer.scope === undefined) {
+        chain.answers.set(parent, answer);
+        continue;
+      }
+      // The scope is the `where` of a read of `parent`: judged as one, and
+      // the leaves it carries are composed before this parent's leaf is.
+      const nested = collectComposableReadableIds(object, operation, answer.scope, 'where', `${site.at}.scope`);
+      chain.answers.set(parent, nested.length === 0
+        ? answer
+        : { scope: await this.composeReadableIdsChain(chain, answer.scope, nested, [...ancestors, parent]) });
     }
     // A parent with no answer (`null`, or never asked: not registered) is
     // `$in: []`.
-    const where = composeReadableIdsLeaves(ast.where, (leaf) => {
-      const answer = answers.get(leaf.object);
+    return composeReadableIdsLeaves(node, (leaf) => {
+      const answer = chain.answers.get(leaf.object);
       return answer ? ReadableIds.compose(leaf, answer.scope) : [];
     });
-    return { ...ast, where };
   }
 
   /**
@@ -15852,6 +16056,14 @@ export class ObjectQL implements IObjectQLEngine {
       // write. `opCtx.data` keeps the caller's payload; only the hook view is
       // built from the withheld rows. ⛔ `isSystem` withholds nothing — the
       // strips do not run for it, so every value it sends is stored.
+      //
+      // [#24822] Read ONCE, here, and by both static-`readonly` passes: whether
+      // the Layer 0 wall judges this insert's `organization_id` on the stored
+      // rows. The wall declares it on the seam it installed, and the engine
+      // reads that member and nothing else (`insertStaticReadonlySubject`).
+      // The middleware chain has run by now, so the seam is in place.
+      const wallJudgesOrganization =
+        !opCtx.context?.isSystem && opCtx.postHookWriteImageCheck?.judgesOrganization === true;
       const insertWithheld: Array<Record<string, unknown> | undefined> = [];
       const hookViewSource: unknown[] = (isBatch ? (opCtx.data as unknown[]) : [opCtx.data]).slice();
       if (!opCtx.context?.isSystem) {
@@ -15863,6 +16075,7 @@ export class ObjectQL implements IObjectQLEngine {
           if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
           const hidden = withholdInsertReadonlyFromHooks(
             hideSchema, row as Record<string, unknown>, suppliedPerRow[i] ?? {}, preserveAuditForHide,
+            wallJudgesOrganization,
           );
           insertWithheld[i] = hidden.withheld;
           hookViewSource[i] = hidden.row;
@@ -16280,7 +16493,14 @@ export class ObjectQL implements IObjectQLEngine {
         // to anything", so a user-writable bucket is judged here exactly as it
         // is on update); `null` — no such field on this object — is the cheap
         // exit every ordinary insert takes.
-        const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
+        //
+        // [#24822] ...without `organization_id` where the Layer 0 wall judges it
+        // on this insert's stored rows (`wallJudgesOrganization`, read once
+        // above for the withhold too). That value is stored as sent or refused
+        // by the wall, never taken here and replaced by the active organization.
+        // So it is not reported or refused under `strictReadonlyWrites` either:
+        // strict refuses exactly what this strip takes.
+        const readonlySubject = insertStaticReadonlySubject(schemaForValidation, wallJudgesOrganization);
         if (readonlySubject) {
           const preserveAuditIgnored: string[] = [];
           for (let i = 0; i < rows.length; i++) {
