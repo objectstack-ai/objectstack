@@ -485,8 +485,11 @@ interface RlsFilterOptions {
    *     the walk covers that master's write is stated once, at that call site's
    *     `masterGateCoversThisWrite` bullet — not restated here;
    *   • the BULK write path does NOT, and must not: with no single id,
-   *     `assertControlledByParentWrite` returns early and nothing replaces the
-   *     floor. Reading the posture alone here would have widened bulk writes on
+   *     `assertControlledByParentWrite` judges every master the write reaches
+   *     and refuses on the first the caller may not edit, but that is a
+   *     verdict, not a row scope, so the floor stays — dropping it here would
+   *     widen the rows a member writes, a separate decision. Reading the
+   *     posture alone here would have widened bulk writes on
    *     every `controlled_by_parent` detail to "any row under a READABLE
    *     master", which no gate had authorized;
    *   • `getReadFilter` and `checkAuthoredRowWrite` do not, and need not: the
@@ -3071,7 +3074,8 @@ export class SecurityPlugin implements Plugin {
           // master gate (step 2.8, immediately below) run on the same middleware
           // pass, and 2.8's condition is a strict SUPERSET of this one: the same
           // `permissionSets.length > 0 && userId && this.ql` triple, the same
-          // single target id (`extractSingleId`, or it returns early), and one
+          // single target id (`extractSingleId`; with none, 2.8 judges every
+          // master the write reaches instead), and one
           // additional operation (`insert`, which has no pre-image and so no
           // floor to drop). Reaching this line therefore PROVES the master gate
           // will answer the same write — the maintainer's precondition, held
@@ -3230,7 +3234,9 @@ export class SecurityPlugin implements Plugin {
       // path by checking the master instead — and the master's own write
       // filter, since #7665, derives from its SELECT narrowing when no
       // write-class policy applies, so a select-only master gates its details
-      // by visibility too.
+      // by visibility too. [#25012] The same gate answers a write that
+      // addresses no single row: the masters of the rows it selects are each
+      // judged, and one the caller may not edit refuses the whole write.
       if (
         ['insert', 'update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation) &&
         permissionSets.length > 0 &&
@@ -9112,9 +9118,20 @@ export class SecurityPlugin implements Plugin {
    * ⛔ Not a blanket refusal for chained declarations: the single-level case is
    * the loop's first iteration and its answer is byte-for-byte the old one.
    *
-   * v1 scope: single-id writes. Bulk writes flow through the AST and are already
-   * scoped by the controlled-by-parent READ filter (to readable masters) — which
-   * since the ADR-0055 amendment is itself chain-composed, so the two faces still agree.
+   * [#25012] EVERY write shape asks it. A write that addresses no single row —
+   * the engine's predicate path, which `extractSingleId` cannot name a target
+   * for — is judged per MASTER: the gate collects the masters of the detail
+   * rows the caller's own predicate selects and the caller can read
+   * ({@link controlledByParentPredicateWriteMasters}), and runs the same chain
+   * walk on each ({@link assertControlledByParentChainEditable}). The first
+   * refusal is the answer, in the by-id leg's own envelope, and nothing is
+   * written. It is a VERDICT, never a scope: no master set is composed into the
+   * write's predicate (ADR-0055 §2's master id set is the READ scope, and its
+   * mechanism is decided on its own record), so a write that selects one such
+   * row writes none of them. A write whose rows all sit under masters the caller
+   * may edit lands exactly as before: the read scope, the platform ownership
+   * floor and the detail's own write policy still decide which of them it
+   * writes, and nothing here vouches the floor away.
    *
    * [#7474] SIX conditions refuse a write here, and they are NOT one verdict.
    * Three are genuine authorization answers (no object-level `update` on the
@@ -9207,7 +9224,28 @@ export class SecurityPlugin implements Plugin {
       masterId = data && typeof data === 'object' && !Array.isArray(data) ? (data as any)[rel.fk] : undefined;
     } else {
       const targetId = this.extractSingleId(opCtx);
-      if (targetId == null) return; // bulk write — scoped by the read filter on the AST
+      if (targetId == null) {
+        // [#25012] No single target row. Either the engine refuses this shape
+        // itself before anything is written (its `reject` verdict — nothing to
+        // judge here), or it is the engine's predicate path, read from the
+        // engine's own dispatch predicates exactly as the write doors read them
+        // ({@link addressedPredicateWrite}), and every master the write would
+        // write details under is judged by the same walk a by-id write runs.
+        const predicatePath =
+          operation === 'update'
+            ? opCtx.data != null &&
+              typeof opCtx.data === 'object' &&
+              resolveEngineUpdateDispatch(opCtx.data as EngineUpdateDispatchData, opCtx.options).kind === 'multi'
+            : operation === 'delete' &&
+              resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
+        if (!predicatePath) return;
+        for (const predicateMasterId of await this.controlledByParentPredicateWriteMasters(object, operation, rel, opCtx)) {
+          await this.assertControlledByParentChainEditable(
+            permissionSets, object, rel, predicateMasterId, context, opCtx, masterEditDenied, denyMasterEdit,
+          );
+        }
+        return;
+      }
       detailRecordId = targetId;
       const row = await this.readRowById(object, targetId, { isSystem: true });
       if (!row) throw new DetailRecordNotFoundError(object, operation, targetId);
@@ -9331,6 +9369,41 @@ export class SecurityPlugin implements Plugin {
       throw new MasterReferenceMissingError(object, operation, rel.fk, detailRecordId);
     }
 
+    await this.assertControlledByParentChainEditable(
+      permissionSets, object, rel, masterId, context, opCtx, masterEditDenied, denyMasterEdit,
+    );
+  }
+
+  /**
+   * [ADR-0055 amendment / #25012] The chain walk of
+   * {@link assertControlledByParentWrite}: the three master-edit legs
+   * ({@link assertMasterRowEditable}) run on ONE master row, then on that
+   * master's own master, hop by hop, until a master that governs its own rows
+   * is reached — with the cycle guard and the depth bound
+   * ({@link CBP_MAX_CHAIN_DEPTH}), each failing closed.
+   *
+   * ⚠️ Extraction, not a rewrite — the body is the walk the gate ran inline,
+   * moved verbatim so that the gate can run it once per master: once for an
+   * insert or a by-id write, once for each master a predicate write selects
+   * rows under ({@link controlledByParentPredicateWriteMasters}). There must
+   * stay exactly one walk, for the reason {@link assertMasterRowEditable} gives
+   * for its legs.
+   *
+   * `masterEditDenied` / `denyMasterEdit` are the gate's own refusal builders,
+   * passed in rather than rebuilt so every refusal, at every hop and for every
+   * write shape, names the CALLER's object and operation (#7474's envelope)
+   * and records its leg ({@link MASTER_EDIT_DENIAL_LEG}).
+   */
+  private async assertControlledByParentChainEditable(
+    permissionSets: PermissionSet[],
+    object: string,
+    rel: CbpRelation,
+    masterId: unknown,
+    context: any,
+    opCtx: any,
+    masterEditDenied: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => PermissionDeniedError,
+    denyMasterEdit: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => never,
+  ): Promise<void> {
     // [ADR-0055 amendment] Walk the `controlled_by_parent` chain, one hop at a time, and run
     // the SAME three master-edit legs on every hop.
     //
@@ -9394,7 +9467,7 @@ export class SecurityPlugin implements Plugin {
         );
       }
       // Read as SYSTEM — we only need this row's master FK, exactly as the
-      // detail's own FK was read above. A throw here is a store fault and
+      // gate reads the detail's own. A throw here is a store fault and
       // propagates (#7505): an outage must not be reported as an access verdict.
       const masterRow = await this.readRowById(masterObject, hopMasterId, { isSystem: true });
       if (!masterRow) {
@@ -9416,6 +9489,93 @@ export class SecurityPlugin implements Plugin {
       hopRel = nextRel;
       hopMasterId = nextMasterId;
     }
+  }
+
+  /**
+   * [#25012 / ADR-0055 §3] The masters a write that addresses no single row
+   * would write details under — what {@link assertControlledByParentWrite}
+   * judges on the engine's predicate path, one chain walk per master.
+   *
+   * WHICH ROWS. The detail rows the caller's own predicate selects AND the
+   * caller can read, asked through the read door under the request's context —
+   * the read question the write doors narrow a predicate write's matched set to
+   * ({@link readableRowsScopeForPredicateWrite}), so every row that write can
+   * reach is among them. They can be MORE than it writes: the write-class
+   * scopes (the platform ownership floor, the detail's own write policy) still
+   * leave some of them unwritten, and a row among them under a master the
+   * caller may not edit refuses the write all the same. The caller named that
+   * row and can read it, and its master too (the detail's read scope is the
+   * readable-master set), so the refusal discloses nothing the read door does
+   * not. A row the caller cannot read is never judged: it is not matched.
+   *
+   * Three outcomes:
+   *
+   *  - the distinct master ids of those rows — an empty list when the predicate
+   *    selects no row the caller can read, and nothing is refused;
+   *  - ABOVE {@link PREDICATE_WRITE_READABLE_ID_CAP} rows, the refusal the read
+   *    narrowing answers for the same count ({@link predicateWriteReadableCapError}):
+   *    masters of rows that were never enumerated cannot be judged;
+   *  - the read door's own refusal, PROPAGATED as raised — a declared 4xx (the
+   *    detail's read grant withheld, a predicate the read guard or the driver
+   *    refuses) or a store fault. ⛔ Never read as "no rows": a write whose rows
+   *    cannot be enumerated cannot have their masters judged, and admitting it
+   *    would be the unjudged write this leg exists to close.
+   *
+   * Each row's master reference is then read as SYSTEM, as the by-id leg reads
+   * its one target row's: only the reference's value is needed, and a field
+   * rule hiding it from the caller must not hide the master from this gate. A
+   * row whose reference is empty answers the by-id leg's stored-row refusal
+   * ({@link MasterReferenceMissingError}, `422`).
+   */
+  private async controlledByParentPredicateWriteMasters(
+    object: string,
+    operation: string,
+    rel: CbpRelation,
+    opCtx: any,
+  ): Promise<unknown[]> {
+    if (typeof this.ql?.find !== 'function') {
+      // Unreachable in a real deployment — `start()` registers no security
+      // middleware at all without a query engine — but a non-conforming engine
+      // double fails closed rather than admitting an unjudged write.
+      throw new Error(
+        `[Security] Cannot judge the ${operation} on '${object}' against the masters of the records it ` +
+          `selects: no query engine is available to read them.`,
+      );
+    }
+    const callerWhere = (opCtx.options as { where?: unknown } | undefined)?.where;
+    const readable = await this.ql.find(object, {
+      ...(callerWhere != null ? { where: copyOfCallerPredicate(callerWhere) } : {}),
+      fields: ['id'],
+      limit: PREDICATE_WRITE_READABLE_ID_CAP + 1,
+      // The request's envelope minus the operation-private keys, as the read
+      // narrowing asks it: on a delegated write that is the agent's context with
+      // the delegation link on it, so the rows are the ones both may read.
+      context: withoutOperationPrivateKeys((opCtx.context ?? {}) as Record<string, unknown>),
+    });
+    const rows: unknown[] = Array.isArray(readable) ? readable : [];
+    if (rows.length > PREDICATE_WRITE_READABLE_ID_CAP) {
+      throw predicateWriteReadableCapError(object, operation);
+    }
+    const ids = rows
+      .map((r) => (r && typeof r === 'object' ? (r as { id?: unknown }).id : undefined))
+      .filter((id) => id !== undefined && id !== null);
+    if (ids.length === 0) return [];
+    const stored = await this.ql.find(object, {
+      where: { id: { $in: ids } },
+      fields: ['id', rel.fk],
+      limit: ids.length,
+      context: { isSystem: true },
+    });
+    const masterIds = new Set<unknown>();
+    for (const row of Array.isArray(stored) ? stored : []) {
+      if (!row || typeof row !== 'object') continue;
+      const masterId = (row as Record<string, unknown>)[rel.fk];
+      if (masterId == null) {
+        throw new MasterReferenceMissingError(object, operation, rel.fk, (row as { id?: unknown }).id);
+      }
+      masterIds.add(masterId);
+    }
+    return [...masterIds];
   }
 
   /**

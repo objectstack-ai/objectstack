@@ -1,0 +1,298 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#24948] Deleting an organization, on the wire, on a booted multi-organization
+ * showcase (SQLite).
+ *
+ * ## The defect
+ *
+ * `POST /auth/organization/delete` runs better-auth's `deleteOrganization`,
+ * which deletes the members, then the invitations, then the organization row,
+ * with no transaction. The engine's cascade then applied the tenant column's
+ * `set_null` default to every row the organization still owned. On a store
+ * whose tenant column is NOT NULL (a ceremonied one) that failed on
+ * `sys_team.organization_id` with a 500, after the members and invitations
+ * were already gone, leaving an organization with no owner. On a store born
+ * nullable (18.0.0) it answered 200 and orphaned the teams and records to
+ * NULL. Every organization created through the door owns a default team, so
+ * on a NOT NULL store not even an empty one could be deleted.
+ *
+ * ## The contract (maintainer ruling on #24948, letter B)
+ *
+ * - (a)(c) An organization that still owns records is refused with 409
+ *   `DELETE_RESTRICTED`, naming each table and its count, before anything is
+ *   deleted: every row is exactly as it was, the caller's active organization
+ *   included.
+ * - (b) An empty organization (only its own auth structure: members,
+ *   invitations, the default team and its members, the organization-admin
+ *   grant) deletes fully, and nothing is left naming it but the append-only
+ *   `sys_activity` ledger, whose rows are kept (seat decision 6305179819). The
+ *   boot composes the audit plugin, as `os serve` does, so that ledger is live.
+ * - An organization whose only rows are an approval request (engine-owned)
+ *   and its actions (append-only) deletes too, and those rows are kept, still
+ *   naming it (seat decision 6307135388).
+ * - An organization holding a business unit is refused like one holding any
+ *   other record.
+ * - (d) The engine refuses the same delete on its own, whatever path reaches
+ *   it: the tenant column is never cleared.
+ * - (e) The Default Organization keeps the last-administrator guard's answer:
+ *   pinned in `organization-delete-federated-fixture.dogfood.test.ts`, whose
+ *   `single` boot has one (this `posture-only` boot has none).
+ *
+ * The seam pins are `packages/objectql/src/engine-organization-delete-refusal.test.ts`
+ * (the engine) and `packages/plugins/plugin-auth/src/organization-delete.test.ts`.
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { AuditPlugin } from '@objectstack/plugin-audit';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
+
+const SYSTEM_CTX = { isSystem: true };
+const PASSWORD = 'OrgDelete!Pass123';
+
+async function findRows(ql: any, object: string, where: Record<string, unknown>, limit = 500): Promise<any[]> {
+  const rows = await ql.find(object, { where, limit, context: SYSTEM_CTX });
+  return Array.isArray(rows) ? rows : (rows?.records ?? []);
+}
+
+describe('[#24948] organization delete: refused while it owns records, whole when it does not', () => {
+  let stack: VerifyStack;
+  let ql: any;
+  let ownerToken: string;
+  let adminToken: string;
+  let ownerId: string;
+  const org = { empty: '', full: '', unit: '', approval: '' };
+
+  /** Every count the delete may touch, for one organization. */
+  const snapshot = async (organizationId: string) => {
+    const teams = await findRows(ql, 'sys_team', { organization_id: organizationId });
+    const teamIds = teams.map((t) => t.id);
+    return {
+      sys_organization: (await findRows(ql, 'sys_organization', { id: organizationId })).length,
+      sys_member: (await findRows(ql, 'sys_member', { organization_id: organizationId })).length,
+      sys_invitation: (await findRows(ql, 'sys_invitation', { organization_id: organizationId })).length,
+      sys_team: teams.length,
+      sys_team_member: teamIds.length
+        ? (await findRows(ql, 'sys_team_member', { team_id: { $in: teamIds } })).length
+        : 0,
+      sys_user_permission_set: (await findRows(ql, 'sys_user_permission_set', { organization_id: organizationId })).length,
+      showcase_category: (await findRows(ql, 'showcase_category', { organization_id: organizationId })).length,
+      showcase_preference: (await findRows(ql, 'showcase_preference', { organization_id: organizationId })).length,
+    };
+  };
+  /** Rows orphaned to NULL in the tables an organization delete used to clear. */
+  const orphans = async () => ({
+    sys_team: (await findRows(ql, 'sys_team', { organization_id: null })).length,
+    showcase_category: (await findRows(ql, 'showcase_category', { organization_id: null })).length,
+  });
+  const activeOrganizationOf = async (userId: string) =>
+    (await findRows(ql, 'sys_session', { user_id: userId })).map((s) => s.active_organization_id ?? null);
+  const createOrg = async (name: string, slug: string): Promise<string> => {
+    const res = await stack.apiAs(ownerToken, 'POST', '/auth/organization/create', { name, slug });
+    expect(res.status, await res.clone().text()).toBe(200);
+    return String(((await res.json()) as { id: string }).id);
+  };
+  // Written in system context rather than through `invite-member`: the door
+  // also queues the invitation EMAIL, a `sys_email` row naming the
+  // organization, and whether that row is the organization's own structure is
+  // an open question on #24948, so the refusal counts it today.
+  const invite = async (organizationId: string, email: string) => {
+    await ql.insert('sys_invitation', {
+      organization_id: organizationId, email, role: 'member', status: 'pending',
+      inviter_id: ownerId, expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    }, { context: SYSTEM_CTX });
+  };
+  const deleteOrg = (token: string, organizationId: string) =>
+    stack.apiAs(token, 'POST', '/auth/organization/delete', { organizationId });
+
+  beforeAll(async () => {
+    // The audit plugin is composed, as `os serve` composes it: its
+    // `sys_activity` ledger names every organization from its creation on,
+    // and the delete writes rows to it itself.
+    stack = await bootShowcase({ multiTenant: 'posture-only', extraPlugins: [new AuditPlugin()] });
+    ql = await stack.kernel.getServiceAsync<any>('objectql');
+    ownerToken = await stack.signUp('org-delete.owner@verify.test', PASSWORD, 'Org delete owner');
+    adminToken = await stack.signUp('org-delete.admin@verify.test', PASSWORD, 'Org delete admin');
+    [{ id: ownerId }] = await findRows(ql, 'sys_user', { email: 'org-delete.owner@verify.test' }, 1);
+    const [{ id: adminId }] = await findRows(ql, 'sys_user', { email: 'org-delete.admin@verify.test' }, 1);
+
+    // Both through the door: each is born with its default team, the team
+    // member and the owner's organization-admin grant.
+    org.empty = await createOrg('Org Delete Empty', 'org-delete-empty');
+    org.full = await createOrg('Org Delete Full', 'org-delete-full');
+    org.unit = await createOrg('Org Delete Unit', 'org-delete-unit');
+    org.approval = await createOrg('Org Delete Approval', 'org-delete-approval');
+    // [seat decision 6307135388] What an approval leaves behind: the request
+    // (engine-owned) and its actions (append-only). The platform writes both.
+    const now = new Date().toISOString();
+    await ql.insert('sys_approval_request', {
+      id: 'apr_org_delete', organization_id: org.approval, process_name: 'expense_approval',
+      object_name: 'showcase_category', record_id: 'cat_gone', status: 'approved', created_at: now,
+    }, { context: SYSTEM_CTX });
+    for (const [id, action] of [['apa_org_delete_1', 'submit'], ['apa_org_delete_2', 'approve']]) {
+      await ql.insert('sys_approval_action', {
+        id, organization_id: org.approval, request_id: 'apr_org_delete', action, created_at: now,
+      }, { context: SYSTEM_CTX });
+    }
+    // A business unit is a record its administrator created, not structure.
+    await ql.insert('sys_business_unit', { name: 'Field Ops', kind: 'department', organization_id: org.unit }, { context: SYSTEM_CTX });
+    for (const id of [org.empty, org.full]) {
+      await invite(id, `invitee.${id}@verify.test`);
+      // An `admin` member: refused by the vendor, so never told a count.
+      await ql.insert('sys_member', { user_id: String(adminId), organization_id: id, role: 'admin' }, { context: SYSTEM_CTX });
+    }
+    // The records the full organization owns: two tables.
+    for (const name of ['Cat A', 'Cat B']) {
+      await ql.insert('showcase_category', { name, organization_id: org.full }, { context: SYSTEM_CTX });
+    }
+    await ql.insert('showcase_preference', { name: 'Pref A', organization_id: org.full }, { context: SYSTEM_CTX });
+    // The caller's active organization is a write the vendor makes before its
+    // delete hook; a refused delete must not make it.
+    const active = await stack.apiAs(ownerToken, 'POST', '/auth/organization/set-active', { organizationId: org.full });
+    expect(active.status, await active.clone().text()).toBe(200);
+  }, 240_000);
+
+  afterAll(async () => {
+    await stack?.stop?.();
+  });
+
+  it('PREMISE: a door-created organization owns its auth structure, and the full one owns records', async () => {
+    for (const id of [org.empty, org.full]) {
+      const counts = await snapshot(id);
+      expect(counts.sys_organization).toBe(1);
+      expect(counts.sys_member).toBe(2);
+      expect(counts.sys_invitation).toBe(1);
+      expect(counts.sys_team).toBe(1);
+      expect(counts.sys_team_member).toBe(1);
+      expect(counts.sys_user_permission_set).toBeGreaterThanOrEqual(1);
+    }
+    expect((await snapshot(org.full)).showcase_category).toBe(2);
+    expect((await snapshot(org.full)).showcase_preference).toBe(1);
+  });
+
+  it('(a)(c) an organization that owns records is refused 409 with each table and its count, and nothing changes', async () => {
+    const before = await snapshot(org.full);
+    const orphansBefore = await orphans();
+    const activeBefore = await activeOrganizationOf(ownerId);
+    expect(activeBefore, 'PREMISE: the owner has the organization active').toContain(org.full);
+
+    const res = await deleteOrg(ownerToken, org.full);
+
+    expect(res.status, await res.clone().text()).toBe(409);
+    const body = (await res.json()) as { code?: string; dependents?: Array<{ object: string; count: number }> };
+    expect(body.code).toBe('DELETE_RESTRICTED');
+    expect([...(body.dependents ?? [])].sort((x, y) => x.object.localeCompare(y.object))).toEqual([
+      { object: 'showcase_category', count: 2 },
+      { object: 'showcase_preference', count: 1 },
+    ]);
+    // Counts, never values: no record's name rides the refusal.
+    expect(JSON.stringify(body)).not.toContain('Cat A');
+
+    expect(await snapshot(org.full)).toEqual(before);
+    expect(await orphans()).toEqual(orphansBefore);
+    expect(await activeOrganizationOf(ownerId)).toEqual(activeBefore);
+  });
+
+  it('a caller the vendor refuses gets the vendor refusal, never a count', async () => {
+    const res = await deleteOrg(adminToken, org.full);
+    expect(res.status, await res.clone().text()).toBe(403);
+    const body = (await res.json()) as { code?: string; dependents?: unknown };
+    expect(body.code).toBe('YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_ORGANIZATION');
+    expect(body.dependents).toBeUndefined();
+  });
+
+  it('(b) an empty organization deletes fully: its auth structure goes with it, and nothing is orphaned', async () => {
+    const orphansBefore = await orphans();
+    const ledgerBefore = await findRows(ql, 'sys_activity', { organization_id: org.empty });
+    expect(ledgerBefore.length, 'PREMISE: the activity ledger names the organization from its creation').toBeGreaterThan(0);
+    // [seat decision 6305996369] The audit log's attribution, `tenant_id`, is no
+    // tenant column; it is kept too.
+    const auditBefore = await findRows(ql, 'sys_audit_log', { tenant_id: org.empty });
+    expect(auditBefore.length, 'PREMISE: the audit log attributes rows to the organization').toBeGreaterThan(0);
+
+    const res = await deleteOrg(ownerToken, org.empty);
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    // [seat decision 6305179819] The append-only ledger refused nothing, and
+    // its rows are kept, still naming the deleted organization: none deleted,
+    // none cleared (the delete adds rows of its own).
+    const ledgerAfter = await findRows(ql, 'sys_activity', { organization_id: org.empty });
+    const keptIds = new Set(ledgerAfter.map((r) => r.id));
+    expect(ledgerBefore.every((r) => keptIds.has(r.id)), 'every ledger row is kept').toBe(true);
+    expect(await findRows(ql, 'sys_activity', { organization_id: null })).toEqual([]);
+    const auditAfter = new Set((await findRows(ql, 'sys_audit_log', { tenant_id: org.empty })).map((r) => r.id));
+    expect(auditBefore.every((r) => auditAfter.has(r.id)), 'every audit row keeps naming the organization').toBe(true);
+
+    expect(await snapshot(org.empty)).toEqual({
+      sys_organization: 0,
+      sys_member: 0,
+      sys_invitation: 0,
+      sys_team: 0,
+      sys_team_member: 0,
+      sys_user_permission_set: 0,
+      showcase_category: 0,
+      showcase_preference: 0,
+    });
+    expect(await orphans()).toEqual(orphansBefore);
+  });
+
+  it('an organization whose only rows are an approval request and its actions deletes, and keeps them naming it', async () => {
+    const requestsBefore = await findRows(ql, 'sys_approval_request', { organization_id: org.approval });
+    const actionsBefore = await findRows(ql, 'sys_approval_action', { organization_id: org.approval });
+    expect(requestsBefore.map((r) => r.id), 'PREMISE: the request names the organization').toEqual(['apr_org_delete']);
+    expect(actionsBefore.length, 'PREMISE: its actions name the organization').toBe(2);
+
+    const res = await deleteOrg(ownerToken, org.approval);
+
+    // [seat decision 6307135388] Engine-owned and append-only rows refuse
+    // nothing, and are kept, still naming the deleted organization.
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await findRows(ql, 'sys_organization', { id: org.approval })).toEqual([]);
+    expect(await findRows(ql, 'sys_approval_request', { organization_id: org.approval })).toEqual(requestsBefore);
+    expect(await findRows(ql, 'sys_approval_action', { organization_id: org.approval })).toEqual(actionsBefore);
+    expect(await findRows(ql, 'sys_approval_request', { organization_id: null })).toEqual([]);
+    expect(await findRows(ql, 'sys_approval_action', { organization_id: null })).toEqual([]);
+  });
+
+  it('an organization holding only a business unit is refused 409 with its count, and nothing changes', async () => {
+    const before = await snapshot(org.unit);
+    const units = await findRows(ql, 'sys_business_unit', { organization_id: org.unit });
+
+    const res = await deleteOrg(ownerToken, org.unit);
+
+    expect(res.status, await res.clone().text()).toBe(409);
+    const body = (await res.json()) as { code?: string; dependents?: unknown };
+    expect(body.code).toBe('DELETE_RESTRICTED');
+    expect(body.dependents).toEqual([{ object: 'sys_business_unit', count: 1 }]);
+    expect(await snapshot(org.unit)).toEqual(before);
+    expect(await findRows(ql, 'sys_business_unit', { organization_id: org.unit })).toEqual(units);
+  });
+
+  it('(d) the engine refuses the same delete on its own, and clears no tenant column', async () => {
+    const before = await snapshot(org.full);
+    const err: any = await ql
+      .delete('sys_organization', { where: { id: org.full }, context: SYSTEM_CTX })
+      .then(() => null, (e: unknown) => e);
+
+    expect(err?.code).toBe('DELETE_RESTRICTED');
+    expect(err?.status).toBe(409);
+    const named = (err?.dependents ?? []).map((d: { object: string }) => d.object);
+    expect(named).toEqual(expect.arrayContaining(['showcase_category', 'showcase_preference', 'sys_team']));
+    expect(await snapshot(org.full)).toEqual(before);
+  });
+
+  it('the operator\'s remedy: once its records are deleted, the organization deletes', async () => {
+    for (const object of ['showcase_category', 'showcase_preference']) {
+      for (const row of await findRows(ql, object, { organization_id: org.full })) {
+        await ql.delete(object, { where: { id: row.id }, context: SYSTEM_CTX });
+      }
+    }
+
+    const res = await deleteOrg(ownerToken, org.full);
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    const after = await snapshot(org.full);
+    expect(Object.values(after).every((n) => n === 0), JSON.stringify(after)).toBe(true);
+  });
+});

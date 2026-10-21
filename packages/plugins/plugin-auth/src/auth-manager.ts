@@ -209,6 +209,15 @@ import {
   retireHeldKeyrings,
   UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS,
 } from './signing-key-read-cache.js';
+import {
+  ORGANIZATION_DELETE_PATH,
+  ORGANIZATION_DELETE_REFUSAL_CODE,
+  defaultOrganizationDeleteRefusal,
+  isDefaultOrganizationTarget,
+  organizationDeleteRefusal,
+  organizationNotEmptyBody,
+  removeOrganizationAuthStructure,
+} from './organization-delete.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -1637,6 +1646,18 @@ export class AuthManager {
    * into scope — so the map is not reachable from `ctx` at that point.
    */
   private orgRolesMap: Record<string, any> | undefined;
+  /**
+   * [#24948] The last-administrator guard's question about an organization
+   * delete (`LastAdminGuardHandle.judgeOrganizationDelete`), handed over by
+   * `AuthPlugin` once the guard is registered. Absent on a composition without
+   * the guard, where the Default Organization has no such protection to move.
+   */
+  private organizationDeleteStandingJudge?: (organizationId: string) => Promise<void>;
+
+  /** [#24948] See {@link organizationDeleteStandingJudge}. */
+  setOrganizationDeleteStandingJudge(judge: (organizationId: string) => Promise<void>): void {
+    this.organizationDeleteStandingJudge = judge;
+  }
   // ADR-0069 — cached "does any org require MFA" flag (per-org tightening).
   // Refreshed lazily with a TTL so isAuthGateActive() stays synchronous + cheap.
   private _orgMfaCache: { value: boolean; at: number } = { value: false, at: 0 };
@@ -2422,6 +2443,16 @@ export class AuthManager {
           if (ctx?.path === '/organization/remove-member') {
             await this.assertRemoveMemberPermitted(ctx);
             // fall through — the vendor still re-decides everything it owns
+          }
+
+          // ── #24948: organization delete refuses while records remain ──
+          // Before the vendor's handler, so a refused delete writes nothing:
+          // the vendor clears the caller's active organization and deletes the
+          // members before its own `beforeDeleteOrganization` hook runs.
+          // `organization-delete.ts` carries the contract.
+          if (ctx?.path === ORGANIZATION_DELETE_PATH) {
+            await this.assertOrganizationDeletable(ctx);
+            // fall through — the vendor still authorizes and deletes
           }
 
           // ── #9714: a revoke that identifies NO record must not report ──
@@ -3862,6 +3893,21 @@ export class AuthManager {
                 code: ORGANIZATION_SLUG_LOCKED_CODE,
               });
             }
+          },
+          // [#24948] The teams, their members and the organization-admin
+          // grants are the organization's own auth structure, and better-auth's
+          // delete leaves them behind. They go here, inside the request's
+          // transaction (`handleRequest`), after the `hooks.before` refusal has
+          // found no records left. The Default Organization is the
+          // last-administrator guard's to answer, so its structure is not
+          // touched: when that guard admits the delete, the engine's own
+          // refusal still holds while anything names it.
+          beforeDeleteOrganization: async ({ organization }: any) => {
+            const engine = this.getDataEngine();
+            const organizationId = organization?.id;
+            if (!engine || typeof organizationId !== 'string' || !organizationId) return;
+            if (await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()))) return;
+            await removeOrganizationAuthStructure(engine, organizationId);
           },
         },
         // No mailer is wired in framework yet — log the accept URL so
@@ -6683,8 +6729,14 @@ export class AuthManager {
           return scimRequestScope.run({ scim: true }, runHandler);
         }
       : runHandler;
+    // [#24948] An organization delete is one unit of work on the same terms:
+    // better-auth clears the caller's active organization and deletes the
+    // members and invitations before the organization row, with no
+    // transaction, and the engine's refusal on that last row used to leave the
+    // organization standing with no owner.
     const vendorResponse =
-      endpointPath !== undefined && SESSION_ERASURE_PATHS.has(endpointPath)
+      endpointPath !== undefined &&
+      (SESSION_ERASURE_PATHS.has(endpointPath) || endpointPath === ORGANIZATION_DELETE_PATH)
         ? await this.runSubjectErasureAtomically(runRequest)
         : await runRequest();
 
@@ -6968,6 +7020,11 @@ export class AuthManager {
    * - side effects outside the datasource (a sent email, secondary-storage
    *   session state) are not transactional and are not undone by a rollback.
    *   `/admin/remove-user` sends nothing, so no path here relies on it.
+   *
+   * [#24948] `/organization/delete` runs here too, on the same terms and for
+   * the same reason: the vendor's member, invitation and organization deletes
+   * are separate adapter calls, and the teams and grants removed by
+   * `beforeDeleteOrganization` must roll back with them.
    */
   private async runSubjectErasureAtomically(
     run: () => Promise<Response>,
@@ -8044,6 +8101,94 @@ export class AuthManager {
    *    the same roles map we hand the org plugin, so this never becomes a second
    *    spelling of the authorization question.
    */
+  /**
+   * [#24948] `/organization/delete` admission: refuse 409 `DELETE_RESTRICTED`,
+   * naming every table and its row count, while the organization still owns
+   * records (`organization-delete.ts` carries the contract and the exclusion
+   * set).
+   *
+   * Only for a caller the vendor itself admits — a member whose role holds
+   * `organization: ['delete']`, asked of the vendor's own `hasPermission`, as
+   * {@link assertRemoveMemberPermitted} does — so a caller it refuses gets its
+   * refusal, and no count. Everything this cannot decide falls through to the
+   * vendor: no session, no organization id, no membership, a lookup that
+   * failed. The COUNT does not fall through: it is the guard, and a guard that
+   * could not be evaluated must not pass, so its failure propagates, and so
+   * does a failure deciding whether the target is the Default Organization.
+   * The Default Organization is asked the last-administrator guard's question
+   * first (a 403), then its own record count (the same 409), both here, before
+   * the first write.
+   */
+  private async assertOrganizationDeletable(ctx: any): Promise<void> {
+    const engine = this.getDataEngine();
+    if (!engine) return;
+    const organizationId = typeof ctx?.body?.organizationId === 'string' ? ctx.body.organizationId : '';
+    if (!organizationId) return;
+
+    let organization: any;
+    try {
+      const actor = await this.resolveActor(ctx);
+      if (!actor?.userId) return; // the vendor answers 401
+      const sys = withSystemReadContext(engine);
+      const callerRow: any = await sys.findOne('sys_member', {
+        where: { organization_id: organizationId, user_id: actor.userId },
+      });
+      if (!callerRow) return; // the vendor answers USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION
+      const { hasPermission } = await import('better-auth/plugins/organization');
+      const permitted = await hasPermission(
+        {
+          role: callerRow.role,
+          options: (this.orgRolesMap ? { roles: this.orgRolesMap } : {}) as any,
+          permissions: { organization: ['delete'] },
+          organizationId,
+        } as any,
+        ctx,
+      );
+      if (!permitted) return; // the vendor answers YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_ORGANIZATION
+      organization = await sys.findOne('sys_organization', { where: { id: organizationId } });
+      if (!organization) return; // the vendor answers 400
+    } catch {
+      // A lookup that did not complete hands the request back to the vendor,
+      // which re-reads everything it decides; the engine's own refusal still
+      // stands under the delete.
+      return;
+    }
+
+    // Which of the two refusals below applies is part of the guard, so it is
+    // decided outside the fall-through above: a lookup that fails here
+    // refuses, never hands the request to the vendor unasked.
+    const defaultOrganization = await isDefaultOrganizationTarget(
+      engine, organization, postureEnforcesWall(resolveTenancyPosture()),
+    );
+
+    // The Default Organization is asked the last-administrator guard's
+    // question first, HERE, before the vendor's first write, so its refusal
+    // leaves every member and invitation as it was on any driver, with or
+    // without transactions. The guard fails closed on a lookup it cannot
+    // complete, so this never passes for want of an answer. When it admits
+    // the delete, the record count below is asked before the vendor's first
+    // write too, leaving out only what the vendor removes (members and
+    // invitations): plugin-auth removes none of the Default Organization's
+    // structure, so its teams and grants count.
+    if (defaultOrganization && this.organizationDeleteStandingJudge) {
+      try {
+        await this.organizationDeleteStandingJudge(organizationId);
+      } catch (err) {
+        if ((err as { code?: unknown } | null)?.code !== 'PERMISSION_DENIED') throw err;
+        const { APIError } = await import('better-auth/api');
+        throw new APIError('FORBIDDEN', { message: (err as Error).message, code: 'PERMISSION_DENIED' });
+      }
+    }
+
+    const owned = defaultOrganization
+      ? await defaultOrganizationDeleteRefusal(engine, organizationId)
+      : await organizationDeleteRefusal(engine, organizationId);
+    if (owned && owned.length > 0) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError('CONFLICT', { code: ORGANIZATION_DELETE_REFUSAL_CODE, ...organizationNotEmptyBody(owned) });
+    }
+  }
+
   private async assertRemoveMemberPermitted(ctx: any): Promise<void> {
     const engine = this.getDataEngine();
     if (!engine) return;
