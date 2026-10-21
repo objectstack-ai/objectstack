@@ -382,7 +382,7 @@ import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 // #16421 — the DIRECTION ARM, read through the fleet's one declaration reader.
 // ⛔ Not re-implemented here: the ruling's condition on the arm is that it has a
 // single legal spelling read in a single place, and every reader imports it.
-import { readClause2Line } from './pm/clause2-line.mjs';
+import { readClause2Line, readMetadataProtocolLine } from './pm/clause2-line.mjs';
 // #16421 — the staging manifest for this gate's own I1/I2 fixture, derived from
 // the module graph rather than typed out. Shared with the OTHER site that copies
 // this gate into a sandbox (`objectui-changeset-digest.mjs`), because two hand
@@ -621,7 +621,7 @@ export function parseChangeset(text) {
 /**
  * Does this changeset DECLARE a breaking change?
  *
- * FOUR spellings are in live use in this repo and all four count, because the
+ * FIVE spellings are in live use in this repo and all five count, because the
  * gate's subject is the author's own declaration and an author who used any of
  * them has declared it:
  *
@@ -629,6 +629,7 @@ export function parseChangeset(text) {
  *   2. a `**BREAKING` marker in the body                 (52)
  *   3. a conventional-commit `!` in the summary line     (175)
  *   4. a `Clause-②` declaration whose ARM reads `narrowing`   (#16421)
+ *   5. a `Metadata-protocol: narrowed` declaration       (ruling A, #25105)
  *
  * The union of the first three is 213. Narrowing to any one of them would drop
  * real declarations: #6048's changeset used (1) and (2) and NOT (3), while the
@@ -667,6 +668,21 @@ export function parseChangeset(text) {
  * refused since it was written. Signal (4) is the carrier that does not depend on
  * prose; (2) stays the one that already works where it was used.
  *
+ * ## Signal (5): the metadata-protocol kind (maintainer ruling A, 2026-10-21)
+ *
+ * Ruling A moved the changeset LEVEL onto a second declaration line beside the
+ * arm — `Metadata-protocol: added | narrowed | semantic | none` — read by the
+ * same module. Of the four kinds exactly one is a break by definition:
+ * `narrowed` is "a key removed or tombstoned, a value refused, a requirement
+ * tightened", an accept-set narrowing of what an author writes against, and
+ * ruling A keeps the BREAKING carriers on it unchanged. So a changeset that
+ * declares `narrowed` has declared breaking, and this gate asks it for its
+ * ADR-0087 disposition exactly as it asks a changeset carrying the arm — the
+ * level gate refuses `narrowed` beside a line with no `(narrowing)` arm, so the
+ * two signals ordinarily travel together; this one closes the day they do not.
+ * `added`, `semantic` and `none` add NO signal: a new key, a changed default and
+ * a non-protocol change are not breaks, and the self-test pins all three.
+ *
  * @param {ReturnType<typeof parseChangeset>} parsed
  * @returns {{ breaking: boolean, signals: string[] }}
  */
@@ -682,6 +698,11 @@ export function breakingDeclaration(parsed) {
   // the moment the claim carrying it is written.
   const decl = readClause2Line(parsed.body);
   if (decl?.kind === 'declared' && decl.arm === 'narrowing') signals.push('clause-②-narrowing');
+  // (5) The metadata-protocol kind, same reader module, same calibration: only
+  // a DECLARED `narrowed` is a signal; a malformed or near-miss line declares
+  // nothing here, and the level gate is what refuses it on the PR.
+  const kind = readMetadataProtocolLine(parsed.body);
+  if (kind?.kind === 'declared' && kind.value === 'narrowed') signals.push('metadata-protocol-narrowed');
   return { breaking: signals.length > 0, signals };
 }
 
@@ -2462,6 +2483,10 @@ export function assertInputs({ cwd, head, witness = generatedWitness }) {
     // signals are all absent from it on purpose.
     ['the `narrowing` ARM with no banner, no `major` and no `!` (#16421)', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nClause-②: no (narrowing)\n"],
     ['the `narrowing` arm beside a `yes` value — a diff that widens AND narrows', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nClause-②: yes (narrowing)\n"],
+    // Ruling A, signal (5): the kind alone, with no arm, no banner, no `major`
+    // and no `!` — the shape the level gate refuses on the PR body and this
+    // gate must not wave through on the changeset body.
+    ['the `Metadata-protocol: narrowed` kind with no arm, no banner, no `major` and no `!` (ruling A)', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nMetadata-protocol: narrowed\n"],
   ];
   const MUST_NOT_MATCH_BREAKING = [
     ['a plain `patch` changeset', "---\n'@objectstack/spec': patch\n---\n\nfix a typo\n"],
@@ -2471,6 +2496,14 @@ export function assertInputs({ cwd, head, witness = generatedWitness }) {
     ['a bare `Clause-②: no` — the shape every declaration on the board carries', "---\n'@objectstack/spec': patch\n---\n\na summary\n\nClause-②: no\n"],
     ['a bare `Clause-②: yes` — a widening declared through the value alone', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nClause-②: yes\n"],
     ['prose merely NAMING the arm — the reader takes a token, never a phrase', "---\n'@objectstack/spec': minor\n---\n\nthis is a narrowing of nothing at all\n"],
+    // The OTHER three kinds of signal (5): a new key, a changed default and a
+    // non-protocol change are not breaks. Without these rows a reader that
+    // classified every `Metadata-protocol:` line as breaking would satisfy the
+    // list above while telling a consumer nothing.
+    ['`Metadata-protocol: added` — a new key is not a break (ruling A)', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nClause-②: yes\n\nMetadata-protocol: added\n"],
+    ['`Metadata-protocol: semantic` — a changed default is not a break (ruling A)', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nClause-②: no\n\nMetadata-protocol: semantic\n"],
+    ['`Metadata-protocol: none` — a non-protocol change at `patch` (ruling A)', "---\n'@objectstack/rest': patch\n---\n\na summary\n\nClause-②: yes\n\nMetadata-protocol: none\n"],
+    ['a MALFORMED kind declares nothing here — the level gate refuses it on the PR', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nMetadata-protocol: narrowed|added\n"],
   ];
   for (const [label, text] of MUST_MATCH_BREAKING) {
     if (!breakingDeclaration(parseChangeset(text)).breaking) {
