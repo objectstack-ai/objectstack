@@ -20,7 +20,7 @@
  * Every stored value comes back exactly. Each case also asserts that the file
  * it imported carried the marks, so the round trip cannot pass by the export
  * never having marked anything. plugin-auth's admin user import is pinned in
- * its own package (`admin-import-users-csv-text-cell.test.ts`).
+ * its own package (`admin-import-users.test.ts`).
  *
  * Control characters are written as escapes in this file, never as raw bytes.
  */

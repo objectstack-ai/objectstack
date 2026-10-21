@@ -17,7 +17,7 @@
  *
  * The round trip through each import door that parses CSV is pinned in
  * `csv-text-cell-round-trip.test.ts` (sync, async job, named mapping) and in
- * plugin-auth's `admin-import-users-csv-text-cell.test.ts` (admin user import).
+ * plugin-auth's `admin-import-users.test.ts` (admin user import).
  *
  * Control characters are written as escapes in this file, never as raw bytes.
  */
