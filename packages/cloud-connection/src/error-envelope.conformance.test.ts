@@ -304,6 +304,19 @@ describe('plugin-route door — CloudConnectionPlugin error exits (#9267)', () =
         });
     }
 
+    /**
+     * Ruling 甲 (#25097): a platform-managed runtime (the service key) refuses
+     * `unbind` with the standard catalog's 409 member, past the session and
+     * `setup.access` checks.
+     */
+    it('POST /unbind on a platform-managed runtime → 409 in the declared envelope', async () => {
+        const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1', controlPlaneApiKey: 'svc-key' });
+        expectDeclaredErrorEnvelope(
+            await driveCloudConnection(routes, `POST ${CC}/unbind`, { body: {} }),
+            { status: 409, code: 'RESOURCE_CONFLICT' },
+        );
+    });
+
     it('POST /install without a session → 401 in the declared envelope', async () => {
         const routes = await mountCloudConnection({ resolvesEnvironment: true });
         expectDeclaredErrorEnvelope(

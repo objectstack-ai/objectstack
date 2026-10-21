@@ -28,7 +28,10 @@
  *  - HELD: under both postures, every session door answers `403` with the
  *    gate's `code` and `message`, and no effect fires (no control-plane call,
  *    no credential cleared; no registry, schema, ledger, seed or delete write).
- *  - UN-HELD: the same caller and grants, without a posture, are served.
+ *  - UN-HELD: the same caller and grants, without a posture, are served —
+ *    except `unbind` on a platform-managed runtime (the service key), which
+ *    answers its own `409` past the gate (ruling 甲, #25097); the self-hosted
+ *    shape, served by all seven, is read beside it.
  *  - Anonymous is refused `401` as before, and `/status` answers a held
  *    session `200` with its narrowed shape (#24148).
  *
@@ -155,7 +158,14 @@ const CC_SESSION_DOORS = [
     { route: `GET ${CC}/org-packages`, url: `${ORIGIN}${CC}/org-packages`, body: {} },
 ] as const;
 
-async function mountCloudConnection(mode: 'single' | 'multi') {
+/**
+ * `serviceKey` is the plugin's `controlPlaneApiKey`. The default, a key, is the
+ * cloud-hosted (platform-managed) shape every case below has always run in;
+ * `''` (no key, and `OS_CLOUD_API_KEY` not consulted) is the self-hosted shape,
+ * whose credential is the stored device token — the one shape in which
+ * `unbind` still disconnects (ruling 甲, #25097).
+ */
+async function mountCloudConnection(mode: 'single' | 'multi', serviceKey = 'svc-key') {
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
     const auth = sessionAuth();
@@ -194,7 +204,7 @@ async function mountCloudConnection(mode: 'single' | 'multi') {
     }));
     await new CloudConnectionPlugin({
         controlPlaneUrl: 'http://cloud.test',
-        controlPlaneApiKey: 'svc-key',
+        controlPlaneApiKey: serviceKey,
         credentialPath,
         ...(mode === 'single' ? { singleEnvironment: true, environmentId: 'env-1' } : {}),
     }).start(ctx as any);
@@ -232,11 +242,36 @@ describe('ADR-0069 at CloudConnectionPlugin', () => {
         }
     }
 
-    it('UN-HELD: the same caller without a posture is served by all seven doors', async () => {
+    it('UN-HELD: the same caller without a posture is served by all seven doors (self-hosted: the stored device credential)', async () => {
+        const { rawApp, fetchCalls } = await mountCloudConnection('single', '');
+        // `unbind` really disconnects here, clearing the stored credential the
+        // install-side doors present — so it is driven last.
+        const UNBIND = `POST ${CC}/unbind`;
+        const lastUnbind = [...CC_SESSION_DOORS.filter((d) => d.route !== UNBIND), ...CC_SESSION_DOORS.filter((d) => d.route === UNBIND)];
+        expect(lastUnbind).toHaveLength(CC_SESSION_DOORS.length);
+        for (const door of lastUnbind) {
+            const before = fetchCalls.length;
+            const res = await rawApp.routes.get(door.route)!(makeC(door.url, 'u_member', door.body));
+            expect(res.status, `${door.route}: ${JSON.stringify(res.payload)}`).toBe(200);
+            expect(fetchCalls.length, `${door.route} did not reach the control plane`).toBeGreaterThan(before);
+        }
+    });
+
+    it('UN-HELD (platform-managed: the service key): six doors are served, and unbind is the platform-managed 409 — not the gate', async () => {
+        // The shape the HELD cases above run in. Ruling 甲 (#25097) refuses
+        // `unbind` here for every caller, so this door's control is that
+        // refusal rather than a 200: still past the gate (not its 403), and
+        // still before any control-plane call.
         const { rawApp, fetchCalls } = await mountCloudConnection('single');
         for (const door of CC_SESSION_DOORS) {
             const before = fetchCalls.length;
             const res = await rawApp.routes.get(door.route)!(makeC(door.url, 'u_member', door.body));
+            if (door.route === `POST ${CC}/unbind`) {
+                expect(res.status, `${door.route}: ${JSON.stringify(res.payload)}`).toBe(409);
+                expect(res.payload?.error?.code, door.route).toBe('RESOURCE_CONFLICT');
+                expect(fetchCalls.length, `${door.route} reached the control plane`).toBe(before);
+                continue;
+            }
             expect(res.status, `${door.route}: ${JSON.stringify(res.payload)}`).toBe(200);
             expect(fetchCalls.length, `${door.route} did not reach the control plane`).toBeGreaterThan(before);
         }

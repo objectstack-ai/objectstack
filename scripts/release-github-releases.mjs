@@ -103,6 +103,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 import { workspacePackages } from './workspace-enumerator.mjs';
+import { readClause2Line, readMetadataProtocolLine } from './pm/clause2-line.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -135,11 +136,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '12. Two concurrent invocations leave exactly one release per tag': 6,
   '13. Any other 422 still fails; a racer the read cannot see fails loudly, bounded': 8,
   '14. Duplicate releases for one tag are reported, never deleted': 14,
+  '15. The Release body is grouped by what the reader must do (ruling A)': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
-// zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 14;
+// zeroing it, so the roster's own size is pinned too. Raised 14 → 15 with the
+// grouping battery (maintainer ruling A, 2026-10-21, objectstack#25105).
+const SELF_TEST_BATTERY_FLOOR = 15;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -354,20 +357,175 @@ export function buildReleaseBody({ entry, tagName, changelogLabel, changelogHref
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Release notes grouped by what the reader must do (ruling A)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Maintainer ruling A (2026-10-21, objectstack#25105): the GitHub Release body
+// is grouped by what the reader must do, and each section is read from the
+// declarations each changeset already carries — the `Metadata-protocol:` line,
+// the `Clause-②:` arm, the BREAKING banner, the ADR-0087 disposition marker.
+// `changeset version` compiles those bodies into CHANGELOG.md under changesets'
+// own `### Minor Changes` / `### Patch Changes` headings, and the per-package
+// CHANGELOG stays exactly as changesets writes it (RELEASE-OWNED, never
+// hand-edited). What changes is the Release body built FROM that section here:
+// the same bullets, byte for byte, re-grouped under five headings in a fixed
+// order; a section with nothing in it is omitted; a bullet that is not a
+// bullet (prose above the first one) is kept ahead of the sections.
+//
+// The declarations are read with the fleet's one reader (`pm/clause2-line.mjs`,
+// import-free) and the breaking signals MIRROR `check-adr-0087-registration.mjs`
+// rather than importing it: the release lane must not sit one rename of an
+// 8,000-line gate away from failing, and the agreement is pinned in the
+// self-test below. A bullet with no declaration at all — the pre-rule stock —
+// lands where its remaining signals put it, 其他修复 last.
+
+/**
+ * The five sections, in the order the ruling lists them. The Chinese names are
+ * the ruling's own words and stay untranslated; the gloss after the dash is for
+ * a reader of the GitHub Release.
+ */
+export const RELEASE_NOTE_SECTIONS = Object.freeze([
+  Object.freeze({ id: 'manual', heading: '需手动处理 — action required: narrowed, with no ADR-0087 conversion' }),
+  Object.freeze({ id: 'migrated', heading: '自动迁移 — migrated for you: narrowed, with a conversion `objectstack migrate meta` applies' }),
+  Object.freeze({ id: 'added', heading: '新增能力 — new capabilities' }),
+  Object.freeze({ id: 'semantic', heading: '语义变化 — semantic changes: the meaning or default of an authorable key moved' }),
+  Object.freeze({ id: 'other', heading: '其他修复 — other fixes' }),
+]);
+
+const RELEASE_NOTE_LEAD =
+  '_Sections follow what the reader must do; each entry is placed by its own declarations ' +
+  '(`Metadata-protocol:`, the `Clause-②:` arm, the BREAKING banner, the ADR-0087 disposition). ' +
+  'The package CHANGELOG keeps the level grouping._';
+
+/**
+ * Split one CHANGELOG version section into its top-level bullets, fence-aware.
+ *
+ * A bullet starts at a column-0 `- ` outside a code fence and runs until the
+ * next such bullet or a column-0 heading; changesets indents every continuation
+ * line by two spaces, so a `- ` or a `##` INSIDE an entry (its own FROM → TO
+ * table, a nested dependency list, a fenced example) never opens a new one.
+ * Column-0 headings — changesets' level headings — are dropped: they are what
+ * this grouping replaces. Anything else at column 0 before the first bullet is
+ * `stray` and is kept ahead of the sections.
+ *
+ * @param {string} entry
+ * @returns {{ bullets: { text: string }[], stray: string }}
+ */
+export function splitChangelogEntry(entry) {
+  const bullets = [];
+  const stray = [];
+  let current = null;
+  let fence = null;
+  for (const line of String(entry ?? '').split('\n')) {
+    const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence !== null) {
+      if (mark && mark[1][0] === fence[0] && mark[1].length >= fence.length) fence = null;
+    } else if (mark) {
+      fence = mark[1];
+    } else if (/^#{1,6}\s/.test(line)) {
+      current = null;
+      continue;
+    } else if (/^- /.test(line)) {
+      current = { lines: [line] };
+      bullets.push(current);
+      continue;
+    }
+    if (current) current.lines.push(line);
+    else if (line.trim() !== '') stray.push(line);
+  }
+  return {
+    bullets: bullets.map((b) => ({ text: b.lines.join('\n').replace(/\s+$/, '') })),
+    stray: stray.join('\n').trim(),
+  };
+}
+
+/**
+ * Which section one bullet belongs to, from the declarations it carries.
+ *
+ *   manual    breaking, and no `registered` ADR-0087 disposition
+ *   migrated  breaking, with a `registered` disposition (a conversion
+ *             `objectstack migrate meta` applies)
+ *   added     not breaking; `Metadata-protocol: added`, or a `Clause-②: yes`
+ *             widening with no protocol kind — new for the reader either way
+ *   semantic  not breaking; `Metadata-protocol: semantic`
+ *   other     everything else, dependency bumps and the undeclared stock included
+ *
+ * "Breaking" is the union `check-adr-0087-registration.mjs` reads, mirrored
+ * here signal for signal: a `**BREAKING` banner or a `BREAKING CHANGE:` line,
+ * a conventional-commit `!` on the summary, the `(narrowing)` arm, and
+ * `Metadata-protocol: narrowed`. (The `major` bump is a frontmatter fact the
+ * CHANGELOG no longer carries; its entries sit under `### Major Changes` and
+ * carry the banner, which is read.) Breaking wins over the kind: a semantic
+ * change that also breaks is action required.
+ *
+ * @param {string} text one bullet, as `splitChangelogEntry` returns it
+ * @returns {{ section: 'manual'|'migrated'|'added'|'semantic'|'other', kind: string|null, value: string|null, arm: string|null, breaking: boolean, registered: boolean }}
+ */
+export function classifyReleaseBullet(text) {
+  const body = String(text ?? '')
+    .split('\n')
+    .map((line, i) => (i === 0 ? line.replace(/^- /, '') : line.replace(/^ {0,2}/, '')))
+    .join('\n');
+  const summary = (body.split('\n')[0] ?? '').replace(/^[0-9a-f]{7,40}: /, '').replace(/^\*\*|^#+\s*/, '');
+  const protocol = readMetadataProtocolLine(body);
+  const kind = protocol?.kind === 'declared' ? protocol.value : null;
+  const clause = readClause2Line(body);
+  const value = clause?.kind === 'declared' ? clause.value : null;
+  const arm = clause?.kind === 'declared' ? clause.arm : null;
+  const breaking =
+    kind === 'narrowed' ||
+    arm === 'narrowing' ||
+    /\*\*BREAKING/i.test(body) ||
+    /^\s*BREAKING[ -]CHANGE/im.test(body) ||
+    /^[a-z]+(\([^)]*\))?!:/.test(summary);
+  const registered = /<!--\s*adr-0087\s*:\s*registered\b/i.test(body);
+  let section = 'other';
+  if (breaking) section = registered ? 'migrated' : 'manual';
+  else if (kind === 'added' || value === 'yes') section = 'added';
+  else if (kind === 'semantic') section = 'semantic';
+  return { section, kind, value, arm, breaking, registered };
+}
+
+/**
+ * The CHANGELOG section regrouped for the Release body. An entry with no
+ * bullets at all round-trips untouched — there is nothing to group.
+ *
+ * @param {string} entry
+ * @returns {string}
+ */
+export function groupReleaseEntry(entry) {
+  const { bullets, stray } = splitChangelogEntry(entry);
+  if (bullets.length === 0) return String(entry ?? '');
+  const groups = new Map(RELEASE_NOTE_SECTIONS.map((s) => [s.id, []]));
+  for (const bullet of bullets) groups.get(classifyReleaseBullet(bullet.text).section).push(bullet.text);
+  const parts = [RELEASE_NOTE_LEAD];
+  if (stray) parts.push(stray);
+  for (const { id, heading } of RELEASE_NOTE_SECTIONS) {
+    const items = groups.get(id);
+    if (items.length === 0) continue;
+    parts.push(`### ${heading}\n\n${items.join('\n\n')}`);
+  }
+  return parts.join('\n\n');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Workspace discovery
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // The gate family this script contributes is `check:release-body`, and that
 // script is `--self-test` ALONE: lint.yml runs the renderer against fixtures,
 // never against the tree. The workspace read below and the CHANGELOG reads
-// belong to the RELEASE run, which no pull request schedules. So there is no
-// card whose file surface should name this family except one editing this file,
-// and identity matching already covers that. The zero hints have a second cause
-// worth keeping straight, recorded in `isNonPathNamespace`: the one pathy
-// literal this module body used to contribute was a media type, refused as a
-// non-filesystem namespace. Both are true, and neither is a missing declaration.
-//
-// dispatch-gates: no-path-population -- check:release-body runs this renderer's --self-test against fixtures only; the workspace and CHANGELOG reads belong to the release run, which no pull request schedules
+// belong to the RELEASE run, which no pull request schedules, so neither is a
+// path population of this family. The family HAS exactly one, and it arrived
+// with ruling A: `scripts/pm/clause2-line.mjs`, the fleet's one reader of the
+// two declaration lines, imported above — its readings decide which section a
+// release-note entry lands in, so a card that edits the reader owes this
+// renderer's self-test, and the import specifier is the hint that derives it.
+// This file therefore no longer declares `no-path-population`: the marker and
+// a pathy first-party import contradict each other by the harvester's own
+// rule, and the import is the true statement. The second zero-hint cause stays
+// recorded in `isNonPathNamespace`: the one other pathy literal this module
+// body contributes is a media type, refused as a non-filesystem namespace.
 
 /**
  * Every non-private workspace package, by name.
@@ -468,8 +626,10 @@ export function planRelease({ target, serverUrl, repository, ref, root = REPO_RO
   const changelogLabel = relative(root, changelogPath).split('\\').join('/');
   const changelogHref = `${serverUrl}/${repository}/blob/${ref}/${changelogLabel}#${headingAnchor(target.version)}`;
 
+  // Ruling A: the Release body is the section regrouped by what the reader must
+  // do; the CHANGELOG the link points at keeps the level grouping.
   const { body, truncated, originalLength } = buildReleaseBody({
-    entry,
+    entry: groupReleaseEntry(entry),
     tagName,
     changelogLabel,
     changelogHref,
@@ -1690,6 +1850,93 @@ async function selfTest() {
     ).warnings.some((w) => w.includes('never appeared')),
     'a tag the list never shows is reported unseen, not silently cleared',
   );
+
+  // ── 15. The Release body is grouped by what the reader must do (ruling A) ─
+  battery('15. The Release body is grouped by what the reader must do (ruling A)');
+  {
+    const B = {
+      manual:
+        '- aaaaaaa: fix(spec)!: a key leaves the accept set\n  \n  Clause-②: no (narrowing)\n  \n  Metadata-protocol: narrowed\n  \n' +
+        '  **BREAKING**: write `b` instead of `a`.\n  \n  <!-- adr-0087: not-required (no-migration-prescription) nothing to rewrite -->',
+      migrated:
+        '- bbbbbbb: feat(spec)!: a key moves\n  \n  Metadata-protocol: narrowed\n  \n  Clause-②: no (narrowing)\n  \n' +
+        '  <!-- adr-0087: registered some-conversion -->\n  \n  ```ts\n  - not a bullet\n  ### not a heading\n  ```',
+      added: '- ccccccc: feat(spec): a new key\n  \n  Clause-②: yes (widening)\n  \n  Metadata-protocol: added',
+      semantic: '- ddddddd: fix(spec): a default moves\n  \n  Clause-②: no\n  \n  Metadata-protocol: semantic',
+      other: '- eeeeeee: fix(rest): a typo\n  \n  Clause-②: no\n  \n  Metadata-protocol: none',
+      rest: '- fffffff: feat(rest): a new endpoint\n  \n  Clause-②: yes\n  \n  Metadata-protocol: none',
+      stock: '- 0000000: fix(core): a pre-rule entry with no declaration at all',
+      deps: '- Updated dependencies [1234567]\n  - @objectstack/spec@18.1.0',
+    };
+    const entry = ['### Minor Changes', '', B.manual, '', B.added, '', B.migrated, '', B.semantic, '', '### Patch Changes', '', B.other, '', B.rest, '', B.stock, '', B.deps].join('\n');
+    const grouped = groupReleaseEntry(entry);
+    const headingsIn = (t) => t.split('\n').filter((l) => /^### /.test(l));
+    assert(
+      headingsIn(grouped).length === 5 && RELEASE_NOTE_SECTIONS.every((s, i) => headingsIn(grouped)[i] === `### ${s.heading}`),
+      `all five sections render, in the ruling's order — got ${JSON.stringify(headingsIn(grouped))}`,
+    );
+    assert(!grouped.includes('### Minor Changes') && !grouped.includes('### Patch Changes'), 'the level headings are gone from the Release body (the CHANGELOG keeps them)');
+    const section = (id) => {
+      const start = grouped.indexOf(`### ${RELEASE_NOTE_SECTIONS.find((s) => s.id === id).heading}`);
+      const next = grouped.indexOf('\n### ', start + 1);
+      return grouped.slice(start, next < 0 ? undefined : next);
+    };
+    assert(section('manual').includes(B.manual) && !section('manual').includes('bbbbbbb'), '需手动处理 holds the narrowing with no conversion, and not the registered one');
+    assert(section('migrated').includes(B.migrated), '自动迁移 holds the narrowing with a registered conversion — byte for byte, fence included');
+    assert(section('added').includes(B.added) && section('added').includes(B.rest), '新增能力 holds `added` and a non-protocol `Clause-②: yes` widening alike — both are new for the reader');
+    assert(section('semantic').includes(B.semantic), '语义变化 holds `semantic`');
+    assert(
+      section('other').includes(B.other) && section('other').includes(B.stock) && section('other').includes(B.deps) &&
+        section('other').indexOf(B.other) < section('other').indexOf(B.stock) && section('other').indexOf(B.stock) < section('other').indexOf(B.deps),
+      '其他修复 holds `none`, the undeclared pre-rule stock and the dependency bumps, in CHANGELOG order',
+    );
+    const bulletsOf = (t) => splitChangelogEntry(t).bullets.map((b) => b.text);
+    assert(
+      bulletsOf(grouped).length === bulletsOf(entry).length && bulletsOf(grouped).every((b) => bulletsOf(entry).includes(b)),
+      'every bullet appears exactly once, unchanged — grouping is presentation, never a filter',
+    );
+    assert(
+      classifyReleaseBullet(B.manual).section === 'manual' &&
+        classifyReleaseBullet('- 1234567: fix(a)!: bang only').section === 'manual' &&
+        classifyReleaseBullet('- fix(a)!: bang only, no commit prefix').section === 'manual' &&
+        classifyReleaseBullet('- x: a\n  \n  BREAKING CHANGE: y').section === 'manual' &&
+        classifyReleaseBullet('- x: a\n  \n  Clause-②: no (narrowing)').section === 'manual' &&
+        classifyReleaseBullet('- x: a\n  \n  Metadata-protocol: narrowed').section === 'manual',
+      'every breaking spelling the ADR-0087 gate reads lands under 需手动处理 — the banner, the bang (with and without the commit prefix changesets writes), the arm, the kind',
+    );
+    assert(
+      classifyReleaseBullet('- 1234567: fix(a): no bang, `!` only in prose!: here').section === 'other',
+      'control: a `!` that is not on the summary\'s type is not the bang',
+    );
+    assert(
+      classifyReleaseBullet('- x: a\n  \n  Metadata-protocol: narrowed\n  \n  <!-- adr-0087: registered x -->').section === 'migrated' &&
+        classifyReleaseBullet('- x: a\n  \n  Metadata-protocol: narrowed\n  \n  <!-- adr-0087: not-required (unpublished) -->').section === 'manual',
+      'only a REGISTERED disposition is an automatic migration; `not-required` leaves the reader to act',
+    );
+    assert(classifyReleaseBullet('- x: a\n  \n  Metadata-protocol: semantic\n  \n  **BREAKING**: y').section === 'manual', 'breaking wins over the kind: a semantic change that also breaks is action required');
+    assert(
+      classifyReleaseBullet('- x: a\n  \n  this is a narrowing of nothing\n  \n  Metadata-protocol: narrowed|added').section === 'other',
+      'prose naming the arm and a malformed kind declare nothing — the reader takes a token, never a phrase',
+    );
+    assert(groupReleaseEntry('no bullets here\n\njust prose') === 'no bullets here\n\njust prose' && groupReleaseEntry('') === '', 'an entry with no bullets round-trips untouched, the empty one included');
+    assert(grouped.startsWith(RELEASE_NOTE_LEAD), 'the body leads with the one-line key to the sections');
+    // The real spec CHANGELOG: a real section regroups without losing, splitting
+    // or inventing a bullet, and `planRelease` posts the grouped body.
+    const real = getChangelogEntry(specChangelog, '16.1.0') ?? '';
+    assert(
+      bulletsOf(real).length > 0 && bulletsOf(groupReleaseEntry(real)).length === bulletsOf(real).length,
+      `the real 16.1.0 section regroups without losing or splitting a bullet (${bulletsOf(real).length} bullets)`,
+    );
+    const realPlan = planRelease({ target: { name: '@objectstack/spec', version: '16.1.0', dir: join(REPO_ROOT, 'packages/spec') }, ...CTX });
+    assert(
+      'body' in realPlan && realPlan.body === buildReleaseBody({ entry: groupReleaseEntry(real), tagName: '@objectstack/spec@16.1.0', changelogLabel: specLabel, changelogHref: specHref }).body,
+      'planRelease posts the GROUPED section, through the same truncation path as before',
+    );
+    assert(
+      'body' in realPlan && headingsIn(realPlan.body).length >= 1 && headingsIn(realPlan.body).every((h) => RELEASE_NOTE_SECTIONS.some((s) => `### ${s.heading}` === h)),
+      'and every heading in the posted body is one of the five',
+    );
+  }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
