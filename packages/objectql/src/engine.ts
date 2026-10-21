@@ -8284,7 +8284,7 @@ export class ObjectQL implements IObjectQLEngine {
         // not a unique violation untouched (a deadlock, a NOT NULL, an
         // unreachable store), so only the recognised conflict changes shape.
         if (!this.isIssuedAutonumberCollision(error, issued)) {
-          throw envelopeUniqueViolation(error, object);
+          throw envelopeUniqueViolation(error, object, this.getSchema(object));
         }
         // Whatever happens next, the stale counter must not survive this call:
         // leaving it in place is what turned one collision into a storm.
@@ -8318,7 +8318,7 @@ export class ObjectQL implements IObjectQLEngine {
           try {
             return await driver.create(object, row, driverOptions);
           } catch (retryError) {
-            throw envelopeUniqueViolation(retryError, object);
+            throw envelopeUniqueViolation(retryError, object, this.getSchema(object));
           }
         }
       }
@@ -16665,7 +16665,7 @@ export class ObjectQL implements IObjectQLEngine {
                   object, fields: [...new Set(batchIssued.map((one) => one.field))],
                 });
               }
-              throw envelopeUniqueViolation(error, object);
+              throw envelopeUniqueViolation(error, object, this.getSchema(object));
             }
           }
         } else {
@@ -18258,7 +18258,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object);
+                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
                }
                // [#21613] The by-id update returns the driver's post-write
                // readback (`select *` on driver-sql), so a column no metadata
@@ -18599,7 +18599,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object);
+                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
                }
                isPredicateWrite = true;
            }

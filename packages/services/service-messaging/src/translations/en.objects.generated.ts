@@ -296,7 +296,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Channel",
-        help: "Which channel uses this template: email or sms. The in-app inbox never does; for in-app content, write an email template and name it in a notify step's template."
+        help: "Which channel uses this template: email or sms; any other value is refused. The in-app inbox never does; for in-app content, write an email template and name it in a notify step's template."
       },
       locale: {
         label: "Locale",
@@ -344,7 +344,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       channel_renders_template: {
-        message: "This channel never uses a notification template: only email and sms do, so this template will never be sent. For in-app (inbox) content, write an email template (email_template) and name it in the notify step's template; email and the inbox both render it."
+        message: "Only the email and sms channels use a notification template, so a template for any other channel is refused: set channel to email or sms, or delete the template. For in-app (inbox) content, write an email template (email_template) and name it in the notify step's template; email and the inbox both render it."
       }
     }
   },

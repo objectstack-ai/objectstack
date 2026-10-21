@@ -296,7 +296,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "通道",
-        help: "使用本模板的通道：email 或 sms。站内信从不使用；站内信内容请编写邮件模板，并在通知步骤的 template 中指定它。"
+        help: "使用本模板的通道：email 或 sms，其他值会被拒绝。站内信从不使用；站内信内容请编写邮件模板，并在通知步骤的 template 中指定它。"
       },
       locale: {
         label: "语言",
@@ -344,7 +344,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       channel_renders_template: {
-        message: "该通道从不使用通知模板：只有 email 和 sms 使用，因此此模板永远不会被发送。站内信内容请编写邮件模板（email_template），并在通知步骤的 template 中指定它；邮件和站内信都会渲染它。"
+        message: "只有 email 和 sms 通道使用通知模板，因此其他通道的模板会被拒绝：请将通道设为 email 或 sms，或删除该模板。站内信内容请编写邮件模板（email_template），并在通知步骤的 template 中指定它；邮件和站内信都会渲染它。"
       }
     }
   },

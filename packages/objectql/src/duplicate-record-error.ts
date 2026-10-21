@@ -65,6 +65,14 @@ import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/type
  *    engine's `DELETE_RESTRICTED` refusal splits it: `message` is the sentence
  *    a user-facing surface renders, `developerMessage` is the one addressed to
  *    the application author.
+ *  - **Labels in `message`, API names in `developerMessage`** — every door keeps
+ *    `message` as thrown, so a refused record save and a screen flow show it to
+ *    the end user verbatim. [#24951] It therefore names the object and the field
+ *    by their declared `label` (the engine resolves them from its registry at
+ *    the write), falling back to the API name only where no label is declared —
+ *    the same "object label" naming ruling B of #23556 / #23594 set for the
+ *    approval notifications. The API names stay on `object` / `field` and open
+ *    `developerMessage`, for diagnostics.
  *
  * ## ⛔ What this deliberately does NOT do
  *
@@ -78,6 +86,9 @@ export const DUPLICATE_RECORD_CODE = 'DUPLICATE_RECORD' as const;
 
 /** The conflict status the engine's sibling 409 refusals declare. */
 const DUPLICATE_RECORD_STATUS = 409 as const;
+
+/** The declared labels of the refused write's object and conflicting field. */
+type DuplicateRecordLabels = { readonly object?: string; readonly field?: string };
 
 export class DuplicateRecordError extends Error {
   readonly code = DUPLICATE_RECORD_CODE;
@@ -103,12 +114,16 @@ export class DuplicateRecordError extends Error {
     cause: unknown,
     /** The conflicting column, when the dialect determinably named one. */
     public readonly field?: string,
+    /** The declared labels the user-facing `message` names them by; absent ⇒ the API name. */
+    labels?: DuplicateRecordLabels,
   ) {
-    super(buildDuplicateMessage(object, field));
+    super(buildDuplicateMessage(labels?.object || object, field && (labels?.field || field)));
     this.name = 'DuplicateRecordError';
     this.cause = cause;
     this.developerMessage =
-      `The driver refused this write as a unique-constraint violation. Its own error is attached ` +
+      `Duplicate record refused on object '${object}'` +
+      (field ? `, field '${field}'` : '') +
+      `. The driver refused this write as a unique-constraint violation. Its own error is attached ` +
       `as \`cause\`. Branch on the platform code (ADR-0112), never on a dialect's code or message, ` +
       `so the handling survives a change of store: over the HTTP API this refusal is reported as ` +
       `\`code === 'UNIQUE_VIOLATION'\` on every route, whole-request and per-row alike; inside the ` +
@@ -118,7 +133,8 @@ export class DuplicateRecordError extends Error {
 }
 
 /**
- * The user-facing sentence.
+ * The user-facing sentence, naming the object and the field by label (or by API
+ * name where none is declared — the caller has already chosen).
  *
  * ⛔ It must not begin with a SQL verb. `@objectstack/rest`'s importer runs
  * every row error through `sanitizeRowError`, whose SQL backstop replaces any
@@ -151,8 +167,23 @@ function buildDuplicateMessage(object: string, field?: string): string {
  * seam that wraps a value another seam already wrapped cannot bury the driver's
  * error one `cause` step deeper.
  */
-export function envelopeUniqueViolation(error: unknown, object: string): unknown {
+export function envelopeUniqueViolation(error: unknown, object: string, schema?: unknown): unknown {
   if (error instanceof DuplicateRecordError) return error;
   if (!isUniqueViolationError(error)) return error;
-  return new DuplicateRecordError(object, error, uniqueViolationColumn(error));
+  const field = uniqueViolationColumn(error);
+  return new DuplicateRecordError(object, error, field, declaredLabels(schema, field));
+}
+
+/**
+ * The declared `label` of the object and of the conflicting field, read off the
+ * registry's schema for the written object. A label that is absent, empty or not
+ * a string is simply not returned, so the sentence falls back to the API name.
+ */
+function declaredLabels(schema: unknown, field: string | undefined): DuplicateRecordLabels {
+  const s = schema as { label?: unknown; fields?: Record<string, { label?: unknown } | undefined> } | undefined;
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  return {
+    object: text(s?.label),
+    field: field ? text(s?.fields?.[field]?.label) : undefined,
+  };
 }
