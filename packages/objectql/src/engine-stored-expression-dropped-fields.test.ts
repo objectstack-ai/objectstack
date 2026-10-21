@@ -20,11 +20,13 @@
 //    grid's consistent save stays silent), nor is a key the caller never sent;
 //  - a caller value another strip already took is reported once, under that
 //    strip's reason, never twice;
-//  - `strictReadonlyWrites` does NOT refuse a replaced value in 18.x (the
-//    maintainer's ruling 「甲」: only the loud half ships; the refusal waits
-//    for 19.0) — the write completes with the computed value and the report
-//    reaches the listener under strict too, while a strict write that ALSO
-//    carries a refusable drop is still refused, and fires no listener.
+//  - #25000: under `strictReadonlyWrites` a replaced value is REFUSED like
+//    every other strip's drop (the amended ruling 「甲」 ships it in 18.x) —
+//    on insert (single, batch, `insertMany`), update by id and predicate
+//    update: `ERR_READONLY_FIELD_REJECTED`, nothing written, no listener —
+//    in one refusal with any other strip's drop; the computed value sent, or
+//    no value, is never refused; and the same payload WITHOUT strict still
+//    completes and is reported (the controls beside each refusal).
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
@@ -128,6 +130,8 @@ describe('[#24690] a caller value a stored expression replaced is reported as `s
         quantity: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
         unit_price: { type: 'currency', readonlyWhen: "parent.status == 'paid'" },
         description: { type: 'text' },
+        // A static lock, so a predicate update can carry a strip's drop.
+        note: { type: 'text', readonly: true },
         amount: { type: 'currency', min: 0, expression: { dialect: 'cel', source: 'record.quantity * record.unit_price' } },
       },
     } as any);
@@ -254,49 +258,150 @@ describe('[#24690] a caller value a stored expression replaced is reported as `s
     });
   });
 
-  describe('strictReadonlyWrites — a replaced value is REPORTED, not refused, in 18.x (ruling 「甲」)', () => {
-    it('update by id: the write completes with the computed value, and the report reaches the listener', async () => {
+  describe('[#25000] strictReadonlyWrites — a replaced value is REFUSED, and nothing is written', () => {
+    const STRICT = { strictReadonlyWrites: true } as const;
+    async function refusal(write: Promise<unknown>): Promise<any> {
+      const err: any = await write.then(() => undefined, (e: unknown) => e);
+      expect(err).toBeInstanceOf(ReadonlyFieldRejectedError);
+      expect(err.code).toBe('ERR_READONLY_FIELD_REJECTED');
+      return err;
+    }
+    const snapshot = () => [...storeFor(LINE).values()].map((r) => ({ ...r }));
+
+    it('update by id: refused, the row keeps its stored values, and no listener fires', async () => {
       const l = listener();
-      await engine.update(LINE, { id: 'line_draft', quantity: 4, amount: 5 }, { strictReadonlyWrites: true, onFieldsDropped: l.onFieldsDropped } as any);
+      const before = snapshot();
+      const err = await refusal(engine.update(LINE, { id: 'line_draft', quantity: 4, amount: 5 }, { ...STRICT, onFieldsDropped: l.onFieldsDropped } as any));
+      expect(err.operation).toBe('update');
+      expect(err.fields).toEqual(['amount']);
+      expect(err.drops).toEqual([AMOUNT]);
+      expect(snapshot()).toEqual(before);
+      expect(l.events).toEqual([]);
+    });
+
+    it('control, update by id: the same payload without strict completes with the computed value, and is reported', async () => {
+      const l = listener();
+      await engine.update(LINE, { id: 'line_draft', quantity: 4, amount: 5 }, { onFieldsDropped: l.onFieldsDropped });
       expect(line('line_draft')).toMatchObject({ quantity: 4, amount: 40 });
       expect(l.events).toEqual([AMOUNT]);
     });
 
-    it('insert: the row is written with the computed value, and reported', async () => {
+    it('update by id under strict: the computed value sent, or no value, is not refused', async () => {
+      await engine.update(LINE, { id: 'line_draft', quantity: 5, unit_price: 20, amount: 100 }, STRICT as any);
+      expect(line('line_draft').amount).toBe(100);
+      await engine.update(LINE, { id: 'line_draft', quantity: 7 }, STRICT as any);
+      expect(line('line_draft').amount).toBe(140);
+    });
+
+    it('insert, single row: refused, nothing written', async () => {
       const l = listener();
-      await engine.insert(LINE, { invoice: 'INV-1004', quantity: 2, unit_price: 10, amount: 999 }, { strictReadonlyWrites: true, onFieldsDropped: l.onFieldsDropped });
+      const err = await refusal(engine.insert(LINE, { invoice: 'INV-1004', quantity: 2, unit_price: 10, amount: 999 }, { ...STRICT, onFieldsDropped: l.onFieldsDropped }));
+      expect(err.operation).toBe('insert');
+      expect(err.drops).toEqual([AMOUNT]);
+      expect(storeFor(LINE).size).toBe(3);
+      expect(l.events).toEqual([]);
+    });
+
+    it('control, insert: the same row without strict is written with the computed value, and reported', async () => {
+      const l = listener();
+      await engine.insert(LINE, { invoice: 'INV-1004', quantity: 2, unit_price: 10, amount: 999 }, { onFieldsDropped: l.onFieldsDropped });
       const rows = [...storeFor(LINE).values()];
       expect(rows).toHaveLength(4);
       expect(rows.find((r) => r.amount === 20 && r.quantity === 2)).toBeDefined();
       expect(l.events).toEqual([AMOUNT]);
     });
 
-    it('predicate update: every matched row is written, and the replacement is reported', async () => {
+    it('insert under strict: the computed value sent, or no value, is written', async () => {
+      await engine.insert(LINE, { invoice: 'INV-1004', quantity: 2, unit_price: 10, amount: 20 }, STRICT);
+      await engine.insert(LINE, { invoice: 'INV-1004', quantity: 3, unit_price: 10 }, STRICT);
+      expect(storeFor(LINE).size).toBe(5);
+    });
+
+    it('insert, batch: one replaced row refuses the whole batch, and no row is written', async () => {
       const l = listener();
-      await engine.update(LINE, { quantity: 2, unit_price: 5, amount: 1 }, { where: { invoice: 'INV-1004' }, multi: true, strictReadonlyWrites: true, onFieldsDropped: l.onFieldsDropped } as any);
+      const err = await refusal(engine.insert(LINE, [
+        { invoice: 'INV-1004', quantity: 4, unit_price: 3, amount: 12 },
+        { invoice: 'INV-1004', quantity: 5, unit_price: 3, amount: 1 },
+      ], { ...STRICT, onFieldsDropped: l.onFieldsDropped }));
+      expect(err.drops).toEqual([AMOUNT]);
+      expect(storeFor(LINE).size).toBe(3);
+      expect(l.events).toEqual([]);
+    });
+
+    it('insertMany: refused like the other strict drops, and no row is written', async () => {
+      const l = listener();
+      const err = await refusal(engine.insertMany(LINE, [
+        { invoice: 'INV-1004', quantity: 1, unit_price: 3, amount: 0 },
+        { invoice: 'INV-1004', quantity: 4, unit_price: 3, amount: 12 },
+      ], { ...STRICT, onFieldsDropped: l.onFieldsDropped }));
+      expect(err.drops).toEqual([AMOUNT]);
+      expect(storeFor(LINE).size).toBe(3);
+      expect(l.events).toEqual([]);
+    });
+
+    it('control, insertMany: without strict both rows are written and the replaced one carries its per-row report', async () => {
+      const outcomes: any[] = await engine.insertMany(LINE, [
+        { invoice: 'INV-1004', quantity: 1, unit_price: 3, amount: 0 },
+        { invoice: 'INV-1004', quantity: 4, unit_price: 3, amount: 12 },
+      ]);
+      expect(outcomes.map((o) => o.ok)).toEqual([true, true]);
+      expect(outcomes[0].droppedFields).toEqual([AMOUNT]);
+      expect(storeFor(LINE).size).toBe(5);
+    });
+
+    it('predicate update: refused, and no matched row is written', async () => {
+      const l = listener();
+      const before = snapshot();
+      const err = await refusal(engine.update(LINE, { quantity: 2, unit_price: 5, amount: 1 }, { where: { invoice: 'INV-1004' }, multi: true, ...STRICT, onFieldsDropped: l.onFieldsDropped } as any));
+      expect(err.drops).toEqual([AMOUNT]);
+      expect(snapshot()).toEqual(before);
+      expect(l.events).toEqual([]);
+    });
+
+    it('control, predicate update: without strict every matched row is written, and the replacement is reported', async () => {
+      const l = listener();
+      await engine.update(LINE, { quantity: 2, unit_price: 5, amount: 1 }, { where: { invoice: 'INV-1004' }, multi: true, onFieldsDropped: l.onFieldsDropped } as any);
       expect([line('line_draft').amount, line('line_draft_2').amount]).toEqual([10, 10]);
       expect(l.events).toEqual([AMOUNT]);
     });
 
-    it('a strict write that ALSO carries a refusable drop is refused for THAT drop alone, writes nothing, and fires no listener', async () => {
+    it('a strict write that ALSO carries another strip\'s drop is refused ONCE, naming both, and writes nothing', async () => {
       const l = listener();
-      const err: any = await engine
-        .update(LINE, { id: 'line_paid', quantity: 60, amount: 2999.4 }, { strictReadonlyWrites: true, onFieldsDropped: l.onFieldsDropped } as any)
-        .catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(ReadonlyFieldRejectedError);
-      expect(err.code).toBe('ERR_READONLY_FIELD_REJECTED');
-      expect(err.drops).toEqual([{ object: LINE, fields: ['quantity'], reason: 'readonly_when' }]);
+      const err = await refusal(engine.update(LINE, { id: 'line_paid', quantity: 60, amount: 2999.4 }, { ...STRICT, onFieldsDropped: l.onFieldsDropped } as any));
+      expect(err.drops).toEqual([
+        { object: LINE, fields: ['quantity'], reason: 'readonly_when' },
+        AMOUNT,
+      ]);
+      expect(err.fields).toEqual(['quantity', 'amount']);
       expect(line('line_paid')).toMatchObject({ quantity: 6, amount: 299.94 });
       expect(l.events).toEqual([]);
     });
 
-    it('insert: a strict write with a refusable drop is refused before the computation, carrying no stored_expression drop', async () => {
+    it('predicate update: a strip\'s drop is refused BEFORE a divergent settle — ERR_READONLY_FIELD_REJECTED, not VALIDATION_FAILED (#5126 ordering)', async () => {
       const l = listener();
+      const before = snapshot();
+      // quantity: 10 computes amount 100 on line_draft and 70 on line_draft_2,
+      // which one statement cannot store; `note` is taken by the static strip.
+      const err = await refusal(engine.update(LINE, { note: 'x', quantity: 10 }, { where: { invoice: 'INV-1004' }, multi: true, ...STRICT, onFieldsDropped: l.onFieldsDropped } as any));
+      expect(err.drops).toEqual([{ object: LINE, fields: ['note'], reason: 'readonly' }]);
+      expect(snapshot()).toEqual(before);
+      expect(l.events).toEqual([]);
+    });
+
+    it('control, predicate update: the same divergent payload without strict is refused by the settle, VALIDATION_FAILED', async () => {
+      const before = snapshot();
       const err: any = await engine
-        .insert('qa_locked_line', { quantity: 4, unit_price: 2, amount: 5 }, { strictReadonlyWrites: true, onFieldsDropped: l.onFieldsDropped })
+        .update(LINE, { note: 'x', quantity: 10 }, { where: { invoice: 'INV-1004' }, multi: true } as any)
         .catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(ReadonlyFieldRejectedError);
-      expect(err.drops.map((d: DroppedFieldsEvent) => d.reason)).not.toContain('stored_expression');
+      expect(err?.code).toBe('VALIDATION_FAILED');
+      expect(err?.fields).toEqual([expect.objectContaining({ field: 'amount', code: 'invalid_value' })]);
+      expect(snapshot()).toEqual(before);
+    });
+
+    it('insert: a value the static `readonly` strip took is refused as `readonly` alone, never also as `stored_expression`', async () => {
+      const l = listener();
+      const err = await refusal(engine.insert('qa_locked_line', { quantity: 4, unit_price: 2, amount: 5 }, { ...STRICT, onFieldsDropped: l.onFieldsDropped }));
+      expect(err.drops).toEqual([{ object: 'qa_locked_line', fields: ['amount'], reason: 'readonly' }]);
       expect([...storeFor('qa_locked_line').values()]).toHaveLength(1);
       expect(l.events).toEqual([]);
     });

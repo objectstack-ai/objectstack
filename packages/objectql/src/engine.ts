@@ -16799,31 +16799,38 @@ export class ObjectQL implements IObjectQLEngine {
         // (`replacedStoredExpressionFields`). A key a strip above already took
         // is that strip's report.
         //
-        // ⛔ NOT refused under `strictReadonlyWrites`, by the maintainer's
-        // ruling 「甲」: in 18.x only the loud half ships — the reason and its
-        // report. The refusal is runtime behaviour no conversion can carry, so
-        // it waits for 19.0. So the strict check judges the strips' drops
-        // alone, BEFORE the computation, exactly where it stood, and a
-        // `stored_expression` report reaches the listener under strict too.
-        const refusableInsertDrops = droppedFieldEvents(object, computedDropped, insertDropped);
-        if (refusableInsertDrops.length > 0 && options?.strictReadonlyWrites === true) {
-          // Before the driver write and before validation — nothing is
-          // written, and "you sent a runtime-owned field" should not depend on
-          // whether some other field also failed a business rule (#5126's
-          // ordering on the update path, mirrored).
-          throw new ReadonlyFieldRejectedError(
-            object, [...new Set(refusableInsertDrops.flatMap((d) => d.fields))], refusableInsertDrops, 'insert',
-          );
-        }
+        // [#25000] REFUSED under `strictReadonlyWrites` like every other
+        // strip's drop: the strict contract follows what `onFieldsDropped`
+        // reports, and a replaced value is one (the amended ruling 「甲」 ships
+        // the refusal in 18.x). So the strict check judges the strips' drops
+        // AND the replacement, AFTER the computation — one refusal names
+        // everything the write would have taken or replaced, rather than a
+        // round-trip per class. The computation writes nothing (it evaluates
+        // over copies and assigns onto the in-memory rows), so the refusal
+        // still lands before validation and before any driver dispatch.
         const storedExpressionReplaced: string[] = [];
         const storedExpressionReplacedPerRow: string[][] = rows.map(() => []);
         if (storedExpressionPlan.length > 0) {
           const liveIndexes = rows
             .map((row, i) => (rowErrors[i] === undefined && row != null && typeof row === 'object' ? i : -1))
             .filter((i) => i >= 0);
-          const computed = await computeStoredExpressions(
-            storedExpressionPlan, liveIndexes.map((i) => rows[i] as Record<string, unknown>), opCtx.context, storedExpressionServing,
-          );
+          let computed: Array<Record<string, unknown>>;
+          try {
+            computed = await computeStoredExpressions(
+              storedExpressionPlan, liveIndexes.map((i) => rows[i] as Record<string, unknown>), opCtx.context, storedExpressionServing,
+            );
+          } catch (err) {
+            // A pass that THROWS is pre-empted by the strict verdict on the
+            // strips' drops (#5126's ordering — the check used to sit ahead
+            // of this pass), then rethrown.
+            const stripDrops = droppedFieldEvents(object, computedDropped, insertDropped);
+            if (stripDrops.length > 0 && options?.strictReadonlyWrites === true) {
+              throw new ReadonlyFieldRejectedError(
+                object, [...new Set(stripDrops.flatMap((d) => d.fields))], stripDrops, 'insert',
+              );
+            }
+            throw err;
+          }
           liveIndexes.forEach((i, k) => {
             const row = rows[i] as Record<string, unknown>;
             const taken = insertDroppedPerRow[i] ?? [];
@@ -16835,11 +16842,19 @@ export class ObjectQL implements IObjectQLEngine {
           });
         }
         const insertDrops = droppedFieldEvents(object, computedDropped, insertDropped, storedExpressionReplaced);
+        if (insertDrops.length > 0 && options?.strictReadonlyWrites === true) {
+          // Before the driver write and before validation — nothing is
+          // written, and "you sent a runtime-owned field" should not depend on
+          // whether some other field also failed a business rule (#5126's
+          // ordering on the update path, mirrored).
+          throw new ReadonlyFieldRejectedError(
+            object, [...new Set(insertDrops.flatMap((d) => d.fields))], insertDrops, 'insert',
+          );
+        }
         if (insertDrops.length > 0 && typeof options?.onFieldsDropped === 'function') {
-          // A strict write that reaches here had no refusable drop (above), so
-          // every event left is a `stored_expression` report on a write that
-          // completes — reported under strict as well. A REFUSED write never
-          // fires the listener: it did not complete.
+          // A strict write never reaches here with a drop (refused above), so
+          // the listener hears only a write that completes. A REFUSED write
+          // never fires the listener: it did not complete.
           for (const drop of insertDrops) {
             try {
               options.onFieldsDropped(drop);
@@ -17484,11 +17499,10 @@ export class ObjectQL implements IObjectQLEngine {
        notifyDrop(fields, reason);
      };
      /**
-      * One drop to the listener ONLY, in every mode — never a strict refusal.
-      * [#24690] The `stored_expression` report goes here: by the maintainer's
-      * ruling 「甲」 18.x ships its report and not its refusal (runtime
-      * behaviour no conversion can carry waits for 19.0). Called after
-      * `assertNoStrictDrops()`, so a refused write never fires the listener.
+      * One drop to the listener, on a non-strict write — `emitDrop`'s other arm.
+      * [#25000] The `stored_expression` report no longer calls this directly:
+      * it goes through `emitDrop` like every strip's, so under strict it is
+      * refused, and a refused write never fires the listener.
       */
      const notifyDrop = (fields: string[], reason: DroppedFieldsEvent['reason']): void => {
        if (fields.length === 0 || !onFieldsDropped) return;
@@ -18494,21 +18508,35 @@ export class ObjectQL implements IObjectQLEngine {
                // strict is about the payload the caller SENT, and reporting
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
-               assertNoStrictDrops();
+               //
                // [#24619] The stored computed fields over the stored row merged
                // with the FINAL payload — after the hooks and both strips, so a
                // locked input the `readonlyWhen` strip took back out feeds the
                // stored value, never the caller's — and before the statement.
                // [#24690] A caller value the computation replaces is reported
-               // under `stored_expression`, to the listener only (`notifyDrop`):
-               // never refused under strict in 18.x (ruling 「甲」).
+               // under `stored_expression`; [#25000] through `emitDrop`, the
+               // channel every strip reports through, so under strict it is
+               // REFUSED like them and nothing is written. The one judgment
+               // below therefore follows the computation, and one refusal names
+               // every drop and replacement together. The computation writes
+               // nothing (it evaluates over a copy), and an object declaring no
+               // stored expression skips it, so its refusal is where it stood.
+               // A pass that THROWS (a permission or related-row read) is
+               // pre-empted by the strict verdict on the strips' drops already
+               // collected — #5126's ordering, as on the predicate branch.
                if (storedExpressionPlan.length > 0) {
                    const patch = hookContext.input.data as Record<string, unknown>;
-                   const [computed] = await computeStoredExpressions(storedExpressionPlan, [{ ...priorRecord, ...patch }], opCtx.context, storedExpressionServing);
-                   const replaced = replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, [computed!]);
+                   let computed: Record<string, unknown> | undefined;
+                   try {
+                       [computed] = await computeStoredExpressions(storedExpressionPlan, [{ ...priorRecord, ...patch }], opCtx.context, storedExpressionServing);
+                   } catch (err) {
+                       assertNoStrictDrops();
+                       throw err;
+                   }
+                   emitDrop(replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, [computed!]), 'stored_expression');
                    applyStoredExpressionsToPatch(patch, computed!, priorRecord);
-                   notifyDrop(replaced, 'stored_expression');
                }
+               assertNoStrictDrops();
                // [#21663] The payload is FINAL here (see the seam below), so
                // every readonly value on it is one the driver will store: a
                // system writer's (the strip above never ran for it), a hook's,
@@ -18781,30 +18809,48 @@ export class ObjectQL implements IObjectQLEngine {
                // [#5126] Same refusal on the predicate path. A bulk strip is
                // "locked in ≥1 matched row ⇒ dropped for ALL", so a strict bulk
                // caller is told before N rows are written with a column missing
-               // — the failure mode a bulk write makes N times larger.
-               assertNoStrictDrops();
+               // — the failure mode a bulk write makes N times larger. The
+               // judgment itself follows the stored-expression pass below, as on
+               // the by-id branch.
+               //
                // [#24619] The stored computed fields on the predicate path, over
                // the FINAL payload as on the by-id branch. One patch reaches
                // every matched row, so {@link settleBulkStoredExpressions} keeps
                // a computed value only when it is the same on every row, and
                // refuses a patch that would compute different ones. The rows
                // are the D7 read (`readPriorRows` is a memo — no second fetch).
-               // [#24690] As on the by-id branch, to the listener only: a caller
-               // value differing from what any matched row then stores (the one
-               // computed value, or the column left as it is) is reported under
-               // `stored_expression`, and never refused under strict in 18.x.
+               // [#24690] As on the by-id branch: a caller value differing from
+               // what any matched row then stores (the one computed value, or
+               // the column left as it is) is reported under
+               // `stored_expression`; [#25000] through `emitDrop`, so under
+               // strict it is REFUSED before the statement and no row is written,
+               // in one refusal with every strip's drop. The pass writes nothing.
+               // ⛔ #5126's ordering survives it: a pass that THROWS — above
+               // all `settleBulkStoredExpressions` refusing a patch that computes
+               // different values on different rows (`VALIDATION_FAILED`) — is
+               // pre-empted by the strict verdict on the strips' drops already
+               // collected, so a strict caller whose payload a strip took is told
+               // `ERR_READONLY_FIELD_REJECTED` first, exactly as when the assert
+               // sat ahead of the whole pass. With no throw, one refusal names
+               // every strip drop plus the replacement.
                if (storedExpressionPlan.length > 0) {
-                   const matched = ((await readPriorRows()) ?? []).filter((row) => row != null && typeof row === 'object');
-                   const patch = hookContext.input.data as Record<string, unknown>;
-                   const before = await computeStoredExpressions(storedExpressionPlan, matched, opCtx.context, storedExpressionServing);
-                   const after = await computeStoredExpressions(storedExpressionPlan, matched.map((row) => ({ ...row, ...patch })), opCtx.context, storedExpressionServing);
-                   const settled = settleBulkStoredExpressions(storedExpressionPlan, patch, before, after, object);
-                   notifyDrop(
-                     replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, matched.map((row) => ({ ...row, ...settled }))),
-                     'stored_expression',
-                   );
-                   hookContext.input.data = settled as any;
+                   try {
+                       const matched = ((await readPriorRows()) ?? []).filter((row) => row != null && typeof row === 'object');
+                       const patch = hookContext.input.data as Record<string, unknown>;
+                       const before = await computeStoredExpressions(storedExpressionPlan, matched, opCtx.context, storedExpressionServing);
+                       const after = await computeStoredExpressions(storedExpressionPlan, matched.map((row) => ({ ...row, ...patch })), opCtx.context, storedExpressionServing);
+                       const settled = settleBulkStoredExpressions(storedExpressionPlan, patch, before, after, object);
+                       emitDrop(
+                         replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, matched.map((row) => ({ ...row, ...settled }))),
+                         'stored_expression',
+                       );
+                       hookContext.input.data = settled as any;
+                   } catch (err) {
+                       assertNoStrictDrops();
+                       throw err;
+                   }
                }
+               assertNoStrictDrops();
                // [#21663] The predicate-path twin of the by-id second pass, at the
                // same point and for the same reason: the readonly values left on
                // the final payload are stored, so their SHAPE is judged — before
