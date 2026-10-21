@@ -88,9 +88,19 @@ interface ZodDefLike {
   shape?: Record<string, unknown>;
 }
 
-/** The `_zod.def` of a schema, or `undefined` for anything that is not one. */
+/**
+ * The definition of a schema, or `undefined` for anything that is not one.
+ *
+ * Read through the public `.def` first, and `_zod.def` only for a core schema
+ * that has no `.def`: a `lazySchema` Proxy reports `_zod` as a non-configurable
+ * own property its function target does not have, so a second Proxy wrapped
+ * around it (a test that instruments a registered schema does exactly this)
+ * throws a Proxy invariant TypeError on any `_zod` read, while `.def` resolves.
+ */
 export function zodDefOf(schema: unknown): ZodDefLike | undefined {
   if (!schema || (typeof schema !== 'object' && typeof schema !== 'function')) return undefined;
+  const publicDef = (schema as { def?: ZodDefLike }).def;
+  if (publicDef && typeof publicDef === 'object' && typeof publicDef.type === 'string') return publicDef;
   const internals = (schema as { _zod?: { def?: ZodDefLike } })._zod;
   return internals?.def;
 }

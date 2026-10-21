@@ -30,7 +30,7 @@ import {
   type MetadataTypeRedactor,
 } from './metadata-type-redaction';
 import { z } from 'zod';
-import { registerMetadataTypeSchema } from './metadata-type-schemas';
+import { getMetadataTypeSchema as getMetadataTypeSchemaForTest, registerMetadataTypeSchema } from './metadata-type-schemas';
 
 describe('register/lookup round trip (the registry pattern of registerMetadataTypeSchema)', () => {
   it('a registered redactor is returned for its type', () => {
@@ -349,6 +349,14 @@ describe('[ruling B+ on #24966] the third resolution: a redactor DERIVED from th
   it('precedence: the datasource built-in is still the datasource redactor', () => {
     const result = getMetadataTypeRedactor('datasource')!({ name: 'ds', driver: 'postgres', config: { host: 'h', password: 'TEST_SECRET' } });
     expect(result.redactedKeys).toEqual(['config.password']);
+  });
+
+  it('derives through a registered schema wrapped in a second Proxy (an instrumented lazy schema)', () => {
+    const webhook = getMetadataTypeSchemaForTest('webhook');
+    const wrapped = new Proxy(webhook as object, { get: (t, p, r) => Reflect.get(t, p, r) });
+    registerMetadataTypeSchema('zz_proxied_rule_test', wrapped as never);
+    const result = getMetadataTypeRedactor('zz_proxied_rule_test')!(declaredWebhook());
+    expect(result.redactedKeys).toEqual(['headers', 'secret']);
   });
 
   it('the derivation is memoised per schema identity: one redactor across lookups', () => {
