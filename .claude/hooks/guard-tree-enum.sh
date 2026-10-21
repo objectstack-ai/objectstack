@@ -96,20 +96,87 @@ fi
 [ -n "$cmd" ] || exit 0
 
 # --- split the command into shell segments, honouring quotes ---------------------------
-# Kept case-for-case identical to guard-shared-stash.sh's pass, including the #11738
-# repair: OUTSIDE quotes a backslash escapes the NEXT character, so an escaped `\"` opens
-# no quoted region. Without that branch a stray `\"` makes every separator behind it inert,
-# the command collapses into one segment, and the real work rides through as an argument.
+# Kept case-for-case identical to guard-shared-stash.sh's pass, and the self-test fails when
+# it is not. That covers the #11738 repair: OUTSIDE quotes a backslash escapes the NEXT
+# character, so an escaped `\"` opens no quoted region. Without that branch a stray `\"`
+# makes every separator behind it inert, the command collapses into one segment, and the
+# real work rides through as an argument.
+#
+# INSIDE "…" two more rules hold, and this copy carried neither until #24901, while the line
+# above already called it identical. A `\"` there is a literal quote that leaves the region
+# OPEN (#11804); and a `$(`, a backtick or a `${` opens a quoting context of its own, so a
+# `"` in its body nests instead of closing the outer string. Reading either `"` as the
+# closer split a pure read: measured on this repo's copy before the fix,
+# `echo "say \"; ls *.yml; git show origin/main:x\" ok"` and
+# `echo "a $(echo "x; ls *.yml")" && git show origin/main:README.md` were both BLOCKED.
+# subst_end() is copied byte-for-byte from guard-main-checkout-bash.sh, whose comment above
+# the function is its documentation; the self-test pins that copy too.
 #
 # `(` and `)` are separators, which is what makes command substitution fall out correctly
 # here: `for f in $(git ls-tree --name-only origin/main dir)` becomes `for f in $` — no
 # glob, so not an enumeration — plus a `git ls-tree` segment, which is the suppressor.
+SUBST_END=0
+subst_end() {
+  local s="$1" i="$2" n=${#1} st ch top run
+  case "${s:i:2}" in
+    '$(') st=')' ; i=$((i + 1)) ;;
+    '${') st='}' ; i=$((i + 1)) ;;
+    '`'*) st='`' ;;
+    *) return 1 ;;
+  esac
+  for ((i = i + 1; i < n; i++)); do
+    ch="${s:i:1}" ; top="${st:${#st}-1:1}"
+    if [ "$top" = "'" ]; then [ "$ch" = "'" ] && st="${st%?}"; continue; fi
+    if [ "$ch" = '\' ]; then i=$((i + 1)); continue; fi
+    if [ "$top" = '"' ] || [ "$top" = '}' ]; then
+      case "$ch" in
+        '"') if [ "$top" = '"' ]; then st="${st%?}"; else st+='"'; fi ;;
+        '`') st+='`' ;;
+        '$')
+          case "${s:i+1:1}" in
+            '(') st+=')' ; i=$((i + 1)) ;;
+            '{') st+='}' ; i=$((i + 1)) ;;
+          esac ;;
+        '}') [ "$top" = '}' ] && st="${st%?}" ;;
+        "'")
+          if [ "$top" = '}' ]; then
+            run="${s:i+1}"
+            case "$run" in *"'"*) ;; *) SUBST_END=$((n - 1)); return 0 ;; esac
+            run="${run%%"'"*}"
+            case "$run" in *[\"\\\`\$\}]*) SUBST_END=$((n - 1)); return 0 ;; esac
+            i=$((i + ${#run} + 1))
+          fi ;;
+      esac
+      if [ -z "$st" ]; then SUBST_END=$i; return 0; fi
+      continue
+    fi
+    case "$ch" in
+      "'" | '"') st+="$ch" ;;
+      '(') st+=')' ;;
+      ')') [ "$top" = ')' ] && st="${st%?}" ;;
+      '`') if [ "$top" = '`' ]; then st="${st%?}"; else st+='`'; fi ;;
+    esac
+    if [ -z "$st" ]; then SUBST_END=$i; return 0; fi
+  done
+  SUBST_END=$((n - 1))
+  return 0
+}
+
 segments=()
 split_segments() {
   local s="$1" seg="" q="" ch i n=${#1}
   for ((i = 0; i < n; i++)); do
     ch="${s:i:1}"
     if [ -n "$q" ]; then
+      if [ "$q" = '"' ] && [ "$ch" = '\' ] && [ $((i + 1)) -lt "$n" ]; then
+        case "${s:i+1:1}" in
+          '"' | '\' | '$' | '`')
+            seg+="$ch" ; i=$((i + 1)) ; seg+="${s:i:1}" ; continue ;;
+        esac
+      fi
+      if [ "$q" = '"' ] && { [ "$ch" = '$' ] || [ "$ch" = '`' ]; } && subst_end "$s" "$i"; then
+        seg+="${s:i:SUBST_END-i+1}" ; i=$SUBST_END ; continue
+      fi
       seg+="$ch"
       [ "$ch" = "$q" ] && q=""
       continue

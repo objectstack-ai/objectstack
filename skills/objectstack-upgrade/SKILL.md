@@ -118,15 +118,16 @@ deleting them on merge, is the usual arrangement — decide it with the owner.
 
 A 17.x project's skills came from `skills add`; their `skills-lock.json` entries
 read `sourceType: github`, so the sync skips them (exit 0) and the agent keeps
-reading 17.x skill text. Remove them (a missing name is skipped; `--all` when
-they are the project's only skills), add `@objectstack/skills` at the installed
-spec's version, copy it:
+reading 17.x skill text. Remove them (a missing name is skipped), add
+`@objectstack/skills` at the installed spec's version with the manager that
+installed the project, copy it:
 
 ```bash
 npx skills remove objectstack-ai objectstack-api objectstack-automation \
   objectstack-data objectstack-formula objectstack-i18n objectstack-platform \
   objectstack-pm-dispatch objectstack-query objectstack-ui objectstack-upgrade -y
-npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+#   npm: npm install --save-dev "@objectstack/skills@…"   ·   yarn: yarn add -D "@objectstack/skills@…"
 npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
 ```
 
@@ -253,9 +254,7 @@ upgrade and again in the report.
 > **Not reachable from a consumer project**, so do not send anyone there: the
 > conversion and migration registries (`src/conversions/registry.ts`,
 > `src/migrations/registry.ts`) and the platform repo's generated upgrade guide
-> are **not** in the published package — only `src/**/*.zod.ts` is. Their
-> consumer-facing projection is `spec-changes.json` and the chain's own `--json`
-> output.
+> are **not** in the published package — only `src/**/*.zod.ts` is.
 
 ### 2.2 The three residue classes
 

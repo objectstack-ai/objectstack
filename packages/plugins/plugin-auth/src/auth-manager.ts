@@ -3020,11 +3020,20 @@ export class AuthManager {
       // Auto-includes origins from OS_CORS_ORIGIN env var so CORS and CSRF stay in sync.
       ...(() => {
         const origins: string[] = [...(this.config.trustedOrigins || [])];
-        // Sync with OS_CORS_ORIGIN env var (comma-separated)
+        // Sync with OS_CORS_ORIGIN env var (comma-separated), judged ENTRY BY
+        // ENTRY: an entry that admits every host never enters the trusted set,
+        // however the list around it is spelled. That is `*`, or a pattern whose
+        // host part is the bare `*` (`https://*`, `*://*`, `http://*:*`) —
+        // better-auth's own matcher reads each of them as every origin — the
+        // same narrow class the CORS transport refuses with credentials
+        // (`isAllHostOriginPattern`, `@objectstack/plugin-hono-server`, which
+        // this package does not depend on). `docs/HARDENING.md` § CORS governs;
+        // `@objectstack/http-conformance`'s CORS-doors pin holds the two equal.
         const corsOrigin = readEnvWithDeprecation('OS_CORS_ORIGIN', 'CORS_ORIGIN', { silent: true });
-        if (corsOrigin && corsOrigin !== '*') {
+        if (corsOrigin) {
+          const admitsEveryHost = (entry: string) => /^(?:[^:/]+:\/\/)?\*+(?::(?:\d+|\*))?$/.test(entry);
           corsOrigin.split(',').map(s => s.trim()).filter(Boolean).forEach(o => {
-            if (!origins.includes(o)) origins.push(o);
+            if (!admitsEveryHost(o) && !origins.includes(o)) origins.push(o);
           });
         }
         // When CORS allows all origins (default) and no explicit trustedOrigins,

@@ -15,7 +15,15 @@
  *  2. a configured origin is admitted, with credentials, and nothing else is;
  *  3. a loopback origin is admitted by the default on a development boot only;
  *  4. `'*'` together with credentials is refused at init (and so at boot),
- *     wherever the `'*'` comes from; `'*'` without credentials still boots.
+ *     wherever the `'*'` comes from; `'*'` without credentials still boots;
+ *  5. a configured list admits a loopback origin beside it on a development
+ *     boot only — the list itself, and nothing more, everywhere else;
+ *  6. a pattern whose host part is the bare `*` (`https://*`, `*://*`) admits
+ *     every host, so it is refused with credentials exactly as `'*'` is.
+ *
+ * The rule itself is `resolveCorsAdmission` (`cors-admission.ts`), which
+ * `@objectstack/hono`'s `createHonoApp` reads too; the pin that holds every
+ * door to the same answer lives in `@objectstack/http-conformance`.
  *
  * "Admitted" is read off `Access-Control-Allow-Origin` — the one header a
  * browser checks before handing a cross-origin response to the page.
@@ -164,14 +172,15 @@ describe('3. the default admits a loopback origin on a development boot only', (
     });
 });
 
-describe("4. '*' together with credentials is refused at init", () => {
-    const refusal = async (options: HonoPluginOptions): Promise<Error> => {
-        const plugin = new HonoServerPlugin({ port: 0, serverTiming: false, ...options });
-        const outcome = await plugin.init(fakeCtx()).then(() => null, (e: unknown) => e);
-        expect(outcome).toBeInstanceOf(Error);
-        return outcome as Error;
-    };
+/** Run the real `init()` and return what it threw; a resolved init fails the case. */
+async function refusal(options: HonoPluginOptions): Promise<Error> {
+    const plugin = new HonoServerPlugin({ port: 0, serverTiming: false, ...options });
+    const outcome = await plugin.init(fakeCtx()).then(() => null, (e: unknown) => e);
+    expect(outcome).toBeInstanceOf(Error);
+    return outcome as Error;
+}
 
+describe("4. '*' together with credentials is refused at init", () => {
     it('from the `cors.origins` option, with credentials left at their default', async () => {
         const err = await refusal({ cors: { origins: '*' } });
         // The named subjects: both variables an operator can set to resolve it.
@@ -208,5 +217,81 @@ describe("4. '*' together with credentials is refused at init", () => {
         const res = await app.request('/probe', { headers: { Origin: FOREIGN } });
         expect(res.headers.get('access-control-allow-origin')).toBe(FOREIGN);
         expect(res.headers.get('access-control-allow-credentials')).toBeNull();
+    });
+});
+
+describe('5. a configured list admits a loopback origin beside it on a development boot only', () => {
+    it('outside development, a loopback origin the list does not name is not admitted', async () => {
+        const app = await boot({ cors: { origins: [CONFIGURED] } });
+        expect(await allowedOnGet(app, CONFIGURED)).toBe(CONFIGURED);
+        expect(await allowedOnGet(app, LOOPBACK)).toBeNull();
+        expect(await allowedOnPreflight(app, LOOPBACK)).toBeNull();
+        expect(await allowedOnGet(app, 'http://127.0.0.1:3001')).toBeNull();
+        expect(await allowedOnGet(app, 'http://[::1]:3000')).toBeNull();
+    });
+
+    it('the same for a list read from OS_CORS_ORIGIN, patterns included, and for an unset or `test` NODE_ENV', async () => {
+        process.env.OS_CORS_ORIGIN = `${CONFIGURED},https://*.example.net`;
+        for (const value of ['production', undefined, 'test']) {
+            if (value === undefined) delete process.env.NODE_ENV;
+            else process.env.NODE_ENV = value;
+            const app = await boot();
+            expect(await allowedOnGet(app, 'https://tenant.example.net')).toBe('https://tenant.example.net');
+            expect(await allowedOnGet(app, LOOPBACK)).toBeNull();
+        }
+    });
+
+    it('on a development boot, a loopback origin is admitted beside the list, and still no foreign origin', async () => {
+        process.env.NODE_ENV = 'development';
+        const app = await boot({ cors: { origins: [CONFIGURED] } });
+        expect(await allowedOnGet(app, CONFIGURED)).toBe(CONFIGURED);
+        expect(await allowedOnGet(app, LOOPBACK)).toBe(LOOPBACK);
+        expect(await allowedOnPreflight(app, LOOPBACK)).toBe(LOOPBACK);
+        expect(await allowedOnGet(app, FOREIGN)).toBeNull();
+    });
+
+    it('a list that names a loopback pattern admits it in every mode, and only what it names', async () => {
+        const app = await boot({ cors: { origins: 'http://localhost:*' } });
+        expect(await allowedOnGet(app, LOOPBACK)).toBe(LOOPBACK);
+        expect(await allowedOnGet(app, 'http://127.0.0.1:3001')).toBeNull();
+    });
+});
+
+describe("6. a pattern whose host part is the bare `*` is refused with credentials, as '*' is", () => {
+    const ALL_HOST = ['https://*', 'http://*', '*://*', 'http://*:*', 'https://*:8443'];
+
+    it('from the `cors.origins` option, alone or inside a list, naming the entry', async () => {
+        for (const entry of ALL_HOST) {
+            const alone = await refusal({ cors: { origins: entry } });
+            expect(alone.message).toContain(`'${entry}'`);
+            expect(alone.message).toContain('OS_CORS_ORIGIN');
+            expect(alone.message).toContain('OS_CORS_CREDENTIALS');
+            await refusal({ cors: { origins: [CONFIGURED, entry] } });
+        }
+    });
+
+    it('from OS_CORS_ORIGIN, alone or inside a list', async () => {
+        for (const entry of ALL_HOST) {
+            process.env.OS_CORS_ORIGIN = entry;
+            await refusal({});
+            process.env.OS_CORS_ORIGIN = `${CONFIGURED}, ${entry}`;
+            const err = await refusal({});
+            expect(err.message).toContain(`'${entry}'`);
+        }
+    });
+
+    it('boots without credentials, admitting what the pattern matches with no credentials header', async () => {
+        process.env.OS_CORS_ORIGIN = 'https://*';
+        process.env.OS_CORS_CREDENTIALS = 'false';
+        const app = await boot();
+        const res = await app.request('/probe', { headers: { Origin: FOREIGN } });
+        expect(res.headers.get('access-control-allow-origin')).toBe(FOREIGN);
+        expect(res.headers.get('access-control-allow-credentials')).toBeNull();
+    });
+
+    it('a pattern that names part of the host is not one: it boots with credentials', async () => {
+        const app = await boot({ cors: { origins: ['https://*.example.com', 'http://localhost:*'] } });
+        expect(await allowedOnGet(app, 'https://tenant.example.com')).toBe('https://tenant.example.com');
+        expect(await allowedOnGet(app, FOREIGN)).toBeNull();
     });
 });
