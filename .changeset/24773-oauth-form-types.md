@@ -10,6 +10,6 @@ Setup › OAuth Applications › Register offered four application types: Web, N
 
 - **Redirect URLs help.** It said "Must use https:// in production", which did not tell an admin that a local `http://localhost` callback needs the Native type. It now states the rule for each type: a Web application needs `https://` on a host other than localhost or another loopback address; a Native application may also use `http://` on exactly `localhost`, `127.0.0.1` or `[::1]`, on any port.
 - **Application Type help.** New: choose Native for a desktop or mobile app, or for an app in local development that redirects to `http://localhost`.
-- **Unchanged.** The stored `sys_oauth_application.type` column still lists all four values, so a row written under an earlier provider line keeps its value. The `public` column is unchanged.
+- **Unchanged.** A row written under an earlier provider line keeps its stored type, and the `public` column is unchanged; the stored column's options narrow to Web and Native in this release's `sys_oauth_application.type` entry.
 
 The zh-CN, ja-JP and es-ES translations carry the new help texts.
