@@ -84,8 +84,13 @@ const FAMILY = [
     valid: {}, literal: 'libsql://x.turso.io', placeholder: 'libsql://${TURSO_HOST}' },
   { name: 'turso syncUrl', schema: TursoConfigSchema, key: 'syncUrl',
     valid: { url: 'file:./data/replica.db' }, literal: 'libsql://x.turso.io', placeholder: 'libsql://${TURSO_SYNC_HOST}' },
+  // A remote url since #25020: a local or replica mode now refuses ANY
+  // non-empty `encryptionKey` (its SQLite engine cannot encrypt the file —
+  // pinned in `turso.test.ts`), so the literal half of this row can only be
+  // judged where the key still parses. This row pins the value-level
+  // placeholder judgement, not that a remote mode honours the key: it does not.
   { name: 'turso encryptionKey', schema: TursoConfigSchema, key: 'encryptionKey',
-    valid: { url: 'file:./data/local.db' }, literal: 'a'.repeat(32), placeholder: '${TURSO_ENCRYPTION_KEY}' },
+    valid: { url: 'libsql://x.turso.io' }, literal: 'a'.repeat(32), placeholder: '${TURSO_ENCRYPTION_KEY}' },
   { name: 'sqlite filename', schema: SqliteConfigSchema, key: 'filename',
     valid: {}, literal: './data/objectstack.db', placeholder: '${DATA_DIR}/objectstack.db' },
   { name: 'sqlite-wasm filename', schema: SqliteWasmConfigSchema, key: 'filename',
