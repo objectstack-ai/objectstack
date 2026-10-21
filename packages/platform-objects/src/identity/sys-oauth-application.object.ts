@@ -151,14 +151,14 @@ export const SysOauthApplication = ObjectSchema.create({
       // provider judges (`@better-auth/oauth-provider` 1.7.3 declares
       // `application_type` as `web` | `native`), and the redirect-URL help
       // states that provider's redirect-URI rule per type, which the register
-      // route forwards the type to. `user-agent-based` and `public` are no
-      // longer offered: the provider has no such application type, so the
-      // route registers either as `web`. The route itself still accepts both
-      // (refusing them narrows the door, which waits for a major version), and
-      // nothing on the server reads these options: the generic action door
-      // refuses a `type: 'api'` action before its param contract runs, so the
-      // route is the only judge. The stored `type` column below is a separate
-      // surface and is not narrowed here: that waits for the same major version.
+      // route forwards the type to. The route accepts only those two: in 18.x it
+      // refuses any other present type (`user-agent-based`, `public`, ...) with
+      // 400 before the provider runs; no type (absent or null) registers `web`.
+      // Nothing on the server reads these options: the generic action door
+      // refuses a `type: 'api'` action before its param contract runs. The
+      // stored `type` column below is not narrowed: 1.7.3 writes only `web` or
+      // `native` (null for a client-metadata-document client), an earlier
+      // provider line could write `user-agent-based`, and no in-tree reader branches on it.
       params: [
         { name: 'name', label: 'Application Name', type: 'text', required: true },
         {
