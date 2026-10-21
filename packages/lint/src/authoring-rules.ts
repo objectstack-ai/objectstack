@@ -1710,14 +1710,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `record:alert` / `action:*` `visible` and `disabled`), judged for the
   // platform's parse bounds with `validateExpression`'s verdict. The component
   // node's own `visibleWhen` is the visibility family's above, an error; these
-  // slots were judged by no rule at any door. `advisory` in 18.x: refusing a
-  // page that saves today is a narrowing no ADR-0087 conversion can carry, so
-  // under the standing ruling for post-GA narrowings (「甲」, record
-  // 6292005854) only the warning ships now and the refusal waits for the next
-  // major. Page-local, so the per-write snapshot is the whole input.
+  // slots were judged by no rule at any door. `gating` since #25002: the
+  // finding is an `error`, so a page carrying such a slot fails all three
+  // commands and its next save is refused at the page door. It first shipped
+  // as an advisory; the amended standing ruling for post-GA narrowings
+  // (「甲」, record 6303865025) ships a narrowing no ADR-0087 conversion can
+  // carry now, as a BREAKING minor. Page-local, so the per-write snapshot is
+  // the whole input.
   {
     name: 'validatePagePredicateBounds',
-    tier: 'advisory',
+    tier: 'gating',
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-page-predicate-bounds.ts',
