@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
 import {
   ORGANIZATION_AUTH_STRUCTURE,
@@ -37,13 +38,15 @@ function makeEngine(tables: Record<string, Row[]>, owned: Array<{ object: string
   const engine: any = {
     async find(object: string, q: any) {
       calls.push(`find ${object}`);
-      return (tables[object] ?? []).filter((r) => matches(r, q?.where));
+      const rows = (tables[object] ?? []).filter((r) => matches(r, q?.where));
+      return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     async count(object: string, q: any) {
       calls.push(`count ${object}`);
       return (tables[object] ?? []).filter((r) => matches(r, q?.where)).length;
     },
     async delete(object: string, q: any) {
+      assertEngineDeleteDispatch(q);
       calls.push(`delete ${object}${q?.multi ? ' multi' : ''}`);
       expect(q?.context?.isSystem, `${object} is deleted as the system`).toBe(true);
       tables[object] = (tables[object] ?? []).filter((r) => !matches(r, q?.where));
