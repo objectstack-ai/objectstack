@@ -16,6 +16,8 @@ import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/s
 import {
   ORGANIZATION_AUTH_STRUCTURE,
   ORGANIZATION_DELETE_REFUSAL_CODE,
+  VENDOR_REMOVED_ON_DELETE,
+  defaultOrganizationDeleteRefusal,
   isDefaultOrganizationTarget,
   organizationDeleteRefusal,
   organizationNotEmptyBody,
@@ -102,6 +104,28 @@ describe('[#24948] organizationDeleteRefusal: the records the organization still
     const fault = new Error('connection lost');
     engine.organizationOwnedRowCounts = async () => { throw fault; };
     await expect(organizationDeleteRefusal(engine, ORG)).rejects.toBe(fault);
+  });
+});
+
+describe('[#24948] defaultOrganizationDeleteRefusal: the Default Organization\'s count, once the guard admits', () => {
+  it('leaves out only what better-auth removes, so its teams and every grant count', async () => {
+    const owned = [{ object: 'sys_team', count: 1 }, { object: 'sys_user_permission_set', count: 2 }];
+    const { engine, asked, calls } = makeEngine({ sys_user_permission_set: [{ organization_id: ORG }] }, owned);
+    expect(await defaultOrganizationDeleteRefusal(engine, ORG)).toEqual(owned);
+    expect(asked).toEqual([{ organizationId: ORG, exclude: ['sys_member', 'sys_invitation'] }]);
+    expect([...VENDOR_REMOVED_ON_DELETE]).toEqual(['sys_member', 'sys_invitation']);
+    // No organization-admin grant is subtracted: plugin-auth removes none of them here.
+    expect(calls).toEqual([]);
+  });
+
+  it('answers undefined for an engine that cannot count, and propagates a count that fails', async () => {
+    const { engine } = makeEngine({});
+    delete engine.organizationOwnedRowCounts;
+    expect(await defaultOrganizationDeleteRefusal(engine, ORG)).toBeUndefined();
+    const failing = makeEngine({}).engine;
+    const fault = new Error('connection lost');
+    failing.organizationOwnedRowCounts = async () => { throw fault; };
+    await expect(defaultOrganizationDeleteRefusal(failing, ORG)).rejects.toBe(fault);
   });
 });
 

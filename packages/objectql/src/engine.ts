@@ -20090,11 +20090,28 @@ export class ObjectQL implements IObjectQLEngine {
       return { where, count: probed.filter((row) => !cascadeSetHas(cascadeSet.members, childName, row?.id)).length };
     }
     try {
-      return { where, count: await this.count(childName, { where, context: ObjectQL.referenceCheckContext(context) }) };
+      return { where, count: await this.count(childName, { where, context: ObjectQL.organizationCountContext(context) }) };
     } catch (error) {
       if (isMissingTableError(error, childName)) return { where, count: 0 };
       throw error;
     }
+  }
+
+  /**
+   * [#24948] The context an organization's row counts run under: system
+   * identity, and nothing of the caller's scope. A `tenantId` carried in from
+   * a caller acting in another organization would scope the count to THAT
+   * organization and read 0 rows naming this one, so the refusal would pass on
+   * an undercount. Only the request's transaction and trace are kept: the
+   * count must see the request's own uncommitted writes. The ordinary
+   * reference probes keep the caller's scope ({@link referenceCheckContext}).
+   */
+  private static organizationCountContext(context?: ExecutionContext): ExecutionContext {
+    return {
+      isSystem: true,
+      ...(context?.transaction !== undefined ? { transaction: context.transaction } : {}),
+      ...(context?.traceId !== undefined ? { traceId: context.traceId } : {}),
+    } as ExecutionContext;
   }
 
   /**
@@ -20222,7 +20239,7 @@ export class ObjectQL implements IObjectQLEngine {
       try {
         count = await this.count(childName, {
           where: this.referenceProbeFilter(tenantField, fdef, organizationId),
-          context: ObjectQL.referenceCheckContext(options?.context),
+          context: ObjectQL.organizationCountContext(options?.context),
         });
       } catch (error) {
         if (isMissingTableError(error, childName)) continue;

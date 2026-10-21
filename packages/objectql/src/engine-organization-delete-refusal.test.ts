@@ -388,6 +388,48 @@ describe('[#24948] references the delete keeps as they are (seat decision 630599
   });
 });
 
+describe('[#24948] the organization counts carry none of the caller\'s tenant scope (delta review R2)', () => {
+  /**
+   * A tenant layer: scopes every `acct` read whose context carries a
+   * `tenantId` to that organization, as a tenant-scoping middleware does. A caller acting in
+   * OTHER_ORG must not read 0 rows for ORG_ID and pass the refusal.
+   */
+  const scopeByTenant = (engine: ObjectQL) =>
+    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      const tenantId = opCtx.context?.tenantId;
+      if (tenantId && opCtx.object === 'acct' && opCtx.ast) {
+        opCtx.ast.where = { ...(opCtx.ast.where ?? {}), organization_id: tenantId };
+      }
+      await next();
+    });
+  const foreign = { userId: 'u1', tenantId: OTHER_ORG } as any;
+
+  it('organizationOwnedRowCounts counts the organization\'s rows under a foreign tenant scope', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT]);
+    scopeByTenant(engine);
+    store.seed('acct', { id: 'a1', organization_id: ORG_ID });
+    store.seed('acct', { id: 'a2', organization_id: ORG_ID });
+    // CONTROL: the tenant layer is live, and scopes this caller's own count away.
+    expect(await engine.count('acct', { where: { organization_id: ORG_ID }, context: foreign })).toBe(0);
+
+    expect(await engine.organizationOwnedRowCounts(ORG_ID, { context: foreign })).toEqual([{ object: 'acct', count: 2 }]);
+  });
+
+  it('the engine refusal still refuses a caller scoped to another organization', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT]);
+    scopeByTenant(engine);
+    store.seed('acct', { id: 'a1', organization_id: ORG_ID });
+
+    const err: any = await engine
+      .delete('sys_organization', { where: { id: ORG_ID }, context: { ...foreign, isSystem: true } } as any)
+      .then(() => null, (e: any) => e);
+
+    expect(err?.code).toBe('DELETE_RESTRICTED');
+    expect(err?.dependents?.map((d: { object: string }) => d.object)).toEqual(['acct']);
+    expect(store.writes).toEqual([]);
+  });
+});
+
 describe('[#24948] the predicate path is refused for an organization', () => {
   it('a multi delete of sys_organization is refused, by id only, before anything is written', async () => {
     const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT]);

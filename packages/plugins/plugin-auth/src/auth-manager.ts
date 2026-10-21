@@ -212,6 +212,7 @@ import {
 import {
   ORGANIZATION_DELETE_PATH,
   ORGANIZATION_DELETE_REFUSAL_CODE,
+  defaultOrganizationDeleteRefusal,
   isDefaultOrganizationTarget,
   organizationDeleteRefusal,
   organizationNotEmptyBody,
@@ -8112,9 +8113,11 @@ export class AuthManager {
    * refusal, and no count. Everything this cannot decide falls through to the
    * vendor: no session, no organization id, no membership, a lookup that
    * failed. The COUNT does not fall through: it is the guard, and a guard that
-   * could not be evaluated must not pass, so its failure propagates. The
-   * Default Organization stays the last-administrator guard's to answer: the
-   * guard's own question is asked here, so its 403 lands before the first write.
+   * could not be evaluated must not pass, so its failure propagates, and so
+   * does a failure deciding whether the target is the Default Organization.
+   * The Default Organization is asked the last-administrator guard's question
+   * first (a 403), then its own record count (the same 409), both here, before
+   * the first write.
    */
   private async assertOrganizationDeletable(ctx: any): Promise<void> {
     const engine = this.getDataEngine();
@@ -8123,7 +8126,6 @@ export class AuthManager {
     if (!organizationId) return;
 
     let organization: any;
-    let defaultOrganization = false;
     try {
       const actor = await this.resolveActor(ctx);
       if (!actor?.userId) return; // the vendor answers 401
@@ -8145,7 +8147,6 @@ export class AuthManager {
       if (!permitted) return; // the vendor answers YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_ORGANIZATION
       organization = await sys.findOne('sys_organization', { where: { id: organizationId } });
       if (!organization) return; // the vendor answers 400
-      defaultOrganization = await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()));
     } catch {
       // A lookup that did not complete hands the request back to the vendor,
       // which re-reads everything it decides; the engine's own refusal still
@@ -8153,15 +8154,23 @@ export class AuthManager {
       return;
     }
 
-    // The Default Organization is the last-administrator guard's to answer,
-    // and it answers HERE, before the vendor's first write, so its refusal
+    // Which of the two refusals below applies is part of the guard, so it is
+    // decided outside the fall-through above: a lookup that fails here
+    // refuses, never hands the request to the vendor unasked.
+    const defaultOrganization = await isDefaultOrganizationTarget(
+      engine, organization, postureEnforcesWall(resolveTenancyPosture()),
+    );
+
+    // The Default Organization is asked the last-administrator guard's
+    // question first, HERE, before the vendor's first write, so its refusal
     // leaves every member and invitation as it was on any driver, with or
     // without transactions. The guard fails closed on a lookup it cannot
     // complete, so this never passes for want of an answer. When it admits
-    // the delete, the vendor proceeds and the engine's own refusal still holds
-    // while anything names the organization.
-    if (defaultOrganization) {
-      if (!this.organizationDeleteStandingJudge) return;
+    // the delete, the record count below is asked before the vendor's first
+    // write too, leaving out only what the vendor removes (members and
+    // invitations): plugin-auth removes none of the Default Organization's
+    // structure, so its teams and grants count.
+    if (defaultOrganization && this.organizationDeleteStandingJudge) {
       try {
         await this.organizationDeleteStandingJudge(organizationId);
       } catch (err) {
@@ -8169,10 +8178,11 @@ export class AuthManager {
         const { APIError } = await import('better-auth/api');
         throw new APIError('FORBIDDEN', { message: (err as Error).message, code: 'PERMISSION_DENIED' });
       }
-      return;
     }
 
-    const owned = await organizationDeleteRefusal(engine, organizationId);
+    const owned = defaultOrganization
+      ? await defaultOrganizationDeleteRefusal(engine, organizationId)
+      : await organizationDeleteRefusal(engine, organizationId);
     if (owned && owned.length > 0) {
       const { APIError } = await import('better-auth/api');
       throw new APIError('CONFLICT', { code: ORGANIZATION_DELETE_REFUSAL_CODE, ...organizationNotEmptyBody(owned) });

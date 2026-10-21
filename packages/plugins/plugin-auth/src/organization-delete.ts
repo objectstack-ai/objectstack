@@ -46,16 +46,20 @@
  * 3. **One unit of work.** `AuthManager.handleRequest` runs the whole request
  *    inside one engine transaction and rolls it back on any 4xx/5xx answer, the
  *    subject-erasure wrapper's posture. On a driver without transactions the
- *    refusals are the guarantee, since both run before the first write: the
- *    count above, and the Default Organization's guard question below.
+ *    refusals are the guarantee, since every one runs before the first write:
+ *    the count above, and the Default Organization's guard question and count
+ *    below.
  * 4. **The engine never clears the tenant column.** Under all of this,
  *    `ObjectQL.cascadeDeleteRelations` refuses a `sys_organization` delete
  *    while any row still names it, whatever path reaches it.
  *
- * The Default Organization is not counted here ({@link isDefaultOrganizationTarget}):
- * the last-administrator guard answers for it, as before, but its question is
- * now asked from the same `hooks.before` (`LastAdminGuardHandle`), so its 403
- * also lands before better-auth deletes any member.
+ * The Default Organization ({@link isDefaultOrganizationTarget}) is asked two
+ * questions instead, both from the same `hooks.before`, so both land before
+ * better-auth deletes any member: first the last-administrator guard's
+ * (`LastAdminGuardHandle`, a 403), then, once the guard admits, its own record
+ * count ({@link defaultOrganizationDeleteRefusal}, the same 409). Its auth
+ * structure beyond members and invitations is not removed, so its teams and
+ * grants count.
  */
 
 import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
@@ -155,6 +159,32 @@ export async function organizationDeleteRefusal(
 }
 
 /**
+ * The tables better-auth itself removes when it deletes an organization: its
+ * members and its invitations. For the Default Organization they are all
+ * that is removed (plugin-auth removes none of its structure), so every other
+ * row that names it counts, its teams and grants included.
+ */
+export const VENDOR_REMOVED_ON_DELETE: readonly string[] = ['sys_member', 'sys_invitation'];
+
+/**
+ * The Default Organization's record count, asked after the last-administrator
+ * guard admits its delete and before better-auth's first write: every table
+ * holding rows that name it, but for its members and invitations
+ * ({@link VENDOR_REMOVED_ON_DELETE}). Its teams and grants are not removed, so
+ * they count: without this, an admitted delete would remove the members and
+ * invitations and only then meet the engine's refusal, a partial delete on a
+ * driver without transactions. `undefined` when the engine cannot answer.
+ */
+export async function defaultOrganizationDeleteRefusal(
+  engine: IDataEngine,
+  organizationId: string,
+): Promise<OrganizationOwnedRows[] | undefined> {
+  const counting = engine as CountingEngine;
+  if (typeof counting.organizationOwnedRowCounts !== 'function') return undefined;
+  return counting.organizationOwnedRowCounts(organizationId, { exclude: VENDOR_REMOVED_ON_DELETE });
+}
+
+/**
  * The 409 body for a refused delete, beside its code
  * ({@link ORGANIZATION_DELETE_REFUSAL_CODE}, spelled at the throw site): every
  * table with its count, and the remedy.
@@ -178,8 +208,9 @@ export function organizationNotEmptyBody(owned: readonly OrganizationOwnedRows[]
  * only organization? The last-administrator guard's own reading of the anchor
  * (`last-admin-guard.ts`, `defaultOrganizationId`): under a walled posture no
  * organization anchors platform standing, so none is the Default one here
- * either. Its delete is that guard's to answer, as before, so the refusal
- * above does not run for it. `walled` is the guard's own expression,
+ * either. Its delete is that guard's to answer first, and then
+ * {@link defaultOrganizationDeleteRefusal}'s rather than
+ * {@link organizationDeleteRefusal}'s. `walled` is the guard's own expression,
  * `postureEnforcesWall(resolveTenancyPosture())`.
  */
 export async function isDefaultOrganizationTarget(
