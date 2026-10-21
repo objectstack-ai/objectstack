@@ -109,16 +109,18 @@ const REFUSAL = 'TIMEOUT OVERRIDE CANNOT REACH THIS PACKAGE';
  *   - CI, merge group run 39444329582, job `Test Core (2/6)`, a contended
  *     shard: 3355 / 7897. Both controls failed, `Test timed out in 5000ms.`
  *   - Local, idle, 6 runs of this file alone: 1244 / 2350.
- *   - Local, 6 runs beside this package's own Test Core slice (`OS_TEST_SHARD`
- *     1/3, `OS_TEST_TIERS=queue`, `VITEST_MAX_WORKERS=3`), with this file
- *     pinned to one CPU that it shares with 2 busy loops: 4668 / 8160. Both
- *     controls failed at the default on all 6 runs. This load reproduces the CI
- *     reading: the file read 21.2 to 24.4 s here and 21.2 s in CI.
+ *   - Local, 12 runs beside this package's own Test Core slice
+ *     (`OS_TEST_SHARD` 1/3, `OS_TEST_TIERS=queue`, `VITEST_MAX_WORKERS=3`),
+ *     with this file pinned to one CPU that it shares with 2 busy loops:
+ *     5134 / 8685. In the 6 runs at the default, both controls failed every
+ *     time. This load reproduces the CI reading: the file read 21.2 to 24.4 s
+ *     here and 21.2 s in CI.
  *
  * The rule follows plugin-sharing's scrypt budgets
  * (`share-link-password-webcontainer.test.ts`): take 3x the slowest reading
- * and round up to the next second. 3 x 8160 = 24480, so the budget is 25000. The refusals are budgeted too, because the same load took them to
- * 4668 ms, 93% of the default.
+ * and round up to the next second. 3 x 8685 = 26055, so the budget is 27000.
+ * The refusals are budgeted too: the same load took one of them to 5134 ms,
+ * past the default.
  *
  * The case body blocks the event loop, so vitest cannot interrupt it. vitest
  * judges the budget after the child returns: its elapsed-time check fails a
@@ -128,7 +130,7 @@ const REFUSAL = 'TIMEOUT OVERRIDE CANNOT REACH THIS PACKAGE';
  * make a control cheaper by narrowing what it lists (a `--project`, a file
  * filter): it asks about a run of the whole package.
  */
-const VITEST_LIST_BUDGET_MS = 25_000;
+const VITEST_LIST_BUDGET_MS = 27_000;
 
 interface ChildRun {
   readonly status: number;
