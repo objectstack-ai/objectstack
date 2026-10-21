@@ -382,11 +382,15 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // permission-set overlay-discard row left with its route. It carried
     // `family: 'security'`, which the surviving security rows still carry, so
     // `reachable` moves with `population` and `keys` stays 18.
-    population: 81,
-    reachable: 81,
+    // [#25104] 81 / 81 / 0 -> 80 / 80 / 0: the OpenAPI document's `/docs`
+    // viewer page row (`GET /api/v1/docs`) left the ledger with its route. It
+    // carried `family: 'openapi'`, which the surviving document row still
+    // carries, so `reachable` moves with `population` and `keys` stays 18.
+    population: 80,
+    reachable: 80,
     blindSpot: 0,
     populationRule: 'ledger rows inside REST_ROUTE_LEDGER; reachable = rows carrying a `family` (each distinct value mints a key)',
-    controls: { "route: '": 81, "family: '": 81, RestRouteLedgerEntry: 2 },
+    controls: { "route: '": 80, "family: '": 80, RestRouteLedgerEntry: 2 },
     // [#22430] The `openapi` family is the second classified one, by the
     // `anonymous-deny-api-description` row; the note's 2 / 16 counts it.
     // [ADR-0138 E2] The `forms` family is the third, by the D2 class 1 row
@@ -397,7 +401,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
       'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
       'and therefore cannot be silently absent from the authz ratchet either. 18 families; 3 classified by ' +
-      'matrix rows (metadata, openapi and forms), 15 enumerated in the shrink-only baseline. Re-measured 82 -> 81 when the permission-set ' +
+      'matrix rows (metadata, openapi and forms), 15 enumerated in the shrink-only baseline. Re-measured 81 -> 80 when the ' +
+      'OpenAPI document viewer page row left with its route; it carried `family: openapi`, which the surviving document row ' +
+      'still carries. Earlier re-measured 82 -> 81 when the permission-set ' +
       'overlay-discard row left with its route; it carried `family: security`, which the surviving security rows still carry. ' +
       'Earlier re-measured 83 -> 82 when the anonymous ' +
       'public-form lookup-picker row left with its route; it carried `family: forms`, which the surviving form rows ' +
@@ -529,9 +535,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     kinds: ['ROUTE_ENUMERATION', 'TRIPWIRE'],
     probes: 3,
     keys: 1,
-    population: 70,
+    population: 69,
     reachable: 19,
-    blindSpot: 51,
+    blindSpot: 50,
     populationRule:
       'route registration sites — `this.routeManager.register(` call sites, LESS the one inside ' +
       '`registerPerItemRoute` (the shared forwarder, not a route; its extent is bounded by the declaration\'s own ' +
@@ -931,9 +937,16 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // `private register*Endpoints(` stays 16, `const registerPerItemRoute =`
     // stays 1, `forwarder slice:` stays 1 and `enforceAuth` stays 112: the moved
     // groups spell none of the last four, and neither does the seam.
+    // [#25104] 70 / 19 / 51 -> 69 / 19 / 50, and `enforceAuth` 112 -> 111: the
+    // OpenAPI document's `/docs` viewer page was deleted with its handler, one
+    // direct `this.routeManager.register(` site (63 -> 62; 4 -> 3 in
+    // `discovery-routes.ts`) inside `registerOpenApiEndpoints`, NOT inside
+    // `registerMetadataEndpoints`, so it was a blind spot; its handler opened
+    // with `enforceAuth`, so that control drops by one. The registrar survives
+    // for the document, so `private register*Endpoints(` stays 16.
     controls: {
       'private register*Endpoints(': 16,
-      'this.routeManager.register(': 63,
+      'this.routeManager.register(': 62,
       'registrar list length': 18,
       'data-action-routes.ts: this.routeManager.register(': 9,
       'batch-routes.ts: this.routeManager.register(': 5,
@@ -941,7 +954,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'sharing-routes.ts: this.routeManager.register(': 8,
       'analytics-routes.ts: this.routeManager.register(': 1,
       'security-routes.ts: this.routeManager.register(': 6,
-      'discovery-routes.ts: this.routeManager.register(': 4,
+      'discovery-routes.ts: this.routeManager.register(': 3,
       'email-routes.ts: this.routeManager.register(': 1,
       'search-routes.ts: this.routeManager.register(': 1,
       'ui-routes.ts: this.routeManager.register(': 1,
@@ -970,7 +983,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 112,
+      enforceAuth: 111,
     },
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +
@@ -1247,7 +1260,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
 /**
  * Entry points inside the probe table's OWN files that no mintable key can
  * reach, counting only the route/handler surfaces the ratchet's completeness
- * claim is about: rest-server.ts (51 static / 56 runtime), http-dispatcher.ts
+ * claim is about: rest-server.ts (50 static / 55 runtime), http-dispatcher.ts
  * (13) and domains/mcp.ts (1).
  *
  * hono-plugin.ts's 6 mounts are deliberately EXCLUDED from this total and
@@ -1262,8 +1275,11 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
 // [ADR-0131 cutover, stage 7-pre] 66 / 71 -> 65 / 70: the retired permission-set
 // overlay-discard route left rest-server.ts as one blind-spot call site and
 // one runtime mount.
-export const BLIND_SPOT_TOTAL_STATIC = 65;
-export const BLIND_SPOT_TOTAL_RUNTIME = 70;
+// [#25104] 65 / 70 -> 64 / 69: the retired `/docs` viewer page left
+// `discovery-routes.ts` (on rest-server.ts's registrar list) as one blind-spot
+// call site and one runtime mount.
+export const BLIND_SPOT_TOTAL_STATIC = 64;
+export const BLIND_SPOT_TOTAL_RUNTIME = 69;
 
 /**
  * Re-measure every row above from the same sources the probes read.

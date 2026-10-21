@@ -899,7 +899,10 @@ describe('[#13160] §3 the 45 bare sites — driven, every one of them', () => {
         const controlByRoute = new Map(control.map((r) => [r.route, r]));
 
         const rows = fault.filter((r) => r.sites.some((l) => bareLines.has(l)));
-        expect(rows.length).toBeGreaterThanOrEqual(45);
+        // [#25104] The floor stays 46 although the bare sites fell to 45: 51 rows
+        // reach a bare line after the `/docs` viewer page retired, so the old
+        // floor still holds, and a floor that holds is not lowered.
+        expect(rows.length).toBeGreaterThanOrEqual(46);
 
         for (const row of rows) {
             expect(row.status, `${row.route} under an absent context`).toBe(ANONYMOUS_DENY_STATUS);
