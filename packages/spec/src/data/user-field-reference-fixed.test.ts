@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import { ObjectSchema, ObjectExtensionSchema } from './object.zod';
 import { Field, FieldSchema } from './field.zod';
 import { referenceTargetOf } from './field-value.zod';
@@ -99,5 +99,10 @@ describe('the target of a `user` field is `sys_user` whatever the carrier says',
     expect(field.reference).toBe('sys_user');
     expect(Object.keys(field)).toEqual(['type', 'reference', 'label']);
     expect(Object.keys(Field.user({ label: 'Owner' }))).toEqual(['type', 'reference', 'label']);
+  });
+
+  it('Field.user() keeps its literal output types (checked by the test typecheck)', () => {
+    expectTypeOf(Field.user({ label: 'Owner' }).type).toEqualTypeOf<'user'>();
+    expectTypeOf(Field.user({ label: 'Owner' }).reference).toEqualTypeOf<'sys_user'>();
   });
 });

@@ -3266,10 +3266,10 @@ export const Field = {
    * position (re-assigning an existing key does not move it), so the output's
    * key order is what it always was.
    */
-  user: (config: UserFieldInput = {}) => ({
-    ...{ type: 'user', reference: 'sys_user', ...config },
-    reference: 'sys_user',
-  } as const),
+  user: (config: UserFieldInput = {}) => {
+    const field = { type: 'user', reference: 'sys_user', ...config } as const;
+    return { ...field, reference: 'sys_user' } as const;
+  },
 
   // Enhanced Field Type Helpers
   location: (config: FieldInput = {}) => ({ 
