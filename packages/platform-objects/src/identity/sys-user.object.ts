@@ -281,9 +281,12 @@ export const SysUser = ObjectSchema.create({
       ],
       resultDialog: {
         title: 'User Created',
+        // Hedged for both outcomes: a typed password returns no
+        // `temporaryPassword`, so the dialog must not claim one to copy.
+        // Same sentence and button as `set_user_password` below.
         description:
-          'Copy the temporary password now — it is shown only once and never stored.',
-        acknowledge: 'I have saved this password',
+          'If a temporary password was generated, copy it now — it is shown only once and never stored.',
+        acknowledge: 'Done',
         fields: [
           // The dialog skips fields whose path is absent from the response, so
           // conditional keys are safe to declare: phoneNumber only exists for

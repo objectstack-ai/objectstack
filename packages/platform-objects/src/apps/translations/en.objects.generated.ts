@@ -189,8 +189,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "User Created",
-          description: "Copy the temporary password now — it is shown only once and never stored.",
-          acknowledge: "I have saved this password",
+          description: "If a temporary password was generated, copy it now — it is shown only once and never stored.",
+          acknowledge: "Done",
           fields: {
             "user.email": "Email",
             "user.phoneNumber": "Phone Number",
