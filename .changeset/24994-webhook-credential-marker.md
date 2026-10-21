@@ -7,3 +7,5 @@ spec: `WebhookSchema` declares `secret` (a credential value) and `headers` (a cr
 Clause-②: no (narrowing) — the `/meta` read doors return less for `webhook`: a stored `secret` or non-empty `headers` map is dropped from the served item and named in `redactedKeys`; the cleared forms (an empty string, an empty map) are served as written. A save that omits the two fields keeps the stored values (the metadata protocol's carry-forward); to remove a credential, save its cleared form. The dispatcher reads the declaration itself, so delivery signing is unchanged.
 
 A metadata type that stores a credential in a declared field marks it on its schema instead of registering a redactor; a spec ratchet reds on a credential-named field that carries no marker.
+
+<!-- adr-0087: not-required (no-migration-prescription) no authorable key, export or stored shape is removed or renamed; the read doors serve less, and a stored webhook needs no migration -->
