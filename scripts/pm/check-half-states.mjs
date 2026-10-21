@@ -4188,15 +4188,13 @@ export function h16HeldCards(body) {
  * it as a finding rather than as fresh (#4690), so a gate that skipped it here
  * would drop exactly the row the predicate promises to surface.
  *
- * `changeset-release/*` is deliberately NOT excluded, unlike in H12. There the
- * Version Packages PR would flag on every sweep BY DESIGN (born ready, never
- * armed, the maintainer's alone to merge). A dirty one is nothing of the kind:
- * it is regenerated from `main` on every push, so it has no normal state in
- * which it sits conflicted for hours — if it ever does, that is a real finding
- * about the release bot, not a false positive to suppress.
+ * `changeset-release/*` is excluded, here and in the predicate, as in H12,
+ * because "Between refreshes `changeset-release/main` is a static branch"
+ * (`release.yml`, #11233): dirty is its normal stale window, not a stuck PR.
  */
 export function h16NeedsDetail(pr, nowMs = Date.now()) {
   if (!pr || pr.draft !== false || pr.merged_at) return false;
+  if ((pr.head?.ref ?? '').startsWith('changeset-release/')) return false;
   const updated = Date.parse(pr.updated_at ?? '');
   if (!Number.isFinite(updated)) return true;
   return (nowMs - updated) / 3_600_000 > MERGE_CONFLICT_STALE_HOURS;
@@ -4247,7 +4245,7 @@ export function h16DetailPassUnreadable(candidates, probed) {
  *
  * Drafts are out of scope (parked deliberately, H12's reading), and a row
  * without a real `draft` field is out of scope too — this predicate must not
- * flag a shape it cannot read.
+ * flag a shape it cannot read. So is `changeset-release/*` (`h16NeedsDetail`).
  *
  * ## Why `auto_merge` is NOT read here, unlike H12
  *
@@ -4261,6 +4259,7 @@ export function h16DetailPassUnreadable(candidates, probed) {
  */
 export function h16StuckMergeConflict(pr, nowMs = Date.now()) {
   if (!pr || pr.draft !== false || pr.merged_at) return null;
+  if ((pr.head?.ref ?? '').startsWith('changeset-release/')) return null;
   if (pr.mergeable_state !== 'dirty') return null;
   const updated = Date.parse(pr.updated_at ?? '');
   const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
@@ -27455,11 +27454,10 @@ async function selfTest() {
   t('H16 gate: an unreadable updated_at IS a candidate (the predicate flags it)', h16NeedsDetail(conflictPr({ updated: 'not-a-date' }), NOW), true);
   t('H16 gate: an absent updated_at IS a candidate', h16NeedsDetail(conflictPr({ updated: undefined }), NOW), true);
   t('H16 gate: an absent row is not a candidate', h16NeedsDetail(undefined, NOW), false);
-  // The Version Packages PR is NOT excluded here, unlike in H12: it is
-  // regenerated from `main` on every push, so a dirty one is a real finding
-  // about the release bot rather than a by-design false positive.
-  t('H16 gate: a changeset-release head is still a candidate (unlike H12)', h16NeedsDetail(conflictPr({ head: { ref: 'changeset-release/main' }, updated: hoursAgo(200) }), NOW), true);
-  t('H16: …and a dirty Version Packages PR really does flag', typeof h16StuckMergeConflict(conflictPr({ head: { ref: 'changeset-release/main' }, updated: hoursAgo(200) }), NOW), 'string');
+  // The Version Packages PR is excluded, as in H12: between refreshes it is a
+  // static branch (`release.yml`, #11233), so dirty is its normal stale window.
+  t('H16 gate: a changeset-release head is not a candidate (excluded, as in H12)', h16NeedsDetail(conflictPr({ head: { ref: 'changeset-release/main' }, updated: hoursAgo(200) }), NOW), false);
+  t('H16: a dirty changeset-release/main PR past the threshold yields no row (the limb is deleted, #11233)', h16StuckMergeConflict(conflictPr({ head: { ref: 'changeset-release/main' }, updated: hoursAgo(200) }), NOW), null);
   // The never-narrower invariant, asserted over the whole fixture table rather
   // than case by case: for every row the predicate flags, the gate must fetch.
   const h16Rows = [

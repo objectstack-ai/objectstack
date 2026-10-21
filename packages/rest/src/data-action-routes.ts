@@ -68,7 +68,7 @@ import {
     type ExportCellMeta,
 } from './export-format.js';
 import { importControlOptOutRefusal, prepareImportRequest } from './import-prepare.js';
-import { readTemplateMode, templateFieldDefs } from './import-template.js';
+import { readTemplateMode, templateFieldDefs, templateText } from './import-template.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { handleRouteError, logUnexpectedRouteError, mapDataError, nestedRefusalEnvelope } from './error-response.js';
@@ -200,6 +200,8 @@ export interface DataActionRouteHost {
     translateMetaItem: RestServer['translateMetaItem'];
     resolveMessageTranslator: RestServer['resolveMessageTranslator'];
     resolveSecurityService: RestServer['resolveSecurityService'];
+    resolveI18nService: RestServer['resolveI18nService'];
+    extractLocale: RestServer['extractLocale'];
     answerImportTemplate: RestServer['answerImportTemplate'];
 }
 
@@ -884,8 +886,15 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     //
     // Values are formatted for readability from the object schema: lookup /
     // user fields resolve to a name (via injected $expand), select fields to
-    // their option label, booleans to 是/否, dates to YYYY-MM-DD. When the
-    // schema is unavailable the raw stored values stream through unchanged.
+    // their option label, booleans to the caller's yes / no words, dates to
+    // YYYY-MM-DD. When the schema is unavailable the raw stored values stream
+    // through unchanged.
+    //
+    // [#24945] Boolean / toggle cells are written in the language of the
+    // header row: `templateText(locale).booleanWords` (yes / no, or 是 / 否 for
+    // a `zh*` locale), for the locale the header labels are translated to
+    // (`Accept-Language`, then `?locale=`, then the i18n service's default).
+    // The importer reads both languages back, so the file re-imports.
     //
     // [#8373] `datetime` cells render in the caller's BUSINESS timezone
     // (`ExecutionContext.timezone`), so the file agrees with the screen;
@@ -1084,7 +1093,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 const fieldsExplicit = !!fields && fields.length > 0;
 
                 // Field metadata drives readable formatting (lookup names, select
-                // labels, 是/否, formatted dates) and the $expand that resolves
+                // labels, yes / no words, formatted dates) and the $expand that resolves
                 // references. Best-effort: when the schema is unavailable the export
                 // falls back to raw values, byte-identical to the un-formatted path.
                 let metaMap = new Map<string, ExportCellMeta>();
@@ -1111,13 +1120,23 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     }
                     return schema;
                 };
+                // [#24945] The file's language, read once for both of its halves:
+                // the header labels below are translated with THIS i18n service,
+                // which `extractLocale` also reads the request's locale from (its
+                // default locale is the last fallback), and the boolean cells are
+                // written in the words of the same locale — the pair the import
+                // template offers (`templateText`, `./import-template.ts`). One
+                // service and one locale, so the header and the cells cannot read
+                // two different languages.
+                const i18n = await this.resolveI18nService(environmentId, req).catch(() => undefined);
+                const booleanWords = templateText(this.extractLocale(req, i18n)).booleanWords;
                 try {
                     let schema: any = await readObjectSchema(objectName);
                     // Localize field labels to the request locale (Accept-Language /
                     // `?locale=`) the same way the metadata endpoints do, so the
                     // export header row matches the UI column headers instead of
                     // leaking the raw, untranslated `field.label` values.
-                    schema = await this.translateMetaItem(req, 'object', environmentId, schema);
+                    schema = await this.translateMetaItem(req, 'object', environmentId, schema, i18n);
                     if (typeof schema?.label === 'string' && schema.label.length > 0) {
                         objectLabel = schema.label;
                     }
@@ -1291,7 +1310,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     }
 
                     if (format === 'csv') {
-                        const text = rowsToCsv(fields ?? [], rows, firstChunk && includeHeader, metaMap, timezone);
+                        const text = rowsToCsv(fields ?? [], rows, firstChunk && includeHeader, metaMap, timezone, booleanWords);
                         res.write(text);
                     } else if (format === 'xlsx') {
                         if (firstChunk && includeHeader) {
@@ -1299,7 +1318,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         }
                         const cols = fields ?? [];
                         for (const row of rows) {
-                            const r = xlsx!.ws.addRow(formatRowCells(row, cols, metaMap, timezone));
+                            const r = xlsx!.ws.addRow(formatRowCells(row, cols, metaMap, timezone, booleanWords));
                             if (styled) {
                                 cols.forEach((f, i) => {
                                     const argb = cellFontColor(row?.[f], metaMap.get(f));
@@ -1320,7 +1339,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         for (let i = 0; i < rows.length; i++) {
                             const prefix = (firstChunk && i === 0) ? '' : ',';
                             const row = fieldsExplicit ? pickExportKeys(rows[i], fields!) : rows[i];
-                            res.write(prefix + JSON.stringify(formatRowForJson(row, metaMap, timezone)));
+                            res.write(prefix + JSON.stringify(formatRowForJson(row, metaMap, timezone, booleanWords)));
                         }
                     }
                     firstChunk = false;

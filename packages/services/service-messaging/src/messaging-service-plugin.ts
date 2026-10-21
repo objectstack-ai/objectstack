@@ -13,6 +13,7 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
 import { NotificationTemplateStore } from './template-renderer.js';
+import { NotificationTextRenderer, type NotificationTextI18n } from './notification-text.js';
 import {
     InboxMessage,
     NotificationReceipt,
@@ -221,12 +222,6 @@ export class MessagingServicePlugin implements Plugin {
             }
         };
 
-        const service = new MessagingService({
-            logger: ctx.logger,
-            getData,
-            mandatoryTopics: this.options.mandatoryTopics,
-        });
-
         // Lazy `email` service resolver — shared by the email channel (send +
         // sendTemplate) and the inbox channel's render-only template path
         // (#9225): one resolver in plugin-email, two channels. Probed at
@@ -259,6 +254,33 @@ export class MessagingServicePlugin implements Plugin {
                 return undefined;
             }
         };
+
+        // [#24978] The `i18n` service whose catalog a keyed notification text
+        // is rendered from — probed at delivery time, never captured at boot,
+        // for the reasons `getDefaultTemplateLocale` above is.
+        const getI18n = (): NotificationTextI18n | undefined => {
+            try {
+                return ctx.getService<NotificationTextI18n>('i18n');
+            } catch {
+                return undefined;
+            }
+        };
+        // ONE renderer for both delivery paths: the service's inline fan-out
+        // and (below) the dispatcher, so a recipient's keyed text is rendered
+        // the same way whichever path delivers it.
+        const textRenderer = new NotificationTextRenderer({
+            getData,
+            getI18n,
+            getDefaultLocale: getDefaultTemplateLocale,
+            logger: ctx.logger,
+        });
+
+        const service = new MessagingService({
+            logger: ctx.logger,
+            getData,
+            mandatoryTopics: this.options.mandatoryTopics,
+            textRenderer,
+        });
 
         if (this.options.registerInbox) {
             service.registerChannel(createInboxChannel({ getData, getEmail, getDefaultTemplateLocale }));
@@ -429,6 +451,7 @@ export class MessagingServicePlugin implements Plugin {
                     intervalMs: this.options.dispatchIntervalMs,
                     maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
                     logger: ctx.logger,
+                    textRenderer,
                 });
                 this.dispatcher.start();
                 ctx.logger.info(
