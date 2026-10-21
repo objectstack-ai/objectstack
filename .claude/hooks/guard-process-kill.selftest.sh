@@ -176,6 +176,41 @@ echo "== an escaped \\\" INSIDE a double-quoted word does NOT close it (#10406 h
 expect allow 'grep -rn "he said \"pkill -f vitest\" once" .claude/'
 expect block 'echo "he said \"x\"" && pkill -f vitest'
 
+echo "== a \$(…), backtick or \${…} inside \"…\" is its own quoting context (#24901) =="
+# Reading the `"` inside the body as CLOSING the outer string split the body at its `;`, so a
+# pure read became a name-matched kill. All four were BLOCKED before subst_end() existed here.
+expect allow 'echo "a $(echo "x; pkill -f node")"'
+expect allow 'echo "a `echo "x; pkill -f node"`"'
+expect allow 'echo "${x:-"a; pkill -f node"}"'
+expect allow 'echo "${x:-"; killall node"}"'
+# Recall: a kill behind a quoted expansion is still seen, and a pattern held in one is still a
+# pattern — the expansion is part of the word, not a way around the rule.
+expect block 'echo "${x:-"a"}" ; pkill -f node'
+expect block 'kill $(pgrep -f "${pat:-"node"}")'
+expect block 'pkill -f "${pat:-"vitest; x"}"'
+# The fail-OPEN mirror: the `"` inside the single quotes left the outer string hanging, so the
+# separator behind it went inert. ALLOWED before subst_end() existed here.
+expect block "echo \"\$(printf '\"')\" ; pkill -f vitest"
+# Deliberately not claimed, as before: a kill INSIDE a quoted substitution is one inert word.
+expect allow 'echo "$(pkill -f node)"'
+
+echo "== the shared quoting rules are copies, byte for byte (#24901) =="
+# split_segments() is guard-shared-stash.sh's and subst_end() is guard-main-checkout-bash.sh's.
+# A copy that drifts is a quoting rule the guards no longer share, and nothing else notices:
+# each hook's own cases keep passing on its own dialect.
+fn_text() { sed -n "/^$1() {\$/,/^}\$/p" "$2"; }
+same_fn() { # same_fn <function> <file holding the copy this hook must equal>
+  local mine theirs
+  mine="$(fn_text "$1" "$hook")"; theirs="$(fn_text "$1" "$2")"
+  if [ -n "$mine" ] && [ "${mine%%$'\n'*}" = "$1() {" ] && [ "$mine" = "$theirs" ]; then
+    pass=$((pass + 1)); printf '  ok   same   %s() as %s\n' "$1" "${2##*/}"
+  else
+    fail=$((fail + 1)); printf '  FAIL %s() is missing here or differs from %s\n' "$1" "${2##*/}"
+  fi
+}
+same_fn split_segments "$here/guard-shared-stash.sh"
+same_fn subst_end "$here/guard-main-checkout-bash.sh"
+
 echo "== escape hatch =="
 expect allow 'pkill -f vitest' OS_ALLOW_PROCESS_KILL=1
 expect allow 'ps aux | grep node | xargs kill' OS_ALLOW_PROCESS_KILL=1

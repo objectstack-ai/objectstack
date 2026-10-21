@@ -1630,6 +1630,9 @@ importers:
       '@objectstack/service-automation':
         specifier: workspace:*
         version: link:../../services/service-automation
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../../services/service-messaging
       '@objectstack/trigger-record-change':
         specifier: workspace:*
         version: link:../../triggers/trigger-record-change
@@ -2236,6 +2239,9 @@ importers:
       '@objectstack/plugin-approvals':
         specifier: workspace:*
         version: link:../../plugins/plugin-approvals
+      '@objectstack/plugin-auth':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-auth
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../../plugins/plugin-hono-server

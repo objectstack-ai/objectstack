@@ -33,6 +33,7 @@
     "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
+    "@objectstack/service-messaging": "workspace:*",
     "@objectstack/trigger-record-change": "workspace:*",
     "@types/node": "^26.6.3",
     "hono": "^4.13.9",

@@ -1530,15 +1530,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           },
           redirectURLs: {
             label: "回调 URL",
-            helpText: "每行一个 URL。生产环境必须使用 https://。"
+            helpText: "每行一个 URL。Web 应用必须使用 https://，且主机不能是 localhost 或其他回环地址。原生应用还可以使用 http://，但主机必须恰好是 localhost、127.0.0.1 或 [::1]，端口不限。"
           },
           type: {
             label: "应用类型",
+            helpText: "桌面或移动应用，以及在本地开发中回调到 http://localhost 的应用，请选择“原生应用”。",
             options: {
               web: "Web 应用",
-              native: "原生应用",
-              "user-agent-based": "基于 User-Agent",
-              public: "公共客户端"
+              native: "原生应用"
             }
           }
         },

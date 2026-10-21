@@ -142,10 +142,63 @@ fi
 #     (#11738 on the stash guard, #11131 on guard-main-checkout-bash.sh);
 #   - INSIDE "…" the rule inverts: `\"` is a literal quote that leaves the region OPEN, and
 #     reading it as closing splits where bash would not, turning the tail of a pure READ
-#     into a segment judged on its own head word — a false BLOCK (#11804 / #10406).
+#     into a segment judged on its own head word — a false BLOCK (#11804 / #10406);
+#   - INSIDE "…" a `$(`, a backtick or a `${` opens a quoting context of its own, so a `"` in
+#     its body nests instead of closing the outer string. Reading it as the closer split the
+#     body: `echo "a $(echo "x; pkill -f node")"` and `echo "${x:-"a; killall node"}"` were
+#     BLOCKED, measured on this repo's copy before the fix (#24901).
 #
 # Both characters are kept verbatim: this pass only SPLITS, and the classifiers below
-# re-read the words afterwards.
+# re-read the words afterwards. The self-test fails when this function differs from
+# guard-shared-stash.sh's, and when subst_end() differs from guard-main-checkout-bash.sh's,
+# whose comment above the function is its documentation.
+SUBST_END=0
+subst_end() {
+  local s="$1" i="$2" n=${#1} st ch top run
+  case "${s:i:2}" in
+    '$(') st=')' ; i=$((i + 1)) ;;
+    '${') st='}' ; i=$((i + 1)) ;;
+    '`'*) st='`' ;;
+    *) return 1 ;;
+  esac
+  for ((i = i + 1; i < n; i++)); do
+    ch="${s:i:1}" ; top="${st:${#st}-1:1}"
+    if [ "$top" = "'" ]; then [ "$ch" = "'" ] && st="${st%?}"; continue; fi
+    if [ "$ch" = '\' ]; then i=$((i + 1)); continue; fi
+    if [ "$top" = '"' ] || [ "$top" = '}' ]; then
+      case "$ch" in
+        '"') if [ "$top" = '"' ]; then st="${st%?}"; else st+='"'; fi ;;
+        '`') st+='`' ;;
+        '$')
+          case "${s:i+1:1}" in
+            '(') st+=')' ; i=$((i + 1)) ;;
+            '{') st+='}' ; i=$((i + 1)) ;;
+          esac ;;
+        '}') [ "$top" = '}' ] && st="${st%?}" ;;
+        "'")
+          if [ "$top" = '}' ]; then
+            run="${s:i+1}"
+            case "$run" in *"'"*) ;; *) SUBST_END=$((n - 1)); return 0 ;; esac
+            run="${run%%"'"*}"
+            case "$run" in *[\"\\\`\$\}]*) SUBST_END=$((n - 1)); return 0 ;; esac
+            i=$((i + ${#run} + 1))
+          fi ;;
+      esac
+      if [ -z "$st" ]; then SUBST_END=$i; return 0; fi
+      continue
+    fi
+    case "$ch" in
+      "'" | '"') st+="$ch" ;;
+      '(') st+=')' ;;
+      ')') [ "$top" = ')' ] && st="${st%?}" ;;
+      '`') if [ "$top" = '`' ]; then st="${st%?}"; else st+='`'; fi ;;
+    esac
+    if [ -z "$st" ]; then SUBST_END=$i; return 0; fi
+  done
+  SUBST_END=$((n - 1))
+  return 0
+}
+
 segments=()
 split_segments() {
   local s="$1" seg="" q="" ch i n=${#1}
@@ -157,6 +210,9 @@ split_segments() {
           '"' | '\' | '$' | '`')
             seg+="$ch" ; i=$((i + 1)) ; seg+="${s:i:1}" ; continue ;;
         esac
+      fi
+      if [ "$q" = '"' ] && { [ "$ch" = '$' ] || [ "$ch" = '`' ]; } && subst_end "$s" "$i"; then
+        seg+="${s:i:SUBST_END-i+1}" ; i=$SUBST_END ; continue
       fi
       seg+="$ch"
       [ "$ch" = "$q" ] && q=""
