@@ -3245,13 +3245,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "コード"
       },
       lock_state: {
-        label: "ロック状態",
-        options: {
-          none: "なし",
-          nooverlay: "オーバーレイ禁止",
-          nodelete: "削除禁止",
-          full: "完全ロック"
-        }
+        label: "ロック状態"
       },
       lock_overridden: {
         label: "ロックの上書き"
