@@ -33,6 +33,16 @@ const app = createHonoApp({
 export default app; // Cloudflare Workers / Bun / Deno / Vercel Edge
 ```
 
+### CORS
+
+`createHonoApp` admits by the same rule as `@objectstack/plugin-hono-server`'s
+`HonoServerPlugin` (`resolveCorsAdmission`), so one configuration gets one answer at
+both: a list admits what it names; no list admits no cross-origin caller; a loopback
+origin is admitted, beside a list or without one, on a development boot only
+(`NODE_ENV=development`). `'*'`, or a pattern whose host part is the bare `*`
+(`https://*`), while credentials are on is refused when the app is created; turn
+credentials off to serve it to callers that send no cookies.
+
 ### Embed into an existing Hono app
 
 ```typescript
@@ -59,8 +69,8 @@ app.use('/api/*', objectStackMiddleware(kernel));
 | `kernel` | `ObjectKernel` | — | Bootstrapped kernel. |
 | `prefix` | `string` | `'/api'` | Base path. |
 | `cors` | `ObjectStackHonoCorsOptions \| false` | Enabled | Set to `false` to disable. |
-| `cors.origin` | `string \| string[]` | env `CORS_ORIGIN` or `'*'` | Supports wildcard patterns. |
-| `cors.credentials` | `boolean` | `false` | Required for cookie sessions. |
+| `cors.origin` | `string \| string[]` | env `OS_CORS_ORIGIN`, else no list | Supports wildcard patterns. With no list, no cross-origin caller is admitted. |
+| `cors.credentials` | `boolean` | env `OS_CORS_CREDENTIALS !== 'false'` (on) | Required for cookie sessions. |
 | `cors.exposeHeaders` | `string[]` | `['set-auth-token']` merged | Always includes `set-auth-token` for better-auth. |
 
 ## Edge runtime notes

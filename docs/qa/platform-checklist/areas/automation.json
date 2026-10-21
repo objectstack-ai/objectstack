@@ -12,8 +12,8 @@
       "app": "showcase",
       "requires": [
         "an admin session holding `manage_metadata` — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough",
-        "an isolated boot (own port + file DB, dogfood §0) — this recipe authors metadata into the running app",
-        "⚠️ export OS_PORT=<port> as well as passing -p <port>, or the showcase's self-pinging connectors dial 3000 and every unrelated flow run in the same boot fails `fetch failed` (RUNNER.md, the isolated-boot/OS_PORT standing fact)"
+        "a boot on its own port and file DB (dogfood §0) — this recipe authors metadata into the running app",
+        "⚠️ export OS_PORT=<port> as well as passing -p <port>, or the showcase's self-pinging connectors dial 3000 and every unrelated flow run in the same boot fails `fetch failed` (RUNNER.md, the own-port/OS_PORT connector standing fact)"
       ],
       "sequence": [
         {
@@ -65,7 +65,7 @@
           "source": "packages/runtime/src/domains/automation.ts#flow (POST /:name/toggle → engine.toggleFlow); automation.flow-toggle-kill-switch names showcase_urgent_task_alert as the only type:'record_change' flow"
         }
       ],
-      "teardown": "POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": true} to undo step 4, then DELETE /api/v1/packages/com.objectstack.qa.automation (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or discard the isolated file DB, the cheaper path an isolated boot makes free. The toggle is NOT covered by discarding the DB if you reused a boot, so undo it explicitly.",
+      "teardown": "POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": true} to undo step 4, then DELETE /api/v1/packages/com.objectstack.qa.automation (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or discard the run's own file DB, the cheaper path a boot on its own port and DB makes free. The toggle is NOT covered by discarding the DB if you reused a boot, so undo it explicitly.",
       "knownGaps": [
         "Same SDK sharp edge as qa-scratch-authz: `meta.saveItem(type, name, item)` does NOT send `?package=` (packages/client/src/index.ts) — issue steps 2 and 3 as raw HTTP with the query string appended, or the flows land outside the package and the teardown misses them.",
         "This recipe has NOT been proven by a live run. If step 2 or 3 4xxs on the flow body, re-read the cited schema line before assuming the recipe rotted — a publish-time refusal of a start-less flow would itself be a finding (it would mean the 422 row has moved from dispatch time to author time, which changes what the item is asserting)."
@@ -1953,7 +1953,7 @@
       "title": "The Setup packaged-automation page: reachable from Setup nav, lists packaged flows + packaged actions, toggle persists, clone on flow rows only, no lineage surface, server refusals verbatim in role=alert",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1992,9 +1992,9 @@
           "evidence": "the meta/app body (item present or absent) + sidebar screenshot"
         },
         {
-          "clause": "inventory: the flows table lists exactly the packaged flows (default all On, an obsolete-status flow excepted: the engine holds it disabled, so its switch reads Off) and the packaged-actions section renders beside it; tenant/org-authored flows are ABSENT",
+          "clause": "inventory: the flows table lists exactly the packaged flows (each row's switch, the activation flag, is checked by default, an obsolete-status flow excepted: the engine holds it disabled, so its switch is unchecked) and the packaged-actions section renders beside it; tenant/org-authored flows are ABSENT. This clause judges the switch, not the badge beside it: on a default boot the two policy-unbound schedule flows keep a checked switch while their badge reads 'Not running here' (steps[3]), and that reading does not fail this clause",
           "oracle": "dom",
-          "verify": "rows (data-testid packaged-flow-<name>) match the isPackagedFlowItem filter — a real _packageId, not 'sys_metadata', and _provenance != 'org', joined against the engine runtime list as spine (objectui packagedFlows.ts). The clone created later must NOT appear (it is a tenant artifact). Erring either way is a real defect: a tenant flow shown gets an install-wide switch Studio owns; a packaged flow filtered out leaves no off-switch at all",
+          "verify": "rows (data-testid packaged-flow-<name>) match the isPackagedFlowItem filter — a real _packageId, not 'sys_metadata', and _provenance != 'org', joined against the engine runtime list as spine (objectui packagedFlows.ts). The clone created later must NOT appear (it is a tenant artifact). Erring either way is a real defect: a tenant flow shown gets an install-wide switch Studio owns; a packaged flow filtered out leaves no off-switch at all. Score each row's switch against the enabled field of its row in the same GET /api/v1/automation/_status read steps[3] takes: the page checks the switch exactly where that field is not false (joinPackagedFlows in packagedFlows.ts; the Switch's checked prop in PackagedAutomationPage.tsx), and the engine sets it false only for an obsolete or invalid status or a ledger toggle (isFlowEnabled, service-automation engine.ts). OS_AUTOMATION_SCHEDULED_WORK_ENABLED moves the badge, never the flag: on a fresh boot the only unchecked switch is the obsolete-status flow's (showcase_approver_bindings), whether that variable is exported or not. The badge (data-testid packaged-flow-activation) is steps[3]'s reading, reconciled there against the row's unboundCause: ⛔ do not score a 'Not running here' badge as a switch reading Off, nor read a checked switch as a flow that runs",
           "evidence": "row list vs the two API reads, side by side"
         },
         {
@@ -2103,6 +2103,12 @@
           "date": "2026-10-21",
           "change": "steps[3] rewritten to the Activation cell's real states. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): the step read \"confirm every switch reads On … 31 On / 1 Off\", and at the console pin cf153eb2e535 the cell carries a badge beside the switch that reads 'Not running here', switch still checked, for an enabled flow whose _status row carries an unboundCause (objectui#13159; packagedFlows.ts activationReading, PackagedAutomationPage.tsx, blobs a85c96d28e5a and f4aa90e11d32). On a default boot showcase_scheduled_digest and showcase_task_due_reminder carry unboundCause 'deployment_policy' (RUNNER.md, the scheduled-work entry; describeUnboundReason in service-automation engine.ts), so a count of 'On' badges is not 31. The step now names the three readings, and states the count with its derivation from the 32 flows allFlows declares at base 93e6c1a5f8: 29 On / 2 Not running here / 1 Off on a default boot, 31 On / 1 Off with the switch exported, and it tells the run to reconcile against _status. No clause changed; the live reading at the pin is NOT MEASURED",
           "ref": "#25018"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-21",
+          "change": "acceptance[1].clause and acceptance[1].verify say which half of the Activation cell the clause judges. PR #25018's out-of-scope finding (round 18 of wave anchor #24579; ACCEPT 6305381435, landing record 6305762608): the clause read 'default all On, an obsolete-status flow excepted', which holds for the switch, the activation flag, and not for the badge beside it, which steps[3] (revision 7) reads as 'Not running here', switch still checked, for the two policy-unbound schedule flows on a default boot. The clause now names the switch, checked by default with the obsolete-status flow unchecked, and says the badge's 'Not running here' does not fail it. verify scores each switch against its _status row's enabled field: the field the page binds it to (joinPackagedFlows and the Switch's checked prop, read at the console pin cf153eb2e535, blobs a85c96d28e5a and f4aa90e11d32), and the one the engine sets false only for an obsolete or invalid status or a ledger toggle (isFlowEnabled, service-automation engine.ts, read at base 73432299c0, where allFlows still declares 32 flows with showcase_approver_bindings the one obsolete). It leaves the badge to steps[3]. The oracle (dom) and the evidence are unchanged. The live reading at the pin is NOT MEASURED",
+          "ref": "#25027"
         }
       ]
     },

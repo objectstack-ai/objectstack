@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync, writeFileSync, mkdirSync, chmodSync, lstatSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqlDriver, resolveSqliteAbsentFileTarget } from './index.js';
@@ -160,6 +160,15 @@ describe('SqlDriver({ sqliteAbsentFile }) — opening must not create (#6743)', 
     } as any);
     expect(((pg as any).config as any).sqliteAbsentFile).toBeUndefined();
     expect(pg.sqliteOpenedEmptyInMemory).toBe(false);
+
+    // A server dialect's connection STRING is a URL, not a filename (#24961):
+    // it is never handed to the absent-file judgement, so it is neither
+    // rewritten to `:memory:` nor walked on disk.
+    const url = 'postgres://app@db.example:5432/main';
+    const pgUrl = new SqlDriver({ client: 'pg', connection: url, sqliteAbsentFile: 'empty-in-memory' } as any);
+    expect((pgUrl as any).knex.client.config.connection).toMatchObject({ connectionString: url });
+    expect(pgUrl.sqliteOpenedEmptyInMemory).toBe(false);
+    await pgUrl.disconnect();
   });
 
   it('a directory that already exists is not disturbed', async () => {
@@ -173,5 +182,141 @@ describe('SqlDriver({ sqliteAbsentFile }) — opening must not create (#6743)', 
       await driver.disconnect();
     }
     expect(readdirSync(dataDir)).toEqual(['unrelated.txt']);
+  });
+});
+
+/**
+ * An unopenable path is not an absent one (#24961).
+ *
+ * `existsSync` answers `false` for every path it cannot stat, so the judgement
+ * used to read a path under a regular file as an absent file and open an empty
+ * `:memory:` database over it: `os migrate plan` reported the datasource
+ * connected and planned tables into a file that cannot exist, while the boot
+ * that writes refused the same path. The judgement now refuses it, naming the
+ * file and the operating system's answer — and still writes nothing to find
+ * out.
+ */
+describe('resolveSqliteAbsentFileTarget — a file that can be neither opened nor created is refused (#24961)', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'os-24961-'));
+    writeFileSync(join(dir, 'plain'), 'a regular file, not a directory');
+  });
+  afterEach(() => {
+    try { chmodSync(join(dir, 'locked'), 0o755); } catch { /* not every case makes it */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  /** What `fn` threw; a failure naming its answer when it threw nothing. */
+  function thrownBy(fn: () => unknown): any {
+    let answer: unknown;
+    try {
+      answer = fn();
+    } catch (error) {
+      return error;
+    }
+    throw new Error(`answered ${JSON.stringify(answer)} for a file that can be neither opened nor created`);
+  }
+
+  /** The driver's refusal of the file: its own error name, the system's code, and the file. */
+  function expectFileRefusal(error: any, filename: string, code: string): void {
+    expect(error?.name).toBe('SqliteDatabaseFileError');
+    expect(error?.code).toBe(code);
+    expect(error?.filename).toBe(filename);
+  }
+
+  it('refuses a path under a regular file with ENOTDIR, at either depth, and writes nothing', () => {
+    const before = readdirSync(dir).sort();
+
+    const at = join(dir, 'plain', 'archive.db');
+    expectFileRefusal(thrownBy(() => resolveSqliteAbsentFileTarget(at, 'empty-in-memory')), at, 'ENOTDIR');
+    const through = join(dir, 'plain', 'sub', 'archive.db');
+    expectFileRefusal(thrownBy(() => resolveSqliteAbsentFileTarget(through, 'empty-in-memory')), through, 'ENOTDIR');
+
+    expect(readdirSync(dir).sort()).toEqual(before);
+  });
+
+  it('refuses a directory whose name a dangling symbolic link holds, and leaves the link dangling', () => {
+    const link = join(dir, 'link');
+    symlinkSync(join(dir, 'nowhere'), link);
+
+    const filename = join(link, 'archive.db');
+    expectFileRefusal(thrownBy(() => resolveSqliteAbsentFileTarget(filename, 'empty-in-memory')), filename, 'ENOENT');
+
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(dir, 'nowhere'))).toBe(false);
+  });
+
+  // Permission is judged as the process holds it, so the case splits on who
+  // runs it: a superuser may create in a 0555 directory, and the writing boot
+  // does — so for it the absent answer is the consistent one.
+  const superuser = typeof process.getuid === 'function' && process.getuid() === 0;
+
+  it.skipIf(superuser)('refuses an absent file in a directory this process may not write, with EACCES', () => {
+    const locked = join(dir, 'locked');
+    mkdirSync(locked);
+    chmodSync(locked, 0o555);
+
+    const filename = join(locked, 'archive.db');
+    expectFileRefusal(thrownBy(() => resolveSqliteAbsentFileTarget(filename, 'empty-in-memory')), filename, 'EACCES');
+    const deeper = join(locked, 'sub', 'archive.db');
+    expectFileRefusal(thrownBy(() => resolveSqliteAbsentFileTarget(deeper, 'empty-in-memory')), deeper, 'EACCES');
+
+    expect(readdirSync(locked)).toEqual([]);
+  });
+
+  it.runIf(superuser)('as the superuser, an absent file in a 0555 directory is absent: the writing boot can create it', () => {
+    const locked = join(dir, 'locked');
+    mkdirSync(locked);
+    chmodSync(locked, 0o555);
+
+    expect(resolveSqliteAbsentFileTarget(join(locked, 'archive.db'), 'empty-in-memory'))
+      .toEqual({ filename: ':memory:', openedEmptyInMemory: true });
+    expect(readdirSync(locked)).toEqual([]);
+  });
+
+  it('CONTROL: an absent file in a directory that exists, or can be made, is still absent and writes nothing', () => {
+    const before = readdirSync(dir).sort();
+    expect(resolveSqliteAbsentFileTarget(join(dir, 'fresh.db'), 'empty-in-memory'))
+      .toEqual({ filename: ':memory:', openedEmptyInMemory: true });
+    expect(resolveSqliteAbsentFileTarget(join(dir, 'new', 'deeper', 'fresh.db'), 'empty-in-memory'))
+      .toEqual({ filename: ':memory:', openedEmptyInMemory: true });
+    expect(readdirSync(dir).sort()).toEqual(before);
+  });
+
+  it('only empty-in-memory asks: the default mode hands the path on for connect() to refuse', () => {
+    const at = join(dir, 'plain', 'archive.db');
+    expect(resolveSqliteAbsentFileTarget(at, 'create')).toEqual({ filename: at, openedEmptyInMemory: false });
+    expect(resolveSqliteAbsentFileTarget(at, undefined)).toEqual({ filename: at, openedEmptyInMemory: false });
+  });
+
+  it('SqlDriver under empty-in-memory refuses at construction with the same error the writing boot\'s connect() names the file with', async () => {
+    const before = readdirSync(dir).sort();
+    const at = join(dir, 'plain', 'archive.db');
+    const build = (mode?: 'empty-in-memory') =>
+      new SqlDriver({
+        client: 'better-sqlite3',
+        connection: { filename: at },
+        useNullAsDefault: true,
+        ...(mode ? { sqliteAbsentFile: mode } : {}),
+      } as any);
+
+    // The read-only boot: no driver over a file that cannot exist.
+    expectFileRefusal(thrownBy(() => build('empty-in-memory')), at, 'ENOTDIR');
+
+    // The boot that may write, over the same path: its connect() refuses it,
+    // as it did before (#23696) — so the two boots now agree.
+    const writing = build();
+    let refusal: unknown;
+    try {
+      await writing.connect().catch((e: unknown) => { refusal = e; });
+    } finally {
+      await writing.disconnect();
+    }
+    expect((refusal as any)?.name).toBe('SqliteDatabaseFileError');
+    expect((refusal as any)?.filename).toBe(at);
+
+    expect(readdirSync(dir).sort()).toEqual(before);
   });
 });

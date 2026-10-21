@@ -8366,7 +8366,7 @@ export class ObjectQL implements IObjectQLEngine {
         // not a unique violation untouched (a deadlock, a NOT NULL, an
         // unreachable store), so only the recognised conflict changes shape.
         if (!this.isIssuedAutonumberCollision(error, issued)) {
-          throw envelopeUniqueViolation(error, object);
+          throw envelopeUniqueViolation(error, object, this.getSchema(object));
         }
         // Whatever happens next, the stale counter must not survive this call:
         // leaving it in place is what turned one collision into a storm.
@@ -8400,7 +8400,7 @@ export class ObjectQL implements IObjectQLEngine {
           try {
             return await driver.create(object, row, driverOptions);
           } catch (retryError) {
-            throw envelopeUniqueViolation(retryError, object);
+            throw envelopeUniqueViolation(retryError, object, this.getSchema(object));
           }
         }
       }
@@ -10975,6 +10975,54 @@ export class ObjectQL implements IObjectQLEngine {
       },
       options,
     );
+  }
+
+  /**
+   * [#24964] Read-only: every record a by-id {@link delete} of `object`/`id`
+   * would remove, the root first — the cascade set that delete collects for
+   * itself before it writes anything, read through the same walk.
+   *
+   * Exists for the operator's remover of the rows {@link inspectDanglingReferences}
+   * reports (`os db orphans`). Its dry run must list the deeper details the
+   * delete would reach, and it can only say that truthfully by asking the walk
+   * the delete runs. A copy of "which relations cascade" in the command would
+   * be free to disagree with the delete it previews.
+   *
+   * It reads, and does nothing else:
+   *
+   * - it issues no write and runs no hook;
+   * - it files no #12166 elevation record: that record says the platform read
+   *   an object as system for a delete, and none happens here;
+   * - it reads as SYSTEM with no organization, the probes a system-context
+   *   delete makes (`{ isSystem: true }`, no `tenantId`). A delete under any
+   *   other context can reach a different set.
+   *
+   * What it lists is the `cascade` relations' reach, the delete's phase 1.
+   * A `restrict` dependent outside the set refuses the delete when it runs,
+   * and a `set_null` reference to a member is cleared when it runs. Neither
+   * is listed here: neither removes a record.
+   *
+   * Like the delete's own walk, it propagates an unreadable registry or a
+   * dependents probe that fails for any reason but a table that was never
+   * provisioned. ⛔ Never treat a throw as "no deeper details".
+   */
+  async inspectCascadeDelete(
+    object: string,
+    id: string | number,
+  ): Promise<Array<{ object: string; id: string }>> {
+    const resolved = this.resolveObjectName(object);
+    const set = await this.collectCascadeDeleteSet(
+      resolved, id, undefined, this._registry.getAllObjects(), { fileElevations: false },
+    );
+    const root = { object: resolved, id: String(id) };
+    const members = [root];
+    for (const [memberObject, ids] of set.members) {
+      for (const memberId of ids) {
+        if (memberObject === root.object && memberId === root.id) continue;
+        members.push({ object: memberObject, id: memberId });
+      }
+    }
+    return members;
   }
 
   /**
@@ -16731,7 +16779,7 @@ export class ObjectQL implements IObjectQLEngine {
                   object, fields: [...new Set(batchIssued.map((one) => one.field))],
                 });
               }
-              throw envelopeUniqueViolation(error, object);
+              throw envelopeUniqueViolation(error, object, this.getSchema(object));
             }
           }
         } else {
@@ -18324,7 +18372,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object);
+                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
                }
                // [#21613] The by-id update returns the driver's post-write
                // readback (`select *` on driver-sql), so a column no metadata
@@ -18665,7 +18713,7 @@ export class ObjectQL implements IObjectQLEngine {
                try {
                    result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                } catch (driverError) {
-                   throw envelopeUniqueViolation(driverError, object);
+                   throw envelopeUniqueViolation(driverError, object, this.getSchema(object));
                }
                isPredicateWrite = true;
            }
@@ -19451,12 +19499,18 @@ export class ObjectQL implements IObjectQLEngine {
    * `set_null` relations are not read here. Every probe here is an elevated
    * read, so it files its #12166 record before it runs, through the
    * once-per-record ledger the walk shares ({@link fileReferenceCheckElevation}).
+   *
+   * [#24964] …except for {@link inspectCascadeDelete}, which passes
+   * `fileElevations: false`: that record says "read as system FOR THE DELETE
+   * of" the record, and an inspection deletes nothing, so filing it there would
+   * put a delete that never happened in the log. The reads are the same.
    */
   private async collectCascadeDeleteSet(
     object: string,
     id: string | number,
     context: ExecutionContext | undefined,
     objects: ServiceObject[],
+    opts: { fileElevations: boolean } = { fileElevations: true },
   ): Promise<CascadeDeleteSet> {
     const set: CascadeDeleteSet = { members: new Map(), entered: new Map(), elevationsFiled: new Set() };
     cascadeSetAdd(set.members, object, id);
@@ -19487,7 +19541,9 @@ export class ObjectQL implements IObjectQLEngine {
     const queue: Array<{ object: string; id: string | number }> = [{ object, id }];
     for (const target of queue) {
       for (const { childName, fieldName, fdef } of cascadingInto(target.object)) {
-        this.fileReferenceCheckElevation(set, target.object, target.id, childName, fieldName, context);
+        if (opts.fileElevations) {
+          this.fileReferenceCheckElevation(set, target.object, target.id, childName, fieldName, context);
+        }
         const rows = await this.probeReferencingRows(
           childName, fieldName, fdef, target.id, this.referenceProbeFilter(fieldName, fdef, target.id), context,
         );

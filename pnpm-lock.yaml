@@ -2239,6 +2239,9 @@ importers:
       '@objectstack/plugin-approvals':
         specifier: workspace:*
         version: link:../../plugins/plugin-approvals
+      '@objectstack/plugin-auth':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-auth
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../../plugins/plugin-hono-server
@@ -2832,6 +2835,9 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../../metadata-core
+      '@objectstack/metadata-protocol':
+        specifier: workspace:*
+        version: link:../../metadata-protocol
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql

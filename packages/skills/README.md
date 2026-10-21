@@ -25,11 +25,16 @@ agent's own skills directory (`.claude/skills/` for Claude Code, and so on):
 
 ```sh
 # 1 · the catalog, at the version of your installed @objectstack/spec
-npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+#   npm: npm install --save-dev "@objectstack/skills@…"   ·   yarn: yarn add -D "@objectstack/skills@…"
 
 # 2 · copy it from node_modules into your agent's skills directory
 npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
 ```
+
+Add the package with the manager that installed the project: in a pnpm project,
+`npm install --save-dev` exits `1` with
+`npm error Cannot read properties of null (reading 'edgesOut')`.
 
 `experimental_sync` discovers the skills at `dist/skills/<skill>/SKILL.md` of
 every dependency and copies each one into the named agent's skills directory
@@ -37,8 +42,8 @@ as real files, recording the source in `skills-lock.json` (`--agent <name>`
 names the runtime — `codex`, `cursor`, …). Keep `--copy`: without it the sync
 writes links into `node_modules`, which a clone of the project does not have;
 the CLI is pinned to the version `create-objectstack` runs. Keep the version
-in step 1: a bare `npm install --save-dev @objectstack/skills` installs
-whichever version the registry tags `latest`, not your spec's.
+in step 1: a bare `pnpm add -D @objectstack/skills` installs whichever version
+the registry tags `latest`, not your spec's.
 
 **Updating.** The catalog moves only with your ObjectStack version: bump
 `@objectstack/skills` with the other `@objectstack/*` packages, then re-run the
@@ -46,13 +51,16 @@ sync (step 2, same flags).
 
 **Which versions exist.** The package is published from `18.0.0-next.0` on;
 there is no 17.x release of it, so on a project whose `@objectstack/spec` is
-17.x step 1 refuses with `ETARGET` (`No matching version found`).
+17.x step 1 refuses with `ERR_PNPM_NO_MATCHING_VERSION` (npm: `ETARGET`; both
+print `No matching version found`).
 
 **Projects scaffolded by `create-objectstack`.** Through `18.0.0-next.0` the
 scaffolder installs the skills from the `next` channel below with `skills add`,
 and step 2 skips every skill a `skills add` installed (it prints `Skipped …
-installed with skills add`). Remove them first — `npx skills remove --all`, or
-name the `objectstack-*` skills if you added others — then run steps 1 and 2.
+installed with skills add`). Run `npx skills list` first, because
+`npx skills remove --all` removes every installed skill without asking: run that
+when the list shows only the `objectstack-*` skills, or name those if you added
+others — then run steps 1 and 2.
 
 ## The `next` channel
 
