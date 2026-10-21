@@ -144,11 +144,13 @@ describe('[ADR-0139 D6 as amended] a leaf inside a composed scope is composed to
     calls.length = 0;
   });
 
+  // The context value is the cast, never the options object: the
+  // query-options-erasure ratchet counts an erased options argument.
   const readVerbs = (where: Record<string, unknown>, context?: unknown) => [
-    ['find', () => engine.find('rid_child', { where, context } as any)],
-    ['findOne', () => engine.findOne('rid_child', { where, context } as any)],
-    ['count', () => engine.count('rid_child', { where, context } as any)],
-    ['aggregate', () => engine.aggregate('rid_child', { where, aggregations: COUNT_AGG as any, context } as any)],
+    ['find', () => engine.find('rid_child', { where, context: context as any })],
+    ['findOne', () => engine.findOne('rid_child', { where, context: context as any })],
+    ['count', () => engine.count('rid_child', { where, context: context as any })],
+    ['aggregate', () => engine.aggregate('rid_child', { where, aggregations: COUNT_AGG as any, context: context as any })],
   ] as const;
 
   /** The service of a two-level chain: the parent's scope carries a leaf over the grandparent, whose scope is plain. */
