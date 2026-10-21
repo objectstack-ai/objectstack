@@ -21,7 +21,7 @@ import { validateActionParams, type ActionSession, type ResolvedActionParam } fr
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
-import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
 // retries have to agree on it, and two doors each writing their own 'confirm'
@@ -288,6 +288,72 @@ async function resolveEngineQuietly(deps: ActionExecutionDeps, requestContext: H
 }
 
 /**
+ * [#25120] The by-name object reads {@link readExposureDeclaration} asks of
+ * the `protocol` slot, both optional: the slot is unmapped in
+ * `ServiceSlotContracts`, and a host may fill it with a partial object.
+ * `getMetaItemForExecution` is the server-only face `RestProtocol` declares the
+ * same way (`packages/rest/src/rest-server.ts`).
+ */
+type ExposureDeclarationRead = Partial<Pick<MetadataProtocol, 'getMetaItem'>> & {
+    getMetaItemForExecution?: MetadataProtocol['getMetaItem'];
+};
+
+/**
+ * [#25120] The definition {@link refuseUnexposedDataAction} judges: the object,
+ * by name, through the protocol's MERGED read — the read `RestServer`'s own
+ * exposure gate makes (`enforceApiAccess`), on the execution face where the
+ * protocol has one (no serving decorations: the gate reads `enable` and serves
+ * nothing). The metadata service's copy is read only on a host whose protocol
+ * has no by-name read: structural absence, answered as before.
+ *
+ * ── The defect this closes ────────────────────────────────────────────────
+ *
+ * This gate read `IMetadataService.getObject(object)`, and an absent copy is
+ * "no declaration", i.e. allowed. On a kernel with an `environmentId` nothing
+ * copies into that service the objects a package or a plugin registers in the
+ * `SchemaRegistry` during the boot, so such an object declared
+ * `apiEnabled: false` was served: measured on that shape, `query_records`
+ * answered and `create_record` reached the driver, through the `/mcp` bridge
+ * and every other door that asks this gate, while `RestServer` refused the
+ * same object `404 OBJECT_API_DISABLED`. One declaration, two verdicts.
+ *
+ * ── Answers, by what the read returns ─────────────────────────────────────
+ *
+ * - the item under its own name → judged;
+ * - nothing, or an item under another name → `undefined`: no declared
+ *   exposure policy, and the data plane's registry gate answers existence
+ *   (#3770), as before;
+ * - refused `OBJECT_PACKAGE_DISABLED` → `undefined`, as `RestServer`'s gate
+ *   reads it (`loadObjectItem`): the list read omits that object, and the data
+ *   plane refuses the request with that same code;
+ * - any other throw → to the caller, whose `catch` falls open, unchanged.
+ */
+async function readExposureDeclaration(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    object: string,
+    scopeId?: string,
+): Promise<unknown> {
+    const protocol = await deps.resolveService(requestContext, 'protocol', scopeId) as ExposureDeclarationRead | undefined;
+    const byName = typeof protocol?.getMetaItemForExecution === 'function'
+        ? protocol.getMetaItemForExecution
+        : typeof protocol?.getMetaItem === 'function' ? protocol.getMetaItem : undefined;
+    if (!byName) {
+        const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
+        return await (meta as any)?.getObject?.(object);
+    }
+    let envelope: unknown;
+    try {
+        envelope = await byName.call(protocol, { type: 'object', name: object });
+    } catch (err) {
+        if ((err as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') return undefined;
+        throw err;
+    }
+    const item = (envelope as { item?: unknown } | null | undefined)?.item;
+    return item !== null && typeof item === 'object' && (item as { name?: unknown }).name === object ? item : undefined;
+}
+
+/**
  * ── Object-level API exposure gate (ADR-0049, #1889) ─────
  * Honour the object's `apiEnabled` / `apiMethods` declarations for external
  * traffic: throws the refusal ({@link checkApiExposure}'s `404` / `405`) when
@@ -323,8 +389,7 @@ export async function refuseUnexposedDataAction(deps: ActionExecutionDeps,
     if (executionContext?.isSystem || !object) return;
     let def: any;
     try {
-        const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
-        def = await (meta as any)?.getObject?.(object);
+        def = await readExposureDeclaration(deps, requestContext, String(object), scopeId);
     } catch {
         def = undefined; // fall open to schema defaults (apiEnabled=true)
     }
