@@ -352,10 +352,11 @@ describe('[#24964] os db orphans --delete — the delete is the engine\'s own', 
   it('a restrict dependent refuses the orphan\'s delete, and nothing of its cascade is removed', async () => {
     const c = prepareCase();
     const exportPath = join(c.caseDir, 'export.json');
-    // A row outside the cascade that holds the orphan through a `restrict` lookup.
+    // A row outside the cascade that holds the orphan through a `restrict` lookup,
+    // in the organization the seeded rows belong to (a raw write is not stamped).
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: c.dbFile }, useNullAsDefault: true });
     try {
-      await (driver as any).knex('od_hold').insert({ id: 'h_row', name: 'holds it', member: 'm_orphan' });
+      await (driver as any).knex('od_hold').insert({ id: 'h_row', name: 'holds it', member: 'm_orphan', ...ORG });
     } finally {
       await driver.disconnect();
     }
