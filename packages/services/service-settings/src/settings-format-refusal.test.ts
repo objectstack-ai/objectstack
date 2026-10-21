@@ -334,7 +334,7 @@ describe('env door — a format-missing override is rejected: not in force, repo
       expect(r.source).toBe('default');
       expect(r.value).not.toBe(c.bad);
       expect(r.locked).toBe(false);
-      expect(r.cascadeChain.some((e) => e.scope === 'env')).toBe(false);
+      expect((r.cascadeChain ?? []).map((e) => e.scope)).not.toContain('env');
       // Re-reads and the namespace payload do not repeat the line.
       await svc.get(c.ns, c.key, ADMIN());
       await svc.getNamespace(c.ns, ADMIN());
