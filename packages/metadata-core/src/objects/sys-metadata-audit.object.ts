@@ -186,8 +186,16 @@ export const SysMetadataAuditObject = ObjectSchema.create({
      * item carried no `_lock`). Captured even on `allowed` rows so
      * later compliance queries can see "what was the lock state when
      * this write succeeded".
+     *
+     * A text column, not a select: the writer stores the `MetadataLock`
+     * spelling as is (`none` | `no-overlay` | `no-delete` | `full`), and a
+     * select option value is a system identifier, which holds no hyphen. The
+     * `Field.select([...])` shorthand used to strip the hyphen, declaring
+     * `nooverlay` / `nodelete` — values no row ever held (#25013). Like `code`
+     * above, the closed set lives with its writer (`MetadataLockSchema`).
+     * No `maxLength`: existing columns keep their width and report no drift.
      */
-    lock_state: Field.select(['none', 'no-overlay', 'no-delete', 'full'], {
+    lock_state: Field.text({
       label: 'Lock State',
       required: false,
       readonly: true,

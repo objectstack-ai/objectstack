@@ -3050,13 +3050,12 @@ type UserFieldInput = Omit<FieldInput, 'reference'> & {
 
 /** `Field.select` with inline options — the array or `{ options }` forms. */
 function selectWithOptions(optionsOrConfig: Array<SelectOption | string> | Omit<FieldInput, 'options'> & { options: Array<SelectOption | string> }, config?: FieldInput) {
-  // Helper function to convert string to lowercase snake_case
-  const toSnakeCase = (str: string): string => {
-    return str
-      .toLowerCase()
-      .replace(/\s+/g, '_')  // Replace spaces with underscores
-      .replace(/[^a-z0-9_]/g, ''); // Remove invalid characters (keeping underscores only)
-  };
+  // The shorthand's whole transform: lower-case, and whitespace runs → `_`.
+  // Every other character stays as written, so a string that is no system
+  // identifier (`'no-overlay'`, `'v2-beta'`) reaches `SelectOptionSchema.value`
+  // and is refused there, by the same rule an explicit `{ value: 'no-overlay' }`
+  // meets — never rewritten into a value the author did not write (#25013).
+  const toSnakeCase = (str: string): string => str.toLowerCase().replace(/\s+/g, '_');
 
   // Support both old and new signatures:
   // Old: Field.select(['a', 'b'], { label: 'X' })
@@ -3162,6 +3161,12 @@ export const Field = {
    * @example Multi-word values - converts to snake_case
    * Field.select(['In Progress', 'Closed Won'], { label: 'Status' })
    * // Results in: [{ label: 'In Progress', value: 'in_progress' }, { label: 'Closed Won', value: 'closed_won' }]
+   *
+   * Lower-casing and whitespace → `_` are the shorthand's only transforms; any
+   * other character is kept, so `Field.select(['no-overlay'])` yields the value
+   * `no-overlay`, which `SelectOptionSchema.value` refuses (a system identifier
+   * holds letters, digits, `_` and `.`). Write such an option explicitly:
+   * `{ label: 'no-overlay', value: 'no_overlay' }`.
    *
    * @example Shared picklist — the options come from the named `picklist` item
    * Field.select({ picklist: 'industry', label: 'Industry' })
