@@ -19,6 +19,7 @@
     "@objectstack/hono": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-approvals": "workspace:*",
+    "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/plugin-webhooks": "workspace:*",
     "@objectstack/runtime": "workspace:*",
