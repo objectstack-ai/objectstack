@@ -485,8 +485,11 @@ interface RlsFilterOptions {
    *     the walk covers that master's write is stated once, at that call site's
    *     `masterGateCoversThisWrite` bullet — not restated here;
    *   • the BULK write path does NOT, and must not: with no single id,
-   *     `assertControlledByParentWrite` returns early and nothing replaces the
-   *     floor. Reading the posture alone here would have widened bulk writes on
+   *     `assertControlledByParentWrite` judges every master the write reaches
+   *     and refuses on the first the caller may not edit, but that is a
+   *     verdict, not a row scope, so the floor stays — dropping it here would
+   *     widen the rows a member writes, a separate decision. Reading the
+   *     posture alone here would have widened bulk writes on
    *     every `controlled_by_parent` detail to "any row under a READABLE
    *     master", which no gate had authorized;
    *   • `getReadFilter` and `checkAuthoredRowWrite` do not, and need not: the
@@ -3071,7 +3074,8 @@ export class SecurityPlugin implements Plugin {
           // master gate (step 2.8, immediately below) run on the same middleware
           // pass, and 2.8's condition is a strict SUPERSET of this one: the same
           // `permissionSets.length > 0 && userId && this.ql` triple, the same
-          // single target id (`extractSingleId`, or it returns early), and one
+          // single target id (`extractSingleId`; with none, 2.8 judges every
+          // master the write reaches instead), and one
           // additional operation (`insert`, which has no pre-image and so no
           // floor to drop). Reaching this line therefore PROVES the master gate
           // will answer the same write — the maintainer's precondition, held
