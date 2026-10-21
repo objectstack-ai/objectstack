@@ -42,6 +42,11 @@ import { registerLoopNode } from './builtin/loop-node.js';
 import { DuplicateRecordError, ValidationError } from '@objectstack/objectql';
 import { PermissionDeniedError } from '@objectstack/plugin-security';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineFindOnePredicate,
+    assertEngineUpdateDispatch,
+} from '@objectstack/metadata-core';
 
 function makeLogger(): any {
     const l: any = { info() {}, warn() {}, error() {}, debug() {} };
@@ -54,10 +59,29 @@ const ctxWith = (data: any): any => ({
     getService: (n: string) => (n === 'data' ? data : undefined),
 });
 
-/** A data engine whose every write and read throws `err`. */
+/**
+ * A data engine whose every write and read throws `err` — AFTER accepting the
+ * call the way `ObjectQL` does (the shared dispatch predicates), so a refusal
+ * here is the one a real engine would have reached, never a call shape the
+ * real engine would have rejected first.
+ */
 function refusingData(err: unknown): any {
-    const refuse = async () => { throw err; };
-    return { insert: refuse, update: refuse, delete: refuse, find: refuse, findOne: refuse };
+    return {
+        async insert() { throw err; },
+        async update(_object: string, data: any, options: any) {
+            assertEngineUpdateDispatch(data, options);
+            throw err;
+        },
+        async delete(_object: string, options: any) {
+            assertEngineDeleteDispatch(options);
+            throw err;
+        },
+        async find() { throw err; },
+        async findOne(object: string, query: any) {
+            assertEngineFindOnePredicate(object, query);
+            throw err;
+        },
+    };
 }
 
 const duplicate = () => new DuplicateRecordError('crm_account', new Error('driver: unique violation'), 'name');
