@@ -107,7 +107,7 @@ const savedEnv: Record<string, string | undefined> = {};
 const savedCwd = process.cwd();
 
 /** A system insert; the roll-up on a missing master refuses AFTER the row is written, as it does in the field. */
-async function seedRow(ql: any, object: string, data: Record<string, unknown>): Promise<void> {
+async function seedRow(ql: ObjectQL, object: string, data: Record<string, unknown>): Promise<void> {
   try {
     await ql.insert(object, data, SYSTEM);
   } catch (error) {
@@ -204,7 +204,7 @@ beforeAll(async () => {
   process.chdir(dir);
   const stack = await bootSchemaStack({ jsonOutput: false, databaseUrl: `file:${templateDb}`, projectRoot: dir });
   try {
-    const ql = stack.kernel.getService('objectql') as any;
+    const ql = stack.kernel.getService('objectql') as ObjectQL;
     await seedRow(ql, 'od_campaign', { ...ORG, id: 'c_live', name: 'Live' });
     await seedRow(ql, 'od_member', { ...ORG, id: 'm_live', name: 'kept', amount: 5, campaign: 'c_live', referrer: 'Gone Campaign' });
     await seedRow(ql, 'od_member', { ...ORG, id: 'm_orphan', name: 'orphan', amount: 7, campaign: MISSING_CAMPAIGN });
