@@ -1,14 +1,15 @@
 ---
-'@objectstack/rest': minor
+'@objectstack/rest': patch
 ---
 
 feat(rest)!: `GET {base}/docs`, the OpenAPI document's HTML viewer page, is retired; `GET {base}/openapi.json` stays
 
 Clause-②: no (narrowing)
+Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) A runtime route retirement in RestServer.registerOpenApiEndpoints, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped: the page was an HTML answer on one REST path, and `objectstack migrate meta` has nothing to rewrite. The machine-readable document, its `api.enableOpenApi` gate and its answer are unchanged. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this route and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only / runtime-export-retired). -->
 
-**BREAKING** (a published route stops being served), shipped as `minor` under the launch-window convention for breaking changes.
+**BREAKING** (a published route stops being served), shipped as `patch` because it is a non-protocol change: it changes what a REST caller is served, not what a metadata author can write.
 
 `RestServer.registerOpenApiEndpoints` mounted two routes on every base: the OpenAPI document and an HTML viewer page for it. The viewer page is retired on both route shapes, the unscoped `{base}/docs` and the environment-scoped `{base}/environments/:environmentId/docs`. Nothing read it, and the API origin serves no HTML viewer.
 
