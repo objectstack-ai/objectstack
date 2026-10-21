@@ -72,7 +72,10 @@ import {
   isMultiValueField,
 } from '@objectstack/spec/data';
 import type { ISecurityService, SecurityContext } from '@objectstack/spec/contracts';
-import { buildFieldMetaMap, type ExportFieldMeta } from './export-format.js';
+// From core, where they live, not through `./export-format.js`'s re-export:
+// that module reads `templateText` from here (#24945), and the two modules do
+// not import each other.
+import { buildFieldMetaMap, type ExportFieldMeta } from '@objectstack/core';
 import { loadExcelJs, type Workbook, type Worksheet } from './xlsx-module.js';
 
 // ── the column rule ─────────────────────────────────────────────────

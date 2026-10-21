@@ -41,8 +41,9 @@ const data = { provider: 'object' as const, object: 'showcase_contact' };
  *     default — self-fills), `notes` (edit-time only). Nothing here restates a
  *     field's type or rules; it only chooses WHICH fields appear and WHERE.
  *
- * The list view binds the create entry point to that form via
- * `addRecord: { mode: 'form', formView: 'create' }`.
+ * The list's Add button opens that form by convention: the create entry uses
+ * `formViews.create` when the container declares it, else the default `form`.
+ * Nothing on `addRecord` names it (`mode` / `formView` were retired, #24692).
  */
 export const ContactViews = defineView({
   // Default list — carries `data` so the view registrar can resolve the object.
@@ -56,8 +57,9 @@ export const ContactViews = defineView({
       { field: 'company' },
       { field: 'stage' },
     ],
-    // Create uses the slim, hand-shaped form rather than the full edit form.
-    addRecord: { enabled: true, mode: 'form', formView: 'create' },
+    // The Add button opens the create form — `formViews.create` below, the
+    // slim, hand-shaped form, rather than the full edit form.
+    addRecord: { enabled: true },
   },
 
   // ── Default (edit/detail) form: the full record, grouped by `field.group`.
