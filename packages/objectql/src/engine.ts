@@ -20093,7 +20093,7 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * [#24948] May the refusal disclose `count` to the caller? Only when the
    * caller's own identity counts the same rows: the elevated count read rows
-   * the caller may not see. The system is always told.
+   * the caller may not see. (A system caller's own count is the elevated one.)
    */
   private async organizationCountIsDisclosable(
     childName: string,
@@ -20101,7 +20101,6 @@ export class ObjectQL implements IObjectQLEngine {
     count: number,
     context: ExecutionContext | undefined,
   ): Promise<boolean> {
-    if (context?.isSystem === true) return true;
     try {
       return (await this.count(childName, { where, context })) === count;
     } catch (error) {
