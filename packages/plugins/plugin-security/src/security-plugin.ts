@@ -260,6 +260,15 @@ interface WriteImageCheckSeam {
   evaluate(rows: readonly Record<string, unknown>[]): void;
   /** Set by the engine immediately before `evaluate` runs. */
   honoured?: boolean;
+  /**
+   * [#24822] Set by step 3.7, and only by it: on an insert, `evaluate` holds
+   * every row's `organization_id` to the Layer 0 tenant wall's own parts. The
+   * engine then leaves a caller's explicit value on the row for that verdict
+   * instead of stripping it as `readonly`. Never set on a seam that carries the
+   * business `check` alone, or on a crossing platform operator's seam: neither
+   * judges the organization.
+   */
+  judgesOrganization?: boolean;
 }
 
 /**
@@ -4311,6 +4320,24 @@ export class SecurityPlugin implements Plugin {
                 if (emptiesOrganization(row)) denyOrganizationRemoval("the stored row's");
               }
             },
+            // ── [#24822 · ADR-0105 D5] The insert's organization is JUDGED here ──
+            //
+            // The loop above holds a stored row's `organization_id` to the wall
+            // whenever the wall has parts, and the payload half above already
+            // refused every supplied value outside them. So on an insert the
+            // engine may leave a caller's explicit value on the row for this
+            // verdict instead of stripping it as `readonly` and storing the
+            // active organization in its place. That replacement was silent:
+            // a 2xx, with the row in another organization than the one the
+            // wall admitted. The member says so, and the engine reads nothing
+            // else. Set ONLY where the wall's own parts are composed in
+            // (`tenantParts` non-empty). The crossing operator's seam
+            // (`operatorInsertLacksActiveOrganization` with no parts) judges no
+            // organization: its loop admits every row. The business `check`
+            // seam of step 3.6 never reaches this composition. Neither sets it,
+            // so the strip there runs as before. An update's organization is
+            // not this member's.
+            ...(opCtx.operation === 'insert' && tenantParts.length > 0 ? { judgesOrganization: true } : {}),
           };
           opCtx.postHookWriteImageCheck = writeImageCheckSeam;
           tenantWallSeamInstalled = true;
