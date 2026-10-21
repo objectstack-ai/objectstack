@@ -9,7 +9,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -27,7 +27,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (own port + file DB per dogfood skill §0); sign in as admin; sign up members A and B (fresh emails; invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)) — both hold only the everyone baseline showcase_member_default",
+        "boot the showcase on its own port and file DB (dogfood skill §0); sign in as admin; sign up members A and B (fresh emails; invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)) — both hold only the everyone baseline showcase_member_default",
         "as A: POST /api/v1/data/showcase_private_note {\"title\": \"A note 1\"} and a second note; as B: POST one note — capture the returned ids",
         "as A: GET /api/v1/data/showcase_private_note (list); as B: same; capture both record sets",
         "as A: GET /api/v1/data/showcase_private_note/<B's id> (foreign by-id read); as A: PATCH /api/v1/data/showcase_private_note/<B's id> {\"body\": \"forged\"} (foreign by-id write)",
@@ -124,6 +124,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21720 parked on #22017 (row 11). A6 was blocked(dependency): the clause forbids ticking it without the private D11 write-up. Disposition: recorded knownGap. The item gains a knownGap naming the environment the D11 spot-check needs (the maintainer's private write-up and fix card, which no public record or CI carries by design) and separating the skipped-object half, which a public run can still score. Non-disclosing, as the clause requires",
           "ref": "#22017"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated (own port + file DB per dogfood skill §0)' → 'boot the showcase on its own port and file DB (dogfood skill §0)'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -132,7 +138,7 @@
       "title": "Write-path guards: readonly strip, owner_id forge/transfer denied, bulk validation",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -148,7 +154,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; admin session + two members Alice and Bob (fresh sign-ups — invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)); resolve their sys_user ids via the data API or objectql",
+        "boot the showcase on its own port and DB; admin session + two members Alice and Bob (fresh sign-ups — invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)); resolve their sys_user ids via the data API or objectql",
         "as admin (contact create is admin-side in the stock matrix): POST /api/v1/data/showcase_contact {\"name\": \"RO probe\", \"email\": \"ro-probe@verify.test\", \"lead_score\": 10} — forging the readonly field on INSERT; GET the row back",
         "PATCH the same contact with {\"lead_score\": 99}; GET again",
         "as Alice: POST /api/v1/data/showcase_private_note {\"title\": \"planted\", \"owner_id\": \"<Bob's id>\"} (insert forge); then POST a note with {\"owner_id\": \"<Alice's own id>\"} (explicit self-owner); then PATCH her own note with {\"owner_id\": \"<Bob's id>\"} (transfer) and with {\"owner_id\": null} (disown)",
@@ -249,6 +255,12 @@
           "date": "2026-10-16",
           "change": "wire shapes the steps left out (#23878 checklist-accuracy findings, re-measured on main c91af8ed6). createMany takes a bare JSON array (a {records} wrapper answers 400 VALIDATION_FAILED); updateMany takes {records:[{id,data}]} (a where body answers 400 naming records); and a bulk run stops at the first validation failure by default, marking later rows NOT_ATTEMPTED, so clause 7's mixed-outcome step now sends options.continueOnError true. Measured on showcase_invoice_line [valid, quantity -1, valid]: default → succeeded 1, failed 2 (VALIDATION_FAILED, NOT_ATTEMPTED), only row 0 changed; continueOnError → succeeded 2, failed 1, rows 0 and 2 changed, row 1 unchanged",
           "ref": "#24036"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -451,7 +463,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -473,7 +485,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set by inserting the sys_user_permission_set row (system context), mirroring showcase-permission-zoo.dogfood.test.ts. ⚠️ the stock showcase declares no auth.audience, so its posture is the invite_only default and an uninvited POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: mint each member by an admin POST /api/v1/auth/organization/invite-member for that address first (a pending sys_invitation row admits the sign-up), or by an admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true",
+        "boot the showcase on its own port and DB; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set by inserting the sys_user_permission_set row (system context), mirroring showcase-permission-zoo.dogfood.test.ts. ⚠️ the stock showcase declares no auth.audience, so its posture is the invite_only default and an uninvited POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: mint each member by an admin POST /api/v1/auth/organization/invite-member for that address first (a pending sys_invitation row admits the sign-up), or by an admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true",
         "as admin (or a helper member), seed one FOREIGN-owned probe row per object under test (e.g. a showcase_private_note, showcase_inquiry, showcase_invoice + line, showcase_announcement owned by someone other than the persona)",
         "for every row of access-matrix.json drive all four verbs as that persona: POST /api/v1/data/<object> {minimal valid payload}, GET /api/v1/data/<object> + GET /api/v1/data/<object>/<probe id>, PATCH /api/v1/data/<object>/<own or probe id>, DELETE /api/v1/data/<object>/<id> — capture status + error.code for each cell",
         "for rows with viewAllRecords:true (auditor on showcase_inquiry/showcase_invoice/showcase_invoice_line/showcase_private_note): GET the foreign probe by id and list; for the SAME objects re-run as a persona whose row says viewAllRecords:false",
@@ -586,6 +598,12 @@
           "date": "2026-10-16",
           "change": "counts and the known gap re-measured on main c91af8ed6 (#23878 checklist-accuracy findings). access-matrix.json now has 45 rows: 41 showcase_* plus 4 delegate × sys_* (sys_business_unit, sys_business_unit_member, sys_user, sys_user_position), so the fixture line, steps[6], acceptance[6] and automated.ref say 45 / 4 instead of 47 / 6; the 164 showcase cells and their 87 allow / 77 deny / 9 baseline-only split are unchanged. knownGaps[4] (A1 a KNOWN FAIL until #21057) is removed, as its own ruling prescribed once the C1 business-unit leg landed: #21057 closed on 2026-10-08, the five seeded sys_business_unit rows carry organization_id, and the delegate's in-subtree create answers 201 while bu_hq_finance stays 403. A1 is therefore expected to pass; a 403 on the in-subtree create is now a fail, not a known one",
           "ref": "#24036"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -594,7 +612,7 @@
       "title": "Sharing-model / OWD matrix: private, public_read, public_read_write, controlled_by_parent each enforce their declared baseline",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -612,7 +630,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; create members A and B (baseline), two contributor members C1/C2 (grant showcase_contributor), an ops member, an auditor member",
+        "boot the showcase on its own port and DB; create members A and B (baseline), two contributor members C1/C2 (grant showcase_contributor), an ops member, an auditor member",
         "private: as A create a showcase_private_note; as B list, GET by id, PATCH it",
         "public_read: as admin (or ops) create a showcase_announcement owned by someone other than B; as B GET list + by id, then PATCH it; as ops PATCH the same announcement (modifyAllRecords contrast)",
         "public_read_write: as admin create a showcase_project; as C1 (allowEdit:true on projects, no project RLS) GET it and PATCH a non-FLS field (e.g. name suffix) — record-level write open by OWD; as A (member_default, allowEdit:false) attempt the same PATCH — the object-level bit must still gate",
@@ -707,6 +725,12 @@
           "date": "2026-10-01",
           "change": "cross-reference disambiguation from QA run #21056: the private handle D11 is not FOLLOW-UPS.md §7c's public D11 row (an unrelated two-factor defect that took the same number), and clause numbers here count from 0 — this item's clause 4 is a run record's A5, rls-both-sides clause 5 is its A6. Non-disclosing as before",
           "ref": "#21060"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -831,7 +855,7 @@
       "title": "Scope depth (readScope/writeScope): org-wide read with own-only write, per persona — depth widens along geometry, never bypasses",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -851,7 +875,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; create member M plus manager/executive/ops personas; as M: POST /api/v1/data/showcase_inquiry {\"name\": \"M probe\", \"email\": \"m.probe@example.com\", \"message\": \"scope probe\"} (showcase_inquiry requires name, email and message and has no `subject` field — examples/app-showcase/src/data/objects/inquiry.object.ts); as the manager: POST their OWN inquiry",
+        "boot the showcase on its own port and DB; create member M plus manager/executive/ops personas; as M: POST /api/v1/data/showcase_inquiry {\"name\": \"M probe\", \"email\": \"m.probe@example.com\", \"message\": \"scope probe\"} (showcase_inquiry requires name, email and message and has no `subject` field — examples/app-showcase/src/data/objects/inquiry.object.ts); as the manager: POST their OWN inquiry",
         "as the manager: GET /api/v1/data/showcase_inquiry (list) — M's inquiry must appear (readScope org on a private object)",
         "as the manager: PATCH M's inquiry (foreign write, writeScope own) and PATCH their own inquiry",
         "as the executive: GET the inquiry list and M's inquiry by id; then attempt PATCH (no edit bit at all); also GET /api/v1/data/showcase_private_note list (readScope org over private notes)",
@@ -932,6 +956,12 @@
           "date": "2026-10-20",
           "change": "automated dropped and fixtures.knownGaps[0] added, under round 6's theme-B rule (drop `automated` where no pin asserts a full clause, with a knownGaps line) — round 11 of wave anchor #24579, whose round-3 summary named this nominally Tier 1 item. Its revision-3 automated.ref already said the three dogfood pins cover no clause. Re-read at 46bb5e3e54: they drive business-unit depth on showcase notes and never the manager / executive / ops personas or showcase_inquiry. The item is now Tier 2, every clause driven by hand as revision 3 already prescribed. No clause changed",
           "ref": "#24801"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -1170,7 +1200,7 @@
       "title": "Per-record manual shares grant, scope, and revoke access on a private-OWD record; rule evaluate reconciles the audience",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1189,7 +1219,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (own port + file DB, dogfood skill §0); admin session + members A/B/C (fresh emails); resolve their sys_user ids system-side",
+        "boot the showcase on its own port and file DB (dogfood skill §0); admin session + members A/B/C (fresh emails); resolve their sys_user ids system-side",
         "as A: POST /api/v1/data/showcase_private_note {\"title\": \"A share probe\"} — capture the id; POST a SECOND note as A too (the revoke-scope probe below needs a different record id under the same object)",
         "as B: GET /api/v1/data/showcase_private_note/<A id> — the PRE-grant baseline (private OWD, B is not owner → must be refused)",
         "as A: POST /api/v1/data/showcase_private_note/<A id>/shares {\"recipientType\": \"user\", \"recipientId\": \"<B id>\", \"accessLevel\": \"read\"} — capture the 201 sys_record_share row (source 'manual')",
@@ -1296,6 +1326,12 @@
           "date": "2026-10-19",
           "change": "acceptance[6] (clause, verify, evidence) corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.record-share-grant-revoke acceptance[6]; wave anchor #24579 §3). The clause required source_id to be the rule's sys_sharing_rule ROW id and NOT its name; that holds only for an organization-authored rule. The rule it evaluates, share_key_account_qualified_contacts_with_managers, is DECLARED, and a declared rule is projected with id = name (sharing-rule-service.ts projectDeclaredRule, ADR-0131 D2), so its grants carry the name. The clause now asserts source_id equals the rule's id as evaluate reports it, and the verify names revokeRuleGrants, the current name of the purge it cited as purgeRuleGrants",
           "ref": "#24632"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated (own port + file DB, dogfood skill §0)' → 'boot the showcase on its own port and file DB (dogfood skill §0)'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -2247,7 +2283,7 @@
       "title": "A package-declared capability is served by the registry (no sys_capability row — the object is retired, ADR-0131 D3) and resolves across the grant/require three-way (ADR-0066) on the PLATFORM action path; platform names cannot be shadowed",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2274,7 +2310,7 @@
         "shadow-refusal — a declaration whose name collides with PLATFORM_CAPABILITY_NAMES, or with a name another package declares, is refused loudly by the registry's one-holder rule"
       ],
       "steps": [
-        "boot showcase isolated; confirm the declared capability is served: GET /api/v1/meta/capability/showcase.export_data answers its declared name/label/description/scope, and GET /api/v1/data/sys_capability answers 404 OBJECT_NOT_FOUND (the object is retired, ADR-0131 D3 — there is no row table to find the capability in)",
+        "boot the showcase on its own port and DB; confirm the declared capability is served: GET /api/v1/meta/capability/showcase.export_data answers its declared name/label/description/scope, and GET /api/v1/data/sys_capability answers 404 OBJECT_NOT_FOUND (the object is retired, ADR-0131 D3 — there is no row table to find the capability in)",
         "read its fields — they are the declaration's own; nothing is transcribed into a row",
         "drive the dispatcher /actions domain (knownGaps): POST /api/v1/actions/showcase_field_zoo/<action>/<a showcase_field_zoo record id>, read the record id off GET /api/v1/data/showcase_field_zoo. Do NOT score /api/v1/data/:object/:id/actions/... — @objectstack/rest mounts no action-invoke route by design (#7680), so a 404 there scores nothing",
         "on that surface, INVOKE showcase_zoo_perm_held (requires showcase.export_data) as the GRANTED member holding OpsPermissionSet, then as a NON-granted member: granted executes, non-granted is refused with the actionPermissionError text naming the action and the missing capability",
@@ -2351,6 +2387,12 @@
           "date": "2026-10-19",
           "change": "steps[7] and acceptance[1].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24559, access-security.capability-declaration-lifecycle; wave anchor #24579 §3). The located `capabilities.0.scope` refusal appears only for a raw capabilities entry: defineCapability parses its argument (packages/spec/src/security/capabilities.ts), so a malformed shape written through it throws at config load. The item stated no expectation for the admin on showcase_zoo_perm_held. The run measured the admin refused, and actionPermissionError has no administrator exemption (only a system context skips it), so the verify now says so. The run also measured DELETE /api/v1/meta/capability/NAME answering 200 while removing nothing; no clause asserts that door, and it is left to the wave anchor as an observation, not encoded here",
           "ref": "#24632"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -2522,7 +2564,7 @@
       "title": "Activation-ledger write authority (ADR-0126 §5): the manage_metadata tier refuses first on every posture, and the shared operator gate — INERT on stock `single` — demands the platform_admin POSITION in walled postures, at both the flow and action doors",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2545,7 +2587,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; admin session; PROVE the posture is `single` and record the evidence — the boot banner's `Tenancy: single` line (no API reports the posture; at OS_LOG_LEVEL=info the \"[security] tenancy posture 'single'\" line corroborates it) — the posture selects which gate can answer",
+        "boot the showcase on its own port and DB; admin session; PROVE the posture is `single` and record the evidence — the boot banner's `Tenancy: single` line (no API reports the posture; at OS_LOG_LEVEL=info the \"[security] tenancy posture 'single'\" line corroborates it) — the posture selects which gate can answer",
         "as the plain member: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} — capture status, code and the EXACT message string",
         "as the plain member: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} — capture status, code and the exact message",
         "as the plain member again: repeat the flow toggle with a deliberately INVALID body (e.g. {\"enabled\": \"false\"}) — the refusal must still be the 403, not a 400 body-validation answer (the gate runs before body validation, automation.ts; activation-gate.ts)",
@@ -2669,6 +2711,12 @@
           "date": "2026-10-20",
           "change": "fixtures.requires[3] names the recipe for the walled legs' org-owner manage_metadata grant, and knownGaps[0]'s prerequisite sentence says os dev — QA run #24783 (findings F7 and F2), round 11 of wave anchor #24579. No HTTP door placed the grant on the walled boot: the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, and the owner's own insert by ADR-0090 D12 condition (c), manage_metadata being scope 'platform'. The recipe is the dogfood harness's system-context engine insert (wall-environment-metadata-refusal.dogfood.test.ts, its boot helper). A bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md), so the refusal sentence now names os dev. No clause changed",
           "ref": "#24801"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -2677,7 +2725,7 @@
       "title": "Write-door parity on a packaged flow: PUT/DELETE /automation/:name must refuse the same packaged artifact that PUT /meta/flow/:name refuses (ADR-0126 §2 locked base)",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2694,7 +2742,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; admin session; GET /api/v1/automation/showcase_urgent_task_alert and store the full definition (the restore payload); also GET /api/v1/meta/flow/showcase_urgent_task_alert?layers=true to prove the artifact is package-backed (populated code layer, _packageId com.example.showcase)",
+        "boot the showcase on its own port and DB; admin session; GET /api/v1/automation/showcase_urgent_task_alert and store the full definition (the restore payload); also GET /api/v1/meta/flow/showcase_urgent_task_alert?layers=true to prove the artifact is package-backed (populated code layer, _packageId com.example.showcase)",
         "control leg, the /meta door: PUT /api/v1/meta/flow/showcase_urgent_task_alert with a trivially modified copy of the definition (e.g. label suffix) — capture status, code and WHICH layer answered; repeat with ?package=com.example.showcase and capture that code too",
         "probe leg 1: PUT /api/v1/automation/showcase_urgent_task_alert with the same trivially modified definition — capture status and, if 2xx, GET the flow back to prove the live registration mutated",
         "probe leg 2: DELETE /api/v1/automation/showcase_urgent_task_alert — capture status and, if 2xx, confirm GET /api/v1/automation/showcase_urgent_task_alert now 404s (the shipped flow is gone from the live engine)",
@@ -2752,7 +2800,8 @@
           "ref": "#12438"
         },
         { "revision": 2, "date": "2026-10-02", "change": "retired the expected-fail framing: 4b45afae (#20817) locked the /automation write doors against the packaged base, and the 17.6.0 release-verification run measured PUT and DELETE /automation/showcase_urgent_task_alert answering 403 NOT_OVERRIDABLE with the /meta door's lock message, the flow unchanged and still firing. Title, knownGaps and clauses 2-3 now state the parity as holding; the restore step is conditional (a restore PUT is itself refused), and the knownGap names the permanent pin packaged-flow-write-door-parity.dogfood.test.ts", "ref": "#21330" },
-        { "revision": 3, "date": "2026-10-20", "change": "negative[1] rewritten as the product outcome it guarded, and negative[2] moved to steps[6]. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): both stated a runner rule with no product expectation, so they could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). negative[1]'s 'do not read the /meta refusal as covering the /automation door' guarded one: an /automation write door answering 2xx on the artifact /meta refused, which is now the FAIL. negative[2] (the toggle door is not this item) guards none, so its text moved, unchanged in substance, to steps[6]. No acceptance clause changed", "ref": "#24963" }
+        { "revision": 3, "date": "2026-10-20", "change": "negative[1] rewritten as the product outcome it guarded, and negative[2] moved to steps[6]. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): both stated a runner rule with no product expectation, so they could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). negative[1]'s 'do not read the /meta refusal as covering the /automation door' guarded one: an /automation write door answering 2xx on the artifact /meta refused, which is now the FAIL. negative[2] (the toggle door is not this item) guards none, so its text moved, unchanged in substance, to steps[6]. No acceptance clause changed", "ref": "#24963" },
+        { "revision": 4, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -3011,7 +3060,7 @@
       "title": "The /auth/me/permissions aggregation (and its /auth/me/localization + /me/apps siblings) mirrors server-side enforcement in both directions — and the trio's anonymous 200 is the deliberate exception to the 401 floor",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3035,7 +3084,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; provision C (grant showcase_contributor via sys_user_permission_set), P (baseline only), admin; use a FRESH http client per persona (cache-staleness)",
+        "boot the showcase on its own port and DB; provision C (grant showcase_contributor via sys_user_permission_set), P (baseline only), admin; use a FRESH http client per persona (cache-staleness)",
         "as C: GET /api/v1/auth/me/permissions — record objects.showcase_project, fields['showcase_project.budget'], permissionSets, systemPermissions",
         "verb parity, both directions: as C PATCH a showcase_project name (the map says allowEdit) — 2xx; as P read P's own map (allowEdit absent/false on showcase_project) then issue the identical PATCH — 403 PERMISSION_DENIED",
         "field parity: C's map says budget editable:false — C's budget PATCH is refused/stripped with the stored value unchanged (the fls-mask-and-strip oracle; cross-check only, do not re-score that item here)",
@@ -3128,6 +3177,12 @@
           "date": "2026-09-25",
           "change": "the parity steps never reached the population the map got wrong: a wall-less org admin (organization_admin_no_bypass, a plain '*' with no super-user bit) had NO entry for an app object covered only by that wildcard, so current_user.can() answered false where checkObjectPermission allowed. Added persona W, its step and acceptance clause (an object no set names present and writable, a narrower named entry widened, the private sys_secret absent and refused — the shape measured on a booted showcase), the source anchor for the producer, and the unit parity table to automated.ref",
           "ref": "#20083"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#25003"
         }
       ]
     },

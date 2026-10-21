@@ -49,7 +49,9 @@ afterEach(async () => {
 /**
  * `title` is the name field, so the companion's real producer declares
  * `__search` on this object (and the read strips its value). `done` is a
- * boolean, so a projected value is visibly formatted (`是` / `否`).
+ * boolean, so a projected value is visibly formatted (`yes` / `no`: the
+ * requests name no locale, so the cells take the words `templateText(undefined)`
+ * answers, #24945).
  */
 const NOTE = provisionSearchCompanion({
   name: 'note',
@@ -161,8 +163,8 @@ describe('format=json honours an explicit ?fields= (#24183)', () => {
       ['done', 'internal_code', 'title', 'id'],
       ['done', 'internal_code', 'title', 'id'],
     ]);
-    expect(rows[0]).toEqual({ done: '是', internal_code: 'IC-1', title: 'Note 1', id: '1' });
-    expect(rows[1]).toEqual({ done: '否', internal_code: 'IC-2', title: 'Note 2', id: '2' });
+    expect(rows[0]).toEqual({ done: 'yes', internal_code: 'IC-1', title: 'Note 1', id: '1' });
+    expect(rows[1]).toEqual({ done: 'no', internal_code: 'IC-2', title: 'Note 2', id: '2' });
   });
 
   it('JSON: a named key the read did not return is absent, never invented as null (the stripped companion)', async () => {

@@ -1774,8 +1774,54 @@ export const UserFiltersSchema = lazySchema(() => strictObject({
 }).describe('End-user quick-filter configuration (Airtable "User filters" parity)'));
 
 /**
+ * The prescription an author meets on an `addRecord` block that omits
+ * `enabled` (#24692, ruling letter B′). The key is REQUIRED with no default:
+ * the renderer draws the Add button only for an explicit `enabled: true`, so
+ * the old `.default(true)` promised a button that `addRecord: {}` never drew.
+ */
+const ADD_RECORD_ENABLED_REQUIRED =
+  '`addRecord.enabled` is required since @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — an '
+  + '`addRecord` block that omits it draws no Add button, so the '
+  + 'block must say whether the entry point is on. Write `enabled: true` to show the Add button '
+  + '(`position` places it: `top`, the default, `bottom` or `both`), or `enabled: false` to declare '
+  + 'it off. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
+  + '`--write` applies the ones it can prove, and you apply the rest by hand.';
+
+/**
+ * `addRecord.mode` / `addRecord.formView` — retired (#24692, ADR-0049
+ * enforce-or-remove; ruling letter B′). No renderer ever read either key:
+ * every Add opens the object's create form, chosen by convention —
+ * `formViews.create` when the object's view container declares one, else the
+ * default form. How that form opens stays the renderer's. D2:
+ * `add-record-mode-form-view-removed`.
+ */
+const ADD_RECORD_MODE_RETIRED =
+  '`addRecord.mode` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no '
+  + 'renderer ever read it: the Add button always opens the create form, never an inline row or a '
+  + 'mode of its own choosing. Delete the key; the create form opens the way the object list\'s New '
+  + 'opens it. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
+  + '`--write` applies the ones it can prove, and you apply the rest by hand.';
+
+const ADD_RECORD_FORM_VIEW_RETIRED =
+  '`addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no '
+  + 'renderer ever read it: the Add button opens the create form chosen by convention, never a named '
+  + 'form. Delete the key, and to give the Add button its own form declare it as `formViews.create` '
+  + 'on the object\'s view container (without one, the default form is used). '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` '
+  + 'applies the ones it can prove, and you apply the rest by hand.';
+
+/**
  * Add Record Configuration Schema (Airtable Interface parity)
  * Configures the "Add Record" entry point for a list view.
+ *
+ * [#24692] Ruling letter B′ made this block say what renders: `enabled` is
+ * REQUIRED (no default — `addRecord: {}` is refused instead of drawing
+ * nothing), `position` defaults to `top` (where the renderer places an absent
+ * position), and `mode` / `formView`, which no renderer read, are tombstoned.
+ * The create form is chosen by convention: `formViews.create` when declared,
+ * else `form` / `formViews.default`. The stored-row half of `enabled` is the D2
+ * conversion `add-record-enabled-defaulted`, which writes the old default
+ * (`true`) onto a block that omits it.
  *
  * @see Airtable Interface → "+ Add record" button
  */
@@ -1783,10 +1829,12 @@ export const AddRecordConfigSchema = lazySchema(() => strictObject({
   surface: 'this add record configuration',
   history: VIEW_HISTORY,
 }, {
-  enabled: z.boolean().default(true).describe('Show the add record entry point'),
-  position: z.enum(['top', 'bottom', 'both']).default('bottom').describe('Position of the add record button'),
-  mode: z.enum(['inline', 'form', 'modal']).default('inline').describe('How to add a new record'),
-  formView: z.string().optional().describe('Named form view to use when mode is "form" or "modal"'),
+  enabled: z
+    .boolean({ error: (issue) => (issue.input === undefined ? ADD_RECORD_ENABLED_REQUIRED : undefined) })
+    .describe('Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off'),
+  position: z.enum(['top', 'bottom', 'both']).default('top').describe('Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both`'),
+  mode: retiredKey(ADD_RECORD_MODE_RETIRED),
+  formView: retiredKey(ADD_RECORD_FORM_VIEW_RETIRED),
 }).describe('Add record entry point configuration'));
 
 /**

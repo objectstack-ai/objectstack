@@ -1157,6 +1157,12 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       addRecord: {
         label: "Agregar registro"
       },
+      "addRecord.enabled": {
+        label: "Habilitado"
+      },
+      "addRecord.position": {
+        label: "Posición"
+      },
       showRecordCount: {
         label: "Mostrar recuento de registros"
       },
@@ -1303,6 +1309,12 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "interfaceConfig.addRecord": {
         label: "Agregar registro",
         helpText: "Punto de entrada para agregar registros"
+      },
+      "interfaceConfig.addRecord.enabled": {
+        label: "Habilitado"
+      },
+      "interfaceConfig.addRecord.position": {
+        label: "Posición"
       },
       "interfaceConfig.emptyState": {
         label: "Estado vacío",

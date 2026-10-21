@@ -1216,6 +1216,19 @@ describe('DroppedFieldsEventSchema.reason — why a write dropped submitted fiel
     expect(parsed).toEqual({ object: 'task', fields: ['id'], reason: 'primary_key' });
   });
 
+  it('stored_expression is the value the engine reports when it stores a field\'s computed value in place of the caller\'s (#24690)', () => {
+    // `computed` names a `formula` field whose key is DROPPED; a stored field
+    // that declares `expression` is WRITTEN, with the engine's value. One enum,
+    // two facts, so the second one has its own arm.
+    const parsed = DroppedFieldsEventSchema.parse({
+      object: 'showcase_invoice_line', fields: ['amount'], reason: 'stored_expression',
+    });
+    expect(parsed).toEqual({ object: 'showcase_invoice_line', fields: ['amount'], reason: 'stored_expression' });
+    expect(DroppedFieldsEventSchema.shape.reason.options).toEqual(
+      ['readonly', 'readonly_when', 'primary_key', 'computed', 'stored_expression'],
+    );
+  });
+
   it('still REJECTS a reason outside the vocabulary — widening is deliberate, not open-ended', () => {
     // The enum grows by decision (a new legal strip class), never by a
     // producer inventing a string. Rejection is asserted on the issue's own
