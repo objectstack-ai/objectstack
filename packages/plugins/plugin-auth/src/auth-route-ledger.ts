@@ -382,6 +382,13 @@ export const BETTER_AUTH_MOUNTED_SURFACE: readonly string[] = [
   'POST /api/v1/auth/get-session',
   'POST /api/v1/auth/link-social',
   'POST /api/v1/auth/oauth2/authorize',
+  // `private_key_jwt` client key rotation. Added to `@better-auth/oauth-provider`
+  // after 1.7.3 and published here since the 1.7.12 lift (#25096). The handler
+  // refuses before it reads anything unless the plugin is given
+  // `allowClientKeyRotation`, and `auth-manager.ts` does not set it, so every
+  // call answers 403 `access_denied` ("Client key rotation is disabled"),
+  // measured on this stack for #25096. Turning it on is its own decision.
+  'POST /api/v1/auth/oauth2/client/rotate-keys',
   'POST /api/v1/auth/oauth2/client/rotate-secret',
   'POST /api/v1/auth/oauth2/consent',
   'POST /api/v1/auth/oauth2/continue',
