@@ -800,6 +800,170 @@ export const AUTH_EMAIL_CHANGE_NOTICE_TEMPLATES: EmailTemplate[] = [
   AUTH_EMAIL_CHANGE_NOTICE_TEMPLATE_ES_ES,
 ];
 
+// ───────────────────────────────────────────────────────────────────────────
+// auth.existing_account_sign_up — a sign-up for an address that has an account
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * Sent to an address that already has an account when someone signs up with
+ * it, under the `open` and `email_domain` audience postures (ruling 1B on
+ * #25040). The sign-up answers exactly as a new one would, so it does not tell
+ * the caller the address is registered; this mail tells the address's holder
+ * instead, and points them to sign-in or password reset. `@objectstack/plugin-auth`
+ * sends it only while the mail transport really delivers — otherwise the
+ * sign-up keeps its explicit refusal.
+ *
+ * What the wording is bound by:
+ *
+ *  - **It reports an attempt, nothing more.** No account was created and
+ *    nothing on the existing one changed, and the body says both, because the
+ *    reader who did not sign up needs to know their account is untouched.
+ *  - ⛔ **No token, no one-click reset.** `{{resetPasswordUrl}}` is the
+ *    Console's forgot-password PAGE, where the holder asks for a reset
+ *    themselves: a reset credential mailed because a stranger typed this
+ *    address would be a reset nobody asked for.
+ *  - The default footer stands ("if this wasn't you, you can safely ignore
+ *    this message") because it is true here: ignoring it changes nothing.
+ *
+ * `{{user.email}}` is the RECIPIENT — the existing account's address.
+ */
+const EXISTING_ACCOUNT_SIGN_UP_VARIABLES: EmailTemplate['variables'] = [
+  { name: 'user.name', type: 'string', required: false, description: 'Recipient display name' },
+  { name: 'user.email', type: 'string', required: true, description: 'The existing account\'s email address — the recipient' },
+  { name: 'signInUrl', type: 'url', required: true, description: 'The sign-in page' },
+  { name: 'resetPasswordUrl', type: 'url', required: true, description: 'The forgot-password page (no token)' },
+  { name: 'appName', type: 'string', required: false, description: 'Product/app name (brand override)' },
+];
+
+const linkStyles = 'color:#2563eb';
+
+export const AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE: EmailTemplate = {
+  name: 'auth.existing_account_sign_up',
+  label: 'Sign-up Attempt for an Existing Account',
+  locale: 'en-US',
+  subject: 'You already have a {{appName}} account',
+  bodyHtml: wrap('You already have an account', `
+<p>Hi {{user.name}},</p>
+<p>Someone just tried to create a new {{appName}} account with <strong>{{user.email}}</strong>. This address already has an account, so no new account was created and nothing on your account has changed.</p>
+<p>If it was you, sign in with your existing account:</p>
+<p style="margin:24px 0"><a href="{{{signInUrl}}}" style="${buttonStyles}">Sign in</a></p>
+<p>Forgotten your password? <a href="{{{resetPasswordUrl}}}" style="${linkStyles}">Reset it here</a>.</p>
+<p style="font-size:13px;color:#6b7280">Or copy and paste these URLs into your browser:<br>Sign in: <span style="word-break:break-all">{{signInUrl}}</span><br>Reset your password: <span style="word-break:break-all">{{resetPasswordUrl}}</span></p>
+`),
+  bodyText: `Hi {{user.name}},
+
+Someone just tried to create a new {{appName}} account with {{user.email}}.
+This address already has an account, so no new account was created and nothing
+on your account has changed.
+
+If it was you, sign in with your existing account:
+{{signInUrl}}
+
+Forgotten your password? Reset it here:
+{{resetPasswordUrl}}
+
+If this wasn't you, you can safely ignore this message.`,
+  variables: EXISTING_ACCOUNT_SIGN_UP_VARIABLES,
+  active: true,
+  description: 'Sent to an address that already has an account when someone signs up with it (audience postures open and email_domain, while mail is delivered), so the sign-up answer does not reveal the account and its holder learns of the attempt.',
+};
+
+export const AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE_ZH_CN: EmailTemplate = {
+  ...AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE,
+  locale: 'zh-CN',
+  label: '已有账号的注册尝试',
+  subject: '您已拥有 {{appName}} 账号',
+  bodyHtml: wrap('您已拥有账号', `
+<p>{{user.name}} 您好：</p>
+<p>刚刚有人尝试使用 <strong>{{user.email}}</strong> 注册新的 {{appName}} 账号。该邮箱地址已有账号，因此没有创建新账号，您的账号也没有任何变化。</p>
+<p>如果这是您本人的操作，请使用现有账号登录：</p>
+<p style="margin:24px 0"><a href="{{{signInUrl}}}" style="${buttonStyles}">登录</a></p>
+<p>忘记密码？<a href="{{{resetPasswordUrl}}}" style="${linkStyles}">点此重置密码</a>。</p>
+<p style="font-size:13px;color:#6b7280">或将以下链接复制到浏览器中打开：<br>登录：<span style="word-break:break-all">{{signInUrl}}</span><br>重置密码：<span style="word-break:break-all">{{resetPasswordUrl}}</span></p>
+`, FOOTER_ZH_CN),
+  bodyText: `{{user.name}} 您好：
+
+刚刚有人尝试使用 {{user.email}} 注册新的 {{appName}} 账号。该邮箱地址已有账号，
+因此没有创建新账号，您的账号也没有任何变化。
+
+如果这是您本人的操作，请使用现有账号登录：
+{{signInUrl}}
+
+忘记密码？请在此重置密码：
+{{resetPasswordUrl}}
+
+如果这不是您本人的操作，可以放心忽略本邮件。`,
+  description: '当有人使用已有账号的邮箱地址注册时发送至该地址（open 与 email_domain 准入模式，且邮件确实可投递时），使注册应答不透露该账号的存在，并让账号持有人得知这次尝试。',
+};
+
+export const AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE_JA_JP: EmailTemplate = {
+  ...AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE,
+  locale: 'ja-JP',
+  label: '既存アカウントのアドレスでの登録の試み',
+  subject: '{{appName}} のアカウントはすでにお持ちです',
+  bodyHtml: wrap('アカウントはすでにお持ちです', `
+<p>{{user.name}} 様</p>
+<p>先ほど、<strong>{{user.email}}</strong> で {{appName}} の新しいアカウントを作成しようとする操作がありました。このアドレスにはすでにアカウントがあるため、新しいアカウントは作成されておらず、お客様のアカウントにも変更はありません。</p>
+<p>ご本人による操作の場合は、既存のアカウントでサインインしてください。</p>
+<p style="margin:24px 0"><a href="{{{signInUrl}}}" style="${buttonStyles}">サインイン</a></p>
+<p>パスワードをお忘れの場合は、<a href="{{{resetPasswordUrl}}}" style="${linkStyles}">こちらから再設定</a>してください。</p>
+<p style="font-size:13px;color:#6b7280">または、次の URL をブラウザーに貼り付けてください：<br>サインイン: <span style="word-break:break-all">{{signInUrl}}</span><br>パスワードの再設定: <span style="word-break:break-all">{{resetPasswordUrl}}</span></p>
+`, FOOTER_JA_JP),
+  bodyText: `{{user.name}} 様
+
+先ほど、{{user.email}} で {{appName}} の新しいアカウントを作成しようとする操作が
+ありました。このアドレスにはすでにアカウントがあるため、新しいアカウントは作成
+されておらず、お客様のアカウントにも変更はありません。
+
+ご本人による操作の場合は、既存のアカウントでサインインしてください:
+{{signInUrl}}
+
+パスワードをお忘れの場合は、こちらから再設定してください:
+{{resetPasswordUrl}}
+
+心当たりがない場合は、本メールを破棄していただいて問題ありません。`,
+  description: '既存アカウントのメールアドレスで登録が試みられたときに、そのアドレス宛に送信されます（オーディエンスのポスチャーが open または email_domain で、メールが実際に配信される場合）。登録の応答からアカウントの存在が分からないようにしつつ、アカウントの所有者に試みを知らせます。',
+};
+
+export const AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE_ES_ES: EmailTemplate = {
+  ...AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE,
+  locale: 'es-ES',
+  label: 'Intento de registro con una cuenta existente',
+  subject: 'Ya tienes una cuenta de {{appName}}',
+  bodyHtml: wrap('Ya tienes una cuenta', `
+<p>Hola {{user.name}}:</p>
+<p>Alguien acaba de intentar crear una cuenta nueva de {{appName}} con <strong>{{user.email}}</strong>. Esta dirección ya tiene una cuenta, así que no se ha creado ninguna cuenta nueva y no ha cambiado nada en tu cuenta.</p>
+<p>Si has sido tú, inicia sesión con tu cuenta actual:</p>
+<p style="margin:24px 0"><a href="{{{signInUrl}}}" style="${buttonStyles}">Iniciar sesión</a></p>
+<p>¿Has olvidado tu contraseña? <a href="{{{resetPasswordUrl}}}" style="${linkStyles}">Restablécela aquí</a>.</p>
+<p style="font-size:13px;color:#6b7280">O copia y pega estas URL en tu navegador:<br>Iniciar sesión: <span style="word-break:break-all">{{signInUrl}}</span><br>Restablecer la contraseña: <span style="word-break:break-all">{{resetPasswordUrl}}</span></p>
+`, FOOTER_ES_ES),
+  bodyText: `Hola {{user.name}}:
+
+Alguien acaba de intentar crear una cuenta nueva de {{appName}} con
+{{user.email}}. Esta dirección ya tiene una cuenta, así que no se ha creado
+ninguna cuenta nueva y no ha cambiado nada en tu cuenta.
+
+Si has sido tú, inicia sesión con tu cuenta actual:
+{{signInUrl}}
+
+¿Has olvidado tu contraseña? Restablécela aquí:
+{{resetPasswordUrl}}
+
+Si no has sido tú, puedes ignorar este mensaje con tranquilidad.`,
+  description: 'Se envía a una dirección que ya tiene una cuenta cuando alguien se registra con ella (posturas de audiencia open y email_domain, mientras el correo se entrega de verdad), para que la respuesta del registro no revele la cuenta y su titular sepa del intento.',
+};
+
+/**
+ * Every locale row of the existing-account sign-up notice, in one list so the
+ * `(name, locale)` set is enumerable rather than re-derived per call site.
+ */
+export const AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATES: EmailTemplate[] = [
+  AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE,
+  AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE_ZH_CN,
+  AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE_JA_JP,
+  AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE_ES_ES,
+];
+
 /**
  * Every built-in auth template, in every supported locale (#8195).
  *
@@ -817,4 +981,5 @@ export const BUILTIN_AUTH_TEMPLATES: EmailTemplate[] = [
   ...AUTH_ACCOUNT_INVITATION_TEMPLATES,
   ...AUTH_TWO_FACTOR_OTP_TEMPLATES,
   ...AUTH_EMAIL_CHANGE_NOTICE_TEMPLATES,
+  ...AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATES,
 ];
