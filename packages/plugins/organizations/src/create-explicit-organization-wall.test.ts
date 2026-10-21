@@ -39,9 +39,14 @@
  *   `sys_user_permission_set`, where the defect was measured: nothing but the
  *   wall stands between a supplied value and the stored row.
  * - `qa_ledger` carries the platform-injected `organization_id`, the shape of
- *   every app object. The engine strips that column from a non-system payload
- *   as `readonly` AFTER the wall has judged it, so here an admitted value is
- *   re-derived, and a refused one never reaches the strip.
+ *   every app object. The column is `readonly`, and [#24822] the engine's
+ *   static-`readonly` strip leaves a non-system caller's explicit value on the
+ *   row only where the wall judges it: the wall's seam declares
+ *   `judgesOrganization`. There an admitted value is stored as sent and a
+ *   refused one never reaches the strip. Everywhere else, the strip takes the
+ *   value exactly as before. Those paths are a `single` boot, a stack without
+ *   the security plugin, a platform operator crossing the wall, and a seam
+ *   that carries a business `check` alone. The last block pins both halves.
  *
  * ## [#21682] The stamp is not a caller write
  *
@@ -70,6 +75,8 @@ const SISTER_ORG = 'org_south';
 
 const DECLARED = 'qa_assignment';
 const INJECTED = 'qa_ledger';
+const PRIVATE = 'qa_vault';
+const UNWALLED = 'qa_catalog';
 
 const OBJECTS = [
   {
@@ -89,6 +96,30 @@ const OBJECTS = [
       name: { name: 'name', type: 'text' },
     },
   },
+  // [#24822] A PRIVATE object, also on the injected column: its posture lets a
+  // platform operator CROSS the wall (ADR-0095 D3), so the wall judges no
+  // organization for that caller there.
+  {
+    name: PRIVATE,
+    label: 'Vault',
+    access: { default: 'private' },
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      name: { name: 'name', type: 'text' },
+    },
+  },
+  // [#24822] Tenancy switched off, and an AUTHORED read-only `organization_id`:
+  // Layer 0 composes nothing on it, so no wall judges the column.
+  {
+    name: UNWALLED,
+    label: 'Catalog',
+    tenancy: { enabled: false },
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      name: { name: 'name', type: 'text' },
+      organization_id: { name: 'organization_id', type: 'text', readonly: true },
+    },
+  },
 ];
 
 /** Plain CRUD and no row-level policy — the wall is the only thing judging the organization. */
@@ -96,6 +127,18 @@ const MEMBER: PermissionSet = {
   name: 'member_default',
   label: 'Member',
   objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+} as unknown as PermissionSet;
+
+/**
+ * [#24822] The same member under a business insert `check` on the injected-column
+ * object. Step 3.6 then installs the stored-image seam on its own, with no wall
+ * behind it wherever the posture composes none.
+ */
+const MEMBER_WITH_CHECK: PermissionSet = {
+  ...MEMBER,
+  rowLevelSecurity: [
+    { name: 'ledger_not_blocked', object: INJECTED, operation: 'insert', check: "record.name != 'blocked'" },
+  ],
 } as unknown as PermissionSet;
 
 /** A platform operator: the superuser bit AND a platform-exclusive capability (ADR-0095 D3). */
@@ -127,19 +170,39 @@ afterEach(async () => {
   }
 });
 
+/**
+ * [#24822] What an insert's stored-image seam looked like once every middleware
+ * had run: whether one was installed, and whether it declared that it judges
+ * the organization (`PostHookWriteImageCheck.judgesOrganization`).
+ */
+interface SeamSighting { installed: boolean; judgesOrganization: unknown }
+
 interface Booted {
   engine: ObjectQL;
   /** `organization_id` as the engine handed it to the `beforeInsert` chain, per insert. */
   seenByHooks: unknown[];
   /** A table's rows read straight off the driver, past every scope. */
   table: (name: string) => Promise<Array<Record<string, unknown>>>;
+  /** [#24822] One sighting per insert that reached the engine. */
+  seams: SeamSighting[];
+  /** [#24822] Every line the engine logged at WARN. */
+  warns: string[];
 }
 
 /**
  * `organizations: false` boots without this package, the way `serve` boots the
- * `single` posture — the control for the [#21682] block.
+ * `single` posture — the control for the [#21682] block. [#24822]
+ * `security: false` boots without the Layer 0 wall, and `member` replaces the
+ * member's permission set.
  */
-async function boot(posture: Posture = 'isolated', { organizations: mountOrganizations = true } = {}): Promise<Booted> {
+async function boot(
+  posture: Posture = 'isolated',
+  {
+    organizations: mountOrganizations = true,
+    security: mountSecurity = true,
+    member = MEMBER,
+  }: { organizations?: boolean; security?: boolean; member?: PermissionSet } = {},
+): Promise<Booted> {
   const engine = new ObjectQL();
   engine.registerDriver(new SqliteWasmDriver({ filename: ':memory:' } as never) as never, true);
   await engine.init();
@@ -166,7 +229,7 @@ async function boot(posture: Posture = 'isolated', { organizations: mountOrganiz
     objectql: engine,
     metadata: {
       get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
-      list: async () => [MEMBER, PLATFORM_ADMIN],
+      list: async () => [member, PLATFORM_ADMIN],
     },
     tenancy: { posture },
   };
@@ -185,24 +248,41 @@ async function boot(posture: Posture = 'isolated', { organizations: mountOrganiz
     hook: vi.fn(),
   };
   const organizations = mountOrganizations ? new OrganizationsPlugin({ ensureDefaultOrganization: false }) : null;
-  const security = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+  const security = mountSecurity ? new SecurityPlugin({ fallbackPermissionSet: 'member_default' }) : null;
   // Kernel order: every init, then every start — organizations first, as `serve` mounts it.
   await organizations?.init(ctx as never);
-  await security.init(ctx as never);
+  await security?.init(ctx as never);
   await organizations?.start(ctx as never);
-  await security.start(ctx as never);
+  await security?.start(ctx as never);
   if (organizations) {
     expect(services['org-scoping'], 'the real runtime is the org-scoping service').toBe(organizations);
   } else {
     expect('org-scoping' in services, 'the control boots without the runtime').toBe(false);
   }
   // The expected refusals log at WARN through the engine's own logger.
-  vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+  const warns: string[] = [];
+  vi.spyOn((engine as unknown as { logger: { warn: (m: unknown) => void } }).logger, 'warn')
+    .mockImplementation((m: unknown) => { warns.push(String(m)); });
+
+  // [#24822] Registered LAST, so it runs innermost: every other middleware has
+  // installed what it installs on the operation by the time this reads it.
+  const seams: SeamSighting[] = [];
+  engine.registerMiddleware((async (opCtx: { operation: string; postHookWriteImageCheck?: { judgesOrganization?: unknown } }, next: () => Promise<void>) => {
+    if (opCtx.operation === 'insert') {
+      seams.push({
+        installed: opCtx.postHookWriteImageCheck !== undefined,
+        judgesOrganization: opCtx.postHookWriteImageCheck?.judgesOrganization,
+      });
+    }
+    await next();
+  }) as never);
 
   for (const object of [DECLARED, INJECTED]) {
     await engine.insert(object, { id: 'r1', name: 'seeded', organization_id: OWN_ORG }, { context: SYS_CTX } as never);
   }
   seenByHooks.length = 0;
+  seams.length = 0;
+  warns.length = 0;
 
   const table = async (name: string) => {
     const driver = (engine as unknown as { getDriver(o: string): { knex: unknown } }).getDriver(name);
@@ -211,7 +291,7 @@ async function boot(posture: Posture = 'isolated', { organizations: mountOrganiz
     return [...rows].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   };
 
-  return { engine, seenByHooks, table };
+  return { engine, seenByHooks, table, seams, warns };
 }
 
 interface Outcome { ok: boolean; code?: string; status?: number; message?: string }
@@ -360,6 +440,9 @@ const createReporting = async (b: Booted, object: string, data: unknown, context
   return { outcome, dropped };
 };
 
+/** [#24822] The engine's read-only WARN lines that name `organization_id`. */
+const organizationWarnings = (b: Booted) => b.warns.filter((line) => line.includes("Field 'organization_id'"));
+
 describe('[#21682] droppedFields names only keys the caller sent, so the organization stamp is not one', () => {
   for (const [who, context] of CALLERS) {
     it(`${who}: a walled create naming no organization reports no dropped field, and is stored in the active organization`, async () => {
@@ -374,13 +457,20 @@ describe('[#21682] droppedFields names only keys the caller sent, so the organiz
     });
   }
 
-  it('a caller that sends the readonly key itself still sees it reported, the same key the stamp fills', async () => {
+  // [#24822] This cell used to pin the report of the key: the strip took the
+  // caller's own organization and the stamp put the same value back. The wall
+  // judges that value on a walled insert, so it is now stored as sent, and
+  // nothing was dropped to report. Its `single` twin below, where no wall
+  // judges the column, still reports it.
+  it('[#24822] isolated: a caller that sends its own active organization has it stored as sent, and nothing is reported', async () => {
     const b = await boot();
 
     const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new', organization_id: OWN_ORG }, MEMBER_CTX);
 
     expect(outcome.ok, outcome.message).toBe(true);
-    expect(dropped).toEqual([{ object: INJECTED, fields: ['organization_id'], reason: 'readonly' }]);
+    expect(dropped, 'a value stored as sent is not a dropped field').toEqual([]);
+    expect(organizationWarnings(b), 'and no read-only WARN names it').toEqual([]);
+    expect(b.seenByHooks, 'the beforeInsert chain sees the value the caller sent').toEqual([OWN_ORG]);
     expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
   });
 
@@ -423,6 +513,250 @@ describe('[#21682] droppedFields names only keys the caller sent, so the organiz
 
       expect(outcome.ok, outcome.message).toBe(true);
       expect(dropped).toEqual([{ object: INJECTED, fields: ['organization_id'], reason: 'readonly' }]);
+    });
+  });
+});
+
+/**
+ * [#24822] An explicit `organization_id` on the platform-injected column is
+ * stored as sent where the Layer 0 wall judges it, and taken as before
+ * everywhere else.
+ *
+ * The wall has always judged a supplied value (the payload half of step 3.7),
+ * and since #20013 it judges the stored row too. But the engine's
+ * static-`readonly` strip then took the admitted value (the column declares
+ * `readonly: true`), and the driver stamped the active organization in its
+ * place: a 2xx, and a row in another organization than the one the caller
+ * named and the wall admitted. Now the wall's seam declares that it judges
+ * the insert's organization (`judgesOrganization`), and only then does the
+ * engine leave the value for that verdict.
+ *
+ * The negative half is the larger one. Every path where no wall judged the
+ * column keeps the strip, the WARN and the `droppedFields` report it had,
+ * cell for cell: a `single` boot with and without a business `check` seam,
+ * `group` and `isolated` without the security plugin, a tenancy-disabled
+ * object with an authored read-only column, a platform operator crossing the
+ * wall, and a system context, which the strip never judged. Honouring the
+ * value on any of them would store a caller's organization with no wall
+ * verdict at all.
+ */
+describe('[#24822] an explicit organization_id the wall judges is stored as sent; nowhere else is it honoured', () => {
+  const GROUP_CTX = { ...MEMBER_CTX, accessible_org_ids: [OWN_ORG, SISTER_ORG] };
+  const GROUP_ADMIN_CTX = { ...ADMIN_CTX, accessible_org_ids: [OWN_ORG, SISTER_ORG] };
+  /** A platform operator with NO active organization (ADR-0123 D2 / #24821). */
+  const ADMIN_NO_ORG_CTX = { userId: 'usr_admin', positions: [], permissions: ['admin_full_access'], posture: 'PLATFORM_ADMIN' };
+  const READONLY_DROP = (object: string) => [{ object, fields: ['organization_id'], reason: 'readonly' }];
+  const WALL_JUDGES = [{ installed: true, judgesOrganization: true }];
+
+  const createStrict = (b: Booted, object: string, data: unknown, context: object) =>
+    attempt(() => b.engine.insert(object, data as never, { context, strictReadonlyWrites: true } as never));
+
+  /** The strict refusal on its own envelope: the code, the field and the verb. */
+  const expectStrictRefusal = async (b: Booted, object: string, data: unknown, context: object) => {
+    let thrown: { code?: unknown; fields?: unknown; operation?: unknown } | undefined;
+    try {
+      await b.engine.insert(object, data as never, { context, strictReadonlyWrites: true } as never);
+    } catch (e) {
+      thrown = e as typeof thrown;
+    }
+    expect(thrown, 'expected the strict write to be refused').toBeDefined();
+    expect(thrown?.code).toBe('ERR_READONLY_FIELD_REJECTED');
+    expect(thrown?.fields).toEqual(['organization_id']);
+    expect(thrown?.operation).toBe('insert');
+  };
+
+  describe('`group`: the wall is the membership set', () => {
+    it('a member\'s create naming a sister organization is stored THERE, with nothing reported', async () => {
+      const b = await boot('group');
+
+      const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, GROUP_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(dropped, 'a value stored as sent is not a dropped field').toEqual([]);
+      expect(organizationWarnings(b)).toEqual([]);
+      expect(b.seenByHooks, 'the beforeInsert chain sees the value that will be stored').toEqual([SISTER_ORG]);
+      expect(b.seams, 'the wall declared that it judges the organization').toEqual(WALL_JUDGES);
+      expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: SISTER_ORG }]);
+    });
+
+    it('the array insert answers the same, row by row, beside a row the stamp fills', async () => {
+      const b = await boot('group');
+
+      const { outcome, dropped } = await createReporting(b, INJECTED, [
+        { id: 'r2', name: 'named', organization_id: SISTER_ORG },
+        { id: 'r3', name: 'left to the stamp' },
+      ], GROUP_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(dropped).toEqual([]);
+      expect(organizationWarnings(b)).toEqual([]);
+      expect(b.seams).toEqual(WALL_JUDGES);
+      expect(await b.table(INJECTED)).toEqual([
+        ...SEEDED,
+        { id: 'r2', organization_id: SISTER_ORG },
+        { id: 'r3', organization_id: OWN_ORG },
+      ]);
+    });
+
+    it('a create naming an organization outside the membership set is still refused, single and array, and nothing is stored', async () => {
+      const b = await boot('group');
+
+      const single = await attempt(() => create(b, INJECTED, { id: 'r2', name: 'new', organization_id: FOREIGN_ORG }, GROUP_CTX));
+      const bulk = await attempt(() => create(b, INJECTED, [{ id: 'r3', name: 'new', organization_id: FOREIGN_ORG }], GROUP_CTX));
+
+      expectWallRefusal(single, 'insert', INJECTED);
+      expectWallRefusal(bulk, 'insert', INJECTED);
+      expect(await b.table(INJECTED)).toEqual(SEEDED);
+    });
+
+    it('a create naming no organization is stamped with the active one and reports nothing', async () => {
+      const b = await boot('group');
+
+      const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new' }, GROUP_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(dropped).toEqual([]);
+      expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+    });
+
+    it('an in-process strictReadonlyWrites create naming a sister organization is stored, not refused: strict refuses only what the strip takes', async () => {
+      const b = await boot('group');
+
+      const outcome = await createStrict(b, INJECTED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, GROUP_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: SISTER_ORG }]);
+    });
+  });
+
+  describe('`isolated`: the wall is the active organization', () => {
+    it('a create naming the active organization is stored as sent, with nothing reported', async () => {
+      const b = await boot('isolated');
+
+      const { outcome, dropped } = await createReporting(b, INJECTED, [{ id: 'r2', name: 'new', organization_id: OWN_ORG }], MEMBER_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(dropped).toEqual([]);
+      expect(organizationWarnings(b)).toEqual([]);
+      expect(b.seams).toEqual(WALL_JUDGES);
+      expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+    });
+
+    it('a create naming any other organization is still refused, single and array, and nothing is stored', async () => {
+      const b = await boot('isolated');
+
+      const single = await attempt(() => create(b, INJECTED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, MEMBER_CTX));
+      const bulk = await attempt(() => create(b, INJECTED, [{ id: 'r3', name: 'new', organization_id: SISTER_ORG }], MEMBER_CTX));
+
+      expectWallRefusal(single, 'insert', INJECTED);
+      expectWallRefusal(bulk, 'insert', INJECTED);
+      expect(await b.table(INJECTED)).toEqual(SEEDED);
+    });
+  });
+
+  describe('where no wall judges the column, the strip takes the value exactly as before', () => {
+    it('`single` without this package: taken, reported, and stored in the context\'s organization; no seam', async () => {
+      const b = await boot('single', { organizations: false });
+
+      const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, MEMBER_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(dropped).toEqual(READONLY_DROP(INJECTED));
+      expect(organizationWarnings(b)).toHaveLength(1);
+      expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
+      expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+    });
+
+    it('`single` with a business insert `check`: its seam is installed and does NOT declare the organization judged, so the value is taken', async () => {
+      const b = await boot('single', { organizations: false, member: MEMBER_WITH_CHECK });
+
+      const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, MEMBER_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(b.seams, 'the business check installs a seam with no wall behind it').toEqual([
+        { installed: true, judgesOrganization: undefined },
+      ]);
+      expect(dropped).toEqual(READONLY_DROP(INJECTED));
+      expect(organizationWarnings(b)).toHaveLength(1);
+      expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+    });
+
+    it('`single` without a wall: an in-process strictReadonlyWrites create naming an organization is still refused, and nothing is stored', async () => {
+      const b = await boot('single', { organizations: false });
+
+      await expectStrictRefusal(b, INJECTED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, MEMBER_CTX);
+      expect(await b.table(INJECTED)).toEqual(SEEDED);
+    });
+
+    for (const posture of ['group', 'isolated'] as const) {
+      it(`\`${posture}\` without the security plugin: no wall, so the value is taken and reported, and the stamp's organization is stored`, async () => {
+        const b = await boot(posture, { security: false });
+        const context = posture === 'group' ? GROUP_CTX : MEMBER_CTX;
+
+        const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, context);
+
+        expect(outcome.ok, outcome.message).toBe(true);
+        expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
+        expect(dropped).toEqual(READONLY_DROP(INJECTED));
+        expect(organizationWarnings(b)).toHaveLength(1);
+        expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+      });
+
+      it(`\`${posture}\`: a platform operator crossing the wall on a private object has the value taken and reported; no seam`, async () => {
+        const b = await boot(posture);
+        const context = posture === 'group' ? GROUP_ADMIN_CTX : ADMIN_CTX;
+
+        const { outcome, dropped } = await createReporting(b, PRIVATE, { id: 'r2', name: 'new', organization_id: FOREIGN_ORG }, context);
+
+        expect(outcome.ok, outcome.message).toBe(true);
+        expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
+        expect(dropped).toEqual(READONLY_DROP(PRIVATE));
+        expect(await b.table(PRIVATE)).toEqual([{ id: 'r2', organization_id: OWN_ORG }]);
+      });
+    }
+
+    it('a platform operator with NO active organization crossing on a private object: its seam does not declare the organization judged, so a named organization is taken and the insert is still refused', async () => {
+      const b = await boot('isolated');
+
+      const outcome = await attempt(() => create(b, PRIVATE, { id: 'r2', name: 'new', organization_id: FOREIGN_ORG }, ADMIN_NO_ORG_CTX));
+
+      expect(b.seams, 'the operator\'s seam is installed (#24821) and judges no organization').toEqual([
+        { installed: true, judgesOrganization: undefined },
+      ]);
+      expect(outcome.ok, 'expected the no-active-organization refusal').toBe(false);
+      expect(outcome.code).toBe('PERMISSION_DENIED');
+      expect(outcome.status).toBe(403);
+      expect(outcome.message).toContain('has no active organization');
+      expect(await b.table(PRIVATE)).toEqual([]);
+    });
+
+    it('a tenancy-disabled object with an authored read-only organization_id: no wall, so the value is taken and NULL is stored', async () => {
+      const b = await boot('group');
+
+      const { outcome, dropped } = await createReporting(b, UNWALLED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, GROUP_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
+      expect(dropped).toEqual(READONLY_DROP(UNWALLED));
+      expect(await b.table(UNWALLED)).toEqual([{ id: 'r2', organization_id: null }]);
+    });
+
+    it('a system context stores what it sends on the injected column, as before; it meets neither the stamp, the wall nor the strip', async () => {
+      const b = await boot('group');
+
+      const { outcome, dropped } = await createReporting(b, INJECTED, [
+        { id: 'r2', name: 'replayed', organization_id: SISTER_ORG },
+        { id: 'r3', name: 'replayed', organization_id: FOREIGN_ORG },
+      ], SYS_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(dropped).toEqual([]);
+      expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
+      expect(await b.table(INJECTED)).toEqual([
+        ...SEEDED,
+        { id: 'r2', organization_id: SISTER_ORG },
+        { id: 'r3', organization_id: FOREIGN_ORG },
+      ]);
     });
   });
 });
