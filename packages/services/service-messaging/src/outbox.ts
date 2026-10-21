@@ -10,6 +10,8 @@
  * Mirrors the proven `plugin-webhooks` outbox.
  */
 
+import type { NotificationTextKeys } from './notification-text.js';
+
 export type DeliveryStatus =
     | 'pending'
     | 'in_flight'
@@ -32,6 +34,13 @@ export interface DeliveryPayload {
      * read of it is then type-checked at both ends.
      */
     actorId?: string;
+    /**
+     * [#24978] `EmitInput.keyedText`, snapshotted so the dispatcher renders the
+     * text in the recipient's language at delivery. A reserved name: the
+     * snapshot never carries a producer payload member under it. Absent on a
+     * literal-only emit.
+     */
+    keyedText?: NotificationTextKeys;
     [k: string]: unknown;
 }
 

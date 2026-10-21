@@ -612,10 +612,19 @@ export default class MigrateApply extends Command {
       }
 
       // Confirmation gate. Nothing above this line has touched the database.
+      //
+      // [#24949] A confirmation the run needs and did not get — a non-TTY
+      // stdin, or `--json`, without `--yes` — applies nothing and exits 1, in
+      // both faces, as every other `os migrate` subcommand with a `--yes` gate
+      // does (`test/migrate-confirmation-exit.pin.test.ts` holds the family to
+      // it). It used to exit 0, so a deploy script reading `$?` took a run
+      // that applied nothing for an applied one. An operator who answers `n`
+      // at the prompt below declined on purpose: that path keeps exit 0.
       if (!flags.yes) {
         if (flags.json || !process.stdin.isTTY) {
-          if (flags.json) { await emitJson({ ...target, applied: [], skipped: drift, pending, message: 'confirmation_required', hint: 'pass --yes' }, 0, { compact: true }); return; }
+          if (flags.json) { await emitJson({ ...target, applied: [], skipped: drift, pending, message: 'confirmation_required', hint: 'pass --yes' }, 1, { compact: true }); return; }
           printWarning('Confirmation required. Re-run with --yes to apply, or use "os migrate plan" to preview.');
+          this.exit(1);
           return;
         }
         const targets = stack.telemetryDatabase !== null
