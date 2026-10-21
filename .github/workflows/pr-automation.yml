@@ -751,46 +751,68 @@ jobs:
             1. It releases something
                -> run 'pnpm changeset' and name the packages it releases.
 
-               WHICH LEVEL: A purely additive widening of a published package's
-               public surface (a new exported symbol on an `index`, a new accepted
-               key or value) takes at least `minor`. The commit type may raise a
-               bump but never lower it below what the act requires; a `fix(` that
-               widens an index is therefore `minor`, and a `fix(` that changes no
-               public surface stays `patch`. During the launch window `major` stays
-               refused by `check-changeset-no-major` and breaking-ness is carried by
-               the BREAKING banner plus the ADR-0087 disposition, not by the level.
-               Ruled by the maintainer on 2026-09-04 (decision batch #35) on #15294,
-               which recorded two contract reviews reading the repo's own history to
-               OPPOSITE bumps for the same additive act. The commit type is not the
-               discriminator it looked like: it correlates with the act, and when
-               they disagree the act wins. The 64 historical `patch` precedents are
-               pre-rule and nothing is retro-fixed.
+               WHICH LEVEL: the level follows the METADATA PROTOCOL alone -- the
+               change to what a metadata author can write -- and the commit type
+               never decides it (maintainer ruling A, 2026-10-21, on #25105; it
+               amends the 2026-09-04 rule of decision batch #35 on #15294, under
+               which nearly every release was a minor: of 95 pending changesets
+               about half were `minor` and about a dozen moved the protocol).
+               Declare the kind on a line of its own, in the PR body AND in the
+               changeset body, beside the `Clause-②:` line:
+
+                 Metadata-protocol: added     a new authorable key, a new accepted
+                                              value or enum member, a new metadata
+                                              type                       -> `minor`
+                 Metadata-protocol: narrowed  a key removed or tombstoned, a value
+                                              refused, a requirement tightened
+                                              (declare the `(narrowing)` arm too)
+                                                                         -> `minor`
+                 Metadata-protocol: semantic  the meaning or default of an
+                                              authorable key changes     -> `minor`
+                 Metadata-protocol: none      everything else: description or
+                                              error text, non-authorable internal
+                                              types, REST, drivers, services, the
+                                              console, `feat:` and `fix!:` alike
+                                                                         -> `patch`
+
+               `added` takes `minor` because spec schemas are not `.strict()`: an
+               older runtime silently strips a key it does not know, so an app
+               that writes a new key must be able to name a minor floor. Where
+               several kinds apply, name the one highest in breaking-ness:
+               `narrowed` over `semantic` over `added`. A non-protocol breaking
+               change ships `patch` and KEEPS its carriers: the BREAKING banner
+               and the ADR-0087 disposition are unchanged. `major` stays refused
+               by `check-changeset-no-major` during the launch window. The
+               GitHub Release body is grouped from these declarations by what the
+               reader must do: 需手动处理 / 自动迁移 / 新增能力 / 语义变化 / 其他修复.
 
                PART OF THIS IS A GATE, and which part is the difference between
                grading well and being refused. `check-changeset-no-major.mjs`
-               refuses `major` and says why in its header. Since #16055 the SAME
-               script also runs a LEVEL AXIS over the rule above, and that
-               script's header states its scope: "a PR that DECLARES clause ② (a
-               new key on a published payload) must grade AT LEAST ONE package
-               whose published source it moves `minor` or above". It mechanizes
-               this ruling "for exactly the PRs where the widening is already
-               DECLARED, and for no others", and its `judgeLevel` verdict table
-               spells both directions: `not-declared`, "the declaration reads
-               `no`", exits 0; `enforce`, "declared `yes`, moved packages graded
-               `patch` and NONE of them graded `minor` or above", exits 1. So on
-               a PR that declares clause ②, grading `patch` across the board is
-               refused; on every other PR the axis stands down and the two levels
-               below `major` are yours, as they always were.
+               refuses `major` and says why in its header. The SAME script runs
+               the LEVEL AXIS over the rule above, reading both lines from the PR
+               body on every `opened`, `synchronize` and `edited` event, and its
+               `judgeLevel` verdict table spells every direction: a declared kind
+               must grade at least ONE package whose published source the diff
+               moves `minor` or above (`enforce`, exit 1 otherwise); a declared
+               `none` must grade every entry it introduces `patch` (`none-minor`,
+               exit 1) and may not move a `packages/spec/authorable-surface/` or
+               `authorable-defaults/` shard (`none-baseline-moved`, exit 1);
+               `added` beside `Clause-②: no`, or `narrowed` beside a line without
+               the `(narrowing)` arm, is a `contradiction` (exit 1); and a PR that
+               introduces a changeset entry with no readable `Metadata-protocol:`
+               line is refused as NOT MEASURED (exit 1) rather than ticked -- the
+               body is re-read on `edited`, so that red clears with no push.
 
                WHAT THE AXIS DOES NOT JUDGE, in its own words: "WHICH of the
                packages above received that widening is NOT something this gate
-               can read, and it does not claim to. Clause ② is declared ONCE, FOR
-               THE PR" -- the declaration line in the PR body names no package.
-               The axis cross-checks a declaration
-               against the levels; it never reads the diff to find the act.
-               Judging the act is still yours, this paragraph is still where the
-               rule lives, and everything in it the axis does not reach is still
-               prose.
+               can read, and it does not claim to. The kind is declared ONCE, FOR
+               THE PR" -- the declaration lines in the PR body name no package. A
+               refused value, a narrowed enum or a changed meaning is invisible to
+               the baselines, so the declaration, not the diff, is the carrier.
+               The axis cross-checks the declarations against the levels; it never
+               reads the diff to find the act. Judging the act is still yours,
+               this paragraph is still where the rule lives, and everything in it
+               the axis does not reach is still prose.
 
             2. It releases nothing (.github/, .claude/, docs/, content/,
                examples/, tests-only, and the like)

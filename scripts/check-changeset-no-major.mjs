@@ -4,16 +4,22 @@
  *
  *   1. LAUNCH-WINDOW GUARD — a PR may not introduce a changeset that declares a
  *      `major` bump. Everything above "The LEVEL axis" below is this.
- *   2. THE LEVEL AXIS (#16055) — a PR that DECLARES clause ② (a new key on a
- *      published payload) must grade AT LEAST ONE package whose published
- *      source it moves `minor` or above; and (#16776) a PR that
- *      grades none of them that way must not leave the declaration UNREADABLE:
- *      where the missing reading is what decides the verdict, this refuses
- *      rather than exiting 0 into a check run that concludes `success`. The
- *      "at least one" is #16361 — the declaration is PR-scoped and names no
- *      package, so a PR-scoped predicate is the whole of what it entails. Read
- *      the block headed "The LEVEL axis" for what it cross-checks, where the
- *      declaration comes from, and the residual it records.
+ *   2. THE LEVEL AXIS (#16055; re-ruled by maintainer ruling A, 2026-10-21, on
+ *      #25105) — the level follows the METADATA PROTOCOL alone. A PR declares
+ *      the kind of protocol change it makes on a `Metadata-protocol:` line
+ *      beside its `Clause-②:` line (`added` / `narrowed` / `semantic` / `none`,
+ *      read through `clause2-line.mjs`): a declared kind must grade AT LEAST
+ *      ONE package whose published source it moves `minor` or above; a declared
+ *      `none` must grade every entry it introduces `patch`, and may not move an
+ *      `authorable-surface/` or `authorable-defaults/` baseline; `added` beside
+ *      `Clause-②: no`, or `narrowed` beside a line without the `(narrowing)`
+ *      arm, is a contradiction. And (#16776) a PR must not leave a reading that
+ *      decides the verdict UNREADABLE: that refuses rather than exiting 0 into
+ *      a check run that concludes `success`. The "at least one" is #16361 — the
+ *      declaration is PR-scoped and names no package, so a PR-scoped predicate
+ *      is the whole of what it entails. Read the block headed "The LEVEL axis"
+ *      for what it cross-checks, where the declarations come from, and the
+ *      residual it records.
  *   3. THE PROTOCOL LOCKSTEP EVIDENCE (ruling records 6049734955 and
  *      6056808625) — the one question here about the TREE rather than the
  *      diff. `PROTOCOL_VERSION` moves to the next major in an ordinary pull
@@ -84,12 +90,14 @@
  * change that states neither). They are not documentation niceties — during the
  * window they are the only signal there is.
  *
- * CHOOSING BETWEEN THE TWO LEVELS THIS GUARD LEAVES: a purely additive widening
- * of a published package's public surface takes at least `minor`, and the commit
- * type may raise a bump but never lower it — the rule is written out in full in
- * the `Check Changeset` step's prose in `.github/workflows/pr-automation.yml`
+ * CHOOSING BETWEEN THE TWO LEVELS THIS GUARD LEAVES: the level follows the
+ * metadata protocol alone — `minor` when the protocol an author writes against
+ * is added to, narrowed or changed in meaning, `patch` for everything else, the
+ * commit type never deciding it — the rule is written out in full in the
+ * `Check Changeset` step's prose in `.github/workflows/pr-automation.yml`
  * ("WHICH LEVEL"), where the author who is told a changeset is missing reads it
- * (maintainer ruling, 2026-09-04 decision batch #35, on #15294).
+ * (maintainer ruling A, 2026-10-21, on #25105, amending the 2026-09-04 rule of
+ * decision batch #35 on #15294).
  *
  * ⇒ **THIS GUARD IS WHAT GETS DISARMED AT GA.** The end condition lives in the
  * file that enforces the convention, rather than in a prose home elsewhere, so
@@ -401,7 +409,7 @@ import { isEntrypoint } from './invoked-as.mjs';
 // here would be one that can drift from the gate the PM protocol actually
 // runs. The module imports nothing, so this file still runs before
 // `pnpm install`.
-import { readClause2Line } from './pm/clause2-line.mjs';
+import { readClause2Line, readMetadataProtocolLine } from './pm/clause2-line.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -887,6 +895,53 @@ export function render(result) {
 // bytes and asserts red on `patch` and green on `minor` for a byte-identical
 // tree — a control that would have caught #16044 rather than one that grades
 // the checker's own fixtures.
+//
+// ## Ruling A (maintainer, 2026-10-21, on #25105): the level follows the protocol
+//
+// The rule this axis mechanizes was re-ruled. Until then `Clause-②: yes` (or the
+// `(narrowing)` arm) coupled to `minor`, so nearly every release was a minor —
+// of 95 pending changesets about half were `minor` and about a dozen of those
+// moved the metadata protocol; the version number did not say whether the
+// protocol had moved. Under ruling A the level is decided by ONE question, the
+// kind of change to what a metadata author can write, declared on the
+// `Metadata-protocol:` line (`clause2-line.mjs`, the one reader):
+//
+//   `added` / `narrowed` / `semantic`  ->  at least one moved package `minor`+
+//   `none`                             ->  every introduced entry `patch`
+//
+// Three consequences, each a lane below:
+//
+//   * `Clause-②` keeps its MEANING (does this diff widen or narrow a published
+//     accept set or public surface) and its readers — the contract-review face,
+//     the ADR-0087 breaking signal from the `(narrowing)` arm — and loses its
+//     LEVEL COUPLING here. A non-protocol widening (REST) or narrowing (a
+//     driver, a posture) ships `patch` and keeps its BREAKING banner and its
+//     ADR-0087 disposition unchanged. The two lines are cross-checked for the
+//     two contradictions that are contradictions by definition: `added` widens
+//     a published accept set, so it cannot sit under `Clause-②: no`; `narrowed`
+//     narrows one, so it cannot sit beside a line that declares no `(narrowing)`
+//     arm (that arm is what the ADR-0087 gate and the queue guard read).
+//   * `none` beside a `minor` is the half of the ruling with teeth — it is what
+//     stops a `feat:` from lifting 73 packages a minor — and it is refused
+//     whatever the package, moved or not: a `minor` the diff did not earn on a
+//     protocol change is the same error wherever the entry sits.
+//   * Where the existing ratchets can SEE a protocol change, a declared `none`
+//     over it is refused: a changed `packages/spec/authorable-surface/` shard is
+//     a key added or removed, a changed `authorable-defaults/` shard is a default
+//     changed. A refused value, a narrowed enum or a changed meaning is invisible
+//     to them, so the declaration — not the diff — is still the carrier.
+//
+// The materiality rule (#16776) is kept and widened to the second line: a
+// `Metadata-protocol:` line that cannot be read is MATERIAL whenever the PR
+// introduces an entry a kind or a `none` would grade differently — a `patch` on
+// a moved package (a kind refuses), any `minor` (a `none` refuses) or a moved
+// baseline — and MOOT otherwise. The `Clause-②` materiality is exactly what it
+// was: unreadable over a moved package graded `patch` with no raise refuses.
+// Nothing below this paragraph loosens a verdict it did not re-rule: the grain
+// (#16361), the depth (#16713), the root (#16692), the copy (#15204) and the
+// reporting (#18263, #19008) are inherited unchanged and their batteries drive
+// the kind lanes with `Metadata-protocol: added` where they drove `Clause-②:
+// yes` before.
 //
 // ## What is cross-checked, and why nothing new is asked of an author
 //
@@ -1528,6 +1583,50 @@ export function packagesTouched({ cwd, from, head }) {
   return { packages: [...packages].sort(), unreadable: [...unreadable].sort() };
 }
 
+/**
+ * The generated baselines that make one class of metadata-protocol change
+ * VISIBLE to this gate (ruling A, the third consequence): the authorable-key
+ * ratchet, sharded per category, which a normal `packages/spec` build rewrites
+ * when an authorable key is added or removed; and the default-value ratchet,
+ * rewritten when an authorable key's default changes. Directory prefixes, read
+ * with a trailing slash so `authorable-surface.base.json` — the hand-off file
+ * only `gen:authorable-surface-base` writes — is not one of them.
+ *
+ * ⛔ This is a reading of what the ratchets ALREADY record, never a parse of the
+ * shard content: whether a changed shard means `added`, `narrowed` or
+ * `semantic` is the author's declaration to make, and the refusal names the
+ * three. What the baselines cannot see (a refused value, a narrowed enum, a
+ * changed meaning) is stated in the header and is why the line, not the diff,
+ * stays the carrier.
+ */
+export const PROTOCOL_BASELINE_ROOTS = Object.freeze([
+  'packages/spec/authorable-surface/',
+  'packages/spec/authorable-defaults/',
+]);
+
+/**
+ * The protocol baselines this diff moves — the shard files under
+ * {@link PROTOCOL_BASELINE_ROOTS} that differ between the branch point and
+ * `head`. Same diff, same branch point as `packagesTouched`, so the two legs
+ * can never read different sides of the fork.
+ *
+ * @param {{ cwd: string, from: string, head: string }} opts
+ * @returns {{ moved: string[] }}
+ */
+export function baselinesTouched({ cwd, from, head }) {
+  let out = '';
+  try {
+    out = git(['diff', '--name-only', from, head, '--', ...PROTOCOL_BASELINE_ROOTS], cwd);
+  } catch {
+    return { moved: [] };
+  }
+  const moved = out
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.endsWith('.json') && PROTOCOL_BASELINE_ROOTS.some((root) => line.startsWith(root)));
+  return { moved: [...new Set(moved)].sort() };
+}
+
 // ── The near-miss remedy vocabulary (#18263) ────────────────────────────────
 //
 // `readClause2Line` returns a REASON with every near miss, and this gate used
@@ -1612,6 +1711,66 @@ export function nearMissReadings(reason, line) {
 }
 
 /**
+ * The same three remedies for the sibling `Metadata-protocol:` line (ruling A).
+ * The reader is shared with the `Clause-②:` line and so is its decoration
+ * tolerance, so the sentences differ only in the key and the closed value set;
+ * the miss path is identical and identically loud.
+ */
+const METADATA_PROTOCOL_NEAR_MISS_REMEDIES = Object.freeze({
+  spelling:
+    'the line does not carry `Metadata-protocol:` in the fixed spelling at the start of a line (case, a space or an ' +
+    'underscore in the key, or a markdown heading in front of it). The reader tolerates a `- `, `* `, `> ` or `**` ' +
+    'prefix and NOTHING else. Write it bare, on a line of its own: `Metadata-protocol: added`, `narrowed`, `semantic` ' +
+    'or `none`.',
+  'inline-key':
+    'the key is spelled exactly right but sits INSIDE a line, after text that no line-start decoration explains. The ' +
+    'POSITION is what is wrong. Give the declaration a line of its own.',
+  describing:
+    'the line carries the key in the fixed spelling at the start of a line, but it QUOTES the spelling instead of ' +
+    'declaring a value: it either names `Metadata-protocol:` twice on one line, or opens a backtick span at the key ' +
+    'and continues past the closing tick. ADD the declaration on a line of its own, bare, with nothing following it.',
+});
+
+/**
+ * The remedy sentence for one `Metadata-protocol:` near-miss reason — or a loud
+ * miss, exactly as {@link clause2NearMissRemedy}.
+ *
+ * @param {string|null|undefined} reason
+ * @param {string} line
+ * @returns {string}
+ */
+export function metadataProtocolNearMissRemedy(reason, line) {
+  if (typeof reason === 'string' && Object.prototype.hasOwnProperty.call(METADATA_PROTOCOL_NEAR_MISS_REMEDIES, reason)) {
+    return METADATA_PROTOCOL_NEAR_MISS_REMEDIES[reason];
+  }
+  return (
+    `this gate carries no remedy sentence for a near miss of reason ${JSON.stringify(reason ?? null)} — ` +
+    '`readMetadataProtocolLine` (scripts/pm/clause2-line.mjs) reports a reason this file has not been taught, ' +
+    `and the reason plus the line are printed rather than swallowed. The offending line is: ${line}. Whatever the ` +
+    'reason, a declaration is `Metadata-protocol: added`, `narrowed`, `semantic` or `none`, bare, at the start of a ' +
+    'line of its own. Add the sentence for this reason to METADATA_PROTOCOL_NEAR_MISS_REMEDIES in ' +
+    'scripts/check-changeset-no-major.mjs.'
+  );
+}
+
+/**
+ * The TWO readings a `Metadata-protocol:` near miss contributes — the sibling of
+ * {@link nearMissReadings}, keyed so a log reader can tell which line is being
+ * talked about.
+ *
+ * @param {string|null|undefined} reason
+ * @param {string} line
+ * @returns {string[]}
+ */
+export function protocolNearMissReadings(reason, line) {
+  const named = typeof reason === 'string' && reason ? reason : '(unnamed)';
+  return [
+    `metadata-protocol line: a near miss, not a declaration — reason \`${named}\` — ${line}`,
+    `remedy for \`${named}\` (Metadata-protocol): ${metadataProtocolNearMissRemedy(reason, line)}`,
+  ];
+}
+
+/**
  * The clause-② declaration this PR carries, read from the event payload alone.
  *
  * Three answers, never two — `null` is NOT MEASURED and is the reason this
@@ -1635,8 +1794,16 @@ export function nearMissReadings(reason, line) {
  * and a PR that declares `no (narrowing)` must not be reported as having
  * declared `yes`.
  *
+ * ## The METADATA-PROTOCOL kind (ruling A)
+ *
+ * `protocol` is the sibling line's value, from `readMetadataProtocolLine` in the
+ * same module, and `null` when the line is absent, malformed or a near miss —
+ * the readings say which. It is the value the level lanes decide on; `value`
+ * and `arm` stay beside it, read and printed, for the two contradictions
+ * `judgeLevel` refuses and for the review face the arm routes elsewhere.
+ *
  * @param {{ body?: string }|null} pr
- * @returns {{ value: 'yes'|'no'|null, arm: 'widening'|'narrowing'|null, payload: boolean, readings: string[] }}
+ * @returns {{ value: 'yes'|'no'|null, arm: 'widening'|'narrowing'|null, protocol: 'added'|'narrowed'|'semantic'|'none'|null, payload: boolean, readings: string[] }}
  */
 export function declarationFromPullRequest(pr) {
   const readings = [];
@@ -1645,7 +1812,7 @@ export function declarationFromPullRequest(pr) {
     // "no pull request to read" and "a pull request that declared nothing" are
     // different facts about different runs, and #16776 is the card about two
     // facts sharing one exit code. `judgeLevel` routes on this flag.
-    return { value: null, arm: null, payload: false, readings: ['no `pull_request` payload was available to read a declaration from'] };
+    return { value: null, arm: null, protocol: null, payload: false, readings: ['no `pull_request` payload was available to read a declaration from'] };
   }
 
   const line = readClause2Line(pr.body ?? '');
@@ -1670,9 +1837,20 @@ export function declarationFromPullRequest(pr) {
       : `direction arm: \`${arm}\`${arm === 'narrowing' ? ' — a BREAKING change; during the launch window it ships `minor`' : ''}`);
   }
 
-  if (line?.kind === 'declared' && line.value === 'yes') return { value: 'yes', arm, payload: true, readings };
-  if (line?.kind === 'declared' && line.value === 'no') return { value: 'no', arm, payload: true, readings };
-  return { value: null, arm, payload: true, readings };
+  // Ruling A: the sibling line, read from the same body by the same module, and
+  // reported on its own line whichever way it reads — absent included, because
+  // under this ruling an absent kind is the reading that decides the level.
+  const protocolLine = readMetadataProtocolLine(pr.body ?? '');
+  if (protocolLine?.kind === 'declared') readings.push(`metadata-protocol line: \`${protocolLine.line}\``);
+  else if (protocolLine?.kind === 'malformed') {
+    readings.push(`metadata-protocol line: MALFORMED, not a declaration — ${protocolLine.line} (the closed set is \`added\`, \`narrowed\`, \`semantic\`, \`none\`)`);
+  } else if (protocolLine?.kind === 'near-miss') readings.push(...protocolNearMissReadings(protocolLine.reason, protocolLine.line));
+  else readings.push('metadata-protocol line: the PR body carries no `Metadata-protocol:` line');
+  const protocol = protocolLine?.kind === 'declared' ? protocolLine.value : null;
+
+  if (line?.kind === 'declared' && line.value === 'yes') return { value: 'yes', arm, protocol, payload: true, readings };
+  if (line?.kind === 'declared' && line.value === 'no') return { value: 'no', arm, protocol, payload: true, readings };
+  return { value: null, arm, protocol, payload: true, readings };
 }
 
 /**
@@ -1682,20 +1860,34 @@ export function declarationFromPullRequest(pr) {
  *   unreadable-diff       the diff could not be computed               -> exit 1 (#4690)
  *   payload-unreadable    a `pull_request` run whose payload would not read -> exit 1 (#4690)
  *   no-pull-request       not a PR run at all (RC cut, local run)      -> exit 0
- *   not-measured-moot     no declaration, and nothing a `yes` could have refused -> exit 0
- *   not-measured-material no declaration, and a `yes` WOULD have refused  -> exit 1
- *   not-declared          the declaration reads `no` and names no
- *                         `narrowing` arm (#16421)                     -> exit 0
- *   clean                 the axis is CARRIED (`yes`, or `no (narrowing)` — the
- *                         arm carries it too, #16421), and no moved package is
- *                         graded `patch`                               -> exit 0
- *   discharged            the axis is CARRIED, a moved package IS graded `minor`+,
- *                         and others are graded `patch`                -> exit 0
- *   enforce               the axis is CARRIED, moved packages graded `patch` and
+ *   not-measured-material a reading that DECIDES this verdict is unreadable:
+ *                         the `Clause-②:` line over a moved package graded
+ *                         `patch` with no raise (#16776, unchanged), or the
+ *                         `Metadata-protocol:` line over any introduced entry a
+ *                         kind or a `none` would grade differently — a `patch`
+ *                         on a moved package, any `minor`+, a moved baseline
+ *                                                                      -> exit 1
+ *   not-measured-moot     the kind is unreadable and could not have changed
+ *                         the verdict: nothing a kind or a `none` refuses -> exit 0
+ *   contradiction         `added` under `Clause-②: no`, or `narrowed` beside a
+ *                         `Clause-②:` line with no `(narrowing)` arm  -> exit 1
+ *   none-baseline-moved   `none` declared while the diff moves an
+ *                         `authorable-surface/` or `authorable-defaults/`
+ *                         shard — a protocol change the ratchet can see -> exit 1
+ *   none-minor            `none` declared while an introduced entry is graded
+ *                         `minor` or above, on any package              -> exit 1
+ *   none-clean            `none` declared, no introduced entry above `patch`,
+ *                         no baseline moved — a non-protocol change at its
+ *                         level, BREAKING carriers untouched            -> exit 0
+ *   clean                 a kind is declared and no moved package is graded
+ *                         `patch`                                      -> exit 0
+ *   discharged            a kind is declared, a moved package IS graded `minor`+,
+ *                         and others are graded `patch` (#16361)       -> exit 0
+ *   enforce               a kind is declared, moved packages graded `patch` and
  *                         NONE of them graded `minor` or above         -> exit 1
  *
- * Nine verdicts and no two of them collapse, because every collapse in this
- * family has been a defect. `not-measured-*` and `not-declared` are a missing
+ * Twelve verdicts and no two of them collapse, because every collapse in this
+ * family has been a defect. `not-measured-*` and `none-clean` are a missing
  * reading and a decision (#16055). The two `not-measured-*` are a missing
  * reading that could not have mattered and one that decided the verdict
  * (#16776) — sharing exit 0 is what let a gate that judged nothing conclude
@@ -1703,30 +1895,42 @@ export function declarationFromPullRequest(pr) {
  * `discharged` are #16361's: "no moved package is graded `patch`" and "some are,
  * and this gate is deliberately not refusing them" are different facts, and the
  * second one carries a residual that must be printed rather than implied by a
- * tick.
+ * tick. The three `none-*` and `contradiction` are ruling A's: a `none` that is
+ * refused by a `minor` it carries, by a baseline it moves, or by the other
+ * line it contradicts owes a different sentence each, and an author reading
+ * one must not be sent to fix another.
+ *
+ * `not-declared` (the old "a bare `no` stands the axis down") is GONE, not
+ * renamed: under ruling A the `Clause-②` value never stands the axis down —
+ * the kind does, and a bare `no` is judged on its `Metadata-protocol:` line like
+ * every other declaration.
  *
  * @param {{
  *   levels: { file: string, entries: { pkg: string, bump: string }[] }[] | null,
  *   touched: { packages: string[], unreadable: string[] },
- *   declaration: { value: 'yes'|'no'|null, arm?: 'widening'|'narrowing'|null, readings: string[], payload?: boolean },
+ *   declaration: { value: 'yes'|'no'|null, arm?: 'widening'|'narrowing'|null, protocol?: 'added'|'narrowed'|'semantic'|'none'|null, readings: string[], payload?: boolean },
  *   prEvent?: boolean,
+ *   baselines?: { moved: string[] },
  * }} input
  */
-export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
+export function judgeLevel({ levels, touched, declaration, prEvent = false, baselines = { moved: [] } }) {
   const readings = declaration?.readings ?? [];
   // ⭐ #19008. The DECLARATION ITSELF travels beside the readings, for the same
   // reason `arm` does: `renderLevel` must not
-  // assert a declaration it did not read. Past the `not-declared` lane below,
-  // this verdict is decided by `refusable` and `offenders.length` ALONE —
-  // `value` plays no further part — so `clean`, `discharged` and `enforce` are
-  // every one of them reachable on a `no (narrowing)`. Each of their headlines
-  // used to state `yes` as a LITERAL, which made the arm docblock's own rule
-  // ("a PR that declares `no (narrowing)` must not be reported as having
-  // declared `yes`") false in the one line a reader quotes. ⛔ The repair is
-  // this field and the derivation in `renderLevel` — it is ⛔ NOT a reworded
-  // branch: a literal in any headline is the same defect one branch along.
-  const declared = { value: declaration?.value ?? null, arm: declaration?.arm ?? null };
-  if (!levels) return { verdict: 'unreadable-diff', offenders: [], raised: [], declared, readings, unreadable: [] };
+  // assert a declaration it did not read. Past the contradiction and `none`
+  // lanes below, this verdict is decided by `refusable` and `offenders.length`
+  // ALONE — `value` plays no further part — so `clean`, `discharged` and
+  // `enforce` are every one of them reachable on a `no (narrowing)`. Each of
+  // their headlines used to state `yes` as a LITERAL, which made the arm
+  // docblock's own rule ("a PR that declares `no (narrowing)` must not be
+  // reported as having declared `yes`") false in the one line a reader quotes.
+  // ⛔ The repair is this field and the derivation in `renderLevel` — it is ⛔
+  // NOT a reworded branch: a literal in any headline is the same defect one
+  // branch along. `protocol` travels the same way, for the same reason.
+  const declared = { value: declaration?.value ?? null, arm: declaration?.arm ?? null, protocol: declaration?.protocol ?? null };
+  const moved = Array.isArray(baselines?.moved) ? [...baselines.moved] : [];
+  const empty = { offenders: [], raised: [], minors: [], declared, readings, unreadable: [], missing: [], baselines: moved };
+  if (!levels) return { verdict: 'unreadable-diff', ...empty };
   const unreadable = touched?.unreadable ?? [];
 
   // NO PR TO READ A DECLARATION FROM. This is a different fact from "a PR that
@@ -1751,8 +1955,8 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   // this file takes everywhere else.
   if (declaration?.payload === false) {
     return prEvent
-      ? { verdict: 'payload-unreadable', offenders: [], raised: [], declared, readings, unreadable }
-      : { verdict: 'no-pull-request', offenders: [], raised: [], declared, readings, unreadable };
+      ? { verdict: 'payload-unreadable', ...empty, unreadable }
+      : { verdict: 'no-pull-request', ...empty, unreadable };
   }
 
   // The offenders are computed BEFORE the declaration is consulted, because
@@ -1772,59 +1976,96 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   const grown = new Set(touched?.packages ?? []);
   const offenders = [];
   const raised = [];
+  // Ruling A: EVERY introduced entry graded `minor` or above, on any package —
+  // the set a declared `none` refuses. `raised` below is its subset on moved
+  // packages, which is what discharges a declared kind (#16361's grain).
+  const minors = [];
   for (const { file, entries } of levels) {
     const bad = entries.filter((entry) => entry.bump === 'patch' && grown.has(entry.pkg)).map((entry) => entry.pkg);
     if (bad.length) offenders.push({ file, packages: bad });
     for (const entry of entries) {
-      if (grown.has(entry.pkg) && (entry.bump === 'minor' || entry.bump === 'major')) raised.push({ file, pkg: entry.pkg, bump: entry.bump });
+      if (entry.bump !== 'minor' && entry.bump !== 'major') continue;
+      minors.push({ file, pkg: entry.pkg, bump: entry.bump });
+      if (grown.has(entry.pkg)) raised.push({ file, pkg: entry.pkg, bump: entry.bump });
     }
   }
-  // The one condition a `yes` refuses. Written once and read by both the
+  // The one condition a KIND refuses. Written once and read by both the
   // declared lane and the NOT MEASURED lane, so materiality cannot drift from
   // enforcement — two copies of this predicate is how the two would come to
   // disagree about whether an unread declaration mattered.
   const refusable = offenders.length > 0 && raised.length === 0;
+  const result = { offenders, raised, minors, declared, readings, unreadable, baselines: moved };
 
-  if (declaration?.value === null || declaration?.value === undefined) {
-    // ⭐ #16776. `NOT MEASURED` used to be one verdict at exit 0, and the check
-    // run therefore concluded `success` whether the reading was IMMATERIAL or
-    // whether it was the one thing the gate needed. Those are the two halves
-    // split here, and only the second one fails:
-    //
-    //   * MOOT — no candidate offender exists, so `yes` and `no` reach the same
-    //     verdict. The exit 0 is a DECIDED one: the missing input could not have
-    //     moved it, and the reader is told exactly that rather than being handed
-    //     a tick that means nothing.
-    //   * MATERIAL — a `patch` sits on a package this PR grew, so the declaration
-    //     is the difference between `clean` and `enforce`, and it was not
-    //     readable. The gate refuses. Not because the level is wrong — it may
-    //     well be right — but because nobody can tell, and a reading that did
-    //     not happen must not be indistinguishable from one that passed at the
-    //     only layer anything downstream reads (#4690).
-    return refusable
-      ? { verdict: 'not-measured-material', offenders, raised, declared, readings, unreadable }
-      : { verdict: 'not-measured-moot', offenders, raised, declared, readings, unreadable };
+  // ⭐ #16776, kept and widened to the second line. `NOT MEASURED` used to be
+  // one verdict at exit 0, and the check run therefore concluded `success`
+  // whether the reading was IMMATERIAL or whether it was the one thing the
+  // gate needed. Those are the two halves split here, and only the second one
+  // fails:
+  //
+  //   * The `Clause-②:` line is MATERIAL exactly where it was: unreadable over a
+  //     `patch` on a package this PR grew with nothing raised. Ruling A moved
+  //     the level coupling off this line, and the obligation to write it stays
+  //     where it was — this verdict is not loosened.
+  //   * The `Metadata-protocol:` line is MATERIAL wherever a kind and a `none`
+  //     would reach different verdicts: a `patch` on a moved package (a kind
+  //     refuses it), any `minor`+ anywhere (a `none` refuses it), or a moved
+  //     protocol baseline (a `none` refuses it). An introduced entry therefore
+  //     almost always makes the kind material, and that is the ruling's own
+  //     sentence — every PR and changeset states its kind.
+  //   * MOOT — neither reading could have moved the verdict. The exit 0 is a
+  //     DECIDED one, and the reader is told exactly that rather than being
+  //     handed a tick that means nothing.
+  //
+  // The gate refuses the material case not because the level is wrong — it may
+  // well be right — but because nobody can tell, and a reading that did not
+  // happen must not be indistinguishable from one that passed at the only
+  // layer anything downstream reads (#4690).
+  const clause2Material = declared.value === null && refusable;
+  const protocolMaterial = declared.protocol === null && (refusable || minors.length > 0 || moved.length > 0);
+  const missing = [
+    ...(declared.value === null ? ['Clause-②'] : []),
+    ...(declared.protocol === null ? ['Metadata-protocol'] : []),
+  ];
+  if (clause2Material || protocolMaterial) return { verdict: 'not-measured-material', ...result, missing };
+  if (declared.protocol === null) return { verdict: 'not-measured-moot', ...result, missing };
+
+  // The kind is read. The two contradictions are refused before any level is
+  // judged, because each is a declaration pair nobody can grade: `added` widens
+  // a published accept set, so it cannot sit under a `Clause-②: no`; `narrowed`
+  // narrows one, so it cannot sit beside a `Clause-②:` line that declares no
+  // `(narrowing)` arm — that arm is the breaking signal `check-adr-0087-
+  // registration.mjs` and the queue guard read from the changeset. ⛔ Neither
+  // is inferred the other way: a `Clause-②: yes` does not become `added`, and a
+  // `(narrowing)` arm does not become `narrowed` — a REST widening and a driver
+  // posture narrowing are exactly the non-protocol changes ruling A grades
+  // `patch`. With no `Clause-②:` line read at all (immaterial here, above),
+  // there is nothing to contradict and the kind is judged alone.
+  if (declared.protocol === 'added' && declared.value === 'no') {
+    return { verdict: 'contradiction', reason: 'added-under-no', ...result, missing };
   }
-  // #16421. A `no` stands the axis down — UNLESS it carries the narrowing arm.
-  // `no (narrowing)` is a truthful `no` to the widening question and a breaking
-  // change at the same time, and the grade a breaking change owes inside the
-  // launch window is the grade this axis enforces. ⛔ The arm is read, never
-  // inferred from the value: `no` alone keeps standing the axis down, which is
-  // what every declaration written before the arm existed says.
-  if (declaration.value === 'no' && declaration.arm !== 'narrowing') {
-    return { verdict: 'not-declared', offenders: [], raised: [], declared, readings, unreadable };
+  if (declared.protocol === 'narrowed' && declared.value !== null && declared.arm !== 'narrowing') {
+    return { verdict: 'contradiction', reason: 'narrowed-without-arm', ...result, missing };
   }
 
-  // An unread manifest can only ever hide an offender, so it cannot be reported
-  // under a tick: every green below states it, and the reader is told what was
-  // not named.
-  if (refusable) return { verdict: 'enforce', offenders, raised, declared, readings, unreadable };
+  // `none`: the level is `patch`, full stop. Three answers, the two refusals
+  // first because each names a different remedy.
+  if (declared.protocol === 'none') {
+    if (moved.length) return { verdict: 'none-baseline-moved', ...result, missing };
+    if (minors.length) return { verdict: 'none-minor', ...result, missing };
+    return { verdict: 'none-clean', ...result, missing };
+  }
+
+  // A kind: the inherited predicate at the inherited grain (#16361). An unread
+  // manifest can only ever hide an offender, so it cannot be reported under a
+  // tick: every green below states it, and the reader is told what was not
+  // named.
+  if (refusable) return { verdict: 'enforce', ...result, missing };
   // #16361. A `patch` on a moved package that this gate is NOT refusing is a
   // reading it made and set aside, not an absence — it gets its own verdict so
   // the residual is printed rather than folded into a tick that means "nothing
   // to see".
-  if (offenders.length) return { verdict: 'discharged', offenders, raised, declared, readings, unreadable };
-  return { verdict: 'clean', offenders: [], raised, declared, readings, unreadable };
+  if (offenders.length) return { verdict: 'discharged', ...result, missing };
+  return { verdict: 'clean', ...result, offenders: [], missing };
 }
 
 /**
@@ -1854,6 +2095,19 @@ export function declaredClause2(declared) {
 }
 
 /**
+ * The metadata-protocol kind a level verdict was reached on, spelled for a
+ * reader — the sibling of {@link declaredClause2}, with the same `NOT MEASURED`
+ * for a kind that was not read (ruling A).
+ *
+ * @param {{ protocol?: 'added'|'narrowed'|'semantic'|'none'|null }|null|undefined} declared
+ * @returns {string}
+ */
+export function declaredProtocol(declared) {
+  const protocol = declared?.protocol ?? null;
+  return protocol === null ? 'NOT MEASURED' : `\`${protocol}\``;
+}
+
+/**
  * Render the level verdict. Separated from `judgeLevel` and from `console` for
  * the same reason `render` is: the self-test asserts the MESSAGE, and "exits 1"
  * does not tell an author which word to change.
@@ -1872,6 +2126,7 @@ export function renderLevel(result) {
   const readingsBlock = (result?.readings ?? []).map((r) => `· ${r}`).join('\n');
   const offenderList = (offenders) =>
     (offenders ?? []).flatMap(({ file, packages }) => (packages ?? []).map((pkg) => `${pkg}: patch (${file})`)).join('; ');
+  const minorList = (minors) => (minors ?? []).map(({ file, pkg, bump }) => `${pkg}: ${bump} (${file})`).join('; ');
   // The `patch` lines, listed WITHOUT a per-package claim about what the diff
   // did to each one. The old rendering appended "← this PR moves <pkg>'s
   // packages/*/src/**" to every line, which is true, directly under a headline
@@ -1889,6 +2144,7 @@ export function renderLevel(result) {
     return lines;
   };
   const raisedLines = (raised) => (raised ?? []).map(({ file, pkg, bump }) => `     - ${pkg}: ${bump}   (${file})`);
+  const baselineLines = (baselines) => (baselines ?? []).map((path) => `     - ${path}`);
   const unreadableNote =
     (result?.unreadable ?? []).length > 0
       ? [`   ⚠️ ${result.unreadable.length} touched package dir(s) could not be named: ${result.unreadable.join(', ')} — an offender there could not be seen.`]
@@ -1897,12 +2153,50 @@ export function renderLevel(result) {
   // the `readings` lines below it come from — never a literal. Three of the
   // lanes below are reachable on a `no (narrowing)` (see `declared` in
   // `judgeLevel`), and a literal `yes` in any of them reports a declaration the
-  // PR did not make while the rows underneath print the true one.
+  // PR did not make while the rows underneath print the true one. The kind
+  // (ruling A) is derived the same way, beside it.
   const declaredValue = declaredClause2(result?.declared);
+  const declaredKind = declaredProtocol(result?.declared);
+  const declares = `clause-② ${declaredValue} and metadata-protocol ${declaredKind}`;
   // And the ACT that declaration names, for the one headline that names it. A
   // declared narrowing is accounted for by the same grade, but calling it a
-  // widening is the same misreport one noun along.
-  const declaredAct = result?.declared?.arm === 'narrowing' ? 'narrowing' : 'widening';
+  // widening is the same misreport one noun along; a `semantic` change under a
+  // bare `no` is neither.
+  const declaredAct =
+    result?.declared?.arm === 'narrowing' || result?.declared?.protocol === 'narrowed'
+      ? 'narrowing'
+      : result?.declared?.value === 'yes' || result?.declared?.protocol === 'added'
+        ? 'widening'
+        : 'protocol change';
+  const PUBLISHED = '`src/**`, a packed `bin` target, or a repo file its build copies in';
+  const RULING =
+    'The level follows the METADATA PROTOCOL alone: `added`, `narrowed` or `semantic` takes AT LEAST `minor` on\n' +
+    'a package the diff moves, `none` takes `patch`, and the commit type never decides it (maintainer ruling A,\n' +
+    '2026-10-21, on #25105, amending the 2026-09-04 rule of decision batch #35 on #15294 — written out in full\n' +
+    'under "WHICH LEVEL" in the `Check Changeset` step of .github/workflows/pr-automation.yml).';
+  const DECLARE_BLOCK =
+    'DECLARE IT. Two lines, each at the START of a line in the PR BODY (a `- `, `> ` or `**` prefix is read too):\n' +
+    '\n' +
+    '  Clause-②: no    — this PR widens no published accept set or public surface; add `(narrowing)` if it\n' +
+    '                    narrows one (a BREAKING change, whatever its level).\n' +
+    '  Clause-②: yes   — it widens one. Neither value decides the level any more; the next line does.\n' +
+    '  Metadata-protocol: none      — no change to what a metadata author can write: the level is `patch`,\n' +
+    '                                 REST, drivers, services, the console, `feat:` and `fix!:` alike.\n' +
+    '  Metadata-protocol: added     — a new authorable key, accepted value or enum member, or metadata type\n' +
+    '                                 (takes `minor`: an older runtime silently strips a key it does not know).\n' +
+    '  Metadata-protocol: narrowed  — a key removed or tombstoned, a value refused, a requirement tightened\n' +
+    '                                 (takes `minor`; also declare the `(narrowing)` arm above).\n' +
+    '  Metadata-protocol: semantic  — the meaning or default of an authorable key changes (takes `minor`).\n' +
+    '\n' +
+    '⛔ The remedy is the declaration, never the deletion: dropping the changeset, or regrading the package to\n' +
+    'dodge this message, changes what ships in order to quiet a gate. And the lines are read from the body on the\n' +
+    'next `edited` event (pr-automation.yml subscribes to it), so this red clears with no push and no re-run.';
+  const KIND_REMEDY =
+    'A `minor` is earned by a change to the metadata protocol and by nothing else. If this diff makes one, declare\n' +
+    'its kind — `Metadata-protocol: added`, `narrowed` or `semantic` — and the `minor` is accounted for; if it does\n' +
+    'not, grade the entry `patch`. A non-protocol change keeps its BREAKING banner and its ADR-0087 disposition\n' +
+    'at `patch`: the level stopped carrying breaking-ness when the launch window opened, and ruling A does not\n' +
+    'hand it back.';
 
   switch (result?.verdict) {
     case 'unreadable-diff':
@@ -1949,46 +2243,47 @@ export function renderLevel(result) {
 
     case 'not-measured-moot':
       stdout.push(
-        'ℹ️ LEVEL AXIS: NOT MEASURED, and it could not have changed this verdict — no clause-② declaration was ' +
-          'readable for this PR, AND there is nothing here a `yes` would have refused: either no changeset grades ' +
-          '`patch` a package whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this PR moves, or one of the packages it moves is already ' +
-          'graded `minor` or above and carries the level for the PR (#16361). ' +
-          '`yes` and `no` reach the same answer on this diff, so this exit 0 is a decided one rather than an unread one (#16776).',
+        'ℹ️ LEVEL AXIS: NOT MEASURED, and it could not have changed this verdict — the metadata-protocol kind was ' +
+          'not readable for this PR, AND there is nothing here a kind or a `none` would have graded differently: ' +
+          `no changeset grades \`patch\` a package whose published source (${PUBLISHED}) this PR moves, no introduced ` +
+          'entry is graded `minor` or above, and no `authorable-surface/` or `authorable-defaults/` baseline moved. ' +
+          'Every kind reaches the same answer on this diff, so this exit 0 is a decided one rather than an unread one (#16776).',
         ...readings,
         ...unreadableNote,
       );
       return { exitCode: 0, stdout, stderr };
 
-    case 'not-measured-material':
-      stderr.push('⛔ LEVEL AXIS: NOT MEASURED, and it is the one reading this PR needed.\n');
-      stderr.push('   The packages whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this PR moves, and the level each is graded:');
-      stderr.push(...patchLines(result.offenders));
-      stderr.push('   ⇒ none of them is graded `minor` or above, so a `yes` here would REFUSE (#16361).\n');
+    case 'not-measured-material': {
+      const missing = (result?.missing ?? []).map((k) => `\`${k}:\``).join(' and ');
+      stderr.push(`⛔ LEVEL AXIS: NOT MEASURED, and it is the reading this PR needed — the ${missing} line was not readable.\n`);
+      stderr.push(`   The packages whose published source (${PUBLISHED}) this PR moves, and the level each is graded:`);
+      stderr.push(...(result.offenders?.length ? patchLines(result.offenders) : ['     (none graded `patch`)']));
+      if (result?.minors?.length) {
+        stderr.push('   The changeset entries this PR introduces at `minor` or above:');
+        stderr.push(...raisedLines(result.minors));
+      }
+      if (result?.baselines?.length) {
+        stderr.push('   The metadata-protocol baselines this PR moves:');
+        stderr.push(...baselineLines(result.baselines));
+      }
       stderr.push(
-        'No clause-② declaration was readable, so whether this PR widened a published surface at all was not judged:\n' +
+        '   ⇒ a declared kind and a declared `none` would reach DIFFERENT verdicts here — a `patch` on a moved package\n' +
+          '     is refused under a kind, a `minor` or a moved baseline is refused under `none` — so the reading that was\n' +
+          '     not made is the one that decides (#16361, #16776).\n',
+      );
+      stderr.push(
+        'What was read:\n' +
           `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n` +
           '\n' +
           'This is a REFUSAL rather than the tick it used to be, and the reason is the layer above this log. A check run\n' +
           'concludes `success` or `failure`; it has no third word for "did not judge". Exiting 0 published the same\n' +
           'conclusion for a reading that passed and a reading that never happened, on every surface that reads\n' +
           'conclusions rather than step logs (#16776, and #4690: a reading that cannot fail is indistinguishable from\n' +
-          'one that passed). Where the declaration could not have mattered this gate still exits 0 and says so — it is\n' +
-          'refusing HERE because every package whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this diff moves is graded `patch`, which is\n' +
-          'exactly the shape a `yes` refuses (#16361).\n' +
+          'one that passed). Where the declaration could not have mattered this gate still exits 0 and says so.\n' +
           '\n' +
-          'DECLARE IT. One line, at the START of a line in the PR BODY (a `- `, `> ` or `**` prefix is read too):\n' +
+          `${RULING}\n` +
           '\n' +
-          '  Clause-②: no    — this PR puts no new key on a published payload. The axis stands down and the `patch`\n' +
-          '                    above is yours to keep. Say it in the line, not only in the prose around it.\n' +
-          '  Clause-②: yes   — it does. Then the level rule applies, and ONE of the packages listed above — the one\n' +
-          '                    that actually grew — must be graded at least `minor`. This gate cannot read which of\n' +
-          '                    them that is, so it asks only that one of them carries it (maintainer ruling\n' +
-          '                    2026-09-04, decision batch #35, on #15294 — written out under "WHICH LEVEL" in the\n' +
-          '                    `Check Changeset` step of pr-automation.yml).\n' +
-          '\n' +
-          '⛔ The remedy is the declaration, never the deletion: dropping the changeset, or regrading the package to\n' +
-          'dodge this message, changes what ships in order to quiet a gate. And the line is read from the body on the\n' +
-          'next `edited` event (pr-automation.yml subscribes to it), so this red clears with no push and no re-run.',
+          `${DECLARE_BLOCK}`,
       );
       // #18263. The discriminator, on the ONE channel the check run exposes.
       // This title and the `Require a changeset` step's own `::error::` are what
@@ -1996,27 +2291,118 @@ export function renderLevel(result) {
       // the two refusals this card measured as one event from outside.
       stdout.push(
         errorAnnotation({
-          title: 'Check Changeset (level axis): no readable `Clause-②:` declaration, and it is the reading this PR needed',
+          title: `Check Changeset (level axis): no readable ${missing} declaration, and it is the reading this PR needed`,
           message:
-            `Every package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) this diff moves is graded \`patch\` (${offenderList(result.offenders)}), ` +
-            'which is exactly the shape a `yes` refuses (#16361) — so the declaration that was not readable is what ' +
+            `Moved and graded \`patch\`: ${offenderList(result.offenders) || '(none)'}; introduced at \`minor\` or above: ` +
+            `${minorList(result.minors) || '(none)'}; protocol baselines moved: ${(result.baselines ?? []).join(', ') || '(none)'}. ` +
+            'A kind and a `none` would grade this differently, so the declaration that was not readable is what ' +
             `decides this verdict.\n${readingsBlock}\n` +
-            'DECLARE IT: one line in the PR BODY, bare and at the START of a line of its own — `Clause-②: no` (this PR ' +
-            'puts no new key on a published payload) or `Clause-②: yes` plus at least `minor` on the package that grew. ' +
+            'DECLARE IT: two lines in the PR BODY, each bare at the START of a line of its own — `Clause-②: yes` or `no` ' +
+            '(plus `(narrowing)` if it narrows a published surface), and `Metadata-protocol: added`, `narrowed`, `semantic` ' +
+            'or `none` (the kind of change to what a metadata author can write; `none` is `patch`, a kind is `minor`). ' +
             'A `- `, `> ` or `**` prefix is read too; a `## ` heading and a backtick span that runs past the key are ' +
             'not. ⛔ The remedy is the declaration, never dropping the changeset. The body is re-read on the next ' +
             '`edited` event, so this red clears with no push and no re-run. Full text in this step\'s log.',
         }),
       );
       return { exitCode: 1, stdout, stderr };
+    }
 
-    case 'not-declared':
-      stdout.push(`✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, so no package here is declared to have grown a published surface.`, ...readings, ...unreadableNote);
+    case 'contradiction': {
+      const sentence =
+        result?.reason === 'added-under-no'
+          ? '`Metadata-protocol: added` says a new authorable key, value or type enters a published payload — a widening ' +
+            'of a published accept set by definition — while `Clause-②: no` says nothing published widens.'
+          : '`Metadata-protocol: narrowed` says a key, value or requirement leaves the accept set an author writes ' +
+            'against — a BREAKING narrowing by definition — while the `Clause-②:` line declares no `(narrowing)` arm, ' +
+            'which is the signal `check-adr-0087-registration.mjs` and the queue guard read for exactly that.';
+      const remedy =
+        result?.reason === 'added-under-no'
+          ? 'Correct the one that is wrong: `Clause-②: yes` (plus `(widening)` if you like) beside `added`, or a kind ' +
+            'that is not `added` beside `no`.'
+          : 'Correct the one that is wrong: add the arm — `Clause-②: no (narrowing)` or `yes (narrowing)` — beside ' +
+            '`narrowed`, or a kind that is not `narrowed` beside the line as written.';
+      stderr.push(
+        `⛔ This PR declares ${declares}, and the two lines contradict each other.\n`,
+        `   ${sentence}\n`,
+        `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n`,
+        `   ${remedy}\n` +
+          '   ⛔ Neither line is inferred from the other: a `Clause-②: yes` is not read as `added` (a REST widening is\n' +
+          '   `none`), and a `(narrowing)` arm is not read as `narrowed` (a driver posture narrowing is `none`). The\n' +
+          '   lines are re-read from the body on the next `edited` event, so this clears with no push.',
+      );
+      stdout.push(
+        errorAnnotation({
+          title: `Check Changeset (level axis): metadata-protocol ${declaredKind} contradicts clause-② ${declaredValue}`,
+          message: `${sentence}\n${readingsBlock}\n${remedy} Full text in this step's log.`,
+        }),
+      );
+      return { exitCode: 1, stdout, stderr };
+    }
+
+    case 'none-clean':
+      stdout.push(
+        `✓ LEVEL AXIS: this PR declares ${declares}, and it introduces no changeset entry graded \`minor\` or above ` +
+          'and moves no metadata-protocol baseline — a non-protocol change at `patch`, its BREAKING banner and ' +
+          'ADR-0087 disposition (if any) untouched by the level.',
+        ...readings,
+        ...unreadableNote,
+      );
       return { exitCode: 0, stdout, stderr };
+
+    case 'none-minor':
+      stderr.push(
+        `⛔ This PR declares ${declares}, and it introduces a changeset entry graded \`minor\` or above:\n`,
+        ...raisedLines(result.minors),
+        '',
+        `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n`,
+        `${RULING}\n`,
+        `${KIND_REMEDY}\n`,
+        'Only what THIS diff introduces is listed above — an entry the branch point already carried at the same bump\n' +
+          'is not this PR\'s to answer for (#7005). The line is re-read from the body on the next `edited` event.',
+      );
+      stdout.push(
+        errorAnnotation({
+          title: `Check Changeset (level axis): metadata-protocol declares \`none\` while a changeset entry is graded \`minor\` or above`,
+          message:
+            `Introduced at \`minor\` or above: ${minorList(result.minors)}. Under \`none\` the level is \`patch\`.\n${readingsBlock}\n` +
+            'Grade the entry `patch`, or — if this diff changes the metadata protocol — declare `Metadata-protocol: ' +
+            'added`, `narrowed` or `semantic`. A non-protocol breaking change keeps its BREAKING banner and ADR-0087 ' +
+            'disposition at `patch`. Full text in this step\'s log.',
+        }),
+      );
+      return { exitCode: 1, stdout, stderr };
+
+    case 'none-baseline-moved':
+      stderr.push(
+        `⛔ This PR declares ${declares}, and it moves a metadata-protocol baseline the ratchets record:\n`,
+        ...baselineLines(result.baselines),
+        '',
+        `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n`,
+        '   A changed `packages/spec/authorable-surface/` shard is an authorable key added or removed; a changed\n' +
+          '   `packages/spec/authorable-defaults/` shard is an authorable key\'s default changed. Either is a change to\n' +
+          '   the metadata protocol, and `none` says there is none.\n',
+        `${RULING}\n`,
+        'Declare the kind the shard records — `Metadata-protocol: added` (a key entered), `narrowed` (a key left or\n' +
+          'was tombstoned; declare the `(narrowing)` arm too), `semantic` (a default moved) — and grade the package\n' +
+          'that carries it at least `minor`. ⛔ Not the reverse: a baseline is never edited to quiet this gate, and\n' +
+          '`authorable-surface.base.json` is rewritten only by `gen:authorable-surface-base`.',
+      );
+      stdout.push(
+        errorAnnotation({
+          title: 'Check Changeset (level axis): metadata-protocol declares `none` while an authorable-surface or authorable-defaults baseline moved',
+          message:
+            `Moved: ${(result.baselines ?? []).join(', ')}. A changed authorable-surface shard is a key added or removed; ` +
+            `a changed authorable-defaults shard is a default changed — a metadata-protocol change the ratchet can see.\n${readingsBlock}\n` +
+            'Declare `Metadata-protocol: added`, `narrowed` (with the `(narrowing)` arm) or `semantic` and grade the ' +
+            'package at least `minor`. Full text in this step\'s log.',
+        }),
+      );
+      return { exitCode: 1, stdout, stderr };
 
     case 'clean':
       stdout.push(
-        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and no package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) it moves is graded \`patch\`.`,
+        `✓ LEVEL AXIS: this PR declares ${declares}, and no package whose published source (${PUBLISHED}) it moves is graded \`patch\`.`,
         ...readings,
         ...unreadableNote,
       );
@@ -2029,14 +2415,14 @@ export function renderLevel(result) {
     // mode the filing card is about, one layer along.
     case 'discharged':
       stdout.push(
-        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and it grades a package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) ` +
+        `✓ LEVEL AXIS: this PR declares ${declares}, and it grades a package whose published source (${PUBLISHED}) ` +
           `it moves at \`minor\` or above — the declared ${declaredAct} is accounted for:`,
         ...raisedLines(result.raised),
         '',
         '   These packages the diff also moves are graded `patch`, and are NOT refused:',
         ...patchLines(result.offenders),
         '',
-        '   ⚠️ Because clause ② is declared once FOR THE PR and names no package, this gate cannot read WHICH ' +
+        '   ⚠️ Because the kind is declared once FOR THE PR and names no package, this gate cannot read WHICH ' +
           'package the act landed in. It therefore does not ask every moved package to carry the level — it asks ' +
           'that ONE of them does (#16361). The residual, named rather than left silent: a SECOND widening in this ' +
           'PR, graded `patch` beside the `minor` above, would not be seen here. The contract review of record is ' +
@@ -2048,48 +2434,45 @@ export function renderLevel(result) {
 
     case 'enforce':
       stderr.push(
-        `⛔ This PR declares clause-② ${declaredValue}, and it grades NO package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) it moves\n` +
+        `⛔ This PR declares ${declares}, and it grades NO package whose published source (${PUBLISHED}) it moves\n` +
           '   at `minor` or above.\n',
       );
-      stderr.push('   The packages whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this PR moves, and the level each is graded:');
+      stderr.push(`   The packages whose published source (${PUBLISHED}) this PR moves, and the level each is graded:`);
       stderr.push(...patchLines(result.offenders));
       stderr.push('   ⇒ none of them is graded `minor` or above.\n');
       stderr.push(
-        'The clause-② declaration and the changeset level disagree, inside one PR:\n' +
+        'The metadata-protocol declaration and the changeset level disagree, inside one PR:\n' +
           `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n` +
           '\n' +
-          'A purely additive widening of a published package\'s public surface takes AT LEAST `minor`;\n' +
-          'the commit type may raise a bump but never lower it below what the act requires (maintainer\n' +
-          'ruling 2026-09-04, decision batch #35, on #15294 — written out in full under "WHICH LEVEL" in\n' +
-          'the `Check Changeset` step of .github/workflows/pr-automation.yml).\n' +
+          `${RULING}\n` +
           '\n' +
-          '⚠️ WHICH of the packages above received that widening is NOT something this gate can read, and it\n' +
-          'does not claim to. Clause ② is declared ONCE, FOR THE PR — the `Clause-②:` line is a PR-body\n' +
+          `⚠️ WHICH of the packages above received that ${declaredAct} is NOT something this gate can read, and it\n` +
+          'does not claim to. The kind is declared ONCE, FOR THE PR — the `Metadata-protocol:` line is a PR-body\n' +
           'line, and it names no package. So\n' +
-          'the finding above is not "each of these was widened"; it is the whole of what a PR-scoped\n' +
+          'the finding above is not "each of these was changed"; it is the whole of what a PR-scoped\n' +
           'declaration entails: THE WIDENED PACKAGE IS ONE OF THEM, AND NONE OF THEM CARRIES THE LEVEL.\n' +
           'Raise the one that actually grew. Raising a package that only received a comment is not asked\n' +
           'for here, and one `minor` on a package this diff moved clears this red for the PR (#16361).\n' +
           '\n' +
           'TWO ways forward, and they are not interchangeable:\n' +
-          '  1. The declaration is right and the level is wrong -> raise the widened package to `minor`.\n' +
+          '  1. The declaration is right and the level is wrong -> raise the package that carries the protocol change to `minor`.\n' +
           '     This is the ordinary case; #16044 is the measured one, one word in one changeset.\n' +
-          '  2. The level is right and the `Clause-②:` LINE is wrong -> correct the line at the producer;\n' +
-          '     it is the claim\'s. ⛔ Do not add a tolerance here to route around a declaration that says\n' +
-          '     something its author did not mean.\n' +
+          '  2. The level is right and the `Metadata-protocol:` LINE is wrong -> correct the line at the producer:\n' +
+          '     a change that adds, narrows or re-means nothing an author writes is `none`, at `patch`. ⛔ Do not add\n' +
+          '     a tolerance here to route around a declaration that says something its author did not mean.\n' +
           '\n' +
           'Only what THIS diff introduces is listed above — an entry the branch point already carried at\n' +
           'the same bump is not this PR\'s to answer for (#7005).',
       );
       stdout.push(
         errorAnnotation({
-          title: `Check Changeset (level axis): clause-② declares ${declaredValue} while no moved package is graded \`minor\` or above`,
+          title: `Check Changeset (level axis): metadata-protocol declares ${declaredKind} under clause-② ${declaredValue} while no moved package is graded \`minor\` or above`,
           message:
             `Moved and graded \`patch\`: ${offenderList(result.offenders)}. None of them is graded \`minor\` or above.\n` +
             `${readingsBlock}\n` +
-            'A purely additive widening of a published package\'s public surface takes AT LEAST `minor` (maintainer ' +
-            'ruling 2026-09-04, decision batch #35, on #15294). Raise the ONE package that actually grew, or correct ' +
-            'the declaration at its producer. Full text in this step\'s log.',
+            'A change to the metadata protocol takes AT LEAST `minor` (maintainer ruling A, 2026-10-21, on #25105). ' +
+            'Raise the ONE package that carries it, or correct the declaration at its producer (`none` is `patch`). ' +
+            'Full text in this step\'s log.',
         }),
       );
       return { exitCode: 1, stdout, stderr };
@@ -2471,6 +2854,10 @@ function main(argv) {
   const levelResult = judgeLevel({
     levels: scanned?.levels ?? null,
     touched: scanned ? packagesTouched({ cwd: REPO_ROOT, from: scanned.base, head }) : { packages: [], unreadable: [] },
+    // Ruling A: the protocol baselines this diff moves, read off the same
+    // branch point, so a declared `none` over a visible protocol change is
+    // refused by name.
+    baselines: scanned ? baselinesTouched({ cwd: REPO_ROOT, from: scanned.base, head }) : { moved: [] },
     declaration: declarationFromPullRequest(readEventPullRequest(eventPath)),
     prEvent: eventName === 'pull_request' || eventName === 'pull_request_target',
   });
@@ -2535,6 +2922,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18263: the refusal says its reason, and says it where the API can read it': 35,
   '#19008: the level headline is the parsed declaration, not a literal': 30,
   'The protocol lockstep evidence, in BOTH directions (ruling 6056808625)': 39,
+  'Ruling A: the metadata-protocol kind is the level axis (#25105)': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2542,8 +2930,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // carrier-axis battery left with the gate label it read (ruling record
 // 5770886272 on #19061): the ordinary direction, one battery, one row. Raised
 // 19 → 20 with the protocol lockstep battery (ruling record 6056808625). Raised
-// 20 → 21 with the copy-leg battery (#15204).
-const SELF_TEST_BATTERY_FLOOR = 21;
+// 20 → 21 with the copy-leg battery (#15204). Raised 21 → 22 with the ruling A
+// battery (maintainer ruling A, 2026-10-21, on #25105).
+const SELF_TEST_BATTERY_FLOOR = 22;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3211,7 +3600,10 @@ function selfTest() {
       const MINOR_HEAD = `---\n"@objectstack/cli": minor${LEVEL_BODY}`;
       const CHANGESET = '.changeset/lint-eval-generator-load-envelope.md';
       const CLI = '@objectstack/cli';
-      const declaredYes = { value: 'yes', readings: ['declaration line: `Clause-②: yes`'] };
+      // Ruling A: the kind lanes are driven by `Metadata-protocol: added` where
+      // `Clause-②: yes` alone drove them before — the `yes` stays, read and
+      // printed, and no longer decides the level.
+      const declaredYes = { value: 'yes', protocol: 'added', readings: ['declaration line: `Clause-②: yes`', 'metadata-protocol line: `Metadata-protocol: added`'] };
       const touchedCli = { packages: [CLI], unreadable: [] };
       const levelsFor = (text) => [{ file: CHANGESET, entries: entriesIn(text) }];
 
@@ -3243,30 +3635,42 @@ function selfTest() {
       // here is about the declaration and cannot be about the changeset.
       //
       // ⭐ #16776 splits the old single `not-measured` in two, and the pair below
-      // is the whole of it: the SAME missing declaration, over two trees that
-      // differ by exactly the bump word, must reach two different EXIT CODES.
-      // The old verdict exited 0 on both, so the check run concluded `success`
-      // whether the unread declaration was immaterial or whether it was the one
-      // input that decided the answer — indistinguishable at every surface that
-      // reads a conclusion rather than a step log.
-      const noDeclaration = { value: null, payload: true, readings: ['declaration line: the PR body carries no `Clause-②:` line'] };
+      // is the whole of it: the SAME missing declaration must reach two
+      // different EXIT CODES depending on whether it could have moved the
+      // verdict. The old verdict exited 0 on both, so the check run concluded
+      // `success` whether the unread declaration was immaterial or whether it
+      // was the one input that decided the answer — indistinguishable at every
+      // surface that reads a conclusion rather than a step log.
+      //
+      // Ruling A re-cuts the pair. The unread kind is material over the `patch`
+      // head (a kind refuses it) AND over the `minor` head (a `none` refuses
+      // it): the two heads are no longer the material/moot pair, they are two
+      // material readings with different reasons. Moot is the tree where no
+      // introduced entry sits on a moved package and nothing is raised — the
+      // SAME changeset bytes with the package not grown.
+      const noDeclaration = { value: null, protocol: null, payload: true, readings: ['declaration line: the PR body carries no `Clause-②:` line', 'metadata-protocol line: the PR body carries no `Metadata-protocol:` line'] };
       const notMeasuredMaterial = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noDeclaration });
-      const notMeasuredMoot = judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: noDeclaration });
+      const notMeasuredMinor = judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: noDeclaration });
+      const notMeasuredMoot = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: { packages: ['@objectstack/spec'], unreadable: [] }, declaration: noDeclaration });
       assert(
         notMeasuredMaterial.verdict === 'not-measured-material',
         `an unread declaration over a \`patch\` on a package this diff grew is MATERIAL — got ${notMeasuredMaterial.verdict}`,
+      );
+      assert(
+        notMeasuredMinor.verdict === 'not-measured-material' && notMeasuredMinor.missing.join() === 'Clause-②,Metadata-protocol',
+        `ruling A: an unread kind over a \`minor\` is MATERIAL too — a \`none\` would refuse it — and both missing lines are named — got ${notMeasuredMinor.verdict} / ${notMeasuredMinor.missing}`,
       );
       assert(
         notMeasuredMoot.verdict === 'not-measured-moot',
         `an unread declaration that could not have changed the verdict is MOOT — got ${notMeasuredMoot.verdict}`,
       );
       assert(
-        renderLevel(notMeasuredMaterial).exitCode === 1 && renderLevel(notMeasuredMoot).exitCode === 0,
-        'the two must differ in EXIT CODE, not merely in verdict name — the exit code is what becomes the check-run conclusion, and that conclusion is the whole of #16776',
+        renderLevel(notMeasuredMaterial).exitCode === 1 && renderLevel(notMeasuredMinor).exitCode === 1 && renderLevel(notMeasuredMoot).exitCode === 0,
+        'the material and moot readings must differ in EXIT CODE, not merely in verdict name — the exit code is what becomes the check-run conclusion, and that conclusion is the whole of #16776',
       );
       assert(
         PATCH_HEAD.replace('patch', 'minor') === MINOR_HEAD,
-        'control: the material/moot pair must differ by exactly the bump word, and by nothing about the declaration — both are judged on the same `noDeclaration` reading',
+        'control: the two material heads must differ by exactly the bump word, and by nothing about the declaration — both are judged on the same `noDeclaration` reading, and the moot tree is the patch head with the package not grown',
       );
       const materialText = renderLevel(notMeasuredMaterial).stderr.join('\n');
       assert(materialText.includes('NOT MEASURED'), 'the refusal must still SAY it did not measure — #16055 bought that honesty and #16776 does not spend it');
@@ -3279,6 +3683,14 @@ function selfTest() {
         'the refusal must spell BOTH declarations — the way out of this red is a declaration, and a message that names only the `yes` reads as a demand to raise the level',
       );
       assert(
+        ['Metadata-protocol: none', 'Metadata-protocol: added', 'Metadata-protocol: narrowed', 'Metadata-protocol: semantic'].every((s) => materialText.includes(s)),
+        'ruling A: and it spells all FOUR kinds — an author who is told a line is missing must be able to copy the one that is true',
+      );
+      assert(
+        renderLevel(notMeasuredMinor).stderr.join('\n').includes(`${CLI}: minor`),
+        'ruling A: the material refusal over a `minor` NAMES the raised entry — that is the line a `none` would refuse, and the author must see which one',
+      );
+      assert(
         renderLevel(notMeasuredMoot).stdout.join('\n').includes('could not have changed this verdict'),
         'the moot green must say WHY it is green — an exit 0 that means "the missing input could not have moved this" is a different claim from a tick, and #16776 is what happens when they print alike',
       );
@@ -3286,35 +3698,71 @@ function selfTest() {
         renderLevel(notMeasuredMaterial).stderr.join('\n') !== renderLevel(judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: declaredYes })).stderr.join('\n'),
         'a missing reading and a self-contradiction must not print the same refusal: one asks for a declaration, the other says the declaration and the level disagree',
       );
-      const declaredNo = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: 'no', payload: true, readings: [] } });
-      assert(declaredNo.verdict === 'not-declared', `a declaration of \`no\` is a DECISION, distinct from an unread one — got ${declaredNo.verdict}`);
+      // The decision that stands the kind lanes down is `none`, and only `none`
+      // — a bare `no` decides nothing about the level any more (ruling A).
+      const declaredNo = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: 'no', protocol: 'none', payload: true, readings: [] } });
+      assert(declaredNo.verdict === 'none-clean', `a declaration of \`none\` is a DECISION, distinct from an unread one — got ${declaredNo.verdict}`);
       assert(
         renderLevel(declaredNo).exitCode === 0,
-        'the explicit `no` is the opt-out this refusal is built around: it must stay a PASS on the very tree the unread reading refuses, or #16776 has been closed by making the gate uncloseable',
+        'the explicit `none` is the opt-out this refusal is built around: it must stay a PASS on the very tree the unread reading refuses, or #16776 has been closed by making the gate uncloseable',
       );
       assert(
         renderLevel(declaredNo).stdout.join('\n') !== renderLevel(notMeasuredMoot).stdout.join('\n'),
         'a decision and a missing reading must not print the same thing — collapsing them is the defect #16055 records',
       );
+      assert(
+        judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: 'no', protocol: null, payload: true, readings: [] } }).verdict === 'not-measured-material',
+        '⛔ ruling A: a bare `no` with NO kind read is not a decision about the level — the kind is the reading this tree needed, and it is refused as unread rather than waved through as the old `not-declared`',
+      );
 
-      // ── The DIRECTION ARM on the level axis (#16421) ──────────────────────
+      // ── The DIRECTION ARM on the level axis (#16421), under ruling A ───────
       //
       // ⭐ BOTH arms, and the arm-less `no` beside them. One direction alone
       // would be satisfied by a reader that answered `narrowing` to everything:
       // the widening row and the bare-`no` row are what make the narrowing row
       // a reading. Same tree, same levels, same `touched` — only the declaration
       // moves, so the verdicts differ for exactly one reason.
+      //
+      // Ruling A: the arm no longer carries the level — the KIND does. The same
+      // `no (narrowing)` reaches `enforce` with `narrowed` beside it and
+      // `none-clean` with `none` beside it: a protocol narrowing owes `minor`, a
+      // non-protocol narrowing (a driver posture, a REST refusal) ships `patch`
+      // and keeps its BREAKING banner and ADR-0087 disposition. That pair is the
+      // ruling, and the widening pair beside it is its control.
       const armDecl = (body) => declarationFromPullRequest({ labels: [], body });
       const armVerdict = (body) => judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: armDecl(body) }).verdict;
-      assert(armDecl('Clause-②: no (narrowing)\n').arm === 'narrowing' && armDecl('Clause-②: no (narrowing)\n').value === 'no', 'the arm travels beside the value and does NOT overwrite it — `no (narrowing)` is still a truthful `no`');
-      assert(armVerdict('Clause-②: no (narrowing)\n') === 'enforce', `a declared narrowing is breaking, so it owes the same grade a widening owes — got ${armVerdict('Clause-②: no (narrowing)\n')}`);
-      assert(armVerdict('Clause-②: yes (widening)\n') === 'enforce', 'the widening arm is read and the value still carries the axis');
-      assert(armVerdict('Clause-②: no\n') === 'not-declared', '⛔ CONTROL: a bare `no` still stands the axis down — every declaration on the board the day this landed is this shape');
-      assert(armDecl('Clause-②: no\n').arm === null, '⛔ CONTROL: a bare `no` names NO arm, and says so rather than defaulting to one');
-      assert(armVerdict('Clause-②: no (nothing published moves)\n') === 'not-declared', '⛔ CONTROL: ordinary parenthetical reasoning is not an arm');
-      assert(armDecl('Clause-②: no (narrowing)\n').readings.some((r) => /direction arm: `narrowing`/.test(r)), 'the arm is PRINTED, so a reader of the log can see which fact moved the verdict');
-      assert(armDecl('Clause-②: no\n').readings.some((r) => /direction arm: none declared/.test(r)), 'and an absent arm is printed too — a decision and a silence must not look alike here either');
-      assert(judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: armDecl('Clause-②: no (narrowing)\n') }).verdict === 'clean', 'a declared narrowing graded `minor` is clean — the arm asks for the grade, it does not refuse the PR');
+      assert(armDecl('Clause-②: no (narrowing)\nMetadata-protocol: narrowed\n').arm === 'narrowing' && armDecl('Clause-②: no (narrowing)\nMetadata-protocol: narrowed\n').value === 'no', 'the arm travels beside the value and does NOT overwrite it — `no (narrowing)` is still a truthful `no`');
+      assert(armVerdict('Clause-②: no (narrowing)\nMetadata-protocol: narrowed\n') === 'enforce', `a declared PROTOCOL narrowing owes \`minor\` — got ${armVerdict('Clause-②: no (narrowing)\nMetadata-protocol: narrowed\n')}`);
+      assert(armVerdict('Clause-②: no (narrowing)\nMetadata-protocol: none\n') === 'none-clean', `⭐ THE RULING: the same \`no (narrowing)\` with \`none\` beside it ships \`patch\` — a non-protocol narrowing keeps its BREAKING carriers and loses the level — got ${armVerdict('Clause-②: no (narrowing)\nMetadata-protocol: none\n')}`);
+      assert(armVerdict('Clause-②: yes (widening)\nMetadata-protocol: added\n') === 'enforce', 'the widening arm is read and the KIND carries the axis');
+      assert(armVerdict('Clause-②: yes (widening)\nMetadata-protocol: none\n') === 'none-clean', `⭐ THE RULING, other direction: a \`yes (widening)\` with \`none\` beside it (a REST widening) ships \`patch\` — got ${armVerdict('Clause-②: yes (widening)\nMetadata-protocol: none\n')}`);
+      assert(armVerdict('Clause-②: no\nMetadata-protocol: none\n') === 'none-clean', '⛔ CONTROL: a bare `no` with `none` stands the axis down — every declaration on the board the day the arm landed is this shape, plus the one line ruling A adds');
+      assert(armDecl('Clause-②: no\nMetadata-protocol: none\n').arm === null, '⛔ CONTROL: a bare `no` names NO arm, and says so rather than defaulting to one');
+      assert(armVerdict('Clause-②: no (nothing published moves)\nMetadata-protocol: none\n') === 'none-clean', '⛔ CONTROL: ordinary parenthetical reasoning is not an arm');
+      assert(armDecl('Clause-②: no (narrowing)\nMetadata-protocol: narrowed\n').readings.some((r) => /direction arm: `narrowing`/.test(r)), 'the arm is PRINTED, so a reader of the log can see which fact moved the verdict');
+      assert(armDecl('Clause-②: no\nMetadata-protocol: none\n').readings.some((r) => /direction arm: none declared/.test(r)), 'and an absent arm is printed too — a decision and a silence must not look alike here either');
+      assert(armDecl('Clause-②: no\nMetadata-protocol: none\n').readings.some((r) => /metadata-protocol line: `Metadata-protocol: none`/.test(r)), 'ruling A: the kind is PRINTED beside the arm, from the same reader');
+      assert(judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: armDecl('Clause-②: no (narrowing)\nMetadata-protocol: narrowed\n') }).verdict === 'clean', 'a declared protocol narrowing graded `minor` is clean — the kind asks for the grade, it does not refuse the PR');
+      assert(judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: armDecl('Clause-②: no (narrowing)\nMetadata-protocol: none\n') }).verdict === 'none-minor', '⭐ THE TEETH: a non-protocol narrowing graded `minor` under `none` is REFUSED — this is the half of ruling A that stops every release being a minor');
+      // `semantic`, the third kind: a bare `no` beside it is coherent (a changed
+      // default widens nothing and narrows nothing), and it owes `minor`.
+      assert(armVerdict('Clause-②: no\nMetadata-protocol: semantic\n') === 'enforce', `\`semantic\` under a bare \`no\` is a kind like the others and owes \`minor\` — got ${armVerdict('Clause-②: no\nMetadata-protocol: semantic\n')}`);
+      assert(judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: armDecl('Clause-②: no\nMetadata-protocol: semantic\n') }).verdict === 'clean', 'and graded `minor` it is clean');
+      // The two contradictions, and the two non-inferences that bound them.
+      assert(armVerdict('Clause-②: no\nMetadata-protocol: added\n') === 'contradiction', `\`added\` under \`Clause-②: no\` is a CONTRADICTION — a new authorable key widens a published accept set by definition — got ${armVerdict('Clause-②: no\nMetadata-protocol: added\n')}`);
+      assert(armVerdict('Clause-②: no\nMetadata-protocol: narrowed\n') === 'contradiction' && armVerdict('Clause-②: yes\nMetadata-protocol: narrowed\n') === 'contradiction', '`narrowed` beside a `Clause-②:` line with no `(narrowing)` arm is a CONTRADICTION under `no` and under `yes` alike — the arm is the breaking signal the ADR-0087 gate reads');
+      assert(armVerdict('Clause-②: yes (narrowing)\nMetadata-protocol: narrowed\n') === 'enforce', 'control: `narrowed` beside `yes (narrowing)` is coherent — a diff that widens and narrows — and is judged on its level');
+      assert(
+        judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: armDecl('Clause-②: no\nMetadata-protocol: added\n') }).reason === 'added-under-no' &&
+          judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: armDecl('Clause-②: no\nMetadata-protocol: narrowed\n') }).reason === 'narrowed-without-arm',
+        'the two contradictions carry different REASONS, because they owe different remedies',
+      );
+      const contradictionOut = renderLevel(judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: armDecl('Clause-②: no\nMetadata-protocol: added\n') }));
+      assert(contradictionOut.exitCode === 1 && contradictionOut.stdout.filter((l) => l.startsWith('::error ')).length === 1, 'a contradiction exits 1 and annotates exactly once');
+      assert(
+        contradictionOut.stderr.join('\n').includes('Neither line is inferred from the other'),
+        'and the refusal states the non-inference out loud: a `yes` is not read as `added` and a `(narrowing)` arm is not read as `narrowed` — the REST widening and the driver narrowing are exactly what ruling A grades `patch`',
+      );
 
       // The two contexts that are NOT a pull request, and the one that only
       // looks like it. `cut-rc.yml` runs this script on a `workflow_dispatch`
@@ -3484,6 +3932,122 @@ function selfTest() {
       );
     }
 
+    // ── Ruling A: the metadata-protocol kind is the level axis (#25105) ──────
+    //
+    // The lanes the ruling adds, each driven through the REAL reader
+    // (`declarationFromPullRequest` over a body) and the real `baselinesTouched`
+    // over temp repositories, and each paired with the control that says the
+    // red is about the declaration and not about the diff.
+    battery('Ruling A: the metadata-protocol kind is the level axis (#25105)');
+    {
+      const SPEC = '@objectstack/spec';
+      const CLI = '@objectstack/cli';
+      const CS = '.changeset/ruling-a.md';
+      const decl = (body) => declarationFromPullRequest({ labels: [], body });
+      const cs = (entries) => `---\n${entries.map(([p, b]) => `"${p}": ${b}`).join('\n')}\n---\n\nbody\n`;
+      const SHARD = 'packages/spec/authorable-surface/ui.json';
+      const DEFAULTS = 'packages/spec/authorable-defaults/data.json';
+      const BASE_FILE = 'packages/spec/authorable-surface.base.json';
+      const SRC = 'packages/spec/src/ui/view.zod.ts';
+      const specRepo = (head) =>
+        makeRepo(
+          {
+            'packages/spec/package.json': JSON.stringify({ name: SPEC, version: '0.0.0' }),
+            [SRC]: 'export const a = 1;\n',
+            [SHARD]: '{"keys":["a"]}\n',
+            [DEFAULTS]: '{"defaults":["a = 1"]}\n',
+            [BASE_FILE]: '{"base":1}\n',
+          },
+          head,
+        );
+      const levelOf = ({ dir, base }, body) => {
+        const scanned = scan({ cwd: dir, base });
+        const touched = packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
+        const baselines = baselinesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
+        const result = judgeLevel({ levels: scanned.levels, touched, baselines, declaration: decl(body), prEvent: true });
+        return { touched, baselines, result, out: renderLevel(result) };
+      };
+      const KEY_ADDED = { [SRC]: 'export const a = 1;\nexport const b = 2;\n', [SHARD]: '{"keys":["a","b"]}\n' };
+
+      // ── The baseline reader, on a real repository ─────────────────────────
+      const r1 = levelOf(specRepo({ ...KEY_ADDED, [CS]: cs([[SPEC, 'minor']]) }), 'Clause-②: yes\nMetadata-protocol: added\n');
+      assert(r1.baselines.moved.join() === SHARD, `baselinesTouched names the moved authorable-surface shard — got ${JSON.stringify(r1.baselines)}`);
+      const defaultsMoved = levelOf(specRepo({ [DEFAULTS]: '{"defaults":["a = 2"]}\n', [SRC]: 'export const a = 2;\n', [CS]: cs([[SPEC, 'minor']]) }), 'Clause-②: no\nMetadata-protocol: semantic\n');
+      assert(defaultsMoved.baselines.moved.join() === DEFAULTS && defaultsMoved.result.verdict === 'clean', `and a moved authorable-defaults shard, clean under \`semantic\` + \`minor\` — got ${JSON.stringify(defaultsMoved.baselines)} / ${defaultsMoved.result.verdict}`);
+      assert(levelOf(specRepo({ [BASE_FILE]: '{"base":2}\n', [CS]: cs([[SPEC, 'patch']]) }), 'Clause-②: no\nMetadata-protocol: none\n').baselines.moved.length === 0, 'control: `authorable-surface.base.json` — the gen-only hand-off, not a shard — is NOT a baseline this leg reads');
+      assert(levelOf(specRepo({ [SRC]: 'export const a = 2;\n', [CS]: cs([[SPEC, 'patch']]) }), 'Clause-②: no\nMetadata-protocol: none\n').baselines.moved.length === 0, 'control: a src-only diff moves no baseline');
+
+      // ── `none` over a visible protocol change is refused by name ───────────
+      const noneOverShard = levelOf(specRepo({ ...KEY_ADDED, [CS]: cs([[SPEC, 'patch']]) }), 'Clause-②: no\nMetadata-protocol: none\n');
+      assert(noneOverShard.result.verdict === 'none-baseline-moved' && noneOverShard.out.exitCode === 1, `\`none\` over a moved authorable-surface shard is REFUSED — got ${noneOverShard.result.verdict}`);
+      assert(noneOverShard.out.stderr.join('\n').includes(SHARD) && noneOverShard.out.stderr.join('\n').includes('`added`'), 'and the refusal names the shard and the kinds that would be true');
+      assert(noneOverShard.out.stdout.filter((l) => l.startsWith('::error ')).length === 1, 'and annotates exactly once');
+      assert(r1.result.verdict === 'clean' && r1.out.exitCode === 0, `control: the same shard move declared \`added\` and graded \`minor\` is CLEAN — the red above is about the declaration — got ${r1.result.verdict}`);
+      const noneOverShardMinor = levelOf(specRepo({ ...KEY_ADDED, [CS]: cs([[SPEC, 'minor']]) }), 'Clause-②: yes\nMetadata-protocol: none\n');
+      assert(noneOverShardMinor.result.verdict === 'none-baseline-moved', `\`none\` + \`minor\` + a moved shard is refused for the BASELINE first — the author declared no protocol change and the tree shows one — got ${noneOverShardMinor.result.verdict}`);
+      const unreadOverShard = levelOf(specRepo({ ...KEY_ADDED, [CS]: cs([[SPEC, 'minor']]) }), 'Clause-②: yes\n');
+      assert(unreadOverShard.result.verdict === 'not-measured-material' && unreadOverShard.result.missing.join() === 'Metadata-protocol', `an unread kind over a moved shard is MATERIAL, naming the one missing line — got ${unreadOverShard.result.verdict} / ${unreadOverShard.result.missing}`);
+      assert(unreadOverShard.out.stderr.join('\n').includes(SHARD), 'and the material refusal lists the baseline that made it material');
+
+      // ── `none` + `minor`: refused on ANY package, moved or not ─────────────
+      const noneMinorOffDiff = judgeLevel({ levels: [{ file: CS, entries: [{ pkg: CLI, bump: 'minor' }] }], touched: { packages: [SPEC], unreadable: [] }, declaration: decl('Clause-②: no\nMetadata-protocol: none\n'), prEvent: true });
+      assert(noneMinorOffDiff.verdict === 'none-minor' && noneMinorOffDiff.minors[0].pkg === CLI, `\`none\` with a \`minor\` on a package the diff does not even move is refused — a \`minor\` nothing earned is the same error wherever it sits — got ${noneMinorOffDiff.verdict}`);
+      const noneMinorOut = renderLevel(noneMinorOffDiff);
+      assert(noneMinorOut.exitCode === 1 && noneMinorOut.stdout.filter((l) => l.startsWith('::error ')).length === 1, 'none-minor exits 1 and annotates once');
+      assert(noneMinorOut.stderr.join('\n').includes(`${CLI}: minor`) && noneMinorOut.stderr.join('\n').includes('grade the entry `patch`'), 'and names the entry and both ways out');
+      const nonePatchOffDiff = judgeLevel({ levels: [{ file: CS, entries: [{ pkg: CLI, bump: 'patch' }] }], touched: { packages: [SPEC], unreadable: [] }, declaration: decl('Clause-②: no\nMetadata-protocol: none\n'), prEvent: true });
+      assert(nonePatchOffDiff.verdict === 'none-clean' && renderLevel(nonePatchOffDiff).exitCode === 0, 'control: the same entry at `patch` is clean under `none`');
+      assert(renderLevel(nonePatchOffDiff).stdout.filter((l) => l.startsWith('::error ')).length === 0, 'and a green `none` annotates nothing');
+      assert(
+        judgeLevel({ levels: [{ file: CS, entries: [{ pkg: CLI, bump: 'major' }] }], touched: { packages: [CLI], unreadable: [] }, declaration: decl('Clause-②: no\nMetadata-protocol: none\n'), prEvent: true }).verdict === 'none-minor',
+        'a `major` under `none` is refused on this axis too (the launch-window guard refuses it on its own)',
+      );
+      assert(
+        renderLevel(judgeLevel({ levels: [{ file: CS, entries: [{ pkg: CLI, bump: 'patch' }] }], touched: { packages: [CLI], unreadable: [] }, declaration: decl('Clause-②: no (narrowing)\nMetadata-protocol: none\n'), prEvent: true })).stdout.join('\n').includes('BREAKING banner'),
+        'the `none-clean` green for a declared non-protocol narrowing says the BREAKING carriers are untouched — the level stopped carrying breaking-ness when the window opened and ruling A does not hand it back',
+      );
+
+      // ── The materiality matrix, under the one predicate ───────────────────
+      const matrix = (levels, touched, baselines, body) => judgeLevel({ levels, touched, baselines, declaration: decl(body), prEvent: true }).verdict;
+      const patchOnGrown = [{ file: CS, entries: [{ pkg: SPEC, bump: 'patch' }] }];
+      const minorOnGrown = [{ file: CS, entries: [{ pkg: SPEC, bump: 'minor' }] }];
+      const grownSpec = { packages: [SPEC], unreadable: [] };
+      const notGrown = { packages: [], unreadable: [] };
+      const noBaseline = { moved: [] };
+      assert(matrix(patchOnGrown, grownSpec, noBaseline, 'Clause-②: no\n') === 'not-measured-material', 'kind unread + patch on a moved package: material');
+      assert(matrix(minorOnGrown, notGrown, noBaseline, 'Clause-②: no\n') === 'not-measured-material', 'kind unread + a minor anywhere: material');
+      assert(matrix([], notGrown, { moved: [SHARD] }, 'Clause-②: no\n') === 'not-measured-material', 'kind unread + a moved baseline and no entry at all: material');
+      assert(matrix(patchOnGrown, notGrown, noBaseline, 'Clause-②: no\n') === 'not-measured-moot', 'kind unread + a patch on a package the diff does not move: moot');
+      assert(matrix([], notGrown, noBaseline, 'Clause-②: no\n') === 'not-measured-moot', 'kind unread + nothing introduced: moot');
+      assert(matrix(patchOnGrown, grownSpec, noBaseline, 'Metadata-protocol: none\n') === 'not-measured-material', '⛔ NOT LOOSENED: the `Clause-②:` line unread over a patch on a moved package is still material, kind or no kind');
+      assert(matrix(minorOnGrown, grownSpec, noBaseline, 'Metadata-protocol: none\n') === 'none-minor', 'the `Clause-②:` line unread where it is immaterial does not stop the kind from deciding: `none` + `minor` is refused');
+      assert(matrix(minorOnGrown, grownSpec, noBaseline, 'Metadata-protocol: added\n') === 'clean', 'and `added` + `minor` with no `Clause-②:` line is clean — nothing to contradict, the kind is judged alone');
+      assert(matrix([], notGrown, noBaseline, 'Clause-②: no\nMetadata-protocol: none\n') === 'none-clean', 'both read, nothing introduced: none-clean');
+
+      // ── The readings and the remedies, for the second line ────────────────
+      const malformed = decl('Clause-②: no\nMetadata-protocol: minor\n');
+      assert(malformed.protocol === null && malformed.readings.some((r) => /metadata-protocol line: MALFORMED/.test(r) && /`added`, `narrowed`, `semantic`, `none`/.test(r)), 'a malformed kind is NOT a declaration and the reading spells the closed set');
+      const misspelled = decl('Clause-②: no\nmetadata protocol: added\n');
+      assert(misspelled.protocol === null && misspelled.readings.some((r) => /remedy for `spelling` \(Metadata-protocol\)/.test(r)), 'a misspelled key is a near miss whose remedy names the line it is about');
+      assert(decl('Clause-②: no\nDomain: x · Metadata-protocol: none\n').readings.some((r) => /remedy for `inline-key` \(Metadata-protocol\)/.test(r)), 'the inline-key near miss reaches its own remedy');
+      assert(decl('Clause-②: no\n`Metadata-protocol: none` · skip-changeset\n').readings.some((r) => /remedy for `describing` \(Metadata-protocol\)/.test(r)), 'and the describing one');
+      assert(new Set(['spelling', 'inline-key', 'describing'].map((r) => metadataProtocolNearMissRemedy(r, 'x'))).size === 3, 'the three remedies are three different sentences');
+      const invented = protocolNearMissReadings('never-taught', '## Metadata-protocol: none');
+      assert(invented.length === 2 && invented.every((r) => r.includes('never-taught')) && invented[1].includes('## Metadata-protocol: none'), 'an unknown reason names itself and quotes the line — the loud path, exactly as the Clause-② remedy');
+      assert(metadataProtocolNearMissRemedy(null, 'x').length > 0, 'a null reason still returns a sentence');
+      assert(declaredProtocol({ protocol: 'added' }) === '`added`' && declaredProtocol({ protocol: null }) === 'NOT MEASURED' && declaredProtocol(undefined) === 'NOT MEASURED', 'the headline spelling of the kind, and NOT MEASURED for a kind not read');
+      const headline = renderLevel(judgeLevel({ levels: minorOnGrown, touched: grownSpec, declaration: decl('Clause-②: yes (widening)\nMetadata-protocol: added\n'), prEvent: true })).stdout.join('\n');
+      assert(headline.includes('clause-② `yes (widening)` and metadata-protocol `added`'), 'the green headline carries BOTH declarations as written');
+      const titles = [
+        noneMinorOut,
+        noneOverShard.out,
+        renderLevel(judgeLevel({ levels: patchOnGrown, touched: grownSpec, declaration: decl('Clause-②: no\nMetadata-protocol: added\n'), prEvent: true })),
+        renderLevel(judgeLevel({ levels: patchOnGrown, touched: grownSpec, declaration: decl('Clause-②: yes\nMetadata-protocol: added\n'), prEvent: true })),
+        renderLevel(judgeLevel({ levels: patchOnGrown, touched: grownSpec, declaration: decl('Clause-②: yes\n'), prEvent: true })),
+      ].map((o) => o.stdout.find((l) => l.startsWith('::error ')) ?? '');
+      assert(titles.every((t) => t.length > 0 && !t.includes('\n')) && new Set(titles.map((t) => t.split('::')[1])).size === titles.length, 'none-minor, none-baseline-moved, contradiction, enforce and not-measured-material carry five DIFFERENT one-line annotation titles');
+    }
+
     // ── The HEADLINE is the DECLARATION, never a literal (#19008) ────────────
     //
     // ⭐ BOTH DIRECTIONS, on ALL THREE carried lanes. Past `not-declared` the
@@ -3503,10 +4067,14 @@ function selfTest() {
       const CLI = '@objectstack/cli';
       const OTHER = '@objectstack/spec';
       const CS = '.changeset/headline.md';
-      const NARROWING = 'Clause-②: no (narrowing)\n';
-      const YES = 'Clause-②: yes\n';
-      const WIDENING = 'Clause-②: yes (widening)\n';
-      const BARE_NO = 'Clause-②: no\n';
+      // Ruling A: the kind drives the lanes, so every body carries one — the
+      // narrowing rows `narrowed`, the yes rows `added`, the bare `no` `none`.
+      // The headline pins below are about the Clause-② half of the headline,
+      // which the kind sits beside and must not displace.
+      const NARROWING = 'Clause-②: no (narrowing)\nMetadata-protocol: narrowed\n';
+      const YES = 'Clause-②: yes\nMetadata-protocol: added\n';
+      const WIDENING = 'Clause-②: yes (widening)\nMetadata-protocol: added\n';
+      const BARE_NO = 'Clause-②: no\nMetadata-protocol: none\n';
       // The REAL reader, so every row below is judged on a declaration this
       // repo's parser actually returns rather than on one assembled here.
       const decl = (body) => declarationFromPullRequest({ labels: ['domain:devx'], body });
@@ -3560,7 +4128,7 @@ function selfTest() {
       const annotation = renderLevel(judged('enforce', NARROWING)).stdout.filter((l) => l.startsWith('::error '));
       assert(annotation.length === 1, `the \`enforce\` lane still annotates EXACTLY once — the derivation is in the title, not in the count (got ${annotation.length})`);
       assert(
-        annotation[0].includes('clause-② declares `no (narrowing)` while no moved package is graded'),
+        annotation[0].includes('metadata-protocol declares `narrowed` under clause-② `no (narrowing)` while no moved package is graded'),
         'the CHECK-RUN annotation title carries the true declaration too — it is the one line a reader outside the run sees, and it used to read `declares YES` for a PR that declared the opposite',
       );
       assert(!annotation[0].includes('\n'), 'and it is still ONE line — a workflow command carrying a raw newline is truncated at it, and the diagnosis would be lost in the channel that exists to carry it');
@@ -3579,8 +4147,8 @@ function selfTest() {
       // it was: this row is what says nothing widened while the headline was fixed.
       const bareNo = judgeLevel({ levels: LANES.enforce.levels, touched: LANES.enforce.touched, declaration: decl(BARE_NO), prEvent: true });
       assert(
-        bareNo.verdict === 'not-declared' && renderLevel(bareNo).exitCode === 0,
-        `⛔ CONTROL: a bare \`no\` still stands the axis down at exit 0 on the very tree the narrowing refuses — the ARM is what carries the axis, and this row says the derivation did not widen the lane (got ${bareNo.verdict})`,
+        bareNo.verdict === 'none-clean' && renderLevel(bareNo).exitCode === 0,
+        `⛔ CONTROL: a bare \`no\` with \`none\` still stands the axis down at exit 0 on the very tree the narrowing refuses — the KIND is what carries the axis (ruling A), and this row says the derivation did not widen the lane (got ${bareNo.verdict})`,
       );
       assert(
         renderLevel(bareNo).stdout.join('\n').includes('declares clause-② `no`'),
@@ -3621,8 +4189,8 @@ function selfTest() {
       const SPEC = '@objectstack/spec';
       const RUNTIME = '@objectstack/runtime';
       const LINT = '@objectstack/lint';
-      const yes = { value: 'yes', payload: true, readings: ['declaration line: `Clause-②: yes`'] };
-      const unread = { value: null, payload: true, readings: ['declaration line: the PR body carries no `Clause-②:` line'] };
+      const yes = { value: 'yes', protocol: 'added', payload: true, readings: ['declaration line: `Clause-②: yes`', 'metadata-protocol line: `Metadata-protocol: added`'] };
+      const unread = { value: null, protocol: null, payload: true, readings: ['declaration line: the PR body carries no `Clause-②:` line', 'metadata-protocol line: the PR body carries no `Metadata-protocol:` line'] };
       const cs = (file, entries) => ({ file, entries });
 
       // ---- #16342: every moved package graded `patch` -> REFUSED ------------
@@ -3744,24 +4312,35 @@ function selfTest() {
       // lane cannot drift from the enforcing lane.
       assert(
         judgeLevel({ ...p16342, declaration: unread }).verdict === 'not-measured-material',
-        "#16342's shape with no declaration is MATERIAL — a `yes` would have refused it, so the missing reading decided the verdict",
+        "#16342's shape with no declaration is MATERIAL — a kind would have refused it, so the missing reading decided the verdict",
       );
+      // Ruling A: #16347's shape with no declaration is material TOO, for the
+      // other reason — its lint `minor` is what a `none` refuses. Moot is the
+      // spec TSDoc `patch` alone, on a diff that moved only the lint package:
+      // no entry on a moved package, nothing raised, nothing a kind or a `none`
+      // would grade differently.
       assert(
-        judgeLevel({ ...p16347, declaration: unread }).verdict === 'not-measured-moot',
-        "#16347's shape with no declaration is MOOT — `yes` and `no` reach the same answer once a moved package carries the level, and refusing here would re-open this card through the NOT MEASURED lane",
+        judgeLevel({ ...p16347, declaration: unread }).verdict === 'not-measured-material',
+        "#16347's shape with no declaration is MATERIAL under ruling A — a `none` would refuse its lint `minor`, so the unread kind decided the verdict",
+      );
+      const p16347moot = { levels: [cs('.changeset/spec-preset-comparand-message-tsdoc.md', [{ pkg: SPEC, bump: 'patch' }])], touched: { packages: [LINT], unreadable: [] } };
+      assert(
+        judgeLevel({ ...p16347moot, declaration: unread }).verdict === 'not-measured-moot',
+        'a `patch` on a package the diff does not move, with nothing raised, is MOOT — every kind and `none` reach the same answer, and refusing here would re-open this card through the NOT MEASURED lane',
       );
       assert(
         renderLevel(judgeLevel({ ...p16342, declaration: unread })).exitCode === 1 &&
-          renderLevel(judgeLevel({ ...p16347, declaration: unread })).exitCode === 0,
+          renderLevel(judgeLevel({ ...p16347moot, declaration: unread })).exitCode === 0,
         'and the two differ in EXIT CODE — #16776 bought that split and #16361 must not spend it',
       );
+      const mootText = renderLevel(judgeLevel({ ...p16347moot, declaration: unread })).stdout.join('\n');
       assert(
-        renderLevel(judgeLevel({ ...p16347, declaration: unread })).stdout.join('\n').includes('carries the level for the PR'),
-        'the moot green must say WHICH of the two reasons made it moot — "no `patch` at all" and "a raise already carries it" are different facts about the diff',
+        mootText.includes('no changeset grades `patch` a package whose published source') && mootText.includes('no introduced entry is graded `minor` or above') && mootText.includes('baseline moved'),
+        'the moot green must say WHY it is moot — the three facts that together make the unread kind immaterial are different facts about the diff, and all three are printed',
       );
       assert(
-        judgeLevel({ ...p16342, declaration: { value: 'no', payload: true, readings: [] } }).verdict === 'not-declared',
-        'control: an explicit `no` is still a DECISION on the very tree the unread reading refuses — the opt-out survives the regrain',
+        judgeLevel({ ...p16342, declaration: { value: 'no', protocol: 'none', payload: true, readings: [] } }).verdict === 'none-clean',
+        'control: an explicit `none` is still a DECISION on the very tree the unread reading refuses — the opt-out survives the regrain',
       );
 
       // ---- end to end, on a real temp git repository ------------------------
@@ -3842,7 +4421,7 @@ function selfTest() {
       // green here cannot be coming from the other leg.
       const cliManifest = { name: '@objectstack/cli', version: '0.0.0', files: ['dist'], bin: { os: './bin/os.mjs' } };
       const owners = (p) => JSON.stringify(publishedSourceOwners(p, (dir) => (dir === 'packages/cli' ? cliManifest : null)));
-      const declaredYes = { value: 'yes', payload: true, readings: ['declaration line: `Clause-②: yes`'] };
+      const declaredYes = { value: 'yes', protocol: 'added', payload: true, readings: ['declaration line: `Clause-②: yes`', 'metadata-protocol line: `Metadata-protocol: added`'] };
 
       // The shape reading, at three depths and its controls. Depth-agnostic is
       // the whole point: a repair that merely allowed ONE extra segment passes
@@ -4011,7 +4590,7 @@ function selfTest() {
     // everything now" produce the same red.
     battery('THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)');
     {
-      const declaredYes = { value: 'yes', payload: true, readings: ['declaration line: `Clause-②: yes`'] };
+      const declaredYes = { value: 'yes', protocol: 'added', payload: true, readings: ['declaration line: `Clause-②: yes`', 'metadata-protocol line: `Metadata-protocol: added`'] };
       const CLI = '@objectstack/cli';
       const CS = '.changeset/root-leg.md';
 
@@ -4238,8 +4817,8 @@ function selfTest() {
     {
       const CONSOLE = '@objectstack/console';
       const SPEC = '@objectstack/spec';
-      const yesWidening = { value: 'yes', arm: 'widening', payload: true, readings: ['declaration line: `Clause-②: yes (widening)`'] };
-      const declaredNo = { value: 'no', arm: null, payload: true, readings: ['declaration line: `Clause-②: no`'] };
+      const yesWidening = { value: 'yes', arm: 'widening', protocol: 'added', payload: true, readings: ['declaration line: `Clause-②: yes (widening)`', 'metadata-protocol line: `Metadata-protocol: added`'] };
+      const declaredNo = { value: 'no', arm: null, protocol: 'none', payload: true, readings: ['declaration line: `Clause-②: no`', 'metadata-protocol line: `Metadata-protocol: none`'] };
       const ROOT_LINE = 'FRAMEWORK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"';
       const BUILD = [
         '#!/usr/bin/env bash',
@@ -4363,9 +4942,10 @@ function selfTest() {
         `the manifest moved with no console changeset at all (spec \`patch\` only) stays red — got ${ungraded.result.verdict}`,
       );
 
-      // `Clause-②: no` is unaffected: the axis stands down whatever it sees.
+      // `Clause-②: no` + `Metadata-protocol: none` is unaffected: the kind
+      // stands the axis down whatever the copy leg sees (ruling A).
       const no = levelOf(copyRepo({ head: { ...PR22812, '.changeset/console-bbbb.md': changeset([[CONSOLE, 'patch']]) } }), declaredNo);
-      assert(no.result.verdict === 'not-declared' && no.exitCode === 0, `the manifest moved under \`Clause-②: no\` is unaffected — got ${no.result.verdict} / ${no.exitCode}`);
+      assert(no.result.verdict === 'none-clean' && no.exitCode === 0, `the manifest moved under \`Clause-②: no\` + \`none\` is unaffected — got ${no.result.verdict} / ${no.exitCode}`);
 
       // The record moves with every regeneration but ships nothing.
       const recordOnly = levelOf(
@@ -4669,7 +5249,7 @@ function selfTest() {
       judgeLevel({
         levels: materialLevels,
         touched: materialTouched,
-        declaration: declarationFromPullRequest({ labels: [], body: 'Clause-②: yes\nFixes #1\n' }),
+        declaration: declarationFromPullRequest({ labels: [], body: 'Clause-②: yes\nMetadata-protocol: added\nFixes #1\n' }),
         prEvent: true,
       }),
     );
@@ -4682,7 +5262,7 @@ function selfTest() {
     // Every refusing lane annotates EXACTLY ONCE, and every green annotates not
     // at all. The cap is ten per level and the runner already spends one.
     const lane = (result) => annotationsOf(renderLevel(result)).length;
-    const declaredNoDecl = declarationFromPullRequest({ labels: [{ name: 'domain:devx' }], body: 'Clause-②: no\n' });
+    const declaredNoDecl = declarationFromPullRequest({ labels: [{ name: 'domain:devx' }], body: 'Clause-②: no\nMetadata-protocol: none\n' });
     assert(
       lane({ verdict: 'unreadable-diff', offenders: [], readings: [], unreadable: [] }) === 1 &&
         lane({ verdict: 'payload-unreadable', offenders: [], readings: [], unreadable: [] }) === 1 &&

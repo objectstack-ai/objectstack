@@ -39,9 +39,12 @@ repo and bundled into `@objectstack/console` at a pinned commit recorded in
 [`.objectui-sha`](../.objectui-sha). A SHA bump alone used to leave **no trace** in
 the history. `scripts/bump-objectui.sh` now closes that gap: on every bump it emits
 a `@objectstack/console` changeset summarising the objectui `OLD_SHA..NEW_SHA`
-commit range (auto-typed `minor` if the range contains any `feat`, else `patch`).
-So frontend deltas flow through the *same* pipeline as the backend — they land in
-`@objectstack/console`'s changelog and roll up into the platform version.
+commit range, graded `patch`: the platform's version line follows the metadata
+protocol, which the console never changes, so the file carries
+`Metadata-protocol: none` and `CONSOLE_BUMP` is the only thing that grades it
+otherwise. So frontend deltas flow through the *same* pipeline as the backend —
+they land in `@objectstack/console`'s changelog and roll up into the platform
+version.
 
 ```bash
 scripts/bump-objectui.sh              # bump to ../objectui HEAD, write the changeset, commit
@@ -166,6 +169,25 @@ platform version maps to.
 - **Minor / patch:** do **not** add a page each. Fold them into the current major's
   page under a "What's new in N.x" running section, or leave them to the generated
   per-package changelogs.
+
+### Release notes are grouped by what the reader must do
+
+The GitHub Release body is not the raw CHANGELOG section. `scripts/release-github-releases.mjs`
+regroups that section's entries — byte for byte, none dropped — under five headings, in this
+order, each read from the declarations the changeset already carries (`Metadata-protocol:`, the
+`Clause-②:` arm, the BREAKING banner, the ADR-0087 disposition marker):
+
+| Section | What places an entry there |
+|:--|:--|
+| 需手动处理 | breaking (`Metadata-protocol: narrowed`, a `(narrowing)` arm, a BREAKING banner or a `!` summary) with no `registered` ADR-0087 conversion |
+| 自动迁移 | breaking, with a `registered` conversion that `objectstack migrate meta` applies |
+| 新增能力 | `Metadata-protocol: added`, or a non-breaking `Clause-②: yes` widening |
+| 语义变化 | `Metadata-protocol: semantic` |
+| 其他修复 | everything else — `none`, dependency bumps, and entries written before the declaration existed |
+
+A section with nothing in it is omitted. A curated `vN.mdx` section for the same release uses the
+same five headings in the same order, so the hand-written page and the generated body agree on
+what a reader must do; the per-package `CHANGELOG.md` keeps changesets' own level grouping.
 
 ### Sourcing the Console section for a release
 
