@@ -283,6 +283,48 @@ describe('ADR-0131 D10 preflight — the per-table plan', () => {
     expect(r).toMatchObject({ reason: 'uninventoried-platform-table', table: 'sys_scim_provider' });
   });
 
+  it('a database still holding the retired sys_notification_subscription plans, listing it as fate 4', async () => {
+    // The table every database that booted before the retirement still holds,
+    // in its last declared shape (the 18.0.0 upgrade-harness fixture's DDL).
+    db.exec(`
+      CREATE TABLE sys_notification_subscription (
+        id TEXT PRIMARY KEY, created_at TEXT, updated_at TEXT, organization_id TEXT,
+        created_by TEXT, updated_by TEXT, topic TEXT, principal TEXT, enabled INTEGER
+      );
+      INSERT INTO sys_notification_subscription VALUES
+        ('sub_1', '2026-07-01', '2026-07-01', 'org_b', 'usr_1', 'usr_1', 'billing.invoice', 'role:admin', 1),
+        ('sub_2', '2026-07-02', '2026-07-02', NULL, NULL, NULL, 'crm.lead', 'user:usr_1', 1);
+    `);
+
+    for (const posture of ['isolated', 'single']) {
+      const sub = table(await plan(posture), 'sys_notification_subscription');
+      expect(sub, posture).toMatchObject({
+        source: 'inventory',
+        fate: 'report',
+        physical: 'present',
+        organizationColumn: 'present',
+        rows: { total: 2, organizationNull: 1, stamped: 1 },
+        fateCounts: { reportedRows: 1 },
+        // Reported, never attributed — not even to the Default Organization under single.
+        unattributable: [{ id: 'sub_2', reason: 'fate 4: reported, never guessed' }],
+        notNull: { willReceive: false, reason: expect.stringContaining('left in place untouched') },
+      });
+      expect(sub.census, posture).toEqual(['platform-census-2026-08-31']);
+      expect(sub.citation, posture).toContain('sys-notification-subscription-retired');
+    }
+
+    // Control: without its row the same database is refused, by name.
+    const r = await refusal(
+      buildOrganizationOwnershipPlan({
+        reader: reader(),
+        posture: 'isolated',
+        database: file,
+        inventory: ORGANIZATION_OWNERSHIP_INVENTORY.filter((e) => e.object !== 'sys_notification_subscription'),
+      }),
+    );
+    expect(r).toMatchObject({ reason: 'uninventoried-platform-table', table: 'sys_notification_subscription' });
+  });
+
   it('under single with no Default Organization (two organizations, none of them default), nothing is assigned and the reason says why', async () => {
     db.exec("UPDATE sys_organization SET slug = 'renamed' WHERE id = 'org_default'");
     const p = await plan('single');

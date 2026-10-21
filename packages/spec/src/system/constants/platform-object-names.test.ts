@@ -163,6 +163,24 @@ describe('platform-object predicates', () => {
     expect(hasPlatformObjectPrefix('sys_view_definition')).toBe(true);
   });
 
+  it('no longer resolves the retired sys_notification_subscription (ADR-0030 L3, ADR-0087)', () => {
+    // Retired as inert: no runtime reader ever expanded a subscription into
+    // recipients — every producer names its audience explicitly. The table is
+    // left in deployed databases; the name no longer resolves as a platform
+    // object (semantic entry `sys-notification-subscription-retired`).
+    expect(PLATFORM_OBJECTS_BY_PACKAGE['service-messaging']).toEqual([
+      'sys_http_delivery',
+      'sys_inbox_message',
+      'sys_notification_delivery',
+      'sys_notification_preference',
+      'sys_notification_receipt',
+      'sys_notification_template',
+    ]);
+    expect(isPlatformProvidedObjectName('sys_notification_subscription')).toBe(false);
+    expect(isPlatformProvidedObjectName('sys_notification_preference')).toBe(true);
+    expect(hasPlatformObjectPrefix('sys_notification_subscription')).toBe(true);
+  });
+
   it('treats an unprefixed name as neither', () => {
     expect(hasPlatformObjectPrefix('crm_lead')).toBe(false);
     expect(isPlatformProvidedObjectName('user')).toBe(false);
