@@ -1645,6 +1645,18 @@ export class AuthManager {
    * into scope — so the map is not reachable from `ctx` at that point.
    */
   private orgRolesMap: Record<string, any> | undefined;
+  /**
+   * [#24948] The last-administrator guard's question about an organization
+   * delete (`LastAdminGuardHandle.judgeOrganizationDelete`), handed over by
+   * `AuthPlugin` once the guard is registered. Absent on a composition without
+   * the guard, where the Default Organization has no such protection to move.
+   */
+  private organizationDeleteStandingJudge?: (organizationId: string) => Promise<void>;
+
+  /** [#24948] See {@link organizationDeleteStandingJudge}. */
+  setOrganizationDeleteStandingJudge(judge: (organizationId: string) => Promise<void>): void {
+    this.organizationDeleteStandingJudge = judge;
+  }
   // ADR-0069 — cached "does any org require MFA" flag (per-org tightening).
   // Refreshed lazily with a TTL so isAuthGateActive() stays synchronous + cheap.
   private _orgMfaCache: { value: boolean; at: number } = { value: false, at: 0 };
@@ -8092,7 +8104,8 @@ export class AuthManager {
    * vendor: no session, no organization id, no membership, a lookup that
    * failed. The COUNT does not fall through: it is the guard, and a guard that
    * could not be evaluated must not pass, so its failure propagates. The
-   * Default Organization stays the last-administrator guard's to answer.
+   * Default Organization stays the last-administrator guard's to answer: the
+   * guard's own question is asked here, so its 403 lands before the first write.
    */
   private async assertOrganizationDeletable(ctx: any): Promise<void> {
     const engine = this.getDataEngine();
@@ -8101,6 +8114,7 @@ export class AuthManager {
     if (!organizationId) return;
 
     let organization: any;
+    let defaultOrganization = false;
     try {
       const actor = await this.resolveActor(ctx);
       if (!actor?.userId) return; // the vendor answers 401
@@ -8122,11 +8136,30 @@ export class AuthManager {
       if (!permitted) return; // the vendor answers YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_ORGANIZATION
       organization = await sys.findOne('sys_organization', { where: { id: organizationId } });
       if (!organization) return; // the vendor answers 400
-      if (await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()))) return;
+      defaultOrganization = await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()));
     } catch {
       // A lookup that did not complete hands the request back to the vendor,
       // which re-reads everything it decides; the engine's own refusal still
       // stands under the delete.
+      return;
+    }
+
+    // The Default Organization is the last-administrator guard's to answer,
+    // and it answers HERE, before the vendor's first write, so its refusal
+    // leaves every member and invitation as it was on any driver, with or
+    // without transactions. The guard fails closed on a lookup it cannot
+    // complete, so this never passes for want of an answer. When it admits
+    // the delete, the vendor proceeds and the engine's own refusal still holds
+    // while anything names the organization.
+    if (defaultOrganization) {
+      if (!this.organizationDeleteStandingJudge) return;
+      try {
+        await this.organizationDeleteStandingJudge(organizationId);
+      } catch (err) {
+        if ((err as { code?: unknown } | null)?.code !== 'PERMISSION_DENIED') throw err;
+        const { APIError } = await import('better-auth/api');
+        throw new APIError('FORBIDDEN', { message: (err as Error).message, code: 'PERMISSION_DENIED' });
+      }
       return;
     }
 

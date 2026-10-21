@@ -869,10 +869,23 @@ function touchesAny(data: Record<string, unknown>, keys: readonly string[]): boo
  * re-binding after a hot reload runs `engine.unregisterHooksByPackage(packageId)`
  * first.
  */
+/**
+ * [#24948] The guard's question about a `sys_organization` delete, askable
+ * BEFORE the delete starts. better-auth's organization delete removes the
+ * members and invitations before it deletes the organization row, so the
+ * `beforeDelete` hook's answer arrives after those writes; plugin-auth asks
+ * this first, from the request's `hooks.before`, so a refused Default
+ * Organization delete writes nothing on any driver. The same judgement as the
+ * hook, `enforceStanding('organization-delete', …)`, never a second spelling.
+ */
+export interface LastAdminGuardHandle {
+  judgeOrganizationDelete(organizationId: string): Promise<void>;
+}
+
 export function registerLastAdminGuard(
   engine: LastAdminGuardEngine,
   opts: LastAdminGuardOptions,
-): void {
+): LastAdminGuardHandle {
   const { packageId, logger } = opts;
   const maxScan = opts.maxScan ?? DEFAULT_MAX_SCAN;
 
@@ -1848,4 +1861,9 @@ export function registerLastAdminGuard(
       'Organization the grant anchor reads) and sys_metadata_activation ' +
       '(switching admin_full_access off) — ADR-0135 D5.2',
   );
+
+  return {
+    judgeOrganizationDelete: (organizationId: string) =>
+      enforceStanding('organization-delete', SystemObjectName.ORGANIZATION, { id: organizationId }),
+  };
 }

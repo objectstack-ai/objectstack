@@ -1692,10 +1692,13 @@ export class AuthPlugin implements Plugin {
         // then switch the guard off for all of the above. Every hook registers
         // at priority 20 so the ADR-0092 checks above (10) still answer first
         // for user-context callers. See last-admin-guard.ts.
-        registerLastAdminGuard(engine, {
+        const lastAdminGuard = registerLastAdminGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.last-admin-guard',
           logger: ctx.logger,
         });
+        // [#24948] The same question, asked before an organization delete's
+        // first write (`AuthManager.assertOrganizationDeletable`).
+        this.authManager?.setOrganizationDeleteStandingJudge(lastAdminGuard.judgeOrganizationDelete);
         // [#15784] The COURTESY half of #15409's ruling: when a membership
         // ends, the session's claim on THAT organization ends with it —
         // re-pointed if the user still belongs somewhere, revoked if not.

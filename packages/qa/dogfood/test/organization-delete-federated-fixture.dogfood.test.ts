@@ -140,9 +140,14 @@ describe('[#21910] an organization delete with the showcase federated fixture pr
 
   it('the owner deletes the organization: 200, nothing names it any more, and the federated rows are untouched', async () => {
     const before = await findRows(ql, FEDERATED, {}, 500);
+    // CONTROL for the recorder (e) relies on: a delete that goes ahead is seen deleting its members.
+    const attempted: string[] = [];
+    ql.registerHook('beforeDelete', async () => { attempted.push('sys_member'); }, { object: 'sys_member', packageId: 'dogfood.24948.control' });
 
     const deleted = await stack.apiAs(token, 'POST', '/auth/organization/delete', { organizationId: orgId });
+    ql.unregisterHooksByPackage('dogfood.24948.control');
     expect(deleted.status, await deleted.clone().text()).toBe(200);
+    expect(attempted.length).toBeGreaterThan(0);
 
     expect(await findRows(ql, 'sys_organization', { id: orgId }, 1)).toHaveLength(0);
     // [#24948] Its own auth structure went with it, and no row was orphaned to it.
@@ -159,14 +164,27 @@ describe('[#21910] an organization delete with the showcase federated fixture pr
     const [defaultOrg] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
     const defaultId = String(defaultOrg.id);
     const membersBefore = await findRows(ql, 'sys_member', { organization_id: defaultId }, 50);
+    const invitationsBefore = await findRows(ql, 'sys_invitation', { organization_id: defaultId }, 50);
     const teamsBefore = await findRows(ql, 'sys_team', { organization_id: defaultId }, 50);
+    // Every delete the request ATTEMPTS on a member or an invitation, recorded
+    // at the engine, so the pin does not rest on the request's transaction:
+    // on a driver without one, an attempted delete would stay deleted.
+    const attempted: string[] = [];
+    const RECORDER = 'dogfood.24948.delete-attempts';
+    for (const object of ['sys_member', 'sys_invitation']) {
+      ql.registerHook('beforeDelete', async () => { attempted.push(object); }, { object, packageId: RECORDER });
+    }
 
     const res = await stack.apiAs(token, 'POST', '/auth/organization/delete', { organizationId: defaultId });
+    ql.unregisterHooksByPackage(RECORDER);
 
     expect(res.status, await res.clone().text()).toBe(403);
     expect(((await res.json()) as { code?: string }).code).toBe('PERMISSION_DENIED');
     // Main answered the same 403 after better-auth had already deleted the
-    // members; the request is one unit of work now, so they are back.
+    // members. The guard's question is now asked before the vendor's first
+    // write, so no member or invitation delete was even attempted.
+    expect(attempted).toEqual([]);
+    expect(await findRows(ql, 'sys_invitation', { organization_id: defaultId }, 50)).toEqual(invitationsBefore);
     expect(await findRows(ql, 'sys_organization', { id: defaultId }, 1)).toHaveLength(1);
     expect(await findRows(ql, 'sys_member', { organization_id: defaultId }, 50)).toEqual(membersBefore);
     expect(await findRows(ql, 'sys_team', { organization_id: defaultId }, 50)).toEqual(teamsBefore);

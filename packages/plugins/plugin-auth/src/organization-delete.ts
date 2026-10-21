@@ -44,13 +44,16 @@
  * 3. **One unit of work.** `AuthManager.handleRequest` runs the whole request
  *    inside one engine transaction and rolls it back on any 4xx/5xx answer, the
  *    subject-erasure wrapper's posture. On a driver without transactions the
- *    refusal above is the guarantee, since it runs before the first write.
+ *    refusals are the guarantee, since both run before the first write: the
+ *    count above, and the Default Organization's guard question below.
  * 4. **The engine never clears the tenant column.** Under all of this,
  *    `ObjectQL.cascadeDeleteRelations` refuses a `sys_organization` delete
  *    while any row still names it, whatever path reaches it.
  *
- * The Default Organization is not judged here: the last-administrator guard
- * keeps answering for it exactly as before ({@link isDefaultOrganizationTarget}).
+ * The Default Organization is not counted here ({@link isDefaultOrganizationTarget}):
+ * the last-administrator guard answers for it, as before, but its question is
+ * now asked from the same `hooks.before` (`LastAdminGuardHandle`), so its 403
+ * also lands before better-auth deletes any member.
  */
 
 import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';

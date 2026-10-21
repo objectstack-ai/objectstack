@@ -190,6 +190,15 @@ describe('[#24948] organization delete: refused while it owns records, whole whe
     const orphansBefore = await orphans();
     const ledgerBefore = await findRows(ql, 'sys_activity', { organization_id: org.empty });
     expect(ledgerBefore.length, 'PREMISE: the activity ledger names the organization from its creation').toBeGreaterThan(0);
+    // [seat decision 6305996369] The audit log's attribution, `tenant_id`, is no
+    // tenant column; it is kept too.
+    const auditBefore = await findRows(ql, 'sys_audit_log', { tenant_id: org.empty });
+    expect(auditBefore.length, 'PREMISE: the audit log attributes rows to the organization').toBeGreaterThan(0);
+    // An engine-owned row on a tenancy-disabled object, attributed by `organization_id`: kept, not counted.
+    const request = await ql.insert('sys_approval_request', {
+      process_name: 'expense_approval', object_name: 'showcase_category', record_id: 'rec_24948',
+      status: 'approved', created_at: new Date().toISOString(), organization_id: org.empty,
+    }, { context: SYSTEM_CTX });
 
     const res = await deleteOrg(ownerToken, org.empty);
 
@@ -201,6 +210,10 @@ describe('[#24948] organization delete: refused while it owns records, whole whe
     const keptIds = new Set(ledgerAfter.map((r) => r.id));
     expect(ledgerBefore.every((r) => keptIds.has(r.id)), 'every ledger row is kept').toBe(true);
     expect(await findRows(ql, 'sys_activity', { organization_id: null })).toEqual([]);
+    const auditAfter = new Set((await findRows(ql, 'sys_audit_log', { tenant_id: org.empty })).map((r) => r.id));
+    expect(auditBefore.every((r) => auditAfter.has(r.id)), 'every audit row keeps naming the organization').toBe(true);
+    const [requestAfter] = await findRows(ql, 'sys_approval_request', { id: request.id });
+    expect(requestAfter?.organization_id).toBe(org.empty);
     expect(await snapshot(org.empty)).toEqual({
       sys_organization: 0,
       sys_member: 0,
