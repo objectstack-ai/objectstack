@@ -59,9 +59,10 @@ needs no sign-in, and a `200` means the plugin is mounted.
 **The server does not hold the environment service key.** A server that holds
 `OS_CLOUD_API_KEY` (the cloud sets it on every environment it hosts) is
 connected by the platform, not from Setup. It registers no Cloud Connection page
-or Setup entry, says so once in its boot log, and refuses a disconnect with
-`409` (`RESOURCE_CONFLICT`): nothing is revoked and nothing is cleared. A
-self-hosted server leaves `OS_CLOUD_API_KEY` unset.
+or Setup entry, says so once in its boot log, and refuses the connect and
+disconnect requests with `409` (`RESOURCE_CONFLICT`): nothing is sent to the
+cloud, and nothing is stored or cleared. A self-hosted server leaves
+`OS_CLOUD_API_KEY` unset.
 
 **The server can reach the cloud.** Every call to the cloud is made by the
 server, not by your browser: the code request, the polling, the connection
@@ -78,18 +79,28 @@ the server reads as not connected until you connect it again.
 
 **The right people on each side.**
 
-- *On the server*, you sign in with a user of this server. The Cloud
-  Connection page is in the Setup app, which takes the **Setup Access**
-  permission (`setup.access`); the default platform-administrator and
-  organization-administrator permission sets carry it. The connect and
-  disconnect requests take the same permission: a signed-in user without
-  Setup Access is refused with `403` (`PERMISSION_DENIED`) before the server
-  calls the cloud. The page's Setup entry sits in the **Integrations** group,
-  which Setup shows only to users who also hold `manage_platform_settings`; the
-  default platform-administrator permission set carries both. A session
-  that the authentication policy is holding (an expired password, or
-  multi-factor sign-in required but not yet set up) is refused with `403`
-  until it is fixed.
+- *On the server*, you sign in with a user of this server who holds the
+  **Manage Platform Settings** permission (`manage_platform_settings`); the
+  default platform-administrator permission set carries it. One rule covers
+  the whole Cloud Connection page:
+  - Its Setup entry sits in the **Integrations** group, which Setup shows only
+    to users who hold that permission.
+  - The connect and disconnect requests take the same permission: a signed-in
+    user without it is refused with `403` (`PERMISSION_DENIED`) before the
+    server calls the cloud.
+  - The connection's details (the approving account, the organization, the
+    environment) are served only to users who hold it. Anyone else who opens
+    the page by its address is shown only whether the server is connected and
+    its runtime id, and the panel's **Connect** or **Disconnect** button is
+    refused with the message listed under [Connect](#connect).
+
+  Setup Access (`setup.access`) alone is not enough. The default
+  organization-administrator permission set carries Setup Access but not
+  Manage Platform Settings, so an organization administrator can open Setup
+  but cannot connect or disconnect the server. A session that the
+  authentication policy is holding (an expired password, or multi-factor
+  sign-in required but not yet set up) is refused with `403` until it is
+  fixed.
 - *In the cloud*, the approval is made by whoever signs in to the cloud
   account behind the link and approves the request. The server records that
   account's email as **Approved by**. Which cloud accounts may approve, and
@@ -135,6 +146,7 @@ button:
 | *The connection request was denied. Start again.* | The cloud answered `access_denied`. |
 | *Device authorization failed: …* | The cloud ended the request with another error, named after the colon. |
 | *Sign in to connect a cloud account.* (or *Sign in.* while waiting) | Your session on the server has ended. |
+| *Managing this runtime's cloud connection requires the `manage_platform_settings` capability.* | You are signed in without Manage Platform Settings (see [Before you start](#before-you-start)). |
 | *No cloud control plane configured.* | The plugin is mounted without a control-plane URL. |
 | a network error such as *fetch failed* | The server could not reach the cloud. |
 
@@ -216,14 +228,19 @@ account afterwards.
 
 ## Reference [#reference]
 
-The routes the Cloud Connection page uses, all on the server's own origin:
+The routes the Cloud Connection page uses, all on the server's own origin. The
+three that change the connection (`bind/start`, `bind/poll` and `unbind`)
+require Manage Platform Settings (`manage_platform_settings`) and answer `403`
+(`PERMISSION_DENIED`) to a signed-in user without it. On a server holding
+`OS_CLOUD_API_KEY`, the same three answer `409` (`RESOURCE_CONFLICT`) to a user
+who holds it, and nothing changes.
 
 | Route | Sign-in | What it does |
 |:---|:---|:---|
-| `GET /api/v1/cloud-connection/status` | not required | Every caller gets `bound`, `runtimeId` and `provider`. A signed-in user with Setup Access (`setup.access`) also gets `environmentId` and `connection`, the connection as the cloud reports it (the approving account and the organization). `bound` is `true` whenever the server holds a credential; `connection` is `null` when the cloud cannot be reached. |
+| `GET /api/v1/cloud-connection/status` | not required | Every caller gets `bound`, `runtimeId` and `provider`. A signed-in user with Manage Platform Settings (`manage_platform_settings`) also gets `environmentId` and `connection`, the connection as the cloud reports it (the approving account and the organization). `bound` is `true` whenever the server holds a credential; `connection` is `null` when the cloud cannot be reached. |
 | `POST /api/v1/cloud-connection/bind/start` | required | Asks the cloud for a device code; answers with `user_code`, `verification_uri`, `verification_uri_complete`, `interval`, `expires_in`. |
 | `POST /api/v1/cloud-connection/bind/poll` | required | Body `{ "device_code": "…" }`. Answers `{ "pending": true }` while the cloud waits for approval, and the connection once it is approved. |
-| `POST /api/v1/cloud-connection/unbind` | required | Disconnects; answers `{ "revoked", "cleared" }`. On a server holding `OS_CLOUD_API_KEY`, refused with `409` (`RESOURCE_CONFLICT`) and nothing changes. |
+| `POST /api/v1/cloud-connection/unbind` | required | Disconnects; answers `{ "revoked", "cleared" }`. |
 
 The settings that shape the flow are listed in
 [Environment variables](/docs/deployment/environment-variables#multi-tenant--cloud-control-plane):
@@ -232,7 +249,8 @@ id the server presents (default `objectstack-cli`), and `OS_RUNTIME_VERSION`
 sets the version it reports. `OS_CLOUD_API_KEY` and `OS_ENVIRONMENT_ID` belong
 to cloud-hosted runtimes; a self-hosted server leaves both unset. A set
 `OS_CLOUD_API_KEY` is used instead of the stored credential, and makes the
-connection platform-managed: no Cloud Connection page, and no disconnect.
+connection platform-managed: no Cloud Connection page, and no connect or
+disconnect.
 
 The Setup app itself, and how plugins add entries to it, is described in
 [Setup app](/docs/ui/setup-app). Running the server is covered in
