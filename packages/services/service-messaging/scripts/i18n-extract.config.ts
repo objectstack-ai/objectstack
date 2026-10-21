@@ -41,7 +41,6 @@ import {
   NotificationReceipt,
   NotificationDelivery,
   NotificationPreference,
-  NotificationSubscription,
   NotificationTemplate,
   HttpDelivery,
 } from '../src/objects/index.js';
@@ -70,7 +69,6 @@ const config: ObjectStackDefinition = defineStack({
     NotificationReceipt,
     NotificationDelivery,
     NotificationPreference,
-    NotificationSubscription,
     NotificationTemplate,
     HttpDelivery,
   ] as any,

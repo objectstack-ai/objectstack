@@ -125,7 +125,6 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_notification_delivery',
     'sys_notification_preference',
     'sys_notification_receipt',
-    'sys_notification_subscription',
     'sys_notification_template',
   ],
   /** `@objectstack/service-realtime` — presence state. */

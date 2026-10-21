@@ -2776,6 +2776,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`sys-audit-log-organization-column-retired` semantic entry.',
   },
   {
+    id: 'sys-notification-subscription-retired',
+    order: 106,
+    text:
+      'It also retires the `sys_notification_subscription` platform object (ADR-0030 Layer 3, '
+      + 'amended): no reader ever expanded a topic subscription into recipients — every producer '
+      + 'names its audience explicitly — so the Setup grid recorded subscriptions that made nobody '
+      + 'receive anything. The object, its registration and boot provisioning, its Setup navigation '
+      + 'item and its translations leave, and its name leaves the platform-object registry. Nothing '
+      + 'in stack metadata is rewritten; an existing database keeps the table, which no platform '
+      + 'path drops. The D3 record is the `sys-notification-subscription-retired` semantic entry.',
+  },
+  {
     id: 'sys-setting-global-rung-moved',
     order: 87,
     text:

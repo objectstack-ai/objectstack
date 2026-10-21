@@ -245,44 +245,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
-  sys_notification_subscription: {
-    label: "Notification Subscription",
-    pluralLabel: "Notification Subscriptions",
-    description: "Standing subscription of a principal (role/team/user) to a notification topic.",
-    fields: {
-      id: {
-        label: "Subscription ID"
-      },
-      display_title: {
-        label: "Title",
-        help: "Record title: the subscribing principal and the topic (computed on read)"
-      },
-      topic: {
-        label: "Topic",
-        help: "Notification topic this principal subscribes to."
-      },
-      principal: {
-        label: "Principal",
-        help: "Selector de suscriptor: 'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | un correo electrónico | un id de usuario sin prefijo."
-      },
-      enabled: {
-        label: "Enabled",
-        help: "When false, the subscription is inactive."
-      },
-      created_at: {
-        label: "Created At"
-      }
-    },
-    _views: {
-      all: {
-        label: "Todas",
-        emptyState: {
-          title: "Aún no hay suscripciones",
-          message: "Una suscripción registra que un rol, un equipo o un usuario sigue un tema de notificación."
-        }
-      }
-    }
-  },
   sys_notification_template: {
     label: "Notification Template",
     pluralLabel: "Notification Templates",

@@ -97,7 +97,6 @@ export const zhCN: TranslationData = {
         nav_settings_knowledge: { label: '知识库' },
         nav_settings_feature_flags: { label: '功能开关' },
         nav_notification_preferences: { label: '通知偏好' },
-        nav_notification_subscriptions: { label: '通知订阅' },
         nav_notification_templates: { label: '通知模板' },
 
         nav_sessions: { label: '会话' },
