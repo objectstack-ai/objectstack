@@ -91,6 +91,9 @@ import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
   VALUE_SHAPES_MIGRATION_ID,
+  ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+  ORGANIZATION_OWNERSHIP_SHAPE_GENERATION,
+  organizationOwnershipShapeGenerationOf,
   isDataMigrationFlagVerified,
   hasMovedFileColumns,
   renderOperationMessage,
@@ -9398,6 +9401,7 @@ export class ObjectQL implements IObjectQLEngine {
 
     this.drivers.set(driver.name, driver);
     this.supplyFileColumnsMovedResolver(driver);
+    this.supplyTenantKeyCertifiedResolver(driver);
     this.logger.info('Registered driver', {
       driverName: driver.name,
       version: driver.version
@@ -12588,6 +12592,67 @@ export class ObjectQL implements IObjectQLEngine {
    */
   async isFileReferencesMigrationVerified(): Promise<boolean> {
     return (await this.readFileReferencesFlagRow()).verified;
+  }
+
+  /**
+   * [ADR-0131 D1] Hand a freshly-registered driver the question "is this
+   * database certified", the same closure-not-value seam as
+   * {@link supplyFileColumnsMovedResolver} and for the same reason: the answer
+   * is a `sys_migration` row on a store this driver has not connected to yet.
+   * A SQL driver asks it only when a table carries an index an earlier release
+   * built with the NULL-safe `COALESCE(<tenant>, …)` key part, to decide
+   * whether that index already is the plain key new DDL emits. A driver with
+   * no such seam is left alone.
+   */
+  private supplyTenantKeyCertifiedResolver(driver: IDataDriver): void {
+    const sink = driver as unknown as {
+      setTenantKeyCertifiedResolver?: (resolve: () => Promise<boolean>) => void;
+    };
+    if (typeof sink.setTenantKeyCertifiedResolver !== 'function') return;
+    try {
+      sink.setTenantKeyCertifiedResolver(() => this.isOrganizationOwnershipCertified());
+    } catch (e: any) {
+      // A driver that did not take the resolver answers "not certified": it
+      // keeps the two forms distinct and REPORTS a destructive recreate_index,
+      // which is never applied unattended (safe-only boot reconcile, the
+      // artifact gate, `os migrate apply --allow-destructive`).
+      this.logger.debug('Driver declined the ADR-0131 certification resolver', {
+        driverName: driver.name,
+        error: e?.message ?? String(e),
+      });
+    }
+  }
+
+  /**
+   * [ADR-0131 D1] Is this database certified for the organization-ownership
+   * shape — a verified `sys_migration` row for the ceremony's id (the birth
+   * marker a store created from empty receives, or the ceremony's completion
+   * marker) at this release's shape generation or above? The same reading the
+   * runtime's boot guard boots on. No ledger object, no ledger table yet, no
+   * row, or an unverified or older row answers `false`. Any other read failure
+   * is thrown: "I could not check" is not "not certified", and the driver
+   * asking reports it (`SqlDriver.isTenantKeyCertified`).
+   */
+  async isOrganizationOwnershipCertified(): Promise<boolean> {
+    if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return false;
+    try {
+      const row: any = await this.findOne(DATA_MIGRATION_FLAG_OBJECT, {
+        where: { id: ORGANIZATION_OWNERSHIP_MIGRATION_ID },
+        context: { isSystem: true } as ExecutionContext,
+      });
+      if (!row || row.id !== ORGANIZATION_OWNERSHIP_MIGRATION_ID) return false;
+      const verified = isDataMigrationFlagVerified({
+        id: ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+        last_run_at: String(row.last_run_at ?? ''),
+        verified_at: row.verified_at == null ? null : String(row.verified_at),
+        blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
+      });
+      return verified && organizationOwnershipShapeGenerationOf(row.details) >= ORGANIZATION_OWNERSHIP_SHAPE_GENERATION;
+    } catch (error) {
+      // A store whose ledger table does not exist yet has no certificate.
+      if (isMissingTableError(error, DATA_MIGRATION_FLAG_OBJECT)) return false;
+      throw error;
+    }
   }
 
   /**

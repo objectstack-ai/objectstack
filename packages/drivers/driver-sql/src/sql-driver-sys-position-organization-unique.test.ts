@@ -204,12 +204,15 @@ describe('#8468 — sys_position.name is unique per organization, not per instal
   // ───────────────────────────────────────────────────────────────────────────
 
   describe('materialized shape', () => {
-    it('the fixed declaration keys on the NULL-safe organization part', async () => {
+    it('the fixed declaration keys on the PLAIN organization column (ADR-0131 D1)', async () => {
+      // ADR-0131 D1: new DDL keys the plain tenant column — no COALESCE. A
+      // fresh table's tenant column is NOT NULL, so the NULL-safe spelling
+      // ADR-0120 D3 needed would guard a value that can no longer occur.
       const d = makeDriver();
       await d.initObjects(FIXED_APP as any);
 
       expect(await uniqueKeyParts('sys_position')).toEqual({
-        uniq_sys_position_organization_id_name: ['COALESCE(organization_id)', 'name'],
+        uniq_sys_position_organization_id_name: ['organization_id', 'name'],
       });
     });
 
@@ -307,14 +310,17 @@ describe('#8468 — sys_position.name is unique per organization, not per instal
       expect(await d.count('sys_position', {})).toBe(1);
     });
 
-    it('AFTER: platform-seeded rows carry no organization and stay unique among THEMSELVES (D3)', async () => {
+    it('AFTER: on a pre-18 nullable column, rows with no organization are NOT constrained by the plain key (ADR-0131 D1)', async () => {
       // `bootstrapBuiltinRoles` seeds the framework-reserved identity positions
       // (platform_admin / org_*) and the ADR-0090 D9 audience anchors
-      // (everyone / guest) with `managed_by: 'platform'` and no organization.
-      // A bare `(organization_id, name)` composite would be NULL-DISTINCT under
-      // SQL, so every seeded position could be duplicated at will; the NULL-safe
-      // key part is what prevents that, and the bootstrap upsert-by-name relies
-      // on it.
+      // (everyone / guest) with `managed_by: 'platform'`. ADR-0120 D3 once keyed
+      // a NULL-safe organization part so a NULL-organization "bucket" stayed
+      // unique among itself. ADR-0131 D1 retires that bucket: new DDL keys the
+      // PLAIN `(organization_id, name)` composite, and SQL UNIQUE is
+      // NULL-distinct, so on a nullable column two NULL-organization rows of
+      // the same name do not conflict. A fresh table cannot hold such rows at
+      // all (its tenant column is NOT NULL); this pins what the plain key does
+      // on the only shape that still can.
       const d = makeDriver();
       await d.initObjects(FIXED_APP as any);
       // Rows with no organization exist only on a database built before 18.x
@@ -326,18 +332,27 @@ describe('#8468 — sys_position.name is unique per organization, not per instal
           id: 'seed1', name: 'platform_admin', label: 'Platform Admin', managed_by: 'platform',
         })).status,
       ).toBe(201);
-      const duplicateSeed = await createAsApi(d, 'sys_position', {
+      const nullOrgRepeat = await createAsApi(d, 'sys_position', {
         id: 'seed2', name: 'platform_admin', label: 'Platform Admin', managed_by: 'platform',
       });
-      expect(duplicateSeed).toMatchObject(CONFLICT_ENVELOPE);
+      expect(nullOrgRepeat.status).toBe(201);
+      expect(
+        (await d.find('sys_position', {})).filter((r: any) => r.name === 'platform_admin').length,
+      ).toBe(2);
 
-      // A tenant may still author its OWN position of the same name — the
-      // platform bucket and the organization buckets are separate namespaces.
+      // A tenant may still author its OWN position of the same name, and the
+      // plain key still refuses that organization's second one — the exemption
+      // is the NULL, not the column.
       expect(
         (await createAsApi(d, 'sys_position', {
           id: 'own1', organization_id: 'org_jia', name: 'platform_admin', label: 'Local', managed_by: 'admin',
         })).status,
       ).toBe(201);
+      expect(
+        await createAsApi(d, 'sys_position', {
+          id: 'own2', organization_id: 'org_jia', name: 'platform_admin', label: 'Local again', managed_by: 'admin',
+        }),
+      ).toMatchObject(CONFLICT_ENVELOPE);
     });
   });
 
@@ -400,8 +415,9 @@ describe('#8468 — sys_position.name is unique per organization, not per instal
         dropIndexNames: ['uniq_sys_position_name'],
         createIndexName: 'uniq_sys_position_organization_id_name',
         createColumns: ['organization_id', 'name'],
-        nullSafeColumns: ['organization_id'],
       });
+      // ADR-0131 D1: the replacement keys the PLAIN organization column.
+      expect(entry!.op).not.toHaveProperty('nullSafeColumns');
 
       // ⛔ The old index must NOT ALSO surface as an orphan. An orphan drop is
       // `destructive`, so an operator applying only the safe half would keep the
@@ -425,8 +441,10 @@ describe('#8468 — sys_position.name is unique per organization, not per instal
       expect(applied.some((e) => e.op.type === 'replace_unique_index')).toBe(true);
       expect(skipped).toHaveLength(0);
 
+      // The plain composite (ADR-0131 D1) — and it converges on the pre-18
+      // nullable column too, since the expectation is plain as well.
       expect(await uniqueKeyParts('sys_position')).toEqual({
-        uniq_sys_position_organization_id_name: ['COALESCE(organization_id)', 'name'],
+        uniq_sys_position_organization_id_name: ['organization_id', 'name'],
       });
       expect(await d.count('sys_position', {})).toBe(3);
 
@@ -455,12 +473,15 @@ describe('#8468 — sys_position.name is unique per organization, not per instal
         }),
       ).toMatchObject(CONFLICT_ENVELOPE);
 
-      // …and the platform seed bucket survived the migration intact.
+      // …and the NULL-organization row the deployment already held is exempt
+      // from the migrated PLAIN key (ADR-0131 D1: SQL UNIQUE is NULL-distinct;
+      // the ADR-0120 D3 bucket is gone). Before the migration the global index
+      // refused this; afterwards only organization-keyed rows are constrained.
       expect(
-        await createAsApi(d, 'sys_position', {
+        (await createAsApi(d, 'sys_position', {
           id: 'seed2', name: 'platform_admin', label: 'Platform Admin', managed_by: 'platform',
-        }),
-      ).toMatchObject(CONFLICT_ENVELOPE);
+        })).status,
+      ).toBe(201);
     });
 
     it('boot creates the replacement ADDITIVELY, so the defect is STILL LIVE until the plan runs', async () => {
@@ -532,9 +553,10 @@ describe('#8468 — sys_position.name is unique per organization, not per instal
           name: 'uniq_sys_position_organization_id_name',
           columns: ['organization_id', 'name'],
           unique: true,
-          nullSafeColumns: ['organization_id'],
         },
       });
+      // ADR-0131 D1: the replacement is the PLAIN composite — no NULL-safe part.
+      expect(entry!.replacement).not.toHaveProperty('nullSafeColumns');
     });
 
     it('claims nothing for an EXPLICITLY NAMED index — that transition is a recreate', () => {
@@ -588,7 +610,7 @@ describe('#8468 — sys_position.name is unique per organization, not per instal
         const d = makeDriver();
         await d.initObjects(FIXED_APP as any);
         expect(await uniqueKeyParts('sys_position'), `posture=${posture}`).toEqual({
-          uniq_sys_position_organization_id_name: ['COALESCE(organization_id)', 'name'],
+          uniq_sys_position_organization_id_name: ['organization_id', 'name'],
         });
         await d.disconnect();
         driver = undefined;

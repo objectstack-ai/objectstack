@@ -34,26 +34,31 @@
  * constraint. The COLUMN — the #16091 result this change must not spend — read
  * `character varying(100)` on all three both before and after.
  *
+ * ## The organization composite — emitted since ADR-0131 D1
+ *
+ * Until ADR-0131 D1 the ORGANIZATION-SCOPED form was the ADR-0120 D3
+ * expression `(COALESCE(<tenant>, '__global__'), <field>)`, which neither format
+ * could spell, so it was deliberately unemitted and named in a NOT EMITTED
+ * line. The driver now keys the PLAIN tenant column — a fresh table's tenant
+ * column is NOT NULL, so the ADR-0120 D3 NULL-organization bucket the COALESCE
+ * existed for is gone from new DDL — and the bare `(organization_id, field)` IS
+ * the platform's constraint. So both formats emit it, and this file pins that
+ * the generated table carries the SAME composite the driver creates and refuses
+ * the same in-organization duplicate (block A), and that no NOT EMITTED line is
+ * printed for it any more (block B).
+ *
  * ## What this pin does NOT claim, stated so nobody reads it as closed
  *
- * Two declaration shapes are deliberately unemitted, and this file asserts that
- * they are unemitted *and named*, never that they are handled:
+ * One declaration shape is deliberately unemitted, and this file asserts that it
+ * is unemitted *and named*, never that it is handled: OBJECT-LEVEL `indexes[]`.
+ * `normalizeDeclaredIndex` is a second normalizer that reads the same
+ * `unique: true` token DIFFERENTLY (verbatim as global, a maintainer ruling), so
+ * it is a second transcription with a second pin, not a loop added to this one.
  *
- *   1. The ADR-0120 D3 ORGANIZATION-SCOPED form — `(COALESCE(<tenant>,
- *      '__global__'), <field>)`. Emitting the bare composite instead would be
- *      worse than emitting nothing: under SQL's NULL-distinct UNIQUE a bare
- *      `(organization_id, field)` constrains NOTHING on rows with no
- *      organization, which on a single-tenant stack is every row (#5030) — a
- *      constraint advertised and not delivered, which is the failure Prime
- *      Directive #10 names.
- *   2. OBJECT-LEVEL `indexes[]`. `normalizeDeclaredIndex` is a second
- *      normalizer that reads the same `unique: true` token DIFFERENTLY (verbatim
- *      as global, a maintainer ruling), so it is a second transcription with a
- *      second pin, not a loop added to this one.
- *
- * ⭐ Measured for the record, because "can the TypeScript format express an
- * expression key part through knex at all" was the open question that kept the
- * scoped form off this change (knex 3.3.0, live PostgreSQL 16.13):
+ * ⭐ Measured for the record — HISTORICAL since ADR-0131 D1 retired the
+ * expression key part, kept because it is why the scoped form was once
+ * unemitted, and stays true for any future expression key part (knex 3.3.0,
+ * live PostgreSQL 16.13):
  *
  * ```
  *   table.unique([knex.raw("COALESCE(...)"), 'f'], {indexName})
@@ -72,8 +77,9 @@
  * knex handle and `db.raw` is exactly the seam `SqlDriver.createNullSafeUniqueIndex`
  * already uses for this — but knex's SCHEMA BUILDER cannot express it in either
  * format, so the scoped form costs a raw statement rather than another
- * `table.unique(...)` line. That is a fact for whoever takes the scoped half,
- * recorded here rather than acted on.
+ * `table.unique(...)` line. ADR-0131 D1 made that moot for the organization
+ * composite (its key parts are plain columns now); it is recorded for whoever
+ * next meets an expression key part.
  *
  * ## Why this pin reads the driver instead of asserting the names
  *
@@ -82,7 +88,7 @@
  * transcribed `uniq_probe_keyed_unique` would re-create the defect one layer up
  * and stay green the day the driver's naming moves. Every name and every key-part
  * ordering here is recomputed from `driver-sql`'s own exported
- * `uniqueIndexesFromFields` / `buildIndexName` / `GLOBAL_TENANT`.
+ * `uniqueIndexesFromFields` / `buildIndexName`.
  *
  * ⭐ And the leaves are not the authority. Above the differential sits THE REAL
  * CHAIN: all three producers driven into ONE in-memory better-sqlite3 database,
@@ -109,7 +115,7 @@
  * measuring the parser.
  */
 
-import { SqlDriver, GLOBAL_TENANT, buildIndexName, uniqueIndexesFromFields } from '@objectstack/driver-sql';
+import { SqlDriver, buildIndexName, uniqueIndexesFromFields } from '@objectstack/driver-sql';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { generateMigrationSql, generateMigrationTs } from './generate.js';
@@ -210,8 +216,12 @@ function loadEmittedTs(ts: string): { up: (db: any) => Promise<void>; down: (db:
 interface Probe {
   label: string;
   object: Record<string, any>;
-  /** What the object's declarations mean for the emitters, asserted below. */
-  expect: 'emitted' | 'scoped-not-emitted' | 'no-column' | 'none';
+  /**
+   * What the object's declarations mean for the emitters, asserted below.
+   * `scoped` is the organization composite — emitted like `emitted`, with the
+   * plain tenant column as its FIRST key part (ADR-0131 D1).
+   */
+  expect: 'emitted' | 'scoped' | 'no-column' | 'none';
 }
 
 const ORG = { type: 'text', maxLength: 64 } as const;
@@ -229,14 +239,14 @@ const CORPUS: Probe[] = [
     expect: 'emitted',
   },
   {
-    label: '`unique: true` beside an organization column — the ADR-0120 D3 scoped composite',
+    label: '`unique: true` beside an organization column — the plain organization composite (ADR-0131 D1)',
     object: { name: 'p_scoped_true', fields: { organization_id: ORG, f: { ...KEYED, unique: true } } },
-    expect: 'scoped-not-emitted',
+    expect: 'scoped',
   },
   {
     label: "explicit `unique: 'organization'` — the same scoped composite",
     object: { name: 'p_scoped_word', fields: { organization_id: ORG, f: { ...KEYED, unique: 'organization' } } },
-    expect: 'scoped-not-emitted',
+    expect: 'scoped',
   },
   {
     label: 'unique ON the organization column itself — "one row per tenant" stays single-column',
@@ -259,7 +269,7 @@ const CORPUS: Probe[] = [
       tenancy: { tenantField: 'org' },
       fields: { org: ORG, f: { ...KEYED, unique: true } },
     },
-    expect: 'scoped-not-emitted',
+    expect: 'scoped',
   },
   {
     label: 'a name past the 60-character identifier budget — hash-suffixed',
@@ -349,8 +359,9 @@ describe('#16317 — the index each generator emits is the index the driver CREA
 
       // ⭐ THE AUTHORITY. Whatever the driver's own table carries, the ts
       // format's table carries too — by NAME, because both go through knex's
-      // named-index spelling — except for the two declared exclusions.
-      const emittable = probe.expect === 'emitted';
+      // named-index spelling — except for the declared exclusions. Since
+      // ADR-0131 D1 the organization composite is one of the emitted shapes.
+      const emittable = probe.expect === 'emitted' || probe.expect === 'scoped';
       if (emittable) {
         expect(uniqueShapes(built.tsgen)).toEqual(uniqueShapes(built.driver));
         expect(uniqueShapes(built.sqlgen)).toEqual(uniqueShapes(built.driver));
@@ -362,22 +373,28 @@ describe('#16317 — the index each generator emits is the index the driver CREA
         for (const want of wanted) expect(built.sqlText).toContain(`CONSTRAINT "${want.name}" UNIQUE (`);
       }
 
-      if (probe.expect === 'scoped-not-emitted') {
-        // The driver DOES build it — the expression key part is why we do not.
+      if (probe.expect === 'scoped') {
+        // ADR-0131 D1: the driver keys the PLAIN tenant column, so the
+        // composite it creates is a two-column list with the tenant FIRST and
+        // no expression key part — the shape both formats can spell, and do.
+        const tenant = newOracle().tenantFieldFor(probe.object);
+        expect(tenant).not.toBeNull();
         expect(wanted.length).toBeGreaterThan(0);
         for (const want of wanted) {
-          expect(want.nullSafeColumns ?? []).not.toHaveLength(0);
-          // ⛔ Absence must be loud: named in the generated file, both formats.
-          expect(built.sqlText).toContain(`NOT EMITTED: UNIQUE index "${want.name}"`);
-          expect(built.tsText).toContain(`NOT EMITTED: UNIQUE index '${want.name}'`);
-          expect(built.sqlText).toContain(`COALESCE("${want.nullSafeColumns![0]}", '${GLOBAL_TENANT}')`);
-          // ...and NOT emitted as the bare composite, which would advertise a
-          // constraint the table does not carry (#5030).
-          expect(built.sqlText).not.toContain(`CONSTRAINT "${want.name}" UNIQUE (`);
-          expect(built.tsText).not.toContain(`indexName: '${want.name}'`);
+          expect(want.nullSafeColumns ?? []).toHaveLength(0);
+          expect(want.columns).toHaveLength(2);
+          expect(want.columns[0]).toBe(tenant);
         }
-        expect(uniqueShapes(built.tsgen)).toHaveLength(0);
-        expect(uniqueShapes(built.sqlgen)).toHaveLength(0);
+        // The catalog agrees: every producer's table carries the composite as
+        // two PLAIN key parts (SQLite reports `null` for an expression part).
+        for (const rows of [built.driver, built.sqlgen, built.tsgen]) {
+          expect(uniqueShapes(rows)).toEqual(wanted.map((w) => w.columns.join(',')).sort());
+        }
+        // ...and nothing is announced as missing, because nothing is.
+        expect(built.sqlText).not.toContain('NOT EMITTED');
+        expect(built.tsText).not.toContain('NOT EMITTED');
+        expect(built.sqlText).not.toContain('COALESCE');
+        expect(built.tsText).not.toContain('COALESCE');
       }
 
       if (probe.expect === 'no-column') {
@@ -426,6 +443,44 @@ describe('#16317 — the index each generator emits is the index the driver CREA
   });
 
   /**
+   * ⭐ The same consequence for the ORGANIZATION composite (ADR-0131 D1): a
+   * duplicate inside ONE organization is refused by the driver's table and by
+   * BOTH generated ones, and the same value in a SECOND organization is accepted
+   * by all three — uniqueness is per organization, not platform-wide. Rows
+   * carry an explicit organization: a fresh driver table's tenant column is
+   * NOT NULL, so a NULL-organization row is not a case the driver's table has.
+   */
+  it('a duplicate inside one organization is refused by BOTH generated tables and the driver; another organization is not', async () => {
+    const object = { name: 'p_enforce_org', fields: { organization_id: ORG, f: { ...KEYED, unique: true } } };
+    const built = await threeTables(object);
+    const insert = (db: any, id: string, org: string) =>
+      db.raw(`INSERT INTO "p_enforce_org" ("id", "organization_id", "f") VALUES (?, ?, 'dup')`, [id, org]);
+    const verdicts: Record<string, { sameOrg: string; otherOrg: string }> = {};
+    for (const [who, db] of Object.entries(built.dbs)) {
+      await insert(db, 'a', 'org_1');
+      let sameOrg: string;
+      try {
+        await insert(db, 'b', 'org_1');
+        sameOrg = 'accepted';
+      } catch (err) {
+        // A UNIQUE refusal specifically — not any error the insert could raise.
+        expect(String((err as Error).message)).toMatch(/UNIQUE constraint failed/);
+        sameOrg = 'refused';
+      }
+      let otherOrg: string;
+      try {
+        await insert(db, 'c', 'org_2');
+        otherOrg = 'accepted';
+      } catch {
+        otherOrg = 'refused';
+      }
+      verdicts[who] = { sameOrg, otherOrg };
+    }
+    const perOrg = { sameOrg: 'refused', otherOrg: 'accepted' };
+    expect(verdicts).toEqual({ driver: perOrg, sqlgen: perOrg, tsgen: perOrg });
+  });
+
+  /**
    * NON-VACUITY for the whole block. A corpus that built no unique index at all
    * would satisfy every `toEqual` above by agreeing on emptiness.
    */
@@ -436,7 +491,7 @@ describe('#16317 — the index each generator emits is the index the driver CREA
     for (const probe of CORPUS) {
       const wanted = driverIndexes(oracle, probe.object);
       if (probe.expect === 'emitted') counts.emitted += wanted.length;
-      if (probe.expect === 'scoped-not-emitted') counts.scoped += wanted.length;
+      if (probe.expect === 'scoped') counts.scoped += wanted.length;
       if (probe.expect === 'no-column') counts.noColumn += wanted.length;
       if (probe.expect === 'none') counts.none += wanted.length;
       for (const w of wanted) if (/_[0-9a-f]{8}$/.test(w.name)) counts.hashed += 1;
@@ -477,11 +532,29 @@ describe('#16317 — the transcriptions in generate.ts are the driver\'s own', (
     expect(hashed).toBeGreaterThanOrEqual(3);
   });
 
-  /** The `__global__` sentinel the unemitted-index note names. */
-  it('the sentinel the NOT EMITTED note prints is the driver\'s GLOBAL_TENANT', () => {
+  /**
+   * The `__global__` sentinel retired with the ADR-0120 D3 expression key part
+   * (ADR-0131 D1), and with it the NOT EMITTED note that printed it. What is
+   * left to pin is that the generators stopped announcing the organization
+   * composite as missing — a stale note would tell the operator to hand-write
+   * an index the file already creates — and that no COALESCE spelling of it
+   * survives in either format, comment or code.
+   */
+  it('no NOT EMITTED line is printed for an organization composite, in either format', () => {
     const object = { name: 'g_probe', fields: { organization_id: ORG, f: { ...KEYED, unique: true } } };
-    expect(generateMigrationSql(configFor(object))).toContain(`'${GLOBAL_TENANT}'`);
-    expect(generateMigrationTs(configFor(object))).toContain(`'${GLOBAL_TENANT}'`);
+    const [want] = driverIndexes(oracle, object);
+    expect(want.columns).toEqual(['organization_id', 'f']);
+    const sql = generateMigrationSql(configFor(object));
+    const ts = generateMigrationTs(configFor(object));
+    expect(sql).not.toContain('NOT EMITTED');
+    expect(ts).not.toContain('NOT EMITTED');
+    expect(sql).not.toContain('COALESCE');
+    expect(ts).not.toContain('COALESCE');
+    expect(sql).not.toContain('__global__');
+    expect(ts).not.toContain('__global__');
+    // Non-vacuity: the index is in the file — as itself, not as a note.
+    expect(sql).toContain(`CONSTRAINT "${want.name}" UNIQUE ("organization_id", "f")`);
+    expect(ts).toContain(`table.unique(['organization_id', 'f'], { indexName: '${want.name}' });`);
   });
 
   /**
@@ -495,16 +568,19 @@ describe('#16317 — the transcriptions in generate.ts are the driver\'s own', (
       const ts = generateMigrationTs(configFor(probe.object));
       for (const want of driverIndexes(oracle, probe.object)) {
         checked += 1;
-        const scoped = (want.nullSafeColumns ?? []).length > 0;
-        const emitted = probe.expect === 'emitted';
+        // ADR-0131 D1: every key part is a plain column, the organization
+        // composite's included, so every emitted index is a column list.
+        expect(want.nullSafeColumns ?? []).toHaveLength(0);
+        const emitted = probe.expect === 'emitted' || probe.expect === 'scoped';
         const cols = want.columns.map((c) => `"${c}"`).join(', ');
         if (emitted) {
-          expect(scoped).toBe(false);
           expect(sql).toContain(`CONSTRAINT "${want.name}" UNIQUE (${cols})`);
           expect(ts).toContain(
             `table.unique([${want.columns.map((c) => `'${c}'`).join(', ')}], { indexName: '${want.name}' });`,
           );
         } else {
+          // Only the no-column exclusion is left to announce.
+          expect(probe.expect).toBe('no-column');
           expect(sql).toContain(`NOT EMITTED: UNIQUE index "${want.name}" on (${want.columns.join(', ')})`);
           expect(ts).toContain(`NOT EMITTED: UNIQUE index '${want.name}' on (${want.columns.join(', ')})`);
         }

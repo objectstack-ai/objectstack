@@ -24,7 +24,7 @@
 // hand-curated regex table reaching 1 of 17 REST registrars and 4 of 17
 // dispatcher domain files.
 //
-// The population comes from `packages/rest/src/rest-route-ledger.ts` (81 rows
+// The population comes from `packages/rest/src/rest-route-ledger.ts` (80 rows
 // / 18 families) and `packages/runtime/src/route-ledger.ts` (105 rows / 23
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
@@ -56,7 +56,9 @@
 // read/delete rows out of the ledger — 94 rows → 91, `sdk` 84 → 81, with
 // families unmoved at 19 because all three departing rows carried
 // `family: packages`, which survives on the publish row. (91 → 83 rows and
-// 19 → 18 families later, when #20102 retired the whole `reports` family.)
+// 19 → 18 families later, when #20102 retired the whole `reports` family;
+// 81 → 80 rows, families unmoved, when #25104 retired the `/docs` viewer
+// page, whose `openapi` family survives on the document row.)
 // Two stale figures in
 // one docblock with two entirely different causes is the failure mode the pin
 // above ends. Widening a regex instead was refused: it rots on the next
@@ -294,14 +296,16 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     note: 'Ungated, an unauthenticated caller — carried to the domain as the guest envelope — was answered 200 on every analytics face on a stock boot, with aggregates over arbitrary objects, while the record doors and the dataset door on the same boot answered it 401. Gating the DOMAIN rather than each face keeps a newly added analytics face from arriving ungated. This row is the door half only: a non-system caller who resolves NO permission set being granted object admission and an unscoped read by that absence is a security-layer question for every door at once, deliberately not copied into service-analytics; it is tracked on its own card. The per-face unit pins (anonymous 401 with the service never consulted, malformed body and empty slot still 401, signed-in control unchanged) live in runtime/domains/analytics-anonymous-deny.test.ts.' },
   // #22430 — the API-description endpoints, under the ruling recorded on #22146
   // (the API-description endpoints refuse an anonymous caller with 401).
-  { id: 'anonymous-deny-api-description', summary: 'anonymous-deny on the API-description endpoints (the document and its viewer)', state: 'enforced',
-    enforcement: 'rest/discovery-routes.ts registerOpenApiEndpoints — BOTH handlers (the document and its viewer page, on every base the server mounts) open with enforceAuth (→ shouldDenyAnonymous) as their first act, ahead of the bundled-artifact load and the protocol resolution, so a refused request does no work and does not reveal whether a document is bundled; an anonymous caller gets the REST seam\'s flat 401 UNAUTHENTICATED, a signed-in caller is served as before, and a session held by the ADR-0069 auth-policy gate gets that gate\'s 403',
+  // #25104 — the document's `/docs` viewer page, the family's second route,
+  // was retired with its handler; the row now covers the one route left.
+  { id: 'anonymous-deny-api-description', summary: 'anonymous-deny on the API-description endpoint (the OpenAPI document)', state: 'enforced',
+    enforcement: 'rest/discovery-routes.ts registerOpenApiEndpoints — the document handler (on every base the server mounts) opens with enforceAuth (→ shouldDenyAnonymous) as its first act, ahead of the bundled-artifact load and the protocol resolution, so a refused request does no work and does not reveal whether a document is bundled; an anonymous caller gets the REST seam\'s flat 401 UNAUTHENTICATED, a signed-in caller is served as before, and a session held by the ADR-0069 auth-policy gate gets that gate\'s 403',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
-    // The REST family at ledger granularity. The family is exactly these two
-    // routes and both handlers open with the floor, which is the property a
+    // The REST family at ledger granularity. The family is exactly this one
+    // route and its handler opens with the floor, which is the property a
     // family key needs.
     covers: ['rest-family:rest-route-ledger.ts:openapi'],
-    note: 'Measured on a booted showcase before the change: an unauthenticated caller was served the document and the viewer page with 200, just as a signed-in caller was, while the record doors on the same boot answered it 401 — ADR-0056 D2 is default-deny and no ADR-0138 D2 door class names these endpoints. The cited proof drives both endpoints anonymously (401, the REST flat envelope, nothing of either served) and with a signed-in member (200, the document / the viewer page) on one boot. The environment-scoped twin mounts only under project scoping, which the showcase does not enable; it is the same handler closure, pinned per base in rest/src/rest-api-description-anonymous-deny.test.ts beside the gated-session 403 and the permission-store-outage 503. The viewer page fetches the document from the browser, and that request carries the browser\'s session (measured with the real viewer in a browser), so a signed-in browser is served on both endpoints; a deployment that publishes its API description to readers without an account publishes a static copy of the document instead.' },
+    note: 'Measured on a booted showcase before the change: an unauthenticated caller was served the document (and its viewer page, since retired) with 200, just as a signed-in caller was, while the record doors on the same boot answered it 401 — ADR-0056 D2 is default-deny and no ADR-0138 D2 door class names this endpoint. The cited proof drives the document anonymously (401, the REST flat envelope, nothing of it served) and with a signed-in member (200, the document) on one boot. The environment-scoped twin mounts only under project scoping, which the showcase does not enable; it is the same handler closure, pinned per base in rest/src/rest-api-description-anonymous-deny.test.ts beside the gated-session 403 and the permission-store-outage 503. A deployment that publishes its API description to readers without an account publishes a static copy of the document instead.' },
   // #22432 — the `/i18n` dispatcher domain, under the ruling recorded on #22146
   // (the domain gains the domain-level anonymous refusal every other dispatcher
   // domain has, with an objectui companion for the Console's sign-in page).

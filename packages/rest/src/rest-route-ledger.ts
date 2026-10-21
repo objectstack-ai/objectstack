@@ -53,7 +53,7 @@ export type RestRouteDisposition =
   | 'sdk'
   /** Should be in the SDK and is not — an open, acknowledged gap. */
   | 'gap'
-  /** Deliberately not SDK surface (docs pages, machine-readable spec, aliases). */
+  /** Deliberately not SDK surface (machine-readable spec, aliases). */
   | 'server-only'
   /** Public, unauthenticated browser-facing route (anonymous forms etc.). */
   | 'public'
@@ -177,11 +177,11 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     responseSchema: 'DiscoverySchema',
     note: 'duplicate mount with the dispatcher /discovery branch — REST registers first and wins. Answers BARE (res.json(discovery), no envelope), so `DiscoverySchema` names the whole body here while the dispatcher row names its envelope `data`; discovery-schema-conformance.test.ts drives THIS handler through the double assertion: the live body parses against `DiscoverySchema`, and it carries no key the protocol does not declare' },
 
-  // ── openapi / docs ────────────────────────────────────────────────────────
+  // ── openapi ───────────────────────────────────────────────────────────────
+  // [#25104] The document's HTML viewer page (`GET /api/v1/docs`) is retired
+  // and left this ledger with its route.
   { route: 'GET /api/v1/openapi.json', family: 'openapi', source: 'route-manager', disposition: 'server-only',
     note: 'machine-readable OpenAPI 3.1 (503 when not bundled); docs tooling, not SDK surface' },
-  { route: 'GET /api/v1/docs', family: 'openapi', source: 'route-manager', disposition: 'server-only',
-    note: 'interactive Scalar HTML page' },
 
   // ── metadata ──────────────────────────────────────────────────────────────
   // [2026-08-31] SEEDED under the field's fill rule: `anonymous-deny-meta` is

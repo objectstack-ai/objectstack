@@ -1099,6 +1099,11 @@ export const REMOTE_FACE_ANSWERS = {
   // `false`, the method's own "not taken" answer: only the Knex `initObjects`
   // asks the resolver, so on this face it would never be asked.
   setFileColumnsMovedResolver: 'remote',
+  // [ADR-0131 D1] In-memory bookkeeping with no Knex: the resolver is asked by
+  // the shared index differ, which the remote drift detector runs, so the
+  // remote face reads an earlier release's COALESCE tenant key part as the
+  // plain one on a certified database exactly as the local face does.
+  setTenantKeyCertifiedResolver: 'inherited',
   // `false`: remote mode opens no in-memory database.
   sqliteOpenedEmptyInMemory: 'inherited',
   // `'sqlite'`: libSQL speaks SQLite, and `execute()` sends what a caller
@@ -4227,8 +4232,12 @@ export class TursoDriver extends SqlDriver {
     const parts = columns.map((c) =>
       nullSafe.has(c) ? `COALESCE(${quoteRemoteIdentifier(c)}, '${GLOBAL_TENANT}')` : quoteRemoteIdentifier(c),
     );
+    // [ADR-0131 D1] A row with a NULL plain key part conflicts with nothing
+    // under the NULL-distinct UNIQUE; the local face leaves it out the same way.
+    const notNull = columns.filter((c) => !nullSafe.has(c)).map((c) => `${quoteRemoteIdentifier(c)} IS NOT NULL`);
     const sql =
-      `SELECT ${parts.map((p, i) => `${p} AS k${i}`).join(', ')}, COUNT(*) AS n FROM ${quoteRemoteIdentifier(table)} ` +
+      `SELECT ${parts.map((p, i) => `${p} AS k${i}`).join(', ')}, COUNT(*) AS n FROM ${quoteRemoteIdentifier(table)}` +
+      `${notNull.length > 0 ? ` WHERE ${notNull.join(' AND ')}` : ''} ` +
       `GROUP BY ${parts.join(', ')} HAVING COUNT(*) > 1 ORDER BY n DESC LIMIT 20`;
     return (await this.remoteCatalogRead(sql)).map((r) => ({
       key: columns.map((c, i) => `${c}=${JSON.stringify(r[`k${i}`])}`).join(', '),

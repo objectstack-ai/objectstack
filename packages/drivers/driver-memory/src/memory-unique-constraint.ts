@@ -39,7 +39,7 @@
  * | declaration | tenant column | driver-sql index | here |
  * |:---|:---|:---|:---|
  * | `unique: 'global'` | any | `(field)` | scope `null` |
- * | `unique: true` / `'organization'` | present, ≠ field | `(COALESCE(tenant,'__global__'), field)` | scope = tenant column |
+ * | `unique: true` / `'organization'` | present, ≠ field | `(tenant, field)` | scope = tenant column |
  * | `unique: true` / `'organization'` | absent | `(field)` | scope `null` |
  * | `unique: true` / `'organization'` | IS the field | `(field)` | scope `null` |
  * | absent / `false` | any | no index | not a constraint |
@@ -61,8 +61,8 @@
  * | `fields` empty / absent / no non-empty strings | any | `null` — unusable | no constraint |
  * | `unique` absent / `false` | any | a PLAIN index | not a constraint |
  * | `unique: true` / `'global'` | any | the listed columns VERBATIM | `columns` = listed, no NULL-safe part |
- * | `unique: 'organization'`, tenant column NOT listed | present | `(COALESCE(tenant,'__global__'), …listed)` | `columns` = `[tenant, …listed]`, `nullSafeColumns` = `[tenant]` |
- * | `unique: 'organization'`, tenant column ALREADY listed | present | listed verbatim, the tenant's own key part goes NULL-safe | `columns` = listed (order kept), `nullSafeColumns` = `[tenant]` |
+ * | `unique: 'organization'`, tenant column NOT listed | present | `(tenant, …listed)` | `columns` = `[tenant, …listed]`, `scopeColumns` = `[tenant]` |
+ * | `unique: 'organization'`, tenant column ALREADY listed | present | listed verbatim | `columns` = listed (order kept), `scopeColumns` = `[tenant]` |
  * | `unique: 'organization'` | absent | degrades to the listed columns alone | `columns` = listed, no NULL-safe part |
  *
  * ⚠️ **bare `true` inverts between the two surfaces.** On a declared index it
@@ -105,9 +105,16 @@
  *    NULL key part exempts the row (below), so such an index constrains
  *    nothing. The field surface has the same exposure and the same answer.
  *
- * ### Why the NULL-organization fold needs no `'__global__'` token here
+ * ### The organization key part is plain since ADR-0131 D1
  *
- * ADR-0120 D3 materializes the organization key part as
+ * The tenant column is NOT NULL (ADR-0131 D1), so `driver-sql` keys the plain
+ * column and a row whose organization is NULL is exempt under its
+ * NULL-distinct UNIQUE, like a NULL in any other key part. This module answers
+ * the same: the organization key part is an ordinary one. The fold the next
+ * paragraphs describe is what ADR-0120 D3 did before, kept for the record of
+ * why `nullSafeColumns` exists on the constraint shape.
+ *
+ * ADR-0120 D3 materialized the organization key part as
  * `COALESCE(organization_id, '__global__')` because SQL `UNIQUE` is
  * NULL-DISTINCT: a raw `(organization_id, field)` composite enforces NOTHING on
  * rows whose organization is NULL, which on a single-organization stack is
@@ -148,9 +155,9 @@
  *
  * So there is exactly ONE rule, and {@link uniqueKeyOf} is the one place it
  * lives: **a NULL in any key part EXEMPTS the row, except in a NULL-SAFE part,
- * where it folds onto the shared `null` bucket.** The organization key part is
- * the only NULL-safe one, on either surface, because on the SQL side it is the
- * only one materialized as an expression that can never be NULL.
+ * where it folds onto the shared `null` bucket.** Since ADR-0131 D1 no
+ * organization key part is NULL-safe; the one NULL-safe part left is the
+ * constant platform scope of a field-level constraint with no tenant column.
  *
  * ## Which column conflicted: this driver answers `undefined`, always
  *
@@ -244,10 +251,15 @@ export interface MemoryDeclaredIndexConstraint {
   readonly columns: readonly string[];
   /**
    * The subset of {@link columns} whose NULL FOLDS onto one shared bucket
-   * instead of exempting the row (ADR-0120 D3). In practice the organization
-   * key part, and only on the `'organization'` spelling.
+   * instead of exempting the row (ADR-0120 D3). Empty from every declaration
+   * since ADR-0131 D1, which keys the plain organization column.
    */
   readonly nullSafeColumns: readonly string[];
+  /**
+   * The organization key part the `'organization'` spelling prepended or
+   * named — what the refusal states as the scope. Absent otherwise.
+   */
+  readonly scopeColumns?: readonly string[];
 }
 
 /**
@@ -459,11 +471,11 @@ export function uniqueConstraintsFromDeclaredIndexes(
     if (!isUniqueDeclared(idx?.unique)) continue;
 
     if (isOrganizationUnique(idx?.unique) && tenantField) {
-      // A listed column that IS the tenant column is not prepended again — its
-      // own key part becomes the NULL-safe one instead (the hand-written S6
-      // spelling, opted in), and the author's column order is kept.
+      // A listed column that IS the tenant column is not prepended again (the
+      // hand-written S6 spelling), and the author's column order is kept. The
+      // organization key part is plain (ADR-0131 D1).
       const columns = listed.includes(tenantField) ? listed : [tenantField, ...listed];
-      out.push({ columns, nullSafeColumns: [tenantField] });
+      out.push({ columns, nullSafeColumns: [], scopeColumns: [tenantField] });
       continue;
     }
     // `'global'`, bare `true`, or `'organization'` on an object with no tenant
@@ -491,8 +503,8 @@ export function uniqueKeyOf(
   const parts: unknown[] = [];
   for (const part of keyPartsOf(constraint)) {
     // A NULL-SAFE part folds: `null` IS its bucket, and the row stays
-    // constrained. That is the ADR-0120 D3 organization key part, and the only
-    // kind of part that behaves this way on either surface.
+    // constrained: the constant platform scope of a field-level constraint.
+    // The organization key part is plain (ADR-0131 D1).
     if (part.nullSafe) {
       parts.push(part.column === null ? null : (record[part.column] ?? null));
       continue;
@@ -530,7 +542,9 @@ function keyPartsOf(constraint: MemoryUniqueEnforcement): readonly UniqueKeyPart
     }));
   }
   return [
-    { column: constraint.scopeField, nullSafe: true },
+    // The constant platform scope (`null`) folds; an organization column is a
+    // plain key part (ADR-0131 D1), so a row with no organization is exempt.
+    { column: constraint.scopeField, nullSafe: constraint.scopeField === null },
     { column: constraint.field, nullSafe: false },
   ];
 }
@@ -574,10 +588,10 @@ export function declaredIndexViolationError(
   constraint: MemoryDeclaredIndexConstraint,
   record: Record<string, unknown>,
 ): Error & { code: string; status: number } {
-  const scope = constraint.nullSafeColumns;
+  const scope = constraint.scopeColumns ?? constraint.nullSafeColumns;
   const keyed = constraint.columns.filter((c) => !scope.includes(c));
-  // A key whose ONLY part is the NULL-safe organization ("one row per
-  // organization") has nothing left to list, so it reports its own column.
+  // A key whose ONLY part is the organization ("one row per organization")
+  // has nothing left to list, so it reports its own column.
   const reported = keyed.length > 0 ? keyed : constraint.columns;
   const scoped =
     keyed.length > 0 && scope.length > 0

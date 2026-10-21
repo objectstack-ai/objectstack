@@ -38,7 +38,9 @@ import {
  * pinned in `spellings` below. Field-level `unique: true` has meant "per
  * organization" since #3696; a DECLARED index's `unique: true` is the positional
  * spelling of `'global'` and takes the listed columns VERBATIM. Only the
- * explicit `'organization'` prepends the NULL-safe organization key part.
+ * explicit `'organization'` prepends the organization key part — since
+ * ADR-0131 D1 the PLAIN tenant column (it was ADR-0120 D3's NULL-safe
+ * `COALESCE` part before 18.x).
  * `packages/lint/src/data-model-rules.ts` calls this "the #4986 trap" and warns
  * on it (`unique/unscoped-declared-index`); `sys_user_preference` and
  * `sys_capability` were two instances of it in the platform's own metadata.
@@ -182,17 +184,18 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
       expect(bare).toEqual(explicit);
     });
 
-    it('only the explicit `"organization"` spelling prepends the NULL-safe organization key part', () => {
+    it('only the explicit `"organization"` spelling prepends the PLAIN organization key part (ADR-0131 D1)', () => {
       const norm = normalizeDeclaredIndex(
         'sys_user_preference',
         { fields: ['user_id', 'key'], unique: 'organization' },
         'organization_id',
       );
+      // ADR-0131 D1: the tenant column is prepended PLAIN — no
+      // `nullSafeColumns`, so no COALESCE in the DDL it materializes.
       expect(norm).toEqual({
         name: 'uniq_sys_user_preference_organization_id_user_id_key',
         columns: ['organization_id', 'user_id', 'key'],
         unique: true,
-        nullSafeColumns: ['organization_id'],
       });
     });
 
@@ -206,11 +209,11 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
         { key: { type: 'string', unique: true } },
         'organization_id',
       );
+      // Keyed on the PLAIN organization column since ADR-0131 D1.
       expect(fieldLevel).toEqual({
         name: 'uniq_sys_user_preference_organization_id_key',
         columns: ['organization_id', 'key'],
         unique: true,
-        nullSafeColumns: ['organization_id'],
       });
     });
   });
@@ -277,19 +280,17 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
   ] as const;
 
   describe('materialized shape', () => {
-    it('the fixed declarations key on the NULL-safe organization part', async () => {
+    it('the fixed declarations key on the PLAIN organization column (ADR-0131 D1)', async () => {
+      // No COALESCE in new DDL: a fresh table's tenant column is NOT NULL, so
+      // the plain column is the whole key part.
       const d = makeDriver();
       await d.initObjects(FIXED_APP as any);
 
       expect(await uniqueKeyParts('sys_user_preference')).toEqual({
-        uniq_sys_user_preference_organization_id_user_id_key: [
-          'COALESCE(organization_id)',
-          'user_id',
-          'key',
-        ],
+        uniq_sys_user_preference_organization_id_user_id_key: ['organization_id', 'user_id', 'key'],
       });
       expect(await uniqueKeyParts('sys_capability')).toEqual({
-        uniq_sys_capability_organization_id_name: ['COALESCE(organization_id)', 'name'],
+        uniq_sys_capability_organization_id_name: ['organization_id', 'name'],
       });
     });
 
@@ -376,10 +377,13 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
       expect(await d.count('sys_capability', {})).toBe(1);
     });
 
-    it('AFTER: platform-seeded rows carry no organization and stay unique among THEMSELVES (D3)', async () => {
-      // The NULL-safe key part is what makes this hold: a bare
-      // `(organization_id, name)` composite would be NULL-distinct under SQL,
-      // so every platform-seeded capability could be duplicated at will.
+    it('AFTER: on a pre-18 nullable column, rows with no organization are NOT constrained by the plain key (ADR-0131 D1)', async () => {
+      // ADR-0120 D3's NULL-safe key part once kept a NULL-organization
+      // "bucket" unique among itself. ADR-0131 D1 retires it: the key is the
+      // PLAIN `(organization_id, name)` composite, and SQL UNIQUE is
+      // NULL-distinct, so two NULL-organization rows of one name do not
+      // conflict. A fresh table cannot hold such rows (its tenant column is
+      // NOT NULL); this pins the plain key on the shape that still can.
       const d = makeDriver();
       await d.initObjects(FIXED_APP as any);
       // Rows with no organization exist only on a database built before 18.x
@@ -387,16 +391,20 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
       await asPre18TenantColumn(d, 'sys_capability');
 
       expect((await createAsApi(d, 'sys_capability', { id: 'p1', name: 'manage_metadata' })).status).toBe(201);
-      const duplicateSeed = await createAsApi(d, 'sys_capability', { id: 'p2', name: 'manage_metadata' });
-      expect(duplicateSeed).toMatchObject(CONFLICT_ENVELOPE);
+      const nullOrgRepeat = await createAsApi(d, 'sys_capability', { id: 'p2', name: 'manage_metadata' });
+      expect(nullOrgRepeat.status).toBe(201);
+      expect(await d.count('sys_capability', {})).toBe(2);
 
-      // An organization may still define its own row of the same name — that
-      // is the ADR-0066 "admins EXTEND the registry" case, and the reason the
-      // platform bucket and the organization buckets are separate.
+      // An organization may still define its own row of the same name — the
+      // ADR-0066 "admins EXTEND the registry" case — and the plain key still
+      // refuses that organization's second one: the exemption is the NULL.
       expect(
         (await createAsApi(d, 'sys_capability', { id: 'o1', organization_id: 'org_jia', name: 'manage_metadata' }))
           .status,
       ).toBe(201);
+      expect(
+        await createAsApi(d, 'sys_capability', { id: 'o2', organization_id: 'org_jia', name: 'manage_metadata' }),
+      ).toMatchObject(CONFLICT_ENVELOPE);
     });
   });
 
@@ -529,8 +537,9 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
         dropIndexNames: ['uniq_sys_user_preference_user_id_key'],
         createIndexName: 'uniq_sys_user_preference_organization_id_user_id_key',
         createColumns: ['organization_id', 'user_id', 'key'],
-        nullSafeColumns: ['organization_id'],
       });
+      // ADR-0131 D1: the replacement keys the PLAIN organization column.
+      expect(entry!.op).not.toHaveProperty('nullSafeColumns');
 
       // The old index must NOT be reported as an orphan as well. An orphan drop
       // is `destructive`, so an operator applying only the safe half would keep
@@ -555,12 +564,9 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
       expect(applied.some((e) => e.op.type === 'replace_unique_index')).toBe(true);
       expect(skipped).toHaveLength(0);
 
+      // The plain composite (ADR-0131 D1).
       expect(await uniqueKeyParts('sys_user_preference')).toEqual({
-        uniq_sys_user_preference_organization_id_user_id_key: [
-          'COALESCE(organization_id)',
-          'user_id',
-          'key',
-        ],
+        uniq_sys_user_preference_organization_id_user_id_key: ['organization_id', 'user_id', 'key'],
       });
       expect(await d.count('sys_user_preference', {})).toBe(2);
 
@@ -793,13 +799,9 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
         driver = undefined;
       }
       // Positively asserted, not merely "all three agree" — three empty maps
-      // would satisfy sameness alone.
+      // would satisfy sameness alone. The plain key part is ADR-0131 D1's.
       expect(shapes.single).toEqual({
-        uniq_sys_user_preference_organization_id_user_id_key: [
-          'COALESCE(organization_id)',
-          'user_id',
-          'key',
-        ],
+        uniq_sys_user_preference_organization_id_user_id_key: ['organization_id', 'user_id', 'key'],
       });
       expect(shapes.group).toEqual(shapes.single);
       expect(shapes.isolated).toEqual(shapes.single);
