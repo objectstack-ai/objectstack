@@ -58,6 +58,17 @@
  * platform's one authorization resolver (`resolveAuthzContext`), against the
  * session this surface already read — see `holdsSetupAccess`.
  *
+ * ## A platform-managed connection is not this runtime's to manage (ruling 甲, #25097)
+ *
+ * A runtime holding the env→cloud service key (`controlPlaneApiKey` /
+ * `OS_CLOUD_API_KEY`, injected by the cloud into the runtimes it hosts) is
+ * connected by the platform, and that key — not a device-bound credential —
+ * is what it presents. Such a runtime registers no Cloud Connection Setup page
+ * or nav entry, and `unbind` answers `409 RESOURCE_CONFLICT`
+ * (`PLATFORM_MANAGED_UNBIND_REFUSAL`). Everywhere else — self-hosted or local,
+ * bound through the device-code flow — the page registers under Setup →
+ * Integrations and every door behaves as described above.
+ *
  * ## Why a same-origin proxy at all
  *
  * The SPA cannot call the control plane from a tenant subdomain — that is a
@@ -156,6 +167,29 @@ const SETUP_ACCESS_REFUSAL = {
     code: 'PERMISSION_DENIED',
     status: 403,
     message: `Managing this runtime's cloud connection requires the \`${SETUP_ACCESS_CAPABILITY}\` capability.`,
+} as const;
+
+/**
+ * Ruling 甲 (#25097): the refusal `POST /unbind` gives on a platform-managed
+ * runtime — one whose control-plane credential is the env→cloud service key
+ * (`platformManaged` in `start()`) — before the control-plane revoke and before
+ * the local credential store is touched.
+ *
+ * `RESOURCE_CONFLICT` / 409, no code minted, on the same rule
+ * {@link SETUP_ACCESS_REFUSAL} follows: the ADR-0112 ledger sends a generic
+ * condition to the standard catalog rather than to a registered synonym, and
+ * the catalog's 409 member is the one for a refusal that comes from the
+ * runtime's state rather than from the request — the same answer this
+ * package's install-local door gives when a writable base holds a package's
+ * namespace (`marketplace-install-local-plugin.ts`). The message carries the
+ * meaning: the platform manages the connection, so nothing here can end it.
+ * It names no remedy, because this runtime has none to offer.
+ */
+const PLATFORM_MANAGED_UNBIND_REFUSAL = {
+    code: 'RESOURCE_CONFLICT',
+    status: 409,
+    message: 'This runtime\'s cloud connection is managed by the platform, so it cannot be disconnected here: its '
+        + 'control-plane credential is the environment service key the platform provides. Nothing was revoked or cleared.',
 } as const;
 
 /**
@@ -271,12 +305,29 @@ export class CloudConnectionPlugin implements Plugin {
             const deviceClientId = (this.cfg.deviceClientId ?? process.env.OS_CLI_CLIENT_ID ?? 'objectstack-cli').trim();
             const deviceScope = 'openid profile email';
 
+            /**
+             * Ruling 甲 (#25097): is this runtime's cloud connection
+             * PLATFORM-MANAGED? It is exactly when the effective control-plane
+             * credential is the env→cloud service key
+             * (`controlPlaneApiKey` / `OS_CLOUD_API_KEY`, which the cloud
+             * injects into the runtimes it hosts) — the one fact `credential()`
+             * below is written in terms of, so the two can never disagree.
+             *
+             * A managed connection belongs to the platform, so this runtime
+             * offers no way to manage it: the Setup page and its nav entry are
+             * not registered, and `POST /unbind` is refused
+             * ({@link PLATFORM_MANAGED_UNBIND_REFUSAL}). Read once, here: the
+             * key is resolved at `kernel:ready` and does not change while the
+             * runtime is up.
+             */
+            const platformManaged = cloudApiKey !== '';
+
             // Effective control-plane credential, resolved PER REQUEST:
             // cloud-hosted runtimes carry the env→cloud service key; a
             // self-hosted runtime presents the `oscc_…` bearer the bind flow
             // persisted. Lazy so a bind that completes while the runtime is
             // up takes effect without a restart.
-            const credential = (): string => cloudApiKey || this.store.read()?.runtimeToken || '';
+            const credential = (): string => (platformManaged ? cloudApiKey : this.store.read()?.runtimeToken || '');
             const authHeaders = (): Record<string, string> => {
                 const cred = credential();
                 return cred ? { Authorization: `Bearer ${cred}` } : {};
@@ -341,10 +392,23 @@ export class CloudConnectionPlugin implements Plugin {
             // plugin as metadata (ADR-0029 K2); the console only provides the
             // registered `cloud-connection:panel` widget. Best-effort — a
             // kernel without a manifest service simply has no Setup entry.
-            try {
-                const manifest = ctx.getService<{ register(m: any): void }>('manifest');
-                manifest?.register?.(CLOUD_CONNECTION_UI_BUNDLE);
-            } catch { /* no manifest service — headless kernel */ }
+            //
+            // Ruling 甲 (#25097): a platform-managed runtime registers neither.
+            // Its connection is the platform's, so a page offering to connect
+            // or disconnect it would offer what this runtime cannot do. The
+            // absence is said once, here, rather than left to be diagnosed.
+            if (platformManaged) {
+                ctx.logger?.info?.(
+                    '[CloudConnectionPlugin] the cloud connection is platform-managed (the control-plane credential is the '
+                    + 'environment service key): the Cloud Connection Setup page and its navigation entry are not registered, '
+                    + 'and disconnecting is refused',
+                );
+            } else {
+                try {
+                    const manifest = ctx.getService<{ register(m: any): void }>('manifest');
+                    manifest?.register?.(CLOUD_CONNECTION_UI_BUNDLE);
+                } catch { /* no manifest service — headless kernel */ }
+            }
 
             const sessionFromAuthService = async (
                 authSvc: any,
@@ -750,7 +814,8 @@ export class CloudConnectionPlugin implements Plugin {
             // POST /unbind — disconnect this runtime from the control plane.
             // Revokes the connection server-side (best-effort) and clears the
             // local credential. Requires an environment session holding
-            // `setup.access`, mirroring bind/start.
+            // `setup.access`, mirroring bind/start. Refused on a
+            // platform-managed runtime (ruling 甲, #25097).
             rawApp.post(`${CLOUD_CONNECTION_PREFIX}/unbind`, async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 if (!environmentId && !this.cfg.singleEnvironment) {
@@ -761,6 +826,17 @@ export class CloudConnectionPlugin implements Plugin {
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in.' } }, 401);
                 // [#24148] Refused before the revoke and before the local clear.
                 if (!(await holdsSetupAccess(c.req.raw, session))) return refuseWithoutSetupAccess(c);
+                // Ruling 甲 (#25097): the connection is the platform's — refused
+                // before the revoke and before the local clear, so nothing
+                // changes on either side. After the identity and capability
+                // checks, so a caller who may not manage the connection learns
+                // nothing about how it is held.
+                if (platformManaged) {
+                    return c.json({
+                        success: false,
+                        error: { code: PLATFORM_MANAGED_UNBIND_REFUSAL.code, message: PLATFORM_MANAGED_UNBIND_REFUSAL.message },
+                    }, PLATFORM_MANAGED_UNBIND_REFUSAL.status);
+                }
 
                 // Revoke cloud-side FIRST (the oscc_ bearer self-identifies;
                 // env-keyed bindings name the environment), then clear the
