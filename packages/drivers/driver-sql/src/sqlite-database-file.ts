@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { accessSync, constants, lstatSync, statSync } from 'node:fs';
 import { mkdir, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
@@ -74,4 +75,84 @@ export async function makeDatabaseDirectory(dir: string): Promise<void> {
       if ((e as { code?: unknown } | null)?.code !== 'EEXIST') throw e;
     }
   }
+}
+
+/**
+ * Does the SQLite database file `filename` exist, or is it absent in a way a
+ * boot that may write could bring into existence? Answered WITHOUT writing
+ * anything, and thrown as a {@link SqliteDatabaseFileError} when it is neither
+ * (#24961) — so under `sqliteAbsentFile: 'empty-in-memory'` that error comes
+ * from `resolveSqliteAbsentFileTarget`, and from the `SqlDriver` constructor,
+ * before any `connect()`.
+ *
+ * The read-only twin of {@link makeDatabaseDirectory}, for
+ * `sqliteAbsentFile: 'empty-in-memory'`, whose contract is that the filesystem
+ * is left untouched — so neither the directory nor the file may be created to
+ * find out. The same walk, with the question the operating system answers
+ * without a write in place of each `mkdir`:
+ *
+ *   - `stat(filename)` succeeds: `'exists'`.
+ *   - `stat(filename)` answers anything but `ENOENT` — `ENOTDIR` (a regular
+ *     file holds a level of the path), `EACCES` (a level this process may not
+ *     search), `ELOOP`, `ENAMETOOLONG` — the file cannot exist, and that answer
+ *     is the refusal. `existsSync` answers `false` for every one of these, which
+ *     is how a read-only boot used to open an empty in-memory database over a
+ *     path its writing twin refuses, and report the datasource connected.
+ *   - `ENOENT`: walk up to the nearest level that exists. A level whose name a
+ *     dangling symbolic link holds cannot be made (`mkdir` answers `EEXIST`,
+ *     and nothing can be created through it): refused. Otherwise the level is a
+ *     directory — a non-directory would have answered `ENOTDIR` above — and
+ *     creating the next level, or the file, needs write and search permission
+ *     on it: `access(W_OK | X_OK)`, whose refusal (`EACCES`; `EROFS` on a
+ *     read-only mount) is the answer. Otherwise `'absent'`.
+ *
+ * What it cannot tell without a write: a directory whose `access` succeeds but
+ * whose `mkdir` fails anyway. `/proc/<missing>/` as root answers `access` with
+ * success and `mkdir` with `ENOENT`, so such a path still reads `'absent'` here;
+ * `SqlDriver.connect()` refuses it on a boot that may write.
+ */
+export function probeAbsentSqliteDatabaseFile(filename: string): 'exists' | 'absent' {
+  try {
+    statSync(filename);
+    return 'exists';
+  } catch (e) {
+    if (errorCode(e) !== 'ENOENT') throw new SqliteDatabaseFileError(filename, 'cannot be opened or created', e);
+  }
+  const dir = dirname(resolve(filename));
+  const unmakeable = `cannot be created: its directory '${dirname(filename)}' cannot be made`;
+  let level = dir;
+  for (;;) {
+    try {
+      statSync(level);
+      break;
+    } catch (e) {
+      if (errorCode(e) !== 'ENOENT') throw new SqliteDatabaseFileError(filename, unmakeable, e);
+      if (isDanglingLink(level)) {
+        throw new SqliteDatabaseFileError(filename, `${unmakeable} ('${level}' is a symbolic link to a path that does not exist)`, e);
+      }
+      const parent = dirname(level);
+      if (parent === level) break;
+      level = parent;
+    }
+  }
+  try {
+    accessSync(level, constants.W_OK | constants.X_OK);
+  } catch (e) {
+    throw new SqliteDatabaseFileError(filename, level === dir ? 'cannot be opened or created' : unmakeable, e);
+  }
+  return 'absent';
+}
+
+/** A name `stat` answered `ENOENT` for, that `lstat` still finds: a dangling link. */
+function isDanglingLink(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function errorCode(e: unknown): unknown {
+  return (e as { code?: unknown } | null | undefined)?.code;
 }

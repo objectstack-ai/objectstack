@@ -93,6 +93,45 @@ const VITEST_ENTRY = resolve(dirname(require.resolve('vitest/package.json')), 'v
 /** The refusal's own headline, as `renderInertOverrideNotice` prints it. */
 const REFUSAL = 'TIMEOUT OVERRIDE CANNOT REACH THIS PACKAGE';
 
+/**
+ * The time budget of every case here: one `vitest list` child of this package
+ * (#24927).
+ *
+ * Each case blocks on exactly one child (`runVitestList`, a synchronous
+ * `execFileSync`), so a case's wall time is that child's wall time, and
+ * vitest's 5000 ms default is a number nobody chose for that work. A control
+ * child passes the config load and then resolves both projects and globs the
+ * whole package; a refusing child stops at the config load. So the control
+ * child is the larger one, and its reading sizes the budget for all four.
+ *
+ * Readings in ms, slowest case of each kind (refusal / control):
+ *
+ *   - CI, merge group run 39444329582, job `Test Core (2/6)`, a contended
+ *     shard: 3355 / 7897. Both controls failed, `Test timed out in 5000ms.`
+ *   - Local, idle, 6 runs of this file alone: 1244 / 2350.
+ *   - Local, 12 runs beside this package's own Test Core slice
+ *     (`OS_TEST_SHARD` 1/3, `OS_TEST_TIERS=queue`, `VITEST_MAX_WORKERS=3`),
+ *     with this file pinned to one CPU that it shares with 2 busy loops:
+ *     5134 / 8685. In the 6 runs at the default, both controls failed every
+ *     time. This load reproduces the CI reading: the file read 21.2 to 24.4 s
+ *     here and 21.2 s in CI.
+ *
+ * The rule follows plugin-sharing's scrypt budgets
+ * (`share-link-password-webcontainer.test.ts`): take 3x the slowest reading
+ * and round up to the next second. 3 x 8685 = 26055, so the budget is 27000.
+ * The refusals are budgeted too: the same load took one of them to 5134 ms,
+ * past the default.
+ *
+ * The case body blocks the event loop, so vitest cannot interrupt it. vitest
+ * judges the budget after the child returns: its elapsed-time check fails a
+ * synchronous case that ran past its timeout. `execFileSync` here is given no
+ * `timeout`, so no child limit fires before this one. If a case's child count
+ * or the package's test population changes, re-measure and re-size. Do not
+ * make a control cheaper by narrowing what it lists (a `--project`, a file
+ * filter): it asks about a run of the whole package.
+ */
+const VITEST_LIST_BUDGET_MS = 27_000;
+
 interface ChildRun {
   readonly status: number;
   readonly output: string;
@@ -141,7 +180,7 @@ describe('#18788 a CLI timeout override that cannot reach a project is refused, 
     // ownership §3). Both spellings named here are measured in this package.
     expect(run.output).toContain('extends: true');
     expect(run.output).toContain('beforeAll(fn, 1)');
-  });
+  }, VITEST_LIST_BUDGET_MS);
 
   it('refuses `--teardownTimeout` — the other knob the same allowlist drops', () => {
     const run = runVitestList('--teardownTimeout=1');
@@ -149,7 +188,7 @@ describe('#18788 a CLI timeout override that cannot reach a project is refused, 
     expect(run.status).not.toBe(0);
     expect(run.output).toContain(REFUSAL);
     expect(run.output).toContain('--teardownTimeout');
-  });
+  }, VITEST_LIST_BUDGET_MS);
 
   it('⭐ CONTROL — a run naming no override passes and says nothing', () => {
     // Without this leg the three above are satisfied by a config that refuses
@@ -160,7 +199,7 @@ describe('#18788 a CLI timeout override that cannot reach a project is refused, 
     expect(run.output).not.toContain(REFUSAL);
     // It really listed something, so the zero is a reading and not an empty run.
     expect(run.output).toMatch(/\.test\.ts/);
-  });
+  }, VITEST_LIST_BUDGET_MS);
 
   it('⭐ CONTROL — `--testTimeout` is on vitest’s allowlist, reaches the projects, and is NOT refused', () => {
     // The discriminator. `--testTimeout=1` bounds test bodies here for real
@@ -172,5 +211,5 @@ describe('#18788 a CLI timeout override that cannot reach a project is refused, 
 
     expect(run.status).toBe(0);
     expect(run.output).not.toContain(REFUSAL);
-  });
+  }, VITEST_LIST_BUDGET_MS);
 });
