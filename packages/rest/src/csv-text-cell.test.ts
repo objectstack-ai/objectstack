@@ -94,7 +94,7 @@ describe('csvTextCellNeedsMark — the one predicate (#25078)', () => {
   });
 
   it('marks with exactly one U+0027', () => {
-    expect(CSV_TEXT_CELL_MARK).toBe(''');
+    expect(CSV_TEXT_CELL_MARK).toBe(String.fromCharCode(0x27));
     for (const [text, marked] of TABLE) {
       expect(markCsvTextCell(text)).toBe(marked ? `'${text}` : text);
     }
