@@ -68,7 +68,7 @@ Turso / libSQL Connection Configuration
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | libSQL endpoint or local file: a remote libsql/https Turso URL, a local file written as a file: URL (never a bare path), or :memory: |
 | **authToken** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config` |
-| **encryptionKey** | `string` | optional | AES-256 encryption key for the local database file (local/replica modes) |
+| **encryptionKey** | `string` | optional | Not honoured in any mode: refused for a local or replica datasource, whose SQLite engine cannot encrypt the file; a remote database's storage encryption is the server's, not set by this key |
 | **concurrency** | `integer` | optional | Maximum concurrent requests to the remote database |
 | **syncUrl** | `string` | optional | Remote sync URL for embedded-replica mode: a libsql or https Turso endpoint |
 | **sync** | `{ intervalSeconds?: integer; onConnect?: boolean }` | optional | Embedded-replica sync configuration (requires `syncUrl`) |
