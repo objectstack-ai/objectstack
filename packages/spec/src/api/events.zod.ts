@@ -257,17 +257,18 @@ export const DataEventSchema = lazySchema(() => z.object({
    *
    * **Absent = the record belongs to no organization.** Two situations, one
    * meaning:
-   *  - a `single`-posture deployment — `postureEnforcesWall(posture)` is
-   *    `false` and `postureStampsOrganization(posture)` with it (see
-   *    `@objectstack/spec/security`): there is no organization wall and
-   *    nothing stamps the column, so EVERY event is organization-less;
-   *  - a row that carries no organization under a walled posture (`group` /
-   *    `isolated`): a row of an object that stands outside the wall —
+   *  - a row of an object that stands outside the wall, under any posture —
    *    `tenancy.enabled: false` by declaration, or no `organization_id`
    *    column at all (the identity tables, and the deployment-level state of
-   *    ADR-0131 D7). An organization-less row on a tenant table is not a
-   *    third case: ADR-0131 D1 makes it invalid state, and no tenant-scoped
-   *    read reaches it (D8).
+   *    ADR-0131 D7);
+   *  - every row of a composition that registers no organization object:
+   *    nothing there has an organization to stamp.
+   * A `single`-posture deployment is not a third case: every write to a
+   * tenant table is stamped with its organization — on a single-organization
+   * deployment, the Default Organization the engine derives (ADR-0131 D9) —
+   * so its events carry it like a walled deployment's. Nor is an
+   * organization-less row on a tenant table: ADR-0131 D1 makes it invalid
+   * state, and no tenant-scoped read reaches it (D8).
    * In both, a consumer may read absence as "not behind any organization
    * wall" — the reading the read path gives a row of an object with no
    * tenant column. It may NOT read absence as "unknown, resolve it yourself":
@@ -282,8 +283,8 @@ export const DataEventSchema = lazySchema(() => z.object({
    * the empty string is refused, so "no organization" has exactly one
    * spelling — the key is absent.
    *
-   * **Optional as a contract fact, not as a transition.** A `single`-posture
-   * deployment stays organization-less for its whole life, so a required key
+   * **Optional as a contract fact, not as a transition.** A row outside the
+   * wall belongs to no organization for its whole life, so a required key
    * would either force a fabricated tenant there or leave the engine unable to
    * publish at all (the publish site `parse`s the event and drops it on
    * failure). Declared = enforced: this optionality is exactly what validation
@@ -295,10 +296,10 @@ export const DataEventSchema = lazySchema(() => z.object({
   organizationId: z.string().min(1).optional().describe(
     'Organization the record belongs to (its organization_id), so a tenant-scoped '
     + 'consumer can discriminate the event\'s tenant without reading the record body. '
-    + 'Absent when the record belongs to no organization: every event on a single-posture '
-    + 'deployment (no organization wall, nothing stamps the column), and a row that '
-    + 'carries no organization under a walled posture (environment-wide, or an object '
-    + 'outside the wall) — read absence as '
+    + 'Absent when the record belongs to no organization: a row of an object outside the '
+    + 'wall (environment-wide, or no organization column), and every row of a composition '
+    + 'that registers no organization object. A single-posture deployment stamps every '
+    + 'tenant row with its Default Organization, so its events carry it — read absence as '
     + '"not behind any organization wall", never as "unknown". Present = exactly that '
     + 'organization; never fabricated, and the empty string is refused.',
   ),

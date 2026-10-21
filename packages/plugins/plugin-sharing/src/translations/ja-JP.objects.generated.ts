@@ -113,7 +113,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "組織",
-        help: "このルールを所有するテナント。null = グローバル"
+        help: "このルールが属する組織。"
       },
       name: {
         label: "名前",

@@ -113,7 +113,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "组织",
-        help: "拥有该规则的租户；null = 全局"
+        help: "该规则所属的组织。"
       },
       name: {
         label: "名称",
