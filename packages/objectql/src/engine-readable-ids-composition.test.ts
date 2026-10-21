@@ -15,8 +15,12 @@
  *
  * Refused by name, `INTERNAL_ERROR` / 500, before any driver is asked: a write
  * verb, `having`, an aggregation's filter, any position but a `$in`
- * comparand, a composed leaf the engine did not compose, and D5's three
- * classes (a delegated caller, a middleware-gated parent, a federated parent).
+ * comparand, a composed leaf the engine did not compose, and D5's two
+ * remaining classes (a middleware-gated parent, a federated parent). A
+ * delegated (on-behalf-of) caller composes like any other (D5.1 as amended):
+ * both halves are asked with the delegated context as it stands, and what the
+ * security service answers for that context — under ADR-0090 D10 the
+ * intersection of the two legs — is the scope.
  *
  * The recording driver is this package's witness shape (the in-memory
  * driver's test consumers are a closed census); evaluating the composed leaf
@@ -87,18 +91,27 @@ const leafOf = (object = 'rid_parent') => ReadableIds.of(object);
 const branch = (object = 'rid_parent') => ({ object_name: object, record_id: { $in: leafOf(object) } });
 const COUNT_AGG = [{ function: 'count', alias: 'n' }];
 
-/** A security service double that records which half it was asked, per object. */
+/** A security service double that records which half it was asked, per object, and the context each half received. */
 function makeSecurity(opts: {
-  canRead?: (object: string) => boolean | Promise<boolean>;
-  scope?: (object: string) => unknown;
+  canRead?: (object: string, context?: unknown) => boolean | Promise<boolean>;
+  scope?: (object: string, context?: unknown) => unknown;
 } = {}) {
   const asked: string[] = [];
+  const contexts: unknown[] = [];
   const svc: any = {
-    async canReadObject(object: string) { asked.push(`canReadObject:${object}`); return opts.canRead ? opts.canRead(object) : true; },
-    async getReadFilter(object: string) { asked.push(`getReadFilter:${object}`); return opts.scope ? opts.scope(object) : undefined; },
+    async canReadObject(object: string, context?: unknown) {
+      asked.push(`canReadObject:${object}`);
+      contexts.push(context);
+      return opts.canRead ? opts.canRead(object, context) : true;
+    },
+    async getReadFilter(object: string, context?: unknown) {
+      asked.push(`getReadFilter:${object}`);
+      contexts.push(context);
+      return opts.scope ? opts.scope(object, context) : undefined;
+    },
     async explain() { asked.push('explain'); return { allowed: false }; },
   };
-  return { svc, asked };
+  return { svc, asked, contexts };
 }
 
 /** The `$in` comparand the driver received at `where.record_id`, under any `$and` the chain wrapped around it. */
@@ -344,6 +357,133 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
   });
 });
 
+describe('[ADR-0139 D5.1, as amended] a delegated (on-behalf-of) caller composes — both halves asked with the delegated context as it stands', () => {
+  let engine: ObjectQL;
+  let calls: SeenCall[];
+  /** The shape the OAuth door assembles: `userId` stays the human, the link names them as the delegator. */
+  const DELEGATED = { userId: 'usr_owner', principalKind: 'agent', onBehalfOf: { userId: 'usr_owner', principalKind: 'human' } };
+  const delegated = () => ({ ...DELEGATED, onBehalfOf: { ...DELEGATED.onBehalfOf } }) as any;
+
+  beforeEach(async () => {
+    const rec = makeRecordingDriver();
+    const farRec = makeRecordingDriver('far');
+    calls = rec.calls;
+    engine = new ObjectQL();
+    engine.registerDriver(rec.driver, true);
+    engine.registerDriver(farRec.driver);
+    await engine.init();
+    for (const def of [CHILD, PARENT, OTHER, GATED, FAR]) engine.registry.registerObject(def as any, 'test');
+    engine.registerMiddleware(async (_ctx, next) => next(), { object: 'rid_gated' });
+    calls.length = 0;
+  });
+
+  const delegatedReads = (where: Record<string, unknown>) => [
+    ['find', () => engine.find('rid_child', { where, context: delegated() })],
+    ['findOne', () => engine.findOne('rid_child', { where, context: delegated() })],
+    ['count', () => engine.count('rid_child', { where, context: delegated() })],
+    ['aggregate', () => engine.aggregate('rid_child', { where, aggregations: COUNT_AGG as any, context: delegated() })],
+  ] as const;
+
+  it('each read verb asks both halves with the delegation link intact and hands its driver ONE call carrying the composed leaf — scope by reference, marked policy', async () => {
+    // What the service answers for the delegated context stands for the
+    // ADR-0090 D10 intersection; the engine composes it, it derives nothing.
+    const scope = { $and: [{ owner: 'usr_owner' }, { title: { $ne: 'secret' } }] };
+    const { svc, asked, contexts } = makeSecurity({ scope: () => scope });
+    wire(engine, () => svc);
+    for (const [verb, run] of delegatedReads(branch())) {
+      calls.length = 0;
+      asked.length = 0;
+      contexts.length = 0;
+      await run();
+      expect(calls.map((c) => c.verb), verb).toEqual([verb]);
+      expect(asked, verb).toEqual(['canReadObject:rid_parent', 'getReadFilter:rid_parent']);
+      // Both halves received the caller's context as it stands: the link the
+      // service intersects on is there, and the principal is the delegated one
+      // — never a context the engine rebuilt for the delegator.
+      for (const ctx of contexts as Array<Record<string, unknown>>) {
+        expect(ctx.onBehalfOf, verb).toEqual(DELEGATED.onBehalfOf);
+        expect(ctx.userId, verb).toBe(DELEGATED.userId);
+        expect(ctx.principalKind, verb).toBe('agent');
+      }
+      const composed = inComparandOf(calls[0].ast.where) as any;
+      expect(isComposedReadableIds(composed), verb).toBe(true);
+      expect(composed.object, verb).toBe('rid_parent');
+      expect(composed.scope, verb).toBe(scope);
+    }
+    expect(filterSubtreeProvenanceOf(scope)).toBe('policy');
+  });
+
+  it('a leaf written by an object-scoped middleware on the child is composed for a delegated caller too', async () => {
+    const scope = { owner: 'usr_owner' };
+    const { svc, contexts } = makeSecurity({ scope: () => scope });
+    wire(engine, () => svc);
+    engine.registerMiddleware(async (ctx, next) => {
+      if (ctx.ast && ['find', 'findOne', 'count', 'aggregate'].includes(ctx.operation)) {
+        ctx.ast.where = ctx.ast.where ? { $and: [ctx.ast.where, branch()] } : branch();
+      }
+      await next();
+    }, { object: 'rid_child' });
+    for (const [verb, run] of delegatedReads({ note: 'x' })) {
+      calls.length = 0;
+      contexts.length = 0;
+      await run();
+      const composed = inComparandOf(calls[0].ast.where) as any;
+      expect(isComposedReadableIds(composed), verb).toBe(true);
+      expect(composed.scope, verb).toBe(scope);
+      expect(contexts.map((c) => (c as any)?.onBehalfOf?.userId), verb).toEqual(['usr_owner', 'usr_owner']);
+    }
+  });
+
+  it('the closed doors stay closed under a delegated context: canReadObject false, the deny sentinel, a throw on either half ⇒ $in: []', async () => {
+    const doors: ReadonlyArray<readonly [string, ReturnType<typeof makeSecurity>]> = [
+      ['canReadObject false', makeSecurity({ canRead: () => false, scope: () => ({ owner: 'usr_owner' }) })],
+      ['the deny sentinel, by identity', makeSecurity({ scope: () => RLS_DENY_FILTER })],
+      ['canReadObject throws', (() => {
+        const s = makeSecurity({ scope: () => ({ owner: 'usr_owner' }) });
+        s.svc.canReadObject = async () => { throw new Error('canReadObject is down'); };
+        return s;
+      })()],
+      ['getReadFilter throws', (() => {
+        const s = makeSecurity();
+        s.svc.getReadFilter = async () => { throw new Error('getReadFilter is down'); };
+        return s;
+      })()],
+    ];
+    for (const [label, { svc }] of doors) {
+      wire(engine, () => svc);
+      for (const [verb, run] of delegatedReads(branch())) {
+        calls.length = 0;
+        await run();
+        expect(calls.map((c) => c.verb), `${label}: ${verb}`).toEqual([verb]);
+        expect(inComparandOf(calls[0].ast.where), `${label}: ${verb}`).toEqual([]);
+      }
+    }
+  });
+
+  it('D5.2 and D5.3 keep their refusal under a delegated context: code and status, no driver call, the service unasked', async () => {
+    const { svc, asked } = makeSecurity();
+    wire(engine, () => svc);
+    const gated = await refusalOf(engine.count('rid_child', { where: branch('rid_gated'), context: delegated() }));
+    expect(envelopeOf(gated)).toEqual(REFUSED);
+    expect(gated!.message).toContain("'rid_gated', whose rows an object-scoped read middleware narrows");
+    const far = await refusalOf(engine.aggregate('rid_child', { where: branch('rid_far'), aggregations: COUNT_AGG as any, context: delegated() }));
+    expect(envelopeOf(far)).toEqual(REFUSED);
+    expect(far!.message).toContain("'rid_far', which is bound to datasource 'far'");
+    expect(calls).toHaveLength(0);
+    expect(asked).toEqual([]);
+  });
+
+  it('CONTROL — the same read without the delegation link composes the same way, so the link is not what the engine keys on', async () => {
+    const scope = { owner: 'usr_owner' };
+    const { svc, asked, contexts } = makeSecurity({ scope: () => scope });
+    wire(engine, () => svc);
+    await engine.find('rid_child', { where: branch(), context: { userId: 'usr_owner', principalKind: 'human' } as any });
+    expect(asked).toEqual(['canReadObject:rid_parent', 'getReadFilter:rid_parent']);
+    expect(contexts.map((c) => (c as any)?.onBehalfOf)).toEqual([undefined, undefined]);
+    expect((inComparandOf(calls[0].ast.where) as any).scope).toBe(scope);
+  });
+});
+
 describe('[ADR-0139 D1, D5] what the engine never composes is refused by name — no driver call', () => {
   let engine: ObjectQL;
   let calls: SeenCall[];
@@ -363,17 +503,6 @@ describe('[ADR-0139 D1, D5] what the engine never composes is refused by name �
     asked = security.asked;
     wire(engine, () => security.svc);
     calls.length = 0;
-  });
-
-  it('D5 — a delegated (on-behalf-of) caller', async () => {
-    const err = await refusalOf(engine.find('rid_child', {
-      where: branch(),
-      context: { userId: 'usr_agent', onBehalfOf: { userId: 'usr_owner' } } as any,
-    }));
-    expect(envelopeOf(err)).toEqual(REFUSED);
-    expect(err!.message).toContain('on-behalf-of');
-    expect(calls).toHaveLength(0);
-    expect(asked, 'D5 is decided before the security service is asked').toEqual([]);
   });
 
   it('D5 — a parent an object-scoped read middleware narrows', async () => {

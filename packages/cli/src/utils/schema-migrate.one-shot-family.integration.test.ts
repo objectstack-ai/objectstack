@@ -54,6 +54,7 @@ import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { isExitSignal } from './format.js';
 import { bootSchemaStack } from './schema-migrate.js';
 import { buildDataMigrationPlugins } from './data-migration-plugins.js';
+import DbOrphans from '../commands/db/orphans.js';
 import MigrateAccountIssuer from '../commands/migrate/account-issuer.js';
 import MigrateActivityChangedFields from '../commands/migrate/activity-changed-fields.js';
 import MigrateCommentParentPair from '../commands/migrate/comment-parent-pair.js';
@@ -155,6 +156,13 @@ const invoke = (command: { run: (argv: string[], opts: { root: string }) => Prom
  * modes it has. The first case below holds this table equal to the source.
  */
 const CALLERS: Record<string, Caller> = {
+  'commands/db/orphans.ts': {
+    run: invoke(DbOrphans),
+    noWrite: [{ label: 'db orphans', argv: ['--database-url', '@DB@', '--json'] }],
+    // The fixture holds no orphan, so the run deletes nothing and writes no
+    // export: the plain boot a delete takes is what this case is about.
+    write: [{ label: 'db orphans --delete', argv: ['--delete', '--export', '@DIR@/orphans-export.json', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
   'commands/migrate/account-issuer.ts': {
     run: invoke(MigrateAccountIssuer),
     noWrite: [{ label: 'migrate account-issuer', argv: ['--database-url', '@DB@', '--json'] }],
