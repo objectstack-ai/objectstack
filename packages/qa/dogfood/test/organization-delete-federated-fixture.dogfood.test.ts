@@ -44,6 +44,13 @@
  * reference to `sys_organization` on ANY organization's delete, so the
  * second organization reaches the same scan with nothing else attached.
  *
+ * [#24948] The same boot also pins the organization-delete contract where the
+ * federated fixture can interfere with it: the refusal's per-table count reads
+ * the cascade's own relations, so it skips the injected anchor too; a deleted
+ * organization leaves nothing naming it; and the Default Organization keeps
+ * the last-administrator guard's 403, now with every row as it was (main
+ * answered that 403 after better-auth had already deleted the members).
+ *
  * The working directory is a temporary one. The showcase's external datasource
  * and its fixture both name a cwd-relative SQLite file, so this file's remote
  * database is its own, never one another file left in the package directory.
@@ -54,6 +61,7 @@ import showcaseStack, { onEnable } from '@objectstack/example-showcase';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { resolveInjectedColumnProvenance } from '@objectstack/metadata-core';
+import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -131,13 +139,179 @@ describe('[#21910] an organization delete with the showcase federated fixture pr
     expect(refused.code).toBe('INVALID_FILTER');
   });
 
-  it('the owner deletes the organization: 200, the row is gone, and the federated rows are untouched', async () => {
+  it('the owner deletes the organization: 200, nothing names it any more, and the federated rows are untouched', async () => {
     const before = await findRows(ql, FEDERATED, {}, 500);
+    // CONTROL for the recorder (e) relies on: a delete that goes ahead is seen deleting its members.
+    const attempted: string[] = [];
+    ql.registerHook('beforeDelete', async () => { attempted.push('sys_member'); }, { object: 'sys_member', packageId: 'dogfood.24948.control' });
 
     const deleted = await stack.apiAs(token, 'POST', '/auth/organization/delete', { organizationId: orgId });
+    ql.unregisterHooksByPackage('dogfood.24948.control');
     expect(deleted.status, await deleted.clone().text()).toBe(200);
+    expect(attempted.length).toBeGreaterThan(0);
 
     expect(await findRows(ql, 'sys_organization', { id: orgId }, 1)).toHaveLength(0);
+    // [#24948] Its own auth structure went with it, and no row was orphaned to it.
+    for (const object of ['sys_member', 'sys_team', 'sys_user_permission_set', 'showcase_category']) {
+      expect(await findRows(ql, object, { organization_id: orgId }, 5), object).toEqual([]);
+    }
     expect((await findRows(ql, FEDERATED, {}, 500)).length).toBe(before.length);
   });
+
+  // Ordered here on purpose: the guard counts an organization owner as an
+  // administrator, so it refuses only while the admin owns no organization
+  // but the Default one (the second organization above is gone by now).
+  it('[#24948] (e) the Default Organization keeps the last-administrator guard\'s 403, and nothing changes', async () => {
+    const [defaultOrg] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
+    const defaultId = String(defaultOrg.id);
+    const membersBefore = await findRows(ql, 'sys_member', { organization_id: defaultId }, 50);
+    const invitationsBefore = await findRows(ql, 'sys_invitation', { organization_id: defaultId }, 50);
+    const teamsBefore = await findRows(ql, 'sys_team', { organization_id: defaultId }, 50);
+    // Every delete the request ATTEMPTS on a member or an invitation, recorded
+    // at the engine, so the pin does not rest on the request's transaction:
+    // on a driver without one, an attempted delete would stay deleted.
+    const attempted: string[] = [];
+    const RECORDER = 'dogfood.24948.delete-attempts';
+    for (const object of ['sys_member', 'sys_invitation']) {
+      ql.registerHook('beforeDelete', async () => { attempted.push(object); }, { object, packageId: RECORDER });
+    }
+
+    const res = await stack.apiAs(token, 'POST', '/auth/organization/delete', { organizationId: defaultId });
+    ql.unregisterHooksByPackage(RECORDER);
+
+    expect(res.status, await res.clone().text()).toBe(403);
+    expect(((await res.json()) as { code?: string }).code).toBe('PERMISSION_DENIED');
+    // Main answered the same 403 after better-auth had already deleted the
+    // members. The guard's question is now asked before the vendor's first
+    // write, so no member or invitation delete was even attempted.
+    expect(attempted).toEqual([]);
+    expect(await findRows(ql, 'sys_invitation', { organization_id: defaultId }, 50)).toEqual(invitationsBefore);
+    expect(await findRows(ql, 'sys_organization', { id: defaultId }, 1)).toHaveLength(1);
+    expect(await findRows(ql, 'sys_member', { organization_id: defaultId }, 50)).toEqual(membersBefore);
+    expect(await findRows(ql, 'sys_team', { organization_id: defaultId }, 50)).toEqual(teamsBefore);
+  });
+  it('[#24948] the Default Organization, the guard admitting on a config anchor, is refused 409 before any member or invitation delete', async () => {
+    const [defaultOrg] = await findRows(ql, 'sys_organization', { slug: 'default' }, 1);
+    const defaultId = String(defaultOrg.id);
+    // The config anchor: the admin is named in OS_PLATFORM_OWNER_EMAIL and
+    // verified, so platform standing survives the Default Organization and
+    // the last-administrator guard admits its delete.
+    const [admin] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);
+    const verifiedBefore = admin.email_verified;
+    if (!verifiedBefore) await ql.update('sys_user', { id: admin.id, email_verified: true }, { context: SYSTEM_CTX });
+    const ownerEnvBefore = process.env.OS_PLATFORM_OWNER_EMAIL;
+    process.env.OS_PLATFORM_OWNER_EMAIL = 'admin@objectos.ai';
+    resetPlatformAdminEmailMemo();
+
+    const membersBefore = await findRows(ql, 'sys_member', { organization_id: defaultId }, 50);
+    const invitationsBefore = await findRows(ql, 'sys_invitation', { organization_id: defaultId }, 50);
+    const teamsBefore = await findRows(ql, 'sys_team', { organization_id: defaultId }, 50);
+    const attempted: string[] = [];
+    const RECORDER = 'dogfood.24948.default-admitted';
+    for (const object of ['sys_member', 'sys_invitation']) {
+      ql.registerHook('beforeDelete', async () => { attempted.push(object); }, { object, packageId: RECORDER });
+    }
+    let res: Response;
+    try {
+      res = await stack.apiAs(token, 'POST', '/auth/organization/delete', { organizationId: defaultId });
+    } finally {
+      ql.unregisterHooksByPackage(RECORDER);
+      if (ownerEnvBefore === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+      else process.env.OS_PLATFORM_OWNER_EMAIL = ownerEnvBefore;
+      resetPlatformAdminEmailMemo();
+      if (!verifiedBefore) await ql.update('sys_user', { id: admin.id, email_verified: verifiedBefore }, { context: SYSTEM_CTX });
+    }
+
+    // Not the guard's 403: the guard admitted. The Default Organization's own
+    // record count refused, before better-auth's first write.
+    expect(res.status, await res.clone().text()).toBe(409);
+    const body = (await res.json()) as { code?: string; dependents?: Array<{ object: string }> };
+    expect(body.code).toBe('DELETE_RESTRICTED');
+    const named = (body.dependents ?? []).map((d) => d.object);
+    // The records it owns are named; its members and invitations are the
+    // vendor's to remove, so they are not.
+    expect(named).toEqual(expect.arrayContaining(['showcase_account']));
+    expect(named).not.toContain('sys_member');
+    expect(named).not.toContain('sys_invitation');
+    expect(attempted).toEqual([]);
+    expect(await findRows(ql, 'sys_organization', { id: defaultId }, 1)).toHaveLength(1);
+    expect(await findRows(ql, 'sys_member', { organization_id: defaultId }, 50)).toEqual(membersBefore);
+    expect(await findRows(ql, 'sys_invitation', { organization_id: defaultId }, 50)).toEqual(invitationsBefore);
+    expect(await findRows(ql, 'sys_team', { organization_id: defaultId }, 50)).toEqual(teamsBefore);
+  });
+
+  let lookupFails = false;
+  let lookupMiddlewareRegistered = false;
+  it('[#24948] a failed Default Organization lookup refuses: it never hands the delete to better-auth unasked', async () => {
+    // An empty organization the admin owns: with the lookup working, it would
+    // delete. The lookup asks how many organizations exist (its slug is not
+    // `default`), and that count fails.
+    const lone = await ql.insert('sys_organization', { name: 'Org 24948 lookup', slug: 'org-24948-lookup' }, { context: SYSTEM_CTX });
+    const loneId = String(lone.id);
+    const [admin] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);
+    await ql.insert('sys_member', { user_id: String(admin?.id), organization_id: loneId, role: 'owner' }, { context: SYSTEM_CTX });
+    // Active, so better-auth's handler would write first to the session
+    // (clearing it) if the request reached it: the write recorded below.
+    const active = await stack.apiAs(token, 'POST', '/auth/organization/set-active', { organizationId: loneId });
+    expect(active.status, await active.clone().text()).toBe(200);
+
+    const attempted: string[] = [];
+    const RECORDER = 'dogfood.24948.lookup-fails';
+    ql.registerHook('beforeUpdate', async () => { attempted.push('sys_session'); }, { object: 'sys_session', packageId: RECORDER });
+    // `count` runs the middleware chain only (no hook), and a middleware has
+    // no unregister, so this one is switched by a flag.
+    lookupFails = true;
+    if (!lookupMiddlewareRegistered) {
+      ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+        if (lookupFails && opCtx.operation === 'count') throw new Error('organization lookup unavailable');
+        await next();
+      }, { object: 'sys_organization' });
+      lookupMiddlewareRegistered = true;
+    }
+    for (const object of ['sys_member', 'sys_invitation', 'sys_organization']) {
+      ql.registerHook('beforeDelete', async () => { attempted.push(object); }, { object, packageId: RECORDER });
+    }
+    let res: Response;
+    try {
+      res = await stack.apiAs(token, 'POST', '/auth/organization/delete', { organizationId: loneId });
+    } finally {
+      lookupFails = false;
+      ql.unregisterHooksByPackage(RECORDER);
+    }
+
+    expect(res.status, await res.clone().text()).toBeGreaterThanOrEqual(400);
+    // better-auth's handler never ran: not even its first write, the session's
+    // active organization, was attempted.
+    expect(attempted).toEqual([]);
+    expect(await findRows(ql, 'sys_organization', { id: loneId }, 1)).toHaveLength(1);
+    expect(await findRows(ql, 'sys_member', { organization_id: loneId }, 5)).toHaveLength(1);
+
+    // CONTROL: with the lookup back, the same empty organization deletes.
+    const ok = await stack.apiAs(token, 'POST', '/auth/organization/delete', { organizationId: loneId });
+    expect(ok.status, await ok.clone().text()).toBe(200);
+  });
+
+  it('[#24948] an organization that owns a record is refused 409 with its count, and the scan still never probes the federated table', async () => {
+    // A second organization the admin owns, holding one record: the refusal's
+    // count reads the same relations the cascade does, so it must skip the
+    // federated object's injected anchor too, or it would answer the remote's
+    // INVALID_FILTER instead of a count.
+    const held = await ql.insert('sys_organization', { name: 'Org 24948', slug: 'org-24948' }, { context: SYSTEM_CTX });
+    const heldId = String(held.id);
+    const [admin] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);
+    await ql.insert('sys_member', { user_id: String(admin?.id), organization_id: heldId, role: 'owner' }, { context: SYSTEM_CTX });
+    await ql.insert('showcase_category', { name: 'Held', organization_id: heldId }, { context: SYSTEM_CTX });
+    const membersBefore = await findRows(ql, 'sys_member', { organization_id: heldId }, 5);
+
+    const refused = await stack.apiAs(token, 'POST', '/auth/organization/delete', { organizationId: heldId });
+
+    expect(refused.status, await refused.clone().text()).toBe(409);
+    const body = (await refused.json()) as { code?: string; dependents?: unknown };
+    expect(body.code).toBe('DELETE_RESTRICTED');
+    expect(body.dependents).toEqual([{ object: 'showcase_category', count: 1 }]);
+    // Refused before anything was deleted: the owner is still there.
+    expect(await findRows(ql, 'sys_organization', { id: heldId }, 1)).toHaveLength(1);
+    expect(await findRows(ql, 'sys_member', { organization_id: heldId }, 5)).toEqual(membersBefore);
+  });
+
 });

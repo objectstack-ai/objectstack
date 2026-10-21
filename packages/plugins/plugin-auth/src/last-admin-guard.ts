@@ -626,6 +626,24 @@ interface PendingStandingWrite {
    * standing write that addresses no existing row (`ids` is then empty).
    */
   inserted?: Record<string, unknown>;
+  /**
+   * [#24948] Writes to OTHER tables that land with this one, as one change:
+   * better-auth's organization delete removes the organization's members in
+   * the same request that removes the organization row, and the guard asked
+   * before that request writes anything must judge both. At most one write per
+   * table; {@link pendingFor} reads the one for a table.
+   */
+  with?: readonly PendingStandingWrite[];
+}
+
+/** [#24948] The part of `pending` that addresses `table`, if any. */
+function pendingFor(
+  pending: PendingStandingWrite | undefined,
+  table: string,
+): PendingStandingWrite | undefined {
+  if (!pending) return undefined;
+  if (pending.table === table) return pending;
+  return pending.with?.find((w) => w.table === table);
 }
 
 /**
@@ -647,11 +665,12 @@ function applyPending(
   pending: PendingStandingWrite | undefined,
   table: string,
 ): Record<string, unknown> | undefined {
-  if (!pending || pending.table !== table) return row;
+  const write = pendingFor(pending, table);
+  if (!write) return row;
   const id = toId(row.id);
-  if (!id || !pending.ids.has(id)) return row;
-  if (!pending.patch) return undefined; // deleted
-  return { ...row, ...pending.patch };
+  if (!id || !write.ids.has(id)) return row;
+  if (!write.patch) return undefined; // deleted
+  return { ...row, ...write.patch };
 }
 
 
@@ -869,10 +888,23 @@ function touchesAny(data: Record<string, unknown>, keys: readonly string[]): boo
  * re-binding after a hot reload runs `engine.unregisterHooksByPackage(packageId)`
  * first.
  */
+/**
+ * [#24948] The guard's question about a `sys_organization` delete, askable
+ * BEFORE the delete starts. better-auth's organization delete removes the
+ * members and invitations before it deletes the organization row, so the
+ * `beforeDelete` hook's answer arrives after those writes; plugin-auth asks
+ * this first, from the request's `hooks.before`, so a refused Default
+ * Organization delete writes nothing on any driver. The same judgement as the
+ * hook, `enforceStanding('organization-delete', …)`, never a second spelling.
+ */
+export interface LastAdminGuardHandle {
+  judgeOrganizationDelete(organizationId: string): Promise<void>;
+}
+
 export function registerLastAdminGuard(
   engine: LastAdminGuardEngine,
   opts: LastAdminGuardOptions,
-): void {
+): LastAdminGuardHandle {
   const { packageId, logger } = opts;
   const maxScan = opts.maxScan ?? DEFAULT_MAX_SCAN;
 
@@ -945,7 +977,7 @@ export function registerLastAdminGuard(
   const readAdminSetSwitchedOff = async (op: GuardedOp, pending?: PendingStandingWrite): Promise<boolean> => {
     const fields = ['id', 'metadata_type', 'name', 'active'];
     const rows = await scanLedger(op, { where: { metadata_type: 'permission', name: ADMIN_FULL_ACCESS }, fields });
-    const ledgerWrite = pending?.table === METADATA_ACTIVATION ? pending : undefined;
+    const ledgerWrite = pendingFor(pending, METADATA_ACTIVATION);
     if (ledgerWrite && ledgerWrite.ids.size > 0) {
       const seen = new Set(rows.map((row) => toId(row.id)));
       const missing = [...ledgerWrite.ids].filter((id) => !seen.has(id));
@@ -979,7 +1011,7 @@ export function registerLastAdminGuard(
       return undefined;
     }
     const fields = ['id', 'slug'];
-    const orgWrite = pending?.table === SystemObjectName.ORGANIZATION ? pending : undefined;
+    const orgWrite = pendingFor(pending, SystemObjectName.ORGANIZATION);
     const addressed = async (rows: Array<Record<string, unknown>>) => {
       if (!orgWrite || orgWrite.ids.size === 0) return rows;
       const seen = new Set(rows.map((row) => toId(row.id)));
@@ -1544,6 +1576,7 @@ export function registerLastAdminGuard(
       | undefined,
     patch?: Record<string, unknown>,
     inserted?: Record<string, unknown>,
+    companions?: readonly PendingStandingWrite[],
   ): Promise<void> => {
     const words = OP_WORDS[op];
     // [ADR-0131 D3] An insert addresses no existing row: its pending write is
@@ -1556,6 +1589,7 @@ export function registerLastAdminGuard(
       ids,
       ...(patch ? { patch } : {}),
       ...(inserted ? { inserted } : {}),
+      ...(companions && companions.length > 0 ? { with: companions } : {}),
     });
     await failClosed(op, async () => {
       const before = await resolveAdminUserIds(op);
@@ -1848,4 +1882,23 @@ export function registerLastAdminGuard(
       'Organization the grant anchor reads) and sys_metadata_activation ' +
       '(switching admin_full_access off) — ADR-0135 D5.2',
   );
+
+  return {
+    // Judged as the request performs it: the organization's members leave with
+    // the row. Asked before either write, the membership half must be in the
+    // simulation too, or an owner's membership of the very organization being
+    // deleted would still read as standing. A read that fails refuses, like
+    // every other lookup the guard makes.
+    judgeOrganizationDelete: (organizationId: string) =>
+      failClosed('organization-delete', async () => {
+        const members = await scan('organization-delete', SystemObjectName.MEMBER, {
+          where: { organization_id: organizationId },
+          fields: ['id'],
+        });
+        const memberIds = new Set(members.map((row) => toId(row.id)).filter((id): id is string => !!id));
+        await enforceStanding('organization-delete', SystemObjectName.ORGANIZATION, { id: organizationId }, undefined, undefined, [
+          { table: SystemObjectName.MEMBER, ids: memberIds },
+        ]);
+      }),
+  };
 }
