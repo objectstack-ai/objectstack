@@ -170,10 +170,10 @@ export const APPLY_DROP_GATES: readonly ApplyDropGate[] = [
     id: 'sys_comment.reactions',
     judges: isCommentReactionsDrop,
     holds: async (reads, engine) => ((await reads.commentReactionsConversion(engine)).verified ? null : {}),
-    entry: 'a drop that waits for "os migrate comment-reactions" to carry the reactions stored in it into '
+    entry: 'a drop that waits for "os migrate comment-reactions" to carry any reactions stored in it into '
       + 'sys_comment_reaction records, and no verified run is recorded on this database (see below).',
     footer: (_held, waiting) =>
-      'sys_comment.reactions above holds the reactions stored before they became sys_comment_reaction records, and no '
+      'sys_comment.reactions above is where reactions were stored before they became sys_comment_reaction records, and no '
       + `verified run of "os migrate comment-reactions --apply" is recorded on this database, so ${REFUSES} one is`
       + `${andTheOthers(waiting)}. Run "os migrate comment-reactions" to preview, then "os migrate comment-reactions `
       + '--apply"; it carries them into records and records the run verified.',
