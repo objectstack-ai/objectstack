@@ -9186,6 +9186,17 @@ export class SecurityPlugin implements Plugin {
    * floor and the detail's own write policy still decide which of them it
    * writes, and nothing here vouches the floor away.
    *
+   * [#25044] …and on every shape it asks EVERY master the write involves, not
+   * one of them. §3 reads a create's master from "the master id in the
+   * incoming body"; on every other shape that id, when the body carries one,
+   * is a master the write involves beside the one (on the predicate path, the
+   * ones) its rows are stored under, so the same walk is asked of it too,
+   * after the stored master's question, which is unchanged. The refusal is
+   * the by-id leg's own envelope and nothing is written. An insert's master
+   * already IS its body's and is asked once; a body naming a master already
+   * asked is not asked again; and a predicate write that selects no row the
+   * caller can read involves no master at all.
+   *
    * [#7474] SIX conditions refuse a write here, and they are NOT one verdict.
    * Three are genuine authorization answers (no object-level `update` on the
    * master, the master row outside the caller's write RLS, no `edit`-level
@@ -9268,6 +9279,25 @@ export class SecurityPlugin implements Plugin {
     // (`rel!.fk`) were the load-bearing half of the same defect.
     if (!rel) throw new MasterDetailRelationMissingError(object, operation);
 
+    // [ADR-0055 §3 · #25044] Every master the write involves is asked, not one
+    // of them. A body that names a master reference involves that master too,
+    // so once the masters `judged` (the stored ones) have been asked, the SAME
+    // walk is asked of the body's — unless it is one of them, which would ask
+    // one master twice. Read as an OWN property, never through the prototype
+    // chain. A body that names no master (no such key, or a null) leaves this
+    // question nothing to ask about; that is not a master-edit verdict, and
+    // nothing here answers it.
+    const askBodyNamedMaster = async (judged: readonly unknown[]): Promise<void> => {
+      const data = opCtx.data;
+      if (data == null || typeof data !== 'object' || Array.isArray(data)) return;
+      if (!Object.prototype.hasOwnProperty.call(data, rel.fk)) return;
+      const named = (data as Record<string, unknown>)[rel.fk];
+      if (named == null || judged.includes(named)) return;
+      await this.assertControlledByParentChainEditable(
+        permissionSets, object, rel, named, context, opCtx, masterEditDenied, denyMasterEdit,
+      );
+    };
+
     // Resolve the master id: from the incoming body on insert, else from the
     // target row (read as system — we only need its FK value).
     let masterId: unknown;
@@ -9292,11 +9322,15 @@ export class SecurityPlugin implements Plugin {
             : operation === 'delete' &&
               resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
         if (!predicatePath) return;
-        for (const predicateMasterId of await this.controlledByParentPredicateWriteMasters(object, operation, rel, opCtx)) {
+        const predicateMasters = await this.controlledByParentPredicateWriteMasters(object, operation, rel, opCtx);
+        for (const predicateMasterId of predicateMasters) {
           await this.assertControlledByParentChainEditable(
             permissionSets, object, rel, predicateMasterId, context, opCtx, masterEditDenied, denyMasterEdit,
           );
         }
+        // [#25044] A write that selects no row the caller can read writes
+        // nothing, so it involves no master — the body's included.
+        if (predicateMasters.length > 0) await askBodyNamedMaster(predicateMasters);
         return;
       }
       detailRecordId = targetId;
@@ -9425,6 +9459,9 @@ export class SecurityPlugin implements Plugin {
     await this.assertControlledByParentChainEditable(
       permissionSets, object, rel, masterId, context, opCtx, masterEditDenied, denyMasterEdit,
     );
+    // [#25044] An insert's master was read from its body, so it is the one
+    // just asked and is not asked again.
+    await askBodyNamedMaster([masterId]);
   }
 
   /**
@@ -9438,9 +9475,10 @@ export class SecurityPlugin implements Plugin {
    * ⚠️ Extraction, not a rewrite — the body is the walk the gate ran inline,
    * moved verbatim so that the gate can run it once per master: once for an
    * insert or a by-id write, once for each master a predicate write selects
-   * rows under ({@link controlledByParentPredicateWriteMasters}). There must
-   * stay exactly one walk, for the reason {@link assertMasterRowEditable} gives
-   * for its legs.
+   * rows under ({@link controlledByParentPredicateWriteMasters}), and once more
+   * for a master the write's body names that is not among those (#25044).
+   * There must stay exactly one walk, for the reason
+   * {@link assertMasterRowEditable} gives for its legs.
    *
    * `masterEditDenied` / `denyMasterEdit` are the gate's own refusal builders,
    * passed in rather than rebuilt so every refusal, at every hop and for every
