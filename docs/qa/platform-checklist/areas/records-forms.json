@@ -4147,7 +4147,7 @@
       "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4156,7 +4156,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an admin session holding `manage_metadata` (PUT /api/v1/meta/:type/:name is capability-gated, packages/rest/src/rest-route-ledger.ts) and an isolated boot — the item authors a scratch object",
+          "an admin session holding `manage_metadata` (PUT /api/v1/meta/:type/:name is capability-gated, packages/rest/src/rest-route-ledger.ts) and a boot on its own port and DB — the item authors a scratch object",
           "the stock fieldGroups declarations as authoring models: examples/app-showcase/src/data/objects/contact.object.ts and semantic-zoo.object.ts — NEITHER carries visibleWhen"
         ],
         "knownGaps": [
@@ -4253,6 +4253,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.requires[0]: 'and an isolated boot — the item' → 'and a boot on its own port and DB — the item'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#PENDING-24579R18"
         }
       ]
     },
@@ -4261,7 +4267,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4270,7 +4276,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an isolated dev boot on the stock SQLite store (no boot door accepts the in-memory engine any more — every one refuses it and names SQLite, 9a4182a75) + a manage_metadata session — the item authors its own scratch object",
+          "a dev boot on its own port and DB, on the stock SQLite store (no boot door accepts the in-memory engine any more — every one refuses it and names SQLite, 9a4182a75) + a manage_metadata session — the item authors its own scratch object",
           "scratch qa_unique object authored inline: sku text unique:true, gsku text unique:'global', nick text (no unique) — NO showcase object declares field-level unique (grepped; invoice.object.ts only mentions the word in a comment)"
         ],
         "knownGaps": [
@@ -4389,6 +4395,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated on ' → 'boot the showcase on its own port and DB, on '. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.requires[0]: 'an isolated dev boot on the stock SQLite store' → 'a dev boot on its own port and DB, on the stock SQLite store'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
+          "ref": "#PENDING-24579R18"
         }
       ]
     },
