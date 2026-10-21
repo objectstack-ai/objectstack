@@ -2,7 +2,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
-import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError, vetOrganizationClaim, withoutOperationPrivateKeys } from '@objectstack/core';
+import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError, withoutOperationPrivateKeys } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
