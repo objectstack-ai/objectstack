@@ -7061,7 +7061,7 @@ export class SqlDriver implements IDataDriver {
    * not merely that space hygiene is unavailable.
    * @throws {SqliteDatabaseFileError} when that first statement's answer is a
    * verdict on the file itself ({@link SQLITE_FILE_REFUSALS}): it cannot be
-   * opened, or it is not a SQLite database.
+   * opened, it is not a SQLite database, or its header or schema is damaged.
    */
   private async applyAutoVacuumIncremental(): Promise<boolean> {
     try {
@@ -7097,7 +7097,17 @@ export class SqlDriver implements IDataDriver {
       //     used to answer it with wasm SQLite, whose open moved the
       //     operator's file aside and wrote an empty database in its place.
       //     The refusal is issued before anything is written: the file is left
-      //     exactly as it was found.
+      //     exactly as it was found;
+      //   • SQLITE_CORRUPT (#25019) — the file is a SQLite database SQLite
+      //     cannot read: its header or its schema is damaged (a file truncated
+      //     inside its 100-byte header, or short of the pages its schema
+      //     names). At the FIRST statement this is a verdict on the whole
+      //     file, measured: `SELECT 1` answers the same code. A database
+      //     damaged deeper inside answers this read and connects; its damage
+      //     surfaces on the read that reaches it, as before. A development
+      //     boot used to take the same step-down to wasm SQLite as for
+      //     SQLITE_NOTADB, and the same rename; it is refused the same way,
+      //     before anything is written.
       const refusal = code === undefined ? undefined : SqlDriver.SQLITE_FILE_REFUSALS.get(code);
       if (refusal !== undefined) {
         const declared = (this.config as any).connection;
@@ -7132,6 +7142,7 @@ export class SqlDriver implements IDataDriver {
   private static readonly SQLITE_FILE_REFUSALS: ReadonlyMap<string, string> = new Map([
     ['SQLITE_CANTOPEN', 'cannot be opened or created'],
     ['SQLITE_NOTADB', 'is not a SQLite database, and was left as it is'],
+    ['SQLITE_CORRUPT', 'is damaged (SQLite cannot read its header or its schema), and was left as it is'],
   ]);
 
   /** What `PRAGMA auto_vacuum` answers for INCREMENTAL (0 is NONE, 1 is FULL). */

@@ -189,8 +189,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "ユーザーを作成しました",
-          description: "一時パスワードを今すぐコピーしてください。表示は一度きりで、保存されません。",
-          acknowledge: "パスワードを保存しました",
+          description: "一時パスワードが生成された場合は今すぐコピーしてください。表示は一度きりで、保存されません。",
+          acknowledge: "完了",
           fields: {
             "user.email": "メールアドレス",
             "user.phoneNumber": "電話番号",
@@ -1389,9 +1389,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "クライアントタイプ",
         options: {
           web: "Web",
-          native: "ネイティブ",
-          useragentbased: "ユーザーエージェントベース",
-          public: "公開"
+          native: "ネイティブ"
         }
       },
       public: {

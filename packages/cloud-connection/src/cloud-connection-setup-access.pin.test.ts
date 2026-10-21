@@ -170,7 +170,14 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
-async function mount(mode: 'single' | 'multi', opts: { outage?: boolean } = {}) {
+/**
+ * `serviceKey` is the plugin's `controlPlaneApiKey`. The default, a key, is the
+ * cloud-hosted (platform-managed) shape every case here has always run in;
+ * `''` (no key, and `OS_CLOUD_API_KEY` not consulted) is the self-hosted shape,
+ * whose credential is the stored device token — the one shape in which
+ * `unbind` still disconnects (ruling 甲, #25097).
+ */
+async function mount(mode: 'single' | 'multi', opts: { outage?: boolean; serviceKey?: string } = {}) {
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
     const auth = sessionAuth();
@@ -210,7 +217,7 @@ async function mount(mode: 'single' | 'multi', opts: { outage?: boolean } = {}) 
     }));
     await new CloudConnectionPlugin({
         controlPlaneUrl: 'http://cloud.test',
-        controlPlaneApiKey: 'svc-key',
+        controlPlaneApiKey: 'serviceKey' in opts ? opts.serviceKey : 'svc-key',
         credentialPath,
         ...(mode === 'single' ? { singleEnvironment: true, environmentId: 'env-1' } : {}),
     }).start(ctx as any);
@@ -249,24 +256,39 @@ for (const mode of ['single', 'multi'] as const) {
             });
         }
 
-        it('CONTROL — a caller holding setup.access is served by all three doors as before', async () => {
-            const { drive, fetchCalls, credentialPath } = await mount(mode);
-            const start = await drive(DOORS.bindStart.route, DOORS.bindStart.path, { user: ADMIN });
-            expect(start.status, JSON.stringify(start.payload)).toBe(200);
-            expect(start.payload.data.device_code).toBe('dc_1');
+        for (const shape of ['self-hosted', 'platform-managed'] as const) {
+            it(`CONTROL — a caller holding setup.access is served by all three doors as before (${shape})`, async () => {
+                // Ruling 甲 (#25097): on a platform-managed runtime (the service
+                // key) `unbind` is refused for every caller, so there its control
+                // is that refusal — past this file's 403, before any revoke —
+                // while the self-hosted shape disconnects exactly as before.
+                const { drive, fetchCalls, credentialPath } = await mount(mode, shape === 'self-hosted' ? { serviceKey: '' } : {});
+                const start = await drive(DOORS.bindStart.route, DOORS.bindStart.path, { user: ADMIN });
+                expect(start.status, JSON.stringify(start.payload)).toBe(200);
+                expect(start.payload.data.device_code).toBe('dc_1');
 
-            const poll = await drive(DOORS.bindPoll.route, DOORS.bindPoll.path, { user: ADMIN, body: DOORS.bindPoll.body });
-            expect(poll.status, JSON.stringify(poll.payload)).toBe(200);
-            expect(poll.payload.success).toBe(true);
-            expect(poll.payload.data.runtime_token, 'the runtime bearer reached the browser').toBeUndefined();
-            expect(new ConnectionCredentialStore(credentialPath).read()?.runtimeToken).toBe('oscc_new');
+                const poll = await drive(DOORS.bindPoll.route, DOORS.bindPoll.path, { user: ADMIN, body: DOORS.bindPoll.body });
+                expect(poll.status, JSON.stringify(poll.payload)).toBe(200);
+                expect(poll.payload.success).toBe(true);
+                expect(poll.payload.data.runtime_token, 'the runtime bearer reached the browser').toBeUndefined();
+                expect(new ConnectionCredentialStore(credentialPath).read()?.runtimeToken).toBe('oscc_new');
 
-            const unbind = await drive(DOORS.unbind.route, DOORS.unbind.path, { user: ADMIN });
-            expect(unbind.status, JSON.stringify(unbind.payload)).toBe(200);
-            expect(unbind.payload.data).toMatchObject({ revoked: true, cleared: true });
-            expect(new ConnectionCredentialStore(credentialPath).read()?.runtimeToken).toBe('');
-            expect(fetchCalls.length).toBeGreaterThan(0);
-        });
+                const beforeUnbind = fetchCalls.length;
+                const unbind = await drive(DOORS.unbind.route, DOORS.unbind.path, { user: ADMIN });
+                if (shape === 'self-hosted') {
+                    expect(unbind.status, JSON.stringify(unbind.payload)).toBe(200);
+                    expect(unbind.payload.data).toMatchObject({ revoked: true, cleared: true });
+                    expect(new ConnectionCredentialStore(credentialPath).read()?.runtimeToken).toBe('');
+                    expect(fetchCalls.length, 'unbind did not reach the control plane').toBeGreaterThan(beforeUnbind);
+                } else {
+                    expect(unbind.status, JSON.stringify(unbind.payload)).toBe(409);
+                    expect(unbind.payload?.error?.code).toBe('RESOURCE_CONFLICT');
+                    expect(new ConnectionCredentialStore(credentialPath).read()?.runtimeToken).toBe('oscc_new');
+                    expect(fetchCalls.length, 'a refused unbind reached the control plane').toBe(beforeUnbind);
+                }
+                expect(fetchCalls.length).toBeGreaterThan(0);
+            });
+        }
 
         it('CONTROL — a grant scoped to the organization the session is active in counts', async () => {
             const { drive } = await mount(mode);

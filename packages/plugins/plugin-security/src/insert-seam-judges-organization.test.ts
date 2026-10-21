@@ -27,9 +27,9 @@
  *   organizations runtime in this composition, an absent value is the
  *   driver's stamp, as before.
  * - UNSET: the seam a business `check` installs under `single`, where no wall
- *   exists; a platform operator's seam that crosses the wall with no active
- *   organization (#24821); and an update's seam, whose organization this
- *   member is not about.
+ *   exists; and a platform operator's seam that crosses the wall with no active
+ *   organization (#24821). A walled update's seam carries the member too (the
+ *   card's UPDATE half): `update-seam-judges-organization.test.ts`.
  * - NO SEAM: a platform operator crossing on a private object with an active
  *   organization, and a system context.
  * - DELEGATED (ADR-0090 D10): a crossing operator acting for a walled
@@ -267,13 +267,17 @@ describe('[#24822] step 3.7 declares the insert\'s organization judged only wher
     expect(await b.table('qa_vault')).toEqual([{ id: 'r2', organization_id: OWN_ORG }]);
   });
 
-  it('an update\'s seam does not carry the member: it declares an INSERT\'s organization only', async () => {
+  // [#24822] This cell used to pin that an update's seam carried no member:
+  // the insert half declared an INSERT's organization only. The UPDATE half
+  // sets it on a walled single-payload update too, and
+  // `update-seam-judges-organization.test.ts` holds the update matrix.
+  it('a walled update\'s seam carries the member as well (the UPDATE half)', async () => {
     const b = await boot('isolated');
 
     const outcome = await attempt(() => b.engine.update('qa_account', { id: 'r1', name: 'renamed' } as never, { context: MEMBER_CTX } as never));
 
     expect(outcome.ok, outcome.message).toBe(true);
-    expect(b.sightings).toEqual([{ operation: 'update', installed: true, judgesOrganization: undefined }]);
+    expect(b.sightings).toEqual([{ operation: 'update', installed: true, judgesOrganization: true }]);
   });
 
   it('a system context installs no seam', async () => {

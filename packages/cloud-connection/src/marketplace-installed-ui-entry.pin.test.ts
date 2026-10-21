@@ -49,7 +49,7 @@ import '@objectstack/runtime';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
-import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
+import { MARKETPLACE_BROWSE_UI_BUNDLE, MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
@@ -66,9 +66,12 @@ const FILTERED_PACKAGES_ENTRY = {
 };
 
 /**
- * A Setup shell with the one group anchor the entry lands in. The real shell
- * (`SETUP_APP` in `@objectstack/platform-objects`) is not a dependency of this
- * package; the merge under test is the engine's, which reads the anchor by id.
+ * A Setup shell with the group anchor the entry lands in, and the one the Cloud
+ * Connection UI bundle's entry lands in (`group_integrations`, ruling 甲 on
+ * #25097), so no contribution in this composition misses its group. The real
+ * shell (`SETUP_APP` in `@objectstack/platform-objects`) is not a dependency of
+ * this package; the merge under test is the engine's, which reads an anchor by
+ * id.
  */
 const SETUP_SHELL = {
     id: 'test.setup-shell',
@@ -80,7 +83,10 @@ const SETUP_SHELL = {
     apps: [{
         name: 'setup',
         label: 'Setup',
-        navigation: [{ id: 'group_apps', type: 'group', label: 'Apps', children: [] }],
+        navigation: [
+            { id: 'group_apps', type: 'group', label: 'Apps', children: [] },
+            { id: 'group_integrations', type: 'group', label: 'Integrations', children: [] },
+        ],
     }],
 };
 
@@ -113,8 +119,10 @@ afterEach(async () => {
 });
 
 /**
- * A real kernel carrying the Setup shell and the Cloud Connection UI bundle,
- * with the install-local plugin booted to `kernel:ready` when `withPlugin`.
+ * A real kernel carrying the Setup shell, the Cloud Connection UI bundle (the
+ * page-listing control) and the marketplace browse bundle (the `group_apps`
+ * control: a plugin-contributed entry in the group this file reads), with the
+ * install-local plugin booted to `kernel:ready` when `withPlugin`.
  */
 async function compose(withPlugin: boolean) {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false } as never);
@@ -127,6 +135,7 @@ async function compose(withPlugin: boolean) {
     const manifest = kernel.getService<{ register(m: unknown): void }>('manifest');
     manifest.register(structuredClone(SETUP_SHELL));
     manifest.register(structuredClone(CLOUD_CONNECTION_UI_BUNDLE));
+    manifest.register(structuredClone(MARKETPLACE_BROWSE_UI_BUNDLE));
     const protocol = kernel.getService<any>('protocol');
 
     if (withPlugin) {
@@ -210,7 +219,9 @@ describe('#23933 — "Installed Apps" opens Setup → Packages filtered to Sourc
         const ids = (await setupAppsGroup(protocol)).map((i) => i?.id);
         expect(ids).not.toContain('nav_marketplace_installed');
         // Control: the read reaches the group's plugin-contributed entries.
-        expect(ids).toContain('nav_cloud_connection');
+        // (Browse Marketplace, not Cloud Connection: that entry sits in
+        // `group_integrations` since ruling 甲 on #25097.)
+        expect(ids).toContain('nav_marketplace_browse');
     });
 
     it('the bundle ships the entry and no page', () => {

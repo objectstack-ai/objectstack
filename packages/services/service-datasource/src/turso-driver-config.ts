@@ -63,7 +63,13 @@ export interface TursoDriverConfigInput {
   url: string;
   /** JWT auth token for a remote Turso database. */
   authToken?: string;
-  /** AES-256 key for the local database file (local/replica modes). */
+  /**
+   * Passed through as authored, and honoured by the driver in no mode: it
+   * refuses a non-empty key beside a `file:` url or `:memory:` in every mode
+   * (`VALIDATION_ERROR` / 400), because nothing it builds encrypts a local
+   * file, and does not forward it to a remote database, whose storage
+   * encryption is the server's.
+   */
   encryptionKey?: string;
   /** Max concurrent requests to the remote database (replica/remote modes). */
   concurrency?: number;

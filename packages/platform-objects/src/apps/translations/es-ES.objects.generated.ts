@@ -189,8 +189,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "Usuario creado",
-          description: "Copie la contraseña temporal ahora: se muestra una sola vez y no se almacena.",
-          acknowledge: "He guardado esta contraseña",
+          description: "Si se generó una contraseña temporal, cópiela ahora: se muestra una sola vez y no se almacena.",
+          acknowledge: "Hecho",
           fields: {
             "user.email": "Correo electrónico",
             "user.phoneNumber": "Número de teléfono",
@@ -1389,9 +1389,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Tipo de cliente",
         options: {
           web: "Web",
-          native: "Nativa",
-          useragentbased: "Basada en agente de usuario",
-          public: "Público"
+          native: "Nativa"
         }
       },
       public: {

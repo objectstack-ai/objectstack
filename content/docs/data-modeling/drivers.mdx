@@ -195,7 +195,7 @@ ObjectStack — is what makes them secrets:
 | `mongodb` | `options.key` | TLS private key material (PEM) |
 | `mongodb` | `options.passphrase` | TLS key passphrase |
 | `mongodb` | `options.authMechanismProperties.AWS_SESSION_TOKEN` | AWS STS session token (`MONGODB-AWS` auth) |
-| `turso` \| `libsql` | `encryptionKey` | AES-256 key for the local database file |
+| `turso` \| `libsql` | `encryptionKey` | A key the driver never applies (see below) |
 
 Unlike `password` / `authToken` (typed `never` in their schemas — the parse
 refuses them outright), these six keys are **writable**: the parse accepts
@@ -222,15 +222,28 @@ like the rest of this table.
 <Callout type="warn">
 **This is a deliberate, documented trade-off ([#9124](https://github.com/objectstack-ai/objectstack/issues/9124)), not an oversight.**
 The binder has exactly one named slot. Refusing `proxyPassword`,
-`tlsCertificateKeyFilePassword`, `key`, `passphrase`, or turso's
-`encryptionKey` at write time would remove the only way to configure an
-authenticated SOCKS5 proxy, a passphrase-protected TLS key, or a
-locally-encrypted database file — a capability the client genuinely honours,
+`tlsCertificateKeyFilePassword`, `key` or `passphrase` at write time would
+remove the only way to configure an authenticated SOCKS5 proxy or a
+passphrase-protected TLS key — a capability the client genuinely honours,
 with no working refusal remedy. (`AWS_SESSION_TOKEN` isn't part of that
 trade-off — see above.) **Restart condition:** the first real deployment
 that needs an authenticated proxy or a passphrase-protected key converts
 that group into named binder-slot support — one mechanism covering those
-five keys — rather than the current per-key accept-and-document posture.
+four keys — rather than the current per-key accept-and-document posture.
+
+Turso's `encryptionKey` is no longer part of that trade-off either. It was
+declared as an AES-256 key for the local database file, but the driver reads
+and writes that file through better-sqlite3, which has no encryption codec, so
+the file was written in plaintext whatever the key said. A local or
+embedded-replica turso datasource that declares it is now refused at write
+time and when the driver is built: drop the key, and put the file on an
+encrypted disk or volume if it must be encrypted at rest. A remote turso
+datasource (a `libsql://`, `https://` or `ws(s)://` url) still parses with the
+key, which the driver does not forward (a remote database's storage encryption
+is the server's), while a `file:` url or `:memory:` under a forced
+`mode: 'remote'` is refused like a local one, because the libSQL client the
+driver builds for it is handed no key; a stored value is redacted on read like
+the rest of this table.
 </Callout>
 
 ## Startup: a driver that cannot connect aborts the boot

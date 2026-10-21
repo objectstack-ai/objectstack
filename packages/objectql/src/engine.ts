@@ -2411,23 +2411,56 @@ function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined):
 }
 
 /**
+ * [#24822] Whether ONE write's static-`readonly` passes leave a non-system
+ * caller's `organization_id` on the row for the Layer 0 wall's verdict instead
+ * of taking it. The ONE answer both write verbs read: the insert's subject
+ * ({@link insertStaticReadonlySubject}) and the update's
+ * ({@link updateStaticReadonlySubject}).
+ *
+ * Three things must hold, and the first is the wall's own word:
+ *
+ *  1. `wallJudgesOrganization`: the seam the wall installed on THIS write
+ *     declares that it judges the stored rows' organization
+ *     (`PostHookWriteImageCheck.judgesOrganization`). The caller reads that
+ *     member once, for a non-system caller only. Nothing here derives it:
+ *     where no wall judged the column, the strip takes a caller's value
+ *     exactly as before.
+ *  2. The object is one the INSERT strip judges, with the column in that
+ *     subject ({@link staticReadonlyInsertSubject}). So never the reserved
+ *     `sys_` namespace or a platform-internal `managedBy` bucket, whose own
+ *     field-write governance a spare must not pre-empt. The UPDATE strip runs
+ *     on those objects too (it applies neither exclusion), so on an update
+ *     this condition is what keeps a `sys_` row's organization exactly as
+ *     before: the update spare covers exactly the objects the insert spare
+ *     covers.
+ *  3. The column is the platform's injected tenant column, the one
+ *     `TENANT_SCOPE_FIELD_DEF` declares read-only on the platform's behalf. An
+ *     AUTHORED `organization_id` declared `readonly: true` is the author's own
+ *     declaration, and declaration is enforcement: it keeps the strip. Which
+ *     one this is, is the registry's own provenance reader, never a second
+ *     copy.
+ *
+ * Why the column is left on the row where all three hold: the wall has
+ * already refused, before this engine ran, every supplied value it does not
+ * admit, and it judges the stored rows again after the hooks: an insert's
+ * rows, an update's prior row merged with the final payload, and on the
+ * predicate path every matched row merged with it. So a value that reaches the
+ * strip is one the wall admitted, and taking it put another organization in
+ * its place (the active one stamped on an insert, the row's own kept on an
+ * update). That is a silent replacement of an admitted input, which ADR-0105
+ * D5 and the organizations runtime's stamp rule out.
+ */
+function staticReadonlySparesOrganization(schema: unknown, wallJudgesOrganization: boolean): boolean {
+  if (!wallJudgesOrganization) return false;
+  const subject = staticReadonlyInsertSubject(schema as any);
+  if (!subject || !Object.prototype.hasOwnProperty.call(subject.fields, SystemFieldName.ORGANIZATION_ID)) return false;
+  return resolveInjectedColumnProvenance(schema, SystemFieldName.ORGANIZATION_ID) !== 'author';
+}
+
+/**
  * [#24822] The fields ONE insert's static-`readonly` passes may judge: the
- * {@link staticReadonlyInsertSubject} view, without `organization_id` when the
- * Layer 0 wall judges that column on this insert's stored rows AND the column
- * is the platform's injected tenant column.
- *
- * The wall says so itself, on the seam it installs
- * (`PostHookWriteImageCheck.judgesOrganization`). The caller passes that
- * member's answer, for a non-system caller only. Nothing here derives it:
- * where no wall judged the column, the strip takes a caller's value exactly
- * as before.
- *
- * Why the column is left on the row: the wall has already refused, before
- * this engine ran, every supplied value it does not admit. It judges the
- * stored row again after the hooks. So a value that reaches the strip is one
- * the wall admitted, and taking it stored the active organization in its
- * place. That is a silent replacement of an admitted input, which ADR-0105 D5
- * and the organizations runtime's stamp rule out.
+ * {@link staticReadonlyInsertSubject} view, without `organization_id` where
+ * {@link staticReadonlySparesOrganization} spares it.
  *
  * ONE function for both passes that read the subject, the pre-hook withhold
  * and the post-hook strip, so the hook view and the stored row cannot
@@ -2438,17 +2471,33 @@ function insertStaticReadonlySubject(
   wallJudgesOrganization: boolean,
 ): ReturnType<typeof staticReadonlyInsertSubject> {
   const subject = staticReadonlyInsertSubject(schema as any);
-  if (!subject || !wallJudgesOrganization) return subject;
-  if (!Object.prototype.hasOwnProperty.call(subject.fields, SystemFieldName.ORGANIZATION_ID)) return subject;
-  // An AUTHORED `organization_id` declared `readonly: true` is the author's
-  // own declaration, and declaration is enforcement: it keeps the strip. Only
-  // the platform's injected tenant column is spared, the one
-  // `TENANT_SCOPE_FIELD_DEF` declares read-only on the platform's behalf. Which
-  // one this is, is the registry's own provenance reader, never a second copy.
-  if (resolveInjectedColumnProvenance(schema, SystemFieldName.ORGANIZATION_ID) === 'author') return subject;
+  if (!subject || !staticReadonlySparesOrganization(schema, wallJudgesOrganization)) return subject;
   const fields = { ...subject.fields };
   delete fields[SystemFieldName.ORGANIZATION_ID];
   return Object.keys(fields).length > 0 ? { name: subject.name, fields } : null;
+}
+
+/**
+ * [#24822] The schema view ONE update's static-`readonly` passes judge: the
+ * object's whole registered schema, because the update strip applies neither
+ * of the insert subject's exclusions, without `organization_id` where
+ * {@link staticReadonlySparesOrganization} spares it. `schema` itself
+ * otherwise, so every update the spare does not reach is judged exactly as
+ * before.
+ *
+ * ONE function for every pass that asks the update's static strip: the
+ * pre-hook hide pass (what `beforeUpdate` is shown), the by-id and predicate
+ * strips (what is stored), and {@link staticReadonlyStoredView}, which the
+ * `readonlyWhen` strips and the master-detail settlement read. `update()`
+ * reads the wall's flag once and hands that one value to all of them, so the
+ * hook view and the stored row cannot disagree about the column.
+ */
+function updateStaticReadonlySubject(schema: unknown, wallJudgesOrganization: boolean): unknown {
+  if (!staticReadonlySparesOrganization(schema, wallJudgesOrganization)) return schema;
+  const { name, fields } = schema as { name?: string; fields: Record<string, unknown> };
+  const kept = { ...fields };
+  delete kept[SystemFieldName.ORGANIZATION_ID];
+  return { name, fields: kept };
 }
 
 /**
@@ -3767,22 +3816,32 @@ export interface PostHookWriteImageCheck {
   evaluate(rows: readonly Record<string, unknown>[]): void | Promise<void>;
   honoured?: boolean;
   /**
-   * [#24822] Declared by the installer, and only by it: on an `insert`,
-   * `evaluate` holds every row's `organization_id` to the Layer 0 tenant wall.
-   * It admits the value or refuses the write by throwing.
+   * [#24822] Declared by the installer, and only by it: `evaluate` holds every
+   * row it is handed to the Layer 0 tenant wall on `organization_id`. It
+   * admits the value or refuses the write by throwing. On an `insert` those
+   * rows are the inserted rows; on an `update` they are the stored images:
+   * the one prior row merged with the final payload on the by-id path, and
+   * every matched row merged with it on the predicate path.
    * `@objectstack/plugin-security` sets it at step 3.7, only where it
-   * composes the wall's own parts into the insert's seam. A seam that carries
-   * a business `check` alone does not judge the organization, and neither
-   * does a platform operator's seam that crosses the wall, so neither sets it.
+   * composes the wall's own parts into the insert's or the single-payload
+   * update's seam. A seam that carries a business `check` alone does not
+   * judge the organization, and neither does a platform operator's seam that
+   * crosses the wall, so neither sets it; nor is it set on an update whose
+   * payload is an array, where step 3.7 installs no seam of its own.
    *
-   * {@link ObjectQL.insert} reads this member, and nothing else, to decide one
-   * thing: whether a non-system caller's explicit `organization_id` stays on
-   * the row for that judgement or is taken by the static-`readonly` strip
-   * (the platform's tenant column declares `readonly: true`). Set, the value
-   * is stored as sent where the wall admits it and refused where it does not.
-   * It is never silently replaced by the active organization (ADR-0105 D5).
-   * Only the platform's injected column is spared. An AUTHORED
-   * `organization_id` declared `readonly: true` keeps the strip.
+   * {@link ObjectQL.insert} and {@link ObjectQL.update} read this member, and
+   * nothing else, to decide one thing: whether a non-system caller's explicit
+   * `organization_id` stays on the row for that judgement or is taken by the
+   * static-`readonly` strip (the platform's tenant column declares
+   * `readonly: true`). Set, the value is stored as sent where the wall admits
+   * it and refused where it does not: an insert's is never silently replaced
+   * by the active organization (ADR-0105 D5), and an update's re-point is
+   * never silently dropped in favour of the row's own organization. Only the
+   * platform's injected column is spared, and only on an object the insert's
+   * static-`readonly` strip judges, so never a `sys_` or platform-internal
+   * object. An AUTHORED `organization_id` declared `readonly: true` keeps the
+   * strip. An emptied value on an update is not spared into storage: the wall
+   * refuses it (`null` or `''`), on the payload and on the stored image.
    * Absent or `false`, the strip runs exactly as before. The engine never
    * sets it, and never derives it from the posture or the context: that
    * would be a mirror of the wall, and a mirror is wider than the wall
@@ -4178,7 +4237,13 @@ function staticReadonlyStripTakes(
   data: Record<string, unknown>,
   key: string,
   supplied: Readonly<Record<string, unknown>>,
-  strip: { runs: boolean; preserveAudit: boolean; hookWrittenKeys: ReadonlySet<string> | undefined },
+  strip: {
+    runs: boolean;
+    preserveAudit: boolean;
+    hookWrittenKeys: ReadonlySet<string> | undefined;
+    /** [#24822] The wall's flag, read once by `update()` — see {@link staticReadonlyStoredView}. */
+    wallJudgesOrganization?: boolean;
+  },
 ): boolean {
   if (!strip.runs) return false;
   return !(key in staticReadonlyStoredView(schema, data, supplied, strip));
@@ -4204,16 +4269,31 @@ function staticReadonlyStripTakes(
  * when the strip does not run (a system caller), and a key a hook wrote, a
  * value a hook overwrote or a column `preserveAudit` keeps all stay, because
  * the write stores them. Silent for the same reason.
+ *
+ * [#24822] ...and over the same view of the schema: the one
+ * {@link updateStaticReadonlySubject} answers for `strip.wallJudgesOrganization`,
+ * the flag `update()` reads once off the wall's seam and hands to the strips
+ * themselves. So where the wall judges the update's organization, a re-point
+ * the strip leaves on the row is in this view too, and a `readonlyWhen`
+ * predicate reading `record.organization_id` reads the organization the row is
+ * stored in. The master-detail settlement forwards the update's descriptor
+ * object unchanged, so the flag reaches {@link staticReadonlyStripTakes} on that
+ * path too. Absent, the view is the whole schema's, exactly as before.
  */
 function staticReadonlyStoredView(
   schema: unknown,
   data: Record<string, unknown>,
   supplied: Readonly<Record<string, unknown>>,
-  strip: { runs: boolean; preserveAudit: boolean; hookWrittenKeys: ReadonlySet<string> | undefined },
+  strip: {
+    runs: boolean;
+    preserveAudit: boolean;
+    hookWrittenKeys: ReadonlySet<string> | undefined;
+    wallJudgesOrganization?: boolean;
+  },
 ): Record<string, unknown> {
   if (!strip.runs) return data;
   return stripReadonlyFields(
-    schema as any, data, supplied, undefined,
+    updateStaticReadonlySubject(schema, strip.wallJudgesOrganization === true) as any, data, supplied, undefined,
     { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys },
   ) ?? data;
 }
@@ -16719,31 +16799,38 @@ export class ObjectQL implements IObjectQLEngine {
         // (`replacedStoredExpressionFields`). A key a strip above already took
         // is that strip's report.
         //
-        // ⛔ NOT refused under `strictReadonlyWrites`, by the maintainer's
-        // ruling 「甲」: in 18.x only the loud half ships — the reason and its
-        // report. The refusal is runtime behaviour no conversion can carry, so
-        // it waits for 19.0. So the strict check judges the strips' drops
-        // alone, BEFORE the computation, exactly where it stood, and a
-        // `stored_expression` report reaches the listener under strict too.
-        const refusableInsertDrops = droppedFieldEvents(object, computedDropped, insertDropped);
-        if (refusableInsertDrops.length > 0 && options?.strictReadonlyWrites === true) {
-          // Before the driver write and before validation — nothing is
-          // written, and "you sent a runtime-owned field" should not depend on
-          // whether some other field also failed a business rule (#5126's
-          // ordering on the update path, mirrored).
-          throw new ReadonlyFieldRejectedError(
-            object, [...new Set(refusableInsertDrops.flatMap((d) => d.fields))], refusableInsertDrops, 'insert',
-          );
-        }
+        // [#25000] REFUSED under `strictReadonlyWrites` like every other
+        // strip's drop: the strict contract follows what `onFieldsDropped`
+        // reports, and a replaced value is one (the amended ruling 「甲」 ships
+        // the refusal in 18.x). So the strict check judges the strips' drops
+        // AND the replacement, AFTER the computation — one refusal names
+        // everything the write would have taken or replaced, rather than a
+        // round-trip per class. The computation writes nothing (it evaluates
+        // over copies and assigns onto the in-memory rows), so the refusal
+        // still lands before validation and before any driver dispatch.
         const storedExpressionReplaced: string[] = [];
         const storedExpressionReplacedPerRow: string[][] = rows.map(() => []);
         if (storedExpressionPlan.length > 0) {
           const liveIndexes = rows
             .map((row, i) => (rowErrors[i] === undefined && row != null && typeof row === 'object' ? i : -1))
             .filter((i) => i >= 0);
-          const computed = await computeStoredExpressions(
-            storedExpressionPlan, liveIndexes.map((i) => rows[i] as Record<string, unknown>), opCtx.context, storedExpressionServing,
-          );
+          let computed: Array<Record<string, unknown>>;
+          try {
+            computed = await computeStoredExpressions(
+              storedExpressionPlan, liveIndexes.map((i) => rows[i] as Record<string, unknown>), opCtx.context, storedExpressionServing,
+            );
+          } catch (err) {
+            // A pass that THROWS is pre-empted by the strict verdict on the
+            // strips' drops (#5126's ordering — the check used to sit ahead
+            // of this pass), then rethrown.
+            const stripDrops = droppedFieldEvents(object, computedDropped, insertDropped);
+            if (stripDrops.length > 0 && options?.strictReadonlyWrites === true) {
+              throw new ReadonlyFieldRejectedError(
+                object, [...new Set(stripDrops.flatMap((d) => d.fields))], stripDrops, 'insert',
+              );
+            }
+            throw err;
+          }
           liveIndexes.forEach((i, k) => {
             const row = rows[i] as Record<string, unknown>;
             const taken = insertDroppedPerRow[i] ?? [];
@@ -16755,11 +16842,19 @@ export class ObjectQL implements IObjectQLEngine {
           });
         }
         const insertDrops = droppedFieldEvents(object, computedDropped, insertDropped, storedExpressionReplaced);
+        if (insertDrops.length > 0 && options?.strictReadonlyWrites === true) {
+          // Before the driver write and before validation — nothing is
+          // written, and "you sent a runtime-owned field" should not depend on
+          // whether some other field also failed a business rule (#5126's
+          // ordering on the update path, mirrored).
+          throw new ReadonlyFieldRejectedError(
+            object, [...new Set(insertDrops.flatMap((d) => d.fields))], insertDrops, 'insert',
+          );
+        }
         if (insertDrops.length > 0 && typeof options?.onFieldsDropped === 'function') {
-          // A strict write that reaches here had no refusable drop (above), so
-          // every event left is a `stored_expression` report on a write that
-          // completes — reported under strict as well. A REFUSED write never
-          // fires the listener: it did not complete.
+          // A strict write never reaches here with a drop (refused above), so
+          // the listener hears only a write that completes. A REFUSED write
+          // never fires the listener: it did not complete.
           for (const drop of insertDrops) {
             try {
               options.onFieldsDropped(drop);
@@ -17404,11 +17499,10 @@ export class ObjectQL implements IObjectQLEngine {
        notifyDrop(fields, reason);
      };
      /**
-      * One drop to the listener ONLY, in every mode — never a strict refusal.
-      * [#24690] The `stored_expression` report goes here: by the maintainer's
-      * ruling 「甲」 18.x ships its report and not its refusal (runtime
-      * behaviour no conversion can carry waits for 19.0). Called after
-      * `assertNoStrictDrops()`, so a refused write never fires the listener.
+      * One drop to the listener, on a non-strict write — `emitDrop`'s other arm.
+      * [#25000] The `stored_expression` report no longer calls this directly:
+      * it goes through `emitDrop` like every strip's, so under strict it is
+      * refused, and a refused write never fires the listener.
       */
      const notifyDrop = (fields: string[], reason: DroppedFieldsEvent['reason']): void => {
        if (fields.length === 0 || !onFieldsDropped) return;
@@ -17547,6 +17641,20 @@ export class ObjectQL implements IObjectQLEngine {
        // judged against the prior record — per ROW on the predicate path, where
        // one shared payload cannot carry a per-row verdict — and #9107
        // deliberately leaves it hook-writable.
+       //
+       // [#24822] Read ONCE, here, and handed to every static-`readonly` pass
+       // below (this hide pass, the by-id and predicate strips, and the views
+       // the `readonlyWhen` strips and the master-detail settlement read off
+       // them): whether the Layer 0 wall judges this update's `organization_id`
+       // on the stored rows. The wall declares it on the seam it installed;
+       // the engine reads that member and nothing else
+       // (`updateStaticReadonlySubject`). The middleware chain has run by now,
+       // so the seam is in place. Where it holds, an admitted re-point is shown
+       // to `beforeUpdate` and stored as sent, instead of being taken and the
+       // row's own organization kept.
+       const wallJudgesOrganization =
+         !opCtx.context?.isSystem && opCtx.postHookWriteImageCheck?.judgesOrganization === true;
+       const readonlyUpdateSubject = updateStaticReadonlySubject(updateSchema, wallJudgesOrganization);
        let readonlyHiddenFromHooks: Record<string, unknown> | undefined;
        if (!opCtx.context?.isSystem) {
          const preHookPayload = opCtx.data as Record<string, unknown> | null | undefined;
@@ -17556,7 +17664,7 @@ export class ObjectQL implements IObjectQLEngine {
            // No logger, deliberately: this pass is SILENT by construction. The
            // strip below owns every word said about these keys.
            const hidden = stripReadonlyFields(
-             updateSchema as any, preHookPayload, suppliedDataOnly, undefined,
+             readonlyUpdateSubject as any, preHookPayload, suppliedDataOnly, undefined,
              { preserveAudit: opCtx.context?.preserveAudit === true },
            ) as Record<string, unknown>;
            if (hidden !== preHookPayload) {
@@ -18304,7 +18412,10 @@ export class ObjectQL implements IObjectQLEngine {
                // [#19887] The static strip's verdict, described once: the
                // settlement asks it of the FK, and both `readonlyWhen` strips
                // build their `record` view from the payload it leaves.
-               const staticStrip = { runs: staticReadonlyStripRuns, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys };
+               // [#24822] ...with the wall's flag read once above, so the views
+               // these consumers read agree with the strip below about
+               // `organization_id`.
+               const staticStrip = { runs: staticReadonlyStripRuns, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys, wallJudgesOrganization };
                const landing = wantsParentBinding
                    ? await this.settleMasterDetailLanding({
                        schema: updateSchema, data: preRoWhen, supplied: suppliedValues,
@@ -18382,7 +18493,14 @@ export class ObjectQL implements IObjectQLEngine {
                    // a read-only column loses its write to any caller that
                    // echoed the same value back, which on `null` is every
                    // whole-record form round-trip.
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys }) as any;
+                   // [#24822] Over `readonlyUpdateSubject`: without
+                   // `organization_id` where the wall's seam judges this
+                   // update's organization (read once, above, for the hide pass
+                   // too). An admitted re-point is then stored as sent, not
+                   // taken with the row's own organization kept; it is not
+                   // reported, and not refused under `strictReadonlyWrites`,
+                   // which refuses exactly what this strip takes.
+                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Both strip passes are done; refuse now if the caller
@@ -18390,21 +18508,35 @@ export class ObjectQL implements IObjectQLEngine {
                // strict is about the payload the caller SENT, and reporting
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
-               assertNoStrictDrops();
+               //
                // [#24619] The stored computed fields over the stored row merged
                // with the FINAL payload — after the hooks and both strips, so a
                // locked input the `readonlyWhen` strip took back out feeds the
                // stored value, never the caller's — and before the statement.
                // [#24690] A caller value the computation replaces is reported
-               // under `stored_expression`, to the listener only (`notifyDrop`):
-               // never refused under strict in 18.x (ruling 「甲」).
+               // under `stored_expression`; [#25000] through `emitDrop`, the
+               // channel every strip reports through, so under strict it is
+               // REFUSED like them and nothing is written. The one judgment
+               // below therefore follows the computation, and one refusal names
+               // every drop and replacement together. The computation writes
+               // nothing (it evaluates over a copy), and an object declaring no
+               // stored expression skips it, so its refusal is where it stood.
+               // A pass that THROWS (a permission or related-row read) is
+               // pre-empted by the strict verdict on the strips' drops already
+               // collected — #5126's ordering, as on the predicate branch.
                if (storedExpressionPlan.length > 0) {
                    const patch = hookContext.input.data as Record<string, unknown>;
-                   const [computed] = await computeStoredExpressions(storedExpressionPlan, [{ ...priorRecord, ...patch }], opCtx.context, storedExpressionServing);
-                   const replaced = replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, [computed!]);
+                   let computed: Record<string, unknown> | undefined;
+                   try {
+                       [computed] = await computeStoredExpressions(storedExpressionPlan, [{ ...priorRecord, ...patch }], opCtx.context, storedExpressionServing);
+                   } catch (err) {
+                       assertNoStrictDrops();
+                       throw err;
+                   }
+                   emitDrop(replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, [computed!]), 'stored_expression');
                    applyStoredExpressionsToPatch(patch, computed!, priorRecord);
-                   notifyDrop(replaced, 'stored_expression');
                }
+               assertNoStrictDrops();
                // [#21663] The payload is FINAL here (see the seam below), so
                // every readonly value on it is one the driver will store: a
                // system writer's (the strip above never ran for it), a hook's,
@@ -18618,7 +18750,7 @@ export class ObjectQL implements IObjectQLEngine {
                const staticReadonlyStripRunsMulti = !opCtx.context?.isSystem;
                // [#19887] Described once, three consumers — as on the by-id
                // branch.
-               const staticStripMulti = { runs: staticReadonlyStripRunsMulti, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys };
+               const staticStripMulti = { runs: staticReadonlyStripRunsMulti, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys, wallJudgesOrganization };
                const landingMulti =
                    hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti) ||
                    schemaHasParentRequiredWhenMulti
@@ -18667,36 +18799,58 @@ export class ObjectQL implements IObjectQLEngine {
                    // one they were each added to close, and a bulk write that
                    // reached a different verdict about authorship than a by-id
                    // write is the #3106 / #4441 divergence verbatim.
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites, hookWrittenKeys }) as any;
+                   // [#24822] The same `readonlyUpdateSubject` as the by-id
+                   // branch: the wall's seam judges every matched row merged
+                   // with this payload, so an admitted re-point is stored as
+                   // sent on every one of them.
+                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Same refusal on the predicate path. A bulk strip is
                // "locked in ≥1 matched row ⇒ dropped for ALL", so a strict bulk
                // caller is told before N rows are written with a column missing
-               // — the failure mode a bulk write makes N times larger.
-               assertNoStrictDrops();
+               // — the failure mode a bulk write makes N times larger. The
+               // judgment itself follows the stored-expression pass below, as on
+               // the by-id branch.
+               //
                // [#24619] The stored computed fields on the predicate path, over
                // the FINAL payload as on the by-id branch. One patch reaches
                // every matched row, so {@link settleBulkStoredExpressions} keeps
                // a computed value only when it is the same on every row, and
                // refuses a patch that would compute different ones. The rows
                // are the D7 read (`readPriorRows` is a memo — no second fetch).
-               // [#24690] As on the by-id branch, to the listener only: a caller
-               // value differing from what any matched row then stores (the one
-               // computed value, or the column left as it is) is reported under
-               // `stored_expression`, and never refused under strict in 18.x.
+               // [#24690] As on the by-id branch: a caller value differing from
+               // what any matched row then stores (the one computed value, or
+               // the column left as it is) is reported under
+               // `stored_expression`; [#25000] through `emitDrop`, so under
+               // strict it is REFUSED before the statement and no row is written,
+               // in one refusal with every strip's drop. The pass writes nothing.
+               // ⛔ #5126's ordering survives it: a pass that THROWS — above
+               // all `settleBulkStoredExpressions` refusing a patch that computes
+               // different values on different rows (`VALIDATION_FAILED`) — is
+               // pre-empted by the strict verdict on the strips' drops already
+               // collected, so a strict caller whose payload a strip took is told
+               // `ERR_READONLY_FIELD_REJECTED` first, exactly as when the assert
+               // sat ahead of the whole pass. With no throw, one refusal names
+               // every strip drop plus the replacement.
                if (storedExpressionPlan.length > 0) {
-                   const matched = ((await readPriorRows()) ?? []).filter((row) => row != null && typeof row === 'object');
-                   const patch = hookContext.input.data as Record<string, unknown>;
-                   const before = await computeStoredExpressions(storedExpressionPlan, matched, opCtx.context, storedExpressionServing);
-                   const after = await computeStoredExpressions(storedExpressionPlan, matched.map((row) => ({ ...row, ...patch })), opCtx.context, storedExpressionServing);
-                   const settled = settleBulkStoredExpressions(storedExpressionPlan, patch, before, after, object);
-                   notifyDrop(
-                     replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, matched.map((row) => ({ ...row, ...settled }))),
-                     'stored_expression',
-                   );
-                   hookContext.input.data = settled as any;
+                   try {
+                       const matched = ((await readPriorRows()) ?? []).filter((row) => row != null && typeof row === 'object');
+                       const patch = hookContext.input.data as Record<string, unknown>;
+                       const before = await computeStoredExpressions(storedExpressionPlan, matched, opCtx.context, storedExpressionServing);
+                       const after = await computeStoredExpressions(storedExpressionPlan, matched.map((row) => ({ ...row, ...patch })), opCtx.context, storedExpressionServing);
+                       const settled = settleBulkStoredExpressions(storedExpressionPlan, patch, before, after, object);
+                       emitDrop(
+                         replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, matched.map((row) => ({ ...row, ...settled }))),
+                         'stored_expression',
+                       );
+                       hookContext.input.data = settled as any;
+                   } catch (err) {
+                       assertNoStrictDrops();
+                       throw err;
+                   }
                }
+               assertNoStrictDrops();
                // [#21663] The predicate-path twin of the by-id second pass, at the
                // same point and for the same reason: the readonly values left on
                // the final payload are stored, so their SHAPE is judged — before

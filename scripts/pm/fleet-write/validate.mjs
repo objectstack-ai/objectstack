@@ -113,8 +113,10 @@ import {
   WORKFLOW_DISPATCH_INPUTS,
   WORKFLOW_DISPATCH_PATH_SHAPE,
   WORKFLOW_DISPATCH_REF,
+  GOVERNED_REVIEW_OPS,
   answerPlaceholder,
   dispatchInputsOnTheWire,
+  governedReviewRequests,
 } from './ops.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -915,9 +917,15 @@ export async function selfTest() {
       const spec = OPS[op];
       const a = { op };
       for (const k of [...spec.required, ...spec.optional]) a[k] = sample[k];
-      return spec.requests(a, 'objectstack-ai/objectstack').map((r) => ({ op, ...r }));
+      return [
+        ...spec.requests(a, 'objectstack-ai/objectstack').map((r) => ({ op, ...r })),
+        // The governed-review follow-up's conditional writes (the ops.mjs header) — spelled by the table, sent by the executor after the row lands.
+        ...(spec.governedReview ? governedReviewRequests('objectstack-ai/objectstack', 7, { reviewers: ['u'], assignees: ['u'] }).map((r) => ({ op, ...r, governedReview: true })) : []),
+      ];
     });
     t('every op produces at least one request', everyRequest.length >= OP_NAMES.length);
+    t('the governed-review follow-up runs after exactly pr_create and pr_ready — derived from the rows, never listed — and its two writes are a POST to requested_reviewers carrying requested and a POST to the additive issue-assignees endpoint carrying assigned, both in the family pin above', [GOVERNED_REVIEW_OPS, everyRequest.filter((r) => r.governedReview).map((r) => [r.op, r.verb, r.path, r.requested ?? null, r.assigned ?? null])], [['pr_create', 'pr_ready'], [['pr_create', 'POST', `/repos/${TARGET_OWNER}/objectstack/pulls/7/requested_reviewers`, ['u'], null], ['pr_create', 'POST', `/repos/${TARGET_OWNER}/objectstack/issues/7/assignees`, null, ['u']], ['pr_ready', 'POST', `/repos/${TARGET_OWNER}/objectstack/pulls/7/requested_reviewers`, ['u'], null], ['pr_ready', 'POST', `/repos/${TARGET_OWNER}/objectstack/issues/7/assignees`, null, ['u']]]]);
+    t('…an empty list spells no request, and a governedReview row is never a row whose spelled requests change: pr_create and pr_ready keep the request lists they always had', [governedReviewRequests('o/r', 7), OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r').length, OPS.pr_ready.requests({ op: 'pr_ready', pull: 7 }, 'o/r').length], [[], 1, 1]);
     t('⛔ no request path reaches a refused family', everyRequest.filter((r) => REFUSED_PATH_FAMILIES.some((re) => re.test(r.path))).map((r) => `${r.op} ${r.path}`), []);
     t('⛔ the table\'s one PUT is pr_update_branch\'s update-branch, an action endpoint — no PUT reaches /labels or /assignees, the whole-set replaces', [everyRequest.filter((r) => r.verb === 'PUT').map((r) => `${r.op} ${r.path}`), everyRequest.some((r) => r.verb === 'PUT' && /\/(labels|assignees)$/.test(r.path))], [[`pr_update_branch /repos/${TARGET_OWNER}/objectstack/pulls/7/update-branch`], false]);
     t('every verb is one of POST, PATCH, PUT, DELETE', everyRequest.every((r) => ['POST', 'PATCH', 'PUT', 'DELETE'].includes(r.verb)));
@@ -930,7 +938,7 @@ export async function selfTest() {
     t('…and neither is the FIRST request of its action — the answer they read exists before either is sent', OP_NAMES.filter((op) => { const a = { op }; for (const k of [...OPS[op].required, ...OPS[op].optional]) a[k] = sample[k]; return OPS[op].requests(a, 'o/r')[0].fromAnswer !== undefined; }), []);
     t('…every such leg is a POST to the one additive issue endpoint for its list — never a PATCH or PUT, the whole-set replaces', legs.map((r) => [r.verb, /\/(assignees|labels)$/.test(r.path)]), [['POST', true], ['POST', true]]);
     t('…their placeholder is the one spelling the executor fills, spelled once, and no path without fromAnswer carries a brace', [answerPlaceholder('number'), everyRequest.filter((r) => r.fromAnswer === undefined && /[{}]/.test(r.path)).map((r) => `${r.op} ${r.path}`)], ['{number}', []]);
-    t('every grant a row ALSO spends is a literal mint input of PERMISSIONS, never a stroke-scoped one — so the mint widens nothing for it; pr_create\'s issues write and automerge_enable\'s workflows write are the two such rows', [OP_NAMES.flatMap((op) => OPS[op].alsoSpends ?? []).every((name) => name in PERMISSIONS && !STROKE_SCOPED_PERMISSIONS.includes(name)), OP_NAMES.filter((op) => OPS[op].alsoSpends).map((op) => [op, [...OPS[op].alsoSpends]])], [true, [['pr_create', ['issues']], ['automerge_enable', ['workflows']]]]);
+    t('every grant a row ALSO spends is a literal mint input of PERMISSIONS, never a stroke-scoped one — so the mint widens nothing for it; pr_create\'s and pr_ready\'s issues write (the legs and the governed-review assignee fallback) and automerge_enable\'s workflows write are the three such rows', [OP_NAMES.flatMap((op) => OPS[op].alsoSpends ?? []).every((name) => name in PERMISSIONS && !STROKE_SCOPED_PERMISSIONS.includes(name)), OP_NAMES.filter((op) => OPS[op].alsoSpends).map((op) => [op, [...OPS[op].alsoSpends]])], [true, [['pr_create', ['issues']], ['pr_ready', ['issues']], ['automerge_enable', ['workflows']]]]);
     t('pr_create without assignees or labels is the one create request it always was — no later leg', OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r').length, 1);
     t('…with labels alone, the create then the labels leg; with assignees alone, the create then the assignees leg', [OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b', labels: ['skip-changeset'] }, 'o/r').map((r) => r.labelled ?? r.assigned ?? 'create'), OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b', assignees: ['u'] }, 'o/r').map((r) => r.labelled ?? r.assigned ?? 'create')], [['create', ['skip-changeset']], ['create', ['u']]]);
     t('labels_remove is one directed DELETE per name, URL-encoded, idempotent on 404', OPS.labels_remove.requests({ op: 'labels_remove', issue: 1, labels: ['a b', 'c'] }, 'o/r').map((r) => [r.verb, r.path, r.idempotent404]), [['DELETE', '/repos/o/r/issues/1/labels/a%20b', true], ['DELETE', '/repos/o/r/issues/1/labels/c', true]]);

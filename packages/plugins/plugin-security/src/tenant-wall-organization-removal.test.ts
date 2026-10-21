@@ -8,9 +8,10 @@
  * ## The guarantee
  *
  * Step 3.7 of the security middleware (ADR-0095 D1) states that, outside a
- * system context and a platform administrator's posture exemption,
- * `organization_id` is effectively immutable on update: the stored row must
- * keep satisfying the same Layer 0 filter the read side uses. It judged only
+ * system context and a platform administrator's posture exemption, an
+ * update's `organization_id` stays inside the Layer 0 wall: the stored row must
+ * keep satisfying the same Layer 0 filter the read side uses ([#24822] a
+ * re-point the wall admits is stored, one it refuses is refused). It judged only
  * an organization a row NAMES, so an update that EMPTIED the column was never
  * judged at all — neither as the payload was sent nor on the stored row. On an
  * ordinary tenant object such a row drops out of every reader's scope; on the
@@ -43,8 +44,9 @@
  * The controls read each store as the engine writes it: on an ordinary tenant
  * object `organization_id` is the registry's injected `readonly` column, whose
  * caller-sent value the engine's static-readonly strip drops for a non-system
- * writer (a hook's value it keeps); the grant tables declare the column
- * writable, so a sent value is stored as sent.
+ * writer where no wall judges it, and leaves for the wall's verdict where one
+ * does ([#24822]; a hook's value it keeps either way); the grant tables declare
+ * the column writable, so a sent value is stored as sent.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';

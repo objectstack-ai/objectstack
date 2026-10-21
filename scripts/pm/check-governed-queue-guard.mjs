@@ -559,6 +559,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head': 13,
   'the per-row repository scope (ruling B2, 2026-10-13)': 14,
   '⭐ B′ with C: the record stands at the tier its FACE maps to, read off the committed paths': 8,
+  'the CODEOWNERS mirror: every Tier H register row routes to every GOVERNED_APPROVERS account, nothing else is routed, and the file says so': 12,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -567,7 +568,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // 5770886272 on #19061, letter B): the ordinary direction, one battery, one row.
 // Raised 23 → 24 with the queued pull-back battery: one battery, one row.
 // Raised 25 → 26 with the B′-with-C face battery (ruling record 6159870311): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 26;
+// Raised 26 → 27 with the CODEOWNERS mirror battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 27;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -617,6 +619,84 @@ export const EVENT_PULL_REQUEST = 'pull_request';
  * refusal/cleared renderings derive their named accounts from this array.
  */
 export const GOVERNED_APPROVERS = Object.freeze(['os-zhuang', 'hotlong']);
+
+// ── the CODEOWNERS mirror — the platform half of "both approvers are asked" ─
+
+/**
+ * `.github/CODEOWNERS` is the platform's own review router: GitHub requests a
+ * code owner's review when a pull is opened READY or marked ready for review.
+ * It is a static file — it can import neither `GOVERNED_SURFACES` nor
+ * `GOVERNED_APPROVERS` — so the two stay in step the only way a static file
+ * can: this predicate reads it and the self-test reds when it drifts. ⛔ It is
+ * a pin inside this existing self-test, not a gate, a check-run or a patrol
+ * row: the fleet's own request on the draft open is the relay's
+ * governed-review follow-up (`fleet-write/ops.mjs`), and the gap both close is
+ * what the H43 patrol row keeps reading.
+ *
+ * `codeownersRows` parses the file's effective lines — a `#` comment to end of
+ * line stripped, blank lines dropped — into `{ pattern, owners, line }`.
+ * `codeownersPatternFor` spells the one CODEOWNERS pattern a register row maps
+ * to: its prefix or exact path, root-anchored. Both pure.
+ */
+export function codeownersRows(text) {
+  const rows = [];
+  String(text ?? '')
+    .split('\n')
+    .forEach((raw, i) => {
+      const line = raw.replace(/#.*$/, '').trim();
+      if (line === '') return;
+      const [pattern, ...owners] = line.split(/\s+/);
+      rows.push({ pattern, owners, line: i + 1 });
+    });
+  return rows;
+}
+
+export function codeownersPatternFor(surface) {
+  return `/${surface.prefix ?? surface.exact}`;
+}
+
+/**
+ * The verdict: `{ ok, problems, tierHPatterns }`. `ok` holds only when
+ *   - every Tier H row of the register that governs `repo` has a CODEOWNERS
+ *     line at exactly its pattern, naming exactly `@` + every account in
+ *     `approvers` (order-free; nobody else, nobody fewer);
+ *   - every other line — the enforcement chain's rows — names exactly that
+ *     same owner set, so an enforcer cannot be routed to a subset;
+ *   - no line routes a Tier S row's pattern: Tier S lands on a seat's review of
+ *     record, and a code-owner request there would summon the maintainer for a
+ *     landing that is not his;
+ *   - the file's prose names `GOVERNED_APPROVERS`, so a reader finds the
+ *     constant the owner list mirrors.
+ * Every problem is a sentence naming the row or line; the list is whole, never
+ * the first hit. Pure.
+ */
+export function codeownersMirrorVerdict({ text, approvers = GOVERNED_APPROVERS, repo = SELF_REPO_ID } = {}) {
+  const rows = codeownersRows(text);
+  const wanted = [...approvers].map((a) => `@${a}`.toLowerCase()).sort();
+  const sameOwners = (owners) => JSON.stringify([...owners].map((o) => o.toLowerCase()).sort()) === JSON.stringify(wanted);
+  const problems = [];
+  // The rows that govern THIS repository, read from the register (ruling B2: the question has a repository in it).
+  const governing = governedSurfacesFor(repo);
+  const tierH = governing.filter((s) => s.tier === GOVERNED_TIER_H);
+  const tierHPatterns = tierH.map(codeownersPatternFor);
+  for (const surface of tierH) {
+    const pattern = codeownersPatternFor(surface);
+    const row = rows.find((r) => r.pattern === pattern);
+    if (!row) {
+      problems.push(`Tier H row \`${surface.id}\` (${surface.glob}) has no CODEOWNERS line at \`${pattern}\` — a pull touching it summons nobody when opened ready`);
+      continue;
+    }
+    if (!sameOwners(row.owners)) problems.push(`CODEOWNERS line ${row.line} \`${pattern}\` names ${row.owners.join(' ') || 'nobody'}, not every GOVERNED_APPROVERS account (${wanted.join(' ')}) — a Tier H pull then waits on an approver who is never asked`);
+  }
+  for (const row of rows) {
+    if (tierHPatterns.includes(row.pattern)) continue;
+    const tierS = governing.find((s) => s.tier === GOVERNED_TIER_S && codeownersPatternFor(s) === row.pattern);
+    if (tierS) problems.push(`CODEOWNERS line ${row.line} routes \`${row.pattern}\`, a Tier S row (\`${tierS.id}\`) that lands on a seat's review of record — a code-owner request there asks the maintainer for a landing that is not his`);
+    else if (!sameOwners(row.owners)) problems.push(`CODEOWNERS line ${row.line} \`${row.pattern}\` (an enforcement-chain row) names ${row.owners.join(' ') || 'nobody'}, not every GOVERNED_APPROVERS account (${wanted.join(' ')})`);
+  }
+  if (!/GOVERNED_APPROVERS/.test(String(text ?? ''))) problems.push('the file never names `GOVERNED_APPROVERS` — its header must say which constant the owner list mirrors');
+  return { ok: problems.length === 0, problems, tierHPatterns, rows };
+}
 
 // ── the landing TIER: Tier S lands on a review of record, Tier H on an approval ─
 
@@ -4529,6 +4609,38 @@ export async function selfTest() {
   assert('⭐ a-record-on-an-OLDER-head-CARRIES-when-the-head-moved-ONLY-on-prose-faces-outside-the-review-surface', proseCarried.exitCode === EXIT_CLEAR && proseCarried.entries[0].record.state === 'stands' && proseCarried.entries[0].record.carriedHops === 1, JSON.stringify(proseCarried.entries[0].record));
   const proseCode = await tierRun({ comments: onOldHead, runGit: qgit(qProseCode), baseRef: QBASE });
   assert('⛔ a-CODE-path-moved-beside-the-prose-REFUSES-exactly-as-an-uncarried-old-head-does', proseCode.exitCode === EXIT_REFUSED_UNAPPROVED && proseCode.entries[0].record.state === 'absent', JSON.stringify(proseCode.entries[0].record));
+  // ── the CODEOWNERS mirror ─────────────────────────────────────────────────
+  //
+  // The platform half of "both approvers are asked": `.github/CODEOWNERS` is a
+  // static file, so this is the ONE place that proves it mirrors the register's
+  // Tier H rows and `GOVERNED_APPROVERS`. The file on disk is read here; the
+  // negative controls drive the predicate with fixtures.
+  battery('the CODEOWNERS mirror: every Tier H register row routes to every GOVERNED_APPROVERS account, nothing else is routed, and the file says so');
+  {
+    const onDisk = readFileSync(join(repoRoot, '.github', 'CODEOWNERS'), 'utf8');
+    const live = codeownersMirrorVerdict({ text: onDisk });
+    assert('⭐ the-file-on-disk-mirrors-the-register-and-the-approver-list', live.ok, live.problems.join(' | '));
+    assert('every-Tier-H-row-that-governs-this-repository-is-a-pattern-the-file-carries', live.tierHPatterns.length === governedSurfacesFor(REPO).filter((s) => s.tier === GOVERNED_TIER_H).length && live.tierHPatterns.every((p) => live.rows.some((r) => r.pattern === p)), JSON.stringify(live.tierHPatterns));
+    assert('the-patterns-are-the-register-rows-root-anchored-prefix-or-exact', live.tierHPatterns.join() === '/docs/adr/,/skills/,/AGENTS.md,/CLAUDE.md,/docs/NORTH-STAR.md,/.github/workflows/', live.tierHPatterns.join());
+    assert('every-line-on-disk-names-every-approver-spelled-as-a-login', live.rows.every((r) => GOVERNED_APPROVERS.every((a) => r.owners.includes(`@${a}`))) && live.rows.length >= live.tierHPatterns.length, JSON.stringify(live.rows));
+    assert('the-parser-strips-comments-and-blank-lines-and-splits-owners', JSON.stringify(codeownersRows('# c\n\n/docs/adr/ @a @b # trailing\n  /x.md   @c\n')) === JSON.stringify([{ pattern: '/docs/adr/', owners: ['@a', '@b'], line: 3 }, { pattern: '/x.md', owners: ['@c'], line: 4 }]));
+    const owners = GOVERNED_APPROVERS.map((a) => `@${a}`).join(' ');
+    const full = (extra = '') => `# mirrors GOVERNED_APPROVERS\n${live.tierHPatterns.map((p) => `${p} ${owners}`).join('\n')}\n${extra}`;
+    assert('a-fixture-carrying-exactly-the-Tier-H-rows-with-every-owner-passes', codeownersMirrorVerdict({ text: full() }).ok);
+    const one = codeownersMirrorVerdict({ text: full().replace(`/docs/adr/ ${owners}`, `/docs/adr/ @${GOVERNED_APPROVERS[1]}`) });
+    assert('⛔ one-approver-on-the-adr-row-is-a-problem-naming-the-row-and-the-missing-account', !one.ok && one.problems.length === 1 && one.problems[0].includes('`/docs/adr/`') && one.problems[0].includes(`@${GOVERNED_APPROVERS[0]}`), one.problems.join(' | '));
+    const missing = codeownersMirrorVerdict({ text: full().split('\n').filter((l) => !l.startsWith('/skills/')).join('\n') });
+    assert('⛔ a-Tier-H-row-with-no-line-is-a-problem-naming-the-row', !missing.ok && missing.problems.length === 1 && missing.problems[0].includes('`skills-catalog`'), missing.problems.join(' | '));
+    const tierS = codeownersMirrorVerdict({ text: full(`/.claude/ ${owners}\n`) });
+    assert('⛔ routing-the-Tier-S-row-is-a-problem-a-seat-record-landing-summons-nobody', !tierS.ok && tierS.problems.length === 1 && tierS.problems[0].includes('`claude-tree`'), tierS.problems.join(' | '));
+    const enforcer = codeownersMirrorVerdict({ text: full(`/.github/CODEOWNERS @${GOVERNED_APPROVERS[1]}\n`) });
+    assert('⛔ an-enforcement-chain-row-routed-to-a-subset-is-a-problem', !enforcer.ok && enforcer.problems.length === 1 && enforcer.problems[0].includes('enforcement-chain'), enforcer.problems.join(' | '));
+    const silent = codeownersMirrorVerdict({ text: full().replace('# mirrors GOVERNED_APPROVERS\n', '') });
+    assert('⛔ a-file-that-never-names-the-constant-is-a-problem', !silent.ok && silent.problems.length === 1 && silent.problems[0].includes('GOVERNED_APPROVERS'), silent.problems.join(' | '));
+    const other = codeownersMirrorVerdict({ text: onDisk, approvers: ['someone-else'] });
+    assert('⭐ the-approver-list-is-READ-not-restated-another-list-reds-the-file-on-disk', !other.ok && other.problems.length >= live.tierHPatterns.length, String(other.problems.length));
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
