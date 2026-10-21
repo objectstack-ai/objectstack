@@ -4258,7 +4258,7 @@
           "revision": 6,
           "date": "2026-10-21",
           "change": "Respelled — fixtures.requires[0]: 'and an isolated boot — the item' → 'and a boot on its own port and DB — the item'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
-          "ref": "#PENDING-24579R18"
+          "ref": "#25018"
         }
       ]
     },
@@ -4400,7 +4400,7 @@
           "revision": 8,
           "date": "2026-10-21",
           "change": "Respelled — fixtures.requires[0]: 'an isolated dev boot on the stock SQLite store' → 'a dev boot on its own port and DB, on the stock SQLite store'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
-          "ref": "#PENDING-24579R18"
+          "ref": "#25018"
         }
       ]
     },
