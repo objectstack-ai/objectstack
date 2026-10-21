@@ -162,11 +162,13 @@ describe('semantic type classes', () => {
     // Guards the set from drifting: adding a reference type without deciding
     // which half it belongs to would leave `referenceTargetOf` silently
     // answering `undefined` for a fully-authored field.
+    // [#24952] A type that implies its target is not moved by a carrier; a
+    // type that admits one answers the carrier.
     for (const t of REFERENCE_VALUE_TYPES) {
       const implied = referenceTargetOf({ type: t });
       const authored = referenceTargetOf({ type: t, reference: 'somewhere' });
-      expect(authored, `authored target for ${t}`).toBe('somewhere');
       expect(implied === undefined || typeof implied === 'string', `implied target for ${t}`).toBe(true);
+      expect(authored, `authored target for ${t}`).toBe(implied ?? 'somewhere');
     }
     expect([...REFERENCE_VALUE_TYPES].filter((t) => referenceTargetOf({ type: t }) !== undefined))
       .toEqual(['user']);
