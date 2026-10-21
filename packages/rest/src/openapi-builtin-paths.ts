@@ -112,9 +112,8 @@
  * requirement. That under-claims for the discovery routes, which answer
  * anonymously — deliberately: the registration carries no auth fact for them,
  * and "credentials not needed" is the one direction where a wrong claim leaks
- * data. The two API-description routes (`/openapi.json`, `/docs`) refuse an
- * anonymous caller (#22430), so the inherited requirement is simply true of
- * them.
+ * data. The API-description route (`/openapi.json`) refuses an anonymous
+ * caller (#22430), so the inherited requirement is simply true of it.
  */
 
 /** The slice of a registered route this module reads. */
