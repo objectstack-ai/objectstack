@@ -144,8 +144,8 @@ describe('SqlDriver.connect — a declared SQLite file whose header or schema SQ
     await seedDatabase(filename);
     const probe = make(filename);
     await probe.connect();
-    const [{ rootpage }] = await probe.execute("SELECT rootpage FROM sqlite_master WHERE name = 't'");
-    const [{ page_size: pageSize }] = await probe.execute('PRAGMA page_size');
+    const [{ rootpage }] = (await probe.execute("SELECT rootpage FROM sqlite_master WHERE name = 't'")) as Array<{ rootpage: number }>;
+    const [{ page_size: pageSize }] = (await probe.execute('PRAGMA page_size')) as Array<{ page_size: number }>;
     await probe.disconnect();
     const fd = openSync(filename, 'r+');
     writeSync(fd, Buffer.alloc(pageSize, 0xab), 0, pageSize, (rootpage - 1) * pageSize);
