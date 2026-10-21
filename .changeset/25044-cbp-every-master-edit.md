@@ -2,7 +2,7 @@
 '@objectstack/plugin-security': minor
 ---
 
-fix(plugin-security)!: a write to a `controlled_by_parent` detail asks for edit access on every master it involves (ADR-0055 §3)
+fix(plugin-security)!: an update of a `controlled_by_parent` detail also asks for edit access on the master its body names (ADR-0055 §3)
 
 ADR-0055 §3 says editing, deleting or creating a detail requires edit access to its master, and it reads a create's master from the master id in the incoming body. A write to a `controlled_by_parent` detail can involve more than one master, and for one shape of write the master-detail write gate asked the master-edit question of one of them only. It now asks it of every master the write involves, with the same check and in the same order as before for the one it already asked. One master the caller may not edit refuses the whole write, and nothing is written. On a write made on a user's behalf, both principals are asked, as on every other detail write.
 
