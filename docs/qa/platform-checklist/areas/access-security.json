@@ -2919,7 +2919,7 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2933,7 +2933,7 @@
           "a manage_platform_settings-floor probe route: GET /api/v1/datasources answers 401/403 BEFORE any service resolution (packages/services/service-datasource/src/admin-routes.ts; DATASOURCE_ADMIN_CAPABILITY), and admin_full_access carries that capability (packages/spec/src/identity/eval-user.zod.ts) — so the probe discriminates platform-admin standing cleanly"
         ],
         "knownGaps": [
-          "the ENTITLED live leg needs a VERIFIED second account, and no stock HTTP path verifies one: email_verified is statically readonly at the user-context API (stripped — the write-path-guards class), a fresh sign-up reads unverified, and the seeded dev admin — whose address IS stamped verified at seed time (#11343, auth-plugin.ts) — also holds the unscoped admin_full_access grant under single (the posture this item boots), so its 200s can never attribute to the config anchor. Verify M's address via a verification-enabled boot with mail capture (identity-auth.email-verification-loop's fixture, itself a knownGap there) or a system-context stamp through the same isSystem doorway the seed itself uses; without either, clause 5's live leg scores blocked(fixture) and the entitled side rests on the unit pin. Measured on main c91af8ed6: POST /api/v1/auth/admin/update-user {userId, data: {emailVerified: true}} answers the seeded dev admin 403 YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS, so the HTTP lane has no verifying door; the run stamped M's email_verified directly on its own isolated scratch database with the server stopped (a system-level write, never on a shared database) and records that it did"
+          "the ENTITLED live leg needs a VERIFIED second account, and no stock HTTP path verifies one: email_verified is statically readonly at the user-context API (stripped — the write-path-guards class), a fresh sign-up reads unverified, and the seeded dev admin — whose address IS stamped verified at seed time (#11343, auth-plugin.ts) — also holds the unscoped admin_full_access grant under single (the posture this item boots), so its 200s can never attribute to the config anchor. Verify M's address via a verification-enabled boot with mail capture (identity-auth.email-verification-loop's fixture, itself a knownGap there) or a system-context stamp through the same isSystem doorway the seed itself uses; without either, clause 5's live leg scores blocked(fixture) and the entitled side rests on the unit pin. Measured on main c91af8ed6: POST /api/v1/auth/admin/update-user {userId, data: {emailVerified: true}} answers the seeded dev admin 403 YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS, so the HTTP lane has no verifying door; the run stamped M's email_verified directly on its own scratch database with the server stopped (a system-level write, never on a shared database) and records that it did"
         ]
       },
       "steps": [
@@ -3052,6 +3052,12 @@
           "date": "2026-10-20",
           "change": "source[5] and source[7] re-pointed — the two comma-range line citations round 9 of wave anchor #24579 left, because PR #24667 held the item then (round 9's report 6283532816, out_of_scope_findings[0]). At the authoring commit 45397edf53, line 200 of env.ts was the resolvePlatformOwnerEmail declaration and line 261 of admin-routes.ts was the DATASOURCE_ADMIN_CAPABILITY declaration. At base 795ff708d8 source[5] anchors both PLATFORM_OWNER_EMAIL_ENV and resolvePlatformOwnerEmail in env.ts, and source[7] anchors the DATASOURCE_ADMIN_CAPABILITY declaration in admin-routes.ts instead of the string literal manage_platform_settings. All three resolve as declarations in the shared resolver. The ',NNN' residue is what #13786's strip left of a two-range list. No clause, step or other field changed",
           "ref": "#24788"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-21",
+          "change": "Respelled — fixtures.knownGaps[0]: 'its own isolated scratch database' → 'its own scratch database'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. steps[0]'s 'a walled posture (group / isolated)' names the posture and is left as written. No clause changed",
+          "ref": "#25018"
         }
       ]
     },

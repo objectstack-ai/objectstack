@@ -147,15 +147,39 @@ export const SysOauthApplication = ObjectSchema.create({
       target: '/api/v1/auth/sys-oauth-application/register',
       requiresFeature: 'oidcProvider',
       refreshAfter: true,
+      // [#24773] The form offers exactly the two application types the OAuth
+      // provider judges (`@better-auth/oauth-provider` 1.7.3 declares
+      // `application_type` as `web` | `native`), and the redirect-URL help
+      // states that provider's redirect-URI rule per type, which the register
+      // route forwards the type to. `user-agent-based` and `public` are no
+      // longer offered: the provider has no such application type, so the
+      // route registers either as `web`. The route itself still accepts both
+      // (refusing them narrows the door, which waits for a major version), and
+      // nothing on the server reads these options: the generic action door
+      // refuses a `type: 'api'` action before its param contract runs, so the
+      // route is the only judge. The stored `type` column below is a separate
+      // surface and is not narrowed here: that waits for the same major version.
       params: [
         { name: 'name', label: 'Application Name', type: 'text', required: true },
-        { name: 'redirectURLs', label: 'Redirect URLs', type: 'textarea', required: true, helpText: 'One URL per line. Must use https:// in production.' },
-        { name: 'type', label: 'Application Type', type: 'select', required: true, defaultValue: 'web', options: [
-          { label: 'Web', value: 'web' },
-          { label: 'Native', value: 'native' },
-          { label: 'User-agent based', value: 'user-agent-based' },
-          { label: 'Public', value: 'public' },
-        ] },
+        {
+          name: 'redirectURLs',
+          label: 'Redirect URLs',
+          type: 'textarea',
+          required: true,
+          helpText: 'One URL per line. Web applications need https:// on a host other than localhost or another loopback address. Native applications may also use http:// on exactly localhost, 127.0.0.1 or [::1], on any port.',
+        },
+        {
+          name: 'type',
+          label: 'Application Type',
+          type: 'select',
+          required: true,
+          defaultValue: 'web',
+          helpText: 'Choose Native for a desktop or mobile app, or for an app in local development that redirects to http://localhost.',
+          options: [
+            { label: 'Web', value: 'web' },
+            { label: 'Native', value: 'native' },
+          ],
+        },
       ],
       resultDialog: {
         title: 'OAuth application registered',

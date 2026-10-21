@@ -18,6 +18,10 @@
  * (`sys_notification_template`), and `emit()`'s dedup lookup
  * (`sys_notification` by `dedup_key`).
  *
+ * [#24978] And by `NotificationTextRenderer.recipientLocale` (`sys_user`, the
+ * locale alone), the read that picks the language a keyed notification text is
+ * rendered in, at delivery, for that recipient.
+ *
  * `emit()` takes no caller context. The door in front of an emitting caller
  * has already decided whether it may notify, and every row these calls read or
  * write belongs to a RECIPIENT, not to the emitter — so no caller's grants
