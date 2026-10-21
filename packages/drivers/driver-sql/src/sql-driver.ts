@@ -7059,6 +7059,9 @@ export class SqlDriver implements IDataDriver {
    * @returns whether the connection answered. The read is the first statement
    * any connection runs, so `false` says the connection itself is not answering —
    * not merely that space hygiene is unavailable.
+   * @throws {SqliteDatabaseFileError} when that first statement's answer is a
+   * verdict on the file itself ({@link SQLITE_FILE_REFUSALS}): it cannot be
+   * opened, or it is not a SQLite database.
    */
   private async applyAutoVacuumIncremental(): Promise<boolean> {
     try {
@@ -7082,15 +7085,24 @@ export class SqlDriver implements IDataDriver {
       // let the step-down message that follows explain the outcome. Any OTHER
       // PRAGMA failure keeps the full warning (with stack) as before.
       const code = (e as { code?: string } | null | undefined)?.code;
-      // The file itself cannot be opened or created (#23696): a directory that
-      // exists but refuses the file, a path SQLite cannot open. Every later
-      // statement would answer the same, so the connect fails here, naming the
-      // file — before, it logged and resolved, and the datasource counted as
-      // connected while it could not answer one query.
-      if (code === 'SQLITE_CANTOPEN') {
+      // The file itself is refused, and every later statement would answer the
+      // same, so the connect fails here, naming the file. Before, each of these
+      // logged and resolved, and the datasource counted as connected while it
+      // could not answer one query:
+      //   • SQLITE_CANTOPEN (#23696) — a directory that exists but refuses the
+      //     file, a path SQLite cannot open;
+      //   • SQLITE_NOTADB (#24960) — the file exists and opens, but its bytes
+      //     are not a SQLite database (plain text, a foreign format, a file
+      //     encrypted by another engine). On a development boot the step-down
+      //     used to answer it with wasm SQLite, whose open moved the
+      //     operator's file aside and wrote an empty database in its place.
+      //     The refusal is issued before anything is written: the file is left
+      //     exactly as it was found.
+      const refusal = code === undefined ? undefined : SqlDriver.SQLITE_FILE_REFUSALS.get(code);
+      if (refusal !== undefined) {
         const declared = (this.config as any).connection;
         const filename = this.sqliteFilename() ?? String(typeof declared === 'string' ? declared : declared?.filename);
-        throw new SqliteDatabaseFileError(filename, 'cannot be opened or created', e);
+        throw new SqliteDatabaseFileError(filename, refusal, e);
       }
       const msg = e instanceof Error ? e.message : String(e);
       const isNativeLoadFailure =
@@ -7108,6 +7120,19 @@ export class SqlDriver implements IDataDriver {
       return false;
     }
   }
+
+  /**
+   * The SQLite codes the connection's first statement can answer that are a
+   * verdict on the FILE, each with the words {@link SqliteDatabaseFileError}
+   * names it with. Only a loaded addon answers with a SQLite code, so none of
+   * these is a native-addon load failure; and every rung of a step-down opens
+   * the same file, so no other engine can cure one (`resolveSqliteDriver` in
+   * `@objectstack/service-datasource` re-throws them).
+   */
+  private static readonly SQLITE_FILE_REFUSALS: ReadonlyMap<string, string> = new Map([
+    ['SQLITE_CANTOPEN', 'cannot be opened or created'],
+    ['SQLITE_NOTADB', 'is not a SQLite database, and was left as it is'],
+  ]);
 
   /** What `PRAGMA auto_vacuum` answers for INCREMENTAL (0 is NONE, 1 is FULL). */
   private static readonly SQLITE_AUTO_VACUUM_INCREMENTAL = 2;
