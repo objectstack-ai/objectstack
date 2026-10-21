@@ -55,7 +55,13 @@ describe('sys_user_detail — the Security tab is gated to the viewer\'s own rec
     for (const name of names) {
       const action = actions.find((a) => a.name === name);
       expect(action, name).toBeDefined();
-      expect(String(action!.visible), name).toMatch(/^has\(record\.id\) && record\.id == ctx\.user\.id(?: && |$)/);
+      // `ObjectSchema.create` parses the bare string into its envelope.
+      const visible = action!.visible as { source?: string } | string | undefined;
+      const source = typeof visible === 'string' ? visible : visible?.source;
+      // A pure conjunction led by the own-record guard — the 2FA actions wrap
+      // it in a parenthesised group `(…) && features.twoFactor == true`.
+      expect(source, name).toMatch(/^\(?has\(record\.id\) && record\.id == ctx\.user\.id(?: && |\)|$)/);
+      expect(source, name).not.toContain('||');
     }
   });
 });
