@@ -12,8 +12,8 @@
       "app": "showcase",
       "requires": [
         "an admin session holding `manage_metadata` — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough",
-        "an isolated boot (own port + file DB, dogfood §0) — this recipe authors metadata into the running app",
-        "⚠️ export OS_PORT=<port> as well as passing -p <port>, or the showcase's self-pinging connectors dial 3000 and every unrelated flow run in the same boot fails `fetch failed` (RUNNER.md, the isolated-boot/OS_PORT standing fact)"
+        "a boot on its own port and file DB (dogfood §0) — this recipe authors metadata into the running app",
+        "⚠️ export OS_PORT=<port> as well as passing -p <port>, or the showcase's self-pinging connectors dial 3000 and every unrelated flow run in the same boot fails `fetch failed` (RUNNER.md, the own-port/OS_PORT connector standing fact)"
       ],
       "sequence": [
         {
@@ -65,7 +65,7 @@
           "source": "packages/runtime/src/domains/automation.ts#flow (POST /:name/toggle → engine.toggleFlow); automation.flow-toggle-kill-switch names showcase_urgent_task_alert as the only type:'record_change' flow"
         }
       ],
-      "teardown": "POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": true} to undo step 4, then DELETE /api/v1/packages/com.objectstack.qa.automation (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or discard the isolated file DB, the cheaper path an isolated boot makes free. The toggle is NOT covered by discarding the DB if you reused a boot, so undo it explicitly.",
+      "teardown": "POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": true} to undo step 4, then DELETE /api/v1/packages/com.objectstack.qa.automation (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or discard the run's own file DB, the cheaper path a boot on its own port and DB makes free. The toggle is NOT covered by discarding the DB if you reused a boot, so undo it explicitly.",
       "knownGaps": [
         "Same SDK sharp edge as qa-scratch-authz: `meta.saveItem(type, name, item)` does NOT send `?package=` (packages/client/src/index.ts) — issue steps 2 and 3 as raw HTTP with the query string appended, or the flows land outside the package and the teardown misses them.",
         "This recipe has NOT been proven by a live run. If step 2 or 3 4xxs on the flow body, re-read the cited schema line before assuming the recipe rotted — a publish-time refusal of a start-less flow would itself be a finding (it would mean the 422 row has moved from dispatch time to author time, which changes what the item is asserting)."

@@ -5448,6 +5448,14 @@ export class SecurityPlugin implements Plugin {
     object: string,
     context: any,
     resolvedSets?: PermissionSet[],
+    /**
+     * [ADR-0090 D10] The depth to stamp instead of the one `getEffectiveScope`
+     * answers for `resolvedSets` — what step 2.6 stamps on a DELEGATED read,
+     * where the agent leg carries the intersected depth and the delegator leg
+     * its own ({@link computeDelegatedReadFilter}). Absent on every
+     * non-delegated call, which resolves the depth here as before.
+     */
+    depth?: string,
   ): Promise<Record<string, unknown> | null> {
     const sharing = this.resolveKernelService?.('sharing') as
       | { buildReadFilter?: (o: string, c: any) => Promise<unknown | null> }
@@ -5459,23 +5467,25 @@ export class SecurityPlugin implements Plugin {
     // [#5386] `resolvedSets` lets an in-middleware caller (the
     // controlled_by_parent derivation) pass the sets it already resolved for
     // THIS identity, instead of re-resolving them from the context.
-    let readScope: string | undefined;
-    try {
-      const permissionSets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context));
-      if (permissionSets.length > 0) {
-        const meta = await this.getObjectSecurityMeta(object);
-        readScope = this.permissionEvaluator.getEffectiveScope(
-          'read',
-          object,
-          permissionSets,
-          { isPrivate: meta.isPrivate },
-        );
+    let readScope: string | undefined = depth;
+    if (readScope === undefined) {
+      try {
+        const permissionSets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context));
+        if (permissionSets.length > 0) {
+          const meta = await this.getObjectSecurityMeta(object);
+          readScope = this.permissionEvaluator.getEffectiveScope(
+            'read',
+            object,
+            permissionSets,
+            { isPrivate: meta.isPrivate },
+          );
+        }
+      } catch {
+        // Depth is a WIDENING input: failing to resolve it leaves the owner-match
+        // at its narrowest ('own'), which is the safe direction. The sharing call
+        // below still runs — and its own failure still denies.
+        readScope = undefined;
       }
-    } catch {
-      // Depth is a WIDENING input: failing to resolve it leaves the owner-match
-      // at its narrowest ('own'), which is the safe direction. The sharing call
-      // below still runs — and its own failure still denies.
-      readScope = undefined;
     }
     const filter = await sharing.buildReadFilter(object, {
       ...context,
@@ -5888,6 +5898,14 @@ export class SecurityPlugin implements Plugin {
    *   3. {@link resolveSharingReadFilter} — plugin-sharing's OWD / record-share
    *      visibility filter, contributed by the sibling middleware.
    *
+   * [ADR-0090 D10] On a DELEGATED (on-behalf-of) context the chain composes
+   * each of the three twice — once for the delegated principal's leg, once for
+   * the delegator's — and so does this method ({@link computeDelegatedReadFilter}):
+   * the delegated read is scoped to the intersection, exactly as a delegated
+   * `find` is. ADR-0139 D5.1 named that intersection reaching this method as
+   * the condition under which the engine composes its `ReadableIds` leaf for a
+   * delegated caller; it does, so the engine does.
+   *
    * Each layer has been missing here at some point, and each absence had the
    * same shape: a caller who cannot read a row through `/data` could still
    * `COUNT(*)` / `GROUP BY` it through `/analytics`. Layer 3 was #4467; layer 2
@@ -5926,6 +5944,28 @@ export class SecurityPlugin implements Plugin {
     // refusal, mirrored: zero rows, read off the same predicate, before any
     // layer resolves. This used to answer the sharing predicate alone.
     if (isPrincipalLessContext(context)) return RLS_DENY_FILTER;
+    // [ADR-0090 D10 / ADR-0139 D5.1 as amended] A DELEGATED (on-behalf-of)
+    // context is scoped to the intersection of its own leg and its delegator's,
+    // composed as the engine middleware chain composes a delegated find
+    // ({@link computeDelegatedReadFilter}). This path used to answer the deny
+    // sentinel for every such context, because the intersection was threaded
+    // through the chain only; the engine's `ReadableIds` composition asks this
+    // method with the delegated context as it stands, so the intersection
+    // reaches here now. Fails CLOSED on every throw: a delegated read is never
+    // scoped wider than its delegator's own, and never served with a layer
+    // dropped.
+    if (context?.onBehalfOf?.userId) {
+      try {
+        return await this.computeDelegatedReadFilter(object, context);
+      } catch (e) {
+        this.logger.error?.(
+          `[security] getReadFilter failed for object '${object}' (principal ${context?.userId ?? 'unknown'} ` +
+            `on behalf of ${context.onBehalfOf.userId}) — denying (fail-closed)`,
+          e instanceof Error ? e : new Error(String(e)),
+        );
+        return RLS_DENY_FILTER;
+      }
+    }
     // [#4467] The OWD/sharing predicate is resolved for EVERY non-system caller,
     // ahead of the RLS branches below, because it is a SEPARATE middleware in
     // the chain this method mirrors: none of the RLS stand-downs below is a
@@ -5940,28 +5980,6 @@ export class SecurityPlugin implements Plugin {
           `'${object}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed: a path that bypasses ` +
           `the engine middleware never runs without the owner and share scope a direct read applies)`,
         e instanceof Error ? e : new Error(String(e)),
-      );
-      return RLS_DENY_FILTER;
-    }
-    // [#2852] D10 delegator intersection is NOT implemented on this path.
-    // The engine middleware (find/count/aggregate) intersects an on-behalf-of
-    // read with the DELEGATOR's own RLS (resolveDelegatorContext, ~L689), but
-    // getReadFilter — the read-scope provider bound by the analytics/raw-SQL
-    // path — resolves only the CALLER's ceiling. Computing a filter here for a
-    // delegated (agent) context would therefore SILENTLY WIDEN the read past
-    // the delegator's scope (the confused-deputy widening D10 prevents on the
-    // CRUD path). Until the intersection is threaded through computeRlsFilter
-    // (tracked with #2920 B1 / ADR-0095 D1), FAIL CLOSED: a delegated read on
-    // this path denies rather than under-scopes. System on-behalf-of already
-    // returned above; today no agent surface reaches analytics, so this is a
-    // latent-invariant guard, not a live-traffic change.
-    if (context?.onBehalfOf?.userId) {
-      this.logger.error?.(
-        `[security] getReadFilter received an on-behalf-of context for object ` +
-          `'${object}' (agent ${context?.userId ?? 'unknown'} on behalf of ` +
-          `${context.onBehalfOf.userId}) — the D10 delegator intersection is not ` +
-          `implemented on the read-scope path; denying (fail-closed: a delegated read is never scoped ` +
-          `wider than its delegator's own)`,
       );
       return RLS_DENY_FILTER;
     }
@@ -6003,6 +6021,88 @@ export class SecurityPlugin implements Plugin {
       );
       return RLS_DENY_FILTER;
     }
+  }
+
+  /**
+   * [ADR-0090 D10 / ADR-0139 D5.1 as amended] The read scope of a DELEGATED
+   * (on-behalf-of) principal: the INTERSECTION of the principal's own leg and
+   * the delegator's — never the union — composed here exactly as the engine
+   * middleware chain composes a delegated `find` of `object`, layer for layer:
+   *
+   *   1. {@link computeRlsFilter} over the principal's sets, with the delegated
+   *      context AS IT STANDS — {@link collectRLSPolicies} reads that context as
+   *      the delegated principal's own leg (`isDelegatedPrincipalLeg`), so the
+   *      ceiling's silence contributes no object default row scope;
+   *   2. {@link computeControlledByParentFilter} for the principal;
+   *   3. {@link computeRlsFilter} over the DELEGATOR's sets, with the context
+   *      {@link resolveDelegatorContext} rebuilds for them (the middleware's
+   *      D10 half, step 3);
+   *   4. {@link computeControlledByParentFilter} for the delegator;
+   *   5. plugin-sharing's visibility filter for the principal's identity, at
+   *      the agent-leg depth step 2.6 stamps as `__readScope`
+   *      (`intersectDelegatedScope` of the ceiling's DECLARED depth and the
+   *      delegator's effective one);
+   *   6. the same filter re-run under the DELEGATOR's identity at the
+   *      delegator's own depth — plugin-sharing's second call, with `userId`
+   *      swapped to the delegator and no delegation link.
+   *
+   * Fails CLOSED where the chain refuses, with the deny sentinel by identity:
+   * a principal that resolves no set (ADR-0056 D2); a delegator the link names
+   * who does not exist (the chain's `PERMISSION_DENIED`; `canReadObject`'s
+   * `false`); a delegator who resolves no set (object admission refuses them);
+   * a sharing scope that cannot be resolved. A throw anywhere propagates to the
+   * caller's catch, which denies.
+   *
+   * ⛔ Not a second intersection rule: every leg is the primitive the
+   * middleware calls, in the middleware's spelling, and the delegator's context
+   * comes from the one resolver the middleware and `canReadObject` share.
+   */
+  private async computeDelegatedReadFilter(
+    object: string,
+    context: any,
+  ): Promise<Record<string, unknown> | undefined> {
+    const permissionSets = await this.resolvePermissionSetsForContext(context);
+    if (permissionSets.length === 0) return RLS_DENY_FILTER;
+    const del = await resolveDelegatorContext(this.ql, context);
+    if (del.kind !== 'resolved') {
+      this.logger.error?.(
+        `[security] getReadFilter received an on-behalf-of context for object '${object}' whose delegator ` +
+          `'${String(context?.onBehalfOf?.userId)}' does not exist — denying (fail-closed: a delegated read is ` +
+          `never scoped wider than its delegator's own) — with no delegator to intersect against it is not ` +
+          `scoped at all (ADR-0090 D10)`,
+      );
+      return RLS_DENY_FILTER;
+    }
+    const delegatorContext = del.context;
+    const delegatorSets = await this.resolvePermissionSetsForContext(delegatorContext);
+    if (delegatorSets.length === 0) return RLS_DENY_FILTER;
+
+    // Step 2.6's two depth stamps, from the same two evaluator calls.
+    const meta = await this.getObjectSecurityMeta(object);
+    const delegatorScope = this.permissionEvaluator.getEffectiveScope('read', object, delegatorSets, { isPrivate: meta.isPrivate });
+    const declared = this.permissionEvaluator.getDeclaredScope('read', object, permissionSets, { isPrivate: meta.isPrivate });
+    const agentLegScope = intersectDelegatedScope(declared, delegatorScope).agentLegScope;
+
+    // Layers 5 and 6 — the sibling middleware's two calls. Resolved first, as
+    // the non-delegated path resolves its one sharing layer first: a sharing
+    // outage denies before any RLS layer is composed.
+    const sharingFilter = await this.resolveSharingReadFilter(object, context, permissionSets, agentLegScope);
+    const delegatorSharingFilter = await this.resolveSharingReadFilter(
+      object,
+      { ...context, userId: delegatorContext.userId, onBehalfOf: undefined },
+      delegatorSets,
+      delegatorScope,
+    );
+
+    // Layers 1 to 4 — the security middleware's own four, in its order.
+    const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
+    const cbpFilter = await this.computeControlledByParentFilter(permissionSets, object, context);
+    const delFilter = await this.computeRlsFilter(delegatorSets, object, 'find', delegatorContext);
+    const delCbpFilter = await this.computeControlledByParentFilter(delegatorSets, object, delegatorContext);
+
+    const securityLayers = andComposeLayers(andComposeLayers(filter, cbpFilter), andComposeLayers(delFilter, delCbpFilter));
+    const sharingLayers = andComposeLayers(sharingFilter, delegatorSharingFilter);
+    return andComposeLayers(securityLayers, sharingLayers) ?? undefined;
   }
 
   /**
@@ -8670,9 +8770,10 @@ export class SecurityPlugin implements Plugin {
     context: any,
     /**
      * [ADR-0055 amendment] The `controlled_by_parent` objects already being resolved on
-     * this branch of the walk, outermost first. Empty at every real call site
-     * — the four are the CRUD middleware (caller and D10 delegator) and
-     * `getReadFilter` — and grown by one on each recursive hop.
+     * this branch of the walk, outermost first. Empty at five of the six call
+     * sites — the CRUD middleware (caller and D10 delegator), `getReadFilter`
+     * and `computeDelegatedReadFilter` (principal and delegator) — and grown by
+     * one at the sixth, the recursive hop.
      */
     ancestors: readonly string[] = [],
   ): Promise<Record<string, unknown> | null> {

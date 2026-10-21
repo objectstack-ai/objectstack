@@ -82,6 +82,7 @@ predicate/schema/binding mistakes that fail silently at runtime), and `os dev --
 | `os dev [package]` | | Start development mode with hot reload |
 | `os serve [config]` | | Start the ObjectStack server with plugin auto-detection |
 | `os db clean` | | Reclaim SQLite free space with a one-time `VACUUM` (ADR-0057) |
+| `os db orphans` | | Report detail rows whose required master-detail master does not exist; delete them only with `--delete` |
 
 #### `os init`
 
@@ -422,6 +423,48 @@ os db clean --database file:./data/app.db        # explicit target
 
 **Options:**
 - `-d, --database <url>` — SQLite database URL/path (defaults to `$OS_DATABASE_URL`, then the per-project dev DB)
+
+#### `os db orphans`
+
+Reports the detail rows whose **required** `master_detail` master does not exist, and —
+only behind `--delete` — deletes them. **Report-only by default: without `--delete` it
+writes no row or table and creates no file.** It is never run for you; nothing on any
+boot, upgrade, migrate or lifecycle path invokes it.
+
+Such a row is written by an elevated (system-context) writer, which the write-time
+reference check exempts. Its access derives from a master that does not exist, so no
+user door reads or deletes it — an administrator's `GET` and `DELETE` answer 404 — and
+the platform's integrity audit reports it without ever rewriting it. This command is
+where an operator acts on that report.
+
+The report lists each orphan's object, record id, field and missing master id, and the
+deeper detail rows its delete removes with it (the master-detail's own cascade). It
+also names, without ever deleting them, the dangling references on those objects that
+are not a required master-detail, and counts the references whose target could not be
+checked at all: unknown is not missing, and none of those rows is listed or deleted.
+
+```bash
+os db orphans                                       # report (writes no rows)
+os db orphans --json                                # the same report, machine-readable
+os db orphans --delete --export ./orphans-backup.json
+```
+
+**Options:**
+- `--delete` — delete the listed orphans and their cascade (default off)
+- `--export <path>` — **mandatory with `--delete`**: every record the run deletes, as stored, written
+  owner-only and read back before the first delete; refuses to overwrite an existing file
+- `--max-rows <n>` — rows read per object and in total (default 100000); the report names every object it
+  could not read in full
+- `-y, --yes` — skip the confirmation prompt
+- `--database-url <url>`, `--json`
+
+`--delete` deletes only what the same run listed. Just before deleting it reads the
+report again and skips an orphan whose master now exists, and it skips one whose cascade
+now reaches a record the export does not hold. Each delete is the engine's own
+system-context delete, so a `restrict` dependent refuses it (reported as failed, with
+nothing of that orphan removed) and a `set_null` reference to a deleted row is cleared.
+A roll-up on the missing master cannot be recomputed, and the run says so. Keep the
+export until you are certain the sweep was right: it is the only copy.
 
 #### Console UI
 
