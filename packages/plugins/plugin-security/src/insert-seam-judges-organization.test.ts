@@ -32,6 +32,10 @@
  *   member is not about.
  * - NO SEAM: a platform operator crossing on a private object with an active
  *   organization, and a system context.
+ * - DELEGATED (ADR-0090 D10): a crossing operator acting for a walled
+ *   delegator. The wall's parts are the delegator's alone, so the member is
+ *   SET, and the explicit organization is held to the delegator's wall: stored
+ *   as sent where it admits it, refused where it does not.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -39,6 +43,10 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
+import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
+import { SysPosition, SysPermissionSet, SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysUserPosition } from './objects/sys-user-position.object.js';
+import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 
 const OWN_ORG = 'org_a';
 const SISTER_ORG = 'org_c';
@@ -274,5 +282,190 @@ describe('[#24822] step 3.7 declares the insert\'s organization judged only wher
 
     expect(outcome.ok, outcome.message).toBe(true);
     expect(b.sightings).toEqual([{ operation: 'insert', installed: false, judgesOrganization: undefined }]);
+  });
+});
+
+/**
+ * [#24822 · ADR-0090 D10] An ON-BEHALF-OF insert whose CALLER crosses the
+ * wall (a platform operator on a private object: its own Layer 0 is `null`)
+ * and whose DELEGATOR is walled. Step 3.7's wall parts are then the
+ * delegator's alone, so the seam judges the insert's organization against the
+ * delegator's wall and declares it: an organization that wall admits is stored
+ * as sent, and one it refuses is refused.
+ *
+ * The delegator is a real user whose context the plugin rebuilds from stored
+ * rows (`resolveDelegatorContext`): two memberships, so under `group` its wall
+ * is that membership set; under `isolated` it is the live request's active
+ * organization.
+ */
+describe('[#24822 · ADR-0090 D10] a delegated insert by a crossing operator is held to the delegator\'s wall', () => {
+  const ORG_A = 'org_a';
+  const ORG_C = 'org_c';
+  const ORG_D = 'org_d';
+  const DELEGATOR = 'usr_delegator';
+  /** A private object is outside the `'*'` grant, so the delegator holds it by name. */
+  const DELEGATOR_SET: PermissionSet = {
+    name: 'qa_vault_writer',
+    label: 'Vault writer',
+    objects: { qa_vault: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+  } as unknown as PermissionSet;
+  const SETS = [MEMBER, PLATFORM_ADMIN, DELEGATOR_SET];
+  const OPERATOR_FOR_DELEGATOR = {
+    userId: 'usr_operator',
+    tenantId: ORG_A,
+    positions: [],
+    permissions: ['admin_full_access'],
+    posture: 'PLATFORM_ADMIN',
+    onBehalfOf: { userId: DELEGATOR },
+  };
+
+  async function bootDelegated(posture: 'isolated' | 'group') {
+    const engine = new ObjectQL();
+    engine.registerDriver(
+      new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never) as never,
+      true,
+    );
+    await engine.init();
+    engine.registerApp({
+      id: 'com.objectstack.qa.insert-seam-judges-organization-delegated',
+      name: 'A delegated insert is held to the delegator\'s wall',
+      version: '1.0.0',
+      type: 'plugin',
+      scope: 'system',
+      objects: [
+        SysPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPosition, SysUserPermissionSet,
+        SysOrganization, SysUser, SysMember,
+        { name: 'qa_vault', label: 'Vault', access: { default: 'private' }, fields: FIELDS },
+      ],
+    } as never);
+    await engine.syncSchemas();
+    engines.push(engine);
+
+    for (const id of [ORG_A, ORG_C, ORG_D]) {
+      await engine.insert('sys_organization', { id, name: id, slug: id }, { context: SYS_CTX } as never);
+    }
+    await engine.insert('sys_user', { id: DELEGATOR, name: DELEGATOR, email: 'delegator@example.test' }, { context: SYS_CTX } as never);
+    for (const org of [ORG_A, ORG_C]) {
+      await engine.insert('sys_member', { id: `mem_${org}`, user_id: DELEGATOR, organization_id: org, role: 'member' }, { context: SYS_CTX } as never);
+    }
+    // The delegator holds the member set through a stored grant in each of its
+    // organizations, as a user does (the rows `resolveDelegatorContext` reads).
+    const driverOf = (o: string) => (engine as unknown as { getDriver(x: string): { create(x: string, r: Record<string, unknown>): Promise<unknown> } }).getDriver(o);
+    await driverOf('sys_permission_set').create('sys_permission_set', {
+      id: 'ps_qa_vault_writer', name: 'qa_vault_writer', label: 'Vault writer', organization_id: null, managed_by: 'admin', active: true,
+      object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
+    });
+    for (const org of [ORG_A, ORG_C]) {
+      await engine.insert('sys_user_permission_set', { id: `ups_${org}`, user_id: DELEGATOR, permission_set: 'qa_vault_writer', organization_id: org }, { context: SYS_CTX } as never);
+    }
+
+    const services: Record<string, unknown> = {
+      manifest: { register: vi.fn() },
+      objectql: engine,
+      metadata: {
+        get: async (type: string, name: string) =>
+          type === 'permission'
+            ? SETS.find((set) => (set as { name?: string }).name === name) ?? null
+            : engine.getSchema(name) ?? null,
+        list: async () => SETS,
+      },
+      'org-scoping': { name: 'com.objectstack.org-scoping' },
+      tenancy: { posture },
+    };
+    const ctx = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      registerService: vi.fn(),
+      getService: (name: string) => {
+        if (!(name in services)) throw new Error(`service not registered: ${name}`);
+        return services[name];
+      },
+    };
+    const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+    await plugin.init(ctx as never);
+    await plugin.start(ctx as never);
+    vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+
+    const sightings: Sighting[] = [];
+    engine.registerMiddleware((async (
+      opCtx: { operation: string; postHookWriteImageCheck?: { judgesOrganization?: unknown } },
+      next: () => Promise<void>,
+    ) => {
+      if (opCtx.operation === 'insert') {
+        sightings.push({
+          operation: opCtx.operation,
+          installed: opCtx.postHookWriteImageCheck !== undefined,
+          judgesOrganization: opCtx.postHookWriteImageCheck?.judgesOrganization,
+        });
+      }
+      await next();
+    }) as never);
+
+    const insertReporting = async (data: unknown) => {
+      const dropped: unknown[] = [];
+      const outcome = await attempt(() => engine.insert('qa_vault', data as never, {
+        context: OPERATOR_FOR_DELEGATOR,
+        onFieldsDropped: (e: unknown) => dropped.push(e),
+      } as never));
+      return { outcome, dropped };
+    };
+    const vault = async () => {
+      const driver = (engine as unknown as { getDriver(o: string): { knex: unknown } }).getDriver('qa_vault');
+      const knex = driver.knex as (t: string) => { select: (...c: string[]) => Promise<Array<Record<string, unknown>>> };
+      const rows = await knex('qa_vault').select('id', 'organization_id');
+      return [...rows].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    };
+    return { sightings, insertReporting, vault };
+  }
+
+  const DELEGATOR_WALL_JUDGES = [{ operation: 'insert', installed: true, judgesOrganization: true }];
+  const expectWallRefusal = (outcome: Outcome) => {
+    expect(outcome.ok, 'expected the delegator\'s wall to refuse').toBe(false);
+    expect(outcome.code).toBe('PERMISSION_DENIED');
+    expect(outcome.status).toBe(403);
+    expect(outcome.message).toContain("the insert would place 'qa_vault' in another tenant");
+  };
+
+  it('`group`: an organization the delegator holds is stored as sent, nothing reported, and the seam declares the delegator\'s judgement', async () => {
+    const b = await bootDelegated('group');
+
+    const { outcome, dropped } = await b.insertReporting({ id: 'r1', name: 'one', organization_id: ORG_C });
+
+    expect(outcome.ok, outcome.message).toBe(true);
+    expect(await b.vault(), 'stored where the caller named, not in the active organization').toEqual([{ id: 'r1', organization_id: ORG_C }]);
+    expect(dropped).toEqual([]);
+    expect(b.sightings).toEqual(DELEGATOR_WALL_JUDGES);
+  });
+
+  it('`group`: an organization the delegator does not hold is refused by the delegator\'s wall, and nothing is stored', async () => {
+    const b = await bootDelegated('group');
+
+    const { outcome } = await b.insertReporting({ id: 'r1', name: 'one', organization_id: ORG_D });
+
+    expectWallRefusal(outcome);
+    expect(await b.vault()).toEqual([]);
+  });
+
+  it('`group`: naming none is stamped with the active organization, as before', async () => {
+    const b = await bootDelegated('group');
+
+    const { outcome, dropped } = await b.insertReporting({ id: 'r1', name: 'one' });
+
+    expect(outcome.ok, outcome.message).toBe(true);
+    expect(dropped).toEqual([]);
+    expect(await b.vault()).toEqual([{ id: 'r1', organization_id: ORG_A }]);
+  });
+
+  it('`isolated`: the active organization is stored as sent and not reported; another one is refused', async () => {
+    const admitted = await bootDelegated('isolated');
+    const sent = await admitted.insertReporting({ id: 'r1', name: 'one', organization_id: ORG_A });
+    expect(sent.outcome.ok, sent.outcome.message).toBe(true);
+    expect(sent.dropped).toEqual([]);
+    expect(await admitted.vault()).toEqual([{ id: 'r1', organization_id: ORG_A }]);
+    expect(admitted.sightings).toEqual(DELEGATOR_WALL_JUDGES);
+
+    const refused = await bootDelegated('isolated');
+    const other = await refused.insertReporting({ id: 'r1', name: 'one', organization_id: ORG_C });
+    expectWallRefusal(other.outcome);
+    expect(await refused.vault()).toEqual([]);
   });
 });

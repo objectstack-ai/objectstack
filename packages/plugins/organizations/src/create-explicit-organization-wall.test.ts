@@ -629,6 +629,52 @@ describe('[#24822] an explicit organization_id the wall judges is stored as sent
     });
   });
 
+  // [#24822 · ADR-0123 D2] F1: a member with a membership set and NO active
+  // organization. Before this change the strip took the named organization, the
+  // stored row named none, and the D2 arm refused it. The arm's scope is a row
+  // that names no organization, and this row names one the wall admits.
+  describe('`group`, a member with NO active organization', () => {
+    const NO_ACTIVE_ORG_CTX = { userId: 'usr_member', positions: [], permissions: [], posture: 'MEMBER', accessible_org_ids: [OWN_ORG, SISTER_ORG] };
+
+    it('a create naming a member organization is stored THERE, single and array, with nothing reported', async () => {
+      const b = await boot('group');
+
+      const single = await createReporting(b, INJECTED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, NO_ACTIVE_ORG_CTX);
+      const bulk = await createReporting(b, INJECTED, [{ id: 'r3', name: 'new', organization_id: SISTER_ORG }], NO_ACTIVE_ORG_CTX);
+
+      expect(single.outcome.ok, single.outcome.message).toBe(true);
+      expect(bulk.outcome.ok, bulk.outcome.message).toBe(true);
+      expect(await b.table(INJECTED)).toEqual([
+        ...SEEDED,
+        { id: 'r2', organization_id: SISTER_ORG },
+        { id: 'r3', organization_id: SISTER_ORG },
+      ]);
+      expect([...single.dropped, ...bulk.dropped]).toEqual([]);
+      expect(b.seams).toEqual([...WALL_JUDGES, ...WALL_JUDGES]);
+    });
+
+    it('a create naming an organization outside the membership set is still refused by the wall, and nothing is stored', async () => {
+      const b = await boot('group');
+
+      const outcome = await attempt(() => create(b, INJECTED, { id: 'r2', name: 'new', organization_id: FOREIGN_ORG }, NO_ACTIVE_ORG_CTX));
+
+      expectWallRefusal(outcome, 'insert', INJECTED);
+      expect(await b.table(INJECTED)).toEqual(SEEDED);
+    });
+
+    it('a create naming no organization still gets the ADR-0123 D2 refusal: it has nowhere to land', async () => {
+      const b = await boot('group');
+
+      const outcome = await attempt(() => create(b, INJECTED, { id: 'r2', name: 'new' }, NO_ACTIVE_ORG_CTX));
+
+      expect(outcome.ok, 'expected the no-active-organization refusal').toBe(false);
+      expect(outcome.code).toBe('PERMISSION_DENIED');
+      expect(outcome.status).toBe(403);
+      expect(outcome.message).toContain('has no active organization');
+      expect(await b.table(INJECTED)).toEqual(SEEDED);
+    });
+  });
+
   describe('`isolated`: the wall is the active organization', () => {
     it('a create naming the active organization is stored as sent, with nothing reported', async () => {
       const b = await boot('isolated');
@@ -640,6 +686,31 @@ describe('[#24822] an explicit organization_id the wall judges is stored as sent
       expect(organizationWarnings(b)).toEqual([]);
       expect(b.seams).toEqual(WALL_JUDGES);
       expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+    });
+
+    // [#24822] F3: Middleware A fills an empty value only on a single-row
+    // payload, so an ARRAY row's explicit `null` or `''` reaches the engine.
+    // It is no longer taken and reported (or refused under strict); the
+    // driver's stamp still fills it with the active organization.
+    it('an array insert with an explicit empty organization is stamped with the active one, and nothing is reported or refused', async () => {
+      const b = await boot('isolated');
+
+      const { outcome, dropped } = await createReporting(b, INJECTED, [
+        { id: 'r2', name: 'null', organization_id: null },
+        { id: 'r3', name: 'empty', organization_id: '' },
+      ], MEMBER_CTX);
+      const strict = await createStrict(b, INJECTED, [{ id: 'r4', name: 'strict', organization_id: '' }], MEMBER_CTX);
+
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(strict.ok, strict.message).toBe(true);
+      expect(await b.table(INJECTED)).toEqual([
+        ...SEEDED,
+        { id: 'r2', organization_id: OWN_ORG },
+        { id: 'r3', organization_id: OWN_ORG },
+        { id: 'r4', organization_id: OWN_ORG },
+      ]);
+      expect(dropped).toEqual([]);
+      expect(organizationWarnings(b)).toEqual([]);
     });
 
     it('a create naming any other organization is still refused, single and array, and nothing is stored', async () => {
