@@ -36,8 +36,9 @@
  *      audit surface reports as holding standing.
  *   2. **Grant anchor** (Choice 4A), **under a NON-WALLED posture
  *      only**: the oldest `sys_user_permission_set` row on `admin_full_access`
- *      owned by the Default Organization, or by none (a row written before
- *      ADR-0131 D5 moved its owner). This is what still anchors
+ *      owned by the Default Organization, and none when no Default
+ *      Organization is nameable (an organization-less grant anchors nothing,
+ *      ADR-0131 D1). This is what still anchors
  *      `single`-posture deployments — first-user promotion keeps writing the
  *      grant row there, by ruling, owned by the Default Organization (#11979).
  *
@@ -446,7 +447,7 @@ export async function ensureDefaultOrganization(
   let adminUserId: string | undefined = await findConfigAnchoredAdminUserId(ql);
 
   // 2. GRANT anchor (oldest `admin_full_access` grant owned by the Default
-  //    Organization or by none) — what anchors `single` posture (Choice 4A;
+  //    Organization) — what anchors `single` posture (Choice 4A;
   //    ADR-0131 D5 owns the promotion's row by the Default Organization),
   //    and ⛔ RETIRED under a wall [#11663 L5].
   //
@@ -494,22 +495,20 @@ export async function ensureDefaultOrganization(
     // trigger binds once the grant names its set.
     //
     // [ADR-0131 D5] …owned by the Default Organization, which is the owner
-    // `single`'s first-user promotion writes, or by no organization, which is
-    // the row an earlier release's promotion wrote before D10's ceremony
-    // attributed it — the two the derivation site reads as the anchor
-    // (`grantAnchorsPlatformStanding`, `resolve-authz-context.ts`). Reading only
-    // the organization-less row would answer `no_admin` on every deployment
-    // promoted since, and never bind its administrator.
+    // `single`'s first-user promotion writes and the one the derivation site
+    // reads as the anchor (`grantAnchorsPlatformStanding`,
+    // `resolve-authz-context.ts`). An organization-less grant anchors nothing
+    // there (ADR-0131 D1), so it binds nobody here: with no nameable Default
+    // Organization no grant is read and the answer is `no_admin`.
     const defaultOrgId = await findDefaultOrganizationId(ql);
-    const adminGrants: any[] = [];
-    for (const organizationId of defaultOrgId ? [null, defaultOrgId] : [null]) {
-      adminGrants.push(...await tryFind(
+    const adminGrants: any[] = defaultOrgId
+      ? await tryFind(
         ql,
         'sys_user_permission_set',
-        { [GRANT_SET_NAME_FIELD]: 'admin_full_access', organization_id: organizationId },
+        { [GRANT_SET_NAME_FIELD]: 'admin_full_access', organization_id: defaultOrgId },
         50,
-      ));
-    }
+      )
+      : [];
     if (adminGrants.length === 0) {
       return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
     }
