@@ -85,7 +85,7 @@ model: opus
    - `bash scripts/pm/os-verify-lock.sh -c '<command>'`(或 `-- <argv>`);⛔ 永不手搓 `flock`/lockfile。
    - 一次前台调用领全部等待预算,阻塞到拿锁或 99;⛔ 不轮询重试,恒设 `OS_VERIFY_LOCK_SLOT`。
    - 它不保证机器空闲:`check:*` 门禁、install、dev server 不走它,与持锁同核并跑。
-   - 测试电池 `pnpm check:pm-dispatch-gates` 亦属 `check:*`:不走锁,`nohup … > LOG 2>&1 &` 后 `tail --pid`。
+   - 超前台上限者(`check:pm-dispatch-gates`、全量 dogfood):`nohup … > LOG 2>&1 &` 后 `tail --pid`。
    - 锁下墙钟绝对值是共享盒读数;只包命令本身,不包你的阅读与判断。
    - 结论读它印的 `VERDICT command-exit` 行,⛔ 不读裸 `$?`;按到达序授予,排队是常态,不是挂死。
 2. **压住堆**:重命令前缀 `NODE_OPTIONS=--max-old-space-size=4096`,要抬需给理由。
@@ -172,13 +172,11 @@ model: opus
 - `set -o pipefail` 与 `${PIPESTATUS[0]}` 仅当下游读到 EOF 才安全。
 - `| head -N` 读满即关读端,生产者吃 SIGPIPE 以 0 退出:是管道改了生产者的退出码。
 - 此陷阱不限于门禁:任何 `cmd | head` 之后读退出码都中招(`git grep`、`node` 皆然)。
-- 陷阱在 shell 用法里,不可机械化;⛔ 别等机械强制。
 - 两类跑了却没测到,都读作 NOT MEASURED,不读作绿也不读作红。
 - 证据已销毁(评论、卡或 PR 答 404)的复核项记 NOT MEASURED 并写因,⛔ 不记通过或「无旗」。
 - ① 包的 `typecheck` 可能 `exclude` 掉 `**/*.test.ts`;声称它覆盖你的测试前,用 `--listFiles` 数。
 - ② `MODULE_NOT_FOUND` 一类的 exit 1 不是红门禁:多半是脚本名或路径敲错,根本没进到门禁体。
 - 它与 `exit 99` / queue-timeout / `PREREQUISITE NOT MET` 同类:用真正的 `pnpm check:*` 命令重跑。
-- ⛔ 不把这类结果写进报告当作一次失败的测量。
 
 ## 标准条款住在这里,不住在你的派发词里
 
@@ -249,7 +247,6 @@ model: opus
 - `packages/qa/dogfood` 是一例,不是定义;读成 dogfood 专属,普通单元套件里的 ablation 会被当真。
 - 两个方向不对称:没 build 的修复是会被注意到的假红;没 build 的 ablation 保持绿。
 - 那份绿给一条可能永远失败不了的断言背书,对 CI 永久隐形(CI 构建正确,那边永远绿)。
-- 消融本就为证明新门禁能失败时,这份假绿读作门禁没触发,于是有人去弱化一条好门禁。
 - 每一腿(变异与还原)都是:改动 → 证明它真落到了磁盘 → `pnpm --filter <pkg> build`。
 - 落盘走 `node scripts/ablation-replace.mjs`,不走 `-i` 家族:锚点必须命中,写入与还原按磁盘核验。
 - 再证明它到达了 `dist/`,才读运行结果:`node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`。
@@ -276,7 +273,10 @@ model: opus
 - 分区 pin `test/vitest-tiers-partition.test.ts` 在某个测试文件两层皆无或皆有时变红。
 - 用 `git push -u origin claude/issue-<n>-<slug>` 推上去,网络失败退避重试;pre-push 拒卡片 trailer。
 - Draft PR 指向 `main`,正文首行 `Fixes #<n>`;合并不应关卡时用 `Part of #<n>`,并说明留下哪一半。
-- PR 开出后合 main 只因冲突、main 致 CI 红、出队,后只跑 §10 复检;dogfood 只在终 head 跑一次。
+- PR 开出后合 main 只因冲突、main 致 CI 红、出队,后只跑 §10 复检。
+- 全量 dogfood 只在终 head 跑一次,仅当标题带 `!` 或 `Clause-②:` 带 `(narrowing)` 臂(yes/no 皆算)。
+- 命令同 CI:按 ① 建闭包,锁下 `pnpm --filter @objectstack/dogfood test`;⛔ 无 `OS_TEST_SHARD`、无路径。
+- 红 = 本改动的后果(陈旧 fixture)同 PR 修,余照报;⛔ 永不跳过或收窄;计数记 `dogfood_battery`。
 - 认领带 `Clause-②:` 行才照抄进正文行首:`Check Changeset` 读正文不读卡;无则零写,⛔ 不自造。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
@@ -370,6 +370,7 @@ model: opus
   "summary": "what was implemented, 2-4 sentences",
   "tests": "commands run + pass/fail evidence (real output excerpts); ablation only where a tested behaviour changed: rebuild + on-disk mutation proof",
   "gates": "local subset: each command + exit code captured before any pipe + --ran reconciliation; every family CI runs: the PR's check-runs (name + conclusion) cited, not re-run locally",
+  "dogfood_battery": "n/a — no `!` in the PR title and no (narrowing) arm | <head sha> · the lock's VERDICT line · Test Files N/N · Tests M/M · every failure named",
   "mcp_calls": "<n> — MCP GitHub calls with tool names; a write tool in the list = this report is refused",
   "api_writes": "<n> — REST proxy writes, each endpoint listed",
   "open_questions": [
@@ -382,7 +383,6 @@ model: opus
 - `status: "rework"` = 你自知不完整的部分成果,在 `summary` 里说明为什么。
 - `premise_still_valid: false` = 核验证伪了前提(规则 6):证据进 `summary`,`pr` null 或只圈存活部分。
 - 报告模板是工具,不是真相:某字段的预设与实际发生的对不上时直说。
-- 例:反向验证方向反转、前提死了、某个产物在此无意义;按模板硬造比留白更糟。
 
 ## 字节与 sanitizer 纪律
 

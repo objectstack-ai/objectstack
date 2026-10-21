@@ -109,6 +109,13 @@ import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import {
+  approvalNotificationText,
+  subjectParams,
+  type ApprovalKeyedText,
+  type ApprovalNotificationText,
+  type ApprovalSubjectParams,
+} from './approval-notification-text.js';
 
 /**
  * Node-era approval runtime (ADR-0019).
@@ -334,6 +341,13 @@ export interface ApprovalMessagingSurface {
      * stored with none.
      */
     organizationId?: string;
+    /**
+     * [#24978] The text as catalog keys (`EmitInput.keyedText` of the
+     * messaging service), rendered per recipient at delivery in that
+     * recipient's language. `payload.title` / `payload.body` stay the literal
+     * fallback beside it.
+     */
+    keyedText?: ApprovalKeyedText;
   }): Promise<unknown>;
 }
 
@@ -365,6 +379,22 @@ type ApprovalNotificationPayload = {
   /** Where opening it lands; `notify()` narrows the approvals inbox to the request. */
   readonly actionUrl: string;
 };
+
+/**
+ * [#24978] An approval notification's payload and its keys, from the ONE
+ * {@link approvalNotificationText} call that builds both: the literal `title` /
+ * `body` the payload has always carried, and beside it the catalog keys the
+ * messaging service renders per recipient at delivery.
+ */
+function approvalNotice(text: ApprovalNotificationText): {
+  payload: ApprovalNotificationPayload;
+  keyedText: ApprovalKeyedText;
+} {
+  return {
+    payload: { title: text.title, body: text.body, actionUrl: '/system/approvals' },
+    keyedText: text.keyedText,
+  };
+}
 
 /** Minimum time between submitter reminders on one request. */
 export const REMIND_COOLDOWN_MS = 4 * 60 * 60 * 1000;
@@ -1785,6 +1815,14 @@ export class ApprovalService implements IApprovalService {
      * approver acting from another organization does not move the request.
      */
     organizationId: string | null | undefined;
+    /**
+     * [#24978] The text as catalog keys, from {@link approvalNotificationText}
+     * — the same call that builds `payload.title` / `payload.body`, so the
+     * literal and its keys cannot name two different sentences. REQUIRED, so
+     * no call site can send an approval notification that only ever reads in
+     * English.
+     */
+    keyedText: ApprovalKeyedText;
     dedupKey?: string;
     source?: { object: string; id: string };
     actorContext?: ExecutionContext;
@@ -3835,17 +3873,21 @@ export class ApprovalService implements IApprovalService {
         comment: `${sub.from} → ${sub.to}${sub.reason ? ` — ${sub.reason}` : ''}`,
         created_at: now,
       }), { context: SYSTEM_CTX });
+      const covering = approvalNotificationText({
+        title: 'approvalOooSubstitutedTitle', body: 'approvalOooSubstitutedBody',
+        params: { ...this.nameSubjectRecord(input.object, input.recordId), person: oooPerson(sub.from) },
+      });
       await this.notify({
         topic: 'approval.ooo_substituted',
         organizationId: requestOrg,
         audience: [sub.to],
         source: { object: 'sys_approval_request', id },
         dedupKey: `approval-ooo-${id}-${sub.to}`,
-        payload: {
-          title: 'Approval routed to you (out-of-office cover)',
-          body: `You are covering an approval on ${this.nameSubjectRecord(input.object, input.recordId)} while ${oooPerson(sub.from)} is out of office.`,
-          actionUrl: '/system/approvals',
-        },
+        ...approvalNotice(covering),
+      });
+      const skipped = approvalNotificationText({
+        title: 'approvalOooSkippedTitle', body: 'approvalOooSkippedBody',
+        params: { ...this.nameSubjectRecord(input.object, input.recordId), person: oooPerson(sub.to) },
       });
       await this.notify({
         topic: 'approval.ooo_skipped',
@@ -3853,11 +3895,7 @@ export class ApprovalService implements IApprovalService {
         audience: [sub.from],
         source: { object: 'sys_approval_request', id },
         dedupKey: `approval-ooo-skip-${id}-${sub.from}`,
-        payload: {
-          title: 'Approval routed to your delegate',
-          body: `An approval on ${this.nameSubjectRecord(input.object, input.recordId)} was routed to ${oooPerson(sub.to)} while you are out of office.`,
-          actionUrl: '/system/approvals',
-        },
+        ...approvalNotice(skipped),
       });
     }
 
@@ -3910,7 +3948,13 @@ export class ApprovalService implements IApprovalService {
     // reader which kind of record is waiting. One name for every recipient.
     const toldByOoo = new Set(substitutions.map((sub) => sub.to));
     const openedOn = new Set(approvers.filter((a) => a && !a.includes(':') && !toldByOoo.has(a)));
-    const subject = this.nameSubjectRecord(input.object, input.recordId);
+    //
+    // [#24978] And it rides as catalog keys beside that literal, so each
+    // approver reads it in their own language, rendered at delivery.
+    const requested = approvalNotificationText({
+      title: 'approvalRequestedTitle', body: 'approvalRequestedBody',
+      params: this.nameSubjectRecord(input.object, input.recordId),
+    });
     for (const approver of openedOn) {
       await this.notify({
         topic: 'approval.requested',
@@ -3919,11 +3963,7 @@ export class ApprovalService implements IApprovalService {
         actorContext: context,
         source: { object: 'sys_approval_request', id },
         dedupKey: `approval-requested-${id}-${approver}`,
-        payload: {
-          title: 'Approval requested',
-          body: `A decision on ${subject} is waiting on you.`,
-          actionUrl: '/system/approvals',
-        },
+        ...approvalNotice(requested),
       });
     }
 
@@ -4652,19 +4692,24 @@ export class ApprovalService implements IApprovalService {
       if (nextStepOpened) return;
     }
     const approved = decision === 'approve';
-    const sentence = `Your ${this.nameSubjectRecord(request.object_name, request.record_id)} was ${approved ? 'approved' : 'rejected'}.`;
+    const subject = this.nameSubjectRecord(request.object_name, request.record_id);
     const note = comment?.trim();
+    // [#24978] The decider's comment, when there is one, rides under the
+    // sentence as written — a hole of its own, never translated.
+    const outcome = approvalNotificationText({
+      title: approved ? 'approvalApprovedTitle' : 'approvalRejectedTitle',
+      body: note
+        ? (approved ? 'approvalApprovedWithCommentBody' : 'approvalRejectedWithCommentBody')
+        : (approved ? 'approvalApprovedBody' : 'approvalRejectedBody'),
+      params: note ? { ...subject, comment: note } : subject,
+    });
     await this.notify({
       topic: approved ? 'approval.approved' : 'approval.rejected',
       organizationId: request.organization_id,
       audience: [submitter],
       actorContext: context,
       source: { object: 'sys_approval_request', id: request.id },
-      payload: {
-        title: approved ? 'Request approved' : 'Request rejected',
-        body: note ? `${sentence}\n\n${note}` : sentence,
-        actionUrl: '/system/approvals',
-      },
+      ...approvalNotice(outcome),
     });
   }
 
@@ -5139,17 +5184,17 @@ export class ApprovalService implements IApprovalService {
         resumeError = outcome.resumeError;
       }
       if (raw.submitter_id) {
+        const autoRejected = approvalNotificationText({
+          title: 'approvalAutoRejectedTitle', body: 'approvalAutoRejectedBody',
+          params: { ...subject, limit: String(maxRevisions) },
+        });
         await this.notify({
           topic: 'approval.returned',
           organizationId: raw.organization_id,
           audience: [String(raw.submitter_id)],
           actorContext: context,
           source: { object: 'sys_approval_request', id: requestId },
-          payload: {
-            title: 'Approval auto-rejected',
-            body: `Your ${subject} exceeded the revision limit (${maxRevisions}) and was rejected.`,
-            actionUrl: '/system/approvals',
-          },
+          ...approvalNotice(autoRejected),
         });
       }
       const fresh = await this.readBackRequest(requestId, context);
@@ -5183,17 +5228,18 @@ export class ApprovalService implements IApprovalService {
     }
 
     if (raw.submitter_id) {
+      // [#24978] The approver's own words, when they wrote some, are the body
+      // as written; only the headline is keyed then.
+      const sentBack = input.comment?.trim()
+        ? approvalNotificationText({ title: 'approvalReturnedTitle', literalBody: input.comment.trim() })
+        : approvalNotificationText({ title: 'approvalReturnedTitle', body: 'approvalReturnedBody', params: subject });
       await this.notify({
         topic: 'approval.returned',
         organizationId: raw.organization_id,
         audience: [String(raw.submitter_id)],
         actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
-        payload: {
-          title: 'Sent back for revision',
-          body: input.comment?.trim() || `Your ${subject} needs rework before it can be approved.`,
-          actionUrl: '/system/approvals',
-        },
+        ...approvalNotice(sentBack),
       });
     }
 
@@ -5444,6 +5490,10 @@ export class ApprovalService implements IApprovalService {
     }, { context: SYSTEM_CTX });
     await this.syncApproverIndex(requestId, next, raw.organization_id ?? null, now);
 
+    const handedOver = approvalNotificationText({
+      title: 'approvalReassignedTitle', body: 'approvalReassignedBody',
+      params: this.nameSubjectRecord(raw.object_name, raw.record_id),
+    });
     await this.notify({
       topic: 'approval.reassigned',
       organizationId: raw.organization_id,
@@ -5451,11 +5501,7 @@ export class ApprovalService implements IApprovalService {
       actorContext: context,
       source: { object: 'sys_approval_request', id: requestId },
       dedupKey: `approval-reassign-${requestId}-${to}`,
-      payload: {
-        title: 'Approval handed to you',
-        body: `You are now an approver on ${this.nameSubjectRecord(raw.object_name, raw.record_id)}.`,
-        actionUrl: '/system/approvals',
-      },
+      ...approvalNotice(handedOver),
     });
 
     const fresh = await this.readBackRequest(requestId, context);
@@ -5518,7 +5564,10 @@ export class ApprovalService implements IApprovalService {
     // reminders handed over: one per distinct address. A user id and the same
     // account's email are two addresses here, exactly as at the opening — two
     // slots the person takes separately, and two reminders delivered.
-    const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
+    const reminder = approvalNotificationText({
+      title: 'approvalReminderTitle', body: 'approvalReminderBody',
+      params: this.nameSubjectRecord(raw.object_name, raw.record_id),
+    });
     let notified = 0;
     const concrete = new Set(pending.filter(a => a && !a.includes(':')));
     const literals = pending.filter(a => a && a.includes(':'));
@@ -5530,11 +5579,7 @@ export class ApprovalService implements IApprovalService {
         actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
         dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
-        payload: {
-          title: 'Approval reminder',
-          body: `A decision on ${subject} is still waiting on you.`,
-          actionUrl: '/system/approvals',
-        },
+        ...approvalNotice(reminder),
       });
     }
     if (literals.length) {
@@ -5545,11 +5590,7 @@ export class ApprovalService implements IApprovalService {
         actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
         dedupKey: `approval-remind-${requestId}-${nowIso}`,
-        payload: {
-          title: 'Approval reminder',
-          body: `A decision on ${subject} is still waiting on you.`,
-          actionUrl: '/system/approvals',
-        },
+        ...approvalNotice(reminder),
       });
     }
 
@@ -5800,11 +5841,9 @@ export class ApprovalService implements IApprovalService {
         audience: [String(raw.submitter_id)],
         actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
-        payload: {
-          title: 'More information requested',
-          body: input.comment.trim(),
-          actionUrl: '/system/approvals',
-        },
+        ...approvalNotice(approvalNotificationText({
+          title: 'approvalRequestInfoTitle', literalBody: input.comment.trim(),
+        })),
       });
     }
 
@@ -5848,11 +5887,9 @@ export class ApprovalService implements IApprovalService {
       audience,
       actorContext: context,
       source: { object: 'sys_approval_request', id: requestId },
-      payload: {
-        title: 'New comment on an approval',
-        body: input.comment.trim(),
-        actionUrl: '/system/approvals',
-      },
+      ...approvalNotice(approvalNotificationText({
+        title: 'approvalCommentTitle', literalBody: input.comment.trim(),
+      })),
     });
 
     const fresh = await this.readBackRequest(requestId, context);
@@ -6905,11 +6942,9 @@ export class ApprovalService implements IApprovalService {
         organizationId: raw.organization_id,
         audience: escalatees,
         source: { object: 'sys_approval_request', id: raw.id },
-        payload: {
-          title: 'Approval escalated to you',
-          body: `An overdue approval on ${subject} was escalated to you.`,
-          actionUrl: '/system/approvals',
-        },
+        ...approvalNotice(approvalNotificationText({
+          title: 'approvalEscalatedTitle', body: 'approvalEscalatedBody', params: subject,
+        })),
       });
     } else if (action === 'auto_approve' || action === 'auto_reject') {
       // [#24753] The submitter hears this outcome from the submitter notice
@@ -6927,11 +6962,9 @@ export class ApprovalService implements IApprovalService {
         organizationId: raw.organization_id,
         audience: [...pending, ...escalatees],
         source: { object: 'sys_approval_request', id: raw.id },
-        payload: {
-          title: 'Approval SLA breached',
-          body: `A decision on ${subject} is overdue.`,
-          actionUrl: '/system/approvals',
-        },
+        ...approvalNotice(approvalNotificationText({
+          title: 'approvalSlaBreachedTitle', body: 'approvalSlaBreachedBody', params: subject,
+        })),
       });
     }
 
@@ -6941,11 +6974,10 @@ export class ApprovalService implements IApprovalService {
         organizationId: raw.organization_id,
         audience: [String(raw.submitter_id)],
         source: { object: 'sys_approval_request', id: raw.id },
-        payload: {
-          title: 'Your approval request breached its SLA',
-          body: `${subject}: escalation action '${action}' was taken.`,
-          actionUrl: '/system/approvals',
-        },
+        ...approvalNotice(approvalNotificationText({
+          title: 'approvalSlaBreachedSubmitterTitle', body: 'approvalSlaBreachedSubmitterBody',
+          params: { ...subject, action },
+        })),
       });
     }
   }
@@ -7411,11 +7443,18 @@ export class ApprovalService implements IApprovalService {
    * snapshot (which the inbox serves only after redacting it for its reader,
    * #10749). Notification text is stored and may be e-mailed, and it has no
    * reader to narrow for.
+   *
+   * [#24978] Answered as the two `{{object}} {{record}}` holes of the keyed
+   * sentence rather than one string: the label is keyed by
+   * `objects.<object>.label`, so a recipient whose language pack holds it
+   * reads it in their language at delivery, and the schema label (the API name
+   * when there is none) is the text it falls back to — the literal, which is
+   * exactly the `Deal D_123` this named before.
    */
-  private nameSubjectRecord(object: string, recordId: string): string {
+  private nameSubjectRecord(object: string, recordId: string): ApprovalSubjectParams {
     // [#23594 / #23556 ruling B] The inbox serves the title narrowed per reader (resolveSubjectDisplays); this body is
     // written once at send time, with no per-recipient reader to narrow for, so it stays label-and-id.
-    return `${this.objectLabelOf(object) ?? object} ${recordId}`;
+    return subjectParams(object, this.objectLabelOf(object), recordId);
   }
 
   /**
