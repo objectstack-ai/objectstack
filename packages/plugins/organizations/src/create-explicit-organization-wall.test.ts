@@ -702,6 +702,18 @@ describe('[#24822] an explicit organization_id the wall judges is stored as sent
         expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
       });
 
+      it(`\`${posture}\` without the security plugin: a create naming no organization is stamped, and the stamp is still not reported (#21682)`, async () => {
+        const b = await boot(posture, { security: false });
+        const context = posture === 'group' ? GROUP_CTX : MEMBER_CTX;
+
+        const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new' }, context);
+
+        expect(outcome.ok, outcome.message).toBe(true);
+        expect(dropped, 'the stamp is the platform\'s write, here where no wall spares the column').toEqual([]);
+        expect(organizationWarnings(b)).toEqual([]);
+        expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+      });
+
       it(`\`${posture}\`: a platform operator crossing the wall on a private object has the value taken and reported; no seam`, async () => {
         const b = await boot(posture);
         const context = posture === 'group' ? GROUP_ADMIN_CTX : ADMIN_CTX;
