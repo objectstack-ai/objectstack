@@ -47,6 +47,13 @@ export default defineConfig({
         find: /^@objectstack\/service-messaging$/,
         replacement: path.resolve(__dirname, '../../services/service-messaging/src/index.ts'),
       },
+      // `cors-doors.conformance.test.ts` reads `AuthManager`'s trusted-origin
+      // merge off a REAL better-auth instance — one of the CORS doors it holds
+      // to one answer — so that verdict is about this checkout's auth source.
+      {
+        find: /^@objectstack\/plugin-auth$/,
+        replacement: path.resolve(__dirname, '../../plugins/plugin-auth/src/index.ts'),
+      },
     ],
   },
   test: {

@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { matchOriginPattern, createOriginMatcher, hasWildcardPattern, normalizeOriginPatterns } from './pattern-matcher';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import {
+    matchOriginPattern,
+    createOriginMatcher,
+    hasWildcardPattern,
+    isAllHostOriginPattern,
+    normalizeOriginPatterns,
+} from './pattern-matcher';
 
 describe('matchOriginPattern', () => {
     describe('exact matching', () => {
@@ -46,6 +52,14 @@ describe('matchOriginPattern', () => {
 
         it('should not match different host', () => {
             expect(matchOriginPattern('http://example.com:3000', 'http://localhost:*')).toBe(false);
+        });
+    });
+
+    describe('a loopback origin', () => {
+        it('matches only a pattern that names it — the pattern, and nothing else', () => {
+            expect(matchOriginPattern('http://localhost:3000', 'https://app.example.com')).toBe(false);
+            expect(matchOriginPattern('http://127.0.0.1:3000', 'http://localhost:*')).toBe(false);
+            expect(matchOriginPattern('http://[::1]:3000', 'https://*.example.com')).toBe(false);
         });
     });
 
@@ -119,22 +133,51 @@ describe('createOriginMatcher', () => {
 
             expect(matcher('http://localhost:3000')).toBe('http://localhost:3000');
             expect(matcher('http://localhost:8080')).toBe('http://localhost:8080');
-            // 127.0.0.1 is also considered localhost and always allowed
-            expect(matcher('http://127.0.0.1:3000')).toBe('http://127.0.0.1:3000');
+            // The pattern names `localhost`; another loopback spelling is not it.
+            expect(matcher('http://127.0.0.1:3000')).toBe(null);
         });
 
-        it('should always allow localhost origins regardless of configured patterns', () => {
-            // Even with a restrictive pattern, localhost should be allowed
-            const matcher = createOriginMatcher('https://app.example.com');
+        it('admits a loopback origin beside a list on a development boot only', () => {
+            const LOOPBACK = [
+                'http://localhost:3000', 'https://localhost:8443', 'http://localhost',
+                'http://127.0.0.1:3000', 'http://[::1]:3000',
+            ];
+            const elsewhere = createOriginMatcher('https://app.example.com', { developmentBoot: false });
+            const development = createOriginMatcher('https://app.example.com', { developmentBoot: true });
+            for (const origin of LOOPBACK) {
+                expect(elsewhere(origin)).toBe(null);
+                expect(development(origin)).toBe(origin);
+            }
+            expect(development('https://app.example.com')).toBe('https://app.example.com');
+            // Non-loopback is still the list's to admit, on either boot.
+            expect(development('https://evil.com')).toBe(null);
+        });
 
-            expect(matcher('http://localhost:3000')).toBe('http://localhost:3000');
-            expect(matcher('http://localhost:5173')).toBe('http://localhost:5173');
-            expect(matcher('https://localhost:8443')).toBe('https://localhost:8443');
-            expect(matcher('http://localhost')).toBe('http://localhost');
-            expect(matcher('http://127.0.0.1:3000')).toBe('http://127.0.0.1:3000');
-            expect(matcher('http://[::1]:3000')).toBe('http://[::1]:3000');
-            // Non-localhost should still be rejected
-            expect(matcher('https://evil.com')).toBe(null);
+        it('admits nothing for an empty list, loopback included, on either boot', () => {
+            expect(createOriginMatcher([], { developmentBoot: true })('http://localhost:3000')).toBe(null);
+            expect(createOriginMatcher(' ', { developmentBoot: true })('http://localhost:3000')).toBe(null);
+        });
+    });
+
+    describe('the development boot, when not passed', () => {
+        let saved: string | undefined;
+        beforeEach(() => { saved = process.env.NODE_ENV; });
+        afterEach(() => {
+            if (saved === undefined) delete process.env.NODE_ENV;
+            else process.env.NODE_ENV = saved;
+        });
+
+        it('is NODE_ENV exactly `development`, read when the matcher is created', () => {
+            process.env.NODE_ENV = 'development';
+            const created = createOriginMatcher('https://app.example.com');
+            process.env.NODE_ENV = 'production';
+            expect(created('http://localhost:3000')).toBe('http://localhost:3000');
+
+            for (const value of ['production', 'test', undefined]) {
+                if (value === undefined) delete process.env.NODE_ENV;
+                else process.env.NODE_ENV = value;
+                expect(createOriginMatcher('https://app.example.com')('http://localhost:3000')).toBe(null);
+            }
         });
     });
 
@@ -155,6 +198,30 @@ describe('hasWildcardPattern', () => {
     it('detects wildcards in an array', () => {
         expect(hasWildcardPattern(['https://a.com', 'https://*.b.com'])).toBe(true);
         expect(hasWildcardPattern(['https://a.com', 'https://b.com'])).toBe(false);
+    });
+});
+
+describe('isAllHostOriginPattern', () => {
+    it("is true for '*' and for a pattern whose host part is the bare `*`", () => {
+        for (const pattern of ['*', ' * ', '**', 'https://*', 'http://*', '*://*', 'http://*:*', 'https://*:8443']) {
+            expect(isAllHostOriginPattern(pattern)).toBe(true);
+        }
+    });
+
+    it('is false for a pattern that names any part of the host, and for an exact origin', () => {
+        for (const pattern of [
+            'https://*.example.com', 'http://localhost:*', '*.example.com',
+            'https://app.example.com', 'http://[::1]:3000', 'https://*.*',
+        ]) {
+            expect(isAllHostOriginPattern(pattern)).toBe(false);
+        }
+    });
+
+    it('agrees with the matcher: each pattern it names matches an origin on any host', () => {
+        for (const pattern of ['*', 'https://*', '*://*', 'http://*:*']) {
+            const origin = pattern.startsWith('http://') ? 'http://unlisted.example:8080' : 'https://unlisted.example';
+            expect(matchOriginPattern(origin, pattern)).toBe(true);
+        }
     });
 });
 

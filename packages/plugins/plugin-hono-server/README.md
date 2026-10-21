@@ -41,17 +41,23 @@ The CORS middleware is mounted by default, and it admits only the origins you na
 (`cors.origins`, else `OS_CORS_ORIGIN`). With neither set, **no cross-origin caller is
 admitted**. Same-origin requests need no CORS answer, so pages this server serves are
 unaffected. On a development boot (`NODE_ENV=development`, which `os dev` sets), loopback
-origins (`localhost`, `127.0.0.1`, `[::1]`, any port) are admitted too.
+origins (`localhost`, `127.0.0.1`, `[::1]`, any port) are admitted too, beside a list or
+without one; on any other boot a list admits only what it names.
 
-`'*'` while credentials are on (the default) is **refused at init**, so the boot fails.
-Name the origins instead, or turn credentials off to serve `'*'` to callers that send no
-cookies:
+`'*'`, or a pattern whose host part is the bare `*` (`https://*`, `*://*`), while
+credentials are on (the default) is **refused at init**, so the boot fails. Name the
+origins instead, or turn credentials off to serve it to callers that send no cookies:
 
 ```typescript
 kernel.use(new HonoServerPlugin({
   cors: { origins: '*', credentials: false }
 }));
 ```
+
+The rule is exported as `resolveCorsAdmission`, and `@objectstack/hono`'s `createHonoApp`
+reads it too, so one configuration gets one answer at both doors. The matcher it uses,
+`createOriginMatcher(patterns, { developmentBoot })`, reads the development boot from
+`NODE_ENV` when the option is not passed.
 
 ### Basic CORS
 

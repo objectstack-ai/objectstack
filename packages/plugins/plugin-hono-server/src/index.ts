@@ -4,5 +4,6 @@ export * from './hono-plugin';
 export * from './current-user-endpoints';
 export * from './adapter';
 export * from './pattern-matcher';
+export * from './cors-admission';
 export * from './route-pattern';
 
