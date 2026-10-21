@@ -139,7 +139,7 @@ os diff <before> <after> --breaking-only
 ```
 
 <Callout type="info">
-There is no `lint --deprecations` flag — deprecation scanning lives on `os doctor --scan-deprecations`. An automated `codemod` command is referenced in the migration guides but is not yet available; until then, combine `os doctor --scan-deprecations`, `os diff`, and the CHANGELOG migration notes (below) to upgrade across MAJOR versions.
+There is no `lint --deprecations` flag — deprecation scanning lives on `os doctor --scan-deprecations`. There is no `codemod` command either: the automated upgrade across MAJOR versions is `os migrate meta` (see [Support Windows](#support-windows)), and `os doctor --scan-deprecations`, `os diff`, and the CHANGELOG migration notes (below) cover what it does not rewrite.
 </Callout>
 
 ### Migration Guides
@@ -152,11 +152,13 @@ Each MAJOR release includes:
 
 ### Support Windows
 
-| Version | Status | Support Level |
-|:---|:---|:---|
-| Current MAJOR (N) | **Active** | Full feature development, bug fixes, security patches |
-| Previous MAJOR (N-1) | **Maintenance** | Critical bug fixes and security patches only |
-| Older versions (N-2+) | **End of Life** | No support; upgrade recommended |
+**Only the current MAJOR receives fixes.** There is no maintenance line for an older MAJOR: compatibility across majors is carried by the protocol's conversion layer and migration chain ([ADR-0087](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0087-metadata-protocol-upgrade-contract.md)), not by patching old releases.
+
+- **The current MAJOR** — bug fixes and security patches ship in the next release cut from `main`. While the next MAJOR is in prerelease, every release cut from `main` is one of its prereleases on npm's `next` tag, so a fix reaches `latest` only when that MAJOR goes GA.
+- **The previous MAJOR, and every older one** — receives no fixes, and no backport or maintenance release is promised. To take a fix, upgrade to the current MAJOR.
+- **The conversion layer** ([ADR-0087](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0087-metadata-protocol-upgrade-contract.md) D2) — as the runtime loads your metadata, it converts the previous MAJOR's lossless changes (renames, alias removals, field moves) to the current shape and emits a deprecation notice per conversion, so those shapes keep loading after you move the runtime forward. It covers only the previous MAJOR and only lossless changes; `os migrate meta` carries everything else.
+- **`os migrate meta`** ([ADR-0087](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0087-metadata-protocol-upgrade-contract.md) D3) — `os migrate meta --from N` replays the migration chain from the major your metadata was authored against (protocol 16 or later, the chain's floor) to the current one in a single pass, and lists the edits your source needs; with `--write` it writes the mechanical ones it can trace to one literal into your source files. It reads no database. `os migrate meta --stored` replays the same chain over one deployment's stored `sys_metadata` rows and, with `--apply`, rewrites the ones still carrying an older shape. See the [CLI reference](/docs/deployment/cli#os-migrate-meta---stored) and [Upgrading → The metadata app](/docs/upgrading#the-metadata-app).
+- **Testing a MAJOR before it reaches `latest`** — under [ADR-0087](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0087-metadata-protocol-upgrade-contract.md) D6, every MAJOR is published to npm's `next` dist-tag for at least one prerelease cycle before `latest`; the v18 line's `18.0.0-next.N` prereleases ran there before 18.0.0. Install from `next` to run your app against a MAJOR before it becomes `latest`.
 
 ---
 
