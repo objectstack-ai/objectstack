@@ -287,7 +287,7 @@ describe('turso config: the constructor, the spec contract and this mirror agree
     // replica half cannot shrink behind the local half.
     expect(ROWS.filter((r) => r.refusedOn === 'encryptionKey').length).toBeGreaterThanOrEqual(8);
     expect(ROWS.filter((r) => r.refusedOn === 'encryptionKey' && (r.config.syncUrl || r.config.mode === 'replica')).length).toBeGreaterThanOrEqual(3);
-    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(28);
+    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(31);
     // [#20200] Exactly zero, not a floor: every key the constructor used to
     // build and ignore is refused at construction now (see the header).
     expect(ROWS.filter((r) => r.inert).length).toBe(0);
