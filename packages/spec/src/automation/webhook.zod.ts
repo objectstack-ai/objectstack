@@ -193,14 +193,28 @@ export const WebhookSchema = lazySchema(() => strictObject({
   url: z.string().url().describe('External webhook endpoint URL'),
   method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('POST').describe('HTTP method'),
   
-  /** Headers */
-  headers: z.record(z.string(), z.string()).optional().describe('Custom HTTP headers'),
+  /**
+   * Headers. A credential MAP as a whole (`.meta({ credential: 'map' })`):
+   * the platform cannot tell which entry of an authored header map carries a
+   * credential, so every meta read door withholds the whole map, and the
+   * schema-derived redactor in `kernel/metadata-type-redaction.ts` is what
+   * reads this marker (ruling B+ on #24966).
+   */
+  headers: z.record(z.string(), z.string()).optional().describe('Custom HTTP headers')
+    .meta({ credential: 'map' }),
 
   /** Timeout */
   timeoutMs: z.number().int().min(1000).max(300000).default(30000).describe('Request timeout in milliseconds'),
   
-  /** Security */
-  secret: z.string().optional().describe('Signing secret for HMAC signature verification'),
+  /**
+   * Security. A credential VALUE (`.meta({ credential: 'value' })`): every
+   * meta read door withholds it, derived from this marker by
+   * `kernel/metadata-type-redaction.ts` (ruling B+ on #24966). The dispatcher
+   * reads the declaration itself, never a served copy, so delivery signing is
+   * unaffected.
+   */
+  secret: z.string().optional().describe('Signing secret for HMAC signature verification')
+    .meta({ credential: 'value' }),
   
   /** Status */
   isActive: z.boolean().default(true).describe('Whether webhook is active'),
