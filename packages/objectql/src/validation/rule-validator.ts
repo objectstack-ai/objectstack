@@ -339,6 +339,24 @@ interface RuleContext {
    *  when it resolved none. Applied per rule — see
    *  {@link resolveTraversalScope}. */
   related: RelatedRecordBinding | undefined;
+  /** [#24782] The TOP-LEVEL rule being evaluated is advisory (`warning` /
+   *  `info`) — set per rule by `evaluateValidationRules`, and inherited by a
+   *  `conditional`'s branch, whose outer rule's severity governs. See
+   *  {@link failClosedLogger}. */
+  advisory: boolean;
+}
+
+/**
+ * [#24782] The logger an unevaluable predicate writes its fail-closed sentence
+ * to ("— write rejected: a rule that cannot be evaluated fails closed"): the
+ * write's logger for an `error` rule, whose write IS rejected, and none for an
+ * advisory rule, whose write proceeds. The predicate evaluators run before the
+ * caller acts on the rule's severity, so they cannot word the outcome
+ * themselves; for an advisory rule `evaluateValidationRules` reports the fault
+ * once, worded as what happened — see {@link unevaluableAdvisoryMessage}.
+ */
+function failClosedLogger(ctx: Pick<RuleContext, 'logger' | 'advisory'>): EvaluateRulesOptions['logger'] {
+  return ctx.advisory ? undefined : ctx.logger;
 }
 
 /**
@@ -3438,9 +3456,10 @@ export function nullPreviousReadDetail(
  * `onValidationAdvisory` listener (see {@link emitValidationAdvisories}) and
  * the validate-only preview appends it to the row's `warnings`. A rule that
  * could not be EVALUATED (`constraint.reason: 'unevaluable'`) is not a hit: it
- * has no verdict, and its text ("could not be evaluated … write rejected") is a
- * fault report for the operator, false for a write an advisory never blocks —
- * so it stays in the log only.
+ * has no verdict, and its text ("could not be evaluated … write rejected") is
+ * the refusal an `error` rule returns, false for a write an advisory never
+ * blocks — so it is not a hit, and the log reports it once in its own words
+ * ({@link unevaluableAdvisoryMessage}, #24782).
  */
 export function evaluateValidationRules(
   objectSchema: { validations?: unknown[]; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
@@ -3478,7 +3497,7 @@ export function evaluateValidationRules(
   // and update: what a predicate can read is the object's DECLARED shape, not
   // whatever subset of columns this driver happened to return.
   if (groundTruth) materializeDeclaredFields(merged, fields);
-  const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger, fields, messages: opts.messages, related: opts.related };
+  const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger, fields, messages: opts.messages, related: opts.related, advisory: false };
 
   const errors: FieldValidationError[] = [];
   // [#22726] The advisory hits this evaluation returns — see the doc above.
@@ -3603,9 +3622,10 @@ export function evaluateValidationRules(
     .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
 
   for (const rule of ordered) {
+    const severity = rule.severity ?? 'error';
     let violation: FieldValidationError | null = null;
     try {
-      violation = evaluateRule(rule, ctx);
+      violation = evaluateRule(rule, { ...ctx, advisory: severity !== 'error' });
     } catch (err) {
       // Defensive: a broken rule must never brick a write.
       opts.logger?.warn?.(`Validation rule '${rule.name}' threw — skipped`, err);
@@ -3614,8 +3634,8 @@ export function evaluateValidationRules(
 
     if (!violation) continue;
 
-    const severity = rule.severity ?? 'error';
-    if (severity !== 'error' && violation.constraint?.reason !== 'unevaluable') {
+    const unevaluable = violation.constraint?.reason === 'unevaluable';
+    if (severity !== 'error' && !unevaluable) {
       advisories.push(advisoryEvent(rule, severity, violation));
     }
     if (severity === 'error') {
@@ -3628,22 +3648,42 @@ export function evaluateValidationRules(
       // row count and example rows. Off that path no scope is active,
       // `recordAdvisoryHit` returns false, and the per-write line below is
       // emitted verbatim — an ordinary interactive write is untouched.
+      //
+      // [#24782] An UNEVALUABLE advisory rule is reported through the same two
+      // outlets, once, but not with its violation's message: that text is the
+      // refusal an `error` rule returns ("… — write rejected."), false for a
+      // write this rule does not block. The evaluator logged nothing for it
+      // (see `failClosedLogger`), so this is its only line.
       !recordAdvisoryHit({
         object: advisoryObjectName(objectSchema),
         rule: String(rule.name ?? '(unnamed)'),
         severity,
-        message: violation.message,
+        message: unevaluable ? unevaluableAdvisoryMessage(rule, violation) : violation.message,
         recordRef: advisoryRecordRef(merged, data),
       })
     ) {
       opts.logger?.warn?.(
-        `Validation rule '${rule.name}' (${severity}): ${violation.message}`,
+        `Validation rule '${rule.name}' (${severity}): ${unevaluable ? unevaluableAdvisoryMessage(rule, violation) : violation.message}`,
       );
     }
   }
 
   if (errors.length > 0) throw new ValidationError(errors);
   return advisories;
+}
+
+/**
+ * [#24782] What an advisory rule that could not be EVALUATED reports, in place
+ * of its violation's message: the fault, and that the write proceeded — the
+ * rule is advisory, so having no verdict does not block (#4649 fails closed on
+ * `severity: 'error'` only). Names the branch when the fault is a
+ * `conditional`'s branch rather than the rule itself.
+ */
+function unevaluableAdvisoryMessage(rule: BaseRule, violation: FieldValidationError): string {
+  const faulted = violation.constraint?.rule;
+  const subject = typeof faulted === 'string' && faulted !== rule.name ? `its branch '${faulted}'` : 'the rule';
+  return `${subject} could not be evaluated (${String(violation.constraint?.fault)})`
+    + ' — write proceeded: the rule is advisory, so it was not applied to this write';
 }
 
 /**
@@ -3753,7 +3793,7 @@ function evaluateRule(rule: BaseRule, ctx: RuleContext): FieldValidationError | 
       return checkStateMachine(rule as StateMachineRule, ctx.mode, ctx.data, ctx.previous, ctx);
     case 'script':
     case 'cross_field':
-      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger, ctx.messages, ctx.related, ctx.fields);
+      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, failClosedLogger(ctx), ctx.messages, ctx.related, ctx.fields);
     case 'format':
       return checkFormat(rule as FormatRule, ctx.data, ctx.logger, ctx.messages);
     case 'json_schema':
@@ -4689,13 +4729,13 @@ function checkConditional(
   let record = ctx.merged;
   if (typeof expr.source === 'string' && expr.dialect === 'cel') {
     const scope = resolveTraversalScope(record, expr.source, ctx.related, ctx.fields);
-    if (!scope.ok) return traversalScopeRefusal(rule.name, '_record', scope, 'when-predicate', ctx.logger);
+    if (!scope.ok) return traversalScopeRefusal(rule.name, '_record', scope, 'when-predicate', failClosedLogger(ctx));
     record = scope.record;
   }
   const result = ExpressionEngine.evaluate<boolean>(expr, ruleScope(record, ctx.previous));
 
   if (!result.ok) {
-    ctx.logger?.warn?.(
+    failClosedLogger(ctx)?.warn?.(
       `Validation rule '${rule.name}' when-predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected: a rule that cannot be evaluated fails closed, it is never skipped`,
     );
     const nullRead = nullPreviousReadDetail(result.error, rule.when, ctx.previous, ctx.fields, 'when-predicate');
