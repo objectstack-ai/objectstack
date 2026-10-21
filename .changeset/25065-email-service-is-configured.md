@@ -1,11 +1,12 @@
 ---
-'@objectstack/spec': minor
-'@objectstack/plugin-email': minor
+'@objectstack/spec': patch
+'@objectstack/plugin-email': patch
 ---
 
 feat(spec, plugin-email): `IEmailService.isConfigured()` answers whether mail sent through the service is actually delivered
 
 Clause-②: yes (widening: an optional member on `IEmailService`)
+Metadata-protocol: none
 
 - **The contract.** `IEmailService` (`@objectstack/spec/contracts`) gains one optional member, `isConfigured?(): boolean`, with the same name and shape as `ISmsService.isConfigured()`. `true` means the active transport hands mail to a real delivery provider. `false` means no mail leaves the process: sends still resolve and still write their audit row. A `log` transport is never delivering, in any environment. The answer is read at call time and follows a transport swapped in at runtime.
 - **Absent means unknown.** The member is optional, so every existing implementation stays valid. A consumer must never read an absent member as delivering: a flow whose success depends on a mail reaching someone treats absent the same as `false` and keeps its explicit refusal, so a service that is merely wired is never mistaken for one that delivers.
