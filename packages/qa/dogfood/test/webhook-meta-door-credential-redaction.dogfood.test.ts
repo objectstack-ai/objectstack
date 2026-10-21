@@ -57,6 +57,19 @@ const WcrTask = ObjectSchema.create({
   fields: { name: Field.text({ label: 'Name', required: true }) },
 });
 
+/**
+ * Built with `strict: false`, on purpose — DECLARED, not an oversight. This
+ * stack declares a webhook and no `requires`, so `defineStack`'s default
+ * judgement refuses it (`STACK_WEBHOOK_CAPABILITY_REQUIRED`: a declared webhook
+ * owes `requires: ['webhooks', 'realtime']`, ruling A on #24910). The pins
+ * below need a composition that judgement cannot reach: a hand-wired host
+ * WITHOUT `@objectstack/plugin-webhooks`, where the redactor must still hold
+ * because it is derived from the schema rather than registered by the plugin.
+ * Declaring the pair instead would have `bootStack` mount the webhook plugin
+ * the way `serve` does, and the "without plugin-webhooks" composition would
+ * silently stop existing. Everything else about the stack is an ordinary
+ * authored package.
+ */
 const fixture = defineStack({
   manifest: {
     id: 'com.dogfood.webhook-credential-redaction',
@@ -79,7 +92,7 @@ const fixture = defineStack({
       isActive: false,
     }),
   ],
-});
+}, { strict: false });
 
 const savedBody = () => ({
   name: SAVED,
