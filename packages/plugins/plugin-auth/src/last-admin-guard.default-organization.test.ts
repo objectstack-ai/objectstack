@@ -25,7 +25,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 
-import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
+import { registerLastAdminGuard, type LastAdminGuardEngine, type LastAdminGuardHandle } from './last-admin-guard.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const POSTURE_ENV = 'OS_TENANCY_POSTURE';
@@ -74,6 +74,8 @@ const OBJECTS = [
 ];
 
 let engines: ObjectQL[] = [];
+/** The handle the most recent `promotedSingle` registered. */
+let guard: LastAdminGuardHandle;
 const ambient: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -113,7 +115,7 @@ async function promotedSingle(opts: { secondOrganization?: boolean; grantOwner?:
   for (const o of OBJECTS) engine.registry.registerObject(o as never);
   await engine.syncSchemas();
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
-  registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard.default-org' });
+  guard = registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard.default-org' });
 
   await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, SYSTEM);
   if (opts.secondOrganization) {
@@ -170,5 +172,41 @@ describe('[ADR-0131 D5] the organization writes that move the anchor off that gr
     await expect(engine.update('sys_organization', { id: 'org_default', name: 'Acme Inc' }, SYSTEM)).resolves.toBeDefined();
     // …and the administrator is still counted afterwards.
     await expect(ban(engine, 'usr_admin')).rejects.toMatchObject(refusal);
+  });
+});
+
+describe('[#24948] the same question about deleting the Default Organization, asked before anything is deleted', () => {
+  const members = (engine: ObjectQL) =>
+    engine.find('sys_member', { where: {}, ...SYSTEM }) as Promise<Array<Record<string, unknown>>>;
+
+  it('refuses when the grant the Default Organization owns is the last standing', async () => {
+    await promotedSingle();
+    await expect(guard.judgeOrganizationDelete('org_default')).rejects.toMatchObject(refusal);
+  });
+
+  it('judges the members that leave with the organization: an owner membership of it is no standing that survives', async () => {
+    // The administrator's only standing is owning the Default Organization
+    // (the grant belongs to another organization and anchors nothing). Asked
+    // before better-auth deletes the members, a question that simulated only
+    // the organization row would still count that membership and admit. A
+    // third organization keeps org_b from becoming the only one, which would
+    // make it the Default Organization and its grant an anchor.
+    const engine = await promotedSingle({ secondOrganization: true, grantOwner: 'org_b' });
+    await engine.insert('sys_organization', { id: 'org_c', name: 'C', slug: 'c' }, SYSTEM);
+    await engine.insert('sys_member', { id: 'mem_owner', user_id: 'usr_admin', organization_id: 'org_default', role: 'owner' }, SYSTEM);
+    await expect(ban(engine, 'usr_admin')).rejects.toMatchObject(refusal); // PREMISE: the membership is standing
+
+    await expect(guard.judgeOrganizationDelete('org_default')).rejects.toMatchObject(refusal);
+    // A question, not a write: the membership is still there.
+    expect((await members(engine)).map((m) => m.id)).toEqual(['mem_owner']);
+  });
+
+  it('CONTROL: with another administrator standing elsewhere, the delete is admitted', async () => {
+    const engine = await promotedSingle({ secondOrganization: true, grantOwner: 'org_b' });
+    await engine.insert('sys_organization', { id: 'org_c', name: 'C', slug: 'c' }, SYSTEM);
+    await engine.insert('sys_member', { id: 'mem_owner', user_id: 'usr_admin', organization_id: 'org_default', role: 'owner' }, SYSTEM);
+    await engine.insert('sys_member', { id: 'mem_other', user_id: 'usr_other', organization_id: 'org_b', role: 'owner' }, SYSTEM);
+
+    await expect(guard.judgeOrganizationDelete('org_default')).resolves.toBeUndefined();
   });
 });
