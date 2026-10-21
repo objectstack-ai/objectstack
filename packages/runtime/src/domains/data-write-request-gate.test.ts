@@ -64,15 +64,16 @@
  * `{}`). Every row asserts the store, not just the door's word.
  *
  * [#23574] Both doors read each object's exposure from the one definition the
- * engine's registry holds: `RestServer` through the protocol's by-name object
- * read beside its object list (`getMetaItems`, and both by-name faces,
- * `getMetaItemForExecution`, which the exposure gate reads when the protocol
- * has it, and `getMetaItem`, which it reads otherwise; this rig's protocol
- * cannot read without a metadata store, so all three are answered from the
- * registry), and the dispatcher through the
- * kernel's `metadata` service (`getObject`, answered from the same registry).
- * Without them each door's exposure gate fails open, and every exposure row
- * below would read as an allowed object.
+ * engine's registry holds, through the protocol's by-name object read
+ * (`RestServer` beside its object list): `getMetaItems`, and both by-name
+ * faces, `getMetaItemForExecution`, which each door's exposure gate reads when
+ * the protocol has it, and `getMetaItem`, which it reads otherwise. This rig's
+ * protocol cannot read without a metadata store, so all three are answered
+ * from the registry ({@link stubObjectReads}). [#25120] The dispatcher's gate
+ * read the kernel's `metadata` service until it moved to the protocol's read;
+ * this rig gives it no `metadata` service, so a gate that stopped reading the
+ * protocol would fail open and every exposure row below would read as an
+ * allowed object.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -155,7 +156,29 @@ async function bootStore() {
     };
     /** Each object's definition as the registry holds it: the one exposure source both doors read. */
     const definition = (name: string) => engine.registry.getObject(name);
-    return { protocol, updateData, createData, findData, state, definition };
+    stubObjectReads(protocol, definition);
+    return { protocol, updateData, createData, findData, state };
+}
+
+/**
+ * The protocol's object reads, answered from the registry: both doors' exposure
+ * gates read the object by name through the protocol, and `RestServer`'s beside
+ * its object list; see the rig note above.
+ */
+function stubObjectReads(protocol: ObjectStackProtocolImplementation, definition: (name: string) => unknown): void {
+    (protocol as any).getMetaItems = async (request: any) => request?.type === 'object'
+        ? { type: 'object', items: OBJECTS.map((o) => definition(o.name)) }
+        : { type: request?.type, items: [] };
+    // [#24535] ONE registry-backed stub on BOTH by-name faces: each gate reads
+    // `getMetaItemForExecution` when the protocol has one (this real one does),
+    // and `getMetaItem` otherwise. Stubbing one face alone leaves the gate on
+    // the other, which fails open here.
+    for (const face of ['getMetaItem', 'getMetaItemForExecution'] as const) {
+        const readByName = (protocol as any)[face].bind(protocol);
+        (protocol as any)[face] = async (request: any) => request?.type === 'object'
+            ? { type: 'object', name: request.name, item: OBJECTS.some((o) => o.name === request.name) ? definition(request.name) : undefined }
+            : readByName(request);
+    }
 }
 
 // ── The two doors ─────────────────────────────────────────────────────────────
@@ -198,21 +221,7 @@ function makeRes() {
 }
 
 async function bootRestServer(): Promise<Door> {
-    const { protocol, updateData, createData, findData, state, definition } = await bootStore();
-    // `enforceApiAccess` reads the object by name through the protocol, beside its object list; see the rig note above.
-    (protocol as any).getMetaItems = async (request: any) => request?.type === 'object'
-        ? { type: 'object', items: OBJECTS.map((o) => definition(o.name)) }
-        : { type: request?.type, items: [] };
-    // [#24535] ONE registry-backed stub on BOTH by-name faces: `enforceApiAccess`
-    // reads `getMetaItemForExecution` when the protocol has one (this real one
-    // does), and `getMetaItem` otherwise. Stubbing one face alone leaves the
-    // gate on the other, which fails open here.
-    for (const face of ['getMetaItem', 'getMetaItemForExecution'] as const) {
-        const readByName = (protocol as any)[face].bind(protocol);
-        (protocol as any)[face] = async (request: any) => request?.type === 'object'
-            ? { type: 'object', name: request.name, item: OBJECTS.some((o) => o.name === request.name) ? definition(request.name) : undefined }
-            : readByName(request);
-    }
+    const { protocol, updateData, createData, findData, state } = await bootStore();
     const noop = () => {};
     const server = { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
     const rest: any = new RestServer(server as any, protocol as any, { api: { requireAuth: false } } as any);
@@ -274,10 +283,10 @@ async function catchAll(dispatcher: HttpDispatcher, method: string, path: string
 }
 
 async function bootCatchAll(): Promise<Door> {
-    const { protocol, updateData, createData, findData, state, definition } = await bootStore();
-    // `callData`'s exposure gate reads the kernel's `metadata` service; see the rig note above.
-    const metadata = { getObject: async (name: string) => definition(name) };
-    const services: Record<string, unknown> = { protocol, metadata };
+    const { protocol, updateData, createData, findData, state } = await bootStore();
+    // `callData`'s exposure gate reads the protocol's by-name object read, and
+    // no `metadata` service is given; see the rig note above.
+    const services: Record<string, unknown> = { protocol };
     const get = (n: string) => services[n] ?? null;
     const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (n: string) => get(n) };
     const dispatcher = new HttpDispatcher(kernel);

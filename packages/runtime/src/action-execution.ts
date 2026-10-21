@@ -326,7 +326,12 @@ type ExposureDeclarationRead = Partial<Pick<MetadataProtocol, 'getMetaItem'>> & 
  * - refused `OBJECT_PACKAGE_DISABLED` → `undefined`, as `RestServer`'s gate
  *   reads it (`loadObjectItem`): the list read omits that object, and the data
  *   plane refuses the request with that same code;
- * - any other throw → to the caller, whose `catch` falls open, unchanged.
+ * - any other throw (the metadata store unreadable) → the metadata service's
+ *   copy, the source this gate read before. An outage of the merged read must
+ *   not WIDEN exposure: failing open at once would serve an object the copy
+ *   still declares off, where this gate refused it before the move. The copy
+ *   can only add a refusal the healthy read would also make or a stale one, never
+ *   an allowance the caller's fail-open `catch` would not already give.
  */
 async function readExposureDeclaration(
     deps: ActionExecutionDeps,
@@ -334,20 +339,21 @@ async function readExposureDeclaration(
     object: string,
     scopeId?: string,
 ): Promise<unknown> {
+    const readCopy = async () => {
+        const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
+        return await (meta as any)?.getObject?.(object);
+    };
     const protocol = await deps.resolveService(requestContext, 'protocol', scopeId) as ExposureDeclarationRead | undefined;
     const byName = typeof protocol?.getMetaItemForExecution === 'function'
         ? protocol.getMetaItemForExecution
         : typeof protocol?.getMetaItem === 'function' ? protocol.getMetaItem : undefined;
-    if (!byName) {
-        const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
-        return await (meta as any)?.getObject?.(object);
-    }
+    if (!byName) return await readCopy();
     let envelope: unknown;
     try {
         envelope = await byName.call(protocol, { type: 'object', name: object });
     } catch (err) {
         if ((err as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') return undefined;
-        throw err;
+        return await readCopy();
     }
     const item = (envelope as { item?: unknown } | null | undefined)?.item;
     return item !== null && typeof item === 'object' && (item as { name?: unknown }).name === object ? item : undefined;
