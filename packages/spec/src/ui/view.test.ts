@@ -3626,37 +3626,17 @@ describe('UserFiltersSchema (ADR-0047)', () => {
 });
 
 describe('AddRecordConfigSchema', () => {
-  it('should apply default values', () => {
-    const config = AddRecordConfigSchema.parse({});
-    expect(config.enabled).toBe(true);
-    expect(config.position).toBe('bottom');
-    expect(config.mode).toBe('inline');
-    expect(config.formView).toBeUndefined();
-  });
-
-  it('should accept full configuration', () => {
-    const config = AddRecordConfigSchema.parse({
-      enabled: true,
-      position: 'top',
-      mode: 'form',
-      formView: 'quick_create',
-    });
-    expect(config.position).toBe('top');
-    expect(config.mode).toBe('form');
-    expect(config.formView).toBe('quick_create');
+  // The #24692 retirement (`enabled` required, `position` default `top`,
+  // `mode` / `formView` tombstoned) is pinned in
+  // `add-record-config-retirement.test.ts`; these are the live-shape basics.
+  it('defaults `position` to `top` and materializes nothing else', () => {
+    expect(AddRecordConfigSchema.parse({ enabled: true })).toEqual({ enabled: true, position: 'top' });
   });
 
   it('should accept all position values', () => {
     const positions = ['top', 'bottom', 'both'] as const;
     positions.forEach(position => {
-      expect(() => AddRecordConfigSchema.parse({ position })).not.toThrow();
-    });
-  });
-
-  it('should accept all mode values', () => {
-    const modes = ['inline', 'form', 'modal'] as const;
-    modes.forEach(mode => {
-      expect(() => AddRecordConfigSchema.parse({ mode })).not.toThrow();
+      expect(AddRecordConfigSchema.parse({ enabled: true, position })).toEqual({ enabled: true, position });
     });
   });
 
@@ -3708,12 +3688,9 @@ describe('ListViewSchema — Airtable Interface parity fields', () => {
       addRecord: {
         enabled: true,
         position: 'bottom',
-        mode: 'form',
-        formView: 'quick_create',
       },
     });
-    expect(listView.addRecord?.mode).toBe('form');
-    expect(listView.addRecord?.formView).toBe('quick_create');
+    expect(listView.addRecord).toEqual({ enabled: true, position: 'bottom' });
   });
 
   it('should accept list view with showRecordCount', () => {
@@ -3761,7 +3738,6 @@ describe('ListViewSchema — Airtable Interface parity fields', () => {
       addRecord: {
         enabled: true,
         position: 'bottom',
-        mode: 'inline',
       },
       showRecordCount: true,
       allowPrinting: true,

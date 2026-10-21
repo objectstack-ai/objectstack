@@ -362,7 +362,7 @@ gantt: {
 A Form View defines how a single record is displayed for viewing or editing. It lives in the same `defineView` container as the object's list views:
 
 - `form` is the object's **default form** — the create and edit surfaces render it.
-- `formViews` holds **additional named forms**. Each one is served only where it is asked for by name: a form action's `target` (`<object>.<key>`), `addRecord.formView`, or a public `sharing.publicLink`. A named form never becomes the default — a container with no `form` has no default form, even when it declares named ones.
+- `formViews` holds **additional named forms**. Each one is served only where it is asked for by name: a form action's `target` (`<object>.<key>`) or a public `sharing.publicLink`. One key is read by convention: `formViews.create`, when declared, is the form every create entry opens (the list's Add button and the object's New). A named form never becomes the default — a container with no `form` has no default form, even when it declares named ones.
 
 ### Basic Structure
 

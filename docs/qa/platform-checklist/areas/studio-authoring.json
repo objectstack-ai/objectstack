@@ -9,7 +9,7 @@
       "title": "The first-run authoring loop closes: package → object → record → app → publish → end-user, zero code, zero restarts",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai)", "end user (same account driving the published app)"],
@@ -39,7 +39,7 @@
         {
           "clause": "package create round-trips and the package switcher lists the new writable package without a page reload",
           "oracle": "network",
-          "verify": "the create POST succeeds and the switcher shows the package in the same session. objectui e2e/live/studio-object-designer.spec.ts test F1 pins it at the pinned objectui (.objectui-sha 616df6598b42, blob 58a7f1cbf024): it creates a package through the switcher's New package dialog by the testids studio-pkg-chip, package-form-id-input and package-form-submit, all declared in that tree's app-shell (StudioDesignSurface.tsx, PackageFormDialog.tsx), and asserts that the surface moved into the new package and that the switcher lists it by name with no reload. From this checkout it is not runnable (RUNNER, the objectui-ref fact): drive the clause by hand, or run F1 in an objectui checkout at the pinned revision and cite its output naming the revision. Note the new-package wizard's own state, objectui#11327",
+          "verify": "the create POST succeeds and the switcher shows the package in the same session. objectui e2e/live/studio-object-designer.spec.ts test F1 pins it at the pinned objectui (.objectui-sha cf153eb2e535, blob 58a7f1cbf024): it creates a package through the switcher's New package dialog by the testids studio-pkg-chip, package-form-id-input and package-form-submit, all declared in that tree's app-shell (StudioDesignSurface.tsx, PackageFormDialog.tsx), and asserts that the surface moved into the new package and that the switcher lists it by name with no reload. From this checkout it is not runnable (RUNNER, the objectui-ref fact): drive the clause by hand, or run F1 in an objectui checkout at the pinned revision and cite its output naming the revision. Note the new-package wizard's own state, objectui#11327",
           "evidence": "the create request/response + switcher screenshot"
         },
         {
@@ -89,7 +89,8 @@
         { "revision": 2, "date": "2026-08-18", "change": "corrected the ?id= spelling in step 8 and clause 4, which said <new app id> in an item whose step 2 creates the package com.example.repairs — inviting the package-id spelling that answers with an empty items array (#9334's class). Found by grounding rather than from a report: this item was not on the #9334 list. ⚠️ The card's other instruction for this item — drop any inherited 'Studio is not installed' assumption (#9453 CF-4) — needed NO edit: the item never carried one. It has no blocked marker, no such knownGap, and its steps drive the App Builder directly; the assumption lived in the wave briefing and the run records, not here", "ref": "#9386" },
         { "revision": 3, "date": "2026-10-01", "change": "checklist-accuracy findings of QA run #21056, each grounded in objectui at the pin: the object is named repairs_repair_ticket (the dialog prefixes the package namespace), and every step and clause now uses that name; the New object dialog carries a pre-selected OWD choice; the zero-nav-items knownGap is superseded (the Create-app scaffold checkbox defaults on); steps[8]'s probe is a forged request because the console hides authoring on a read-only package; acceptance[0]'s cited objectui pin targets testids absent at the pin", "ref": "#21060" },
         { "revision": 4, "date": "2026-10-19", "change": "fixtures.knownGaps[0], steps[1], steps[2], steps[3] and steps[6] corrected from QA run #24571 (18.0 sweep, 5b14b7f3; carried by #24604 at ba4afcc2) and the P0 run #24556's continuation, re-read at the console pin 4016370af3c9. (1) knownGaps[0] said publish has no review step; Publish now opens the Pending changes sheet with per-item diff and a separate 'Publish all' (DraftChangesPanel.tsx). (2) A CJK-only display name derives no package id (PackageFormDialog.tsx toIdSegment). (3) There is no Save draft button for a field: the designer autosaves, and a picklist is held until it has an option ('Not saved yet: … needs at least one option'). (4) The publish toast names the count (objectui#11807). (5) The Studio house icon goes to the Studio landing, not the console Home. No clause changed. Wave anchor #24579 (round 3 named this item)", "ref": "#24671" },
-        { "revision": 5, "date": "2026-10-20", "change": "acceptance[0].verify follows F1's testids. Round 14's out-of-scope finding (report 6289612504 on PR #24857, wave anchor #24579): it said F1 targets package-id-input / package-name-input, which no source declares. Read at the console pin 616df6598b42 (objectui blob 58a7f1cbf024): F1 targets studio-pkg-chip, package-form-id-input and package-form-submit, each declared in that tree's app-shell source, and the two old testids appear nowhere in it. So F1 is citable when run at the pinned revision; the live verdict there is not measured here. No clause changed", "ref": "#24963" }
+        { "revision": 5, "date": "2026-10-20", "change": "acceptance[0].verify follows F1's testids. Round 14's out-of-scope finding (report 6289612504 on PR #24857, wave anchor #24579): it said F1 targets package-id-input / package-name-input, which no source declares. Read at the console pin 616df6598b42 (objectui blob 58a7f1cbf024): F1 targets studio-pkg-chip, package-form-id-input and package-form-submit, each declared in that tree's app-shell source, and the two old testids appear nowhere in it. So F1 is citable when run at the pinned revision; the live verdict there is not measured here. No clause changed", "ref": "#24963" },
+        { "revision": 6, "date": "2026-10-20", "change": "acceptance[0].verify names the console pin cf153eb2e535. PR #24982's pin finding: the verify stated the current pin as 616df6598b42, and PR #24982 moved .objectui-sha to cf153eb2e535. Read in a full objectui clone: e2e/live/studio-object-designer.spec.ts keeps blob 58a7f1cbf024 at both pins (over the range, e2e/live/ changes only ci/backend.env), and studio-pkg-chip, package-form-id-input and package-form-submit are still declared in app-shell's StudioDesignSurface.tsx and PackageFormDialog.tsx at cf153eb2e535. The spec's live verdict at the pin is not measured here. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -273,7 +274,7 @@
       "title": "Record-page authoring round-trip: created bound to its object, seeded from the default layout, block-edited, published, rendered",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors)", "end user (opens the record). On stock no non-admin persona reads showcase_contact (auditor.demo is refused 'You don't have access to Contact records', QA run #24604), so the viewer is the admin unless a grant is provisioned — e.g. a member bound to the `manager` position, whose showcase_manager set reads showcase_contact (examples/app-showcase/src/security/permission-sets.ts); record which"],
@@ -304,7 +305,7 @@
         {
           "clause": "the page editor exposes block authoring: the picker offers schema-backed block kinds (Card, Section, Record details)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the editor rendered, the Add-block dialog lists the three kinds. No pin in automated.ref covers this clause: objectui e2e/live/studio-editor.spec.ts asserts the same picker (Card, Section, Record details) on an editable copy of the shipped showcase_project_workspace page, and is not in the ref. Until objectui 0b36ffa that spec was stale: it looked for a 'Layout' section heading the page form no longer renders (the layout is edited on the canvas) and opened a shipped page the editor correctly locks",
+          "verify": "after a screenshot confirms the editor rendered, the Add-block dialog lists the three kinds. objectui e2e/live/studio-editor.spec.ts pins this clause carrier-neutrally (automated.ref): it asserts the same picker (Card, Section, Record details) on an editable copy of the shipped showcase_project_workspace page. Until objectui 0b36ffa that spec was stale: it looked for a 'Layout' section heading the page form no longer renders (the layout is edited on the canvas) and opened a shipped page the editor correctly locks",
           "evidence": "screenshot + dialog DOM read"
         },
         {
@@ -326,7 +327,7 @@
       "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/studio-record-page.spec.ts — acceptance[0] ONLY, carrier-neutrally: it creates a record page bound to showcase_invoice (not this item's showcase_contact) and asserts the captured PUT body's type 'record', its object, and regions seeded with a record:highlights block. It covers no other clause. objectui e2e/live/studio-editor.spec.ts, which drives the Add-block picker acceptance[1] scores, is cited in source[1] and has never been in this ref"
+        "ref": "objectui: e2e/live/studio-record-page.spec.ts — acceptance[0], carrier-neutrally: it creates a record page bound to showcase_invoice (not this item's showcase_contact) and asserts the captured PUT body's type 'record', its object, and regions seeded with a record:highlights block. + objectui: e2e/live/studio-editor.spec.ts — acceptance[1], carrier-neutrally: 'Add block opens a block-type picker with configurable block kinds' opens the live page editor on an environment-authored copy of the shipped showcase_project_workspace (an app page, not this item's showcase_contact record page) and asserts that the dialog offers Card, Section and Record details. The picker offers one static catalogue whatever the page (AddBlockButton in objectui's PageBlockCanvas.tsx reads TYPES_BY_CATEGORY from block-types.ts), so the carrier does not change the answer. Both were read at the console pin cf153eb2e535 (blobs 3844a60ccd79 and 19f9cc131654). Neither covers acceptance[2] or [3]"
       },
       "source": [
         "objectui: e2e/live/studio-record-page.spec.ts (#1541, ADR-0034 — create bound + seeded regions, asserted off the PUT payload)",
@@ -364,6 +365,12 @@
           "date": "2026-10-20",
           "change": "automated.stale removed, automated.ref scoped to acceptance[0], and the stale notes in acceptance[0].verify, acceptance[1].verify, steps[3], source[0] and source[1] rewritten — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired both specs the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. studio-record-page.spec.ts: blob 181b2562c18d at the old pin 12dc7b47c340, 3844a60ccd79 at both 0b36ffa and 616df6598b42; it now sets Page type to record and picks the object from the Object combobox. studio-editor.spec.ts: blob e442b4c1a29e, then 19f9cc131654 at both; it now edits a copy of showcase_project_workspace and reads the layout on the canvas. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, studio-record-page.spec.ts asserts acceptance[0], the one clause the ref claims (carrier-neutrally, on showcase_invoice). studio-editor.spec.ts was never in the ref, so acceptance[1] stays driven by hand rather than widening the ref. No clause changed",
           "ref": "#24857"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "automated.ref widened to acceptance[1], and acceptance[1].verify says so. Round 14's widening candidate (PR #24857's acceptance notes, carrier #24579): objectui e2e/live/studio-editor.spec.ts, read at the console pin cf153eb2e535 (blob 19f9cc131654, the same at 616df6598b42). Its case 'Add block opens a block-type picker with configurable block kinds' drives the live page editor and asserts that the dialog offers Card, Section and Record details: acceptance[1]'s whole dom oracle, at its layer. It edits an environment-authored copy of showcase_project_workspace, an app page, while this item authors a showcase_contact record page, and the picker offers one static catalogue whatever the page (AddBlockButton reads TYPES_BY_CATEGORY, objectui block-types.ts), so the carrier does not change the answer. The spec's live verdict at the pin is not measured here. No clause changed",
+          "ref": "#25003"
         }
       ]
     },
@@ -1353,7 +1360,7 @@
       "title": "The metadata governance sweep: GET /meta/diagnostics reports every STORED item failing spec validation with located errors, refuses outages and bad spellings loudly instead of answering '0 problems', and the Studio diagnostics page + directory tile badges paint the same numbers",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (the governance surface is Studio's)"],
@@ -1370,7 +1377,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "GET /api/v1/meta/diagnostics on the live REST server and record the BARE body — { entries, total, scannedTypes, scannedItems, stats } with NO { success, data } envelope on this surface (rest-route-ledger.ts); ⛔ the route is REST-server-only, so a simulated dispatch is not an oracle here",
         "stats parity probe: for two or three types (object, view, flow), GET /api/v1/meta/<type> and compare stats[<type>].count against the list's item count and stats[<type>].packages against the sorted distinct _packageId set of those items",
         "package scoping: GET /api/v1/meta/diagnostics?package=com.example.showcase and record how stats narrows; then open Studio's metadata directory (/apps/<app>/metadata?package=com.example.showcase) and compare the tile counts against the scoped stats (DirectoryPage feeds its tiles from the package-scoped sweep)",
@@ -1457,7 +1464,8 @@
         { "revision": 3, "date": "2026-10-13", "change": "acceptance[1].verify compares stats.locked against the served envelope lock (stale spec, #23166 A1; parked on #23121, carried by #23169). getMetaDiagnostics counts an item as locked when its read envelope reports a lock other than 'none' — the same derivation getMetaItem publishes (#21694) — not when its declared _lock is set. QA run #23166 compared against the envelope lock and passed. Read from source at 6d7f4df3c (protocol.ts getMetaDiagnostics docblock and loop). The A6 row of the same run, the unplantable invalid stored row, is already recorded in full in knownGaps[0] and needs no edit", "ref": "#23169" },
         { "revision": 4, "date": "2026-10-16", "change": "acceptance[1].verify names the read that carries the envelope lock (checklist-accuracy finding 2 of QA run #23942, wave #23878). It told the runner to compare stats.locked against the lock GET /api/v1/meta/TYPE/NAME publishes, but that default read is the cached arm and carries no `lock` by design; the envelope lock is on GET /api/v1/meta/TYPE/NAME/layers, which is where #23942 read it (object 107, view 0, flow 32 locked, matching stats). The comparison itself is unchanged", "ref": "#24036" },
         { "revision": 5, "date": "2026-10-19", "change": "fixtures.knownGaps[0], steps[6], steps[8] and acceptance[6] (clause, verify) corrected from QA run #24604 (18.0 sweep round 2, ba4afcc2), the round-2 §3 note that knownGaps[0] is wrong. The invalid stored row is plantable in-run on an isolated scratch file DB: save a valid view through the door with ?package=, rewrite its sys_metadata.metadata, and the next sweep lists it — the run scored acceptance[6] pass that way, deep link and badge included. The directory always repairs ?package= to a project package, so the red button is judged per package scope; rootless union-parent entries may ride beside the located leaf. Wave anchor #24579 round 2 §3 (6272314386)", "ref": "#24671" },
-        { "revision": 6, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[5] cited lines 242-254 of objectui DirectoryPage.tsx and line 982 of app-shell's console AppContent.tsx in the comma-range spelling (authored in 45397edf53 as the lists 133-158 and 242-254, and 882 and 982). At the objectui pin that commit shipped, 9602dc820450, 242-254 was the diagnostics link that renders only when diagSummary.total is above 0, 133-158 the package-scoped useGlobalDiagnostics sweep, and 982 the nested metadata route block that holds _diagnostics; at the shipped pin 12dc7b47c340 all have moved. source[5] now names the MetadataDirectoryPage component's sweep and link, and the AppContent component's metadata/_diagnostics route. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
+        { "revision": 6, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[5] cited lines 242-254 of objectui DirectoryPage.tsx and line 982 of app-shell's console AppContent.tsx in the comma-range spelling (authored in 45397edf53 as the lists 133-158 and 242-254, and 882 and 982). At the objectui pin that commit shipped, 9602dc820450, 242-254 was the diagnostics link that renders only when diagSummary.total is above 0, 133-158 the package-scoped useGlobalDiagnostics sweep, and 982 the nested metadata route block that holds _diagnostics; at the shipped pin 12dc7b47c340 all have moved. source[5] now names the MetadataDirectoryPage component's sweep and link, and the AppContent component's metadata/_diagnostics route. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
+        { "revision": 7, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -1465,7 +1473,7 @@
       "title": "A doc on the app menu follows the reader's audience: an admin authors a doc and puts it (or its book) on an app menu; a member who may read it sees it and opens it in its book; a member outside its audience does not see the entry and gets a refusal — never \"not found\", never a blank page — on the direct route",
       "since": "v17.5",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1489,7 +1497,7 @@
         ]
       },
       "steps": [
-        "boot the showcase isolated (dogfood §0) with the console named above; as admin, verify the stock corpus first (knownGaps), then author the doc in the writable base package over the metadata API (PUT /api/v1/meta/doc/DOC?package=PKG, then publish) — knownGaps[2]'s recipe, so the doc shares the books' package, rather than through the Studio doc editor; author the remaining fixture books/docs and the permission set the same way, and assign SET to the reader",
+        "boot the showcase on its own port and DB (dogfood §0) with the console named above; as admin, verify the stock corpus first (knownGaps), then author the doc in the writable base package over the metadata API (PUT /api/v1/meta/doc/DOC?package=PKG, then publish) — knownGaps[2]'s recipe, so the doc shares the books' package, rather than through the Studio doc editor; author the remaining fixture books/docs and the permission set the same way, and assign SET to the reader",
         "as admin, add the three doc entries to the app navigation (Studio app designer, or PUT /api/v1/meta/app/APP) over the gated and the open corpus",
         "GET /api/v1/meta/app?id=APP as each member in that member's own session (prove the identity with GET /api/v1/auth/get-session first); record which doc entries each receives",
         "as each member, open the app and capture the rendered menu after a screenshot confirms it settled; diff the rendered doc entries against that member's /meta/app answer (UI mirror)",
@@ -1546,7 +1554,8 @@
         { "revision": 1, "date": "2026-09-30", "change": "new — the 清单项待写 row of docs/NORTH-STAR.md beside platform-core.docs-audience-gate and platform-core.docs-portal-render; drafted with objectui#10188 and corrected by the at-tier review of objectui PR 11258 (the UI-mirror clause scoped to entries naming an installed doc or book; no signed-out persona — /docs sits behind ProtectedRoute)", "ref": "#20939" },
         { "revision": 2, "date": "2026-10-13", "change": "knownGaps[2]'s fixture recipe re-pointed (knownGap stale, #23166 A0; parked on #23121, carried by #23169). The Studio doc editor no longer answers the read-only showcase package with a 422: it saves an env-wide draft and offers no package picker, so the recipe's reason for a writable base changed, not its need. The books and docs must share one package, so the recipe drives the writable base over the metadata API with ?package=. QA run #23166 did exactly that and passed", "ref": "#23169" },
         { "revision": 3, "date": "2026-10-16", "change": "knownGaps[1] closed (checklist-accuracy finding 9 of QA run #23942, wave #23878): the .objectui-sha pin has been past the fork window since daeb77fc84dd — the console carries the refusal page and the menu pruning — so the knownGap no longer asks for a console built elsewhere. Wording only: no step, request or oracle changed", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-19", "change": "steps[0] aligned with fixtures.knownGaps[2] from QA run #24571 (18.0 sweep, 5b14b7f3): the step said to create the doc in the Studio doc editor while knownGaps[2] prescribes authoring every book, doc and the app over the metadata API with ?package= so they share one package; the run drove the API recipe. No clause changed. Wave anchor #24579 §3", "ref": "#24671" }
+        { "revision": 4, "date": "2026-10-19", "change": "steps[0] aligned with fixtures.knownGaps[2] from QA run #24571 (18.0 sweep, 5b14b7f3): the step said to create the doc in the Studio doc editor while knownGaps[2] prescribes authoring every book, doc and the app over the metadata API with ?package= so they share one package; the run drove the API recipe. No clause changed. Wave anchor #24579 §3", "ref": "#24671" },
+        { "revision": 5, "date": "2026-10-20", "change": "steps[0] respelled: 'boot the showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {
@@ -1554,7 +1563,7 @@
       "title": "A picklist authored in a package is used by two objects' select fields from the designer: both forms offer its options, the bound field refuses inline options, and a GET → edit → PUT of an object with a bound field saves",
       "since": "v17.7",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1569,7 +1578,7 @@
         ]
       },
       "steps": [
-        "boot the showcase isolated with the console under test; sign in as the seeded admin",
+        "boot the showcase on its own port and DB with the console under test; sign in as the seeded admin",
         "GET /api/v1/meta/picklist and GET /api/v1/meta/picklist/NAME — the list is served with name, label, its own options and _packageId",
         "GET /api/v1/meta/object/OBJ_A/layers for the object whose field is already bound — record the bound field as served (picklist + resolved options, the extension's option included)",
         "metadata admin (Setup → Metadata → Object → OBJ_A): select an UNRELATED field, rename its label, let the autosave run; record the PUT body and status",
@@ -1643,7 +1652,8 @@
         "the fixture's spelling: packages/spec/src/data/picklist.zod.ts#definePicklist, the defineStack keys packages/spec/src/stack.zod.ts#picklists and packages/spec/src/stack.zod.ts#picklistExtensions; an extension in the list's own package merges (packages/objectql/src/engine-picklist.test.ts, the nested-plugin case)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-10-06", "change": "new — drafted with objectui#10202 against the measured run of its PR; filed by the seat. Authored from that draft with these changes: since v17.7, because 17.6.0 shipped before objectui PR 11669 merged; the picker clause split in two, one oracle each; the picklist fixture spelled with its export, its stack keys and the reload it needs; the console fixture naming the merge it must carry; the spec citations written as anchors the gate resolves", "ref": "#21957" }
+        { "revision": 1, "date": "2026-10-06", "change": "new — drafted with objectui#10202 against the measured run of its PR; filed by the seat. Authored from that draft with these changes: since v17.7, because 17.6.0 shipped before objectui PR 11669 merged; the picker clause split in two, one oracle each; the picklist fixture spelled with its export, its stack keys and the reload it needs; the console fixture naming the merge it must carry; the spec citations written as anchors the gate resolves", "ref": "#21957" },
+        { "revision": 2, "date": "2026-10-20", "change": "steps[0] respelled: 'boot the showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
       ]
     },
     {

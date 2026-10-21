@@ -128,10 +128,19 @@ export const SysBusinessUnit = ObjectSchema.create({
     ),
 
     // ── Hierarchy ────────────────────────────────────────────────
+    // `restrict`, not the lookup default `set_null`: deleting a unit that still
+    // has child units is refused (`409 DELETE_RESTRICTED`, naming this object and
+    // the child count) until they are re-parented or deleted. Under `set_null`
+    // the delete answered 200 and silently made each child a root of the
+    // tenant, so a `unit_and_subordinates` grant anchored above the deleted
+    // unit stopped reaching the former subtree. A delete that removes the
+    // children first (leaf to root) still completes.
     parent_business_unit_id: Field.lookup('sys_business_unit', {
       label: 'Parent Business Unit',
       required: false,
-      description: 'Self-reference for the org tree. Null = root of tenant.',
+      deleteBehavior: 'restrict',
+      description:
+        'Self-reference for the org tree. Null = root of tenant. A unit that still has child units cannot be deleted until they are re-parented or deleted.',
       group: 'Hierarchy',
     }),
 

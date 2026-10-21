@@ -999,7 +999,6 @@ describe('InterfacePageConfigSchema', () => {
       addRecord: {
         enabled: true,
         position: 'bottom',
-        mode: 'inline',
       },
       showRecordCount: true,
       allowPrinting: true,
@@ -1066,7 +1065,6 @@ describe('PageSchema with interfaceConfig', () => {
         addRecord: {
           enabled: true,
           position: 'bottom',
-          mode: 'inline',
         },
         showRecordCount: true,
         allowPrinting: true,
