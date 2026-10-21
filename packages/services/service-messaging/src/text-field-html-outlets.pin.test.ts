@@ -46,10 +46,8 @@ import { fileURLToPath } from 'node:url';
 
 import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
-import type { IDataEngine } from '@objectstack/spec/contracts';
 
-import { renderNotification, NotificationTemplateStore } from './template-renderer.js';
+import { renderNotification, NotificationTemplateStore, type NotificationTemplateRow } from './template-renderer.js';
 import { createEmailChannel } from './email-channel.js';
 import type { Delivery } from './channel.js';
 
@@ -203,27 +201,23 @@ function pinTemplateRenderer(): void {
     });
 
     it('through the email channel: a stored html row sends the text field escaped in the html, as typed in the subject', async () => {
-        const row = {
-            organization_id: 'org_1', topic: 'collab.mention', channel: 'email', locale: 'en', is_active: true,
+        const row: NotificationTemplateRow = {
             subject: '{{ actorName }} mentioned you', body: '<p><b>{{ actorName }}</b></p>', format: 'html',
         };
-        const engine = {
-            async findOne(object: string, query: any) {
-                assertEngineFindOnePredicate(object, query);
-                const w = query?.where ?? {};
-                return object === 'sys_notification_template'
-                    && w.organization_id === row.organization_id && w.topic === row.topic
-                    && w.channel === row.channel && w.locale === row.locale
-                    ? row
-                    : null;
-            },
-        } as unknown as IDataEngine;
+        // The stored row, handed straight to the channel: the store's own
+        // organization-keyed read is pinned in template-renderer.test.ts, and
+        // this pin is about what the channel sends once the row is in hand.
+        class StoredRow extends NotificationTemplateStore {
+            override async load(): Promise<NotificationTemplateRow | null> {
+                return row;
+            }
+        }
         const sent: any[] = [];
         const email = { async send(input: any) { sent.push(input); return { id: 'email_1' }; } };
         const channel = createEmailChannel({
             getEmail: () => email,
-            getData: () => engine,
-            store: new NotificationTemplateStore({ getData: () => engine }),
+            getData: () => undefined,
+            store: new StoredRow({ getData: () => undefined }),
         });
         const delivery: Delivery = {
             channel: 'email',
