@@ -2,6 +2,7 @@
 '@objectstack/plugin-auth': minor
 '@objectstack/spec': patch
 '@objectstack/cli': patch
+'@objectstack/service-datasource': patch
 ---
 
 fix(plugin-auth)!: lift the better-auth family from 1.7.3 to 1.7.12 for the security fixes published since
@@ -31,4 +32,5 @@ Clause-②: no (narrowing)
 - **New route:** `POST /api/v1/auth/oauth2/client/rotate-keys` (`private_key_jwt` key rotation) is now published, and refused with `403 access_denied` because this package does not enable client key rotation.
 - **Unchanged:** the package's exports and configuration; sign-up, sign-in and session cookies (`HttpOnly; SameSite=Lax; Path=/`, no `Secure` on plain HTTP); the active organization stamped on a new session; implicit account linking and its unlink records; single-use reservations (a replayed DPoP proof or client assertion is still refused); and where sessions and verification values are stored with or without a host `secondaryStorage`.
 - **`@objectstack/spec` and `@objectstack/cli` (patch, text only, not breaking):** the TSDoc on the organization schema's optional `updatedAt` now records that its better-auth measurement still holds on 1.7.12, and the `os migrate account-issuer` description no longer names a better-auth version. No schema, type, flag or behaviour changes in either package.
+- **`@objectstack/service-datasource` (patch, text only, not breaking):** the `resolveSqliteDriver` docs now describe the error better-sqlite3 13 actually throws for an addon that was never built: its loader's `require()` of the absent `build/Release/better_sqlite3.node`, which Node answers with `MODULE_NOT_FOUND`. The docs used to name a helper package's message that 13.x no longer produces. Development still steps down to wasm SQLite on that error, as before. No code changes.
 - **What to do as an operator:** tell users that a Magic Link, social, SSO or account-linking sign-in begun before the upgrade must be started again after it. Check each OIDC SSO provider's configured issuer against its discovery document and set it to the exact `issuer` string the document publishes. An OAuth client that branched on `401` for a PKCE failure should branch on `400 invalid_grant`. A browser client that read every non-`200` `/get-session` answer as "signed out" should treat a `500` as "try again".
