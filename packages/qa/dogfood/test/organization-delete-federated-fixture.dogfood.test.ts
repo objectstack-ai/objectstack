@@ -250,9 +250,14 @@ describe('[#21910] an organization delete with the showcase federated fixture pr
     const loneId = String(lone.id);
     const [admin] = await findRows(ql, 'sys_user', { email: 'admin@objectos.ai' }, 1);
     await ql.insert('sys_member', { user_id: String(admin?.id), organization_id: loneId, role: 'owner' }, { context: SYSTEM_CTX });
+    // Active, so better-auth's handler would write first to the session
+    // (clearing it) if the request reached it: the write recorded below.
+    const active = await stack.apiAs(token, 'POST', '/auth/organization/set-active', { organizationId: loneId });
+    expect(active.status, await active.clone().text()).toBe(200);
 
     const attempted: string[] = [];
     const RECORDER = 'dogfood.24948.lookup-fails';
+    ql.registerHook('beforeUpdate', async () => { attempted.push('sys_session'); }, { object: 'sys_session', packageId: RECORDER });
     // `count` runs the middleware chain only (no hook), and a middleware has
     // no unregister, so this one is switched by a flag.
     lookupFails = true;
@@ -275,6 +280,8 @@ describe('[#21910] an organization delete with the showcase federated fixture pr
     }
 
     expect(res.status, await res.clone().text()).toBeGreaterThanOrEqual(400);
+    // better-auth's handler never ran: not even its first write, the session's
+    // active organization, was attempted.
     expect(attempted).toEqual([]);
     expect(await findRows(ql, 'sys_organization', { id: loneId }, 1)).toHaveLength(1);
     expect(await findRows(ql, 'sys_member', { organization_id: loneId }, 5)).toHaveLength(1);
