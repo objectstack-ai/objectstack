@@ -1389,9 +1389,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "クライアントタイプ",
         options: {
           web: "Web",
-          native: "ネイティブ",
-          useragentbased: "ユーザーエージェントベース",
-          public: "公開"
+          native: "ネイティブ"
         }
       },
       public: {

@@ -1389,9 +1389,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Tipo de cliente",
         options: {
           web: "Web",
-          native: "Nativa",
-          useragentbased: "Basada en agente de usuario",
-          public: "Público"
+          native: "Nativa"
         }
       },
       public: {
