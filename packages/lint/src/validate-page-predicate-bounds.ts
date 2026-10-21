@@ -58,14 +58,17 @@
  * budget by definition, and `validateExpression`'s own `detail` quotes the
  * author's line); the `path` locates it.
  *
- * ## Why a warning
+ * ## Why an error
  *
- * Refusing a page that saves today is a narrowing no ADR-0087 conversion can
- * carry — a predicate cannot be shrunk mechanically — so under the standing
- * ruling for breaking narrowings after the 18.0 GA (「甲」, record 6292005854)
- * the 18.x line ships the loud half only: a `warning` at `os validate`,
- * `os build`, `os lint` and the page publish door's `advisories` channel. The
- * refusal belongs to the next major, which promotes the finding to `error`.
+ * Such a source never gates what it was written to gate, at any door, so the
+ * finding is a refusal: `os validate`, `os build` and `os lint` fail, and the
+ * page publish door answers its structured 422 on the page's next save.
+ * Stored pages keep loading and serving — the gate judges writes, never the
+ * read path. The 18.x line first shipped this as a warning; under the amended
+ * standing ruling for breaking narrowings (「甲」, record 6303865025: a
+ * narrowing no ADR-0087 conversion can carry also ships now, as a BREAKING
+ * minor) the refusal ships in 18.x too. No conversion carries it: a predicate
+ * cannot be shrunk mechanically, so the author's fix is the hint below.
  */
 
 import { validateExpression } from '@objectstack/formula';
@@ -78,7 +81,7 @@ import { recordsOf } from './object-graph.js';
 export const PAGE_PREDICATE_OVER_BUDGET = 'page-predicate-over-budget';
 
 export interface PagePredicateBoundsFinding {
-  severity: 'warning';
+  severity: 'error';
   rule: typeof PAGE_PREDICATE_OVER_BUDGET;
   /** e.g. `page "pipeline_home" · page:tabs`. */
   where: string;
@@ -202,14 +205,13 @@ export function validatePagePredicateBounds(stack: AnyRec): PagePredicateBoundsF
           ? `the \`${verdict.limit}\` budget (platform limit ${verdict.limitValue})`
           : "one of the platform's CEL parse budgets";
         findings.push({
-          severity: 'warning',
+          severity: 'error',
           rule: PAGE_PREDICATE_OVER_BUDGET,
           where: `page "${pageName}" · ${type}`,
           path: `${path}.properties${slot.rel}`,
           message:
             `\`${slot.key}\` is valid CEL that exceeds ${bound}, so it does not parse anywhere on the ` +
-            'platform: it faults on every evaluation and never gates what it was written to gate. ' +
-            'A future major release refuses it.',
+            'platform: it faults on every evaluation and never gates what it was written to gate.',
           hint:
             "Make the expression smaller: collapse an `||` chain into one `in ['a', 'b', …]` test, or " +
             'precompute the heavy part into a formula or roll-up field on the object and test that one field',

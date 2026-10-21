@@ -2045,7 +2045,7 @@
       "title": "Marketplace console honesty: nav entries live and die with their capability, the disabled state renders the configuration conclusion (never a red 'failed to load') for every viewer ahead of the admin guard, Installed Apps drives the real same-origin lifecycle, and an enabled runtime turns a non-admin away with access-denied",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2067,15 +2067,15 @@
         "boot B (OS_CLOUD_URL=off), as admin in Setup: confirm the group_apps nav carries Installed Apps (nav_marketplace_installed — the entry rides MARKETPLACE_INSTALLED_UI_BUNDLE, registered by the install-local plugin that IS mounted) and does NOT carry Browse Marketplace (nav_marketplace_browse rides the browse proxy, which is not mounted) — the marketplace-ui.ts ownership rule: 'the entry lives and dies with the capability → no dead page'",
         "boot B: navigate directly to /apps/setup/system/marketplace — the page renders the MarketplaceDisabled card (data-testid marketplace-disabled): muted informational styling, a hint addressed to the operator naming the action, a Back-home button. Screenshot",
         "boot B: open the Installed Apps page — the installed CRM entry renders with its manifest identity; open that package's Details page, where reseed and purge live in the 'More install options' menu (objectui#11627 — they are not on the Installed Apps list itself), drive both and capture the same-origin POSTs to /api/v1/marketplace/install-local/:manifestId/{reseed,purge}-sample-data on the wire",
-        "boot A (default), as admin: the group_apps nav now carries BOTH Browse Marketplace and Installed Apps plus Cloud Connection (nav_cloud_connection); open the browse page — if the control plane is reachable the catalog renders; if not, record blocked(environment) for the catalog leg only (the page mounting and asking is this kernel's part)",
+        "boot A (default), as admin: the group_apps nav now carries BOTH Browse Marketplace and Installed Apps, and the group_integrations nav carries Cloud Connection (nav_cloud_connection — it moved out of group_apps; a boot holding OS_CLOUD_API_KEY is platform-managed and carries no such entry at all); open the browse page — if the control plane is reachable the catalog renders; if not, record blocked(environment) for the catalog leg only (the page mounting and asking is this kernel's part)",
         "as the plain member on boot A (marketplace enabled): navigate directly to /apps/setup/system/marketplace — once the admin verdict resolves (MarketplaceResolving holds only until then) the page renders MarketplaceAccessDenied, never an indefinite spinner and never the destructive card; then open a package URL (…/system/marketplace/:packageId) and confirm the package page issues no package request for the member. On boot B the same URLs render the MarketplaceDisabled card for the member too: objectui#5557 moved the disabled return AHEAD of the !isAdmin guard, because 'there is no marketplace here' is true of every viewer",
         "on boot B reload the disabled page several times: confirm no transient red 'Failed to load' card paints before the disabled card settles (the objectui#5533/#5557 resolving-state work — MarketplaceResolving covers the gap)"
       ],
       "acceptance": [
         {
-          "clause": "nav ownership: on the offline boot, Installed Apps is present and Browse Marketplace is ABSENT from Setup's group_apps; on the cloud boot both are present (plus Cloud Connection) — each entry registered by the plugin that owns its capability, so no nav entry ever points at a dead page",
+          "clause": "nav ownership: on the offline boot, Installed Apps is present and Browse Marketplace is ABSENT from Setup's group_apps; on the cloud boot both are present (plus Cloud Connection, in group_integrations) — each entry registered by the plugin that owns its capability, so no nav entry ever points at a dead page",
           "oracle": "api",
-          "verify": "GET /api/v1/meta/app?id=setup on each boot and diff the group_apps items (nav_marketplace_browse / nav_marketplace_installed / nav_cloud_connection presence per boot); confirm the rendered sidebar matches",
+          "verify": "GET /api/v1/meta/app?id=setup on each boot and diff the group_apps items (nav_marketplace_browse / nav_marketplace_installed presence per boot) and the group_integrations items (nav_cloud_connection presence per boot); confirm the rendered sidebar matches",
           "evidence": "the two nav payloads + sidebar screenshots"
         },
         {
@@ -2147,6 +2147,12 @@
           "date": "2026-10-16",
           "change": "steps[2] and acceptance[2] (clause, verify) re-pointed (checklist-accuracy finding of QA run #23939, wave #23878). Reseed and purge are not on the Installed Apps list: they are in the package Details page's 'More install options' menu (objectui#11627), which is where #23939 drove them. The Installed Apps note #23939 saw as stale was objectui#12684; the console pin since moved that note into the Uninstall tooltip (objectui#12610). Not loosened: both POSTs must still leave the page same-origin and answer 2xx",
           "ref": "#24036"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-21",
+          "change": "steps[3], acceptance[0].clause and acceptance[0].verify re-pointed: Cloud Connection (nav_cloud_connection) moved from group_apps to group_integrations, and a runtime holding the environment service key (OS_CLOUD_API_KEY) is platform-managed and registers neither the entry nor its page (ruling 甲 on #25097). The marketplace entries' ownership rule this item judges is unchanged.",
+          "ref": "#25097"
         }
       ]
     },

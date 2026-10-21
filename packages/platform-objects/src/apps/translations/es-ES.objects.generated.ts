@@ -1389,9 +1389,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Tipo de cliente",
         options: {
           web: "Web",
-          native: "Nativa",
-          useragentbased: "Basada en agente de usuario",
-          public: "Público"
+          native: "Nativa"
         }
       },
       public: {
@@ -3247,13 +3245,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Código"
       },
       lock_state: {
-        label: "Estado de bloqueo",
-        options: {
-          none: "Ninguno",
-          nooverlay: "Sin superposición",
-          nodelete: "Sin eliminación",
-          full: "Bloqueo total"
-        }
+        label: "Estado de bloqueo"
       },
       lock_overridden: {
         label: "Bloqueo anulado"

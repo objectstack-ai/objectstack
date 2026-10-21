@@ -127,7 +127,7 @@ describe('#24491 — the page door gives the build\'s visibility-predicate verdi
       'validateComponentTypes',
       'validatePrintPageBlocks',
       ...FAMILY,
-      // #24953 — the props-bag CEL slots' bounds warning, after the family.
+      // #24953 / #25002 — the props-bag CEL slots' bounds refusal, after the family.
       'validatePagePredicateBounds',
     ]);
   });

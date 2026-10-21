@@ -39,9 +39,10 @@
  *
  *   - **The addon cannot load — steps down.** An ABI mismatch (Node's
  *     `ERR_DLOPEN_FAILED`, a `NODE_MODULE_VERSION` message), an addon that was
- *     never built (`bindings`' "Could not locate the bindings file", which has
- *     no code), or a missing `better-sqlite3` package. Today's path,
- *     unchanged.
+ *     never built (better-sqlite3 13's loader `require()`s the absent
+ *     `build/Release/better_sqlite3.node`, and Node answers
+ *     `MODULE_NOT_FOUND`), or a missing `better-sqlite3` package. Today's
+ *     path, unchanged.
  *   - **The database FILE cannot be opened or created, or is not a database —
  *     re-thrown, as in production.** A path under a regular file, a parent
  *     directory the driver cannot make, a permission refusal, a directory where
@@ -164,8 +165,9 @@ function isEphemeralFilename(filename: string): boolean {
  * An addon that cannot load never carries any of these. It surfaces at the
  * probe's `SELECT 1`, whose failure `SqlDriver.execute()` hands back as
  * `DATABASE_ERROR`, with the load error as its `cause`: Node's
- * `ERR_DLOPEN_FAILED`, `MODULE_NOT_FOUND`, or no code at all (`bindings`'
- * "Could not locate the bindings file"). A missing `better-sqlite3` package
+ * `ERR_DLOPEN_FAILED`, or `MODULE_NOT_FOUND` (an addon that was never built:
+ * better-sqlite3 13's loader `require()`s the absent
+ * `build/Release/better_sqlite3.node`). A missing `better-sqlite3` package
  * fails at construction with knex's install hint, which has no code. None of
  * these matches.
  *

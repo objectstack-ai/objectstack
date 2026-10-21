@@ -6,7 +6,8 @@
  * The import invites an email row by asking better-auth for a password reset,
  * and better-auth runs `sendResetPassword` through `runInBackgroundOrAwait`,
  * which catches and logs whatever the send throws and still answers
- * `{ status: true }` (installed 1.7.3, `dist/context/create-context.mjs`). So a
+ * `{ status: true }` (better-auth 1.7.12, `dist/context/create-context.mjs`,
+ * re-measured 2026-10-21 for #25096). So a
  * throw inside the send can never reach the import. `sendResetPassword` now
  * settles a delivery receipt the import's own request carries
  * (`account-invitation-marker.ts`), and the import reads it after the request

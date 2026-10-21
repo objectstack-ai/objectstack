@@ -1389,9 +1389,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "客户端类型",
         options: {
           web: "Web 应用",
-          native: "原生应用",
-          useragentbased: "基于用户代理",
-          public: "公开"
+          native: "原生应用"
         }
       },
       public: {
@@ -3247,13 +3245,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "代码"
       },
       lock_state: {
-        label: "锁定状态",
-        options: {
-          none: "无",
-          nooverlay: "禁止叠加",
-          nodelete: "禁止删除",
-          full: "完全锁定"
-        }
+        label: "锁定状态"
       },
       lock_overridden: {
         label: "锁定已被覆盖"

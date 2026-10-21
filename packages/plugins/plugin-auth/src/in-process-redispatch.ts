@@ -27,7 +27,8 @@
  * renewing — there is no cookie to fall behind.
  *
  * better-auth reads the flag from the query on both kinds of re-dispatch
- * (1.7.3, measured by `in-process-session-renewal.pin.test.ts`): the
+ * (1.7.12, re-measured 2026-10-21 for #25096 by
+ * `in-process-session-renewal.pin.test.ts`): the
  * `/get-session` route declares it (`getSessionQuerySchema`, coerced), and
  * `getSessionFromCtx` — which `sessionMiddleware` and this plugin's own
  * before-hooks call — spreads the route's `ctx.query` into the read it makes,

@@ -18,12 +18,12 @@
  * `secondaryStorage` — see `auth-manager.ts`'s `deleteUser` note), and
  * `internalAdapter.createSession` is `await`-ed to completion — including the
  * database write — before the sign-in/sign-up ENDPOINT returns
- * `{ token, user }` at all (`better-auth@1.7.3`
- * `dist/db/internal-adapter.mjs:247-319`). So by the time this repo's global
+ * `{ token, user }` at all (`better-auth@1.7.12`, re-read 2026-10-21 for #25096,
+ * `dist/db/internal-adapter.mjs:259-332`). So by the time this repo's global
  * `after` hook runs (`ctx.context.returned` already holds the endpoint's
  * answer), the row the token names is not merely creatABLE — it is already
  * committed. Reading it back is exactly what `/get-session` already does
- * (`internalAdapter.findSession`, `dist/db/internal-adapter.mjs:321-358`), so
+ * (`internalAdapter.findSession`, `dist/db/internal-adapter.mjs:333-370`), so
  * this produces the SAME shape `data.session` already carries on that route
  * (`auth-get-session-envelope.test.ts`), not a second declaration of it.
  *
