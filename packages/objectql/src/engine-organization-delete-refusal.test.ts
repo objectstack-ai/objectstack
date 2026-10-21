@@ -146,6 +146,14 @@ const SESSION = {
   },
 };
 
+/** An append-only ledger (the audit bucket): its rows outlive the organization they name. */
+const LEDGER = {
+  name: 'activity_like',
+  label: 'Activity',
+  managedBy: 'append-only' as const,
+  fields: { summary: { name: 'summary', label: 'Summary', type: 'text' as const } },
+};
+
 async function makeEngine(objects: any[]) {
   const engine = new ObjectQL({ logger: { debug() {}, info() {}, warn() {}, error() {} } } as any);
   const store = makeDriver();
@@ -230,6 +238,42 @@ describe('[#24948] deleting an organization that rows still name in their tenant
 
     expect(await deleteOrg(engine)).toBeNull();
     expect(store.rows('sys_organization').map((r) => r.id)).toEqual([OTHER_ORG]);
+  });
+});
+
+describe('[#24948] an append-only ledger neither refuses the delete nor is cleared by it (seat decision 6305179819)', () => {
+  it('deletes an organization only a ledger still names, and keeps the ledger rows naming it', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT, LEDGER]);
+    store.seed('activity_like', { id: 'l1', summary: 'organization created', organization_id: ORG_ID });
+    store.seed('activity_like', { id: 'l2', summary: 'team created', organization_id: ORG_ID });
+
+    expect(await deleteOrg(engine)).toBeNull();
+
+    expect(store.rows('sys_organization').map((r) => r.id)).toEqual([OTHER_ORG]);
+    // Kept, and still naming the deleted organization: never NULL, never deleted.
+    expect(store.rows('activity_like').map((r) => [r.id, r.organization_id])).toEqual([
+      ['l1', ORG_ID],
+      ['l2', ORG_ID],
+    ]);
+    expect(store.writes.filter((w) => w.includes('activity_like'))).toEqual([]);
+  });
+
+  it('CONTROL: beside a ledger, a record still refuses, and only the record is named', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT, LEDGER]);
+    store.seed('activity_like', { id: 'l1', organization_id: ORG_ID });
+    store.seed('acct', { id: 'a1', organization_id: ORG_ID });
+
+    const err = await deleteOrg(engine);
+
+    expect(err?.code).toBe('DELETE_RESTRICTED');
+    expect(err?.dependents).toEqual([{ object: 'acct', count: 1 }]);
+    expect(store.writes).toEqual([]);
+  });
+
+  it('organizationOwnedRowCounts never counts a ledger', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT, LEDGER]);
+    store.seed('activity_like', { id: 'l1', organization_id: ORG_ID });
+    expect(await engine.organizationOwnedRowCounts(ORG_ID)).toEqual([]);
   });
 });
 

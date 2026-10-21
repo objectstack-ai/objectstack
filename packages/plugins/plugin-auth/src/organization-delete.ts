@@ -25,7 +25,10 @@
  * 1. **Refused while the organization owns records.** {@link
  *    organizationDeleteRefusal} counts, per table, the rows that name the
  *    organization in their tenant column, leaving out the organization's own
- *    auth structure. Any count above zero refuses with 409
+ *    auth structure and every append-only ledger (`managedBy: 'append-only'`:
+ *    `sys_activity`, `sys_email` and their siblings), whose rows are history,
+ *    are kept, and go on naming the deleted organization (seat decision
+ *    6305179819; the engine reads the same set). Any count above zero refuses with 409
  *    `DELETE_RESTRICTED` and `dependents: [{ object, count }]`: counts, never a
  *    row value. It runs in `hooks.before`, ahead of the vendor's handler, and
  *    only for a caller the vendor itself would admit (a member holding the

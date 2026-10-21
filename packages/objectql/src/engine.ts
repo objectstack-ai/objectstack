@@ -19992,8 +19992,29 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#24948] Is `child` an append-only ledger, whose rows outlive the
+   * organization they name? Read from the declaration the object already
+   * carries, `managedBy: 'append-only'` (the audit bucket: `sys_activity`,
+   * `sys_audit_log`, `sys_email` and their siblings), never from a list of
+   * names.
+   *
+   * Such a row is history, not a record an administrator manages: it ages out
+   * on its own retention, or is the delivery log of something that already
+   * happened. The organization delete itself writes `sys_activity` rows, so a
+   * ledger that counted would refuse every organization delete, the empty ones
+   * included. Neither refusal counts a ledger. Its rows are kept, and so is
+   * their tenant column: it goes on naming the deleted organization, never
+   * NULL (ADR-0131 D1) and never deleted (ADR-0131 §8), and under tenant
+   * scoping the rows read as no organization's (seat decision 6305179819).
+   */
+  private static isAppendOnlyLedger(child: ServiceObject): boolean {
+    return (child as { managedBy?: unknown })?.managedBy === 'append-only';
+  }
+
+  /**
    * [#24948] The engine half of organization delete: refuse while any row
-   * outside the cascade set still names the organization in its tenant column.
+   * outside the cascade set still names the organization in its tenant column,
+   * an append-only ledger's excepted ({@link isAppendOnlyLedger}).
    *
    * Runs before the walk touches the first relation, and reads every tenant
    * relation before it throws, so the one refusal names every table that holds
@@ -20020,7 +20041,8 @@ export class ObjectQL implements IObjectQLEngine {
     for (const child of objects) {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
-      if (!childName || !fields) continue;
+      // An append-only ledger's rows outlive the organization: not counted, kept as they are.
+      if (!childName || !fields || ObjectQL.isAppendOnlyLedger(child)) continue;
       for (const [fieldName, fdef] of Object.entries(fields)) {
         const behavior = this.cascadeRelationBehavior(ORGANIZATION_OBJECT, child, fieldName, fdef);
         if (!this.isTenantColumnSetNull(ORGANIZATION_OBJECT, child, fieldName, behavior)) continue;
@@ -20074,7 +20096,8 @@ export class ObjectQL implements IObjectQLEngine {
    * row.
    *
    * `exclude` names the objects the caller removes as part of the delete
-   * itself.
+   * itself. An append-only ledger is never counted ({@link isAppendOnlyLedger}),
+   * the same set the engine's own refusal leaves out.
    */
   async organizationOwnedRowCounts(
     organizationId: string,
@@ -20085,7 +20108,7 @@ export class ObjectQL implements IObjectQLEngine {
     for (const child of this._registry.getAllObjects()) {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
-      if (!childName || !fields || exclude.has(childName)) continue;
+      if (!childName || !fields || exclude.has(childName) || ObjectQL.isAppendOnlyLedger(child)) continue;
       const tenantField = resolveTenantFieldName(child);
       if (!tenantField || !fields[tenantField]) continue;
       const fdef = fields[tenantField];

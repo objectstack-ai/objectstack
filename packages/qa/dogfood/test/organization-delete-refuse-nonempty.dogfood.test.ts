@@ -25,7 +25,11 @@
  *   included.
  * - (b) An empty organization (only its own auth structure: members,
  *   invitations, the default team and its members, the organization-admin
- *   grant) deletes fully, and nothing is left naming it.
+ *   grant) deletes fully, and nothing is left naming it but the append-only
+ *   `sys_activity` ledger, whose rows are kept (seat decision 6305179819). The
+ *   boot composes the audit plugin, as `os serve` does, so that ledger is live.
+ * - An organization holding a business unit is refused like one holding any
+ *   other record.
  * - (d) The engine refuses the same delete on its own, whatever path reaches
  *   it: the tenant column is never cleared.
  * - (e) The Default Organization keeps the last-administrator guard's answer:
@@ -37,6 +41,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { AuditPlugin } from '@objectstack/plugin-audit';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 
@@ -54,7 +59,7 @@ describe('[#24948] organization delete: refused while it owns records, whole whe
   let ownerToken: string;
   let adminToken: string;
   let ownerId: string;
-  const org = { empty: '', full: '' };
+  const org = { empty: '', full: '', unit: '' };
 
   /** Every count the delete may touch, for one organization. */
   const snapshot = async (organizationId: string) => {
@@ -99,7 +104,10 @@ describe('[#24948] organization delete: refused while it owns records, whole whe
     stack.apiAs(token, 'POST', '/auth/organization/delete', { organizationId });
 
   beforeAll(async () => {
-    stack = await bootShowcase({ multiTenant: 'posture-only' });
+    // The audit plugin is composed, as `os serve` composes it: its
+    // `sys_activity` ledger names every organization from its creation on,
+    // and the delete writes rows to it itself.
+    stack = await bootShowcase({ multiTenant: 'posture-only', extraPlugins: [new AuditPlugin()] });
     ql = await stack.kernel.getServiceAsync<any>('objectql');
     ownerToken = await stack.signUp('org-delete.owner@verify.test', PASSWORD, 'Org delete owner');
     adminToken = await stack.signUp('org-delete.admin@verify.test', PASSWORD, 'Org delete admin');
@@ -110,6 +118,9 @@ describe('[#24948] organization delete: refused while it owns records, whole whe
     // member and the owner's organization-admin grant.
     org.empty = await createOrg('Org Delete Empty', 'org-delete-empty');
     org.full = await createOrg('Org Delete Full', 'org-delete-full');
+    org.unit = await createOrg('Org Delete Unit', 'org-delete-unit');
+    // A business unit is a record its administrator created, not structure.
+    await ql.insert('sys_business_unit', { name: 'Field Ops', kind: 'department', organization_id: org.unit }, { context: SYSTEM_CTX });
     for (const id of [org.empty, org.full]) {
       await invite(id, `invitee.${id}@verify.test`);
       // An `admin` member: refused by the vendor, so never told a count.
@@ -177,10 +188,19 @@ describe('[#24948] organization delete: refused while it owns records, whole whe
 
   it('(b) an empty organization deletes fully: its auth structure goes with it, and nothing is orphaned', async () => {
     const orphansBefore = await orphans();
+    const ledgerBefore = await findRows(ql, 'sys_activity', { organization_id: org.empty });
+    expect(ledgerBefore.length, 'PREMISE: the activity ledger names the organization from its creation').toBeGreaterThan(0);
 
     const res = await deleteOrg(ownerToken, org.empty);
 
     expect(res.status, await res.clone().text()).toBe(200);
+    // [seat decision 6305179819] The append-only ledger refused nothing, and
+    // its rows are kept, still naming the deleted organization: none deleted,
+    // none cleared (the delete adds rows of its own).
+    const ledgerAfter = await findRows(ql, 'sys_activity', { organization_id: org.empty });
+    const keptIds = new Set(ledgerAfter.map((r) => r.id));
+    expect(ledgerBefore.every((r) => keptIds.has(r.id)), 'every ledger row is kept').toBe(true);
+    expect(await findRows(ql, 'sys_activity', { organization_id: null })).toEqual([]);
     expect(await snapshot(org.empty)).toEqual({
       sys_organization: 0,
       sys_member: 0,
@@ -192,6 +212,20 @@ describe('[#24948] organization delete: refused while it owns records, whole whe
       showcase_preference: 0,
     });
     expect(await orphans()).toEqual(orphansBefore);
+  });
+
+  it('an organization holding only a business unit is refused 409 with its count, and nothing changes', async () => {
+    const before = await snapshot(org.unit);
+    const units = await findRows(ql, 'sys_business_unit', { organization_id: org.unit });
+
+    const res = await deleteOrg(ownerToken, org.unit);
+
+    expect(res.status, await res.clone().text()).toBe(409);
+    const body = (await res.json()) as { code?: string; dependents?: unknown };
+    expect(body.code).toBe('DELETE_RESTRICTED');
+    expect(body.dependents).toEqual([{ object: 'sys_business_unit', count: 1 }]);
+    expect(await snapshot(org.unit)).toEqual(before);
+    expect(await findRows(ql, 'sys_business_unit', { organization_id: org.unit })).toEqual(units);
   });
 
   it('(d) the engine refuses the same delete on its own, and clears no tenant column', async () => {
