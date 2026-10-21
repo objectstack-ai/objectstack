@@ -280,16 +280,16 @@ describe('#25030 a database with no issuer column answers as it did', () => {
     const file = newDbFile();
     await arrangeAccountTable(file, { issuerColumn: false, rows: COLLIDING });
     const applyEngine = await applyComposition(file);
-    const before = await probeAccountIdentityCollisions(engineFindRead(applyEngine));
     const viaApply = await probeAccountIdentityCollisions(applyEngine as never);
     const viaAccountIssuer = await probeAccountIdentityCollisions((await accountIssuerComposition(file)) as never);
-
-    expect(viaApply).toEqual(before);
-    expect(viaAccountIssuer).toEqual(before);
     expect(viaApply).toMatchObject({ scanned: 3, keys: 2, crossUser: 1, ok: false });
     expect(viaApply.collisions).toEqual([
       expect.objectContaining({ providerId: 'okta', accountId: 'sub-7', issuers: ['(none)'], rowIds: ['acc_alice', 'acc_bob'] }),
     ]);
+
+    const before = await probeAccountIdentityCollisions(engineFindRead(applyEngine));
+    expect(viaApply).toEqual(before);
+    expect(viaAccountIssuer).toEqual(before);
   });
 });
 
