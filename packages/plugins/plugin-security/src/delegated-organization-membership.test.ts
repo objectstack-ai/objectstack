@@ -175,6 +175,10 @@ async function boot(posture: Posture) {
   }
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    // `kernel:ready` never fires here: without a `hook` the plugin starts its
+    // platform bootstrap un-awaited, and a short case then destroys the engine
+    // under that bootstrap's reads. Nothing this file pins reads what it sets.
+    hook: () => undefined,
     registerService: vi.fn(),
     getService: (name: string) => {
       if (!(name in services)) throw new Error(`service not registered: ${name}`);
