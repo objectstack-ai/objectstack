@@ -50,6 +50,7 @@ import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { ApprovalsTranslations } from './translations/index.js';
 import { approvalMessages, enMessages } from './translations/messages.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 const asUser = (userId: string) => ({ userId, positions: [], permissions: [] }) as any;
@@ -124,6 +125,9 @@ async function bootEngine(users: Array<Record<string, unknown>>): Promise<Object
     engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
   }
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   for (const u of users) await engine.insert('sys_user', u, { context: SYSTEM } as any);
   return engine;
 }
@@ -207,8 +211,10 @@ describe('#24978 — every approval notification carries its text as catalog key
     await open('rejected', [{ type: 'user', value: 'u_alice' }]);
     await svc.decide(ids.rejected, { decision: 'reject', actorId: 'u_alice', comment: 'Not this quarter.' }, asUser('u_alice'));
 
+    // The delegation belongs to the deals' organization, where the request it
+    // substitutes in is opened.
     await engine.insert('sys_approval_delegation', {
-      id: 'dlg_1', delegator_id: 'u_ooo', delegate_id: 'u_bob', reason: 'leave',
+      id: 'dlg_1', delegator_id: 'u_ooo', delegate_id: 'u_bob', reason: 'leave', organization_id: ORG,
       valid_from: '2026-09-01T00:00:00.000Z', valid_until: '2026-12-31T00:00:00.000Z',
       created_at: '2026-09-01T00:00:00.000Z', updated_at: '2026-09-01T00:00:00.000Z',
     }, { context: SYSTEM } as any);

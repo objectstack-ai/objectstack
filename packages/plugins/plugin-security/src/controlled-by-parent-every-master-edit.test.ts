@@ -44,6 +44,7 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const ORG = 'org_cbp_eme';
@@ -152,6 +153,10 @@ async function boot() {
     ],
   } as never);
   await engine.syncSchemas();
+  // The organization-less permission-set catalogue row below exists only on a
+  // store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
+  // NULL): that table is this store's.
+  await relaxTenantColumns(engine as never, ['sys_permission_set']);
 
   const e = engine as unknown as {
     insert: (o: string, row: Record<string, unknown>, opts: never) => Promise<unknown>;

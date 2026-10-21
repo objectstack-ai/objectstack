@@ -47,6 +47,7 @@ import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objec
 import { SysPosition, SysPermissionSet, SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const OWN_ORG = 'org_a';
 const SISTER_ORG = 'org_c';
@@ -339,6 +340,10 @@ describe('[#24822 · ADR-0090 D10] a delegated insert by a crossing operator is 
       ],
     } as never);
     await engine.syncSchemas();
+    // The organization-less permission-set catalogue row below exists only on a
+    // store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
+    // NULL): that table is this store's.
+    await relaxTenantColumns(engine as never, ['sys_permission_set']);
     engines.push(engine);
 
     for (const id of [ORG_A, ORG_C, ORG_D]) {
