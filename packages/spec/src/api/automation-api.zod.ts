@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { BaseResponseSchema } from './contract.zod';
+import { ErrorCode } from './error-code-ledger.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../automation/execution.zod';
 
@@ -283,6 +284,68 @@ const screenSpecShape = () => z.object({
   ),
 });
 
+// ==========================================
+// 7a. Inner refusal (AutomationResult.innerRefusal, and every door's 400 FLOW_FAILED details)
+// ==========================================
+
+/**
+ * The refusal a flow node's write met INSIDE the run — the structured answer
+ * the data layer gave the node, carried to the caller beside the run's own
+ * failure instead of being flattened into it (ruling B′ on #24914, the
+ * maintainer's 「同意」, decision batch #379 item 5; filed as #24996).
+ *
+ * ## The problem it solves
+ *
+ * A record save that the platform refuses (a duplicate, a validation rule, a
+ * permission) reaches a record form as a structured envelope — `code`,
+ * `message`, and the producer-marked `userMessage` — and the form renders it
+ * by one rule. The same refusal met by a flow's write node reached the caller
+ * as one string: the node's catch kept the message, the engine prefixed the
+ * node id, and each flow door served that string as the `FLOW_FAILED`
+ * `message`. Nothing structured survived, so a flow runner had nothing to
+ * render but developer prose naming node ids and object API names. This
+ * member is the declared carrier for what was dropped.
+ *
+ * ## Semantics
+ *
+ *  - **`code` takes the WIRE spelling** — the ADR-0112 vocabulary member a
+ *    record save of the same write answers in `error.code`, not the driver's
+ *    or the engine's internal spelling: a unique refusal is
+ *    `UNIQUE_VIOLATION`, the spelling every route answers since the
+ *    2026-09-03 unique-violation ruling. It is the same closed set
+ *    `ApiErrorSchema` (`api/contract.zod.ts`)'s `code` parses against, so an unregistered
+ *    spelling fails parse here exactly as it does there.
+ *  - **`message` is the inner refusal's own diagnostic text**, verbatim —
+ *    without the node and operation prefixes the run's failure text adds.
+ *  - **It is a NESTED member, never a replacement.** The run's failure keeps
+ *    its own channels unchanged: `AutomationResult.error` and the door's
+ *    `error.message` keep their wording byte for byte, and the door's
+ *    `error.code` stays `FLOW_FAILED`. `AutomationResult.code` stays the
+ *    closed union the #9378 ruling settled — the inner code rides HERE, so no
+ *    new ledger code is minted for it.
+ *  - **Present only when a refusal was met.** Absent on every other failure
+ *    (a script that threw, an unreachable connector) and on every success:
+ *    a producer never synthesises one from the message text.
+ *
+ * The producer-marked end-user text of the same refusal does not ride here:
+ * it is `userMessage` — on `AutomationResult`, and at the top level of the
+ * door's error envelope, where `ApiErrorSchema` (`api/contract.zod.ts`) already declares it.
+ */
+export const FlowInnerRefusalSchema = lazySchema(() => z.object({
+  code: ErrorCode.describe(
+    'The inner refusal\'s code in its WIRE spelling - the ADR-0112 member a record save of '
+    + 'the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set '
+    + '`ApiErrorSchema.code` parses against',
+  ),
+  message: z.string().describe(
+    'The inner refusal\'s own diagnostic text, verbatim, without the node and operation '
+    + 'prefixes the run\'s failure text adds',
+  ),
+}));
+export type FlowInnerRefusal = z.input<typeof FlowInnerRefusalSchema>;
+/** Post-parse shape of {@link FlowInnerRefusal} — defaults applied, transforms run (ADR-0122). */
+export type FlowInnerRefusalParsed = z.infer<typeof FlowInnerRefusalSchema>;
+
 /**
  * Response after triggering a flow execution.
  *
@@ -361,6 +424,16 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
     ),
     errorMessage: z.string().optional().describe(
       'Friendly terminal message copied from the flow definition on failure',
+    ),
+    userMessage: z.string().optional().describe(
+      'Producer-marked user-facing refusal text, verbatim, of the refusal a node met inside '
+      + 'the run - present exactly when that refusal\'s producer opted in at throw time '
+      + '(`ApiErrorSchema.userMessage` semantics). Never replaces `error`',
+    ),
+    innerRefusal: FlowInnerRefusalSchema.optional().describe(
+      'The refusal a node\'s write met inside the run, structured: `{ code, message }`, `code` '
+      + 'in its wire spelling. Set on a failed run only when a refusal was met; `code` above '
+      + 'and `error` are unchanged by it',
     ),
     flowLabel: z.string().optional().describe(
       'The flow definition\'s authored `label`, copied verbatim so a runner can name the flow '
@@ -464,6 +537,69 @@ export const ResumeFailureDetailsSchema = lazySchema(() => z.object({
 export type ResumeFailureDetails = z.input<typeof ResumeFailureDetailsSchema>;
 /** Post-parse shape of {@link ResumeFailureDetails} — defaults applied, transforms run (ADR-0122). */
 export type ResumeFailureDetailsParsed = z.infer<typeof ResumeFailureDetailsSchema>;
+
+// ==========================================
+// 7c. Flow failure details (every door's 400 FLOW_FAILED: trigger, resume, /actions, endpoint)
+// ==========================================
+
+/**
+ * The `error.details` every flow door answers on its `400 FLOW_FAILED` arm —
+ * declared ONCE, so the four doors (`POST /api/v1/automation/:name/trigger`,
+ * the resume route, `/actions` and a flow-backed endpoint) emit one shape
+ * rather than four that drift (ruling B′ on #24914, decision batch #379
+ * item 5; filed as #24996).
+ *
+ * ## The keys, and the ceiling this relaxes
+ *
+ * The run's two artefacts — the flow author's `errorMessage` and the
+ * per-node `summary` — rode these details first at the trigger door, and the
+ * #9585 ruling (2026-08-19, Option B) brought `/actions` level with it under a
+ * ceiling: that door carries EXACTLY those two keys into `error.details`, and
+ * no new schema key. Ruling B′ relaxes that ceiling by one key and names it:
+ * {@link FlowInnerRefusalSchema}, the refusal a node's write met inside the
+ * run, as `innerRefusal`. The ceiling is therefore these three keys, at every
+ * door; a fourth is a contract widening neither ruling covers.
+ *
+ * The resume door's verdict (`runId` / `status` / `repairable`,
+ * {@link ResumeFailureDetailsSchema}) rides beside these keys in the same
+ * object on that door alone — a client parses the one `details` object with
+ * both schemas. Like that schema this one is a plain (non-strict) object for
+ * exactly that reason: each describes its own members and leaves the other's
+ * alone.
+ *
+ * ## What it does not move
+ *
+ *  - `error.message` keeps each door's wording byte for byte, and
+ *    `error.code` stays `FLOW_FAILED`; the inner refusal is NESTED here, never
+ *    promoted over either.
+ *  - The producer-marked end-user text of the inner refusal is NOT a details
+ *    key: it is the envelope's own top-level `userMessage`
+ *    (`ApiErrorSchema` in `api/contract.zod.ts`), the channel a record save's
+ *    refusal already uses, so a client reads one channel for both.
+ *  - Every key is optional and present only when the run produced it — an
+ *    author who wrote no `errorMessage`, an engine that measured no
+ *    `summary`, a failure that met no refusal: absent means absent, never an
+ *    invented empty. A never-dispatched refusal (`FLOW_DISABLED`,
+ *    `FLOW_NO_START_NODE`, `FLOW_INPUT_SCHEMA_INVALID`) carries none of them.
+ */
+export const FlowFailureDetailsSchema = lazySchema(() => z.object({
+  errorMessage: z.string().optional().describe(
+    'The flow author\'s own failure text (`flow.errorMessage`), copied verbatim from '
+    + '`AutomationResult.errorMessage`; absent when the author wrote none',
+  ),
+  summary: FlowRunSummarySchema.optional().describe(
+    'The run\'s per-node accounting (`AutomationResult.summary`) - which node failed; '
+    + 'absent when the engine measured none',
+  ),
+  innerRefusal: FlowInnerRefusalSchema.optional().describe(
+    'The refusal a node\'s write met inside the run (`AutomationResult.innerRefusal`): '
+    + '`{ code, message }`, `code` in its wire spelling (e.g. `UNIQUE_VIOLATION`). Absent '
+    + 'when the failure met no refusal',
+  ),
+}));
+export type FlowFailureDetails = z.input<typeof FlowFailureDetailsSchema>;
+/** Post-parse shape of {@link FlowFailureDetails} — defaults applied, transforms run (ADR-0122). */
+export type FlowFailureDetailsParsed = z.infer<typeof FlowFailureDetailsSchema>;
 
 // ==========================================
 // 8. Toggle Flow (POST /api/v1/automation/:name/toggle)
