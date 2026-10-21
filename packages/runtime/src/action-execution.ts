@@ -1046,8 +1046,13 @@ const FLOW_ACTION_REFUSAL_BRAND = Symbol.for('objectstack.runtime.flowActionRefu
  * The run artefacts a failed flow dispatch carries beside its status and code
  * — EXACTLY the two fields the trigger door ships in `error.details` on its
  * own `400 FLOW_FAILED` arm (`domains/automation.ts`), same names, same
- * source (`AutomationResult.errorMessage` / `.summary`). A third key here is
- * a contract widening the #9585 ruling does not cover.
+ * source (`AutomationResult.errorMessage` / `.summary`). The #9585 ruling
+ * capped this at those two keys; ruling B′ on #24914 (decision batch #379
+ * item 5) relaxes the cap by exactly one, `innerRefusal`, and the spec now
+ * declares the three-key set once for every flow door as
+ * `FlowFailureDetailsSchema` (`@objectstack/spec/api`). Carrying that third
+ * key is #24914's emission half and is not done here yet; any key beyond the
+ * three is a contract widening neither ruling covers.
  */
 export interface FlowActionRunDetails {
     /** The flow AUTHOR's own failure text (`flow.errorMessage`). */

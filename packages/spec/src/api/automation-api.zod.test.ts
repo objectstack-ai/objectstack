@@ -556,7 +556,8 @@ describe('FlowFailureDetailsSchema — one inner-refusal shape across the four F
   const USER_MESSAGE = 'An account with this name already exists.';
   const SUMMARY = {
     selected: 0, acted: 0, skipped: 0, unmeasured: 0,
-    nodes: [{ nodeId: 'create_account', nodeType: 'create_record', status: 'failure', runs: 1, failures: 1 }],
+    nodes: [{ nodeId: 'create_account', nodeType: 'create_record', status: 'failure', runs: 1, failures: 1, skipped: 0 }],
+    gates: [],
   };
   // The four doors, each with its OWN message wording (unchanged by the
   // ruling) and, on the resume door alone, the engine's verdict beside the
