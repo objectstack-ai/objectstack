@@ -2340,7 +2340,7 @@
           "revision": 1,
           "date": "2026-10-21",
           "change": "initial, for #25054: no checklist clause drove the fresh-install order #24827 fixed (QA run #24838, 18.0 sweep round 4; confirmed in round 16 of wave anchor #24579). A new item, because no existing item's scope covers a fresh install's first `os serve` after `os migrate apply`: platform-core.v18-boot-refusals scopes a 17.x-shaped database (its revision 6 says the order is not added there), cli.organization-ownership-ceremony the upgrade of a database 17.x or an 18.0 pre-release created, cli.migrate-plan-apply-json an apply on a database a prior `os dev` boot already synced (its fixtures.requires[0]), platform-core.boot-health and cli.dev-boot-contract the `os dev` boot, which creates the tables and writes the birth marker itself, and cli.scaffold-first-run the published scaffold booted by `os start --artifact`, with no `os migrate apply` in it. First evidence, driven live at base 688052e147 (the showcase in this PR's worktree, its own file DB, OS_PORT 41873): `os migrate apply --yes` exited 0, printed '✓ Created/extended 107 table(s)' and '[organization-ownership] a datastore created from empty: birth marker written (shape generation 1, platform 18.0.0).'; the marker row read verified_at 2026-10-21T06:54:23.840Z, applied_at null, blocking 0, advisory 0, details birth shapeGeneration 1, platformVersion 18.0.0; the first `os serve -p 41873` printed '✓ Server is ready' with Mode production, /api/v1/health and /api/v1/ready answered 200 (health 10 s after the start), the three refusal greps counted 0, and the row read back unchanged after the boot",
-          "ref": "#PENDING-25054"
+          "ref": "#25075"
         }
       ]
     }

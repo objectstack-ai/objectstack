@@ -2049,7 +2049,7 @@
           "revision": 7,
           "date": "2026-10-21",
           "change": "fixtures.knownGaps[1] removed and acceptance[5].clause's closing 'Red until #24782 lands' dropped, as knownGaps[1] said to do once #24782's fix merged: PR #25051 (72518d20f5), named by the domain:engine pointer 6308955528 on seat post #6023. Verification re-run of acceptance[5] at base 688052e147, steps[6] on the canonical own-port boot (`objectstack dev --ui --seed-admin -p 41874 -d file:SCRATCH/data.db`, OS_PORT exported): the qa_vr_probe write {title: \"abc\"} answered 201 and the re-read found its one row; exactly one server-log line names qa_unevaluable_warn, \"Validation rule 'qa_unevaluable_warn' (warning): the rule could not be evaluated (runtime: int() type error: cannot convert to int) — write proceeded: the rule is advisory, so it was not applied to this write\", and it carries neither 'write rejected' nor 'fails closed'. Control: the qa_vr_probe_err write answered 400 VALIDATION_FAILED, fields[0].constraint {rule: qa_unevaluable_err, reason: unevaluable}, its re-read found no row, and its log lines say the write was rejected. No other clause changed",
-          "ref": "#PENDING-25054"
+          "ref": "#25075"
         }
       ]
     },
