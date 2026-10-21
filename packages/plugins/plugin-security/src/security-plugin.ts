@@ -8743,9 +8743,10 @@ export class SecurityPlugin implements Plugin {
     context: any,
     /**
      * [ADR-0055 amendment] The `controlled_by_parent` objects already being resolved on
-     * this branch of the walk, outermost first. Empty at every real call site
-     * — the four are the CRUD middleware (caller and D10 delegator) and
-     * `getReadFilter` — and grown by one on each recursive hop.
+     * this branch of the walk, outermost first. Empty at five of the six call
+     * sites — the CRUD middleware (caller and D10 delegator), `getReadFilter`
+     * and `computeDelegatedReadFilter` (principal and delegator) — and grown by
+     * one at the sixth, the recursive hop.
      */
     ancestors: readonly string[] = [],
   ): Promise<Record<string, unknown> | null> {
