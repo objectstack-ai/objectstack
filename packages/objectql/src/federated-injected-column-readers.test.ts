@@ -151,6 +151,14 @@ const READERS: Record<string, Row> = {
     via: 'cascadeRelationBehavior',
     why: "counts a tenant column only once the cascade's own relation reading admits it, so a federated object's unprovisioned injected column is never counted",
   },
+  'engine.ts#keepsOrganizationReference :: organization_id': {
+    disposition: 'not-a-read',
+    why: "names the attribution column a tenancy-disabled object keeps through an organization delete; the walk reads its relation through cascadeRelationBehavior; it reads no row",
+  },
+  'engine.ts#keepsOrganizationReference :: resolveTenantFieldName()': {
+    disposition: 'not-a-read',
+    why: 'asks whether the object has a tenant column at all, on a relation the walk already read; it reads no row',
+  },
   'engine.ts#isTenantColumnSetNull :: resolveTenantFieldName()': {
     disposition: 'not-a-read',
     why: "compares a field name with the object's tenant column, on a relation its callers already read through cascadeRelationBehavior; it reads no row",

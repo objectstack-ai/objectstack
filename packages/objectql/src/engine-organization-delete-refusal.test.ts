@@ -27,6 +27,7 @@ const OTHER_ORG = 'org_other';
 function makeDriver() {
   const tables: Record<string, Row[]> = {};
   const writes: string[] = [];
+  const reads: string[] = [];
   const missing = new Set<string>();
   const rowsOf = (o: string): Row[] => (tables[o] ??= []);
   const matches = (row: Row, where: any): boolean => {
@@ -45,6 +46,7 @@ function makeDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async syncSchema() {},
     async find(o: string, ast: any) {
+      reads.push(o);
       if (missing.has(o)) throw missingTable(o);
       const hit = rowsOf(o).filter((r) => matches(r, ast?.where));
       return typeof ast?.limit === 'number' ? hit.slice(0, ast.limit) : hit;
@@ -54,7 +56,8 @@ function makeDriver() {
       return first ?? null;
     },
     async count(o: string, ast: any) {
-      return (await this.find(o, { where: ast?.where })).length;
+      if (missing.has(o)) throw missingTable(o);
+      return rowsOf(o).filter((r) => matches(r, ast?.where)).length;
     },
     async create(o: string, data: Row) {
       const row = { ...data, id: String(data.id) };
@@ -86,6 +89,7 @@ function makeDriver() {
   return {
     driver,
     writes,
+    reads,
     missing,
     rows: (o: string) => rowsOf(o).map((r) => ({ ...r })),
     seed: (o: string, row: Row) => void rowsOf(o).push(row),
@@ -152,6 +156,29 @@ const LEDGER = {
   label: 'Activity',
   managedBy: 'append-only' as const,
   fields: { summary: { name: 'summary', label: 'Summary', type: 'text' as const } },
+};
+
+/** An append-only ledger whose organization lookup is its ATTRIBUTION, not a tenant column (`sys_audit_log.tenant_id`). */
+const AUDIT_LIKE = {
+  name: 'audit_like',
+  label: 'Audit',
+  managedBy: 'append-only' as const,
+  systemFields: { tenant: false },
+  fields: {
+    action: { name: 'action', label: 'Action', type: 'text' as const },
+    tenant_id: { name: 'tenant_id', label: 'Tenant', type: 'lookup' as const, reference: 'sys_organization', readonly: true },
+  },
+};
+
+/** Tenancy disabled, with an `organization_id` attribution column (`sys_approval_request`). */
+const REQUEST_LIKE = {
+  name: 'request_like',
+  label: 'Request',
+  tenancy: { enabled: false },
+  fields: {
+    subject: { name: 'subject', label: 'Subject', type: 'text' as const },
+    organization_id: { name: 'organization_id', label: 'Organization', type: 'lookup' as const, reference: 'sys_organization' },
+  },
 };
 
 async function makeEngine(objects: any[]) {
@@ -274,6 +301,68 @@ describe('[#24948] an append-only ledger neither refuses the delete nor is clear
     const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT, LEDGER]);
     store.seed('activity_like', { id: 'l1', organization_id: ORG_ID });
     expect(await engine.organizationOwnedRowCounts(ORG_ID)).toEqual([]);
+  });
+});
+
+describe('[#24948] references the delete keeps as they are (seat decision 6305996369)', () => {
+  it("an append-only ledger's non-tenant lookup keeps naming the deleted organization", async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, AUDIT_LIKE]);
+    store.seed('audit_like', { id: 'au1', action: 'org.created', tenant_id: ORG_ID });
+
+    expect(await deleteOrg(engine)).toBeNull();
+
+    expect(store.rows('audit_like')).toEqual([{ id: 'au1', action: 'org.created', tenant_id: ORG_ID }]);
+    expect(store.writes.filter((w) => w.includes('audit_like'))).toEqual([]);
+  });
+
+  it('an organization_id on a tenancy-disabled object is kept, naming it, and is not counted', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, REQUEST_LIKE, SESSION]);
+    store.seed('request_like', { id: 'r1', subject: 'Expense', organization_id: ORG_ID });
+    store.seed('session_like', { id: 's1', active_organization_id: ORG_ID });
+    expect(await engine.organizationOwnedRowCounts(ORG_ID)).toEqual([]);
+
+    expect(await deleteOrg(engine)).toBeNull();
+
+    expect(store.rows('request_like')[0].organization_id).toBe(ORG_ID);
+    // CONTROL: a pointer is still cleared.
+    expect(store.rows('session_like')[0].active_organization_id).toBeNull();
+  });
+});
+
+describe('[#24948] the predicate path is refused for an organization', () => {
+  it('a multi delete of sys_organization is refused, by id only, before anything is written', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT]);
+    const err: any = await engine
+      .delete('sys_organization', { where: { name: 'Doomed Org' }, multi: true } as any)
+      .then(() => null, (e: any) => e);
+
+    expect(err?.code).toBe('DELETE_RESTRICTED');
+    expect(err?.status).toBe(409);
+    expect(err?.message).toContain('by id');
+    expect(store.writes).toEqual([]);
+    expect(store.rows('sys_organization').map((r) => r.id)).toEqual([ORG_ID, OTHER_ORG]);
+  });
+
+  it('CONTROL: a multi delete of another object is not refused by this rule', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT]);
+    store.seed('acct', { id: 'a1', name: 'gone', organization_id: OTHER_ORG });
+    const err = await engine
+      .delete('acct', { where: { name: 'gone' }, multi: true } as any)
+      .then(() => null, (e: any) => e);
+    expect(err?.code).not.toBe('DELETE_RESTRICTED');
+  });
+});
+
+describe('[#24948] the engine refusal counts, it does not read rows', () => {
+  it('refusing an organization that owns rows issues no row read of the owning table', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT]);
+    for (let i = 0; i < 5; i++) store.seed('acct', { id: `a${i}`, organization_id: ORG_ID });
+    store.reads.length = 0;
+
+    const err = await deleteOrg(engine);
+
+    expect(err?.dependents).toEqual([{ object: 'acct', count: 5 }]);
+    expect(store.reads.filter((o) => o === 'acct')).toEqual([]);
   });
 });
 

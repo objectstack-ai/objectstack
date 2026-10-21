@@ -746,6 +746,28 @@ function writeFailureLogMeta(
 }
 
 /**
+ * [#24948] The refusal of a predicate (`multi`) delete of `sys_organization`:
+ * the standard `DELETE_RESTRICTED`, saying to delete by id. Only the by-id
+ * delete runs the referential pass that refuses an organization still owning
+ * rows and keeps every row's reference to it.
+ */
+function organizationPredicateDeleteRefusal(): Error {
+  const err: any = new Error(
+    'Organizations are deleted one at a time, by id: a delete matching organizations by a filter is refused. ' +
+      'Delete each organization by its id.',
+  );
+  err.developerMessage =
+    `A predicate delete of ${ORGANIZATION_OBJECT} is refused: it runs no referential pass, so it could neither ` +
+    'refuse an organization that still owns rows nor keep the rows naming it. Delete each organization by id ' +
+    `(engine.delete('${ORGANIZATION_OBJECT}', { where: { id } })).`;
+  err.code = 'DELETE_RESTRICTED';
+  err.status = 409;
+  err.httpStatus = 409;
+  err.object = ORGANIZATION_OBJECT;
+  return err;
+}
+
+/**
  * Is this failure the security layer refusing the CALLER's read — the
  * ADR-0112 `PERMISSION_DENIED` code — rather than the read failing?
  *
@@ -19612,6 +19634,10 @@ export class ObjectQL implements IObjectQLEngine {
         // found no row outside the cascade set: there is nothing to clear, and
         // clearing is not on offer for this column anyway.
         if (this.isTenantColumnSetNull(object, child, fieldName, resolvedBehavior)) continue;
+        // [#24948] A reference the organization's delete keeps as it is,
+        // naming the deleted organization: never cleared, never counted.
+        if (object === ORGANIZATION_OBJECT && resolvedBehavior === 'set_null' &&
+            ObjectQL.keepsOrganizationReference(child, fieldName)) continue;
         let behavior: string = resolvedBehavior;
 
         // [#9689] (maintainer ruling 2026-08-19, Q3 = B): the judgement the
@@ -20012,6 +20038,82 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#24948] Does an organization delete keep `child.fieldName`, a `set_null`
+   * lookup into `sys_organization` that is not `child`'s tenant column, as it
+   * is? Two kinds of reference, and only these (seat decisions 6305179819 and
+   * 6305996369):
+   *
+   *   - every such lookup on an append-only ledger ({@link isAppendOnlyLedger}):
+   *     `sys_audit_log.tenant_id` is the audit log's attribution, not its tenant
+   *     column, and history outlives what it audits;
+   *   - an attribution column named `organization_id` on an object whose
+   *     tenancy is disabled (`resolveTenantFieldName` answers null), such as
+   *     `sys_approval_request`: an engine-owned row an administrator cannot
+   *     delete, so it is neither counted nor cleared.
+   *
+   * Everything else keeps its `set_null`: a pointer such as a session's or an
+   * API key's `active_organization_id`, or a parent-organization lookup, is
+   * cleared exactly as before.
+   */
+  private static keepsOrganizationReference(child: ServiceObject, fieldName: string): boolean {
+    if (ObjectQL.isAppendOnlyLedger(child)) return true;
+    return fieldName === SystemFieldName.ORGANIZATION_ID && resolveTenantFieldName(child) === null;
+  }
+
+  /**
+   * [#24948] How many rows of `childName` name the organization `id` through
+   * `fieldName`, leaving out the rows the cascade itself deletes. A system
+   * `count`, never a row read, for every table the cascade deletes no row of,
+   * which is every table but the cascading children of the organization (none
+   * on the platform). Only for such a table are the rows probed
+   * ({@link probeReferencingRows}), so the cascade's own members can be left
+   * out exactly. A table never provisioned holds none.
+   */
+  private async countReferencingRowsOutside(
+    childName: string,
+    fieldName: string,
+    fdef: any,
+    id: string | number,
+    cascadeSet: CascadeDeleteSet,
+    context: ExecutionContext | undefined,
+  ): Promise<{ where: Record<string, unknown>; count: number }> {
+    const where = this.referenceProbeFilter(fieldName, fdef, id);
+    if ((cascadeSet.members.get(childName)?.size ?? 0) > 0) {
+      const probed = await this.probeReferencingRows(childName, fieldName, fdef, id, where, context);
+      return { where, count: probed.filter((row) => !cascadeSetHas(cascadeSet.members, childName, row?.id)).length };
+    }
+    try {
+      return { where, count: await this.count(childName, { where, context: ObjectQL.referenceCheckContext(context) }) };
+    } catch (error) {
+      if (isMissingTableError(error, childName)) return { where, count: 0 };
+      throw error;
+    }
+  }
+
+  /**
+   * [#24948] May the refusal disclose `count` to the caller? Only when the
+   * caller's own identity counts the same rows: the elevated count read rows
+   * the caller may not see. The system is always told.
+   */
+  private async organizationCountIsDisclosable(
+    childName: string,
+    where: Record<string, unknown>,
+    count: number,
+    context: ExecutionContext | undefined,
+  ): Promise<boolean> {
+    if (context?.isSystem === true) return true;
+    try {
+      return (await this.count(childName, { where, context })) === count;
+    } catch (error) {
+      // The refusal stands either way; only the number is withheld.
+      this.logger.warn('[cascade-delete] disclosure count failed; the refusal names the table without a count', {
+        object: childName, error: (error as Error)?.message ?? String(error),
+      });
+      return false;
+    }
+  }
+
+  /**
    * [#24948] The engine half of organization delete: refuse while any row
    * outside the cascade set still names the organization in its tenant column,
    * an append-only ledger's excepted ({@link isAppendOnlyLedger}).
@@ -20024,11 +20126,12 @@ export class ObjectQL implements IObjectQLEngine {
    * no row is orphaned to NULL, on a store born with a nullable tenant column
    * or anywhere else.
    *
-   * The probe is the walk's own ({@link probeReferencingRows}: system
-   * identity, its elevation filed first, a missing table read as no rows). A
-   * count reaches the refusal only when the caller could see every row it
-   * counts ({@link dependentCountIsDisclosable}); otherwise the table is named
-   * without one. The wire code is the standard catalog's `DELETE_RESTRICTED`,
+   * Each relation is COUNTED ({@link countReferencingRowsOutside}: system
+   * identity, its elevation filed first, a missing table read as no rows),
+   * never read row by row, so a large organization costs one `count` per
+   * table. A count reaches the refusal only when the caller's own identity
+   * counts the same ({@link organizationCountIsDisclosable}); otherwise the
+   * table is named without one. The wire code is the standard catalog's `DELETE_RESTRICTED`,
    * because that is the condition: a delete refused while dependents exist.
    */
   private async refuseOrganizationDeleteWhileOwned(
@@ -20046,15 +20149,11 @@ export class ObjectQL implements IObjectQLEngine {
       for (const [fieldName, fdef] of Object.entries(fields)) {
         const behavior = this.cascadeRelationBehavior(ORGANIZATION_OBJECT, child, fieldName, fdef);
         if (!this.isTenantColumnSetNull(ORGANIZATION_OBJECT, child, fieldName, behavior)) continue;
-        const probeWhere = this.referenceProbeFilter(fieldName, fdef, id);
         this.fileReferenceCheckElevation(cascadeSet, ORGANIZATION_OBJECT, id, childName, fieldName, context);
-        const probed = await this.probeReferencingRows(childName, fieldName, fdef, id, probeWhere, context);
-        const outside = probed.filter((row) => !cascadeSetHas(cascadeSet.members, childName, row?.id));
-        if (outside.length === 0) continue;
-        const disclose = await this.dependentCountIsDisclosable(
-          childName, probeWhere, probed.map((row: any) => String(row?.id)), fieldName, false, id, context,
-        );
-        owned.push(disclose ? { object: childName, count: outside.length } : { object: childName });
+        const { where, count } = await this.countReferencingRowsOutside(childName, fieldName, fdef, id, cascadeSet, context);
+        if (count === 0) continue;
+        const disclose = await this.organizationCountIsDisclosable(childName, where, count, context);
+        owned.push(disclose ? { object: childName, count } : { object: childName });
       }
     }
     if (owned.length === 0) return;
@@ -20378,6 +20477,14 @@ export class ObjectQL implements IObjectQLEngine {
       // update twin says why; for every pre-#11009 input the two spellings
       // agree.
       const isPredicatePath = !isByIdDelete && dispatch.kind === 'multi' && typeof driver.deleteMany === 'function';
+      // [#24948] An organization is deleted by id or not at all. The predicate
+      // arm runs no referential cascade, so it could neither refuse an
+      // organization that still owns rows nor keep a single row from naming a
+      // deleted one; any delete not by id is refused here, whatever the driver
+      // offers, before any hook or write.
+      if (!isByIdDelete && object === ORGANIZATION_OBJECT) {
+        throw organizationPredicateDeleteRefusal();
+      }
       if (!isByIdDelete && !isPredicatePath) {
         // [#4550] The `reject` verdict of resolveEngineDeleteDispatch. It used
         // to be re-asked after the before phase because a hook could still bind
