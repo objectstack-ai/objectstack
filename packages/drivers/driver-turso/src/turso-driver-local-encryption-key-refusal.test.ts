@@ -33,6 +33,13 @@
  * contract's issue byte for byte; that equality is pinned in
  * `spec/turso-config-constructor-parity.test.ts`, not here.
  *
+ * [#25020, patch round 1] The same key beside a `file:` url or `:memory:` under
+ * a forced `mode: 'remote'` is refused too, in its own words: that mode skipped
+ * every local-engine refusal, and `connect()` handed the local url to the
+ * libSQL client the driver builds, which is handed no key. Its controls: the
+ * same shape with no key or an empty one, and a `libsql://` url with a key,
+ * still construct.
+ *
  * The replica pins need no sync server: the refusal fires at construction,
  * before any client is built. A replica with the key and a REACHABLE sync
  * server was not measured — no libSQL sync server runs in this package's test
@@ -89,6 +96,17 @@ const REPLICA_FIRST_SENTENCE =
   'codec (the sync client shares that one file, and a file it encrypted could not be opened by that ' +
   'engine): nothing would encrypt the file, so it would be written in plaintext that any SQLite reader ' +
   'opens without the key — the turso driver refuses this configuration when it starts.';
+
+const REMOTE_FILE_FIRST_SENTENCE =
+  "`encryptionKey` asks for this datasource's database file to be encrypted, but `url` is a local `file:` " +
+  "url, and `mode: 'remote'` runs every read and write of that file through the libSQL client this driver " +
+  'builds, which is handed no key: nothing would encrypt the file, so it would be written in plaintext that ' +
+  'any SQLite reader opens without the key — the turso driver refuses this configuration when it starts.';
+const REMOTE_MEMORY_FIRST_SENTENCE =
+  "`encryptionKey` asks for this datasource's database to be encrypted, but `url` names an in-memory " +
+  "database, and `mode: 'remote'` runs every read and write of it through the libSQL client this driver " +
+  'builds, which is handed no key: there is no file for the key to encrypt, so it would change nothing — ' +
+  'the turso driver refuses this configuration when it starts.';
 
 /** A client that never touches a network: the replica arm takes it instead of building one. */
 const offlineClient = () => ({ close() {}, sync: async () => ({}) }) as unknown as TursoDriverConfig['client'];
@@ -156,6 +174,55 @@ describe('an embedded replica: `encryptionKey` is refused at construction', () =
     expect(refusal!.message).not.toContain('private-dir');
     expect(refusal!.message).not.toContain('private-host');
     expect(refusal!.message).not.toContain('private-key-value');
+  });
+});
+
+// [#25020, patch round 1] A forced `mode: 'remote'` answers first in `detectMode`, so this shape
+// skipped every local-engine refusal, and `connect()` handed the local url to the libSQL client the
+// driver builds, with no key. Judged by where the database lives, not by the mode.
+describe("a local url under a forced mode: 'remote': `encryptionKey` is refused at construction", () => {
+  it.each<[string, (path: string) => TursoDriverConfig]>([
+    ['a file: url', (path) => ({ url: `file:${path}`, mode: 'remote', encryptionKey: KEY })],
+    ['an uppercase FILE: url', (path) => ({ url: `FILE:${path}`, mode: 'remote', encryptionKey: KEY })],
+    ['a file: url beside timeout', (path) => ({ url: `file:${path}`, mode: 'remote', timeout: 5000, encryptionKey: KEY })],
+  ])('%s: VALIDATION_ERROR / 400, naming the forced remote mode, and no file is opened', (_name, configOf) => {
+    const path = nextPath();
+    const refusal = refusalOf(() => new TursoDriver(configOf(path)));
+
+    expect(refusal).not.toBeNull();
+    expect(refusal!.code).toBe('VALIDATION_ERROR');
+    expect(refusal!.status).toBe(400);
+    expect(refusal!.message.startsWith(REMOTE_FILE_FIRST_SENTENCE), refusal!.message).toBe(true);
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it.each([':memory:', 'file::memory:'])('%s: refused in the in-memory words', (url) => {
+    const refusal = refusalOf(() => new TursoDriver({ url, mode: 'remote', encryptionKey: KEY }));
+
+    expect(refusal?.code).toBe('VALIDATION_ERROR');
+    expect(refusal?.status).toBe(400);
+    expect(refusal!.message.startsWith(REMOTE_MEMORY_FIRST_SENTENCE), refusal!.message).toBe(true);
+  });
+
+  it('createTursoDriver() refuses the same config, and the message names no url and no key', () => {
+    const refusal = refusalOf(
+      () => createTursoDriver({ url: `file:${join(DIR, 'private-dir.db')}`, mode: 'remote', encryptionKey: 'private-key-value' }),
+    );
+
+    expect(refusal?.code).toBe('VALIDATION_ERROR');
+    expect(refusal?.status).toBe(400);
+    expect(refusal!.message).not.toContain('private-dir');
+    expect(refusal!.message).not.toContain('private-key-value');
+  });
+
+  it.each<[string, TursoDriverConfig]>([
+    ['the same file: url with no key', { url: `file:${join(DIR, 'remote-no-key.db')}`, mode: 'remote' }],
+    ['the same file: url with an empty key (unset)', { url: `file:${join(DIR, 'remote-empty-key.db')}`, mode: 'remote', encryptionKey: '' }],
+    [':memory: with no key', { url: ':memory:', mode: 'remote' }],
+    ['a libsql:// url with a key (a remote server\'s storage: not judged by this card)', { url: 'libsql://db.example.invalid', encryptionKey: KEY }],
+    ["a libsql:// url with a key under a forced mode: 'remote'", { url: 'libsql://db.example.invalid', mode: 'remote', encryptionKey: KEY }],
+  ])('CONTROL: %s still constructs, in remote mode', (_name, config) => {
+    expect(new TursoDriver(config).transportMode).toBe('remote');
   });
 });
 

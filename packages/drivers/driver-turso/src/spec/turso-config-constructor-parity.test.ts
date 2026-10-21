@@ -37,7 +37,14 @@
  *    non-empty `encryptionKey` in a local or replica mode, refused on
  *    `encryptionKey` — the fifth copy, one text per mode. Those rows used to
  *    be accepted everywhere, and the driver wrote the file in plaintext: its
- *    local engine (better-sqlite3) has no encryption codec.
+ *    local engine (better-sqlite3) has no encryption codec. And for the same
+ *    key beside a `file:` url or `:memory:` under a forced `mode: 'remote'`,
+ *    whose libSQL client is handed no key — the sixth copy, one text for a
+ *    file and one for an in-memory database. The mirror declares no `mode`, so
+ *    it judges those configs as the local database their url selects (it
+ *    refuses them on `encryptionKey` in the local arm's words); its own copy
+ *    of the remote arm is unreachable through it and kept byte-identical, as
+ *    its other forced-mode branches are.
  *
  * ⚠️ The mirror declares no `mode`, so zod strips an authored one before its
  * refinement runs: rows that FORCE a mode are judged by the constructor and the
@@ -121,6 +128,12 @@ const ROWS: Row[] = [
   // [#25020] An empty key is unset, as the loaders read it.
   { name: 'an empty encryptionKey (unset) beside a file: url', config: { url: FILE, encryptionKey: '' }, ctor: 'accept' },
   { name: 'an empty encryptionKey (unset) on a replica', config: { url: FILE, syncUrl: REMOTE, sync: { onConnect: false }, encryptionKey: '' }, ctor: 'accept' },
+  // [#25020, patch round 1] The forced-remote local-url arm's controls: no key, an empty key, and a
+  // remote url with a key — a remote server's storage, which this card does not judge.
+  { name: ":memory: under a forced mode: 'remote'", config: { url: ':memory:', mode: 'remote' }, ctor: 'accept' },
+  { name: "an empty encryptionKey (unset) beside file: under a forced mode: 'remote'", config: { url: FILE, mode: 'remote', encryptionKey: '' }, ctor: 'accept' },
+  { name: 'encryptionKey beside a libsql:// url (remote: not judged by this card)', config: { url: REMOTE, encryptionKey: KEY }, ctor: 'accept' },
+  { name: "encryptionKey beside libsql:// under a forced mode: 'remote' (not judged by this card)", config: { url: REMOTE, mode: 'remote', encryptionKey: KEY }, ctor: 'accept' },
 
   // ── a remote url in a local or replica mode ─────────────────────────────
   { name: 'libsql:// beside syncUrl', config: { url: REMOTE, syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'url' },
@@ -210,6 +223,19 @@ const ROWS: Row[] = [
   { name: 'encryptionKey beside sync with no syncUrl: the sync refusal first', config: { url: FILE, sync: { intervalSeconds: 60 }, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'sync', issues: 2 },
   { name: "encryptionKey under a forced mode: 'replica' with no syncUrl: the mode refusal first", config: { url: FILE, mode: 'replica', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'mode' },
   { name: "encryptionKey + syncUrl under a forced mode: 'local': the mode refusal first", config: { url: FILE, mode: 'local', syncUrl: REMOTE, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'mode' },
+
+  // ── the same key beside a local url under a forced mode: 'remote' (#25020, patch round 1) ──
+  // Judged by where the database lives, not by the mode: `connect()` hands the url to the libSQL
+  // client the driver builds, which is handed no key. The mirror declares no `mode`, so these rows
+  // are judged by the constructor and the spec contract only (see the header).
+  { name: "encryptionKey beside file: under a forced mode: 'remote'", config: { url: FILE, mode: 'remote', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
+  { name: "encryptionKey beside an uppercase FILE: url under a forced mode: 'remote'", config: { url: `FILE:${DIR}/upper-remote-key.db`, mode: 'remote', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
+  { name: "encryptionKey beside file: + timeoutMs under a forced mode: 'remote'", config: { url: FILE, mode: 'remote', timeoutMs: 5000, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
+  { name: "encryptionKey beside :memory: under a forced mode: 'remote'", config: { url: ':memory:', mode: 'remote', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
+  { name: "encryptionKey beside file::memory: under a forced mode: 'remote'", config: { url: 'file::memory:', mode: 'remote', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
+  // ORDER against the forced-remote refusals: the spec contract raises BOTH issues (theirs first); the constructor throws the first.
+  { name: "encryptionKey + syncUrl beside file: under a forced mode: 'remote': the syncUrl refusal first", config: { url: FILE, mode: 'remote', syncUrl: REMOTE, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'syncUrl', issues: 2 },
+  { name: "encryptionKey + sync with no syncUrl beside file: under a forced mode: 'remote': the sync refusal first", config: { url: FILE, mode: 'remote', sync: { onConnect: true }, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'sync', issues: 2 },
 ];
 
 /**
@@ -285,9 +311,11 @@ describe('turso config: the constructor, the spec contract and this mirror agree
     expect(ROWS.filter((r) => r.refusedOn === 'mode' && r.config.mode === 'local').length).toBeGreaterThanOrEqual(8);
     // [#25020] Both modes of the `encryptionKey` refusal, floored apart so the
     // replica half cannot shrink behind the local half.
-    expect(ROWS.filter((r) => r.refusedOn === 'encryptionKey').length).toBeGreaterThanOrEqual(8);
+    expect(ROWS.filter((r) => r.refusedOn === 'encryptionKey').length).toBeGreaterThanOrEqual(13);
     expect(ROWS.filter((r) => r.refusedOn === 'encryptionKey' && (r.config.syncUrl || r.config.mode === 'replica')).length).toBeGreaterThanOrEqual(3);
-    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(31);
+    // [#25020, patch round 1] The forced-remote local-url half, floored on its own.
+    expect(ROWS.filter((r) => r.refusedOn === 'encryptionKey' && r.config.mode === 'remote').length).toBeGreaterThanOrEqual(5);
+    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(38);
     // [#20200] Exactly zero, not a floor: every key the constructor used to
     // build and ignore is refused at construction now (see the header).
     expect(ROWS.filter((r) => r.inert).length).toBe(0);

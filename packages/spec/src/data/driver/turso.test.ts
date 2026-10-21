@@ -579,6 +579,91 @@ describe('TursoConfigSchema refuses what the turso driver refuses', () => {
       const description = TursoConfigSchema.shape.encryptionKey.description ?? '';
       expect(description).not.toMatch(/AES-256/);
       expect(description).toContain('refused for a local or replica datasource');
+      expect(description).toContain('under a forced remote mode');
+    });
+  });
+
+  // #25020, patch round 1 — the same key beside a local url under a FORCED
+  // `mode: 'remote'`. The forced mode skipped every local-engine refusal, and
+  // `connect()` handed the url to the libSQL client the driver builds, which is
+  // handed no key: plaintext all the same. Judged by where the database lives,
+  // not by the mode, in its own words.
+  describe("a non-empty `encryptionKey` beside a `file:` url or `:memory:` under a forced `mode: 'remote'` — refused on `encryptionKey`", () => {
+    const FILE_FIRST_SENTENCE =
+      "`encryptionKey` asks for this datasource's database file to be encrypted, but `url` is a local `file:` "
+      + "url, and `mode: 'remote'` runs every read and write of that file through the libSQL client this driver "
+      + 'builds, which is handed no key: nothing would encrypt the file, so it would be written in plaintext that '
+      + 'any SQLite reader opens without the key — the turso driver refuses this configuration when it starts.';
+    const MEMORY_FIRST_SENTENCE =
+      "`encryptionKey` asks for this datasource's database to be encrypted, but `url` names an in-memory "
+      + "database, and `mode: 'remote'` runs every read and write of it through the libSQL client this driver "
+      + 'builds, which is handed no key: there is no file for the key to encrypt, so it would change nothing — '
+      + 'the turso driver refuses this configuration when it starts.';
+    const KEY = 'test-key-25020';
+
+    it('a `file:` url in any case, behind whitespace, beside `timeoutMs`', () => {
+      for (const config of [
+        { url: 'file:./data/app.db', mode: 'remote', encryptionKey: KEY },
+        { url: 'FILE:./data/app.db', mode: 'remote', encryptionKey: KEY },
+        { url: ' file:./data/app.db', mode: 'remote', encryptionKey: KEY },
+        { url: 'file:./data/app.db', mode: 'remote', timeoutMs: 5000, encryptionKey: KEY },
+      ]) {
+        const { path, message } = refusal(config);
+        expect(path, JSON.stringify(config)).toBe('encryptionKey');
+        expect(message.startsWith(FILE_FIRST_SENTENCE), message).toBe(true);
+        expect(message).toContain('Drop `encryptionKey`, and encrypt the disk or volume the file lives on instead');
+      }
+    });
+
+    it('an in-memory url — `:memory:`, `file::memory:`, a `:memory:?` query — in its own words', () => {
+      for (const url of [':memory:', 'file::memory:', 'FILE::memory:', 'file::memory:?cache=shared']) {
+        const { path, message } = refusal({ url, mode: 'remote', encryptionKey: KEY });
+        expect(path, url).toBe('encryptionKey');
+        expect(message.startsWith(MEMORY_FIRST_SENTENCE), message).toBe(true);
+      }
+    });
+
+    it('never echoes the key or the url', () => {
+      const { message } = refusal({ url: 'file:./private-dir/app.db', mode: 'remote', encryptionKey: 'private-key-value' });
+      expect(message).not.toContain('private-dir');
+      expect(message).not.toContain('private-key-value');
+    });
+
+    it('comes last in the remote arm: a `syncUrl` or a lone `sync` keeps its own refusal, first', () => {
+      for (const [config, first] of [
+        [{ url: 'file:./data/app.db', mode: 'remote', syncUrl: 'libsql://db.turso.io', encryptionKey: KEY }, 'syncUrl'],
+        [{ url: 'file:./data/app.db', mode: 'remote', sync: { onConnect: true }, encryptionKey: KEY }, 'sync'],
+      ] as const) {
+        const result = TursoConfigSchema.safeParse(config);
+        expect(result.success).toBe(false);
+        expect(result.error!.issues.map((i) => i.path.join('.')), JSON.stringify(config)).toEqual([first, 'encryptionKey']);
+      }
+    });
+
+    it('reaches both authoring doors: `DatasourceSchema` (re-pathed under `config`) and `validateDriverConfig`', () => {
+      const config = { url: 'file:./data/app.db', mode: 'remote', encryptionKey: KEY };
+      const datasource = DatasourceSchema.safeParse({ name: 'edge', driver: 'turso', config });
+      expect(datasource.success).toBe(false);
+      const issue = datasource.error!.issues.find((i) => i.path.join('.') === 'config.encryptionKey');
+      expect(issue, JSON.stringify(datasource.error!.issues)).toBeDefined();
+      expect(issue!.message.startsWith(FILE_FIRST_SENTENCE)).toBe(true);
+
+      const verdict = validateDriverConfig('turso', config);
+      expect(verdict.known).toBe(true);
+      expect(verdict.known && verdict.issues.map((i) => i.path.join('.'))).toEqual(['encryptionKey']);
+    });
+
+    it('controls: no key or an empty one, and a remote url with a key (not judged by this card), stay accepted', () => {
+      for (const config of [
+        { url: 'file:./data/app.db', mode: 'remote' },
+        { url: 'file:./data/app.db', mode: 'remote', encryptionKey: '' },
+        { url: ':memory:', mode: 'remote' },
+        { url: 'libsql://db.turso.io', encryptionKey: KEY },
+        { url: 'libsql://db.turso.io', mode: 'remote', encryptionKey: KEY },
+      ]) {
+        const result = TursoConfigSchema.safeParse(config);
+        expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      }
     });
   });
 
