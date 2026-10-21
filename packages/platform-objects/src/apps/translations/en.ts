@@ -130,7 +130,6 @@ export const en: TranslationData = {
         nav_settings_feature_flags: { label: 'Feature Flags' },
         // Notifications (contributed by @objectstack/service-messaging)
         nav_notification_preferences: { label: 'Notification Preferences' },
-        nav_notification_subscriptions: { label: 'Notification Subscriptions' },
         nav_notification_templates: { label: 'Notification Templates' },
 
         // Diagnostics

@@ -17,8 +17,9 @@
  *
  *  - `platform-census-2026-08-31` — the 84 platform objects of the first
  *    #13564 census (59 carrying the column, 25 not), measured at
- *    `00d8f6541b`. Three of them have since left the tree
- *    (`sys_view_definition`, `sys_saved_report`, `sys_report_schedule`); their
+ *    `00d8f6541b`. Four of them have since left the tree
+ *    (`sys_view_definition`, `sys_saved_report`, `sys_report_schedule`,
+ *    `sys_notification_subscription`); their
  *    physical tables can still exist on an upgraded database, so they keep a
  *    row.
  *  - `platform-census-main` — objects the gated census on `main` lists and
@@ -473,6 +474,21 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       'the column, and a connection scoped to no organization was a legitimate row',
   },
 
+  // ── Platform: counted by the first census, retired since, table left in place (fate 4) ──
+  {
+    object: 'sys_notification_subscription',
+    census: P1_ONLY,
+    fate: 'report',
+    citation:
+      'ADR-0087 semantic entry sys-notification-subscription-retired (packages/spec/src/migrations/entries/semantic/' +
+      '18.sys-notification-subscription-retired.ts): the ADR-0030 Layer-3 topic subscription no reader ever expanded ' +
+      'into recipients, retired by maintainer ruling with its table left in place untouched. A physical table left ' +
+      'by an older release is listed, its NULL rows reported, never attributed and never deleted',
+    notNullExempt:
+      'the object is retired and its table is left in place untouched, by ruling: no declaration anchors tenancy on ' +
+      'the column any more, and nothing reads its rows',
+  },
+
   // ── Platform: attribution through a parent anchor (fate 3) ──
   {
     object: 'sys_file',
@@ -503,7 +519,7 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_notification', census: P1, fate: 'attribution', citation: `${D7} (the notification family is recipient-anchored); the source record carries the organization`, anchors: [subject('source_object', 'source_id')] },
   { object: 'sys_notification_delivery', census: P1, fate: 'attribution', citation: `${C7_FATE_3}; the delivery's notification carries the organization`, anchors: [parent('notification_id', 'sys_notification')] },
   { object: 'sys_notification_receipt', census: P1, fate: 'attribution', citation: `${D7} (recipient-anchored); the receipt's notification carries the organization`, anchors: [parent('notification_id', 'sys_notification')] },
-  ...['sys_notification_preference', 'sys_notification_subscription', 'sys_inbox_message'].map(
+  ...['sys_notification_preference', 'sys_inbox_message'].map(
     (object): InventoryEntry => ({ object, census: P1, fate: 'attribution', citation: `${D7} (recipient-anchored); no anchor names the organization; ${D10_SINGLE}`, anchors: [] }),
   ),
   {
