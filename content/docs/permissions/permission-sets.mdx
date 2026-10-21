@@ -187,15 +187,17 @@ sufficient depends on the deployment's
   are one administrator, not two half-matches. Nothing is stored and nothing is
   granted — the answer is recomputed from configuration on every resolution.
   This anchor is read under every posture.
-- **An unscoped `admin_full_access` grant row** — a `sys_user_permission_set`
-  row with `organization_id = NULL`, the original anchor. It confers standing
-  under the `single` posture only. Under the walled postures (`group` /
-  `isolated`) the row is no longer an anchor: the set it names still grants
-  what any held set grants, but it confers no `PLATFORM_ADMIN` standing, and
-  nothing is logged about it per request. If a walled deployment holding such a
-  row ends up with no usable configured administrator, the boot log says it has
-  zero platform administrators, names the account that holds the row, and points
-  at `OS_PLATFORM_OWNER_EMAIL` as the way to restore that account's standing.
+- **The Default Organization's `admin_full_access` grant row** — a
+  `sys_user_permission_set` row owned by the Default Organization, the row the
+  `single` first-user promotion writes. It confers standing under the `single`
+  posture only. An organization-less grant (`organization_id = NULL`, the row an
+  earlier release's promotion wrote, which the ownership ceremony attributes to
+  an organization) anchors nothing, in any posture. Under the walled postures
+  (`group` / `isolated`) no grant row is an anchor: the set it names still
+  grants what any held set grants, but it confers no `PLATFORM_ADMIN` standing,
+  and nothing is logged about it per request. A walled deployment that declares
+  no usable configured administrator is told so at boot: the log says it has
+  zero platform administrators and points at `OS_PLATFORM_OWNER_EMAIL`.
 
 Which anchor a fresh deployment gets depends on its
 [tenancy posture](/docs/deployment/tenancy-modes). Under `single` the first
