@@ -663,8 +663,8 @@ describe('[#24822] an explicit organization_id the wall judges is stored as sent
       expect(outcome.ok, outcome.message).toBe(true);
       expect(dropped).toEqual(READONLY_DROP(INJECTED));
       expect(organizationWarnings(b)).toHaveLength(1);
-      expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
       expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+      expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
     });
 
     it('`single` with a business insert `check`: its seam is installed and does NOT declare the organization judged, so the value is taken', async () => {
@@ -673,12 +673,12 @@ describe('[#24822] an explicit organization_id the wall judges is stored as sent
       const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, MEMBER_CTX);
 
       expect(outcome.ok, outcome.message).toBe(true);
+      expect(await b.table(INJECTED), 'the caller\'s organization is not stored').toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+      expect(dropped).toEqual(READONLY_DROP(INJECTED));
+      expect(organizationWarnings(b)).toHaveLength(1);
       expect(b.seams, 'the business check installs a seam with no wall behind it').toEqual([
         { installed: true, judgesOrganization: undefined },
       ]);
-      expect(dropped).toEqual(READONLY_DROP(INJECTED));
-      expect(organizationWarnings(b)).toHaveLength(1);
-      expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
     });
 
     it('`single` without a wall: an in-process strictReadonlyWrites create naming an organization is still refused, and nothing is stored', async () => {
@@ -696,10 +696,10 @@ describe('[#24822] an explicit organization_id the wall judges is stored as sent
         const { outcome, dropped } = await createReporting(b, INJECTED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, context);
 
         expect(outcome.ok, outcome.message).toBe(true);
-        expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
         expect(dropped).toEqual(READONLY_DROP(INJECTED));
         expect(organizationWarnings(b)).toHaveLength(1);
         expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: OWN_ORG }]);
+        expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
       });
 
       it(`\`${posture}\` without the security plugin: a create naming no organization is stamped, and the stamp is still not reported (#21682)`, async () => {
@@ -721,9 +721,9 @@ describe('[#24822] an explicit organization_id the wall judges is stored as sent
         const { outcome, dropped } = await createReporting(b, PRIVATE, { id: 'r2', name: 'new', organization_id: FOREIGN_ORG }, context);
 
         expect(outcome.ok, outcome.message).toBe(true);
-        expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
         expect(dropped).toEqual(READONLY_DROP(PRIVATE));
         expect(await b.table(PRIVATE)).toEqual([{ id: 'r2', organization_id: OWN_ORG }]);
+        expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
       });
     }
 
@@ -732,14 +732,14 @@ describe('[#24822] an explicit organization_id the wall judges is stored as sent
 
       const outcome = await attempt(() => create(b, PRIVATE, { id: 'r2', name: 'new', organization_id: FOREIGN_ORG }, ADMIN_NO_ORG_CTX));
 
-      expect(b.seams, 'the operator\'s seam is installed (#24821) and judges no organization').toEqual([
-        { installed: true, judgesOrganization: undefined },
-      ]);
       expect(outcome.ok, 'expected the no-active-organization refusal').toBe(false);
       expect(outcome.code).toBe('PERMISSION_DENIED');
       expect(outcome.status).toBe(403);
       expect(outcome.message).toContain('has no active organization');
       expect(await b.table(PRIVATE)).toEqual([]);
+      expect(b.seams, 'the operator\'s seam is installed (#24821) and judges no organization').toEqual([
+        { installed: true, judgesOrganization: undefined },
+      ]);
     });
 
     it('a tenancy-disabled object with an authored read-only organization_id: no wall, so the value is taken and NULL is stored', async () => {
@@ -748,9 +748,9 @@ describe('[#24822] an explicit organization_id the wall judges is stored as sent
       const { outcome, dropped } = await createReporting(b, UNWALLED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, GROUP_CTX);
 
       expect(outcome.ok, outcome.message).toBe(true);
-      expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
       expect(dropped).toEqual(READONLY_DROP(UNWALLED));
       expect(await b.table(UNWALLED)).toEqual([{ id: 'r2', organization_id: null }]);
+      expect(b.seams).toEqual([{ installed: false, judgesOrganization: undefined }]);
     });
 
     it('a system context stores what it sends on the injected column, as before; it meets neither the stamp, the wall nor the strip', async () => {
