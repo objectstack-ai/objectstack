@@ -46,7 +46,6 @@
     "jose": "^6.2.12"
   },
   "devDependencies": {
-    "@objectstack/driver-memory": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/formula": "workspace:*",
     "@objectstack/objectql": "workspace:*",
