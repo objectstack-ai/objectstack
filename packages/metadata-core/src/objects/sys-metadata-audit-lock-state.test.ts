@@ -19,11 +19,12 @@ import { SysMetadataAuditObject } from './sys-metadata-audit.object.js';
 describe('sys_metadata_audit.lock_state (#25013)', () => {
   const field = SysMetadataAuditObject.fields.lock_state as Record<string, unknown>;
 
-  it('is a text column with no option list of its own and no width', () => {
+  it('is a text column with no option list of its own, as wide as the select column was', () => {
     expect(field.type).toBe('text');
     expect(field).not.toHaveProperty('options');
-    // No `maxLength`: an existing `varchar(255)` column reports no width drift.
-    expect(field).not.toHaveProperty('maxLength');
+    // The `varchar(255)` a select column is created as: an existing database
+    // reports no drift (no `maxLength` would read as varchar → text).
+    expect(field.maxLength).toBe(255);
     expect(field.readonly).toBe(true);
   });
 

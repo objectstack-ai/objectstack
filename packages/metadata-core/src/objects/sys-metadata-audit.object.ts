@@ -193,12 +193,16 @@ export const SysMetadataAuditObject = ObjectSchema.create({
      * `Field.select([...])` shorthand used to strip the hyphen, declaring
      * `nooverlay` / `nodelete` — values no row ever held (#25013). Like `code`
      * above, the closed set lives with its writer (`MetadataLockSchema`).
-     * No `maxLength`: existing columns keep their width and report no drift.
+     * `maxLength: 255` is the `varchar(255)` the select column was created
+     * as, so an existing database reports no drift: measured with
+     * `diffManagedTable` on postgres / mysql / sqlite, no `maxLength` reads as a
+     * varchar → text type change and a narrower one as a destructive narrowing.
      */
     lock_state: Field.text({
       label: 'Lock State',
       required: false,
       readonly: true,
+      maxLength: 255,
     }),
 
     /** True when the write succeeded by bypassing a lock (Phase 3). */
