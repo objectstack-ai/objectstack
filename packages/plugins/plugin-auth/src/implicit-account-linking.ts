@@ -42,7 +42,7 @@
  *
  * ## Why the enforcement point is `user.validateUserInfo`
  *
- * Measured against the installed better-auth `1.7.3`
+ * Measured against better-auth `1.7.12` (re-measured 2026-10-21 for #25096)
  * (`dist/oauth2/link-account.mjs`, `handleOAuthUserInfo`):
  *
  *  - The library's own gate refuses an implicit link when
@@ -63,7 +63,8 @@
  *    implicitly (`/callback/:id`, `/sign-in/social` with an id token,
  *    one-tap, oauth-proxy, and the SSO plugin, which share the function).
  *  - The EXPLICIT link (`/link-social` → `/callback/:id` with `link` in the
- *    OAuth state) passes the same `action: 'link-account'`. It is told apart
+ *    OAuth state) passes the same `action: 'link-account'` (1.7.12 routes it
+ *    through `linkOAuthAccount`, in the same file). It is told apart
  *    by the OAuth state the callback parsed (`getOAuthState().link`), which
  *    the server writes from the session at `/link-social`; `generateState`
  *    places `link` AFTER the client-supplied `additionalData`, so a client

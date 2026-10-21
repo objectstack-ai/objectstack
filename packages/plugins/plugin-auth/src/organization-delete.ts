@@ -7,7 +7,7 @@
  *
  * ## What better-auth does, and what it leaves
  *
- * `POST /organization/delete` (better-auth 1.7.3,
+ * `POST /organization/delete` (better-auth 1.7.12, re-read 2026-10-21 for #25096,
  * `plugins/organization/routes/crud-org.mjs`) authorizes the caller, clears the
  * caller's active organization, calls `organizationHooks.beforeDeleteOrganization`,
  * and then `adapter.deleteOrganization`, which deletes `member`, then

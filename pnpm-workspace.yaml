@@ -187,7 +187,7 @@ patchedDependencies:
 #     undici above).
 #     IMPORTANT: these overrides do NOT ship with published packages — a
 #     downstream `npx create-objectstack` install resolves plugin-auth's own
-#     declared ranges. plugin-auth therefore declares the same exact `1.7.2`
+#     declared ranges. plugin-auth therefore declares the same exact target
 #     in its dependencies (a `^1.6.23` range there resolved to the broken
 #     1.6.23 mix and 500'd every fresh 15.1.0 project; a `^1.7.2` range there
 #     resolved to 1.7.3 and made every fresh 17.1.0–17.3.0 project unloadable,
@@ -238,12 +238,24 @@ overrides:
   # all. The selectors keep their `<2.0.0` major boundary, so lifting the
   # family later is still a target-only edit.
   #
-  # The target IS 1.7.3 since #17440: the platform adopted the vendor's
+  # The target was 1.7.3 from #17440: the platform adopted the vendor's
   # rollback rather than owning a fork of a model its author abandoned, so
   # nothing here imports the two deleted names any more and `sys_account`
   # no longer carries the column they served. What did NOT change is the rule
-  # above — the exact target stays exact for the reason 1.7.3 demonstrated,
-  # and 1.7.4 (published) is the next reviewed one-line lift, not a float.
+  # above — the exact target stays exact for the reason 1.7.3 demonstrated.
+  #
+  # The target IS 1.7.12 since #25096, a reviewed lift of the whole family at
+  # once, made for the security fixes published after 1.7.3 in packages
+  # plugin-auth mounts (GHSA-965c-763c-88jm and GHSA-r4xp-prcw-77qf in 1.7.7,
+  # and fixes in oauth-provider, sso, scim and core up to 1.7.12). Measured on
+  # the lift, not assumed: every symbol plugin-auth imports is still exported
+  # (`pnpm check:vendor-export-contract`), and only what the family pulls in
+  # moved with it: better-call 1.4.0 -> 1.4.4, @better-auth/utils 0.4.2 ->
+  # 0.5.0 (one copy left), @better-fetch/fetch 1.3.1 -> 1.3.2, and the copies
+  # 1.7.12 no longer asks for (the better-sqlite3 12 peer,
+  # @cloudflare/workers-types, core's @opentelemetry/semantic-conventions)
+  # left the lockfile. The 1.8 line is a separate decision; the next lift is
+  # again a reviewed edit, never a float.
   #
   # These targets are held EQUAL to the ranges `@objectstack/plugin-auth`
   # declares (`scripts/check-override-consistency.mjs` cross-checks that the

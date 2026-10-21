@@ -1799,8 +1799,9 @@ export class AuthManager {
       // The deployment's product name, from the one authority every auth
       // email already reads (`getAppName()`: the `branding.workspace_name`
       // override, else the configured `appName`, else 'ObjectStack').
-      // better-auth 1.7.3 reads this key once, into its context's `appName`
-      // (unset ⇒ "Better Auth"), and reads that in exactly two places: the
+      // better-auth 1.7.12 (re-read 2026-10-21 for #25096) reads this key once,
+      // into its context's `appName` (unset ⇒ "Better Auth"), and reads that
+      // in exactly two places: the
       // issuer and label prefix of the otpauth URI that `/two-factor/enable`
       // and `/two-factor/get-totp-uri` answer. No cookie name derives from it
       // (the prefix is the literal "better-auth") and nothing stores it, so an
@@ -2058,8 +2059,8 @@ export class AuthManager {
             );
           }
           // The lifetime the token in `url` really has: better-auth mints it
-          // with `resetPasswordTokenExpiresIn || 3600` seconds (installed
-          // 1.7.3 `routes/password.mjs`) — `||`, so a configured `0` is its
+          // with `resetPasswordTokenExpiresIn || 3600` seconds (better-auth
+          // 1.7.12 `routes/password.mjs`, re-measured 2026-10-21 for #25096) — `||`, so a configured `0` is its
           // default too, and the mail must not say "0 minutes" for it.
           const ttlSec = this.config.emailAndPassword?.resetPasswordTokenExpiresIn || 60 * 60;
           // [#23343] An account an administrator created (the identity
@@ -2081,7 +2082,8 @@ export class AuthManager {
           // commit 35e94c96b — the ladder's stored rung. It matters most HERE: an
           // admin-initiated send (`admin-import-users.ts` calls
           // `requestPasswordReset` server-side) reaches this callback with NO
-          // request at all (measured on 1.7.3, #23343), so without this rung
+          // request at all (measured on 1.7.3, #23343; unchanged on 1.7.12,
+          // re-read for #25096), so without this rung
           // the user's mail carries only the deployment default. Best-effort;
           // `undefined` leaves the #14319 ladder exactly as it was.
           const storedLocale = await this.storedRecipientLocale({ id: user.id });
@@ -4723,8 +4725,8 @@ export class AuthManager {
     //
     // Handing better-auth no `database` makes it build its own in-memory store
     // in `getBaseAdapter`, and that store is keyed by the schema KEY while
-    // every read resolves by `modelName`. Re-measured 2026-09-11 on the
-    // installed better-auth 1.7.3, unchanged from the 1.7.2 reading it replaces
+    // every read resolves by `modelName`. Re-measured 2026-10-21 for #25096 on
+    // better-auth 1.7.12, unchanged since the 1.7.2 reading
     // (`db/adapter-base.mjs` builds the store by schema KEY;
     // `@better-auth/memory-adapter` throws on the lookup, naming the model):
     //
@@ -9698,7 +9700,8 @@ export class AuthManager {
    * (plus `id`), or `undefined` when the identifier names no account.
    *
    * It asks exactly what better-auth's `/sign-in/email` credential check asks
-   * (1.7.3: `internalAdapter.findUserByEmail(email.toLowerCase())`, an
+   * (1.7.12, re-read 2026-10-21 for #25096:
+   * `internalAdapter.findUserByEmail(email.toLowerCase())`, an
    * equality match of the `email` column against the lower-cased address,
    * which is also the spelling `internalAdapter.createUser` stores), so the
    * gate, the counter, the ledger and the credential check name one account

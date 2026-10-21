@@ -12,8 +12,8 @@
  *
  *     new APIError("BAD_REQUEST", { message: `${ROLE_NOT_FOUND}: ${unknownRoles}` })
  *
- * (`dist/plugins/organization/routes/crud-invites.mjs`, measured against the
- * installed better-auth `1.7.3`). Its sibling `update-member-role`
+ * (`dist/plugins/organization/routes/crud-invites.mjs`, measured against
+ * better-auth `1.7.12`, re-measured 2026-10-21 for #25096). Its sibling `update-member-role`
  * (`routes/crud-members.mjs`) throws the SAME refusal with
  * `code: ROLE_NOT_FOUND` beside the identical message — so one vendor
  * condition reached the wire coded on one door and uncoded on the other. The

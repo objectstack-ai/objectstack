@@ -11,7 +11,8 @@
  * is what creates the row's credential on first set. But better-auth hands the
  * resulting link only to `sendResetPassword({ user, url, token }, ctx.request)`;
  * `requestPasswordReset` itself answers `{ status, message }` and nothing else
- * (installed better-auth 1.7.3, `dist/api/routes/password.mjs`). So the import
+ * (better-auth 1.7.12, `dist/api/routes/password.mjs`, re-measured 2026-10-21
+ * for #25096). So the import
  * never holds the link, and the template choice can only be made inside
  * `sendResetPassword` (`auth-manager.ts`). Without a marker that callback
  * cannot tell an administrator's invitation from a user who forgot their
@@ -65,8 +66,8 @@
  *
  * better-auth runs `sendResetPassword` through `runInBackgroundOrAwait`, which
  * CATCHES and logs whatever the send throws, and `requestPasswordReset` still
- * answers `{ status: true }` (installed 1.7.3, `dist/context/create-context.mjs`
- * and `dist/api/routes/password.mjs`). That is right for the public door — the
+ * answers `{ status: true }` (better-auth 1.7.12, `dist/context/create-context.mjs`
+ * and `dist/api/routes/password.mjs`, re-measured 2026-10-21 for #25096). That is right for the public door — the
  * answer must not say whether an address exists or whether its mail went out —
  * and it means a throw inside the send can never reach the import. No
  * better-auth option makes the call rethrow: `advanced.backgroundTasks.handler`
