@@ -76,9 +76,15 @@ const SYSTEM_CTX = { isSystem: true } as const;
 const PROBE_COLUMNS = ['id', 'provider_id', 'account_id', 'issuer', 'user_id'];
 
 /**
- * The engine surface the re-point guard ({@link refuseIssuerRepointWithLiveBindings})
- * reads through — read-only by construction. It reads DECLARED columns only
- * (`id`, `user_id`), which the engine's read verbs serve.
+ * A `find`-only read surface, read-only by construction. The re-point guard
+ * ({@link refuseIssuerRepointWithLiveBindings}) reads the engine through it,
+ * which serves the DECLARED columns that guard needs (`id`, `user_id`).
+ *
+ * {@link probeAccountIdentityCollisions} reads a source of this shape AS
+ * HANDED, and only when the source offers no storage door
+ * ({@link AccountTableStorage}). ⛔ An engine's `find` is not such a source for
+ * the probe: it cuts the undeclared `issuer` away. The `objectql` engine offers
+ * the storage door, so the probe never reads its `find`.
  */
 export interface AccountIdentityReadEngine {
   find(
@@ -114,8 +120,10 @@ export interface AccountTableDriver {
  * and `os migrate account-issuer`, whose boot composes no auth plugin, so the
  * name is unregistered there and the engine's `find` refuses it
  * (`OBJECT_NOT_FOUND`) before any driver is asked. The engine routes either
- * one to the driver serving the table, and the read below is the only read
- * either gets, so the two reports cannot disagree about what a row holds.
+ * one to the driver serving the table, and that driver's read is the only
+ * read either gets, so the two reports cannot disagree about what a row holds.
+ * A source that offers this door is read through it alone: a missing driver
+ * refuses, and never falls back to the source's `find`.
  */
 export interface AccountTableStorage {
   getDriverForObject(object: string): AccountTableDriver | undefined;
@@ -210,26 +218,47 @@ function rowsOf(r: unknown, what: string): Array<Record<string, unknown>> {
  * Read every stored `sys_account` row and report the keys that more than one
  * row holds, each with the `issuer` values its rows STORE.
  *
- * The rows are read through the driver ({@link AccountTableStorage}), never
- * the engine's `find`. A database whose `sys_account` no longer has the
- * `issuer` column (the retirement already applied) reads every row without it
- * (the driver retries a projection naming an absent column as `select *`), so
- * each row's issuer is `(none)` there.
+ * The rows are read through the storage door when the source offers one
+ * ({@link AccountTableStorage}: the driver, never the engine's `find`), and
+ * otherwise through the `find` the source hands in
+ * ({@link AccountIdentityReadEngine}). A database whose `sys_account` no
+ * longer has the `issuer` column (the retirement already applied) reads every
+ * row without it (the SQL driver retries a projection naming an absent column
+ * as `select *`), so each row's issuer is `(none)` there.
  *
  * ⛔ Throws {@link AccountIdentityPreflightRefusal} when the table cannot be
  * enumerated — a read that fails and a table that is empty are different
  * answers, and only one of them authorises a drop.
  */
 export async function probeAccountIdentityCollisions(
-  storage: AccountTableStorage,
+  source: AccountTableStorage | AccountIdentityReadEngine,
   options: AccountIdentityPreflightOptions = {},
 ): Promise<AccountIdentityPreflightReport> {
-  if (!storage || typeof storage.getDriverForObject !== 'function') {
+  const storage =
+    typeof (source as Partial<AccountTableStorage> | undefined)?.getDriverForObject === 'function'
+      ? (source as AccountTableStorage)
+      : undefined;
+  const handed =
+    !storage && typeof (source as Partial<AccountIdentityReadEngine> | undefined)?.find === 'function'
+      ? (source as AccountIdentityReadEngine)
+      : undefined;
+  if (!storage && !handed) {
     throw new AccountIdentityPreflightRefusal(
       `Cannot enumerate ${SYS_ACCOUNT_OBJECT}: no readable ObjectQL engine. ` +
         'Refusing rather than reporting an unread table as clean.',
     );
   }
+
+  const readPage = (query: Record<string, unknown>): Promise<unknown> => {
+    if (handed) return handed.find(SYS_ACCOUNT_OBJECT, query, { context: SYSTEM_CTX });
+    // No driver is not an empty table: this turns into the refusal below,
+    // never into a clean report, and never into a read of the source's `find`.
+    const driver = storage!.getDriverForObject(SYS_ACCOUNT_OBJECT);
+    if (!driver || typeof driver.find !== 'function') {
+      throw new Error(`no driver serves ${SYS_ACCOUNT_OBJECT} on this stack`);
+    }
+    return driver.find(SYS_ACCOUNT_OBJECT, query);
+  };
 
   const { onTableAbsent } = options;
   let tableAbsent = false;
@@ -238,28 +267,19 @@ export async function probeAccountIdentityCollisions(
     async (q) => {
       let page: unknown;
       try {
-        // No driver is not an empty table: this turns into the refusal below,
-        // never into a clean report.
-        const driver = storage.getDriverForObject(SYS_ACCOUNT_OBJECT);
-        if (!driver || typeof driver.find !== 'function') {
-          throw new Error(`no driver serves ${SYS_ACCOUNT_OBJECT} on this stack`);
-        }
-        try {
-          page = await driver.find(SYS_ACCOUNT_OBJECT, {
-            where: q.where ?? {},
-            orderBy: q.orderBy,
-            limit: q.limit,
-            fields: [...PROBE_COLUMNS],
-          });
-        } catch (e) {
-          // [#21552] The one refused read a caller may opt into reading as no
-          // rows, and only by saying so (`onTableAbsent`). Every other refusal
-          // falls through to the probe's own.
-          if (!onTableAbsent || !isMissingTableError(e, SYS_ACCOUNT_OBJECT)) throw e;
+        page = await readPage({
+          where: q.where ?? {},
+          orderBy: q.orderBy,
+          limit: q.limit,
+          fields: [...PROBE_COLUMNS],
+        });
+      } catch (e) {
+        // [#21552] The one refused read a caller may opt into reading as no
+        // rows, and only by saying so (`onTableAbsent`).
+        if (onTableAbsent && isMissingTableError(e, SYS_ACCOUNT_OBJECT)) {
           tableAbsent = true;
           return [];
         }
-      } catch (e) {
         // Rule 1 of this file's refusal discipline. A swallowed read here
         // would report an unreadable table as a clean one and authorise the
         // drop on it.

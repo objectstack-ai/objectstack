@@ -34,7 +34,7 @@
  *    the read the gate used to make, not from a number written down here.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -329,10 +329,14 @@ describe('#21552 a missing sys_account table, through the shared reader', () => 
     expect(told).toBe(0);
   });
 
-  it('no driver for the table refuses, naming it', async () => {
+  it('no driver for the table refuses, naming it, and never falls back to the source\'s own find', async () => {
+    const engineFind = vi.fn(async () => COLLIDING);
     let refusal: AccountIdentityPreflightRefusal | undefined;
     try {
-      await probeAccountIdentityCollisions({ getDriverForObject: () => undefined }, { onTableAbsent: () => {} });
+      await probeAccountIdentityCollisions(
+        { getDriverForObject: () => undefined, find: engineFind } as AccountTableStorage,
+        { onTableAbsent: () => {} },
+      );
     } catch (e) {
       refusal = e as AccountIdentityPreflightRefusal;
     }
@@ -340,5 +344,6 @@ describe('#21552 a missing sys_account table, through the shared reader', () => 
     expect(refusal!.code).toBe('RESOURCE_CONFLICT');
     expect(refusal!.status).toBe(409);
     expect(refusal!.message).toContain('no driver serves sys_account');
+    expect(engineFind).not.toHaveBeenCalled();
   });
 });
