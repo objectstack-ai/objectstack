@@ -7004,22 +7004,64 @@ export class SqlDriver implements IDataDriver {
   // ===================================
 
   async connect(): Promise<void> {
-    // Ensure the database directory exists before any query can trigger
-    // better-sqlite3 to open the file (e.g. loadMetaFromDb on startup).
-    await this.ensureDatabaseExists();
+    try {
+      // Ensure the database directory exists before any query can trigger
+      // better-sqlite3 to open the file (e.g. loadMetaFromDb on startup).
+      await this.ensureDatabaseExists();
 
-    if (this.isSqlite) {
-      // Both pragmas below are persistent properties of the FILE, so one
-      // connection setting them is enough for every process that follows.
-      // Each is READ first and set only when the file answers differently, so
-      // a connect to a file an earlier boot already configured writes nothing
-      // to it (#21734) — one rule for every connect, read-only boots included.
-      // A `false` means the very first statement on this connection failed —
-      // in practice a native addon that cannot load — so asking it for another
-      // pragma would only repeat the same warning.
-      if (await this.applyAutoVacuumIncremental()) {
-        await this.applySqliteJournalMode();
+      if (this.isSqlite) {
+        // Both pragmas below are persistent properties of the FILE, so one
+        // connection setting them is enough for every process that follows.
+        // Each is READ first and set only when the file answers differently, so
+        // a connect to a file an earlier boot already configured writes nothing
+        // to it (#21734) — one rule for every connect, read-only boots included.
+        // A `false` means the very first statement on this connection failed —
+        // in practice a native addon that cannot load — so asking it for another
+        // pragma would only repeat the same warning.
+        if (await this.applyAutoVacuumIncremental()) {
+          await this.applySqliteJournalMode();
+        }
       }
+    } catch (error) {
+      if (this.isSqlite) await this.releaseRefusedSqliteConnection();
+      throw error;
+    }
+  }
+
+  /**
+   * Close what a refused SQLite `connect()` opened, before the refusal leaves
+   * it (#25084).
+   *
+   * A file refused by its first statement ({@link SQLITE_FILE_REFUSALS}) was
+   * opened to answer it: the pool keeps that better-sqlite3 connection, and for
+   * a file whose header says WAL, SQLite keeps its `-shm` and an empty `-wal`
+   * beside it for as long as the connection is open. No caller is owed that
+   * handle — the connect failed — and a caller that does not `disconnect()` a
+   * handle whose `connect()` rejected (the datasource connection service's
+   * degraded path) used to keep it for the life of the process.
+   *
+   * The pool is destroyed and a fresh, empty one put in its place, so the
+   * instance is left as it was constructed: nothing open, and a later
+   * `connect()` opens the file again and gives its own answer. Destroying
+   * alone would not: every later statement would answer "Unable to acquire a
+   * connection", which carries no code, so a second `connect()` would log it
+   * and resolve over a datasource that cannot run one query. A host-adopted
+   * instance is connected again on the same object (`createPrebuiltDriverFactory`
+   * in `@objectstack/service-datasource`), so that second `connect()` is real.
+   *
+   * SQLite only: it is the one dialect whose `connect()` can reject holding a
+   * connection. A server dialect rejects there only when the connection itself
+   * could not be made, so its pool holds nothing to release.
+   *
+   * Never throws: the refusal the caller is owed is the error `connect()`
+   * raised, so a release that fails is logged and that error goes on unchanged.
+   */
+  private async releaseRefusedSqliteConnection(): Promise<void> {
+    try {
+      await this.knex.destroy();
+      this.knex.initialize();
+    } catch (e) {
+      this.logger.warn('Failed to close the SQLite connection a refused connect() opened', e);
     }
   }
 
