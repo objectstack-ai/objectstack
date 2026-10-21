@@ -41,10 +41,12 @@ const FLOW = 'crm_convert_lead_wizard';
 const INNER_MESSAGE = "Duplicate record refused on 'crm_account': a unique constraint already holds these values. No record was written.";
 const RAW_ERROR = `Node 'create_account' failed: create_record(crm_account) failed: ${INNER_MESSAGE}`;
 const USER_TEXT = '该客户名称已被另一位销售代表占用，请联系主管。';
-const SUMMARY = {
-    selected: 0, acted: 0, skipped: 0, unmeasured: 0,
-    nodes: [{ nodeId: 'create_account', nodeType: 'create_record', status: 'failure', runs: 1, failures: 1 }],
-} as AutomationResult['summary'];
+/** A summary the spec's `FlowRunSummarySchema` parses — the details are parsed whole below. */
+const SUMMARY: AutomationResult['summary'] = {
+    selected: 0, acted: 0, skipped: 0,
+    nodes: [{ nodeId: 'create_account', nodeType: 'create_record', status: 'failure', runs: 1, failures: 1, skipped: 0 }],
+    gates: [],
+};
 const INNER = { code: 'UNIQUE_VIOLATION', message: INNER_MESSAGE } as const;
 
 /** The engine's ran-and-failed exit carrying the refusal its node met — unmarked. */
@@ -138,8 +140,8 @@ describe('#24914 — every flow door carries the inner refusal in its 400 FLOW_F
             const parsed = FlowFailureDetailsSchema.safeParse(body.error.details);
             expect(parsed.success).toBe(true);
             expect(parsed.success && parsed.data.innerRefusal).toEqual(INNER);
-            expect(ApiErrorSchema.safeParse(body.error).success).toBe(true);
-            expect(BaseResponseSchema.safeParse(body).success).toBe(true);
+            expect(ApiErrorSchema.safeParse(body.error).error?.issues).toBeUndefined();
+            expect(BaseResponseSchema.safeParse(body).error?.issues).toBeUndefined();
             // The diagnostic channel does not move.
             expect(body.error.message).toBe(wording);
             // Unmarked: no top-level userMessage at all (absent, not empty).
@@ -159,7 +161,7 @@ describe('#24914 — every flow door carries the inner refusal in its 400 FLOW_F
             // declared keys (plus the resume door's verdict).
             expect(body.error.details.userMessage).toBeUndefined();
             expect(body.error.details.innerRefusal).toEqual(INNER);
-            expect(ApiErrorSchema.safeParse(body.error).success).toBe(true);
+            expect(ApiErrorSchema.safeParse(body.error).error?.issues).toBeUndefined();
         });
     }
 
