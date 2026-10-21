@@ -77,6 +77,7 @@ const DECLARED = 'qa_assignment';
 const INJECTED = 'qa_ledger';
 const PRIVATE = 'qa_vault';
 const UNWALLED = 'qa_catalog';
+const AUTHORED = 'qa_authored';
 
 const OBJECTS = [
   {
@@ -106,6 +107,18 @@ const OBJECTS = [
     fields: {
       id: { name: 'id', type: 'text', primaryKey: true },
       name: { name: 'name', type: 'text' },
+    },
+  },
+  // [#24822] A tenancy-enabled app object whose AUTHOR declares its own
+  // read-only `organization_id`. The wall still judges it, and the author's
+  // declaration keeps the static-`readonly` strip.
+  {
+    name: AUTHORED,
+    label: 'Authored',
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      name: { name: 'name', type: 'text' },
+      organization_id: { name: 'organization_id', type: 'text', readonly: true },
     },
   },
   // [#24822] Tenancy switched off, and an AUTHORED read-only `organization_id`:
@@ -626,6 +639,26 @@ describe('[#24822] an explicit organization_id the wall judges is stored as sent
 
       expect(outcome.ok, outcome.message).toBe(true);
       expect(await b.table(INJECTED)).toEqual([...SEEDED, { id: 'r2', organization_id: SISTER_ORG }]);
+    });
+  });
+
+  describe('an AUTHORED read-only organization_id on a walled object (F4)', () => {
+    // [#24822] F4: the wall judges this column too (the object stays walled on
+    // an authored `organization_id`), and the seam declares it. But the
+    // author declared the column read-only, and declaration is enforcement:
+    // only the platform's injected column is spared.
+    it('an AUTHORED read-only organization_id on a walled object keeps the strip: taken, reported, the active organization stored, and refused under strict', async () => {
+      const b = await boot('group');
+
+      const { outcome, dropped } = await createReporting(b, AUTHORED, { id: 'r2', name: 'new', organization_id: SISTER_ORG }, GROUP_CTX);
+      expect(outcome.ok, outcome.message).toBe(true);
+      expect(await b.table(AUTHORED), 'the author\'s read-only column is not written by the caller').toEqual([{ id: 'r2', organization_id: OWN_ORG }]);
+      expect(dropped).toEqual(READONLY_DROP(AUTHORED));
+      expect(organizationWarnings(b)).toHaveLength(1);
+
+      await expectStrictRefusal(b, AUTHORED, { id: 'r3', name: 'strict', organization_id: SISTER_ORG }, GROUP_CTX);
+      expect(await b.table(AUTHORED)).toEqual([{ id: 'r2', organization_id: OWN_ORG }]);
+      expect(b.seams, 'the wall still judges an authored column and declares it').toEqual([...WALL_JUDGES, ...WALL_JUDGES]);
     });
   });
 

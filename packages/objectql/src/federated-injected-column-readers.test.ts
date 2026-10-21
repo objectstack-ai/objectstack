@@ -350,6 +350,12 @@ const READERS: Record<string, Row> = {
   },
   // [#24822] The insert's static-`readonly` subject, without the tenant column
   // where the Layer 0 wall's seam declares it judges the insert's organization.
+  'engine.ts#insertStaticReadonlySubject :: resolveInjectedColumnProvenance()': {
+    disposition: 'not-a-read',
+    why:
+      "asks whether the insert's organization_id is the platform's injected column or the author's; " +
+      'it reads a registered definition, never storage',
+  },
   'engine.ts#insertStaticReadonlySubject :: organization_id': {
     disposition: 'not-a-read',
     why:

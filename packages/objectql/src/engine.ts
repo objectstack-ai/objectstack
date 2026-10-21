@@ -29,7 +29,7 @@ import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/
 // [#22646] The ADR-0112 catalog — `rejectCredentialAggregation`'s refusal
 // envelope carries `INVALID_FIELD` from it rather than a bare `Error`.
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 import type { FileRefusedValue } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
@@ -2391,7 +2391,8 @@ function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined):
 /**
  * [#24822] The fields ONE insert's static-`readonly` passes may judge: the
  * {@link staticReadonlyInsertSubject} view, without `organization_id` when the
- * Layer 0 wall judges that column on this insert's stored rows.
+ * Layer 0 wall judges that column on this insert's stored rows AND the column
+ * is the platform's injected tenant column.
  *
  * The wall says so itself, on the seam it installs
  * (`PostHookWriteImageCheck.judgesOrganization`). The caller passes that
@@ -2417,6 +2418,12 @@ function insertStaticReadonlySubject(
   const subject = staticReadonlyInsertSubject(schema as any);
   if (!subject || !wallJudgesOrganization) return subject;
   if (!Object.prototype.hasOwnProperty.call(subject.fields, SystemFieldName.ORGANIZATION_ID)) return subject;
+  // An AUTHORED `organization_id` declared `readonly: true` is the author's
+  // own declaration, and declaration is enforcement: it keeps the strip. Only
+  // the platform's injected tenant column is spared, the one
+  // `TENANT_SCOPE_FIELD_DEF` declares read-only on the platform's behalf. Which
+  // one this is, is the registry's own provenance reader, never a second copy.
+  if (resolveInjectedColumnProvenance(schema, SystemFieldName.ORGANIZATION_ID) === 'author') return subject;
   const fields = { ...subject.fields };
   delete fields[SystemFieldName.ORGANIZATION_ID];
   return Object.keys(fields).length > 0 ? { name: subject.name, fields } : null;
@@ -3752,6 +3759,8 @@ export interface PostHookWriteImageCheck {
    * (the platform's tenant column declares `readonly: true`). Set, the value
    * is stored as sent where the wall admits it and refused where it does not.
    * It is never silently replaced by the active organization (ADR-0105 D5).
+   * Only the platform's injected column is spared. An AUTHORED
+   * `organization_id` declared `readonly: true` keeps the strip.
    * Absent or `false`, the strip runs exactly as before. The engine never
    * sets it, and never derives it from the posture or the context: that
    * would be a mirror of the wall, and a mirror is wider than the wall

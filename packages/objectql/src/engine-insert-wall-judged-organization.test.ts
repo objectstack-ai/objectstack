@@ -14,7 +14,9 @@
 // What this file holds the engine to:
 //  - the member SET: the value is stored as sent, shown to `beforeInsert`,
 //    handed to the seam, not reported, and not refused under
-//    `strictReadonlyWrites`. Every OTHER read-only key is still taken;
+//    `strictReadonlyWrites`. Every OTHER read-only key is still taken, and so
+//    is an AUTHORED read-only `organization_id`: only the platform's injected
+//    column is spared;
 //  - the member ABSENT or `false` on an installed seam, and no seam at all:
 //    the strip takes the value exactly as before (reported, withheld from the
 //    hook, refused under strict). Seam presence is not the signal: a business
@@ -92,6 +94,7 @@ const OBJECT = 'qa_ledger';
 const ACTIVE = 'org_a';
 const NAMED = 'org_c';
 const SESSION = { userId: 'usr_member', tenantId: ACTIVE };
+const AUTHORED = 'qa_authored';
 
 /** How the stand-in installer behaves on this engine's next insert. */
 type SeamMode = 'judges' | 'judges-false' | 'no-member' | 'none';
@@ -122,6 +125,12 @@ describe('[#24822] engine.insert spares organization_id only where the seam decl
     engine.registerDriver(d.driver, true);
     await engine.init();
     engine.registry.registerObject({ name: OBJECT, fields: { name: { type: 'text' } } } as any);
+    // [#24822] F4: an app object whose AUTHOR declares its own read-only
+    // organization_id. The member alone does not spare it.
+    engine.registry.registerObject({
+      name: AUTHORED,
+      fields: { name: { type: 'text' }, organization_id: { type: 'text', readonly: true } },
+    } as any);
 
     engine.registerHook('beforeInsert', async (ctx: any) => {
       const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
@@ -187,6 +196,26 @@ describe('[#24822] engine.insert spares organization_id only where the seam decl
     expect(stored()).toEqual([NAMED]);
     expect(dropped).toEqual([{ fields: ['created_by'], reason: 'readonly' }]);
     expect([...storeFor(OBJECT).values()][0]?.created_by, 'the forged audit value is not stored').not.toBe('usr_forged');
+  });
+
+  it('SET, but an AUTHORED read-only organization_id: the author\'s declaration keeps the strip, and strict refuses it', async () => {
+    const dropped: Array<{ fields: string[]; reason: string }> = [];
+    await engine.insert(AUTHORED, { name: 'one', organization_id: NAMED } as any, {
+      context: SESSION,
+      onFieldsDropped: (e: any) => dropped.push({ fields: e.fields, reason: e.reason }),
+    } as any);
+
+    expect([...storeFor(AUTHORED).values()].map((r) => r.organization_id), 'the caller\'s value is not stored').toEqual([undefined]);
+    expect(dropped).toEqual([{ fields: ['organization_id'], reason: 'readonly' }]);
+
+    let thrown: { code?: unknown; fields?: unknown } | undefined;
+    try {
+      await engine.insert(AUTHORED, { name: 'two', organization_id: NAMED } as any, { context: SESSION, strictReadonlyWrites: true } as any);
+    } catch (e) {
+      thrown = e as typeof thrown;
+    }
+    expect(thrown?.code).toBe('ERR_READONLY_FIELD_REJECTED');
+    expect(thrown?.fields).toEqual(['organization_id']);
   });
 
   it('SET: strictReadonlyWrites does not refuse it, because strict refuses only what the strip takes', async () => {
