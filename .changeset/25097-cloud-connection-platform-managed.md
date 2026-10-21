@@ -8,7 +8,7 @@ A runtime whose control-plane credential is the environment service key (`contro
 
 Such a runtime now registers neither the page nor its navigation entry, and says so once at boot. A request to disconnect it is refused with `409` and `RESOURCE_CONFLICT`, after the sign-in and Setup Access checks and before anything is revoked or cleared. The message says the platform manages the connection.
 
-A self-hosted or local runtime, connected through the device-code flow, keeps the page and its disconnect unchanged. Its Cloud Connection entry moves from the Apps group to the Integrations group, after Webhooks, Datasources and Connect an Agent. That group requires `manage_platform_settings`, so a user who holds Setup Access without it, such as an organization administrator, no longer sees the entry. The page and its requests still take Setup Access alone.
+A self-hosted or local runtime, connected through the device-code flow, keeps the page and its disconnect unchanged. Its Cloud Connection entry moves from the Apps group to the Integrations group, after Webhooks, Datasources and Connect an Agent. That group requires `manage_platform_settings`, so a user who holds Setup Access without it, such as an organization administrator, no longer sees the entry. The connect and disconnect requests still take Setup Access alone.
 
 Clause-②: no (narrowing)
 

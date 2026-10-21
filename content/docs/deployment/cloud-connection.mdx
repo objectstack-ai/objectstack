@@ -6,8 +6,8 @@ description: Connect your own ObjectStack server to an ObjectStack Cloud account
 
 A self-hosted ObjectStack server can be connected to an ObjectStack Cloud
 account. You start the connection on your own server, in **Setup →
-Integrations → Cloud Connection**, and approve it in the cloud account with a one-time code.
-Nothing is typed into the server: no id, no key, no password. Under the hood
+Integrations → Cloud Connection**, and approve it in the cloud account with a
+one-time code. Nothing is typed into the server: no id, no key, no password. Under the hood
 this is the OAuth 2.0 device authorization grant
 ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)), run by the
 `@objectstack/cloud-connection` package on your server.
@@ -98,8 +98,8 @@ the server reads as not connected until you connect it again.
 ## Connect [#connect]
 
 1. **Open the page.** Sign in to your server and go to **Setup →
-   Integrations → Cloud Connection**. The header reads *Cloud Connection — Connect this
-   runtime to an ObjectStack control plane to browse your organization's
+   Integrations → Cloud Connection**. The header reads *Cloud Connection —
+   Connect this runtime to an ObjectStack control plane to browse your organization's
    private packages and install them here.* The panel shows *Checking
    connection…*, then **Not connected** and a **Connect** button.
 2. **Click Connect.** The server asks the cloud for a device code and hands
