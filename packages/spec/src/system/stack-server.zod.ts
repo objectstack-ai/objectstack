@@ -210,19 +210,24 @@ export const StackServerConfigSchema = lazySchema(() => strictObject(
      * of authorship — the operator asserting "a proxy I control rewrites this
      * header on every request" — and never a default.
      *
-     * Both consumers apply one rule, `resolveClientAddress` from
+     * Three consumers apply one rule, `resolveClientAddress` from
      * `@objectstack/plugin-auth/client-address`: the runtime's inbound rate
-     * limiter, and `AuthPlugin` (passed this value by `objectstack serve`),
-     * whose ADR-0069 D5 IP allow-list and D7 `last_login_ip` audit use the
-     * address it establishes — so a header believed without such a proxy is
-     * an allow-list bypass as well as a rate-limit one.
+     * limiter; the endpoint policy chain's per-endpoint rate limiter, for
+     * every declared endpoint whose own `rateLimit` is enabled, whether or not
+     * the server-level budget is; and `AuthPlugin` (passed this value by
+     * `objectstack serve`), whose ADR-0069 D5 IP allow-list and D7
+     * `last_login_ip` audit use the address it establishes — so a header
+     * believed without such a proxy is an allow-list bypass as well as a
+     * rate-limit one.
      */
     trustProxy: z.boolean().default(false).describe(
       'Believe `X-Forwarded-For` / `X-Real-IP` when identifying a caller. Declare `true` ONLY when a reverse proxy '
       + 'you control overwrites those headers on every inbound request. Left `false` (the default) the caller IP is '
-      + "the transport's own peer address, which a client cannot forge. One client-address rule, two consumers: the "
-      + 'inbound rate limiter when `server.security.rateLimit.enabled` is set, and the authentication plugin, whose IP '
-      + 'allow-list (`allowed_ip_ranges`) judges and whose login audit stamps (`last_login_ip`) the same address.',
+      + "the transport's own peer address, which a client cannot forge. One client-address rule, three consumers: the "
+      + 'inbound rate limiter when `server.security.rateLimit.enabled` is set; the per-endpoint rate limiter of every '
+      + 'declared endpoint (`apis:`) whose own `rateLimit` is enabled, whether or not the server-level one is; and the '
+      + 'authentication plugin, whose IP allow-list (`allowed_ip_ranges`) judges and whose login audit stamps '
+      + '(`last_login_ip`) the same address.',
     ),
   },
 ));
