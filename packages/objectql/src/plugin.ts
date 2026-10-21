@@ -1831,6 +1831,10 @@ export class ObjectQLPlugin implements Plugin {
    * the outside the deployment looks healthy while declared data is simply
    * not reachable — naming the objects, their datasources, the consequence
    * and the fix. A boot with nothing to report says nothing.
+   *
+   * One class is reported apart, at `info` (#25079): an object whose datasource
+   * the connect policy denied (`listUnavailableDatasources()` kind `blocked`).
+   * Its reads refuse loudly, and the denial was deliberate.
    */
   private async reconcileFederatedBindings(ctx: PluginContext): Promise<void> {
     if (!this.ql) return;
@@ -1871,15 +1875,25 @@ export class ObjectQLPlugin implements Plugin {
 
     let bound = 0;
     const unbound: string[] = [];
+    const denied: string[] = [];
     const unsupported: string[] = [];
     const failed: string[] = [];
     const datasourceOf = (name: string): string =>
       this.ql?.resolveEffectiveDatasource?.(name) ?? '(default)';
+    // [#25079] The datasource layer's recorded verdict, read back through the
+    // engine: `blocked` is a connect the host policy REFUSED on purpose
+    // (`os migrate`'s managed-only policy refuses every `schemaMode:
+    // 'external'` datasource), as opposed to `failed`. Judged on the verdict
+    // alone, on every composition.
+    const blocked = new Set(
+      this.ql.listUnavailableDatasources().filter((d) => d.kind === 'blocked').map((d) => d.name),
+    );
 
     for (const obj of federated) {
       const driver: any = this.ql.getDriverForObject(obj.name);
       if (!driver) {
-        unbound.push(`${obj.name} -> datasource '${datasourceOf(obj.name)}'`);
+        const datasource = datasourceOf(obj.name);
+        (blocked.has(datasource) ? denied : unbound).push(`${obj.name} -> datasource '${datasource}'`);
         continue;
       }
       if (typeof driver.registerExternalObject !== 'function') {
@@ -1892,6 +1906,21 @@ export class ObjectQLPlugin implements Plugin {
       } catch (e: unknown) {
         failed.push(`${obj.name}: ${e instanceof Error ? e.message : String(e)}`);
       }
+    }
+
+    // [#25079] A policy denial is a decision, not a durability loss: every read
+    // against such an object refuses with `DatasourceUnavailableError`, so
+    // nothing looks normal while it is not — functional, hence `info` per the
+    // AGENTS.md degradation-log-level rule, and named rather than silent
+    // (#7737). It stays out of the ERROR below, whose consequence ("resolves
+    // to a table named after the OBJECT") is false for it.
+    if (denied.length) {
+      ctx.logger.info(
+        `${denied.length} federated (external) object(s) left unbound because the connect policy denied their ` +
+          `datasource: ${denied.join(', ')}. Every read against them is refused (DatasourceUnavailableError) until ` +
+          `the policy allows that datasource; see its "connect denied by policy" line earlier in this boot.`,
+        { denied: denied.length },
+      );
     }
 
     if (unbound.length === 0 && unsupported.length === 0 && failed.length === 0) {
