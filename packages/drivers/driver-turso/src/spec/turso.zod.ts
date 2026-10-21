@@ -324,6 +324,32 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
         + "file beside `syncUrl`: `url: 'file:./data/replica.db'`.",
     });
   }
+  if (
+    (isFileTursoUrl(url) || url === ':memory:')
+    && typeof cfg.encryptionKey === 'string' && cfg.encryptionKey.length > 0
+  ) {
+    // #25020, patch round 1. Only a FORCED remote mode reaches here with a
+    // `file:` url or `:memory:` (with no `mode`, those urls select a local
+    // engine). The key is judged by where the database lives, not by the
+    // mode: `connect()` hands that url to the libSQL client this driver
+    // builds, which is handed no key, so the issue sits on `encryptionKey`,
+    // last, like the local-engine arm's.
+    issues.push({
+      path: 'encryptionKey',
+      message: namesInMemoryTursoDatabase(url)
+        ? "`encryptionKey` asks for this datasource's database to be encrypted, but `url` names an in-memory "
+          + "database, and `mode: 'remote'` runs every read and write of it through the libSQL client this "
+          + 'driver builds, which is handed no key: there is no file for the key to encrypt, so it would change '
+          + 'nothing — the turso driver refuses this configuration when it starts. Drop `encryptionKey`.'
+        : "`encryptionKey` asks for this datasource's database file to be encrypted, but `url` is a local "
+          + "`file:` url, and `mode: 'remote'` runs every read and write of that file through the libSQL client "
+          + 'this driver builds, which is handed no key: nothing would encrypt the file, so it would be written '
+          + 'in plaintext that any SQLite reader opens without the key — the turso driver refuses this '
+          + 'configuration when it starts. Nothing in this driver encrypts a local file. Drop `encryptionKey`, '
+          + 'and encrypt the disk or volume the file lives on instead, or point `url` at a remote Turso '
+          + "database, whose storage encryption is the server's to configure, not this key's.",
+    });
+  }
   return issues;
 }
 
@@ -347,8 +373,11 @@ export const TursoConfigSchema = lazySchema(() => z.object({
 
   /**
    * Encryption Key — encrypts nothing, in any mode, and is REFUSED for a local
-   * or embedded-replica database (#25020; the refusal is the
-   * `tursoTransportIssues` arm above, in the spec contract's words).
+   * or embedded-replica database, and beside a `file:` url or `:memory:` under
+   * a forced `mode: 'remote'` (#25020; the refusals are the
+   * `tursoTransportIssues` arms above, in the spec contract's words — this
+   * mirror declares no `mode`, so it judges such a config as the local
+   * database its url selects, and refuses it with that arm's text).
    *
    * It used to promise to encrypt the local database file at rest with
    * AES-256. The driver reads and writes that file through better-sqlite3,
@@ -357,7 +386,7 @@ export const TursoConfigSchema = lazySchema(() => z.object({
    * its sync client only. The driver does not forward it to a remote database
    * either, whose storage encryption is the server's.
    */
-  encryptionKey: z.string().optional().describe("Not honoured in any mode: refused for a local or replica datasource, whose SQLite engine cannot encrypt the file; a remote database's storage encryption is the server's, not set by this key"),
+  encryptionKey: z.string().optional().describe("Not honoured in any mode: refused for a local or replica datasource, whose SQLite engine cannot encrypt the file, and for a file: url or :memory: under a forced remote mode, whose libSQL client is handed no key; a remote database's storage encryption is the server's, not set by this key"),
 
   /**
    * Concurrency Limit.

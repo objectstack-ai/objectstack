@@ -523,7 +523,7 @@ carries the prescription. The live keys:
 |:---|:---|:---:|:---|
 | `url` | `string` | (required) | Database URL (`libsql://`, `https://`, `file:`, `:memory:`) — in replica mode, also the local file |
 | `authToken` | `string?` | — | JWT auth token for remote databases |
-| `encryptionKey` | `string?` | — | Encrypts nothing, in any mode: refused for a local or replica datasource (`VALIDATION_ERROR` / 400 at construction, a `custom` issue at authoring), because the local engine (better-sqlite3) has no encryption codec; a remote database's storage encryption is the server's, not set by this key |
+| `encryptionKey` | `string?` | — | Encrypts nothing, in any mode: refused for a local or replica datasource (`VALIDATION_ERROR` / 400 at construction, a `custom` issue at authoring), because the local engine (better-sqlite3) has no encryption codec, and for a `file:` url or `:memory:` under a forced `mode: 'remote'`, whose libSQL client is handed no key; a remote database's storage encryption is the server's, not set by this key |
 | `concurrency` | `number` | `20` | Maximum concurrent requests |
 | `syncUrl` | `string?` | — | Remote sync URL for embedded replica mode |
 | `sync.intervalSeconds` | `number` | `60` | Periodic sync interval (0 = manual only) |

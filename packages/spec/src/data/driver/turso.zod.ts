@@ -117,7 +117,14 @@ export type TursoTransportMode = z.input<typeof TursoTransportModeSchema>;
 //    only its sync client is handed the key, and a file that client encrypted
 //    is one better-sqlite3 cannot open. Authoring and the constructor now
 //    refuse it together, in this arm's words, last among the local-engine
-//    refusals. A remote mode is not judged here.
+//    refusals;
+//  - the same key beside a `file:` url or `:memory:` under a forced
+//    `mode: 'remote'` (#25020, patch round 1): the key is judged by where the
+//    database lives, not by the mode. `connect()` hands that url to the
+//    libSQL client this driver builds, which is handed no key, so the file
+//    was written in plaintext all the same. Refused last in the remote arm,
+//    in its own words (one text for a file, one for an in-memory database).
+//    A remote url (`libsql://`, `https://`, `ws(s)://`) is not judged here.
 //
 // The predicates MIRROR the constructor's on `main` (`localEngineDefect`,
 // `refuseWebSocketTimeout` and `detectMode` in
@@ -342,6 +349,32 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
         + "file beside `syncUrl`: `url: 'file:./data/replica.db'`.",
     });
   }
+  if (
+    (isFileTursoUrl(url) || url === ':memory:')
+    && typeof cfg.encryptionKey === 'string' && cfg.encryptionKey.length > 0
+  ) {
+    // #25020, patch round 1. Only a FORCED remote mode reaches here with a
+    // `file:` url or `:memory:` (with no `mode`, those urls select a local
+    // engine). The key is judged by where the database lives, not by the
+    // mode: `connect()` hands that url to the libSQL client this driver
+    // builds, which is handed no key, so the issue sits on `encryptionKey`,
+    // last, like the local-engine arm's.
+    issues.push({
+      path: 'encryptionKey',
+      message: namesInMemoryTursoDatabase(url)
+        ? "`encryptionKey` asks for this datasource's database to be encrypted, but `url` names an in-memory "
+          + "database, and `mode: 'remote'` runs every read and write of it through the libSQL client this "
+          + 'driver builds, which is handed no key: there is no file for the key to encrypt, so it would change '
+          + 'nothing — the turso driver refuses this configuration when it starts. Drop `encryptionKey`.'
+        : "`encryptionKey` asks for this datasource's database file to be encrypted, but `url` is a local "
+          + "`file:` url, and `mode: 'remote'` runs every read and write of that file through the libSQL client "
+          + 'this driver builds, which is handed no key: nothing would encrypt the file, so it would be written '
+          + 'in plaintext that any SQLite reader opens without the key — the turso driver refuses this '
+          + 'configuration when it starts. Nothing in this driver encrypts a local file. Drop `encryptionKey`, '
+          + 'and encrypt the disk or volume the file lives on instead, or point `url` at a remote Turso '
+          + "database, whose storage encryption is the server's to configure, not this key's.",
+    });
+  }
   return issues;
 }
 
@@ -456,7 +489,9 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
 
     /**
      * Encrypts nothing, in any mode — and is REFUSED in a local or replica
-     * mode since #25020 (see {@link tursoTransportIssues}). This key used to
+     * mode since #25020, and beside a `file:` url or `:memory:` under a forced
+     * `mode: 'remote'`, whose libSQL client is handed no key (see
+     * {@link tursoTransportIssues}). This key used to
      * promise "AES-256 key for the local database file", but the driver reads
      * and writes that file through better-sqlite3, which has no encryption
      * codec: a local datasource that declared it was written in plaintext that
@@ -471,7 +506,7 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
      * `datasource-credential-redaction.ts`).
      */
     encryptionKey: placeholderFree(z.string(), 'encryptionKey').optional()
-      .describe("Not honoured in any mode: refused for a local or replica datasource, whose SQLite engine cannot encrypt the file; a remote database's storage encryption is the server's, not set by this key")
+      .describe("Not honoured in any mode: refused for a local or replica datasource, whose SQLite engine cannot encrypt the file, and for a file: url or :memory: under a forced remote mode, whose libSQL client is handed no key; a remote database's storage encryption is the server's, not set by this key")
       .meta({ title: 'Encryption key', format: 'password' }),
 
     /** Max concurrent requests to the remote database (replica/remote modes). */

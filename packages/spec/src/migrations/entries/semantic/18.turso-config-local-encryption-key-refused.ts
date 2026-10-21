@@ -14,9 +14,10 @@ export const entry: SemanticMigration = {
   // span already, and a nested backtick would close it.
   surface:
     'data.TursoConfig (a turso / libsql datasource.config), the published TursoConfigSchema mirror and '
-    + 'the TursoDriver constructor of @objectstack/driver-turso — a non-empty encryptionKey on a local '
-    + 'or embedded-replica datasource (a file: url or :memory:, with or without syncUrl or a forced '
-    + 'mode) is now refused, on encryptionKey at authoring and at construction',
+    + 'the TursoDriver constructor of @objectstack/driver-turso — a non-empty encryptionKey beside a '
+    + 'file: url or :memory: (a local or embedded-replica datasource, with or without syncUrl, and the '
+    + 'same url under any forced mode, remote included) is now refused, on encryptionKey at authoring '
+    + 'and at construction',
   replacement:
     'no key: drop encryptionKey. Nothing in the turso driver encrypts a local or replica file, so a '
     + 'file that must be encrypted at rest lives on an encrypted disk or volume, or the data moves to '
@@ -34,12 +35,15 @@ export const entry: SemanticMigration = {
     + 'protection the runtime does not apply is the declared-but-not-enforced shape ADR-0049 does not '
     + 'ship, and here it left operators believing their data was encrypted. The refusal comes last '
     + 'among the local-engine refusals, so a url, a lone sync or a forced mode that another refusal '
-    + 'takes keeps that refusal. An empty encryptionKey is unset and is not refused. A remote '
-    + 'datasource is not judged by this refusal. Stored datasource rows are not re-parsed when they '
-    + 'load, so a stored local or replica row with a key now fails when its driver is built: the '
+    + 'takes keeps that refusal. An empty encryptionKey is unset and is not refused. The key is judged '
+    + 'by where the database lives, not by the mode: a file: url or :memory: under a forced remote '
+    + 'mode is refused too, because the driver hands that url to the libSQL client it builds, which is '
+    + 'handed no key, so the file was written in plaintext all the same. A remote url (libsql, https or '
+    + 'ws) is not judged by this refusal. Stored datasource rows are not re-parsed when they load, so a '
+    + 'stored row in this shape now fails when its driver is built: the '
     + 'connection service records it as failed-degraded, a test connection answers ok false, and '
-    + 'under ADR-0062 D5 the boot fails fast when objects bind to that datasource, unless '
-    + 'OS_ALLOW_DRIVER_CONNECT_FAILURE is set. Measured on this tree at the change: no example, '
+    + 'under ADR-0062 D5 the boot fails fast when objects bind to that datasource. Measured on this '
+    + 'tree at the change: no example, '
     + 'template, CLI scaffold or published skill authors the key, and no host default or environment '
     + 'variable sets it. ADR-0049 / ADR-0087 / ADR-0112.',
   acceptanceCriteria:

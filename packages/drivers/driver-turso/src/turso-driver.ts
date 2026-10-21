@@ -122,8 +122,10 @@ export interface TursoDriverConfig {
    * and writes the local file through better-sqlite3, which has no encryption
    * codec, so the file would be written in plaintext that any SQLite reader
    * opens without the key. Drop it, and encrypt the disk or volume the file
-   * lives on instead. A remote database's storage encryption is the server's;
-   * this driver does not forward the key to it.
+   * lives on instead. A `file:` url or `:memory:` under a forced
+   * `mode: 'remote'` is refused the same way: the libSQL client this driver
+   * builds for it is handed no key. A remote database's storage encryption is
+   * the server's; this driver does not forward the key to it.
    */
   encryptionKey?: string;
 
@@ -1493,7 +1495,9 @@ const LOCAL_MODE_WITH_SYNC_URL_REFUSAL =
  * local-engine refusals: a url the engine cannot open, a sync key nothing
  * would read and a forced mode the driver would ignore each keep their own
  * message. An empty key is unset, as the datasource loaders read it
- * (`buildTursoDriverConfig` drops it). A remote mode is not judged here.
+ * (`buildTursoDriverConfig` drops it). A forced `mode: 'remote'` on a
+ * `file:` url or `:memory:` meets {@link remoteModeLocalEncryptionKeyRefusal}
+ * instead; a remote url is not judged here.
  *
  * ⚠️ The text is `@objectstack/spec`'s `TursoConfigSchema` refusal on
  * `encryptionKey`, byte for byte, held equal by
@@ -1512,6 +1516,53 @@ function localEncryptionKeyRefusal(mode: 'local' | 'replica'): string {
     'encrypts a local or replica file. Drop `encryptionKey`, and encrypt the disk or volume the file lives ' +
     "on instead, or keep the data in a remote Turso database, whose storage encryption is the server's to " +
     "configure, not this key's."
+  );
+}
+
+/**
+ * [#25020, patch round 1] The same key beside a `file:` url or `:memory:` under
+ * a FORCED `mode: 'remote'` — refused at construction too.
+ *
+ * {@link TursoDriver.detectMode} answers the forced mode first, so this shape
+ * skips every local-engine refusal: `toKnexConfig`'s remote arm opens nothing,
+ * and `connect()` hands the url to {@link TursoDriver.createRemoteClient},
+ * which builds `createClient({ url, authToken, concurrency })` with no key —
+ * and `@libsql/client` opens the local file for a `file:` url (the reading in
+ * {@link startsWithScheme}'s docblock; the parity table's row "file: under a
+ * forced mode: 'remote'" and `turso-driver-unrecognised-url-refusal.test.ts`
+ * pin the shape as a supported one). Every read and write then runs through
+ * the remote transport over that file, in plaintext. Honouring the key here
+ * is not the route: it would make a file's encryption depend on a transport
+ * override, a capability nothing pulls, and the key is proposed for
+ * retirement. So it is refused, in its own words — one text for a file, one
+ * for an in-memory database, which has no file to encrypt.
+ *
+ * Raised after every forced-remote refusal above, so a `syncUrl` or a lone
+ * `sync` beside it keeps its own message. A remote url (`libsql://`,
+ * `https://`, `ws(s)://`) is not judged here: there the storage is the
+ * server's.
+ *
+ * ⚠️ The text is `@objectstack/spec`'s `TursoConfigSchema` refusal on
+ * `encryptionKey` in its remote arm, byte for byte, held equal by
+ * `spec/turso-config-constructor-parity.test.ts`. Edit it there first.
+ */
+function remoteModeLocalEncryptionKeyRefusal(url: string): string {
+  if (namesInMemoryDatabase(url)) {
+    return (
+      "`encryptionKey` asks for this datasource's database to be encrypted, but `url` names an in-memory " +
+      "database, and `mode: 'remote'` runs every read and write of it through the libSQL client this " +
+      'driver builds, which is handed no key: there is no file for the key to encrypt, so it would change ' +
+      'nothing — the turso driver refuses this configuration when it starts. Drop `encryptionKey`.'
+    );
+  }
+  return (
+    "`encryptionKey` asks for this datasource's database file to be encrypted, but `url` is a local " +
+    "`file:` url, and `mode: 'remote'` runs every read and write of that file through the libSQL client " +
+    'this driver builds, which is handed no key: nothing would encrypt the file, so it would be written ' +
+    'in plaintext that any SQLite reader opens without the key — the turso driver refuses this ' +
+    'configuration when it starts. Nothing in this driver encrypts a local file. Drop `encryptionKey`, ' +
+    'and encrypt the disk or volume the file lives on instead, or point `url` at a remote Turso ' +
+    "database, whose storage encryption is the server's to configure, not this key's."
   );
 }
 
@@ -1582,6 +1633,15 @@ function namesInMemoryDatabase(url: string): boolean {
   if (!isFileUrl(url)) return false;
   const path = url.slice('file:'.length);
   return path === ':memory:' || path.startsWith(':memory:?');
+}
+
+/**
+ * [#25020] A url naming a database that lives on THIS host — a `file:` url
+ * (any letter case) or `:memory:` — whichever engine opens it. The
+ * `encryptionKey` refusal is judged by this, not by the transport mode.
+ */
+function namesLocalDatabase(url: string): boolean {
+  return url === ':memory:' || isFileUrl(url);
 }
 
 type LocalEngineDefect = 'remote-url' | 'unrecognised-url' | 'in-memory-replica';
@@ -2024,12 +2084,19 @@ export class TursoDriver extends SqlDriver {
     if (mode === 'local' && config.syncUrl) {
       refuseIgnoredSyncKey(LOCAL_MODE_WITH_SYNC_URL_REFUSAL);
     }
-    // [#25020] A key the local engine cannot honour: better-sqlite3 has no
-    // encryption codec, so the file would be written in plaintext. Refused in
-    // a local and a replica mode alike, before `super()` opens the file, in
-    // the spec's words, last. See `localEncryptionKeyRefusal`.
-    if (mode !== 'remote' && config.encryptionKey) {
-      refuseIgnoredSyncKey(localEncryptionKeyRefusal(mode));
+    // [#25020] A key nothing this driver builds can honour, judged by WHERE
+    // THE DATABASE LIVES, not by the mode: a `file:` url or `:memory:`.
+    // In a local or replica mode better-sqlite3 has no encryption codec; under
+    // a forced `mode: 'remote'` the libSQL client `createRemoteClient()` builds
+    // for that url is handed no key. Either way the file would be written in
+    // plaintext. Refused before `super()`, in the spec's words, last. (In a
+    // local or replica mode every url that reaches here is a `file:` url or
+    // `:memory:`: `localEngineDefect` refused the rest above.) See
+    // `localEncryptionKeyRefusal` and `remoteModeLocalEncryptionKeyRefusal`.
+    if (config.encryptionKey && namesLocalDatabase(config.url)) {
+      refuseIgnoredSyncKey(
+        mode === 'remote' ? remoteModeLocalEncryptionKeyRefusal(config.url) : localEncryptionKeyRefusal(mode),
+      );
     }
     const knexConfig = TursoDriver.toKnexConfig(config, mode);
     super(knexConfig);

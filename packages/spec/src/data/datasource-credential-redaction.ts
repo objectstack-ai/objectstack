@@ -55,12 +55,14 @@
  *     validation is a structural name/label check. So the only place these can
  *     still be found is exactly the place this module reads: a stored row.
  *  3. **Credential-shaped keys that are still WRITABLE** ({@link
- *     STILL_WRITABLE_CREDENTIAL_KEYS}) — today just turso's `encryptionKey`, an
- *     AES-256 key the binder has no slot for (#8081 scope item 4, which owns
- *     the decision about giving it one). Redacting it on READ neither grants
- *     nor removes that slot: the key stays writable, stays stored, and stays
- *     injected at connect. It simply stops being served back in cleartext,
- *     which is the one question this module answers.
+ *     STILL_WRITABLE_CREDENTIAL_KEYS}) — today just turso's `encryptionKey`, a
+ *     key the binder has no slot for (#8081 scope item 4, which owns the
+ *     decision about giving it one). Since #25020 it is refused for a local
+ *     database file and honoured by the driver in no mode, but a remote
+ *     datasource still parses with it and a stored row may still carry it.
+ *     Redacting it on READ neither grants nor removes a slot: where the key is
+ *     still writable it stays stored. It simply stops being served back in
+ *     cleartext, which is the one question this module answers.
  *
  * For a driver the platform ships no contract for, source 1 is empty — the
  * registry is saying "nothing to check against", not "nothing to protect". The

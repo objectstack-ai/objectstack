@@ -257,7 +257,9 @@ better-sqlite3, which has no encryption codec, so the key would encrypt nothing
 and the file would be written in plaintext that any SQLite reader opens without
 it. Drop `encryptionKey`, and put the file on an encrypted disk or volume if it
 must be encrypted at rest, or use a remote Turso database, whose storage
-encryption is the server's to configure.
+encryption is the server's to configure. A `file:` url or `:memory:` under a
+forced `mode: 'remote'` is refused the same way: the libSQL client the driver
+builds for that url is handed no key.
 
 You can also force a specific mode:
 
@@ -337,7 +339,8 @@ interface TursoDriverConfig {
 
   /**
    * Encrypts nothing, in any mode: refused in local and replica modes
-   * (VALIDATION_ERROR / 400), because the local engine cannot encrypt the file.
+   * (VALIDATION_ERROR / 400), because the local engine cannot encrypt the file,
+   * and beside a file: url or :memory: under a forced mode: 'remote'.
    */
   encryptionKey?: string;
 
