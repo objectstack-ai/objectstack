@@ -840,7 +840,7 @@ export const AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATE: EmailTemplate = {
   name: 'auth.existing_account_sign_up',
   label: 'Sign-up Attempt for an Existing Account',
   locale: 'en-US',
-  subject: 'You already have a {{appName}} account',
+  subject: 'You already have an account on {{appName}}',
   bodyHtml: wrap('You already have an account', `
 <p>Hi {{user.name}},</p>
 <p>Someone just tried to create a new {{appName}} account with <strong>{{user.email}}</strong>. This address already has an account, so no new account was created and nothing on your account has changed.</p>
