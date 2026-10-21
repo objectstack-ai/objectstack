@@ -1,5 +1,6 @@
 ---
 '@objectstack/objectql': minor
+'@objectstack/spec': patch
 ---
 
 fix(objectql)!: under `strictReadonlyWrites`, a write whose value a stored field's `expression` replaces (`stored_expression`) is refused, and nothing is written
@@ -15,6 +16,8 @@ Clause-②: no (narrowing: under `strictReadonlyWrites`, a write whose value a s
 - **FROM:** a write with `strictReadonlyWrites: true` that sent a value for a stored expression field, different from the value the engine computes, completed. The row held the computed value, and `onFieldsDropped` received a `stored_expression` event.
 - **TO:** the same write throws `ReadonlyFieldRejectedError` (`code: 'ERR_READONLY_FIELD_REJECTED'`), whose `drops` carries the `stored_expression` event. Nothing is written, and `onFieldsDropped` does not fire. This holds on insert (a single row, a batch, and `insertMany`, which refuses the whole call as it does for the other strict drops), on update by id, and on a predicate update.
 - **One refusal names everything.** When the same payload also carries another strip's drop (`readonly`, `readonly_when`, `primary_key`, `computed`), the one refusal names all of them together, `stored_expression` last. Before, such a write was refused for the other drops alone. The message's per-reason form gains a `stored_expression` remedy, spoken only when that reason is present, so every other refusal's message is unchanged.
+- **Ordering is kept.** The strips' refusal still comes first: if the stored-expression pass itself throws, for example a predicate update whose patch computes different values on different matched rows (`VALIDATION_FAILED`), a strict write that also carries a strip's drop is still refused with `ERR_READONLY_FIELD_REJECTED` naming those drops, as before.
+- **`@objectstack/spec` (patch):** the TSDoc on `WriteObservabilityOptions.strictReadonlyWrites` and `DroppedFieldsEvent.reason`, which ships in the published declarations, now says the `stored_expression` arm is refused under strict. No schema, `.describe()` text or export changes.
 - **Unchanged:** a strict write that sends the computed value, or no value for the field, is not refused, because nothing it sent was replaced. A stored expression field also declared `readonly` is still refused once, as `readonly`. Without `strictReadonlyWrites`, the write completes with the computed value and the replacement is reported, as before. The error code is unchanged.
 - **The fix for a strict caller:** leave the stored expression field out of the payload, or send the value its expression computes. To let the replacement happen and merely observe it, drop `strictReadonlyWrites` and pass `onFieldsDropped`.
 

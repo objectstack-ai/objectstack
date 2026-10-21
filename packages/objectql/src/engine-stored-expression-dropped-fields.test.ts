@@ -130,6 +130,8 @@ describe('[#24690] a caller value a stored expression replaced is reported as `s
         quantity: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
         unit_price: { type: 'currency', readonlyWhen: "parent.status == 'paid'" },
         description: { type: 'text' },
+        // A static lock, so a predicate update can carry a strip's drop.
+        note: { type: 'text', readonly: true },
         amount: { type: 'currency', min: 0, expression: { dialect: 'cel', source: 'record.quantity * record.unit_price' } },
       },
     } as any);
@@ -373,6 +375,27 @@ describe('[#24690] a caller value a stored expression replaced is reported as `s
       expect(err.fields).toEqual(['quantity', 'amount']);
       expect(line('line_paid')).toMatchObject({ quantity: 6, amount: 299.94 });
       expect(l.events).toEqual([]);
+    });
+
+    it('predicate update: a strip\'s drop is refused BEFORE a divergent settle — ERR_READONLY_FIELD_REJECTED, not VALIDATION_FAILED (#5126 ordering)', async () => {
+      const l = listener();
+      const before = snapshot();
+      // quantity: 10 computes amount 100 on line_draft and 70 on line_draft_2,
+      // which one statement cannot store; `note` is taken by the static strip.
+      const err = await refusal(engine.update(LINE, { note: 'x', quantity: 10 }, { where: { invoice: 'INV-1004' }, multi: true, ...STRICT, onFieldsDropped: l.onFieldsDropped } as any));
+      expect(err.drops).toEqual([{ object: LINE, fields: ['note'], reason: 'readonly' }]);
+      expect(snapshot()).toEqual(before);
+      expect(l.events).toEqual([]);
+    });
+
+    it('control, predicate update: the same divergent payload without strict is refused by the settle, VALIDATION_FAILED', async () => {
+      const before = snapshot();
+      const err: any = await engine
+        .update(LINE, { note: 'x', quantity: 10 }, { where: { invoice: 'INV-1004' }, multi: true } as any)
+        .catch((e: unknown) => e);
+      expect(err?.code).toBe('VALIDATION_FAILED');
+      expect(err?.fields).toEqual([expect.objectContaining({ field: 'amount', code: 'invalid_value' })]);
+      expect(snapshot()).toEqual(before);
     });
 
     it('insert: a value the static `readonly` strip took is refused as `readonly` alone, never also as `stored_expression`', async () => {

@@ -16734,9 +16734,23 @@ export class ObjectQL implements IObjectQLEngine {
           const liveIndexes = rows
             .map((row, i) => (rowErrors[i] === undefined && row != null && typeof row === 'object' ? i : -1))
             .filter((i) => i >= 0);
-          const computed = await computeStoredExpressions(
-            storedExpressionPlan, liveIndexes.map((i) => rows[i] as Record<string, unknown>), opCtx.context, storedExpressionServing,
-          );
+          let computed: Array<Record<string, unknown>>;
+          try {
+            computed = await computeStoredExpressions(
+              storedExpressionPlan, liveIndexes.map((i) => rows[i] as Record<string, unknown>), opCtx.context, storedExpressionServing,
+            );
+          } catch (err) {
+            // A pass that THROWS is pre-empted by the strict verdict on the
+            // strips' drops (#5126's ordering — the check used to sit ahead
+            // of this pass), then rethrown.
+            const stripDrops = droppedFieldEvents(object, computedDropped, insertDropped);
+            if (stripDrops.length > 0 && options?.strictReadonlyWrites === true) {
+              throw new ReadonlyFieldRejectedError(
+                object, [...new Set(stripDrops.flatMap((d) => d.fields))], stripDrops, 'insert',
+              );
+            }
+            throw err;
+          }
           liveIndexes.forEach((i, k) => {
             const row = rows[i] as Record<string, unknown>;
             const taken = insertDroppedPerRow[i] ?? [];
@@ -18403,9 +18417,18 @@ export class ObjectQL implements IObjectQLEngine {
                // every drop and replacement together. The computation writes
                // nothing (it evaluates over a copy), and an object declaring no
                // stored expression skips it, so its refusal is where it stood.
+               // A pass that THROWS (a permission or related-row read) is
+               // pre-empted by the strict verdict on the strips' drops already
+               // collected — #5126's ordering, as on the predicate branch.
                if (storedExpressionPlan.length > 0) {
                    const patch = hookContext.input.data as Record<string, unknown>;
-                   const [computed] = await computeStoredExpressions(storedExpressionPlan, [{ ...priorRecord, ...patch }], opCtx.context, storedExpressionServing);
+                   let computed: Record<string, unknown> | undefined;
+                   try {
+                       [computed] = await computeStoredExpressions(storedExpressionPlan, [{ ...priorRecord, ...patch }], opCtx.context, storedExpressionServing);
+                   } catch (err) {
+                       assertNoStrictDrops();
+                       throw err;
+                   }
                    emitDrop(replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, [computed!]), 'stored_expression');
                    applyStoredExpressionsToPatch(patch, computed!, priorRecord);
                }
@@ -18693,20 +18716,31 @@ export class ObjectQL implements IObjectQLEngine {
                // the column left as it is) is reported under
                // `stored_expression`; [#25000] through `emitDrop`, so under
                // strict it is REFUSED before the statement and no row is written,
-               // in one refusal with every strip's drop. The pass writes nothing;
-               // a patch it cannot store as one statement is refused by
-               // `settleBulkStoredExpressions` on its own, before this judgment.
+               // in one refusal with every strip's drop. The pass writes nothing.
+               // ⛔ #5126's ordering survives it: a pass that THROWS — above
+               // all `settleBulkStoredExpressions` refusing a patch that computes
+               // different values on different rows (`VALIDATION_FAILED`) — is
+               // pre-empted by the strict verdict on the strips' drops already
+               // collected, so a strict caller whose payload a strip took is told
+               // `ERR_READONLY_FIELD_REJECTED` first, exactly as when the assert
+               // sat ahead of the whole pass. With no throw, one refusal names
+               // every strip drop plus the replacement.
                if (storedExpressionPlan.length > 0) {
-                   const matched = ((await readPriorRows()) ?? []).filter((row) => row != null && typeof row === 'object');
-                   const patch = hookContext.input.data as Record<string, unknown>;
-                   const before = await computeStoredExpressions(storedExpressionPlan, matched, opCtx.context, storedExpressionServing);
-                   const after = await computeStoredExpressions(storedExpressionPlan, matched.map((row) => ({ ...row, ...patch })), opCtx.context, storedExpressionServing);
-                   const settled = settleBulkStoredExpressions(storedExpressionPlan, patch, before, after, object);
-                   emitDrop(
-                     replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, matched.map((row) => ({ ...row, ...settled }))),
-                     'stored_expression',
-                   );
-                   hookContext.input.data = settled as any;
+                   try {
+                       const matched = ((await readPriorRows()) ?? []).filter((row) => row != null && typeof row === 'object');
+                       const patch = hookContext.input.data as Record<string, unknown>;
+                       const before = await computeStoredExpressions(storedExpressionPlan, matched, opCtx.context, storedExpressionServing);
+                       const after = await computeStoredExpressions(storedExpressionPlan, matched.map((row) => ({ ...row, ...patch })), opCtx.context, storedExpressionServing);
+                       const settled = settleBulkStoredExpressions(storedExpressionPlan, patch, before, after, object);
+                       emitDrop(
+                         replacedStoredExpressionFields(storedExpressionPlan, suppliedValues, patch, matched.map((row) => ({ ...row, ...settled }))),
+                         'stored_expression',
+                       );
+                       hookContext.input.data = settled as any;
+                   } catch (err) {
+                       assertNoStrictDrops();
+                       throw err;
+                   }
                }
                assertNoStrictDrops();
                // [#21663] The predicate-path twin of the by-id second pass, at the
