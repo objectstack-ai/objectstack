@@ -177,7 +177,7 @@ describe('[ADR-0131 D5] the organization writes that move the anchor off that gr
 
 describe('[#24948] the same question about deleting the Default Organization, asked before anything is deleted', () => {
   const members = (engine: ObjectQL) =>
-    engine.find('sys_member', { where: {}, ...SYSTEM } as any) as Promise<Array<Record<string, unknown>>>;
+    engine.find('sys_member', { where: {}, ...SYSTEM }) as Promise<Array<Record<string, unknown>>>;
 
   it('refuses when the grant the Default Organization owns is the last standing', async () => {
     await promotedSingle();
