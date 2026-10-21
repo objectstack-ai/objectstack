@@ -336,4 +336,31 @@ export interface IEmailService {
    * - `MISSING_VARIABLES`  — declared `required` variables absent from `data`.
    */
   renderTemplate(input: RenderTemplateInput): Promise<RenderTemplateResult>;
+
+  /**
+   * Whether mail sent through this service is actually delivered — the
+   * deliverability fact, answered by the one package that owns the transport.
+   * Same name and shape as `ISmsService.isConfigured()` (`./sms-service`).
+   *
+   * - `true` — the active transport hands messages to a real delivery
+   *   provider (SMTP, an API provider, an injected transport). It says the
+   *   transport is live, not that any one send will succeed: a send can still
+   *   resolve `status: 'failed'`.
+   * - `false` — no delivery transport is active: `send()` / `sendTemplate()`
+   *   still resolve and still record their audit row, but no mail leaves the
+   *   process. A `log` transport (plugin-email's development default) is
+   *   NEVER delivering, in any environment — it always answers `false`.
+   *
+   * The answer is read at call time and follows runtime transport swaps (for
+   * example a transport rebuilt from the `mail` settings namespace), so
+   * consumers call it when they decide, never cache it at boot.
+   *
+   * Optional so existing implementations stay valid. A consumer MUST treat an
+   * absent member as UNKNOWN, never as `true`: a flow whose success depends on
+   * mail reaching someone (a sign-up answered as a success on the promise of a
+   * mail, a verification or reset link) reads absent the same as `false` and
+   * keeps its explicit refusal — reading "a service is wired" as delivery
+   * reopens the #15587 black hole (a fake success with no mail).
+   */
+  isConfigured?(): boolean;
 }
