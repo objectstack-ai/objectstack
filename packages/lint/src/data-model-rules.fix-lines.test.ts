@@ -150,8 +150,8 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
   it('object/missing-name-field: the pointer, and where the titleFormat reasoning lives', () => {
     const fix = fixOf(record(lintDataModel([{ name: LONG_OBJECT, fields: { amount: { type: 'number' } } }])), MISSING_NAME_FIELD);
     expect(fix).toBe(
-      "Set `nameField`; a composite title to import, sort or search by is a text field with an `expression` " +
-        "(a text formula is display-only); `titleFormat` never counts (`os explain title-format-retired`).",
+      "Set `nameField` (ADR-0079), never `titleFormat` (`os explain title-format-retired`); a composite title " +
+        "to import/sort/search by is a text field with an `expression` (a text formula is display-only).",
     );
     // The command the line names answers, and says why `titleFormat` does not count.
     expect(explainRule('title-format-retired')!.paragraphs.join('\n')).toContain('render-only');

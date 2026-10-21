@@ -738,8 +738,8 @@ export function lintDataModel(objects: any[]): LintIssue[] {
         // [#22161] One remedy line; why `titleFormat` does not count is
         // `title-format-retired`'s `os explain` text.
         fix:
-          "Set `nameField`; a composite title to import, sort or search by is a text field with an `expression` " +
-          "(a text formula is display-only); `titleFormat` never counts (`os explain title-format-retired`).",
+          "Set `nameField` (ADR-0079), never `titleFormat` (`os explain title-format-retired`); a composite title " +
+          "to import/sort/search by is a text field with an `expression` (a text formula is display-only).",
       });
     }
 
