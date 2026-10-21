@@ -1389,9 +1389,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Client Type",
         options: {
           web: "web",
-          native: "native",
-          useragentbased: "user-agent-based",
-          public: "public"
+          native: "native"
         }
       },
       public: {

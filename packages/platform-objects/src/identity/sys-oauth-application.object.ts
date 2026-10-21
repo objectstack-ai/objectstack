@@ -156,9 +156,9 @@ export const SysOauthApplication = ObjectSchema.create({
       // 400 before the provider runs; no type (absent or null) registers `web`.
       // Nothing on the server reads these options: the generic action door
       // refuses a `type: 'api'` action before its param contract runs. The
-      // stored `type` column below is not narrowed: 1.7.3 writes only `web` or
-      // `native` (null for a client-metadata-document client), an earlier
-      // provider line could write `user-agent-based`, and no in-tree reader branches on it.
+      // stored `type` column below declares the same two values [#25053]:
+      // 1.7.3 writes only `web` or `native` (null for a client-metadata-document
+      // client), and a row an earlier provider line stored as `user-agent-based` still reads.
       params: [
         { name: 'name', label: 'Application Name', type: 'text', required: true },
         {
@@ -446,7 +446,20 @@ export const SysOauthApplication = ObjectSchema.create({
     // (#3002). The column keeps its name and its data; the rename is absorbed
     // by the `applicationType: 'type'` mapping in plugin-auth's
     // `auth-schema-config.ts`.
-    type: Field.select(['web', 'native', 'user-agent-based', 'public'], {
+    //
+    // [#25053, ADR-0049 enforce-or-remove] The options are exactly the values
+    // the column's one writer produces. `@better-auth/oauth-provider` 1.7.3
+    // writes `application_type` `web` or `native` on every creation and
+    // update path, and the generic data API cannot write this table
+    // (`apiMethods` is `get` / `list`). It can also write `null` (a
+    // client-metadata-document client that names no type), so the column
+    // stays optional. The former `useragentbased` and `public` options had no
+    // writer. Rows are not rewritten: a row an earlier provider line stored as
+    // `user-agent-based` (never a declared value, because the string shorthand
+    // strips hyphens) still reads and lists, and takes every write that leaves
+    // `type` out, because the record validator judges only the keys a write
+    // sends. Neither value has a hyphen, so the shorthand stores each as written.
+    type: Field.select(['web', 'native'], {
       label: 'Client Type',
       required: false,
       defaultValue: 'web',

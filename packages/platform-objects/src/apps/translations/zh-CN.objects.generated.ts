@@ -1389,9 +1389,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "客户端类型",
         options: {
           web: "Web 应用",
-          native: "原生应用",
-          useragentbased: "基于用户代理",
-          public: "公开"
+          native: "原生应用"
         }
       },
       public: {

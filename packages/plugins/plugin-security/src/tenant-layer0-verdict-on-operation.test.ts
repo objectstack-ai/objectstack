@@ -550,11 +550,18 @@ describe('[#15887 / ADR-0090 D10] the on-behalf-of INTERSECTION is recorded at t
   // both halves resolve to the same organization by construction).
   const GROUP = { posture: 'group' };
   const CALLER_ORGS = ['org-1', 'org-2', 'org-3'];
+  // [#25063] The delegator is a member of the live organization (`org-1`,
+  // `MEMBER_CTX.tenantId`): a delegated context whose active organization the
+  // delegator's membership does not back is refused at the prologue, before
+  // any wall is composed (pinned in `delegated-organization-membership.test.ts`).
+  // Its other memberships still differ from the caller's, so the intersection
+  // below is a set neither wall names alone.
+  const DELEGATOR_ORGS = ['org-1', 'org-3', 'org-9'];
 
   it('the recorded verdict is the INTERSECTION — an organization set neither wall names alone', async () => {
     const { middleware } = await boot({
       tenancy: GROUP,
-      delegator: { userId: DELEGATOR, memberOf: ['org-2', 'org-3', 'org-9'] },
+      delegator: { userId: DELEGATOR, memberOf: DELEGATOR_ORGS },
     });
     const opCtx = sweep('crm_task', 'update', {
       ...MEMBER_CTX,
@@ -566,14 +573,14 @@ describe('[#15887 / ADR-0090 D10] the on-behalf-of INTERSECTION is recorded at t
     // Both walls really were composed onto this one operation, in order.
     expect(injectedOrgWalls(opCtx)).toEqual([
       { $in: ['org-1', 'org-2', 'org-3'] },
-      { $in: ['org-2', 'org-3', 'org-9'] },
+      { $in: ['org-1', 'org-3', 'org-9'] },
     ]);
     // And the recorded verdict is what a row must satisfy to clear BOTH — a
     // set that is neither injected clause. Dropping the intersection at the
     // call site records the caller's three organizations while the composed
     // predicate admits two: the recorded verdict would then over-state the
     // batch's reach, on a wall the middleware itself narrowed.
-    expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'organizations', organizationIds: ['org-2', 'org-3'] });
+    expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'organizations', organizationIds: ['org-1', 'org-3'] });
   });
 
   it('the SAME fixture without the delegation link records the caller\'s half — the link is what moves the answer', async () => {
@@ -581,7 +588,7 @@ describe('[#15887 / ADR-0090 D10] the on-behalf-of INTERSECTION is recorded at t
     // is a reading about the intersection, not about the `group` posture.
     const { middleware } = await boot({
       tenancy: GROUP,
-      delegator: { userId: DELEGATOR, memberOf: ['org-2', 'org-3', 'org-9'] },
+      delegator: { userId: DELEGATOR, memberOf: DELEGATOR_ORGS },
     });
     const opCtx = sweep('crm_task', 'update', { ...MEMBER_CTX, accessible_org_ids: CALLER_ORGS });
     await middleware(opCtx, engineTerminal(opCtx));
@@ -595,12 +602,19 @@ describe('[#15887 / ADR-0090 D10] the on-behalf-of INTERSECTION is recorded at t
     // at all. The caller's own half names three organizations; the delegator's
     // empty access set denies; the AND of the two admits no row, and the
     // recorded verdict says so rather than naming an organization.
+    //
+    // [#25063] The caller carries NO active organization. A delegator with no
+    // membership backs no organization, so a context with one is refused at
+    // the prologue before any wall is composed (`delegated-organization-
+    // membership.test.ts`); with none, the prologue has nothing to vet and the
+    // composed wall is what decides — the subject of this case.
+    const { tenantId: _activeOrganization, ...callerWithNoActiveOrganization } = MEMBER_CTX;
     const { middleware } = await boot({
       tenancy: GROUP,
       delegator: { userId: DELEGATOR, memberOf: [] },
     });
     const opCtx = readSweep('crm_task', {
-      ...MEMBER_CTX,
+      ...callerWithNoActiveOrganization,
       accessible_org_ids: CALLER_ORGS,
       onBehalfOf: { userId: DELEGATOR },
     });
