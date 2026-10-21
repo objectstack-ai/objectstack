@@ -515,14 +515,17 @@ export function groupReleaseEntry(entry) {
 // The gate family this script contributes is `check:release-body`, and that
 // script is `--self-test` ALONE: lint.yml runs the renderer against fixtures,
 // never against the tree. The workspace read below and the CHANGELOG reads
-// belong to the RELEASE run, which no pull request schedules. So there is no
-// card whose file surface should name this family except one editing this file,
-// and identity matching already covers that. The zero hints have a second cause
-// worth keeping straight, recorded in `isNonPathNamespace`: the one pathy
-// literal this module body used to contribute was a media type, refused as a
-// non-filesystem namespace. Both are true, and neither is a missing declaration.
-//
-// dispatch-gates: no-path-population -- check:release-body runs this renderer's --self-test against fixtures only; the workspace and CHANGELOG reads belong to the release run, which no pull request schedules
+// belong to the RELEASE run, which no pull request schedules, so neither is a
+// path population of this family. The family HAS exactly one, and it arrived
+// with ruling A: `scripts/pm/clause2-line.mjs`, the fleet's one reader of the
+// two declaration lines, imported above — its readings decide which section a
+// release-note entry lands in, so a card that edits the reader owes this
+// renderer's self-test, and the import specifier is the hint that derives it.
+// This file therefore no longer declares `no-path-population`: the marker and
+// a pathy first-party import contradict each other by the harvester's own
+// rule, and the import is the true statement. The second zero-hint cause stays
+// recorded in `isNonPathNamespace`: the one other pathy literal this module
+// body contributes is a media type, refused as a non-filesystem namespace.
 
 /**
  * Every non-private workspace package, by name.
