@@ -597,10 +597,11 @@ export interface SchemaRegistryOptions {
  * Currently injects:
  *   - `organization_id` — always provisioned (unless the object opts out via
  *     `systemFields`/`tenancy.enabled:false` or is `better-auth` managed) so
- *     the column never depends on the global multi-tenant flag. Required-false;
- *     org-scoping populates it on insert in multi-tenant mode, and it stays
- *     NULL on single-tenant stacks. Only the column's INDEX is gated on
- *     `multiTenant` (no per-tenant filtering exists single-tenant).
+ *     the column never depends on the global multi-tenant flag. Required-false
+ *     in the declaration; org-scoping stamps it on insert (under `single` with
+ *     the Default Organization), and it is never NULL (ADR-0131 D1). Only the
+ *     column's INDEX is gated on `multiTenant` (no per-tenant filtering exists
+ *     single-tenant).
  *   - `created_at` / `created_by` / `updated_at` / `updated_by` — audit
  *     fields. Marked `system: true, readonly: true` so detail views can
  *     surface them in a dedicated "System Information" section while
