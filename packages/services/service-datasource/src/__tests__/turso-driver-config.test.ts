@@ -325,6 +325,15 @@ describe('#16023 — every reader consults the spelling the authoring contract a
   // arrives (`loadDatasourceRows` / `loadDatasourceRow`), so a `??` fallback
   // here would be a consumer-side dialect for a spelling both doors closed —
   // the sqlite `filename` and mongo `url` arms say exactly this.
+  //
+  // ONE named exception, and it is a refusal, not a tolerance: `encryptionKey`
+  // (#25050) is a removal with no successor whose conversion deliberately
+  // leaves a non-empty value beside a LOCAL url for its author. Its reader
+  // forwards that value verbatim, under its own name, so the driver
+  // constructor refuses it by name instead of the row booting in silence. It
+  // is held to exactly that below: forwarded unchanged, never read into any
+  // other key.
+  const FORWARDED_TO_CONSTRUCTOR_REFUSAL = new Set(['encryptionKey']);
   it('reads NO retired spelling — a config authored the old way yields only `url`', () => {
     for (const { retired } of retirements()) {
       // Probed at every candidate type, not at the replacement's: a tolerance
@@ -332,12 +341,20 @@ describe('#16023 — every reader consults the spelling the authoring contract a
       // itself accepts nothing to sample from.
       for (const value of CANDIDATES) {
         const built = build({ url: 'libsql://x', [retired]: value });
+        if (FORWARDED_TO_CONSTRUCTOR_REFUSAL.has(retired)) {
+          expect(built, `\`${retired}\` is forwarded unchanged (probed with ${typeof value})`)
+            .toEqual({ url: 'libsql://x', [retired]: value });
+          continue;
+        }
         expect(
           Object.keys(built),
           `a reader still consults the retired \`${retired}\` (probed with ${typeof value})`,
         ).toEqual(['url']);
       }
     }
+    // The exception list names only keys the contract really retired.
+    const retiredNames = retirements().map((r) => r.retired);
+    for (const key of FORWARDED_TO_CONSTRUCTOR_REFUSAL) expect(retiredNames).toContain(key);
   });
 
   // The named, readable instance of the property above — the case #16023

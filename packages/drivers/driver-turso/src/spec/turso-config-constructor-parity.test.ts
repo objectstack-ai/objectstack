@@ -296,7 +296,8 @@ describe('turso config: the constructor, the spec contract and this mirror agree
     // [#20586] The forced-local half of the `mode` rows, floored on its own so
     // it cannot shrink behind the forced-replica half.
     expect(ROWS.filter((r) => r.refusedOn === 'mode' && r.config.mode === 'local').length).toBeGreaterThanOrEqual(8);
-    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(25);
+    // 20 measured at #25050, after the `encryptionKey` rows moved to RETIRED_KEY_ROWS.
+    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(20);
     // [#25050] The removed key, across every mode and beside other defects.
     expect(RETIRED_KEY_ROWS.length).toBeGreaterThanOrEqual(15);
     expect(RETIRED_KEY_ROWS.filter((r) => /^(libsql|https|wss):/i.test(r.config.url)).length).toBeGreaterThanOrEqual(5);
