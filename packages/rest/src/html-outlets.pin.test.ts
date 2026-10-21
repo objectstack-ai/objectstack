@@ -9,9 +9,12 @@
  * The burden sits on the OUTLET: the code that places a value into markup. A
  * value reaching an HTML outlet may carry any character, and nothing upstream
  * strips or refuses it, so the outlet escapes it for the context it lands in —
- * element text or a quoted attribute value. This package has exactly one such
- * outlet today: the `GET {base}/docs` viewer in `discovery-routes.ts`, which
- * places the request-derived openapi URL into a `data-url="…"` attribute.
+ * element text or a quoted attribute value. This package has NO such outlet
+ * today. Its one outlet, the `GET {base}/docs` viewer page in
+ * `discovery-routes.ts`, was retired with its route (#25104), and the escaper
+ * that page called left with it, having no other caller. A new outlet escapes
+ * by context and joins {@link OUTLETS} with a pin that drives its real render
+ * path.
  *
  * ## The list, and the pin on the list itself
  *
@@ -22,8 +25,10 @@
  * an identifier or a string naming `html`, or a string carrying an HTML tag —
  * and requires each one to be on {@link OUTLETS} or on {@link NOT_OUTLETS} with
  * the reason it renders nothing. A new file that touches HTML fails here until
- * its author says which it is. A positive control proves the census actually
- * finds the known outlet.
+ * its author says which it is. A positive control proves the census finds an
+ * outlet and reds on it while it is unlisted: it runs over this package's tree
+ * plus a FIXTURE source shaped like the retired viewer page, because the tree
+ * itself no longer holds one.
  *
  * ⚠️ LIMIT, stated so it is not read as more: the census reads source text of
  * THIS package. It proves no unlisted file here touches HTML; it does not see
@@ -37,8 +42,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import ts from 'typescript';
-import { describe, it, expect, vi } from 'vitest';
-import { RestServer } from './rest-server.js';
+import { describe, it, expect } from 'vitest';
 
 /** …/packages/rest/src — this package's whole source tree. */
 const SRC = dirname(fileURLToPath(import.meta.url));
@@ -56,17 +60,11 @@ interface NotOutletEntry {
   readonly why: string;
 }
 
-const OUTLETS: Readonly<Record<string, OutletEntry>> = {
-  'discovery-routes.ts': {
-    renders: 'the GET {base}/docs Scalar viewer page, which places the request-derived openapi URL into a data-url attribute',
-    pin: pinDocsViewer,
-  },
-};
+/** Empty since #25104: the one outlet, the `GET {base}/docs` viewer page, was retired with its route. */
+const OUTLETS: Readonly<Record<string, OutletEntry>> = {};
 
 const NOT_OUTLETS: Readonly<Record<string, NotOutletEntry>> = {
-  'html-escape.ts': { why: 'the escaper the outlet calls; renders nothing itself' },
   'import-template.ts': { why: 'names "html" as a sample field-type string in SAMPLE_TEXT_TYPES; renders nothing' },
-  'rest-route-ledger.ts': { why: 'a route-ledger note describing the docs page in prose; renders nothing' },
 };
 
 // ── The census ──────────────────────────────────────────────────────────────
@@ -112,6 +110,36 @@ function shippedSources(dir = SRC): string[] {
   return out.sort();
 }
 
+/** Every shipped source file's text, keyed package-relative. */
+function shippedSourceTexts(): Map<string, string> {
+  return new Map(shippedSources().map((rel) => [rel, readFileSync(join(SRC, rel), 'utf8')]));
+}
+
+/** The files among `sources` whose code touches HTML, sorted. */
+function touchingFiles(sources: ReadonlyMap<string, string>): string[] {
+  return [...sources].filter(([rel, text]) => touchesHtml(rel, text)).map(([rel]) => rel).sort();
+}
+
+/** The listed files, outlets and non-outlets together, sorted. */
+function listedFiles(): string[] {
+  return [...Object.keys(OUTLETS), ...Object.keys(NOT_OUTLETS)].sort();
+}
+
+/**
+ * The positive control's fixture: a source shaped like the retired viewer page,
+ * a request-derived value placed into a quoted attribute of a served document.
+ * It is a string, never a file, so the tree the census reads is unchanged.
+ */
+const FIXTURE_OUTLET_FILE = 'fixture-viewer-page.ts';
+const FIXTURE_OUTLET_SOURCE = [
+  'export function page(specUrl: string): string {',
+  '  return `<!doctype html>',
+  '<html><body>',
+  '<script id="api-reference" data-url="${specUrl}"></script>',
+  '</body></html>`;',
+  '}',
+].join('\n');
+
 describe('the outlet list — every file here that touches HTML is classified', () => {
   it('the census reads code, not comments (control)', () => {
     expect(touchesHtml('a.ts', '// renders html\nexport const x = 1;')).toBe(false);
@@ -120,16 +148,21 @@ describe('the outlet list — every file here that touches HTML is classified', 
     expect(touchesHtml('a.ts', "export const t = 'text/html';")).toBe(true);
   });
 
-  it('the census finds the known outlet (positive control)', () => {
-    const outlet = 'discovery-routes.ts';
-    expect(Object.keys(OUTLETS)).toContain(outlet);
-    expect(touchesHtml(outlet, readFileSync(join(SRC, outlet), 'utf8'))).toBe(true);
+  it('the census finds an outlet, and an unlisted one breaks the classification (positive control, on a fixture)', () => {
+    // The tree holds no outlet since #25104, so the control is a fixture source
+    // added to the tree's own texts: the census must find it, and it must be
+    // exactly what the classification below would red on.
+    const sources = shippedSourceTexts();
+    expect(sources.has(FIXTURE_OUTLET_FILE), 'the fixture names no real file').toBe(false);
+    sources.set(FIXTURE_OUTLET_FILE, FIXTURE_OUTLET_SOURCE);
+    const touching = touchingFiles(sources);
+    expect(touching).toContain(FIXTURE_OUTLET_FILE);
+    expect(touching.filter((f) => !listedFiles().includes(f))).toEqual([FIXTURE_OUTLET_FILE]);
+    expect(touching).not.toEqual(listedFiles());
   });
 
   it('the files that touch HTML are exactly the listed outlets and non-outlets', () => {
-    const touching = shippedSources().filter((rel) => touchesHtml(rel, readFileSync(join(SRC, rel), 'utf8')));
-    const listed = [...Object.keys(OUTLETS), ...Object.keys(NOT_OUTLETS)].sort();
-    expect(touching).toEqual(listed);
+    expect(touchingFiles(shippedSourceTexts())).toEqual(listedFiles());
   });
 
   it('no file is both an outlet and a non-outlet', () => {
@@ -139,76 +172,9 @@ describe('the outlet list — every file here that touches HTML is classified', 
 
 // ── The per-entry pin ─────────────────────────────────────────────────────
 
-const UNSCOPED = '/api/v1';
-const SCOPED = '/api/v1/environments/:environmentId';
-
-/** Mount both bases, a signed-in context, and drive the GET {base}/docs handler. */
-function makeRest() {
-  const httpServer = {
-    get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), patch: vi.fn(),
-    use: vi.fn(), listen: vi.fn(), close: vi.fn(),
-  } as any;
-  const protocol: any = { getMetaItems: vi.fn(async () => ({ items: [] })) };
-  const rest = new RestServer(
-    httpServer, protocol,
-    { api: { version: 'v1', enableProjectScoping: true, projectResolution: 'auto' } } as any,
-  );
-  (rest as any).resolveExecCtx = vi.fn(async () => ({ userId: 'u_docs_reader' }));
-  rest.registerRoutes();
-  return rest;
-}
-
-/** The viewer's `data-url` attribute value, as served for a request whose path is `reqPath`. */
-async function dataUrlFor(rest: RestServer, mountPath: string, reqPath: string, environmentId?: string): Promise<string> {
-  const entry = (rest as any).routeManager.get('GET', mountPath);
-  expect(entry, `GET ${mountPath} must be mounted`).toBeDefined();
-  let html = '';
-  const res: any = {
-    status: () => res,
-    json: () => res,
-    send: (body: string) => { html = body; return res; },
-    setHeader: () => res,
-    header: () => res,
-  };
-  await entry.handler({
-    method: 'GET', path: reqPath, url: reqPath,
-    params: environmentId ? { environmentId } : {}, query: {},
-    headers: { host: 'example.test' },
-  }, res);
-  const m = html.match(/data-url="([^\n]*)"><\/script>/);
-  expect(m, 'the viewer page carries a data-url attribute').not.toBeNull();
-  return m![1];
-}
-
-function pinDocsViewer(): void {
-  /**
-   * A path segment carrying the characters a quoted HTML attribute interprets.
-   * Kept to the minimum the context reads — a quote, an angle bracket, an
-   * ampersand, an apostrophe — not an attack string.
-   */
-  const SPECIAL_ENV = 'a"<&\'b';
-  const SPECIAL_ENV_ESCAPED = 'a&quot;&lt;&amp;&#39;b';
-
-  it('a value carrying attribute-interpreted characters is escaped for the attribute context', async () => {
-    const rest = makeRest();
-    const reqPath = `/api/v1/environments/${SPECIAL_ENV}/docs`;
-    const dataUrl = await dataUrlFor(rest, `${SCOPED}/docs`, reqPath, SPECIAL_ENV);
-    expect(dataUrl).toBe(`/api/v1/environments/${SPECIAL_ENV_ESCAPED}/openapi.json`);
-    // The literal characters do not survive into the served attribute value.
-    expect(dataUrl).not.toContain('"');
-    expect(dataUrl).not.toContain('<');
-  });
-
-  it('an ordinary URL is served byte-identical', async () => {
-    const rest = makeRest();
-    const unscoped = await dataUrlFor(rest, `${UNSCOPED}/docs`, '/api/v1/docs');
-    expect(unscoped).toBe('/api/v1/openapi.json');
-    const scoped = await dataUrlFor(rest, `${SCOPED}/docs`, '/api/v1/environments/env_1/docs', 'env_1');
-    expect(scoped).toBe('/api/v1/environments/env_1/openapi.json');
-  });
-}
-
-// Registered last, so every helper above is initialised before the pin reads it.
+// Each listed outlet registers the pin that drives its real render path. The
+// list is empty today (see OUTLETS), so this registers nothing until an outlet
+// joins it.
 for (const [file, entry] of Object.entries(OUTLETS)) {
   describe(`${file} — ${entry.renders}`, entry.pin);
 }

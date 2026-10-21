@@ -45,15 +45,18 @@
  *   ('acme', NULL, 'X') then ('acme', NULL, 'X')   -> BOTH ACCEPTED   (NULL-DISTINCT)
  *   ('acme', 'A2', NULL) then ('acme', 'A2', NULL) -> BOTH ACCEPTED   (NULL-DISTINCT)
  *
- * UNIQUE (COALESCE(organization_id,'__global__'), account_id, code)  -- 'organization'
- *   (NULL, 'A1', 'X') then (NULL, 'A1', 'X')       -> second REFUSED  (the org part FOLDS)
- *   (NULL, 'A2', NULL) then (NULL, 'A2', NULL)     -> BOTH ACCEPTED   (NULL-DISTINCT wins)
+ * UNIQUE (organization_id, account_id, code)                 -- 'organization'
+ *   (NULL, 'A1', 'X') then (NULL, 'A1', 'X')       -> BOTH ACCEPTED   (NULL-DISTINCT)
+ *   (NULL, 'A2', NULL) then (NULL, 'A2', NULL)     -> BOTH ACCEPTED   (NULL-DISTINCT)
  * ```
  *
  * So the composite rule is the field-level rule with a wider key, and NOT a new
- * invention: a NULL in any LISTED key column exempts the row, while a NULL
- * ORGANIZATION folds onto one bucket because its key part is an expression that
- * is never NULL. Both halves are pinned below.
+ * invention: a NULL in ANY key part exempts the row — the organization's
+ * included. Since ADR-0131 D1 the tenant column is NOT NULL and `driver-sql`
+ * keys it plain; until then ADR-0120 D3 keyed it as
+ * `COALESCE(organization_id,'__global__')`, which folded NULL organizations onto
+ * one bucket (the second `(NULL, 'A1', 'X')` above was REFUSED). That fold is
+ * retired on both surfaces, and the exemption is pinned below.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -177,9 +180,11 @@ describe('[#13239] the two `unique` surfaces disagree about bare `true`, and thi
     );
   });
 
-  it("only the explicit `'organization'` prepends the NULL-safe organization key part", async () => {
+  it("only the explicit `'organization'` prepends the organization key part — plain, ADR-0131 D1", async () => {
+    // `scopeColumns` names it for the refusal's wording; `nullSafeColumns` is
+    // empty — the organization key part no longer folds NULLs (ADR-0131 D1).
     expect(uniqueConstraintsFromDeclaredIndexes(ledger('organization'))).toEqual([
-      { columns: ['organization_id', 'account_id', 'code'], nullSafeColumns: ['organization_id'] },
+      { columns: ['organization_id', 'account_id', 'code'], nullSafeColumns: [], scopeColumns: ['organization_id'] },
     ]);
 
     const driver = new InMemoryDriver();
@@ -232,16 +237,17 @@ describe('[#13239] the two `unique` surfaces disagree about bare `true`, and thi
  * ==================================================================== */
 
 describe("[#13239] the arms are `normalizeDeclaredIndex`'s, reproduced without importing driver-sql", () => {
-  it('a listed column that IS the tenant column is not prepended again — its own key part becomes NULL-safe', () => {
+  it('a listed column that IS the tenant column is not prepended again — it stays a plain key part, named as the scope', () => {
     // The hand-written S6 spelling, opted in. Order is preserved: the author's
-    // column stays where they put it.
+    // column stays where they put it. Since ADR-0131 D1 its key part is plain,
+    // like the prepended one.
     const schema = {
       name: 'ledger',
       fields: { id: {}, organization_id: {}, code: {} },
       indexes: [{ fields: ['code', 'organization_id'], unique: 'organization' }],
     };
     expect(uniqueConstraintsFromDeclaredIndexes(schema)).toEqual([
-      { columns: ['code', 'organization_id'], nullSafeColumns: ['organization_id'] },
+      { columns: ['code', 'organization_id'], nullSafeColumns: [], scopeColumns: ['organization_id'] },
     ]);
   });
 
@@ -276,7 +282,7 @@ describe("[#13239] the arms are `normalizeDeclaredIndex`'s, reproduced without i
       indexes: [{ fields: ['a'], unique: 'organization' }],
     };
     expect(uniqueConstraintsFromDeclaredIndexes(schema)).toEqual([
-      { columns: ['org', 'a'], nullSafeColumns: ['org'] },
+      { columns: ['org', 'a'], nullSafeColumns: [], scopeColumns: ['org'] },
     ]);
   });
 
@@ -337,7 +343,7 @@ describe("[#13239] the arms are `normalizeDeclaredIndex`'s, reproduced without i
     };
     expect(uniqueConstraintsFromDeclaredIndexes(schema)).toEqual([
       { columns: ['a'], nullSafeColumns: [] },
-      { columns: ['organization_id', 'b', 'c'], nullSafeColumns: ['organization_id'] },
+      { columns: ['organization_id', 'b', 'c'], nullSafeColumns: [], scopeColumns: ['organization_id'] },
     ]);
   });
 });
@@ -357,43 +363,46 @@ describe('[#13239] NULL handling matches the composite index SQL actually builds
     expect(await driver.count('ledger')).toBe(4);
   });
 
-  it('a NULL ORGANIZATION does NOT exempt — the D3 fold, reached without the `__global__` token', async () => {
-    // SQL folds NULL organizations with COALESCE onto a reserved literal because
-    // an index EXPRESSION needs a non-NULL one. A JS key holds `null` directly,
-    // so the same bucket is reached with no token at all.
+  it('a NULL ORGANIZATION exempts the row, like any NULL key part — the D3 fold is retired (ADR-0131 D1)', async () => {
+    // The plain `(organization_id, …)` index SQL builds now is NULL-distinct in
+    // its organization part too, so rows without an organization (which only a
+    // pre-18 store can still hold) are not constrained among themselves.
     const driver = new InMemoryDriver();
     await driver.syncSchema('ledger', ledger('organization'));
     await driver.create('ledger', { id: '1', account_id: 'A1', code: 'X' });
-    const err = await refusalOf(() => driver.create('ledger', { id: '2', account_id: 'A1', code: 'X' }));
+    await driver.create('ledger', { id: '2', account_id: 'A1', code: 'X' });
+    await driver.create('ledger', { id: '3', organization_id: null, account_id: 'A1', code: 'X' });
+    // …while a row that DOES carry an organization is still constrained in it.
+    await driver.create('ledger', { id: '4', organization_id: 'acme', account_id: 'A1', code: 'X' });
+    const err = await refusalOf(() =>
+      driver.create('ledger', { id: '5', organization_id: 'acme', account_id: 'A1', code: 'X' }),
+    );
     expectUniqueViolationEnvelope(err, 'account_id', 'code', 'organization_id');
-    // …and a row that DOES carry an organization is untouched by that bucket.
-    await driver.create('ledger', { id: '3', organization_id: 'acme', account_id: 'A1', code: 'X' });
-    expect(await driver.count('ledger')).toBe(2);
+    expect(await driver.count('ledger')).toBe(4);
   });
 
-  it('an index whose ONLY key part is the NULL-safe organization is "one row per organization"', async () => {
+  it('an index whose ONLY key part is the organization is "one row per organization" — NULL-org rows exempt', async () => {
     // `normalizeDeclaredIndex` has no "a unique ON the tenant column stays
     // single-column" guard — that guard is the FIELD surface's. Here the listed
-    // organization column simply becomes the NULL-safe key part, so NULL-org
-    // rows share one bucket and are unique among themselves.
+    // organization column is the whole key, and plain since ADR-0131 D1: one
+    // row per organization, while rows without one are not constrained.
     const schema = {
       name: 'settings',
       fields: { id: {}, organization_id: {} },
       indexes: [{ fields: ['organization_id'], unique: 'organization' }],
     };
     expect(uniqueConstraintsFromDeclaredIndexes(schema)).toEqual([
-      { columns: ['organization_id'], nullSafeColumns: ['organization_id'] },
+      { columns: ['organization_id'], nullSafeColumns: [], scopeColumns: ['organization_id'] },
     ]);
 
     const driver = new InMemoryDriver();
     await driver.syncSchema('settings', schema);
     await driver.create('settings', { id: '1', organization_id: 'acme' });
-    await driver.create('settings', { id: '2' }); // NULL organization: its own bucket
+    await driver.create('settings', { id: '2' }); // NULL organization: exempt
     const dupOrg = await refusalOf(() => driver.create('settings', { id: '3', organization_id: 'acme' }));
     expectUniqueViolationEnvelope(dupOrg, 'organization_id');
-    const dupNull = await refusalOf(() => driver.create('settings', { id: '4' }));
-    expectUniqueViolationEnvelope(dupNull, 'organization_id');
-    expect(await driver.count('settings')).toBe(2);
+    await driver.create('settings', { id: '4' }); // a second NULL-org row lands too
+    expect(await driver.count('settings')).toBe(3);
   });
 });
 
@@ -411,7 +420,7 @@ describe('[#13239] the refusal names no single column, because a composite has n
     );
     // Matches what SQLite answers for the same index — measured: the plain
     // composite prints `UNIQUE constraint failed: t.account_id, t.code` (two
-    // targets -> undefined) and the NULL-safe form prints
+    // targets -> undefined) and the 18.0 NULL-safe form printed
     // `UNIQUE constraint failed: index '…'` (an index name -> undefined).
     expect(isUniqueViolationError(err)).toBe(true);
     expect(uniqueViolationColumn(err)).toBeUndefined();

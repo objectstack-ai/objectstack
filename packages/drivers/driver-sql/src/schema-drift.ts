@@ -63,6 +63,12 @@ import type { SchemaDiffEntry } from '@objectstack/spec/shared';
  *    `(__global__, a@b.com)` says "platform bucket", not "corrupt data".
  *  - **The token is reserved**: an organization id may never equal it
  *    (guarded at the organization-creation seam in plugin-auth).
+ *
+ * Since ADR-0131 D1 the tenant column is NOT NULL, so new DDL keys the plain
+ * column and no longer emits this form. The COALESCE form stays READ:
+ * every database an earlier release built keeps those indexes, and the
+ * differ takes them as equivalent to the plain key on a certified database
+ * ({@link diffManagedIndexes}'s `tenantKeyCertified`).
  */
 export const GLOBAL_TENANT = '__global__';
 
@@ -113,9 +119,12 @@ export function isOrganizationScopedUnique(unique: unknown): boolean {
 }
 
 /**
- * The organization key part of an organization-scoped unique index, spelled
- * once (ADR-0120 D3). Display/signature form — DDL emission quotes the
- * identifier per dialect in `SqlDriver.syncDeclaredIndexes`.
+ * The NULL-safe organization key part, spelled once (ADR-0120 D3). Display and
+ * signature form — DDL emission quotes the identifier per dialect.
+ *
+ * Read vocabulary only since ADR-0131 D1: no generator marks the tenant key
+ * part NULL-safe any more, so this renders an index an earlier release built,
+ * or an op a caller hands in already normalized.
  */
 export function organizationKeyPartSql(column: string): string {
   return `COALESCE(${column}, '${GLOBAL_TENANT}')`;
@@ -1829,13 +1838,14 @@ export function isRuntimeManagedIndex(
  * Scoping rule (ADR-0120 D1/D3):
  *   - `unique: 'global'` → single-column `(field)`, platform-wide.
  *   - `unique: true` / `unique: 'organization'` on a tenant-scoped table →
- *     composite `(COALESCE(tenantField, '__global__'), field)`: unique
- *     *within* the organization, matching the per-tenant autonumber sequence,
- *     the RLS read predicate and the write-path tenant stamp. The organization
- *     key part is NULL-safe: rows without an organization form one platform
- *     bucket, unique among themselves — a bare `(tenantField, field)` under
- *     SQL's NULL-distinct UNIQUE enforced NOTHING on those rows, which on a
- *     single-tenant stack is every row (#5030).
+ *     composite `(tenantField, field)`: unique *within* the organization,
+ *     matching the per-tenant autonumber sequence, the RLS read predicate and
+ *     the write-path tenant stamp. The organization key part is the plain
+ *     column (ADR-0131 D1: the tenant column is NOT NULL, so no row escapes
+ *     the NULL-distinct UNIQUE). ADR-0120 D3's `COALESCE(tenantField,
+ *     '__global__')` form, which folded NULL-organization rows into one bucket
+ *     (#5030), is what earlier releases built; the differ reads it as
+ *     equivalent on a certified database.
  *   - `unique: true` / `'organization'` with no tenant column → single-column
  *     `(field)`.
  *
@@ -1856,12 +1866,7 @@ export function uniqueIndexesFromFields(
     const scoped =
       isOrganizationScopedUnique(field.unique) && tenantField != null && tenantField !== name;
     const columns = scoped ? [tenantField, name] : [name];
-    out.push({
-      name: buildIndexName(table, columns, true),
-      columns,
-      unique: true,
-      ...(scoped ? { nullSafeColumns: [tenantField] } : {}),
-    });
+    out.push({ name: buildIndexName(table, columns, true), columns, unique: true });
   }
   return out;
 }
@@ -1883,13 +1888,14 @@ export interface DeclaredIndexInput {
  *   - `unique: true` / `'global'` → the listed columns, VERBATIM — the #3696
  *     contract, now the `'global'` arm of the explicit vocabulary.
  *   - `unique: 'organization'` → the organization key part is PREPENDED to the
- *     listed columns in its NULL-safe form (`COALESCE(tenantField,
- *     '__global__')`), resolved against the table's tenant column at
- *     registration — the one place tenancy is knowable. With no tenant column
- *     the index degrades to the listed columns alone, mirroring field-level
- *     behavior (S11). A listed column that IS the tenant column is not
- *     prepended again — its own key part becomes the NULL-safe form instead
- *     (the hand-written S6 spelling, opted in).
+ *     listed columns as the plain tenant column (ADR-0131 D1), resolved
+ *     against the table's tenant column at registration — the one place
+ *     tenancy is knowable. With no tenant column the index degrades to the
+ *     listed columns alone, mirroring field-level behavior (S11). A listed
+ *     column that IS the tenant column is not prepended again (the
+ *     hand-written S6 spelling).
+ *   - An input already carrying `nullSafeColumns` (an op normalized before
+ *     ADR-0131 D1) is honoured verbatim.
  */
 export function normalizeDeclaredIndex(
   table: string,
@@ -1910,7 +1916,6 @@ export function normalizeDeclaredIndex(
     if (nullSafeColumns.length === 0) nullSafeColumns = undefined;
   } else if (idx?.unique === 'organization' && tenantField) {
     columns = listed.includes(tenantField) ? listed : [tenantField, ...listed];
-    nullSafeColumns = [tenantField];
   }
 
   const name =
@@ -2196,16 +2201,11 @@ export function legacyUniqueReplacements(args: {
       column: name,
       legacyColumns: [name],
       legacyNames,
-      // NULL-safe organization key part (ADR-0120 D3). Still a pure
-      // relaxation to create from under the legacy GLOBAL single-column
-      // unique: any two rows colliding in the new key already collided in the
-      // old one, so the replacement can neither fail nor lose data.
-      replacement: {
-        name: buildIndexName(table, columns, true),
-        columns,
-        unique: true,
-        nullSafeColumns: [tenantField],
-      },
+      // A pure relaxation to create from under the legacy GLOBAL
+      // single-column unique: any two rows colliding in the new key already
+      // collided in the old one, so the replacement can neither fail nor lose
+      // data.
+      replacement: { name: buildIndexName(table, columns, true), columns, unique: true },
     });
   }
 
@@ -2214,8 +2214,8 @@ export function legacyUniqueReplacements(args: {
   // #8323: the same retirement, one level up. A declared index's bare
   // `unique: true` is the positional spelling of `'global'` — the listed
   // columns VERBATIM — so respelling it `'organization'` changes the
-  // materialized shape from `(…listed)` to `(COALESCE(tenant,'__global__'),
-  // …listed)`, and with it the generated NAME. On a deployed database that
+  // materialized shape from `(…listed)` to `(tenant, …listed)`, and with it
+  // the generated NAME. On a deployed database that
   // reads as two unrelated findings: the composite is missing (create, safe)
   // and the old global index is an orphan (drop, DESTRUCTIVE, opt-in). An
   // operator who applies only the safe half keeps the global index — and the
@@ -2248,8 +2248,7 @@ export function legacyUniqueReplacements(args: {
     const legacyName = buildIndexName(table, listed, true);
     // The S6 hand-written composite already lists the tenant column, so
     // `normalizeDeclaredIndex` prepends nothing and the "legacy" name IS the
-    // current name. Nothing was superseded; the D4 NULL-safe tightening path
-    // owns that transition.
+    // current name. Nothing was superseded.
     if (legacyName === replacement.name) continue;
     // An index the CURRENT metadata declares is by definition not legacy
     // (#3955) — the same guard the field-level arm applies.
@@ -2357,6 +2356,19 @@ export function canonicalIndexKey(columns: string[], nullSafeColumns?: ReadonlyA
 }
 
 /**
+ * [ADR-0131 D1] Does any physical index key the tenant column through the
+ * NULL-safe `COALESCE` form — directly, or through a #11627 hash shadow's
+ * resolved key? Those are the indexes an earlier release built, and the only
+ * ones whose verdict {@link diffManagedIndexes}'s `tenantKeyCertified` can
+ * change, so a caller asks the (costly) certification question only when this
+ * answers yes.
+ */
+export function carriesNullSafeTenantKeyPart(physical: PhysicalIndex[], tenantField?: string | null): boolean {
+  if (!tenantField) return false;
+  return physical.some((p) => (enforcedIndexKey(p).nullSafeColumns ?? []).includes(tenantField));
+}
+
+/**
  * Diff a table's expected index set against the physical one.
  *
  * Presence is matched by NAME, not by column signature, because that is exactly
@@ -2381,8 +2393,29 @@ export function diffManagedIndexes(args: {
    * (ADR-0120 D3) — see {@link isSyncReproducibleIndex}.
    */
   tenantField?: string | null;
+  /**
+   * [ADR-0131 D1] Does the tenant column hold no NULL on this table — because
+   * the column is physically NOT NULL, or because the database is certified
+   * (a birth marker or an organization-ownership ceremony marker of the
+   * current shape generation)? Then `COALESCE(<tenantField>, …)` and the plain
+   * tenant column enforce the same constraint, and a key part in either form
+   * matches the other, in both directions: an index an earlier release built
+   * in the NULL-safe form is never proposed for a rebuild into the plain form
+   * new DDL emits. Absent or false on a database that may still hold
+   * NULL-organization rows, where the two forms are different constraints.
+   */
+  tenantKeyCertified?: boolean;
 }): ManagedDriftEntry[] {
-  const { table, expected, legacy, physical, runtimeCreated, tenantField } = args;
+  const { table, expected, legacy, physical, runtimeCreated, tenantField, tenantKeyCertified } = args;
+  // The comparison identity of a key: the NULL-safe tenant key part reads as
+  // the plain column where the two are the same constraint (ADR-0131 D1).
+  const comparisonKey = (columns: string[], nullSafeColumns?: ReadonlyArray<string> | null): string =>
+    canonicalIndexKey(
+      columns,
+      tenantKeyCertified === true && tenantField
+        ? (nullSafeColumns ?? []).filter((c) => c !== tenantField)
+        : nullSafeColumns,
+    );
   const out: ManagedDriftEntry[] = [];
   const byName = new Map(physical.map((p) => [p.name, p]));
   /** Physical index names accounted for — either declared, or already reported. */
@@ -2475,12 +2508,10 @@ export function diffManagedIndexes(args: {
     // Same normalization on BOTH sides (#4884, ADR-0120 D3): column identity
     // AND key-part form, literal-agnostic on the COALESCE literal — asked of
     // the key the index ENFORCES, which for a #11627 shadow-carried UNIQUE is
-    // not the column it stores (commit cd1348802).
+    // not the column it stores (commit cd1348802). On a certified table the
+    // tenant key part's form drops out of the identity (ADR-0131 D1).
     const pk = enforcedIndexKey(p);
-    if (
-      p.unique === e.unique &&
-      canonicalIndexKey(pk.columns, pk.nullSafeColumns) === canonicalIndexKey(e.columns, e.nullSafeColumns)
-    ) {
+    if (p.unique === e.unique && comparisonKey(pk.columns, pk.nullSafeColumns) === comparisonKey(e.columns, e.nullSafeColumns)) {
       continue;
     }
     // The framework's own runtime migrations own some declared names — ADR-0048
@@ -2526,6 +2557,22 @@ export function diffManagedIndexes(args: {
     // own (`nullSafeColumns` is only ever recorded alongside an expression key
     // part); a resolved shadow key can carry NULL-safe parts with no
     // expressions at all, so the implication no longer holds.
+    // [ADR-0131 D1] An earlier release's COALESCE tenant key part against the
+    // plain one new DDL declares — the divergence is ONLY that form, on a
+    // table where the two are still different constraints (not
+    // certified, nullable tenant column). The remedy is the ownership ceremony,
+    // which certifies the database and so retires this entry — never a rebuild:
+    // `--allow-destructive` would drop and re-key the index over rows that may
+    // still lack an organization. The op is unchanged (destructive, reported,
+    // never applied unattended); only what it tells the operator differs.
+    const uncertifiedTenantKeyOnly =
+      tenantKeyCertified !== true &&
+      !!tenantField &&
+      p.unique === e.unique &&
+      (pk.nullSafeColumns ?? []).includes(tenantField) &&
+      !(e.nullSafeColumns ?? []).includes(tenantField) &&
+      canonicalIndexKey(pk.columns, (pk.nullSafeColumns ?? []).filter((c) => c !== tenantField)) ===
+        canonicalIndexKey(e.columns, (e.nullSafeColumns ?? []).filter((c) => c !== tenantField));
     const tightenNullSafeOnly =
       e.unique &&
       p.unique &&
@@ -2553,7 +2600,15 @@ export function diffManagedIndexes(args: {
         ...(e.nullSafeColumns ? { nullSafeColumns: e.nullSafeColumns } : {}),
         ...(tightenNullSafeOnly ? { tightenNullSafeOnly: true } : {}),
       },
-      message: tightenNullSafeOnly
+      message: uncertifiedTenantKeyOnly
+        ? `${table}: index '${e.name}' is ${indexSignature(pk.columns, p.unique, pk.nullSafeColumns)} and metadata declares ` +
+          `${indexSignature(e.columns, e.unique, e.nullSafeColumns)}: the same columns, differing only in how the ` +
+          `'${tenantField}' key part treats a row with no organization. This database is not certified for the ` +
+          `organization-ownership shape and '${tenantField}' is nullable, so the two are still different constraints. ` +
+          `Run "os migrate organization-ownership": once it certifies the database the two read as one index and this ` +
+          `entry is gone. Do not rebuild it with "os migrate apply --allow-destructive", which would drop and re-key ` +
+          `the index over rows that may still have no organization.`
+        : tightenNullSafeOnly
         ? `${table}: index '${e.name}' is ${indexSignature(pk.columns, p.unique, pk.nullSafeColumns)} but metadata declares ` +
           `${indexSignature(e.columns, e.unique, e.nullSafeColumns)} (ADR-0120 D3: the organization key part is NULL-safe, ` +
           `so rows without an organization are constrained too). Pure tightening — eligibility is decided by the ` +

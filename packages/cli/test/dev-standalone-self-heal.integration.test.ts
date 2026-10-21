@@ -23,13 +23,26 @@
  *
  * ## What each leg pins
  *
- * - boot 1 — a fresh `os dev` creates the NULL-safe index; with
- *   `OS_TELEMETRY_DB=0` it provisions no telemetry sibling (the opt-out).
- * - boot 2 — after the card's step 3 restages the bare index, a plain `os dev`
- *   restart puts the NULL-safe one back, says `auto-reconciled`, and provisions
+ * - boot 1 — a fresh `os dev` creates the plain `(organization_id, qa_code)`
+ *   composite (ADR-0131 D1: no COALESCE) and no legacy single-column UNIQUE;
+ *   with `OS_TELEMETRY_DB=0` it provisions no telemetry sibling (the opt-out).
+ * - boot 2 — after the staging step plants the legacy platform-wide UNIQUE on
+ *   `qa_code` beside the composite, a plain `os dev` restart drops it (a pure
+ *   relaxation, the composite survives), says `auto-reconciled`, and provisions
  *   `A.telemetry.db` (default-on in dev for a file-backed SQLite primary).
  * - boot 3 — a production boot (`os serve`, `NODE_ENV` unset) on the restaged
  *   file reports the drift and leaves it: production never auto-migrates.
+ *
+ * ⚠️ Why not the drift the card staged. #21733 reproduced with the ADR-0120 D4
+ * tightening — a bare composite against the NULL-safe expectation, a
+ * `recreate_index` the duplicate probe recategorised `safe` (the table above).
+ * ADR-0131 D1 retired it: the expectation is the plain composite now, so a bare
+ * composite MATCHES and there is no drift at all. The defect is about the
+ * standalone stack never applying the self-heal's `safe` subset, not about any
+ * one op, so the staging carries the `safe` op that is still live:
+ * `replace_unique_index`, the legacy global UNIQUE an older release left (the
+ * same fixture `src/utils/schema-migrate.dev-self-heal-fence.integration.test.ts`
+ * stages).
  *
  * The host-config path is pinned unchanged where it is decided
  * (`src/utils/storage-driver.test.ts`), and both hosts are held to one answer
@@ -53,6 +66,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
+import { legacyUniqueIndexNames } from '@objectstack/driver-sql';
 import {
   childEnv,
   E2E_SECRET_KEY,
@@ -72,7 +86,13 @@ const READY = /Press Ctrl\+C to stop/;
 const BOOT_TIMEOUT_MS = 180_000;
 const ALL_BOOTS_TIMEOUT_MS = 3 * (BOOT_TIMEOUT_MS + 30_000);
 
+/** The organization composite the declaration asks for (ADR-0131 D1: plain key parts). */
 const INDEX = 'uniq_scaf_item_organization_id_qa_code';
+/**
+ * The legacy platform-wide single-column UNIQUE, spelled by the driver's own
+ * `legacyUniqueIndexNames` — its `uniq_` arm, the one the differ recognises.
+ */
+const LEGACY = legacyUniqueIndexNames('scaf_item', 'qa_code')[1];
 
 /** The card's blank scaffold: one object, an org-scoped unique field, no plugins, no datasources. */
 const SCAFFOLD = {
@@ -86,8 +106,10 @@ const SCAFFOLD = {
 };
 
 interface BootRecord {
-  /** The index DDL `sqlite_master` holds after the boot stopped. */
+  /** The composite's DDL `sqlite_master` holds after the boot stopped. */
   indexSql: string | undefined;
+  /** The legacy global UNIQUE's DDL after the boot stopped; `undefined` when absent. */
+  legacySql: string | undefined;
   telemetryExists: boolean;
   output: string;
 }
@@ -97,10 +119,10 @@ let dir: string;
 let db: string;
 const record: Partial<Record<'fresh' | 'restart' | 'production', BootRecord | Error>> = {};
 
-function readIndexSql(): string | undefined {
+function readIndexSql(name: string): string | undefined {
   const handle = new Database(db, { readonly: true });
   try {
-    const row = handle.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?").get(INDEX) as
+    const row = handle.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?").get(name) as
       | { sql: string }
       | undefined;
     return row?.sql;
@@ -109,11 +131,16 @@ function readIndexSql(): string | undefined {
   }
 }
 
-/** The card's step 3: replace the NULL-safe unique index with the bare one an older release left. */
-function stageBareIndex(): void {
+/**
+ * The staging step: plant, beside the plain composite, the platform-wide UNIQUE
+ * on `qa_code` a pre-#3696 release left — the state every additive boot after
+ * such an upgrade produces, since the sync creates the composite by name and
+ * never drops anything. Idempotent, so it restages after a heal.
+ */
+function stageLegacyIndex(): void {
   const handle = new Database(db);
   try {
-    handle.exec(`DROP INDEX ${INDEX}; CREATE UNIQUE INDEX ${INDEX} ON scaf_item (organization_id, qa_code);`);
+    handle.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${LEGACY} ON scaf_item (qa_code);`);
   } finally {
     handle.close();
   }
@@ -200,7 +227,12 @@ async function stopGroup(child: ChildProcess): Promise<void> {
 async function recordBoot(leg: 'fresh' | 'restart' | 'production', boot: Promise<string>): Promise<void> {
   try {
     const output = await boot;
-    record[leg] = { indexSql: readIndexSql(), telemetryExists: existsSync(join(dir, 'A.telemetry.db')), output };
+    record[leg] = {
+      indexSql: readIndexSql(INDEX),
+      legacySql: readIndexSql(LEGACY),
+      telemetryExists: existsSync(join(dir, 'A.telemetry.db')),
+      output,
+    };
   } catch (error) {
     record[leg] = error instanceof Error ? error : new Error(String(error));
   }
@@ -213,7 +245,9 @@ function recorded(leg: 'fresh' | 'restart' | 'production'): BootRecord {
   return r;
 }
 
-const isNullSafe = (sql: string | undefined): boolean => /COALESCE\(`?organization_id`?/.test(sql ?? '');
+/** The composite in its ADR-0131 D1 form: both key parts plain, no COALESCE. */
+const isPlainComposite = (sql: string | undefined): boolean =>
+  /\(\s*[`"]?organization_id[`"]?\s*,\s*[`"]?qa_code[`"]?\s*\)/.test(sql ?? '') && !/COALESCE/i.test(sql ?? '');
 
 beforeAll(async () => {
   requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
@@ -224,12 +258,12 @@ beforeAll(async () => {
   // Boot 1: fresh, with the telemetry opt-out.
   await recordBoot('fresh', bootUntilReady(['dev', '--no-watch', '-d', 'file:A.db', '-p', KERNEL_ASSIGNED_PORT], { OS_TELEMETRY_DB: '0' }));
 
-  // Boot 2: the card's restart, on the restaged bare index, telemetry default-on.
-  if (existsSync(db)) stageBareIndex();
+  // Boot 2: the card's restart, on the staged legacy index, telemetry default-on.
+  if (existsSync(db)) stageLegacyIndex();
   await recordBoot('restart', bootUntilReady(['dev', '--no-watch', '-d', 'file:A.db', '-p', KERNEL_ASSIGNED_PORT], {}));
 
-  // Boot 3: production (`os serve`, NODE_ENV unset) on the restaged bare index.
-  if (existsSync(db)) stageBareIndex();
+  // Boot 3: production (`os serve`, NODE_ENV unset) on the restaged legacy index.
+  if (existsSync(db)) stageLegacyIndex();
   await recordBoot('production', bootUntilReady(['serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT], {
     OS_DATABASE_URL: 'file:A.db',
     OS_AUTH_SECRET: 'e2e-21733-production-leg-secret-not-for-real-use',
@@ -243,16 +277,19 @@ afterAll(async () => {
 });
 
 describe('#21733 — a plain `os dev` (standalone stack) self-heals and provisions telemetry', () => {
-  it('a fresh `os dev` creates the NULL-safe index, and OS_TELEMETRY_DB=0 provisions no sibling', () => {
+  it('a fresh `os dev` creates the plain organization composite, and OS_TELEMETRY_DB=0 provisions no sibling', () => {
     const fresh = recorded('fresh');
-    expect(isNullSafe(fresh.indexSql), `fresh boot index: ${fresh.indexSql}`).toBe(true);
+    expect(isPlainComposite(fresh.indexSql), `fresh boot index: ${fresh.indexSql}`).toBe(true);
+    expect(fresh.legacySql, 'the fresh boot created the legacy global unique itself').toBeUndefined();
     expect(fresh.telemetryExists, 'OS_TELEMETRY_DB=0 still created A.telemetry.db').toBe(false);
   });
 
-  it('a plain `os dev` restart puts the staged bare unique index back NULL-safe', () => {
+  it('a plain `os dev` restart relaxes the staged legacy global unique to the organization composite', () => {
     const restart = recorded('restart');
-    expect(isNullSafe(restart.indexSql), `the restart left the bare index: ${restart.indexSql}`).toBe(true);
-    expect(restart.output).toContain('[schema-drift] auto-reconciled recreate_index on scaf_item');
+    expect(restart.legacySql, `the restart left the legacy index: ${restart.legacySql}`).toBeUndefined();
+    // A relaxation, not a removal: the per-organization constraint survives.
+    expect(isPlainComposite(restart.indexSql), `the restart lost the composite: ${restart.indexSql}`).toBe(true);
+    expect(restart.output).toContain('[schema-drift] auto-reconciled replace_unique_index on scaf_item.qa_code');
   });
 
   it('the same restart provisions the `telemetry` sibling next to the file-backed primary', () => {
@@ -262,8 +299,9 @@ describe('#21733 — a plain `os dev` (standalone stack) self-heals and provisio
 
   it('a production boot reports the staged drift and does not auto-migrate it', () => {
     const production = recorded('production');
-    expect(production.output).toContain(`index '${INDEX}' tightens`);
+    expect(production.output).toContain(`a legacy platform-wide UNIQUE index (${LEGACY})`);
     expect(production.output).not.toContain('[schema-drift] auto-reconciled');
-    expect(isNullSafe(production.indexSql), `production auto-migrated: ${production.indexSql}`).toBe(false);
+    expect(production.legacySql, 'production auto-migrated the legacy index away').toBeDefined();
+    expect(isPlainComposite(production.indexSql)).toBe(true);
   });
 });
