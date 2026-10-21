@@ -10,7 +10,7 @@ Clause-②: no (narrowing: a `Field.select` shorthand string the helper used to 
 
 Metadata-protocol: narrowed
 
-<!-- adr-0087: not-required (no-migration-prescription) No metadata moves: the shorthand is a TypeScript helper that runs in the author's own module, before any metadata exists, and what it hands on is an ordinary explicit option list. No spec key, stored shape or schema accept set changes: `SelectOptionSchema.value` refuses exactly what it refused before, and an object definition already stored or built from the old helper carries explicit values (`nooverlay`) that still parse, so there is nothing for `objectstack migrate meta` to rewrite. The one object definition that changes is `sys_metadata_audit`, a platform object `@objectstack/metadata-core` ships and owns: its `lock_state` column becomes a 255-character text column, its rows are audit records the metadata protocol writes, not metadata, no stored row is rewritten, and an existing column reports no drift. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+<!-- adr-0087: registered field-select-shorthand-keeps-written-value -->
 
 **BREAKING** (a TypeScript author's shorthand that used to be rewritten is now refused), shipped as `minor` under the launch-window convention for breaking changes.
 
