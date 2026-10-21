@@ -68,7 +68,7 @@ export default class MigrateAccountIssuer extends Command {
   static override description =
     'Pre-flight the retirement of sys_account.issuer: report every (provider_id, account_id) ' +
     'key held by more than one row — the class that is legal under the retired (issuer, account_id) key ' +
-    'and is ONE account under the key better-auth 1.7.3 restored. Read-only; exits non-zero when the ' +
+    'and is ONE account under the (provider_id, account_id) key better-auth restored. Read-only; exits non-zero when the ' +
     'drop must not proceed.';
 
   static override examples = [
