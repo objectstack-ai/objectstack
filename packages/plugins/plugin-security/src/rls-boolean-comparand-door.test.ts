@@ -47,6 +47,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** Every compiled policy filter `compileCelToFilter` handed the seam, deep-frozen, by predicate. */
 const compiled = new Map<string, unknown[]>();
@@ -127,6 +128,9 @@ async function boot(config: Record<string, unknown>, predicate: string) {
     ],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   cleanups.push(async () => {
     if (config.client === 'pg') await (driver as unknown as { execute(sql: string): Promise<unknown> }).execute(`drop table if exists ${OBJ}`);
     await engine.destroy();

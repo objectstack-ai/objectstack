@@ -44,6 +44,7 @@ import { SqlHttpOutbox } from './sql-http-outbox.js';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { HttpDelivery, SYS_HTTP_DELIVERY } from './objects/http-delivery.object.js';
 import type { FetchImpl } from './http-sender.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /**
  * [#10740] `IHttpOutbox.redeliver` now requires its caller to state the
@@ -109,6 +110,9 @@ describe('sys_http_delivery — signing secret at rest (#7722)', () => {
         // driver from the object definition, so its physical columns are
         // exactly the ones production would have.
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         return { driver, engine: engine! };
     }
 

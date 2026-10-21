@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { SqlDriver, classifyIndexKeyPart, expectedIndexes, parseIndexDdl } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * Unique-scope materialization: tenancy composites (#3696) + the explicit
@@ -575,6 +576,9 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
         },
       ]);
 
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(driver, 'account');
       const first = await driver.create('account', { email: 'dup@example.com' });
       expect(first.organization_id ?? null).toBeNull();
       await expect(driver.create('account', { email: 'dup@example.com' })).rejects.toThrow(
@@ -594,6 +598,9 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
       ]);
 
       // Platform (NULL-organization) row takes the value…
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(driver, 'template');
       await driver.create('template', { key: 'welcome' });
       // …an organization may still hold the same value (per-org scope)…
       const org = await driver.create('template', { organization_id: 'org_a', key: 'welcome' });
@@ -658,6 +665,9 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
       await expect(
         driver.create('case_record', { organization_id: 'org_a', department: 'sales', code: 'C-1' }),
       ).rejects.toThrow(/UNIQUE constraint failed|duplicate key value/);
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(driver, 'case_record');
       await driver.create('case_record', { department: 'sales', code: 'C-2' });
       await expect(
         driver.create('case_record', { department: 'sales', code: 'C-2' }),
@@ -696,6 +706,9 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
         'name',
       ]);
 
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(driver, 'team');
       await driver.create('team', { name: 'Core' });
       await expect(driver.create('team', { name: 'Core' })).rejects.toThrow(
         /UNIQUE constraint failed|duplicate key value/,

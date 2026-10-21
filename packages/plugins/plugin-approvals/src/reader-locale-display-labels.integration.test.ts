@@ -57,6 +57,7 @@ import { TranslationDataSchema } from '@objectstack/spec/system';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import type { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 const reader = (userId: string, locale?: string) =>
@@ -187,6 +188,9 @@ describe('[#24863] the approvals door serves a request\'s labels in the reader\'
       engine.registry.registerObject(def as any, 'approvals-reader-locale-test', 'approvals-reader-locale-test');
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     for (const [id, name] of [[SUBMITTER, 'Sam Submitter'], [MANAGER, 'Mona Manager'], [DIRECTOR, 'Dina Director']]) {
       await engine.insert('sys_user', { id, name, email: `${id}@example.com` }, { context: SYSTEM } as any);
     }

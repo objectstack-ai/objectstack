@@ -50,6 +50,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { bindApprovalLockHook } from './lifecycle-hooks.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const opportunity = {
   name: 'opportunity',
@@ -105,6 +106,9 @@ describe('[#8570] a locked record\'s batch row carries the 409 the hook declared
     }
     // Real DDL through the real path.
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     lockedId = String((await engine.insert('opportunity', { name: 'Deal', amount: 100 })).id);
     freeId = String((await engine.insert('opportunity', { name: 'Other', amount: 100 })).id);

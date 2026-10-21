@@ -72,6 +72,7 @@ import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import { NO_DATETIME_COLUMNS, normalizeAnalyticsFilterTree, type NormalizedFilterNode } from '../strategies/filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(HERE, '..');
@@ -378,6 +379,9 @@ for (const cell of DB_CELLS) {
         await engine.init();
         engine.registry.registerObject(LEDGER as never);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         for (const row of ROWS) await engine.insert(OBJECT, { ...row } as never);
         const realExecute = (engine as any).execute.bind(engine);
         (engine as any).execute = (sql: string, opts?: { object?: string }) => {
@@ -588,6 +592,9 @@ describe('[#5930 step 4] the temporal conformance matrix answers on every analyt
       },
     } as never);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     for (const r of TEMPORAL_ROWS) await engine.insert(TEMPORAL, { id: r.id, [COLUMN.at]: r.at, [COLUMN.on]: r.on } as never);
     faces = await composeFaces(engine, [temporalCube]);
   });

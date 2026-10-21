@@ -190,6 +190,8 @@ async function drive(
 
 const B = '/api/v1/share-links';
 const CREATOR = { userId: 'usr_creator' };
+/** The organization the fixture's records belong to. */
+const SEED_ORG = 'org_pin';
 const PASSWORD = 'correct horse 21839 $ battery';
 
 /**
@@ -249,7 +251,10 @@ async function boot(
     engine.registry.registerObject(o as never, '@objectstack/plugin-sharing');
   }
   await engine.syncSchemas();
-  const sys = { context: { isSystem: true } };
+  // Seeded under one organization, as every row on a real install is: a fresh
+  // tenant column is NOT NULL (ADR-0131 D1), and this lean engine registers no
+  // organization object to derive one from. A minted link takes its record's.
+  const sys = { context: { isSystem: true, tenantId: SEED_ORG } };
   await (engine as any).insert('pin_doc', { id: 'doc_1', title: 'Shared doc' }, sys);
   await (engine as any).insert('ai_conversations', { id: 'conv_1', title: 'Chat' }, sys);
   await (engine as any).insert(

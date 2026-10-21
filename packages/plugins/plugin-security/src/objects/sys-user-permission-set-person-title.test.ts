@@ -44,6 +44,7 @@ import { SysUser } from '@objectstack/platform-objects';
 import { resolveDisplayField, resolveRecordDisplayName } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SysUserPermissionSet } from './sys-user-permission-set.object.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const OBJECT = 'sys_user_permission_set';
@@ -83,6 +84,9 @@ describe('sys_user_permission_set is titled by the person, not the raw user id',
     engine.registry.registerObject(SysUser as any, 'com.objectstack.test.person-title');
     engine.registry.registerObject(SysUserPermissionSet as any, 'com.objectstack.test.person-title');
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     // Row-level security on `sys_user` for a reader that is not SYSTEM — the
     // composition the security plugin makes (its own row scope is "own row or
     // an organization member"; here, the ids in `readable`).

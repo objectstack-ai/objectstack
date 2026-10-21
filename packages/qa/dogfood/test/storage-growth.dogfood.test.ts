@@ -65,6 +65,7 @@ describe('objectstack verify LIFECYCLE (ADR-0057): declared policies bound growt
   let engine: EngineLike;
   let lifecycle: LifecycleLike;
   let driver: DriverLike;
+  let organizationId: string;
 
   // Platform storage convention: `created_at` is registry-injected as a
   // `datetime` field, stored as epoch-ms INTEGER on SQLite (a JS Date through
@@ -76,6 +77,11 @@ describe('objectstack verify LIFECYCLE (ADR-0057): declared policies bound growt
   beforeAll(async () => {
     stack = await bootShowcase();
     engine = stack.kernel.getService('objectql') as unknown as EngineLike;
+    // The runaway writer's rows belong to the install's organization, as the
+    // engine would stamp them: a fresh tenant column is NOT NULL (ADR-0131 D1).
+    organizationId = String(
+      ((await (engine as any).find('sys_organization', { context: { isSystem: true } })) as Array<{ id: string }>)[0].id,
+    );
     lifecycle = stack.kernel.getService('lifecycle') as unknown as LifecycleLike;
     expect(lifecycle?.sweep, 'the ObjectQLPlugin must register the ADR-0057 lifecycle service').toBeTruthy();
 
@@ -148,12 +154,14 @@ describe('objectstack verify LIFECYCLE (ADR-0057): declared policies bound growt
     // any window (must never be touched).
     for (let i = 0; i < 40; i++) {
       await driver.create('growth_probe_event', {
+        organization_id: organizationId,
         payload: `tick-${i}`,
         created_at: backdated(5 + i * 5), // 5d … 200d
       });
     }
     for (let i = 0; i < 5; i++) {
       await driver.create('growth_probe_record', {
+        organization_id: organizationId,
         payload: `business-${i}`,
         created_at: backdated(400),
       });
@@ -215,7 +223,7 @@ describe('objectstack verify LIFECYCLE (ADR-0057): declared policies bound growt
     // Round-trip: write through the driver, read through the view, and a
     // sweep applies the 'rotation' policy without touching the rows inside
     // the window.
-    await streamDriver.create('growth_probe_stream', { payload: 'tick' });
+    await streamDriver.create('growth_probe_stream', { organization_id: organizationId, payload: 'tick' });
     expect(await streamDriver.count('growth_probe_stream', {})).toBe(1);
 
     const report = await lifecycle.sweep();
@@ -227,6 +235,7 @@ describe('objectstack verify LIFECYCLE (ADR-0057): declared policies bound growt
   it('ARCHIVE SAFETY: an audit ledger with a declared archive is never hot-deleted unarchived', async () => {
     for (let i = 0; i < 3; i++) {
       await driver.create('growth_probe_ledger', {
+        organization_id: organizationId,
         payload: `ledger-${i}`,
         created_at: backdated(365), // far past the 90d hot window
       });

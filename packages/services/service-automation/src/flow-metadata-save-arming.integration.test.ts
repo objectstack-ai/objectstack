@@ -36,6 +36,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { AutomationServicePlugin } from './plugin.js';
 import type { AutomationEngine, FlowTrigger, FlowTriggerBinding } from './engine.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** The saved surface these tests drive: `ObjectStackProtocolImplementation`'s write doors. */
 interface MetadataWriteDoors {
@@ -133,6 +134,9 @@ describe('a flow saved through the metadata API is armed on the running engine (
             'qa-21725',
         );
         await ql.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(ql);
 
         const rec = objectqlRecordTrigger(ql);
         automation.registerTrigger(rec.trigger);

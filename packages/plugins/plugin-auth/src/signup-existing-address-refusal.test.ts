@@ -69,6 +69,7 @@ import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -155,6 +156,10 @@ async function bootEngine(): Promise<ObjectQL> {
   engine.registry.registerObject(sysPermissionSet as never, '@objectstack/plugin-security');
   engine.registry.registerObject(sysUserPermissionSet as never, '@objectstack/plugin-security');
   await engine.syncSchemas();
+  // The organization-less rows below (global sets, grants, identities) exist
+  // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
+  // NOT NULL): this is that store.
+  await relaxEveryRegisteredTenantColumn(engine);
   // [ADR-0131 D3/D4] The declared self-registration set is a catalog definition
   // — what the admission asks before it admits.
   return bindTestSecurityCatalog(engine, { permissions: [{ name: 'member_default' }] });

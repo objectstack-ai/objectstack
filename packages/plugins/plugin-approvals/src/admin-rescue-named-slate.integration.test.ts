@@ -45,6 +45,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { bindSecurityCatalogReader, type SecurityCatalogEntry, type SecurityCatalogReader } from '@objectstack/core';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 
@@ -185,6 +186,10 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
     ];
     for (const def of defs) engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
     await engine.syncSchemas();
+    // The organization-less rows below (positions, holdings) exist only on a
+    // store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
+    // NULL): this is that store.
+    await relaxEveryRegisteredTenantColumn(engine);
     bindSecurityCatalogReader(engine, catalogServing([
       'organization_admin', 'organization_admin_no_bypass', 'admin_full_access',
     ]));

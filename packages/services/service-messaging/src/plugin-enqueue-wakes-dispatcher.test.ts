@@ -40,6 +40,7 @@ import type { MessagingService } from './messaging-service.js';
 import { DELIVERY_OBJECT } from './sql-outbox.js';
 import { SYS_HTTP_DELIVERY } from './objects/http-delivery.object.js';
 import { hashPartition } from './backoff.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** No timer-driven tick inside the test's lifetime. */
 const DISPATCH_INTERVAL_MS = 60_000;
@@ -93,6 +94,9 @@ async function bootMessagingKernel() {
     objectql.registerDriver(driver, true);
     openDrivers.push(driver);
     await objectql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql);
 
     return {
         engine: kernel.getService<IDataEngine>('data'),

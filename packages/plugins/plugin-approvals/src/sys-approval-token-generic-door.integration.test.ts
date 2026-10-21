@@ -66,6 +66,7 @@ import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { SysApprovalToken } from './sys-approval-token.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const TOKEN = 'sys_approval_token';
 const OBJECT = 'tokdoor_sheet';
@@ -143,6 +144,9 @@ async function boot(): Promise<Rig> {
     engine.registry.registerObject(def as any, 'approvals-token-door-test', 'approvals-token-door-test');
   }
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   await engine.insert(OBJECT, { id: 'sheet_1', title: 'tokdoor ledger sheet' }, { context: SYSTEM } as any);
 
   const services: Record<string, unknown> = { objectql: engine };

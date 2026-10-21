@@ -56,6 +56,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { Account, Opportunity, OpportunityLineItem } from '../src/objects/index.js';
 import { allHooks } from '../src/hooks/index.js';
 import { OpportunityStageHook } from '../src/hooks/opportunity.hook.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** The app id `AppPlugin` derives its `packageId` from. */
 const PACKAGE_ID = 'app:com.example.crm';
@@ -96,6 +97,9 @@ async function bootCrm(hooks: unknown[] = allHooks): Promise<ObjectQL> {
     engine.registry.registerObject(def as never, PACKAGE_ID, 'crm');
   }
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
 
   // Exactly the AppPlugin call, minus the sandbox body runner this app has no
   // use for (its single hook is an inline code handler).

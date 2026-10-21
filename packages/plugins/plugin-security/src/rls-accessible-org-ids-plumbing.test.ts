@@ -53,6 +53,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // ── the fixture: six rows across THREE organizations ───────────────────────
 //
@@ -153,6 +154,9 @@ async function boot(
     objects: OBJECTS,
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   engines.push(engine);
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },

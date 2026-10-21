@@ -3,6 +3,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { isUniqueViolationError } from '@objectstack/types';
 import { SqlDriver, classifyIndexKeyPart, parseIndexDdl, legacyUniqueReplacements } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * #8468 — `sys_position.name`, the THIRD instance of the #8323 class.
@@ -316,6 +317,9 @@ describe('#8468 — sys_position.name is unique per organization, not per instal
       // on it.
       const d = makeDriver();
       await d.initObjects(FIXED_APP as any);
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(d, 'sys_position');
 
       expect(
         (await createAsApi(d, 'sys_position', {
@@ -349,6 +353,9 @@ describe('#8468 — sys_position.name is unique per organization, not per instal
      */
     const seedDeployed = async (d: SqlDriver) => {
       await d.initObjects(PRE_FIX_APP as any);
+      // Every deployment in the field was built before 18.x: its tenant column
+      // is nullable, and it holds rows with no organization.
+      await asPre18TenantColumn(d, 'sys_position');
       await d.create('sys_position', {
         id: 'pos1', organization_id: 'org_jia', name: 'sales_manager', label: 'Sales Manager', managed_by: 'admin',
       } as any);

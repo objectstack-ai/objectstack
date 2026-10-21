@@ -52,6 +52,7 @@ import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 
 import { registerLastAdminGuard, USER_STANDING_KEYS, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const ENV = 'OS_PLATFORM_OWNER_EMAIL';
 /**
@@ -205,6 +206,10 @@ async function boot(opts: { unguarded?: boolean } = {}): Promise<ObjectQL> {
     engine.registry.registerObject(o as never);
   }
   await engine.syncSchemas();
+  // The organization-less rows below (global sets, grants, identities) exist
+  // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
+  // NOT NULL): this is that store.
+  await relaxEveryRegisteredTenantColumn(engine);
   // [ADR-0131 D3/D4] The set a grant names is the catalog's definition.
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
   if (!opts.unguarded) {

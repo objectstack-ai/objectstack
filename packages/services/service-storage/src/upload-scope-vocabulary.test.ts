@@ -37,6 +37,7 @@ import { SystemUploadSession } from './objects/system-upload-session.object.js';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const PRESIGNED = '/api/v1/storage/upload/presigned';
 const CHUNKED = '/api/v1/storage/upload/chunked';
@@ -126,6 +127,9 @@ describe('the upload-starting doors refuse a scope outside the vocabulary (#2247
     engine.registry.registerObject(SystemFile as any, 'com.objectstack.storage');
     engine.registry.registerObject(SystemUploadSession as any, 'com.objectstack.storage');
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     adapter = new LocalStorageAdapter({ rootDir, signingSecret: 'test-secret' });
     store = new StorageMetadataStore(engine as any);

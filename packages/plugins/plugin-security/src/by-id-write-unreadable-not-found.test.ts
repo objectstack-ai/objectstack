@@ -34,6 +34,7 @@ import { recordNotFoundError } from '@objectstack/core';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -98,6 +99,9 @@ async function boot(): Promise<Rig> {
     ],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   await engine.insert(PARENT, [
     { id: 'p_plain', name: 'plain' },
     { id: 'p_cascade', name: 'has a hidden child' },

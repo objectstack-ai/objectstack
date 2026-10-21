@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SqlDriver, classifyIndexKeyPart, parseIndexDdl } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * ADR-0120 §Acceptance tests — posture portability (S13/S14).
@@ -284,6 +285,9 @@ describe('ADR-0120 — one app package, three tenancy postures (S13/S14 acceptan
         // (SQL UNIQUE is NULL-distinct), so every field-level unique was a
         // silent no-op there. It must now be enforced under `single` exactly as
         // under `isolated` — the posture is not what makes a constraint real.
+        // The NULL bucket exists only on a database built before 18.x (ADR-0131
+        // D1 makes a fresh tenant column NOT NULL).
+        await asPre18TenantColumn(driver, 'crm_contact');
         await driver.create('crm_contact', { email: 'platform@b.com' });
         await expect(driver.create('crm_contact', { email: 'platform@b.com' }))
           .rejects.toThrow(REJECTED);
@@ -305,6 +309,9 @@ describe('ADR-0120 — one app package, three tenancy postures (S13/S14 acceptan
         await expect(driver.create('crm_case', { organization_id: 'org_a', department: 'ops', code: 'C1' }))
           .rejects.toThrow(REJECTED);
         // …and the NULL bucket is constrained too (D3 reaches declared indexes).
+        // The NULL bucket exists only on a database built before 18.x (ADR-0131
+        // D1 makes a fresh tenant column NOT NULL).
+        await asPre18TenantColumn(driver, 'crm_case');
         await driver.create('crm_case', { department: 'ops', code: 'C9' });
         await expect(driver.create('crm_case', { department: 'ops', code: 'C9' }))
           .rejects.toThrow(REJECTED);
@@ -314,6 +321,9 @@ describe('ADR-0120 — one app package, three tenancy postures (S13/S14 acceptan
         // The nine engine idempotency keys live or die on this row: they are
         // written by sudo with a NULL organization, so a composite would have
         // enforced nothing on exactly the rows that matter.
+        // The NULL bucket exists only on a database built before 18.x (ADR-0131
+        // D1 makes a fresh tenant column NOT NULL).
+        await asPre18TenantColumn(driver, 'crm_delivery');
         await driver.create('crm_delivery', { source: 'smtp', dedup_key: 'K1' });
         await expect(driver.create('crm_delivery', { source: 'smtp', dedup_key: 'K1' }))
           .rejects.toThrow(REJECTED);
@@ -332,6 +342,9 @@ describe('ADR-0120 — one app package, three tenancy postures (S13/S14 acceptan
           .resolves.toBeTruthy();
         // The un-closed NULL hole, pinned as the honest status quo (D5c nudges
         // toward the respelling that closes it; nothing forces it).
+        // The NULL bucket exists only on a database built before 18.x (ADR-0131
+        // D1 makes a fresh tenant column NOT NULL).
+        await asPre18TenantColumn(driver, 'crm_team');
         await driver.create('crm_team', { name: 'Platform' });
         await expect(driver.create('crm_team', { name: 'Platform' })).resolves.toBeTruthy();
       });

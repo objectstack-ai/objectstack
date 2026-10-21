@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import type { SendEmailInput, SendTemplateInput } from './email-service';
+import type { IEmailService, SendEmailInput, SendTemplateInput } from './email-service';
 
 /**
  * Commit b706af987 (Decision 2 of #11303) — `SendEmailInput` is widened with an
@@ -75,5 +75,37 @@ describe('Email Service Contract — SendTemplateInput.org retired', () => {
     // above still carries the key at runtime, which is exactly the inertness
     // the removal documents (nothing reads it).
     expect(input.template).toBe('auth.password_reset');
+  });
+});
+
+/**
+ * `IEmailService.isConfigured` — the OPTIONAL deliverability member, shaped
+ * like `ISmsService.isConfigured()`. Two contract facts pinned here:
+ *  - an implementation without the member stays assignable (the widening is
+ *    additive; absent reads as "unknown", never as delivering);
+ *  - when present it is a zero-argument function returning `boolean`.
+ */
+describe('Email Service Contract — isConfigured (optional deliverability member)', () => {
+  const base = {
+    send: async () => ({ id: 'e1', status: 'sent' as const }),
+    sendTemplate: async () => ({ id: 'e1', status: 'sent' as const }),
+    renderTemplate: async () => ({ subject: 's', html: 'h', text: 't' }),
+  };
+
+  it('keeps an implementation without isConfigured assignable (absent = unknown)', () => {
+    const legacy: IEmailService = { ...base };
+    expect(legacy.isConfigured).toBeUndefined();
+  });
+
+  it('accepts isConfigured(): boolean and refuses a non-boolean answer at compile time', () => {
+    const svc: IEmailService = { ...base, isConfigured: () => false };
+    expect(svc.isConfigured?.()).toBe(false);
+
+    type Member = NonNullable<IEmailService['isConfigured']>;
+    const ok: Member = () => true;
+    // @ts-expect-error isConfigured answers a boolean, not a string
+    const bad: Member = () => 'yes';
+    expect(ok()).toBe(true);
+    expect(typeof bad).toBe('function');
   });
 });

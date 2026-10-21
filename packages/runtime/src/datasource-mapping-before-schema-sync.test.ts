@@ -104,7 +104,8 @@ function platformPlugin() {
       });
     },
     start: async (ctx: any) => {
-      await ctx.getService('objectql').insert(PLATFORM_OBJECT, { title: BOOT_ROW }, { context: { isSystem: true } });
+      // Written in an organization: a fresh tenant column is NOT NULL (ADR-0131 D1).
+      await ctx.getService('objectql').insert(PLATFORM_OBJECT, { title: BOOT_ROW }, { context: { isSystem: true, tenantId: 'org_a' } });
     },
   };
 }

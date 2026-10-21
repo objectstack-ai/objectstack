@@ -36,6 +36,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { OverdueEscalationFlow } from '../src/flows/index.js';
 import { Task } from '../src/objects/task.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const openDrivers: Array<{ disconnect?: () => Promise<void> }> = [];
 afterEach(async () => {
@@ -106,6 +107,9 @@ async function bootTodoData(): Promise<any> {
   openDrivers.push(driver);
   objectql.registry.registerObject(Task, 'todo', 'todo');
   await objectql.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(objectql);
 
   return kernel.getService('data');
 }

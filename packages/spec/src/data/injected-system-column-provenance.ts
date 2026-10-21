@@ -101,6 +101,13 @@ export const AUDIT_FIELD_DEFS = {
  * Spread verbatim by `applySystemFields` — nothing is layered on top of it.
  * (#6810 removed the `indexed: opts.multiTenant` that used to be; the tenant
  * index is declared in the object's `indexes[]` instead.)
+ *
+ * ADR-0131 D1: the column is NOT NULL, and nothing here says so on purpose
+ * (ruling record 6269955919 on the v18 epic, ② A). The SQL driver creates a
+ * fresh table's tenant column NOT NULL by itself, the organization-ownership
+ * ceremony tightens an upgraded one, and the schema differ reads the column's
+ * nullability as theirs, never as drift — so this shape keeps `required:
+ * false` and no `storage`.
  */
 export const TENANT_SCOPE_FIELD_DEF: Readonly<Record<string, unknown>> = {
   type: 'lookup',
@@ -111,7 +118,7 @@ export const TENANT_SCOPE_FIELD_DEF: Readonly<Record<string, unknown>> = {
   readonly: true,
   system: true,
   description:
-    'Tenant scope (auto-populated by org-scoping on insert; NULL on single-tenant stacks).',
+    'Tenant scope (stamped on insert by org-scoping; never NULL — a write that names no organization is refused).',
 };
 
 /**

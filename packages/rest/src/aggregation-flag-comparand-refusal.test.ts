@@ -55,6 +55,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver, withheldFilterDiagnosticOf } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'rest_agg_flag_comparand_20981';
 
@@ -117,6 +118,9 @@ describe('[#20981] a non-boolean $exists / $null in a per-aggregation filter or 
     await engine.init();
     engine.registry.registerObject(DOC as any);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     for (const row of ROWS) await engine.insert(OBJECT, { ...row } as any);
     vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
 

@@ -65,6 +65,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { Task } from '../src/objects/task.object.js';
 import taskHook from '../src/objects/task.hook.js';
 import TodoApp from '../objectstack.config.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** The two fields this card retired. */
 const REMOVED_FIELDS = ['is_completed', 'is_overdue'] as const;
@@ -94,6 +95,9 @@ async function bootEngine(objectDef: unknown = Task) {
   openDrivers.push(driver);
   objectql.registry.registerObject(objectDef, 'todo', 'todo');
   await objectql.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(objectql);
   objectql.bindHooks([taskHook], { packageId: 'app:com.example.todo' });
   return objectql;
 }

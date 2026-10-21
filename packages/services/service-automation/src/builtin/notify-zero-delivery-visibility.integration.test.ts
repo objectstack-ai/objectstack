@@ -116,6 +116,7 @@ import type { FlowRunSummary } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { registerNotifyNode } from './notify-node.js';
 import { formatRunSummaryLine } from '../run-summary.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 /** The employer organization whose admin members are the intended recipients. */
 const ORG_EMPLOYER = 'org_employer_alpha';
@@ -299,6 +300,9 @@ async function boot(kind: DriverKind) {
         const PKG = '@objectstack/service-messaging';
         for (const o of FIXTURES) ql.registry.registerObject(o as any, PKG, PKG);
         await ql.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(ql);
         data = ql as unknown as IDataEngine;
     } else {
         data = inProcessEngine();

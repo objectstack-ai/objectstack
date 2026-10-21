@@ -43,6 +43,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { bindApprovalLockHook, APPROVALS_HOOK_PACKAGE } from './lifecycle-hooks.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OPPORTUNITY = {
   name: 'opportunity',
@@ -105,6 +106,9 @@ describe('[#18153] the per-row refusal is user-facing copy', () => {
       engine.registry.registerObject(o as any, 'com.objectstack.test.18153');
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     opportunityId = String((await engine.insert('opportunity', { name: 'Acme renewal', amount: 100 })).id);
     ledgerId = String((await engine.insert('ledger_entry', { amount: 100 })).id);

@@ -2426,16 +2426,24 @@ export class RemoteTransport {
    * Build a CREATE TABLE SQL string for the given object definition.
    * Shared by syncSchema() and syncSchemasBatch() to avoid duplication.
    */
-  private buildCreateTableSQL(tableName: string, objectDef: { fields?: Record<string, any> }): string {
+  private buildCreateTableSQL(tableName: string, objectDef: { fields?: Record<string, any>; tenancy?: any }): string {
     let sql = `CREATE TABLE "${tableName}" ("id" TEXT PRIMARY KEY, "created_at" TEXT DEFAULT (datetime('now')), "updated_at" TEXT DEFAULT (datetime('now'))`;
 
+    // ADR-0131 D1, the local face's `createColumn` twin: a fresh table's
+    // tenant column is NOT NULL with no declaration saying so. Asked through
+    // the driver's schema resolver ({@link tenantFieldResolver}) — the by-table
+    // registry is still empty here. CREATE only: an `ADD COLUMN` below and in
+    // {@link syncSchemasBatch} stays nullable, and a remote store this face
+    // created before keeps what it has (the organization-ownership ceremony
+    // reports the remote face as unable to tighten it).
+    const tenantField = this.tenantFieldResolver ? this.tenantFieldResolver(objectDef) : null;
     if (objectDef.fields) {
       for (const [name, field] of Object.entries(objectDef.fields)) {
         if (BUILTIN_COLUMNS.has(name)) continue;
         const type = (field as any).type || 'string';
         if (type === 'formula') continue; // Virtual — no column
         this.assertSafeIdentifier(name);
-        sql += `, "${name}" ${this.columnDeclarationSQL(field)}`;
+        sql += `, "${name}" ${this.columnDeclarationSQL(field, name === tenantField)}`;
       }
     }
 
@@ -2492,9 +2500,9 @@ export class RemoteTransport {
    * asymmetry; closing it means deciding whether, and from which shared source,
    * this face emits declared defaults.
    */
-  private columnDeclarationSQL(field: any): string {
+  private columnDeclarationSQL(field: any, tenantColumn: boolean = false): string {
     const colType = this.mapFieldTypeToSQL(field);
-    return declaresColumnNotNull(field) ? `${colType} NOT NULL` : colType;
+    return declaresColumnNotNull(field) || tenantColumn ? `${colType} NOT NULL` : colType;
   }
 
   /**

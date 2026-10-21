@@ -77,6 +77,7 @@ import type { FileRecord, UploadSessionRecord } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
 import { SystemFile } from './objects/system-file.object.js';
 import { SystemUploadSession } from './objects/system-upload-session.object.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const fileRec = (id: string): FileRecord => ({
   id,
@@ -708,6 +709,9 @@ beforeEach(async () => {
   warns = [];
   (driver as any).logger = { warn: (msg: string, meta: any) => warns.push({ msg, meta }) };
   await driver.initObjects([AUDITED_OBJECT]);
+  // The legacy organization-less rows below exist only on a store built before
+  // 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(driver as any, ['sys_file']);
   await driver.create('sys_file', { id: 'own', key: 'a', status: 'pending', organization_id: 'org_A' }, { tenantId: 'org_A' });
   await driver.create('sys_file', { id: 'other', key: 'b', status: 'pending', organization_id: 'org_B' }, { tenantId: 'org_B' });
   // No tenant on the call: a tenant on it would stamp the NULL column
@@ -926,6 +930,9 @@ describe('[#21908] D2. ⛔ under the opt-in, a door tenant still cannot reach an
     ql.registry.registerObject(SystemFile as any, 'com.objectstack.storage');
     ql.registry.registerObject(SystemUploadSession as any, 'com.objectstack.storage');
     await ql.syncSchemas();
+    // The legacy organization-less rows below exist only on a store built before
+    // 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+    await relaxTenantColumns(sql as any, ['sys_file', 'sys_upload_session']);
     for (const [id, org] of [['own', 'org_A'], ['other', 'org_B'], ['legacy', null]] as const) {
       await ql.insert('sys_file', { ...fileRec(id), organization_id: org }, { context: SYS });
       await ql.insert('sys_upload_session', { ...sessionRec(id), organization_id: org }, { context: SYS });

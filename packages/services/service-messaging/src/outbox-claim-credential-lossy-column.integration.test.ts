@@ -62,6 +62,7 @@ import { NotificationDelivery } from './objects/notification-delivery.object.js'
 import { HttpDelivery } from './objects/http-delivery.object.js';
 import type { ClaimedDeliveryRecord, INotificationOutbox, NotificationDeliveryRecord } from './outbox.js';
 import type { HttpDelivery as HttpDeliveryRow, IHttpOutbox } from './http-outbox.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // ── The `real` column double ────────────────────────────────────────────────
 
@@ -175,6 +176,9 @@ async function sqliteEngine(...objects: unknown[]): Promise<ObjectQL> {
     await engine.init();
     for (const object of objects) engine.registry.registerObject(object as any, '@objectstack/service-messaging');
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     return engine;
 }
 

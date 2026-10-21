@@ -94,6 +94,7 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // ── the app, transcribed from the card ─────────────────────────────────────
 
@@ -357,6 +358,9 @@ async function boot(makeDriver: () => unknown): Promise<Booted> {
     objects: OBJECTS,
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   engines.push(engine);
 
   // The app's stamp, on BOTH write events — the card's `runAs: 'system'` shape:

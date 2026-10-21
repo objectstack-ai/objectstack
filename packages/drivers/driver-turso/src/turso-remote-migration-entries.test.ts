@@ -41,6 +41,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
 import { TursoDriver } from './turso-driver.js';
+import { initObjectsPre18 } from './pre-18-tenant-column.testkit.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'turso-remote-migrate-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -196,6 +197,9 @@ describe('the index entries', () => {
   async function bareTenantKey(duplicates: boolean) {
     const file = nextFile();
     const remote = await remoteOver(file);
+    // Duplicates the bare key admitted carry no organization, which only a
+    // store built before 18.x can hold (ADR-0131 D1).
+    if (duplicates) await initObjectsPre18(remote, TENANT);
     await remote.syncSchemasBatch([{ object: 'tenant_t', schema: TENANT }]);
     const synced = await indexesOf(file, 'tenant_t');
     await onDisk(

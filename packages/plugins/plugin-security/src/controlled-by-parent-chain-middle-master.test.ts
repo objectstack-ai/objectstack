@@ -66,6 +66,7 @@ import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -225,6 +226,10 @@ beforeAll(async () => {
     ],
   } as never);
   await engine.syncSchemas();
+  // The organization-less rows below (global sets, positions, grants) exist only
+  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
+  // NULL): this is that store.
+  await relaxEveryRegisteredTenantColumn(engine);
 
   // The two delegators exist as users, so the on-behalf-of link resolves rather
   // than failing closed. Each holds the manager's set through a stored position

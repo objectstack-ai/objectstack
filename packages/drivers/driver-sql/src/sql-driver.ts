@@ -12141,6 +12141,13 @@ export class SqlDriver implements IDataDriver {
     // ahead of either.
     this.warnBuiltinColumnCollisions(shardName, obj.fields, builtinColumns, 'shard');
     const exists = await this.knex.schema.hasTable(shardName);
+    // ADR-0131 D1: a shard is created from the BASE's declaration, so it takes
+    // the base's tenant column NOT NULL — asked of the base through the
+    // recording resolver, the same answer the declared-index sync below uses
+    // (the shard has no bookkeeping of its own until `aliasShardBookkeeping`).
+    // A shard that already exists keeps the nullability it has: the
+    // organization-ownership ceremony reports such a shard, it never rebuilds it.
+    const baseTenantField = this.computeAndRecordTenantField(baseTable, obj);
     // Commit d0e3a885b: a shard carries the base table's declared indexes (below), so its
     // columns need the same keyable-text decision the managed path makes.
     const keyedColumns = indexedKeyColumns({
@@ -12156,7 +12163,7 @@ export class SqlDriver implements IDataDriver {
         this.createAuditTimestampColumn(table, 'updated_at');
         for (const [name, field] of Object.entries(obj.fields ?? {})) {
           if (builtinColumns.has(name)) continue;
-          this.createColumn(table, name, field, keyedColumns.get(name));
+          this.createColumn(table, name, field, keyedColumns.get(name), name === baseTenantField);
         }
       });
     } else {
@@ -12199,7 +12206,7 @@ export class SqlDriver implements IDataDriver {
         shardName,
         perShard,
         new Set(Object.keys(colInfo)),
-        this.computeAndRecordTenantField(baseTable, obj),
+        baseTenantField,
         obj.fields ?? {},
       );
     }
@@ -12742,7 +12749,8 @@ export class SqlDriver implements IDataDriver {
             if (obj.fields) {
               for (const [name, field] of Object.entries(obj.fields)) {
                 if (builtinColumns.has(name)) continue;
-                this.createColumn(table, name, field, keyedColumns.get(name));
+                // ADR-0131 D1: a fresh table's tenant column is NOT NULL.
+                this.createColumn(table, name, field, keyedColumns.get(name), name === tenantField);
               }
             }
           });
@@ -19743,6 +19751,7 @@ export class SqlDriver implements IDataDriver {
     name: string,
     field: any,
     keyed?: { unique: boolean },
+    tenantColumn: boolean = false,
   ) {
     // [#11567] Stated BEFORE the `multiple` short-circuit and before the type
     // switch, because the spec's refusal is gated on neither: `FieldSchema`
@@ -19793,7 +19802,7 @@ export class SqlDriver implements IDataDriver {
     // producers already agree.
     if (isMultiValuedColumn(String(field.type ?? ''), field)) {
       const jsonCol = this.jsonColumn(table, name);
-      if (declaresColumnNotNull(field)) jsonCol.notNullable();
+      if (declaresColumnNotNull(field) || tenantColumn) jsonCol.notNullable();
       return;
     }
 
@@ -20204,7 +20213,18 @@ export class SqlDriver implements IDataDriver {
       // [#17231] Asked through {@link declaresColumnNotNull} — the same
       // question the multi-value short-circuit above now asks, stated once so
       // this method's two exits cannot answer it differently again.
-      if (declaresColumnNotNull(field)) col.notNullable();
+      //
+      // ADR-0131 D1 (execution record 6285122667 on the v18 step 7 card): the
+      // table's tenant column is the one column NOT NULL WITHOUT a declaration
+      // — "there is no nullable tenant column anywhere". `tenantColumn` is
+      // passed only by the two CREATE TABLE sites ({@link initObjects}' create
+      // branch, {@link ensureShardTable}'s), never by an ADD COLUMN: a column
+      // added to a table that already holds rows is the organization-ownership
+      // ceremony's to tighten (ruling ② A, 6269955919), and no metadata says
+      // it — the injected tenant field stays `required: false` with no
+      // `storage`, and the differ's `ceremonyOwnedNullability` reads the
+      // difference as no drift.
+      if (declaresColumnNotNull(field) || tenantColumn) col.notNullable();
       this.applyDeclaredColumnDefault(col, field, type);
     }
   }

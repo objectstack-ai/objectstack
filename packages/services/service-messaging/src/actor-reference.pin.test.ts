@@ -22,6 +22,7 @@ import { InboxMessage } from './objects/inbox-message.object.js';
 import { NotificationReceipt } from './objects/notification-receipt.object.js';
 import { MessagingService } from './messaging-service.js';
 import { createInboxChannel } from './inbox-channel.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as const;
 const GHOST = 'usr_ghost_21913';
@@ -47,6 +48,9 @@ beforeEach(async () => {
     engine.registry.registerObject(InboxMessage as any, '@objectstack/service-messaging');
     engine.registry.registerObject(NotificationReceipt as any, '@objectstack/service-messaging');
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     const user = await engine.insert('sys_user', { name: 'Ada', email: 'ada@example.test' }, SYS);
     userId = String((user as any).id);
 });

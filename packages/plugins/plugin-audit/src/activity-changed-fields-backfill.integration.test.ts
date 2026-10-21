@@ -24,6 +24,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from './audit-plugin.js';
 import { backfillActivityChangedFields } from './activity-changed-fields-backfill.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const ACTIVITY = 'sys_activity';
 const ITEM = 'acb_item';
@@ -71,6 +72,9 @@ describe('[ADR-0139 E6] backfillActivityChangedFields', () => {
     engine.registerDriver(driver, true);
     engine.registry.registerObject(itemObject as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     const id = (await engine.insert(ITEM, { name: 'x', stage: 'open', f_a: '1', f_b: '1' }, { context: SYS })).id;
     const update = (patch: Row) => engine.update(ITEM, patch, { where: { id }, context: SYS });

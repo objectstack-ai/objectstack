@@ -51,6 +51,7 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const ORG = 'org_rid_nest';
@@ -194,6 +195,10 @@ async function boot() {
     ],
   } as never);
   await engine.syncSchemas();
+  // The organization-less permission-set catalogue row below exists only on a
+  // store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
+  // NULL): that table is this store's.
+  await relaxTenantColumns(engine as never, ['sys_permission_set']);
 
   const e = engine as unknown as {
     insert: (o: string, row: Record<string, unknown>, opts: never) => Promise<unknown>;
@@ -240,12 +245,13 @@ async function boot() {
   }, SYS);
   // The parents, one per grandparent, plus one with a dangling and one with a
   // null master pointer (written through the driver: the required master is
-  // what the authoring door refuses, and these rows exist to be excluded).
+  // what the authoring door refuses, and these rows exist to be excluded). A
+  // driver write is not stamped, so it names the rig's organization itself.
   for (const [id, grand] of [
     ['p_both', 'g_both'], ['p_del_only', 'g_del_only'], ['p_caller_only', 'g_caller_only'],
     ['p_neither', 'g_neither'], ['p_shared', 'g_shared'], ['p_dangling', 'g_missing'], ['p_null', null],
   ] as const) {
-    await e.getDriver(PARENT).create(PARENT, { id, name: id, grand });
+    await e.getDriver(PARENT).create(PARENT, { id, name: id, grand, organization_id: ORG });
   }
   // The same children in both tables, so the two paths read the same rows.
   for (const child of [CHILD_CBP, CHILD_LEAF]) {
@@ -254,7 +260,7 @@ async function boot() {
       ['c_neither', 'p_neither'], ['c_shared', 'p_shared'], ['c_via_dangling', 'p_dangling'], ['c_via_null', 'p_null'],
       ['c_dangling', 'p_missing'], ['c_null', null],
     ] as const) {
-      await e.getDriver(child).create(child, { id, note: '', parent });
+      await e.getDriver(child).create(child, { id, note: '', parent, organization_id: ORG });
     }
   }
 

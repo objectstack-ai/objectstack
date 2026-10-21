@@ -42,6 +42,7 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { hashPartition } from './backoff.js';
 import type { FetchImpl } from './http-sender.js';
 import type { EnqueueHttpInput, IHttpOutbox } from './http-outbox.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** The production default. */
 const PARTITIONS = 8;
@@ -86,6 +87,9 @@ beforeEach(async () => {
     await engine.init();
     engine.registry.registerObject(HttpDelivery as any, '@objectstack/service-messaging');
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     calls = { update: 0, find: 0, other: 0 };
     posted = [];

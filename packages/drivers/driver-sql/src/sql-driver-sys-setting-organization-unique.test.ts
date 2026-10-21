@@ -3,6 +3,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { isUniqueViolationError } from '@objectstack/types';
 import { SqlDriver, classifyIndexKeyPart, parseIndexDdl, legacyUniqueReplacements } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * #8555 — `sys_setting`, the SIXTH instance of the #8323 class, and the first
@@ -315,6 +316,9 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
     // key at its own layer.
     const d = makeDriver();
     await d.initObjects(app('fixed') as any);
+    // Rows with no organization exist only on a database built before 18.x
+    // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+    await asPre18TenantColumn(d, TABLE);
 
     const platform = { scope: 'global', namespace: 'branding', key: 'logo_url' };
     expect((await createAsApi(d, row('seed1', undefined, platform))).status).toBe(201);
@@ -358,6 +362,9 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
      */
     const seedDeployed = async (d: SqlDriver) => {
       await d.initObjects(app('pre') as any);
+      // Every deployment in the field was built before 18.x: its tenant column
+      // is nullable, and it holds rows with no organization.
+      await asPre18TenantColumn(d, TABLE);
       await d.create(TABLE, row('r1', 'org_jia', KEY) as any);
       await d.create(TABLE, row('r2', 'org_jia', CONTROL) as any);
       await d.create(TABLE, row('r3', undefined, { scope: 'global', key: 'platform_default' }) as any);
@@ -586,6 +593,9 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
     it('AFTER the migration: two platform defaults on the `scope=global` layer are refused', async () => {
       const d = makeDriver();
       await d.initObjects(app('fixed') as any);
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(d, TABLE);
       await runIdentityMigration(d);
 
       expect((await createAsApi(d, row('a', undefined, globalRow))).status).toBe(201);

@@ -46,6 +46,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { REMOTE_FACE_ANSWERS, TursoDriver } from './turso-driver.js';
+import { initObjectsPre18 } from './pre-18-tenant-column.testkit.js';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -100,8 +101,16 @@ const nextFile = () => join(scratch, `db-${++seq}.db`);
 
 type Face = 'remote' | 'local';
 
-/** A driver of the given face over a fresh SQLite file, synced and seeded. */
-async function seeded(face: Face, file = nextFile()): Promise<TursoDriver> {
+/**
+ * A driver of the given face over a fresh SQLite file, synced and seeded.
+ *
+ * `t3` carries no organization, which only a store built before 18.x can hold
+ * (ADR-0131 D1), so `probe_org` is built in that shape (`initObjectsPre18`).
+ * `pre18Tenant: false` builds it as 18.x does, through the schema doors alone,
+ * and seeds only the rows that name an organization — for a case whose subject
+ * is what those doors count.
+ */
+async function seeded(face: Face, file = nextFile(), pre18Tenant = true): Promise<TursoDriver> {
   const client = face === 'remote' ? createClient({ url: `file:${file}` }) : null;
   const driver =
     face === 'remote'
@@ -109,9 +118,15 @@ async function seeded(face: Face, file = nextFile()): Promise<TursoDriver> {
       : new TursoDriver({ url: `file:${file}` });
   open.push({ driver, client });
   await driver.connect();
-  await driver.initObjects([PROBE, TENANT]);
+  if (pre18Tenant) {
+    await driver.initObjects([PROBE]);
+    await initObjectsPre18(driver, TENANT);
+  } else {
+    await driver.initObjects([PROBE, TENANT]);
+  }
   await driver.bulkCreate('probe_t', PROBE_ROWS.map((row) => ({ ...row })));
-  await driver.bulkCreate('probe_org', TENANT_ROWS.map((row) => ({ ...row })));
+  const tenantRows = pre18Tenant ? TENANT_ROWS : TENANT_ROWS.filter((row) => row.organization_id !== null);
+  await driver.bulkCreate('probe_org', tenantRows.map((row) => ({ ...row })));
   return driver;
 }
 
@@ -405,7 +420,7 @@ describe('members whose remote answer is a declaration', () => {
 describe('getSchemaSyncStats on the remote face: what its schema doors counted', () => {
   it('a fresh remote database is observed as created from empty; the same database reached again is found; the local control counts too', async () => {
     const file = nextFile();
-    expect((await seeded('remote', file)).getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
+    expect((await seeded('remote', file, false)).getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
     // A second process over the same remote database: every table is found.
     const again = new TursoDriver({ url: 'libsql://probe.example.turso.io', client: createClient({ url: `file:${file}` }) });
     open.push({ driver: again, client: null });
@@ -415,7 +430,7 @@ describe('getSchemaSyncStats on the remote face: what its schema doors counted',
     // A re-sync of the tables this process created is not a find.
     await again.syncSchemasBatch([{ object: 'probe_t', schema: PROBE }]);
     expect(again.getSchemaSyncStats()).toEqual({ created: 0, existing: 2 });
-    expect((await seeded('local')).getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
+    expect((await seeded('local', nextFile(), false)).getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
   });
 
   it("a remote boot that ran no schema door says nothing: both counts at zero, the contract's \"cannot say\"", () => {

@@ -654,6 +654,17 @@ export class EmailService implements IEmailService {
     this.options.transport = transport;
   }
 
+  /**
+   * `IEmailService.isConfigured` — whether mail sent through this service is
+   * delivered. `false` while the active transport is the {@link LogTransport}
+   * (it only logs, in every environment), `true` for any other transport.
+   * Read from the live transport on every call, so it follows
+   * {@link setTransport} hot swaps from the `mail` settings namespace.
+   */
+  isConfigured(): boolean {
+    return !(this.options.transport instanceof LogTransport);
+  }
+
   /** Replace the default `from` address used when callers omit `input.from`. */
   setDefaultFrom(from: EmailAddress | undefined): void {
     this.options.defaultFrom = from;

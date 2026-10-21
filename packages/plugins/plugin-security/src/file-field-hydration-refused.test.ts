@@ -26,6 +26,7 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from './security-plugin';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const DOC = 'sec_file_refusal_doc';
 const SYS_CTX = { isSystem: true, userId: 'usr_system' };
@@ -90,6 +91,9 @@ describe('a file field the security layer refused reads as refused, not as "no f
       ],
     } as never);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     const services: Record<string, unknown> = {
       manifest: { register: vi.fn() },

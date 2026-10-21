@@ -49,6 +49,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { isUniqueViolationError } from '@objectstack/types';
 import { SqlDriver } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
 interface WireBearingError extends Error {
@@ -261,6 +262,9 @@ function declareCrossOrganizationRefusal(cell: DialectCell): void {
      * organization.
      */
     it('refuses a conflict on a row that carries no organization, and leaves it untouched', async () => {
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(driver, ACCOUNT.name);
       await knexInstance(ACCOUNT.name).insert({ id: 'os21185_platform_row', email: 'platform@os21185.test', title: 'platform' });
       const before = await snapshot();
 

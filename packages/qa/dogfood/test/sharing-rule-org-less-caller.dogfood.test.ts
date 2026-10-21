@@ -72,6 +72,7 @@ import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { leaveOrganization } from './armed.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const RULES = '/sharing/rules';
 const SYS = { isSystem: true } as const;
@@ -171,6 +172,9 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     // an organization-less system insert (ADR-0131 D9), so the row is landed
     // beneath the engine, as the residue an older release left. It applies
     // nowhere now.
+    // That residue lives only on a store built before 18.x, whose tenant column is
+    // nullable (ADR-0131 D1 makes a fresh one NOT NULL): the table is that store's.
+    await relaxTenantColumns(ql as any, ['sys_user_permission_set']);
     await ql.getDriver('sys_user_permission_set').create('sys_user_permission_set', {
       id: 'ups_8158_org_less', user_id: orgLessUserId, permission_set: 'sharing_admin_8158', organization_id: null,
     });

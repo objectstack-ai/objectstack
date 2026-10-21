@@ -50,6 +50,7 @@ import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objec
 import { SysPosition, SysPermissionSet, SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const OWN_ORG = 'org_a';
 const SISTER_ORG = 'org_c';
@@ -145,6 +146,10 @@ async function boot(posture: Posture) {
     ],
   } as never);
   await engine.syncSchemas();
+  // The organization-less permission-set and position catalogue rows below
+  // exist only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant
+  // column NOT NULL): those tables are this store's.
+  await relaxTenantColumns(engine as never, ['sys_permission_set', 'sys_position']);
   engines.push(engine);
 
   for (const id of [OWN_ORG, SISTER_ORG, FOREIGN_ORG]) {

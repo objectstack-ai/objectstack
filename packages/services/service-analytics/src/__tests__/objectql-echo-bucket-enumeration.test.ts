@@ -118,6 +118,7 @@ import { BUILTIN_DRIVER_IDS, TimeUpdateInterval, type BuiltinDriverId, type Cube
 import { declaredRefusalMessage } from '@objectstack/types';
 import type { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const DEAL = 'os21647_bucket_deal';
 const DEAL_OBJECT = {
@@ -327,6 +328,9 @@ async function serve(face: DriverFace) {
   engine.registry.registerObject(DEAL_OBJECT as any);
   if (seeded) {
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     for (const deal of EXCEPTION_DEALS) await engine.insert(DEAL, { ...deal } as any);
   }
 

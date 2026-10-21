@@ -54,6 +54,7 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { HttpRedeliverError, type IHttpOutbox } from './http-outbox.js';
 import { HttpDelivery, SYS_HTTP_DELIVERY } from './objects/http-delivery.object.js';
 import type { FetchImpl } from './http-sender.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /**
  * [#10740] `IHttpOutbox.redeliver` now requires its caller to state the
@@ -106,6 +107,9 @@ describe('sys_http_delivery — parked drop records are not redeliverable (#8069
         await engine.init();
         engine.registry.registerObject(HttpDelivery as any, '@objectstack/service-messaging');
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         return { driver, engine: engine! };
     }
 

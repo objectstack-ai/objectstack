@@ -54,6 +54,7 @@ import { DatasetSchema } from '@objectstack/spec/ui';
 import { translateObject, type TranslationBundle } from '@objectstack/spec/system';
 import type { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'os22178_account';
 const PICKLIST = 'os22178_industry';
@@ -213,6 +214,9 @@ describe('[#22178] a picklist-bound select dimension renders its labels in the r
     await engine.init();
     engine.registerApp({ id: 'com.test.os22178', name: 'os22178', picklists: [INDUSTRY], objects: [ACCOUNT] } as never);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     for (const row of ROWS) await engine.insert(OBJECT, { ...row } as never);
 
     for (const [face, caps] of [

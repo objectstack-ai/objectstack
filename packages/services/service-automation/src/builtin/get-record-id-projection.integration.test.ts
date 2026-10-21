@@ -38,6 +38,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin } from '../plugin.js';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -80,6 +81,9 @@ describe('get_record answers the row id as output.id whatever its fields project
     ql.registerDriver(driver, true);
     ql.registry.registerObject(OBJECT as any, 'pin-get-record-id', 'pin-get-record-id');
     await ql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(ql);
 
     const row: any = await ql.insert(OBJECT.name, { title: 'alpha', status: 'open' }, { context: SYS });
     rowId = row.id;

@@ -36,6 +36,7 @@ import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
 import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { withLegacyPermissionSetTable } from './__tests__/legacy-catalog-objects.testkit.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const GUARD_PACKAGE = 'test.grant-readers-unnamed';
@@ -113,6 +114,10 @@ async function soleGrantAnchoredAdmin(): Promise<Rig> {
     ]),
   } as any);
   await engine.syncSchemas();
+  // The organization-less rows below (global sets, grants, identities) exist
+  // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
+  // NOT NULL): this is that store.
+  await relaxEveryRegisteredTenantColumn(engine);
   // [ADR-0131 D3/D5] The Default Organization a `single` boot creates before
   // `kernel:ready` (AuthPlugin's invariant); it owns the promotion's grant.
   await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, SYS);

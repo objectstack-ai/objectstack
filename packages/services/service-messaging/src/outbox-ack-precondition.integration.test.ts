@@ -58,6 +58,7 @@ import { MemoryNotificationOutbox } from './memory-outbox.js';
 import { SqlNotificationOutbox } from './sql-outbox.js';
 import { NotificationDelivery } from './objects/notification-delivery.object.js';
 import type { ClaimedDeliveryRecord, INotificationOutbox, NotificationDeliveryRecord } from './outbox.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /**
  * The refusal identity both backends must produce. `DELIVERY_NOT_ELIGIBLE` is
@@ -96,6 +97,9 @@ function sqlBackend(): Backend {
             await engine.init();
             engine.registry.registerObject(NotificationDelivery as any, '@objectstack/service-messaging');
             await engine.syncSchemas();
+            // A real `single` install's Default Organization: the system writes below
+            // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+            await installDefaultOrganization(engine);
             return new SqlNotificationOutbox(engine as any, { partitionCount: 1 });
         },
         async destroy() {

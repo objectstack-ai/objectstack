@@ -42,6 +42,7 @@ import { resolveDisplayField } from '@objectstack/spec/data';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as any;
 
@@ -86,6 +87,9 @@ describe('[#20015] approval objects resolve a real record title under ADR-0079 o
       engine.registry.registerObject(o as any, 'com.objectstack.test.20015');
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
   });
 
   afterAll(async () => {

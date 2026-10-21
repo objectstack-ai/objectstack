@@ -53,6 +53,7 @@ import {
 } from '@objectstack/spec/data';
 
 import { claimSeedOwnership } from './claim-seed-ownership.js';
+import { relaxEveryTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { context: { isSystem: true } } as const;
 const ADMIN = 'usr_admin_human';
@@ -115,6 +116,9 @@ async function boot() {
     objects: [PROBE_OBJECT],
   } as any);
   await engine.syncSchemas();
+  // The organization-less holdings and rows below exist only on a store built
+  // before 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is it.
+  await relaxEveryTenantColumn(engine, [PROBE_OBJECT]);
   engines.push(engine);
 
   const metadataHook: Seen[] = [];

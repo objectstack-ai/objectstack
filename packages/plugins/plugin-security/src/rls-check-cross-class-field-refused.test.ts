@@ -44,6 +44,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYS_CTX = { isSystem: true, userId: 'usr_system' };
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -106,6 +107,9 @@ async function boot(makeDriver: () => Driver, clause: 'using' | 'check', predica
     ],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   booted.push({ engine, driver, table: OBJ });
 
   const set = PermissionSetSchema.parse({

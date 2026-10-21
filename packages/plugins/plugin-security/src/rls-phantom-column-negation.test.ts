@@ -76,6 +76,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // ── the fixture, transcribed from the card: three rows, one of them public ──
 
@@ -246,6 +247,9 @@ async function boot(makeDriver: () => unknown, ps: PermissionSet): Promise<Objec
     objects: OBJECTS,
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   engines.push(engine);
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },

@@ -34,6 +34,7 @@ import { HttpDelivery, MessagingService, SqlHttpOutbox, type EnqueueHttpInput } 
 import { AutoEnqueuer } from './auto-enqueuer.js';
 import { DeclaredWebhookSource, declaredWebhookRefId } from './declared-webhooks.js';
 import { SysWebhook } from './sys-webhook.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYSTEM = { context: { isSystem: true } };
 
@@ -94,6 +95,9 @@ describe('#24835 — a webhook delivery is stored for an update on a real SqlDri
         engine.registry.registerObject(HttpDelivery as any, 'test');
         engine.registry.registerObject(SysWebhook as any, 'test');
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
 
         const realtime = new FakeRealtime();
         engine.setRealtimeService(realtime);

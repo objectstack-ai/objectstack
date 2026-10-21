@@ -37,6 +37,7 @@ import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { AppPlugin } from './app-plugin.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const BOOT_TIMEOUT = 180_000;
 const ORIGIN = 'http://localhost:3000';
@@ -172,6 +173,10 @@ describe('[#24523] statements per warm request: an organization-owned admin gran
   });
 
   it('CONTROL — the organization-less grant anchors nothing: on either slug, no standing, and no sys_organization statement is issued for it', async () => {
+    // An organization-less grant exists only on a store built before 18.x
+    // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this table is that
+    // store's, relaxed through its driver's own drift apply door.
+    await relaxTenantColumns((engine as any).getDriver('sys_user_permission_set'), ['sys_user_permission_set']);
     const grant = await adminGrant();
     const [organization] = await find('sys_organization');
     await engine.update('sys_user_permission_set', { id: grant.id, organization_id: null }, { context: SYS });

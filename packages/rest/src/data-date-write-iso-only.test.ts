@@ -41,6 +41,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'rest_date_20481';
 
@@ -125,6 +126,9 @@ for (const cell of CELLS) {
         await engine.init();
         engine.registry.registerObject(LEDGER as any);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         await engine.insert(OBJECT, { id: 'o1', customer_id: 'c1', placed_on: '2026-01-10' } as any);
 
         // Writes of THIS object — the protocol's own metadata traffic is not the question.

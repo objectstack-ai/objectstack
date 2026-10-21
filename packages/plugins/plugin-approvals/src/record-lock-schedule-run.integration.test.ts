@@ -35,6 +35,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveRunDataContext } from '@objectstack/service-automation';
 import { bindApprovalLockHook } from './lifecycle-hooks.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const opportunity = {
   name: 'opportunity',
@@ -99,6 +100,9 @@ describe('an owning run and the approvals record lock (#3703 / #3712 / #3760)', 
     await engine.init();
     for (const o of [opportunity, approvalRequest]) engine.registry.registerObject(o as any);
     await engine.syncSchemas(); // real DDL for both tables
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     const opp = await engine.insert('opportunity', { name: 'Deal', amount: 100 });
     oppId = String(opp.id);

@@ -70,6 +70,7 @@ import type {
     HttpDelivery as HttpDeliveryRow,
     IHttpOutbox,
 } from './http-outbox.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const TTL = 60_000;
 /** Step-1 instant: node A's claim. */
@@ -119,6 +120,9 @@ function sqlBackend(): Backend {
             await engine.init();
             engine.registry.registerObject(HttpDelivery as any, '@objectstack/service-messaging');
             await engine.syncSchemas();
+            // A real `single` install's Default Organization: the system writes below
+            // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+            await installDefaultOrganization(engine);
             return new SqlHttpOutbox(engine as any, { partitionCount: 1 });
         },
         async destroy() {
