@@ -234,6 +234,37 @@ describe('[#25053] a stored row takes every write that leaves `type` out', () =>
   });
 });
 
+describe('[#25053] the provider\'s update path on a row holding an undeclared type', () => {
+  // The provider re-judges the stored client merged with the update, so it
+  // refuses an update that leaves such a type in place, before and after the
+  // narrowing alike; setting `application_type` in the same update is the
+  // remedy the changeset names, and the engine accepts the value it writes.
+  type UpdateApi = { updateOAuthClient(input: unknown): Promise<{ application_type?: unknown }> };
+
+  it.each(UNDECLARED)('type %s: an update that leaves it in place is refused by the provider, the row unchanged', async (type) => {
+    const { id, clientId } = await seed(`provider_update_${label(type)}`, type);
+    const api = (await manager.getApi()) as unknown as UpdateApi;
+    const refusal = await api
+      .updateOAuthClient({ body: { client_id: clientId, update: { client_name: 'renamed' } }, headers: new Headers({ cookie }) })
+      .then(() => undefined, (e: unknown) => e as { body?: { error?: unknown } });
+    expect(refusal?.body?.error).toBe('invalid_client_metadata');
+    const row = await stored(id);
+    expect(row?.type).toBe(type);
+    expect(row?.name).toBe(`seeded provider_update_${label(type)}`);
+  });
+
+  it.each(UNDECLARED)('type %s: an update that also sets application_type native is accepted and stored', async (type) => {
+    const { id, clientId } = await seed(`provider_retype_${label(type)}`, type);
+    const api = (await manager.getApi()) as unknown as UpdateApi;
+    const updated = await api.updateOAuthClient({
+      body: { client_id: clientId, update: { client_name: 'renamed', application_type: 'native' } },
+      headers: new Headers({ cookie }),
+    });
+    expect(updated.application_type).toBe('native');
+    expect((await stored(id))?.type).toBe('native');
+  });
+});
+
 describe('[#25053] a write that sends `type` is judged against web and native', () => {
   const insertRow = (tag: string, type: unknown) => ({
     id: `oauthc_25053_${tag}`,
