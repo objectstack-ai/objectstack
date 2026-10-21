@@ -56,11 +56,27 @@ export const CloudConnectionSettingsPage: Page = {
     ],
 };
 
-/** Setup-nav contribution: System group, after the marketplace entries. */
+/**
+ * Setup-nav contribution: the Integrations group, after its other entries
+ * (ruling 甲, #25097 — the connection is an optional integration of a
+ * self-hosted or local runtime, not an app).
+ *
+ * `priority` orders contributions within a group, lowest first. The group's
+ * other contributors, read where they are declared: Webhooks / HTTP Deliveries
+ * (`@objectstack/plugin-webhooks`) and Datasources
+ * (`@objectstack/service-datasource`) at 100, Connect an Agent
+ * (`@objectstack/mcp`) at 110 — so 200 sorts this entry last.
+ *
+ * The group's own `requiredPermissions` (`manage_platform_settings`, on
+ * `SETUP_APP` in `@objectstack/platform-objects`) now applies to the entry.
+ *
+ * A platform-managed runtime registers none of this
+ * (`CloudConnectionPlugin`, `platformManaged`).
+ */
 export const CLOUD_CONNECTION_NAV_CONTRIBUTIONS = [
     {
         app: 'setup',
-        group: 'group_apps',
+        group: 'group_integrations',
         priority: 200,
         items: [
             {

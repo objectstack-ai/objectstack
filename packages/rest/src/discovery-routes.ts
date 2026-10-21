@@ -67,6 +67,8 @@
 // half is the class's `probeMcpServeable`, reached through the host.
 import { isMcpServerEnabled } from '@objectstack/types';
 import { handleRouteError, sendThrownError } from './error-response.js';
+// [#25077] The docs viewer page escapes the value it places into its attribute.
+import { escapeHtml } from './html-escape.js';
 import { logError } from './log.js';
 // [#5040 E6] The `api`-metadata endpoints the OpenAPI document folds in.
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
@@ -690,6 +692,10 @@ export function registerOpenApiEndpoints(this: OpenApiRouteHost, basePath: strin
                 // Strip the trailing /docs to get the API base.
                 const apiBase = reqPath.replace(/\/docs\/?$/, '');
                 const specUrl = `${apiBase}/openapi.json`;
+                // [#25077] Escaped for the attribute it lands in (ruling 3C on
+                // #25040: every outlet that renders a value into HTML escapes it
+                // by context). A path without HTML-special characters renders
+                // byte for byte as before. `html-outlets.pin.test.ts` pins both.
                 const html = `<!doctype html>
 <html>
 <head>
@@ -698,7 +704,7 @@ export function registerOpenApiEndpoints(this: OpenApiRouteHost, basePath: strin
 <title>ObjectStack API Docs</title>
 </head>
 <body>
-<script id="api-reference" data-url="${specUrl}"></script>
+<script id="api-reference" data-url="${escapeHtml(specUrl)}"></script>
 <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 </body>
 </html>`;
