@@ -180,7 +180,7 @@ describe('[#24948] the same question about deleting the Default Organization, as
     engine.find('sys_member', { where: {}, ...SYSTEM } as any) as Promise<Array<Record<string, unknown>>>;
 
   it('refuses when the grant the Default Organization owns is the last standing', async () => {
-    const engine = await promotedSingle();
+    await promotedSingle();
     await expect(guard.judgeOrganizationDelete('org_default')).rejects.toMatchObject(refusal);
   });
 
