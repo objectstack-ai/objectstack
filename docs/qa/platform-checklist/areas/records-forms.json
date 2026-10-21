@@ -1919,7 +1919,7 @@
       "title": "All six validation-rule types enforce on the write path with their exact per-type error codes — and advisory severities flag without blocking",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1933,8 +1933,7 @@
           "for the UNEVALUABLE legs (negative[0], negative[1], acceptance[5]): two runtime-authored scratch objects, each carrying one script rule whose condition `int(record.title) > 1` cannot be evaluated over a non-numeric title — no seeded rule is unevaluable, so the stock doors author them. As admin: PUT /api/v1/meta/object/qa_vr_probe {name: qa_vr_probe, label: QA, sharingModel: public_read_write, fields: {title: {type: text}}, validations: [{type: script, name: qa_unevaluable_warn, severity: warning, message: x, condition: \"int(record.title) > 1\"}]} → 200, and the same body as qa_vr_probe_err with the rule named qa_unevaluable_err at severity: error → 200 (the recipe of QA run #24779 / #24782). A write with title \"abc\" then drives each rule"
         ],
         "knownGaps": [
-          "no showcase rule declares severity:'info' — it shares the identical non-error branch with 'warning' (rule-validator.ts tests `severity === 'error'` and logs everything else), so the warning leg is the driven proof; author a scratch info rule only if a distinct observation is wanted, and record which severities were actually driven",
-          "acceptance[5] stays red until #24782 lands: the unevaluable warning rule's write answers 201 and persists (correct), but the server log prints two lines naming the rule that both say \"write rejected\" — the predicate evaluator's fail-closed sentence, emitted before severity is consulted, and the advisory branch's warn, which embeds that violation message (packages/objectql/src/validation/rule-validator.ts). Measured at 580fd4ed (QA run #24779) and again at a43405d596 (#24802). When #24782's fix merges, re-run the clause and drop this line"
+          "no showcase rule declares severity:'info' — it shares the identical non-error branch with 'warning' (rule-validator.ts tests `severity === 'error'` and logs everything else), so the warning leg is the driven proof; author a scratch info rule only if a distinct observation is wanted, and record which severities were actually driven"
         ]
       },
       "variants": [
@@ -1987,7 +1986,7 @@
           "evidence": "response + re-read + the captured log line"
         },
         {
-          "clause": "an UNEVALUABLE severity:'warning' rule lets the write land, and no log line beside it reports a rejection: the write answers 2xx, the row persists, and no server-log line naming the rule says the write was rejected or that the rule failed closed — the log must not state the opposite of what the server did. Red until #24782 lands",
+          "clause": "an UNEVALUABLE severity:'warning' rule lets the write land, and no log line beside it reports a rejection: the write answers 2xx, the row persists, and no server-log line naming the rule says the write was rejected or that the rule failed closed — the log must not state the opposite of what the server did.",
           "oracle": "log",
           "verify": "step-7 qa_vr_probe write: status 201 and a re-read finding the row; then every log entry naming qa_unevaluable_warn, read to its end — the predicate evaluator's entry spans lines (it embeds the CEL source with a caret) and its verdict sits after the caret — none may contain \"write rejected\" or \"fails closed\" (the fail-closed sentence belongs to the error-severity path; rule-validator.ts header: an unevaluable warning/info rule is logged, never thrown). Score the absence of the rejection wording, not whichever replacement sentence #24782 picks; a line saying the rule could not be evaluated is expected and passes. Control: the qa_vr_probe_err write answers 400 VALIDATION_FAILED naming qa_unevaluable_err and persists nothing — there the rejection wording is true",
           "evidence": "both responses + both re-reads + every log line naming either rule, quoted"
@@ -2045,6 +2044,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-21",
+          "change": "fixtures.knownGaps[1] removed and acceptance[5].clause's closing 'Red until #24782 lands' dropped, as knownGaps[1] said to do once #24782's fix merged: PR #25051 (72518d20f5), named by the domain:engine pointer 6308955528 on seat post #6023. Verification re-run of acceptance[5] at base 688052e147, steps[6] on the canonical own-port boot (`objectstack dev --ui --seed-admin -p 41874 -d file:SCRATCH/data.db`, OS_PORT exported): the qa_vr_probe write {title: \"abc\"} answered 201 and the re-read found its one row; exactly one server-log line names qa_unevaluable_warn, \"Validation rule 'qa_unevaluable_warn' (warning): the rule could not be evaluated (runtime: int() type error: cannot convert to int) — write proceeded: the rule is advisory, so it was not applied to this write\", and it carries neither 'write rejected' nor 'fails closed'. Control: the qa_vr_probe_err write answered 400 VALIDATION_FAILED, fields[0].constraint {rule: qa_unevaluable_err, reason: unevaluable}, its re-read found no row, and its log lines say the write was rejected. No other clause changed",
+          "ref": "#25075"
         }
       ]
     },

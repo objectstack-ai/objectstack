@@ -181,12 +181,21 @@ const NO_SITES: readonly ComposableReadableIdsSite[] = Object.freeze([]);
  * self-referential in-process `where` instead of overflowing the stack. A
  * filter with no leaf walks its own keys and returns a shared empty list, so
  * the common path allocates nothing.
+ *
+ * `at` is the label the sites and the refusals name the root of `node` by;
+ * it defaults to `path`. The executor boundary passes the position of the
+ * enclosing leaf when it walks a COMPOSED SCOPE for the leaves it carries
+ * (ADR-0139 D6 as amended, the nested master chain): a scope is the `where` of
+ * a read of its parent, so it is judged with `path` `'where'`, and its sites
+ * read `where.record_id.$in.scope.master.$in` — the leaf, its scope, the
+ * field inside it.
  */
 export function collectComposableReadableIds(
   object: string,
   operation: string,
   node: unknown,
   path = 'where',
+  at: string = path,
 ): readonly ComposableReadableIdsSite[] {
   const composable = READABLE_IDS_READ_VERBS.has(operation) && path === 'where';
   let sites: ComposableReadableIdsSite[] | undefined;
@@ -218,7 +227,7 @@ export function collectComposableReadableIds(
       onPath.delete(value);
     }
   };
-  visit(node, path, false);
+  visit(node, at, false);
   return sites ?? NO_SITES;
 }
 

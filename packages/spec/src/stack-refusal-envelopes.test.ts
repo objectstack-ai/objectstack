@@ -6,7 +6,8 @@
  * ## What was wrong
  *
  * `defineStack` had seven refusal sites (ADR-0131 D6 adds the eighth, the
- * `unmanaged` install mode's). After #14552 one of them — the
+ * `unmanaged` install mode's; ruling A on #24910 the ninth, the declared
+ * webhook's). After #14552 one of them — the
  * cross-reference refusal, pinned in `stack-cross-reference-envelope.test.ts`
  * — carried `code` / `status`; the other six threw `new Error(message)` with
  * both `undefined`. A consumer that had learned to branch on `error.code`
@@ -86,6 +87,15 @@ const recordFlow = {
   edges: [{ id: 'e1', source: 'start', target: 'end' }],
 };
 
+/** A declared webhook — dispatched only by `requires: ['webhooks', 'realtime']`, the pair. */
+const taskWebhook = {
+  name: 'probe_task_changed',
+  label: 'Task changed',
+  object: task.name,
+  triggers: ['create'],
+  url: 'https://hooks.example/probe',
+};
+
 /**
  * One row per semantic refusal site. `refused` and `accepted` differ by the one
  * detail the site checks; `finding` is a verbatim fragment of the one `issues`
@@ -151,6 +161,14 @@ const rows: Array<{
     refused: { manifest, objects: [task], requires: ['automation'], flows: [recordFlow] },
     accepted: { manifest, objects: [task], requires: ['automation', 'triggers'], flows: [recordFlow] },
     finding: "flow 'task_fanout' declares a 'record_change' trigger",
+  },
+  {
+    site: 'webhook capability — a declared webhook without realtime (ruling A on #24910)',
+    code: 'STACK_WEBHOOK_CAPABILITY_REQUIRED',
+    header: 'defineStack webhook capability validation failed',
+    refused: { manifest, objects: [task], requires: ['webhooks'], webhooks: [taskWebhook] },
+    accepted: { manifest, objects: [task], requires: ['webhooks', 'realtime'], webhooks: [taskWebhook] },
+    finding: "webhook 'probe_task_changed' is declared but `requires` does not include 'realtime'",
   },
   {
     site: 'unmanaged install mode — `unmanaged` permitted on a package the copy cannot write (ADR-0131 D6)',
@@ -237,18 +255,18 @@ describe('every defineStack refusal carries an ADR-0112 envelope', () => {
     });
   });
 
-  describe('census over all eight refusal sites', () => {
+  describe('census over all nine refusal sites', () => {
     const crossReference = { manifest, objects: [task], data: [{ object: 'missing_object', records: [] }] };
     const everySite = [...rows.map((r) => r.refused), { manifest: {} }, crossReference];
 
-    it('eight sites, eight distinct STACK_* codes, every status 422', () => {
+    it('nine sites, nine distinct STACK_* codes, every status 422', () => {
       const envelopes = everySite.map((config) => refusal(config));
       for (const envelope of envelopes) {
         expect(envelope).toBeInstanceOf(Error);
         expect(envelope?.code).toMatch(/^STACK_[A-Z_]+$/);
         expect(envelope?.status).toBe(422);
       }
-      expect(new Set(envelopes.map((e) => e?.code)).size).toBe(8);
+      expect(new Set(envelopes.map((e) => e?.code)).size).toBe(9);
       expect(envelopes.map((e) => e?.code)).toContain('STACK_CROSS_REFERENCE_INVALID');
     });
 

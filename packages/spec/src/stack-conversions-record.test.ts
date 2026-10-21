@@ -534,6 +534,17 @@ describe('every refusal site in defineStack carries the record — census, both 
       config: { manifest, objects: [task], pages, requires: ['automation'], flows: [recordFlow] },
     },
     {
+      site: 'webhook capability',
+      code: 'STACK_WEBHOOK_CAPABILITY_REQUIRED',
+      config: {
+        manifest,
+        objects: [task],
+        pages,
+        requires: ['webhooks'],
+        webhooks: [{ name: 'probe_hook', label: 'Hook', object: task.name, triggers: ['create'], url: 'https://hooks.example/probe' }],
+      },
+    },
+    {
       site: 'unmanaged install mode',
       code: 'STACK_UNMANAGED_INSTALL_UNCOPYABLE',
       config: { manifest: { ...manifest, installModes: ['unmanaged'] }, objects: [task], pages, functions: { probe_noop: () => undefined } },
@@ -553,8 +564,8 @@ describe('every refusal site in defineStack carries the record — census, both 
     });
   }
 
-  it('the census reaches every code defineStack refuses with: eight distinct codes', () => {
-    expect(new Set(rows.map((r) => r.code)).size).toBe(8);
+  it('the census reaches every code defineStack refuses with: nine distinct codes', () => {
+    expect(new Set(rows.map((r) => r.code)).size).toBe(9);
   });
 });
 
