@@ -6041,8 +6041,8 @@ export class SecurityPlugin implements Plugin {
       this.logger.error?.(
         `[security] getReadFilter received an on-behalf-of context for object '${object}' whose delegator ` +
           `'${String(context?.onBehalfOf?.userId)}' does not exist — denying (fail-closed: a delegated read is ` +
-          `never scoped wider than its delegator's own, and with no delegator to intersect against it is not ` +
-          `scoped at all; ADR-0090 D10)`,
+          `never scoped wider than its delegator's own) — with no delegator to intersect against it is not ` +
+          `scoped at all (ADR-0090 D10)`,
       );
       return RLS_DENY_FILTER;
     }
