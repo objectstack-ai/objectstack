@@ -2830,16 +2830,18 @@ export class AuthManager {
             // vendor's OWN constant, so the two lanes are byte-identical by
             // construction rather than by copying.
             const signUpAddress = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
-            if (
-              signUpAddress
-              && (await this.hasExistingUserFor(signUpAddress))
-              && !this.existingAddressSignUpAnswersSuccess(ctx?.context?.options?.emailAndPassword)
-            ) {
-              const { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');
-              throw APIError.from(
-                'UNPROCESSABLE_ENTITY',
-                BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL,
-              );
+            if (signUpAddress && (await this.hasExistingUserFor(signUpAddress))) {
+              if (!this.existingAddressSignUpAnswersSuccess(ctx?.context?.options?.emailAndPassword)) {
+                const { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');
+                throw APIError.from(
+                  'UNPROCESSABLE_ENTITY',
+                  BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL,
+                );
+              }
+              // The answer will carry a user id that no row holds: tell the
+              // after-hook, so it stamps nothing on that id (it would report a
+              // lost write for a user that was never created).
+              if (ctx?.context) ctx.context.__osExistingAddressSignUp = true;
             }
             // fall through — the vendor still decides everything it owns
           }
@@ -3053,7 +3055,11 @@ export class AuthManager {
             } catch {
               signupOk = !(ctx?.context?.returned instanceof Error);
             }
-            if (signupOk && typeof newUserId === 'string') await this.stampPasswordChangedAt(newUserId);
+            // [#25060] Not for an existing address answered as a success: that
+            // answer's user id belongs to no row, and nothing was created.
+            if (signupOk && typeof newUserId === 'string' && ctx?.context?.__osExistingAddressSignUp !== true) {
+              await this.stampPasswordChangedAt(newUserId);
+            }
           }
           const ep = ctx?.context?.options?.emailAndPassword;
           if (ep && ctx.context.__osDisableSignUpOrig !== undefined) {
