@@ -35,12 +35,12 @@ const CC = '/api/v1/cloud-connection';
 const ORIGIN = 'https://env.example.test';
 const CLOUD = 'http://cloud.test';
 
-/** Holds `setup.access`, which the two bind doors demand — in {@link ORG}, the organization the session acts in. */
+/** Holds `manage_platform_settings`, which the two bind doors demand (#25119) — in {@link ORG}, the organization the session acts in. */
 const ADMIN = 'u_admin';
 const ORG = 'o1';
 const GRANTS: Record<string, any[]> = {
-    sys_user_permission_set: [{ id: 'ups_1', user_id: ADMIN, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: ORG }],
-    sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
+    sys_user_permission_set: [{ id: 'ups_1', user_id: ADMIN, permission_set_id: 'ps_1', permission_set: 'platform_admin', organization_id: ORG }],
+    sys_permission_set: [{ id: 'ps_1', name: 'platform_admin', system_permissions: ['setup.access', 'manage_platform_settings'] }],
 };
 
 /**

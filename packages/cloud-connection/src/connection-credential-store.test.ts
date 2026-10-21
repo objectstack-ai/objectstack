@@ -59,15 +59,16 @@ function makeRawApp() {
 const ORG = 'o1';
 const sessionAuth = (userId?: string) => ({ api: { getSession: async () => (userId ? { user: { id: userId }, session: { activeOrganizationId: ORG } } : null) } });
 /**
- * [#24148] The suites below sign in as `admin`, who must hold `setup.access` to
- * reach the connection-changing doors (their subject is the credential, not the
- * permission — that is `cloud-connection-setup-access.pin.test.ts`). Real
- * permission-set rows, read by the shared resolver through `find`; the grant is
- * owned by {@link ORG}, the organization the session acts in.
+ * [#24148, #25119] The suites below sign in as `admin`, who must hold
+ * `manage_platform_settings` to reach the connection-changing doors (their
+ * subject is the credential, not the permission — that is
+ * `cloud-connection-setup-access.pin.test.ts`). Real permission-set rows, read
+ * by the shared resolver through `find`; the grant is owned by {@link ORG}, the
+ * organization the session acts in.
  */
 const ADMIN_GRANTS: Record<string, any[]> = {
-    sys_user_permission_set: [{ id: 'ups_1', user_id: 'admin', permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: ORG }],
-    sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
+    sys_user_permission_set: [{ id: 'ups_1', user_id: 'admin', permission_set_id: 'ps_1', permission_set: 'platform_admin', organization_id: ORG }],
+    sys_permission_set: [{ id: 'ps_1', name: 'platform_admin', system_permissions: ['setup.access', 'manage_platform_settings'] }],
 };
 /**
  * [#24150] With `OS_RUNTIME_VERSION` unset, the bind claim's `runtime_version`
