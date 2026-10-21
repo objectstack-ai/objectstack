@@ -42,15 +42,44 @@
  *
  * ## Where the retry budget comes from
  *
- * Not a guess -- npm's own `time` field on that release. The burst took
- * ~8 minutes to commit end to end, and the spread from the FIRST read
- * (`cli`, 10:53:25, which is when this verification starts) to the LAST commit
- * (`runtime`, 11:00:32) is 7m07s. `RETRY_BUDGET_MS` is 15 minutes: a little
- * over twice the observed spread, because burst latency scales with whatever
- * else the registry is absorbing and the cost of being wrong in the short
- * direction is a false red on a good release. The cost in the other direction
- * is that a GENUINELY broken publish is reported 15 minutes later -- paid once,
- * by a job that has already spent longer than that building.
+ * Not a guess -- npm's own `time` field, read on the releases that set it. The
+ * spread runs from the FIRST read (when this verification starts) to the LAST
+ * package npm commits, and the budget is that spread times one margin.
+ *
+ * **17.3.0** (run 8330, job 100996109699). The burst took ~8 minutes to commit
+ * end to end, and the spread from the first read (`cli`, 10:53:25) to the last
+ * commit (`runtime`, 11:00:32) is 7m07s. The budget was set at 15 minutes: a
+ * little over twice the observed spread (900 s / 427 s = 2.11x), because burst
+ * latency scales with whatever else the registry is absorbing and the cost of
+ * being wrong in the short direction is a false red on a good release.
+ *
+ * **18.0.0** (run 39421537775, job 118624531794) is the first reading past it.
+ * Verification started at 12:41:37Z and spent its 900 s over 19 rounds; the
+ * step ended red at 12:57:38Z with 1 of 73 packages unread,
+ * `@objectstack/console`, whose npm `time` is 12:57:59.327Z -- 21 s later, and
+ * 16m22s after the first read. All 73 were on npm; the false red skipped that
+ * job's GitHub Releases, its ADR-0087 D4 asset and the runtime image. Same
+ * margin, new spread: 982 s x 2.11 = 34m30s, so `RETRY_BUDGET_MS` is 35
+ * minutes (2.14x the 18.0.0 spread).
+ *
+ * It is ONE number for the whole group, not an allowance per package scaled by
+ * its size, because size did not predict which package settled last. On
+ * 18.0.0 `console`'s packed tarball is 9,399,458 bytes (36 MB unpacked) and
+ * `spec`'s is 42,118,133 bytes (193 MB unpacked), yet `spec` was readable at
+ * +10m04s, six minutes before `console`. On 17.5.0 the order was the other way
+ * round (`console` 08:05:24Z, `spec` last at 08:09:33Z), and on 17.3.0 the
+ * last package was `runtime`. Scaled by size, the slowest package of 18.0.0
+ * would have drawn a SMALLER allowance than one that settled six minutes before
+ * it -- and the allowance would need the size of a package the registry cannot
+ * serve yet.
+ *
+ * The budget is a CEILING, not a wait: the loop returns on the first round
+ * that finds the last target, so a good publish pays only its own settle time
+ * (18.0.0, replayed on this schedule, goes green at +17m15s -- battery 14).
+ * Only a GENUINELY broken publish spends all 35 minutes before it is reported.
+ * Whoever raises it re-checks the caller: the publish job declares no
+ * `timeout-minutes`, so GitHub's 360-minute job default bounds this step
+ * together with everything before it (17m23s on 18.0.0, build included).
  *
  * ## ⛔ It still fails CLOSED, and that is the whole point
  *
@@ -128,7 +157,7 @@
  * ONE round (a budget of 0 — the parameter battery 2 already drives) and prints
  * one JSON line: `state` is `published`, `unpublished` (some package is
  * definitively absent) or `unknown` (nothing is absent, but a read failed).
- * One round, not fifteen minutes of backoff, because the direction of error is
+ * One round, not the verifier's whole backoff budget, because the direction of error is
  * the safe one: a cold read answers `unpublished` and the backfill waits for
  * the next landing, while a false `published` is impossible — every package
  * has to answer present. The exit status is 0 for all three answers; it is
@@ -195,7 +224,7 @@ const AUDIT_STEP_NAME = 'Audit the release that main actually carries';
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  '1. The backoff schedule is bounded and spends its whole budget': 8,
+  '1. The backoff schedule is bounded and spends its whole budget': 10,
   '2. The #15321 false red: a cold read seven seconds after the commit': 6,
   '3. The masked defect: runtime never lands, and cli is fine': 6,
   '4. Absence after the budget is a HARD failure, never softened': 5,
@@ -208,11 +237,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '11. The 17.5.0 publish window, replayed on npm\'s own clock': 7,
   '12. The audit step backfills only a version whose whole group is on npm, and no publish or image build of it is in flight': 34,
   '13. The backfill builds from the version commit\'s tree, as the publish does': 13,
+  '14. The 18.0.0 publish window: console readable at +16m22s, past the old 900 s': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -282,8 +312,11 @@ function batteryFloorFailures() {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** See "Where the retry budget comes from" in the header — 7m07s observed, 15m budgeted. */
-export const RETRY_BUDGET_MS = 15 * 60 * 1000;
+/**
+ * See "Where the retry budget comes from" in the header — spreads of 7m07s
+ * (17.3.0) and 16m22s (18.0.0) observed; 35m budgeted, the 17.3.0 margin over 18.0.0.
+ */
+export const RETRY_BUDGET_MS = 35 * 60 * 1000;
 
 /** First wait after the first round comes back short. */
 export const FIRST_DELAY_MS = 5 * 1000;
@@ -697,10 +730,21 @@ export function formatSuccess(result) {
 // ---------------------------------------------------------------------------
 
 /**
- * @param {{ argv?: string[], env?: NodeJS.ProcessEnv }} [options]
+ * `probe` and `sleep` are the verifier's own seams, threaded through so the
+ * self-test pins THIS function's exit code and its `::error::` naming on a
+ * replayed clock — no network, no real wait — under the production budget.
+ *
+ * @param {{ argv?: string[], env?: NodeJS.ProcessEnv,
+ *           probe?: (name: string, version: string) => Promise<boolean>,
+ *           sleep?: (ms: number) => Promise<void> }} [options]
  * @returns {Promise<number>} process exit code
  */
-export async function main({ argv = process.argv.slice(2), env = process.env } = {}) {
+export async function main({
+  argv = process.argv.slice(2),
+  env = process.env,
+  probe = (name, version) => probeVersion(name, version),
+  sleep = realSleep,
+} = {}) {
   const probeMode = argv.includes('--probe');
   const what = probeMode ? 'probe the fixed group' : 'verify the publish';
   if (probeMode && argv.includes('--dry-run')) {
@@ -733,7 +777,7 @@ export async function main({ argv = process.argv.slice(2), env = process.env } =
   }
 
   if (probeMode) {
-    const answer = await probeGroup({ targets, probe: (name, version) => probeVersion(name, version) });
+    const answer = await probeGroup({ targets, probe });
     // stdout is the answer and nothing else; the log line goes to stderr.
     process.stdout.write(`${JSON.stringify({ version: env.RELEASE_VERSION, ...answer })}\n`);
     console.error(formatProbe(env.RELEASE_VERSION, answer));
@@ -753,7 +797,8 @@ export async function main({ argv = process.argv.slice(2), env = process.env } =
 
   const result = await verifyAllPublished({
     targets,
-    probe: (name, version) => probeVersion(name, version),
+    probe,
+    sleep,
     log: (line) => console.log(line),
   });
 
@@ -1380,6 +1425,18 @@ export async function selfTest() {
     // last commit. The budget has to be able to sit through it.
     const OBSERVED_SPREAD_MS = (7 * 60 + 7) * 1000;
     t('the budget outlasts the 7m07s spread measured on the 17.3.0 burst', RETRY_BUDGET_MS > OBSERVED_SPREAD_MS, `${RETRY_BUDGET_MS} > ${OBSERVED_SPREAD_MS}`);
+
+    // The 18.0.0 reading: the first read at 12:41:37Z, `console` committed at
+    // 12:57:59.327Z. The budget has to sit through it with the margin 17.3.0
+    // was given (900 s over 427 s), not merely outlast it.
+    const SPREAD_18_0_0_MS = Date.parse('2026-10-20T12:57:59.327Z') - Date.parse('2026-10-20T12:41:37Z');
+    const MARGIN_17_3_0 = (15 * 60 * 1000) / OBSERVED_SPREAD_MS;
+    t('the budget outlasts the 16m22s spread measured on the 18.0.0 burst', RETRY_BUDGET_MS > SPREAD_18_0_0_MS, `${RETRY_BUDGET_MS} > ${SPREAD_18_0_0_MS}`);
+    t(
+      'and keeps the 17.3.0 margin (2.11x) over it',
+      RETRY_BUDGET_MS >= SPREAD_18_0_0_MS * MARGIN_17_3_0,
+      `${RETRY_BUDGET_MS} >= ${Math.round(SPREAD_18_0_0_MS * MARGIN_17_3_0)} (${(RETRY_BUDGET_MS / SPREAD_18_0_0_MS).toFixed(2)}x)`,
+    );
 
     const tiny = backoffDelays(7000, { firstMs: 5000, capMs: 60000 });
     t('a budget smaller than two waits is truncated, not overspent', tiny.reduce((a, b) => a + b, 0) === 7000, JSON.stringify(tiny));
@@ -2214,6 +2271,127 @@ export async function selfTest() {
     }
   }
 
+  // ── 14. The 18.0.0 window ─────────────────────────────────────────────────
+  battery('14. The 18.0.0 publish window: console readable at +16m22s, past the old 900 s');
+  {
+    // npm's own `time` field for 18.0.0 (run 39421537775, job 118624531794):
+    // the first package of the group, the anchor, the largest tarball, and the
+    // package the 900 s budget ran out on, readable 16m22s after the first read.
+    const STARTED = Date.parse('2026-10-20T12:41:37Z');
+    const LANDED = {
+      '@objectstack/sdui-parser': '2026-10-20T12:40:32.440Z',
+      '@objectstack/cli': '2026-10-20T12:44:06.409Z',
+      '@objectstack/spec': '2026-10-20T12:51:40.837Z',
+      '@objectstack/console': '2026-10-20T12:57:59.327Z',
+    };
+    const CONSOLE = '@objectstack/console';
+    const GROUP = Object.keys(LANDED).sort().map((name) => ({ name, version: '18.0.0' }));
+    // npm's clock, driven by the stub sleep: a round reads the registry at
+    // STARTED plus every wait taken so far. Probing is taken as instant, so
+    // each round reads no later than the real step's did — a green here is
+    // one the real step would also have seen.
+    const replay = (landed) => {
+      const waits = [];
+      const reads = [];
+      let waited = 0;
+      return {
+        waits,
+        reads,
+        sleep: async (ms) => { waits.push(ms); waited += ms; },
+        probe: async (name) => {
+          const now = STARTED + waited;
+          reads.push({ name, now });
+          return landed[name] !== undefined && now >= Date.parse(landed[name]);
+        },
+      };
+    };
+    const consoleReads = (r) => r.reads.filter((x) => x.name === CONSOLE).map((x) => x.now);
+    const at = (ms) => new Date(ms).toISOString();
+
+    // OLD BUDGET — 900 s, as a parameter: the run's own red, reproduced.
+    const old = replay(LANDED);
+    const oldResult = await verifyAllPublished({ targets: GROUP, probe: old.probe, sleep: old.sleep, budgetMs: 15 * 60 * 1000 });
+    t('OLD BUDGET (900 s) reds on 18.0.0, a release that WAS complete', oldResult.ok === false, JSON.stringify(oldResult.missing));
+    t('...naming @objectstack/console@18.0.0 and nothing else', oldResult.missing.length === 1 && oldResult.missing[0].name === CONSOLE, JSON.stringify(oldResult.missing));
+    t('...after 19 rounds over 900 s, as the run\'s annotation reads', oldResult.rounds === 19 && oldResult.waitedMs === 900_000, `rounds=${oldResult.rounds} waited=${oldResult.waitedMs}`);
+    t(
+      '...its last read of console came BEFORE console landed',
+      Math.max(...consoleReads(old)) < Date.parse(LANDED[CONSOLE]),
+      `${at(Math.max(...consoleReads(old)))} < ${LANDED[CONSOLE]}`,
+    );
+
+    // THIS BUDGET — the production default, never passed in, so restoring the
+    // old constant reds the cases below.
+    const now = replay(LANDED);
+    const result = await verifyAllPublished({ targets: GROUP, probe: now.probe, sleep: now.sleep });
+    t('THIS BUDGET sits through the 16m22s spread and goes GREEN', result.ok === true, JSON.stringify(result));
+    t('...on a round the old budget never reached', result.waitedMs > 900_000, `waited=${result.waitedMs}`);
+    const reads = consoleReads(now);
+    t(
+      '...the FIRST round after console landed, not by spending the budget',
+      reads.length >= 2 && reads[reads.length - 2] < Date.parse(LANDED[CONSOLE]) && reads[reads.length - 1] >= Date.parse(LANDED[CONSOLE])
+        && result.waitedMs < RETRY_BUDGET_MS,
+      reads.slice(-2).map(at).join(' .. '),
+    );
+    t('...at +17m15s, the figure the header quotes', result.waitedMs === (17 * 60 + 15) * 1000, `waited=${result.waitedMs}`);
+
+    // main() itself, over a fixture workspace of the same four packages: its
+    // exit code and its `::error::` line are what the publish step reads.
+    const ws = mkdtempSync(join(tmpdir(), 'release-verify-npm-18-'));
+    try {
+      writeFileSync(join(ws, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+      for (const { name, version } of GROUP) {
+        const dir = join(ws, 'packages', name.split('/')[1]);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ name, version }, null, 2)}\n`);
+      }
+      const runMain = async (landed) => {
+        const r = replay(landed);
+        const out = [];
+        const err = [];
+        const { log, error } = console;
+        console.log = (...a) => { out.push(a.join(' ')); };
+        console.error = (...a) => { err.push(a.join(' ')); };
+        let code;
+        try {
+          code = await main({ argv: ['--root', ws], env: { RELEASE_VERSION: '18.0.0' }, probe: r.probe, sleep: r.sleep });
+        } catch (e) {
+          code = `threw: ${e instanceof Error ? e.message : String(e)}`;
+        } finally {
+          console.log = log;
+          console.error = error;
+        }
+        return { code, out: out.join('\n'), err: err.join('\n'), waits: r.waits };
+      };
+
+      const pass = await runMain(LANDED);
+      t('main() exits 0 on the 18.0.0 replay, under the production budget', pass.code === 0, `code=${pass.code} ${pass.err.split('\n')[0]}`);
+      t('...and its notice says the whole group settled', /::notice::all 4 published package\(s\) are readable on npm/.test(pass.out), pass.out.split('\n').slice(-1)[0]);
+
+      const withoutConsole = Object.fromEntries(Object.entries(LANDED).filter(([name]) => name !== CONSOLE));
+      const absent = await runMain(withoutConsole);
+      const annotation = absent.err.split('\n')[0];
+      t('ABSENT: main() exits NON-ZERO when console never lands', absent.code === 1, `code=${absent.code}`);
+      t(
+        '...its ::error:: line names @objectstack/console@18.0.0, 1 of 4',
+        annotation.startsWith('::error::') && annotation.includes(`${CONSOLE}@18.0.0`) && annotation.includes('1 of 4'),
+        annotation.slice(0, 160),
+      );
+      t(
+        '...and names none of the three that landed',
+        !['@objectstack/cli@', '@objectstack/spec@', '@objectstack/sdui-parser@'].some((n) => absent.err.includes(n)),
+        absent.err.split('\n').filter((l) => l.includes('@objectstack/')).join(' | '),
+      );
+      t(
+        '...concluded only after the WHOLE budget was spent',
+        absent.waits.reduce((a, b) => a + b, 0) === RETRY_BUDGET_MS,
+        `${absent.waits.reduce((a, b) => a + b, 0)} of ${RETRY_BUDGET_MS}`,
+      );
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  }
+
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.
   for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false });
@@ -2226,7 +2404,8 @@ export async function selfTest() {
   }
   console.log(
     `OK release-verify-npm self-test: ${cases.length} cases pass across `
-      + `${Object.keys(SELF_TEST_BATTERIES).length} batteries (the #15321 false red reproduced and absorbed, `
+      + `${Object.keys(SELF_TEST_BATTERIES).length} batteries (the #15321 false red reproduced and absorbed, the 18.0.0 `
+      + '16m22s spread red under the old 900 s and green under the production budget, '
       + 'the masked partial publish caught, absence still fatal, the release audit backfilling '
       + 'only a version whose whole group is on npm and whose publish and image build are not in flight, and that backfill built '
       + 'from the version commit\'s tree).',

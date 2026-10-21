@@ -601,6 +601,15 @@ export {
 } from './validate-print-page-blocks.js';
 export type { PrintPageBlockFinding } from './validate-print-page-blocks.js';
 
+// #24953 — a CEL slot inside a page component's `properties` (a `page:tabs`
+// item `visibleWhen`, an `object-form` section predicate, an `action:*`
+// `visible`, …) over the platform's parse bounds. A warning in 18.x.
+export {
+  validatePagePredicateBounds,
+  PAGE_PREDICATE_OVER_BUDGET,
+} from './validate-page-predicate-bounds.js';
+export type { PagePredicateBoundsFinding } from './validate-page-predicate-bounds.js';
+
 export {
   validateChartBindings,
   CHART_DIMENSION_UNKNOWN,

@@ -106,8 +106,8 @@ export interface WriteObservabilityOptions {
    * learns WHICH fields would go — but their result is discarded.
    *
    * It covers every drop `onFieldsDropped` reports — coverage DERIVED from the
-   * reported set, never an enumeration frozen at #5126. Today that is all four
-   * `DroppedFieldsEvent['reason']` arms: static `readonly: true` (#2948, which
+   * reported set, never an enumeration frozen at #5126. Today that is four of
+   * the five `DroppedFieldsEvent['reason']` arms: static `readonly: true` (#2948, which
    * only runs for non-system callers), a TRUE `readonlyWhen` predicate (#3042,
    * which runs for every API-BOUNDARY caller, `isSystem` included — but judges
    * only the keys the caller supplied at engine entry, so a value a
@@ -121,6 +121,15 @@ export interface WriteObservabilityOptions {
    * passes `{ context: { isSystem: true } }` and is therefore exempt from the
    * static strip — still losing `readonlyWhen` fields in silence, which is the
    * bug this option exists to abolish.
+   *
+   * ⛔ **The one arm outside that coverage, for the 18.x line: `stored_expression`**
+   * (#24690) — a caller's value for a stored field the engine computes from
+   * its `expression`, replaced by the computed one. By the maintainer's ruling
+   * 「甲」 only its loud half ships in 18.x: it is REPORTED through
+   * `onFieldsDropped` / `droppedFields`, under `strictReadonlyWrites` as well,
+   * and the write completes with the computed value. Its refusal is runtime
+   * behaviour no conversion can carry, so it waits for 19.0, where the derived
+   * coverage below reaches it like any other arm.
    *
    * ⚠️ **A new `reason` therefore adds a new REFUSAL, by construction** — the
    * price of the derived coverage above, paid deliberately when `primary_key`

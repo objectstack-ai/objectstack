@@ -93,6 +93,14 @@ const TASK = {
   },
 };
 
+/**
+ * [#24945] The caller these Chinese fixtures are read by. A boolean cell is
+ * written in the caller's language (`templateText(locale).booleanWords`), so a
+ * pin on `是` / `否` names a Chinese caller; a caller naming no locale gets the
+ * words `templateText(undefined)` answers (`export-boolean-locale.test.ts`).
+ */
+const ZH_CALLER = { 'accept-language': 'zh-CN' };
+
 function createMockServer() {
   const noop = () => {};
   return { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
@@ -191,7 +199,7 @@ describe('export route — real engine + protocol integration', () => {
 
   it('CSV: formats every value type readably; owner name comes from a REAL $expand', async () => {
     const { res, chunks, headers } = makeRes();
-    await route.handler({ params: { object: 'task' }, query: { format: 'csv' } } as any, res);
+    await route.handler({ params: { object: 'task' }, query: { format: 'csv' }, headers: ZH_CALLER } as any, res);
 
     expect(headers['Content-Type']).toBe('text/csv; charset=utf-8');
     const rows = parseCsv(chunks.join(''));
@@ -213,7 +221,7 @@ describe('export route — real engine + protocol integration', () => {
 
   it('XLSX: opens as a real workbook with formatted cells', async () => {
     const { res, getBuffer, headers } = makeBinRes();
-    await route.handler({ params: { object: 'task' }, query: { format: 'xlsx' } } as any, res);
+    await route.handler({ params: { object: 'task' }, query: { format: 'xlsx' }, headers: ZH_CALLER } as any, res);
 
     expect(headers['Content-Type']).toBe(
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -247,7 +255,7 @@ describe('export route — real engine + protocol integration', () => {
   it('XLSX: exceeding the style cap drops styling but keeps all rows', async () => {
     const { res, getBuffer, headers } = makeBinRes();
     await route.handler(
-      { params: { object: 'task' }, query: { format: 'xlsx', limit: '20000' } } as any,
+      { params: { object: 'task' }, query: { format: 'xlsx', limit: '20000' }, headers: ZH_CALLER } as any,
       res,
     );
 
@@ -263,7 +271,7 @@ describe('export route — real engine + protocol integration', () => {
 
   it('JSON: readable values, all rows present', async () => {
     const { res, chunks, headers } = makeRes();
-    await route.handler({ params: { object: 'task' }, query: { format: 'json' } } as any, res);
+    await route.handler({ params: { object: 'task' }, query: { format: 'json' }, headers: ZH_CALLER } as any, res);
 
     expect(headers['Content-Type']).toBe('application/json; charset=utf-8');
     const arr = JSON.parse(chunks.join(''));
@@ -276,6 +284,7 @@ describe('export route — real engine + protocol integration', () => {
     await route.handler({
       params: { object: 'task' },
       query: { format: 'csv', filter: JSON.stringify({ done: true }), orderby: 'id:desc' },
+      headers: ZH_CALLER,
     } as any, res);
 
     const dataRows = parseCsv(chunks.join('')).slice(1);

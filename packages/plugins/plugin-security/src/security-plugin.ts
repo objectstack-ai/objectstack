@@ -902,9 +902,25 @@ interface SecurityReportSink {
  * (#10706), so a degraded boot reports through the host too.
  */
 /**
- * [#13419 执行要点 3] The stable event name stamped on every position-name-fold
- * report — the structured half of {@link SecurityPlugin.reportNameFoldCollisions},
- * so an operator can grep one token for every ungoverned same-name grant.
+ * [#13419 执行要点 3; #24757 under 「甲」] The stable event name stamped on every
+ * position-name-fold report — the structured half of
+ * {@link SecurityPlugin.reportNameFoldCollisions}, so an operator can grep one
+ * token for every grant that exists only because a position and a permission
+ * set share a name.
+ *
+ * ## The 18.x loud half of the fold's retirement
+ *
+ * The standing ruling 「甲」 (ruling record 6292005854 on #6015) splits a
+ * narrowing that no ADR-0087 conversion can carry: 18.x ships only its loud
+ * half, and the refusal waits for 19.0. Retiring the position-name fold is
+ * such a narrowing: the platform cannot write `permissionSets` into a sealed
+ * managed position definition (ADR-0131 D6), so nothing rewrites an author's
+ * reliance on it (triage's derivation for #24757, record 6292072572). This
+ * event is that loud half's REPORTED EVENT. Every report carries the retirement
+ * as data, `removedIn: 'next_major'`, beside the fields it has always carried
+ * (`event`, `position`, `permissionSet`), which stay unchanged because a log
+ * consumer may already key on them. 19.0 removes the fold, and with it this
+ * event and its reporter (the card's 19.0 half).
  *
  * Deliberately NOT exported from this package. The maintainer ruling this
  * serves permits a warning and nothing more; adding a published symbol would
@@ -6330,11 +6346,6 @@ export class SecurityPlugin implements Plugin {
       //    empty list grants nothing, which is the middleware's step 2 answer.
       if (permissionSets.length === 0) return false;
 
-      const { isPrivate, unresolved, requiredPermissions } =
-        await this.getObjectSecurityMeta(objectName);
-      // 3. [#3545] Posture unresolvable → deny.
-      if (unresolved) return false;
-
       // [ADR-0090 D10] Resolve the delegator ONCE — arms 4 and 6 both need it,
       // and a dangling link denies before either runs.
       let delegatorSets: PermissionSet[] | null = null;
@@ -6346,36 +6357,9 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
-      // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
-      //    principals — a caller missing any required capability is denied
-      //    however permissive their grants are.
-      const required = requiredCapsForOperation(requiredPermissions, 'find');
-      if (required.length > 0) {
-        const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
-        if (required.some((cap) => !held.has(cap))) return false;
-        if (delegatorSets && delegatorSets.length > 0) {
-          const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
-          if (required.some((cap) => !delHeld.has(cap))) return false;
-        }
-      }
-
-      // 5. The object-level CRUD grant.
-      if (!this.permissionEvaluator.checkObjectPermission('find', objectName, permissionSets, { isPrivate })) {
-        return false;
-      }
-
-      // 6. [ADR-0090 D10] The delegator must independently grant the same read.
-      //    [#21079] Asked over the delegator's list whatever its length, as the
-      //    middleware asks it: a delegator who resolves NO set grants nothing,
-      //    the deny baseline for the second principal too.
-      if (
-        delegatorSets &&
-        !this.permissionEvaluator.checkObjectPermission('find', objectName, delegatorSets, { isPrivate })
-      ) {
-        return false;
-      }
-
-      return true;
+      // 3–6. The posture and grant arms, over the resolved sets — the one
+      // predicate the ADR-0055 master-derived read scope asks as well.
+      return await this.objectReadAdmission(objectName, permissionSets, delegatorSets);
     } catch (e) {
       this.logger.error?.(
         `[security] canReadObject could not resolve the object-level read admission for ` +
@@ -6384,6 +6368,81 @@ export class SecurityPlugin implements Plugin {
       );
       return false;
     }
+  }
+
+  /**
+   * Arms 3–6 of {@link canReadObject} — the OBJECT-level read admission over
+   * permission sets the caller has ALREADY resolved: the posture arm, the
+   * ADR-0066 D3/⑤ capability AND-gate, the `allowRead` CRUD grant, and the
+   * ADR-0090 D10 delegator's same two questions when `delegatorSets` is given.
+   * Each is the primitive the middleware's own read gate calls (steps 1, 1.5
+   * and 2), in that order.
+   *
+   * Two askers, one rule:
+   *
+   *   - {@link canReadObject}, which resolves the context first (system bypass,
+   *     principal-less refusal, sets, delegator) and then asks this;
+   *   - [ADR-0055 §3] {@link computeControlledByParentFilter}, which asks it of
+   *     the MASTER for the principal whose sets it was handed — the caller's on
+   *     the caller half, the delegator's on the D10 half — before it scopes the
+   *     master's rows. "Reading a detail requires read access to its master",
+   *     and the object-level admission is the first half of that access.
+   *
+   * ⛔ There is no second copy of this rule: a reader that needs the object-level
+   * read answer for sets it already holds asks this, and one that holds only a
+   * context asks {@link canReadObject}.
+   *
+   *   - [#21079] An empty list grants nothing (ADR-0056 D2).
+   *   - 3. [#3545] An unresolvable posture denies.
+   *   - 4. The capabilities the object requires for a read, held by the caller
+   *     and (D10) by a delegator who resolved any set.
+   *   - 5. The caller's `find` grant, with the posture's `isPrivate` (ADR-0066 D2).
+   *   - 6. [ADR-0090 D10] The delegator's `find` grant, asked over its list
+   *     whatever its length, as the middleware asks it: a delegator who resolves
+   *     NO set grants nothing, the deny baseline for the second principal too.
+   *
+   * ⛔ Object-level ONLY, like {@link canReadObject}: `true` never means
+   * "unrestricted". A throw propagates; each asker fails closed on it.
+   */
+  private async objectReadAdmission(
+    objectName: string,
+    permissionSets: PermissionSet[],
+    delegatorSets: PermissionSet[] | null,
+  ): Promise<boolean> {
+    if (permissionSets.length === 0) return false;
+
+    const { isPrivate, unresolved, requiredPermissions } =
+      await this.getObjectSecurityMeta(objectName);
+    // 3. [#3545] Posture unresolvable → deny.
+    if (unresolved) return false;
+
+    // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
+    //    principals — a caller missing any required capability is denied
+    //    however permissive their grants are.
+    const required = requiredCapsForOperation(requiredPermissions, 'find');
+    if (required.length > 0) {
+      const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+      if (required.some((cap) => !held.has(cap))) return false;
+      if (delegatorSets && delegatorSets.length > 0) {
+        const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
+        if (required.some((cap) => !delHeld.has(cap))) return false;
+      }
+    }
+
+    // 5. The object-level CRUD grant.
+    if (!this.permissionEvaluator.checkObjectPermission('find', objectName, permissionSets, { isPrivate })) {
+      return false;
+    }
+
+    // 6. [ADR-0090 D10] The delegator must independently grant the same read.
+    if (
+      delegatorSets &&
+      !this.permissionEvaluator.checkObjectPermission('find', objectName, delegatorSets, { isPrivate })
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -6989,20 +7048,48 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [#13419 执行要点 3, warning half] Report a permission-set name that collides
-   * with a POSITION name and has NO junction row — the ungoverned half of the
-   * position→set binding, said out loud.
+   * [#13419 执行要点 3; #24757 under 「甲」] Report a permission set granted to a
+   * position's holders only because the two share a NAME — a grant the
+   * position's definition does not declare — and say what happens to it when
+   * the fold is retired.
    *
    * ## What is being reported
    *
    * {@link resolvePermissionSetsForContextUnmemoized} builds its request as
    * `[...positions, ...explicitPermissionSets]`. That fold means a position
-   * called `sales_rep` resolves a permission set called `sales_rep` — with no
-   * `sys_position_permission_set` row, no audit line, and nothing declaring
-   * that it happens. The maintainer ruling (2026-08-31, 「同意」) makes the
-   * junction table the one governed channel and retires the fold; the fold's
-   * DELETION is not this method (see the boundary note below), so until it
-   * lands the grant is at least no longer silent.
+   * called `sales_rep` resolves a permission set called `sales_rep` although
+   * the definition of `sales_rep` names no such set in `permissionSets`, the
+   * one binding spec and docs declare (ADR-0131 D3/D4; `position.zod.ts`,
+   * `positions.mdx`). Nothing declares that it happens, and Setup cannot show
+   * it: both the position's Permission Sets field and the set's Assigned Users
+   * read the declared binding. The maintainer ruling on #13419 (2026-08-31,
+   * 「同意」 to B) retires the fold; ADR-0131 later made the definition's
+   * `permissionSets` the binding in place of the junction table that ruling
+   * named.
+   *
+   * ## The 18.x loud half (「甲」, #24757)
+   *
+   * The fold's retirement is a narrowing no ADR-0087 conversion can carry, so
+   * under 「甲」 (ruling record 6292005854 on #6015) 18.x ships its loud half
+   * and the removal waits for 19.0. This warning IS that loud half, and its
+   * text says three things the 17.x wording did not: the grant is in force
+   * today only because the names match; that name-based grant is deprecated
+   * and is removed in the next major version, after which holders of `P` do
+   * not receive set `P` unless `P`'s definition names it; and the fix,
+   * `permissionSets: ['P']` on position `P` (or renaming one of the two). The
+   * structured payload carries the same consequence as `removedIn:
+   * 'next_major'` beside its unchanged `event`, `position` and `permissionSet`
+   * ({@link POSITION_NAME_FOLD_EVENT}). The string says "the next major
+   * version" and not a number, and carries no tracker id: an operator reading
+   * the log can resolve neither a ruling record nor `#NNNN`.
+   *
+   * ## When it fires
+   *
+   * Lazily, on the first resolution that meets an undeclared pair — never at
+   * boot, so a deployment where no holder of `P` has made a request has not
+   * been told yet. Once per position NAME per plugin instance
+   * ({@link nameFoldWarned}): not per holder, and not per organization, since
+   * the key is the name alone. A restart reports again.
    *
    * ## The predicate, and why each clause is there
    *
@@ -7030,14 +7117,18 @@ export class SecurityPlugin implements Plugin {
    * anything?" would report neither of the two real name-folds in the repo
    * while looking complete.
    *
-   * ## Boundary (#13419 slice 2)
+   * ## Boundary (#13419 slice 2, kept by #24757)
    *
    * ⛔ Purely additive. The resolution result is READ, never rewritten — 要点 5
    * of the ruling: 「任何行为差异只能表现为拒绝/告警,永不静默改变解析结果」, and a
-   * warning is the permitted half. ⛔ Deleting the fold is NOT this change: the
-   * vendored HotCRM artifact carries that app's permission sets but not its
-   * position roster, so HotCRM's own same-name folds are NOT MEASURED rather
-   * than zero, and deleting the fold would silently revoke them.
+   * warning is the permitted half. Under 「甲」 the grant does not change in 18.x
+   * either: a holder of `P` still resolves set `P`, and
+   * `position-name-fold-warning.test.ts` pins that beside the text. ⛔ Deleting
+   * the fold is NOT this change. It is #24757's 19.0 half, with
+   * {@link dropDeactivatedFoldedSets} and the delegated walk, explain and
+   * collision-gate follow-ups. The reliance it would revoke, as measured on the
+   * card, is HotCRM's: 5 of its 12 positions at `f22dfa52`, which
+   * objectstack-ai/hotcrm#2200 declares in `permissionSets`.
    */
   private reportNameFoldCollisions(
     positions: unknown,
@@ -7066,15 +7157,21 @@ export class SecurityPlugin implements Plugin {
       // ruling 2026-08-12). The card anchor lives in the docblock above, where the reader
       // who can resolve it is already looking.
       this.logger.warn?.(
-        `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' was granted ` +
-          `because a POSITION of the same name resolved by name — the position's definition ` +
-          `does not name it in its permissionSets. This grant is in force and ungoverned: ` +
-          `no position declares it. Declare it explicitly (position '${position}': ` +
-          `permissionSets: ['${position}']) or rename one of the two.`,
+        `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' is in force for ` +
+          `holders of position '${position}' only because the two share a name — the definition ` +
+          `of position '${position}' does not name it in its permissionSets. This name-based ` +
+          `grant is deprecated and is removed in the next major version: from then on, holders ` +
+          `of position '${position}' do not receive permission set '${position}' unless the ` +
+          `position's definition names it. To keep the grant, declare it (position ` +
+          `'${position}': permissionSets: ['${position}']); if the shared name is a ` +
+          `coincidence, rename one of the two.`,
         {
           event: POSITION_NAME_FOLD_EVENT,
           position,
           permissionSet: position,
+          // The consequence as data, for a consumer that keys on fields rather
+          // than prose. The three fields above are unchanged on purpose.
+          removedIn: 'next_major',
         },
       );
     }
@@ -8493,6 +8590,14 @@ export class SecurityPlugin implements Plugin {
    * `buildReadFilter` returns null for a non-`private` master — so the derived
    * set stays point-for-point equal to what a direct find of the master returns.
    *
+   * [ADR-0055 §3] Both halves scope ROWS. Ahead of them the master's OBJECT-level
+   * read admission is asked ({@link objectReadAdmission}, the predicate
+   * `canReadObject` asks), for the principal whose sets this call was handed: a
+   * principal the master's own read door refuses at the object gate gets the
+   * empty master set, so the equality with a direct find of the master holds for
+   * that principal too, and with the engine's ReadableIds leaf, which asks
+   * `canReadObject` before it scopes a parent's rows.
+   *
    * An empty set yields `{ masterFK: { $in: [] } }`, which matches no rows (fail
    * closed), as does a failure to resolve the sharing half. A misconfigured
    * object (not exactly one required master_detail to derive from, ADR-0055 §1)
@@ -8574,6 +8679,32 @@ export class SecurityPlugin implements Plugin {
       );
       return { [rel.fk]: { $in: [] } };
     }
+
+    // [ADR-0055 §3] "Reading a detail requires READ access to its master", and
+    // the OBJECT-level read admission is the first half of that access — the
+    // half the master's own read door asks before any row filter, and the half
+    // the engine's ADR-0139 ReadableIds leaf asks (`canReadObject`). Asked here
+    // through the one predicate both read ({@link objectReadAdmission}), for
+    // the principal whose sets this call was handed, before the master's rows
+    // are scoped below under a system context. A principal the master's own
+    // door does not admit reads no master, so the master set is empty and no
+    // detail is read; at every hop of a chain alike, since the recursion below
+    // asks the same question of the next master. A throw denies too
+    // (fail-closed), as the sharing half's resolution failure does.
+    let masterObjectReadable: boolean;
+    try {
+      masterObjectReadable = await this.objectReadAdmission(rel.master, permissionSets, null);
+    } catch (e) {
+      this.logger.error?.(
+        `[security] controlled_by_parent derivation could not resolve the object-level read admission ` +
+          `of master '${rel.master}' for '${object}' (user ${context?.userId ?? 'unknown'}) ` +
+          `— denying (fail-closed: a child is readable only where its master is, so a master whose ` +
+          `admission cannot be resolved admits no child)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return { [rel.fk]: { $in: [] } };
+    }
+    if (!masterObjectReadable) return { [rel.fk]: { $in: [] } };
 
     const masterRlsFilter = await this.computeRlsFilter(permissionSets, rel.master, 'find', context);
     // [#5386] The OWD / record-share half, resolved through the SAME helper

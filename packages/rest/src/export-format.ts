@@ -32,6 +32,7 @@
 
 import { temporalStorageForm, type ExportFieldMeta } from '@objectstack/core';
 import { resolveDisplayField } from '@objectstack/spec/data';
+import { templateText, type TemplateText } from './import-template.js';
 
 // `ExportFieldMeta` and `buildFieldMetaMap` live in `@objectstack/core`
 // (`utils/import-field-meta.ts`), beside the import runner that reads them.
@@ -434,23 +435,42 @@ function formatReference(value: unknown, displayField?: string, titleField?: str
 }
 
 /**
+ * The words a boolean / toggle cell is written as, `[true, false]`.
+ *
+ * [#24945] The export route resolves them once per export, as
+ * `templateText(locale).booleanWords` (`./import-template.ts`) for the locale
+ * its header row is translated to, so the header and the cells of one file read
+ * one language. That is the table the import template already offers the same
+ * words from, and the importer reads both of its languages back
+ * (`IMPORT_BOOLEAN_TRUE_TOKENS` / `IMPORT_BOOLEAN_FALSE_TOKENS`), so a file
+ * exported in either language re-imports. ⛔ No second table here.
+ */
+export type ExportBooleanWords = TemplateText['booleanWords'];
+
+/**
  * Format one storage value into a display value using its field metadata.
  *
  * `timezone` is the request's business timezone (`ExecutionContext.timezone`).
  * It reaches only the `datetime` branch; absent, the cell renders in UTC —
  * see {@link formatDate} for why `date` never reads it at all.
+ *
+ * `booleanWords` ({@link ExportBooleanWords}) reaches only the boolean /
+ * toggle branch; absent, the cell is written in the words the table answers
+ * for no locale at all.
  */
 export function formatCellValue(
   value: unknown,
   meta?: ExportCellMeta,
   timezone?: string,
+  booleanWords: ExportBooleanWords = templateText(undefined).booleanWords,
 ): unknown {
   if (value === null || value === undefined) return value;
   if (!meta || !meta.type) return value;
   const t = meta.type;
   if (t === 'boolean' || t === 'toggle') {
-    if (value === true || value === 'true' || value === 1) return '是';
-    if (value === false || value === 'false' || value === 0) return '否';
+    const [yes, no] = booleanWords;
+    if (value === true || value === 'true' || value === 1) return yes;
+    if (value === false || value === 'false' || value === 0) return no;
     return value;
   }
   if (OPTION_TYPES.has(t)) return optionLabel(value, meta.options);
@@ -467,16 +487,18 @@ export function formatCellValue(
 /**
  * Ordered display cells for one row — the CSV / XLSX column path.
  *
- * `timezone` is threaded straight through to {@link formatCellValue}; the
- * export route reads it off the `ExecutionContext` it already resolved.
+ * `timezone` and `booleanWords` are threaded straight through to
+ * {@link formatCellValue}; the export route reads the timezone off the
+ * `ExecutionContext` it already resolved, and the words off the request locale.
  */
 export function formatRowCells(
   row: Record<string, unknown>,
   fields: string[],
   metaMap: Map<string, ExportCellMeta>,
   timezone?: string,
+  booleanWords?: ExportBooleanWords,
 ): unknown[] {
-  return fields.map((f) => formatCellValue(row?.[f], metaMap.get(f), timezone));
+  return fields.map((f) => formatCellValue(row?.[f], metaMap.get(f), timezone, booleanWords));
 }
 
 /**
@@ -488,13 +510,14 @@ export function formatRowForJson(
   row: Record<string, unknown>,
   metaMap: Map<string, ExportCellMeta>,
   timezone?: string,
+  booleanWords?: ExportBooleanWords,
 ): Record<string, unknown> {
   if (metaMap.size === 0 || !row || typeof row !== 'object') return row;
   let copy: Record<string, unknown> | null = null;
   for (const key of Object.keys(row)) {
     const meta = metaMap.get(key);
     if (!meta) continue;
-    const formatted = formatCellValue(row[key], meta, timezone);
+    const formatted = formatCellValue(row[key], meta, timezone, booleanWords);
     if (formatted !== row[key]) {
       if (!copy) copy = { ...row };
       copy[key] = formatted;

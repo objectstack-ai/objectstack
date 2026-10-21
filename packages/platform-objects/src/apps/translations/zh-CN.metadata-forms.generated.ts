@@ -1157,6 +1157,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       addRecord: {
         label: "添加记录"
       },
+      "addRecord.enabled": {
+        label: "已启用"
+      },
+      "addRecord.position": {
+        label: "位置"
+      },
       showRecordCount: {
         label: "显示记录数"
       },
@@ -1303,6 +1309,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "interfaceConfig.addRecord": {
         label: "添加记录",
         helpText: "添加记录的入口"
+      },
+      "interfaceConfig.addRecord.enabled": {
+        label: "已启用"
+      },
+      "interfaceConfig.addRecord.position": {
+        label: "位置"
       },
       "interfaceConfig.emptyState": {
         label: "空状态",
