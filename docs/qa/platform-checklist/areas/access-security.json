@@ -3434,10 +3434,10 @@
     },
     {
       "id": "access-security.anonymous-floor-v18-doors",
-      "title": "The anonymous floor answers 401 FIRST on the doors v18 added to it — /notifications (was 501), non-POST /keys (was 405), share-link management (was 501), /openapi.json and /docs, every /i18n face and the settings family — while the token faces and the public-form submit stay anonymous and the submit echoes only {id}",
+      "title": "The anonymous floor answers 401 FIRST on the doors v18 added to it — /notifications (was 501), non-POST /keys (was 405), share-link management (was 501), /openapi.json, every /i18n face and the settings family — while the token faces and the public-form submit stay anonymous and the submit echoes only {id}",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3456,7 +3456,8 @@
         ]
       },
       "steps": [
-        "with NO credentials call: GET /api/v1/notifications, GET /api/v1/keys, GET /api/v1/share-links, GET /api/v1/openapi.json, GET /api/v1/docs, GET /api/v1/i18n/locales, GET /api/settings/branding",
+        "with NO credentials call: GET /api/v1/notifications, GET /api/v1/keys, GET /api/v1/share-links, GET /api/v1/openapi.json, GET /api/v1/i18n/locales, GET /api/settings/branding",
+        "with NO credentials, then as admin, call the retired viewer path GET /api/v1/docs, and a path nothing serves (GET /api/v1/this-route-does-not-exist) as the control",
         "with no credentials call a token face: GET /api/v1/share-links/BOGUS/resolve",
         "with no credentials POST /api/v1/forms/contact-us/submit with the four whitelisted fields plus a forged owner_id and a non-whitelisted status",
         "repeat two of the 401 calls as admin to prove the door itself serves"
@@ -3473,6 +3474,12 @@
           "oracle": "api",
           "verify": "status + error.code per door, anonymous",
           "evidence": "one status+code line per door"
+        },
+        {
+          "clause": "the retired viewer path GET /api/v1/docs is routed nowhere: to the anonymous caller and to the admin it answers 404 with the same body the never-served control path answers on that boot — never 401 (a door is back) and never 200 or text/html (the page is back)",
+          "oracle": "api",
+          "verify": "status + content-type + body of GET /api/v1/docs, anonymous and as admin, compared with the control path's",
+          "evidence": "one status+code line per call, the control included"
         },
         {
           "clause": "the share-link token face is NOT behind the floor (it answers its own invalid-token refusal, not 401)",
@@ -3496,7 +3503,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/anonymous-door-sweep.dogfood.test.ts + packages/rest/src/rest-api-description-anonymous-deny.test.ts + packages/runtime/src/domains/i18n-anonymous-deny.test.ts + packages/services/service-settings/src/settings-routes.anonymous-floor.pin.test.ts + packages/rest/src/public-form-submit-answer.test.ts"
+        "ref": "packages/qa/dogfood/test/anonymous-door-sweep.dogfood.test.ts + packages/rest/src/rest-api-description-anonymous-deny.test.ts + packages/rest/src/rest-docs-viewer-retired.pin.test.ts + packages/runtime/src/domains/i18n-anonymous-deny.test.ts + packages/services/service-settings/src/settings-routes.anonymous-floor.pin.test.ts + packages/rest/src/public-form-submit-answer.test.ts"
       },
       "source": [
         "packages/core/src/security/anonymous-deny.ts#shouldDenyAnonymous",
@@ -3516,6 +3523,12 @@
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[1] marked CLOSED — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.anonymous-floor-v18-doors; wave anchor #24579 §3): the gap said a non-POST /keys never reaches the floor on a stock boot and answers 405; since #23909 the dispatcher registers /keys for every verb (packages/runtime/src/dispatcher-plugin.ts) and the run measured anonymous GET /api/v1/keys → 401. No clause changed: acceptance[1] already demanded 401",
           "ref": "#24632"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-21",
+          "change": "re-pointed for the retirement of GET /api/v1/docs, the OpenAPI document's HTML viewer page (no consumer; the API origin serves no HTML viewer). /docs left the title and the floored-door step, so acceptance[1] no longer demands 401 of it; a new step and acceptance[2] drive the retired path anonymously and as admin and demand the host's ordinary 404, the never-served control path's body, on that boot. automated.ref gains packages/rest/src/rest-docs-viewer-retired.pin.test.ts, the registrar-level not-served pin on both route shapes. /openapi.json stays on the floor, unchanged",
+          "ref": "#25104"
         }
       ]
     },
