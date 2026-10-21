@@ -368,7 +368,10 @@ async function boot() {
 type Rig = Awaited<ReturnType<typeof boot>>;
 
 const member = (userId: string, set: string) => ({ userId, positions: [], permissions: [set], posture: 'MEMBER' });
-const touchesChain = (sql: string) => sql.includes(PARENT) || sql.includes(GRAND);
+/** The table a statement's FIRST `from` names — the table it reads, not one inside a subquery of it. */
+const fromTable = (sql: string): string | undefined => /^select .*? from `?([a-z0-9_]+)`?/i.exec(sql)?.[1];
+/** A statement that reads `table` — not one that reads another table with `table` inside a subquery. */
+const readsTable = (table: string) => (sql: string) => fromTable(sql) === table;
 
 describe('[ADR-0139 D6 as amended] a two-level controlled_by_parent chain composes and serves the rows the id-list path serves', () => {
   let rig: Rig;
@@ -417,26 +420,44 @@ describe('[ADR-0139 D6 as amended] a two-level controlled_by_parent chain compos
     expect(new Set(rig.replacedPerCall)).toEqual(new Set([1, 2]));
   });
 
-  it('one statement per find and per count on the leaf path: the child\'s select, the parent and the grandparent inside nested subqueries — against the pre-scans of today\'s path', async () => {
+  it('one statement per find and per count on the leaf path: the child\'s select with the parent and the grandparent inside nested subqueries, and no pre-scan of the parent — against the pre-scans of today\'s path', async () => {
     const context = member(HUMAN, SET.human);
     for (const [verb, run] of [
       ['find', () => rig.engine.find(CHILD_LEAF, { context: { ...context } } as never)],
       ['count', () => rig.engine.count(CHILD_LEAF, { context: { ...context } } as never)],
     ] as const) {
       const statements = await rig.statementsDuring(run);
-      const chain = statements.filter(touchesChain);
-      expect(chain, `${verb}: ${statements.join('\n')}`).toHaveLength(1);
-      expect(chain[0], verb).toMatch(new RegExp(`from .${CHILD_LEAF}.`, 'i'));
-      expect(chain[0].match(/in \(select/gi) ?? [], `${verb}: ${chain[0]}`).toHaveLength(2);
-      expect(chain[0], verb).toMatch(new RegExp(`from .${PARENT}.`, 'i'));
-      expect(chain[0], verb).toMatch(new RegExp(`from .${GRAND}.`, 'i'));
+      const all = `${verb}:\n${statements.join('\n')}`;
+      // The read is ONE statement: the child's, the parent inside its subquery
+      // and the grandparent inside that one.
+      const reads = statements.filter(readsTable(CHILD_LEAF));
+      expect(reads, all).toHaveLength(1);
+      expect(reads[0].match(/in \(select/gi) ?? [], all).toHaveLength(2);
+      expect(reads[0], all).toMatch(new RegExp(`in \\(select .id. from .${PARENT}. where .grand. in \\(select .id. from .${GRAND}.`, 'i'));
+      // No statement reads the parent on its own: the leaf stands where the
+      // pre-resolved id list stood, so the parent is never pre-scanned.
+      expect(statements.filter(readsTable(PARENT)), all).toHaveLength(0);
+      // What else the driver ran is the security service's own answering, not
+      // the read: the real `getReadFilter(PARENT)` still derives PARENT's
+      // scope through `computeControlledByParentFilter`, whose grandparent
+      // pre-scan this rig's wrapper then REPLACES with the leaf (it retires
+      // with the plugin-security switch, card (c)), and plugin-sharing reads
+      // the share rows to answer the grandparent's scope. Neither is a read
+      // of the child, the parent or — as a read of its own — the grandparent
+      // by the composed statement.
+      for (const sql of statements.filter(readsTable(GRAND))) expect(sql, all).toMatch(/^select .id. from/i);
     }
-    // Today's path pre-scans the grandparent and then the parent under a
-    // system context before the child's own statement: more than one statement
-    // touches the chain per find, and none is a subquery.
-    const today = (await rig.statementsDuring(() => rig.engine.find(CHILD_CBP, { context: { ...context } } as never))).filter(touchesChain);
-    expect(today.length).toBeGreaterThan(1);
-    expect(today.some((sql) => /in \(select/i.test(sql))).toBe(false);
+    // Today's path: the grandparent and then the parent are pre-scanned under
+    // a system context (`select id from …`), and the child's own statement
+    // binds the parent ids as a list — no subquery anywhere.
+    const today = await rig.statementsDuring(() => rig.engine.find(CHILD_CBP, { context: { ...context } } as never));
+    const todayAll = `today:\n${today.join('\n')}`;
+    expect(today.filter(readsTable(GRAND)), todayAll).toHaveLength(1);
+    expect(today.filter(readsTable(PARENT)), todayAll).toHaveLength(1);
+    const todayReads = today.filter(readsTable(CHILD_CBP));
+    expect(todayReads, todayAll).toHaveLength(1);
+    expect(todayReads[0], todayAll).not.toMatch(/in \(select/i);
+    expect(today.some((sql) => /in \(select/i.test(sql)), todayAll).toBe(false);
   });
 });
 

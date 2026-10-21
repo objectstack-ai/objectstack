@@ -209,7 +209,7 @@ describe('[ADR-0139 D6 as amended] a leaf inside a composed scope is composed to
   });
 
   it("the grandparent's scope undefined ⇒ the nested leaf composes with no row restriction; the outer leaf's scope is still the rewritten copy", async () => {
-    const { svc } = chainSecurity(undefined);
+    const { svc } = makeSecurity({ scope: (object) => (object === 'rid_parent' ? derivedFrom('rid_grand') : undefined) });
     wire(engine, () => svc);
     await engine.find('rid_child', { where: branch() });
     const outer = inComparandOf(calls[0].ast.where) as any;
