@@ -1498,14 +1498,17 @@ const LOCAL_MODE_WITH_SYNC_URL_REFUSAL =
  * copy; `spec/turso-config-constructor-parity.test.ts` holds the three equal.
  * Edit it in the spec first.
  */
+// Written with LEADING `+`, unlike this file's other messages: the house-sentence
+// pin (`retired-key-migrate-sentence.test.ts` in `@objectstack/spec`) scans this
+// package and joins string seams in that spelling.
 const ENCRYPTION_KEY_RETIRED_REFUSAL =
-  '`turso config.encryptionKey` was removed in @objectstack/spec 18 and @objectstack/driver-turso 18 ' +
-  '(ADR-0049) — it never encrypted anything, in any mode: a local or embedded-replica file is read and ' +
-  'written through a SQLite engine that has no encryption codec, and the driver never handed the key to ' +
-  'a remote database, whose storage encryption the server configures. Delete the key. A local file that ' +
-  'must be encrypted at rest belongs on an encrypted disk or volume. ' +
-  'Run `os migrate meta --from 17` to list the mechanical edits for the unset and remote-url cases; ' +
-  '`--write` applies the ones it can prove, and you delete the key from a local or replica datasource by hand.';
+  '`turso config.encryptionKey` was removed in @objectstack/spec 18 and @objectstack/driver-turso 18 '
+  + '(ADR-0049) — it never encrypted anything, in any mode: a local or embedded-replica file is read and '
+  + 'written through a SQLite engine that has no encryption codec, and the driver never handed the key to '
+  + 'a remote database, whose storage encryption the server configures. Delete the key. A local file that '
+  + 'must be encrypted at rest belongs on an encrypted disk or volume. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for the unset and remote-url cases; '
+  + '`--write` applies the ones it can prove, and you delete the key from a local or replica datasource by hand.';
 
 /**
  * Throw one of the four sync-key refusals above, or the retired

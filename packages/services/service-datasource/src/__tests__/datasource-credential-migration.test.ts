@@ -132,7 +132,7 @@ describe('planCredentialMigration — stated outcomes for what it will not touch
     expect(plan.reason).toContain('config.passwd');
   });
 
-  it('refuses turso\'s `encryptionKey` — credential-shaped, but not the binder\'s slot', () => {
+  it('refuses turso\'s RETIRED `encryptionKey` — credential-shaped, but not the binder\'s slot', () => {
     const plan = refusal(
       row({ driver: 'turso', config: { url: 'libsql://x.turso.io', encryptionKey: 'aes-key' } }),
     );
@@ -313,7 +313,7 @@ describe('planCredentialMigration reads the same list under every accepted spell
     variantsOf(spelling).flatMap((variant) => stillWritableOf(id).map((key) => ({ variant, id, key }))),
   );
 
-  it('a bindable row names the still-writable credential key as its residue, byte-equal to the canonical spelling', () => {
+  it('a bindable row names the retired credential key as its residue, byte-equal to the canonical spelling', () => {
     // Population floor: the class is not empty today.
     expect(CASES.length).toBeGreaterThan(0);
     for (const { variant, id, key } of CASES) {
@@ -326,7 +326,7 @@ describe('planCredentialMigration reads the same list under every accepted spell
     }
   });
 
-  it('a row holding only the still-writable credential key is refused with that key named, as under the canonical spelling', () => {
+  it('a row holding only the retired credential key is refused with that key named, as under the canonical spelling', () => {
     for (const { variant, id, key } of CASES) {
       const config = { url: 'file:./fixture.db', [key]: 'fixture-secret' };
       const canonical = planCredentialMigration(row({ driver: id, config }));

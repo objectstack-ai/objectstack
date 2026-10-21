@@ -41,7 +41,6 @@ describe('buildTursoDriverConfig (#7314)', () => {
       config: {
         url: 'libsql://my-db.turso.io',
         authToken: 'jwt-token',
-        encryptionKey: 'aes-256-key',
         concurrency: 7,
         syncUrl: 'libsql://replica.turso.io',
         sync: { intervalSeconds: 30, onConnect: false },
@@ -52,7 +51,6 @@ describe('buildTursoDriverConfig (#7314)', () => {
     expect(buildTursoDriverConfig(spec, resolveTursoUrl(spec))).toEqual({
       url: 'libsql://my-db.turso.io',
       authToken: 'jwt-token',
-      encryptionKey: 'aes-256-key',
       concurrency: 7,
       syncUrl: 'libsql://replica.turso.io',
       sync: { intervalSeconds: 30, onConnect: false },
@@ -72,6 +70,9 @@ describe('buildTursoDriverConfig (#7314)', () => {
       config: {
         url: 'libsql://x',
         authToken: 'a',
+        // Retired (#25050) and refused by the schema, but still READ: a legacy
+        // stored row that carries it must reach the driver constructor's
+        // refusal rather than be dropped in silence. See the pin below.
         encryptionKey: 'k',
         concurrency: 1,
         syncUrl: 'libsql://y',
@@ -98,10 +99,28 @@ describe('buildTursoDriverConfig (#7314)', () => {
   it('treats empty string credentials as unset and keeps zero-valued numbers', () => {
     const spec: DatasourceConnectionSpec = {
       driver: 'turso',
-      config: { url: 'libsql://x', authToken: '', encryptionKey: '', syncUrl: '', concurrency: 0, timeoutMs: 0 },
+      config: { url: 'libsql://x', authToken: '', syncUrl: '', concurrency: 0, timeoutMs: 0 },
     };
     expect(buildTursoDriverConfig(spec, resolveTursoUrl(spec)))
       .toEqual({ url: 'libsql://x', concurrency: 0, timeout: 0 });
+  });
+
+  // #25050 — `encryptionKey` is retired: the schema refuses it and the driver
+  // constructor refuses it in every mode. The builder is the seam between the
+  // two for a row that never crossed the schema (a legacy stored row), so it
+  // forwards ANY declared value — the empty string included, which is no
+  // longer "unset" but a key the author must delete — and lets the
+  // constructor refuse it by name. Dropping it here would turn a loud refusal
+  // back into the silent no-op the key always was.
+  it('forwards a declared retired encryptionKey, whatever its value, to the constructor', () => {
+    for (const value of ['aes-256-key', '', 0, null]) {
+      const spec: DatasourceConnectionSpec = {
+        driver: 'turso',
+        config: { url: 'file:./a.db', encryptionKey: value },
+      };
+      expect(buildTursoDriverConfig(spec, resolveTursoUrl(spec)))
+        .toEqual({ url: 'file:./a.db', encryptionKey: value });
+    }
   });
 
   // #8152 — the case this file did not have. `authToken` read `config` alone, so
@@ -168,15 +187,13 @@ describe('buildTursoDriverConfig (#7314)', () => {
   });
 
   // ⛔ #8152 is step 1 and ONLY step 1: one slot, the primary credential. A bound
-  // secret must NOT be sprayed into `encryptionKey` — that is a different secret
-  // (an AES-256 key for a local file, not a bearer token for a remote), the
-  // binder has one slot, and deciding whether it needs a second is deliberately
-  // deferred until this lands.
+  // secret must NOT be sprayed into `encryptionKey`. The question #8152 left
+  // open is now closed the other way: #25050 retired the key (it never
+  // encrypted anything), so there is no second slot to bind, and forwarding
+  // the secret there would hand the constructor a key it refuses.
   //
   // RED on main, for the shared reason (main emitted `{ url }`, so the key-set
-  // assertion failed). Its value is forward-facing: it fails if a later change
-  // resolves the encryptionKey question by GUESSING that one bound secret means
-  // both slots.
+  // assertion failed).
   it('RED ON MAIN — binds the secret to authToken ONLY, never to encryptionKey', () => {
     const spec: DatasourceConnectionSpec = {
       driver: 'turso',

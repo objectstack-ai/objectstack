@@ -106,7 +106,7 @@ const AUDIT_COPY = JSON.stringify({
   name: 'ds',
   type: 'datasource',
   scope: 'platform',
-  metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: CRED } }),
+  metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', authToken: CRED } }),
 });
 
 /** Env that would point the command's boot somewhere other than the fixture. */

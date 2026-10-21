@@ -33,18 +33,15 @@
  *    everywhere, as a replica that never synced. [#20586] And for a forced
  *    `mode: 'local'` beside a `syncUrl`, refused on `mode` too — the fourth
  *    copy. That row used to be accepted everywhere as well, as a "local"
- *    database the driver synced with the remote anyway. [#25020] And for a
- *    non-empty `encryptionKey` in a local or replica mode, refused on
- *    `encryptionKey` — the fifth copy, one text per mode. Those rows used to
- *    be accepted everywhere, and the driver wrote the file in plaintext: its
- *    local engine (better-sqlite3) has no encryption codec. And for the same
- *    key beside a `file:` url or `:memory:` under a forced `mode: 'remote'`,
- *    whose libSQL client is handed no key — the sixth copy, one text for a
- *    file and one for an in-memory database. The mirror declares no `mode`, so
- *    it judges those configs as the local database their url selects (it
- *    refuses them on `encryptionKey` in the local arm's words); its own copy
- *    of the remote arm is unreachable through it and kept byte-identical, as
- *    its other forced-mode branches are.
+ *    database the driver synced with the remote anyway.
+ *  - [#25050] `encryptionKey` is REMOVED: a tombstone in both schemas and a
+ *    refusal in the constructor, in every mode and for every value, ahead of
+ *    every other refusal, in ONE text at all three places. Its own table
+ *    (`RETIRED_KEY_ROWS`, below) holds the three to that text byte for byte.
+ *    It is kept apart from `ROWS` because a tombstone's issue is not a
+ *    `custom` one and the mirror judges it too, forced `mode` or not (the key
+ *    is refused before any mode is read). #25020 refused the key beside a
+ *    local url in one text per mode; those rows moved there.
  *
  * ⚠️ The mirror declares no `mode`, so zod strips an authored one before its
  * refinement runs: rows that FORCE a mode are judged by the constructor and the
@@ -77,7 +74,7 @@ afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 const FILE = `file:${DIR}/app.db`;
 const REMOTE = 'libsql://db.example.turso.io';
 /** A test value only — never a real key. */
-const KEY = 'test-key-25020';
+const KEY = 'test-key-25050';
 
 type Authored = {
   url: string;
@@ -85,7 +82,6 @@ type Authored = {
   sync?: { intervalSeconds?: number; onConnect?: boolean };
   mode?: 'local' | 'replica' | 'remote';
   timeoutMs?: number;
-  encryptionKey?: string;
 };
 
 interface Row {
@@ -94,7 +90,7 @@ interface Row {
   /** The constructor's verdict on this config. */
   ctor: 'accept' | 'refuse';
   /** The key both schemas refuse on, or `undefined` when they accept. */
-  refusedOn?: 'url' | 'syncUrl' | 'timeoutMs' | 'sync' | 'mode' | 'encryptionKey';
+  refusedOn?: 'url' | 'syncUrl' | 'timeoutMs' | 'sync' | 'mode';
   /** How many issues the spec contract raises on a refused row; 1 unless stated. */
   issues?: number;
   /** The constructor accepts it and ignores a key: refused at authoring only. None today (#20200). */
@@ -125,15 +121,7 @@ const ROWS: Row[] = [
   { name: "libsql:// under a forced mode: 'remote'", config: { url: REMOTE, mode: 'remote' }, ctor: 'accept' },
   { name: "file: under a forced mode: 'remote'", config: { url: FILE, mode: 'remote' }, ctor: 'accept' },
   { name: "a bare path under a forced mode: 'remote' (the client refuses it at connect)", config: { url: './data/app.db', mode: 'remote' }, ctor: 'accept' },
-  // [#25020] An empty key is unset, as the loaders read it.
-  { name: 'an empty encryptionKey (unset) beside a file: url', config: { url: FILE, encryptionKey: '' }, ctor: 'accept' },
-  { name: 'an empty encryptionKey (unset) on a replica', config: { url: FILE, syncUrl: REMOTE, sync: { onConnect: false }, encryptionKey: '' }, ctor: 'accept' },
-  // [#25020, patch round 1] The forced-remote local-url arm's controls: no key, an empty key, and a
-  // remote url with a key — a remote server's storage, which this card does not judge.
   { name: ":memory: under a forced mode: 'remote'", config: { url: ':memory:', mode: 'remote' }, ctor: 'accept' },
-  { name: "an empty encryptionKey (unset) beside file: under a forced mode: 'remote'", config: { url: FILE, mode: 'remote', encryptionKey: '' }, ctor: 'accept' },
-  { name: 'encryptionKey beside a libsql:// url (remote: not judged by this card)', config: { url: REMOTE, encryptionKey: KEY }, ctor: 'accept' },
-  { name: "encryptionKey beside libsql:// under a forced mode: 'remote' (not judged by this card)", config: { url: REMOTE, mode: 'remote', encryptionKey: KEY }, ctor: 'accept' },
 
   // ── a remote url in a local or replica mode ─────────────────────────────
   { name: 'libsql:// beside syncUrl', config: { url: REMOTE, syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'url' },
@@ -204,75 +192,74 @@ const ROWS: Row[] = [
   { name: "file: + a wss:// syncUrl under a forced mode: 'local'", config: { url: FILE, mode: 'local', syncUrl: 'wss://db.example.turso.io' }, ctor: 'refuse', refusedOn: 'mode' },
   { name: ":memory: + syncUrl under a forced mode: 'local'", config: { url: ':memory:', mode: 'local', syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'mode' },
   { name: "file::memory: + syncUrl under a forced mode: 'local'", config: { url: 'file::memory:', mode: 'local', syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'mode' },
-
-  // ── an encryptionKey the local engine cannot apply: refused on `encryptionKey` (#25020) ──
-  // Every row here was accepted everywhere until #25020, and the driver wrote the file in plaintext.
-  { name: 'encryptionKey beside a file: url', config: { url: FILE, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  { name: 'encryptionKey beside an uppercase FILE: url', config: { url: `FILE:${DIR}/upper-key.db`, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  { name: 'encryptionKey beside a file: url behind whitespace', config: { url: ` ${FILE}`, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  { name: 'encryptionKey beside :memory:', config: { url: ':memory:', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  { name: "encryptionKey beside file: under a forced mode: 'local'", config: { url: FILE, mode: 'local', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  { name: 'encryptionKey on a replica: file: + syncUrl', config: { url: FILE, syncUrl: REMOTE, sync: { onConnect: false }, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  { name: 'encryptionKey on a replica syncing from wss://, bounded by timeoutMs', config: { url: FILE, syncUrl: 'wss://db.example.turso.io', timeoutMs: 5000, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  { name: "encryptionKey on file: + syncUrl under a forced mode: 'replica'", config: { url: FILE, mode: 'replica', syncUrl: REMOTE, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  // ORDER: it comes last — every refusal above keeps its own row's verdict beside a key.
-  { name: 'encryptionKey beside a bare path: the url refusal first', config: { url: './data/app.db', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'url' },
-  { name: 'encryptionKey on a remote url beside syncUrl: the url refusal first', config: { url: REMOTE, syncUrl: REMOTE, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'url' },
-  { name: 'encryptionKey on :memory: beside syncUrl: the in-memory replica refusal first', config: { url: ':memory:', syncUrl: REMOTE, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'url' },
-  // The spec contract raises BOTH issues here (`sync`, then `encryptionKey`); the constructor throws the first.
-  { name: 'encryptionKey beside sync with no syncUrl: the sync refusal first', config: { url: FILE, sync: { intervalSeconds: 60 }, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'sync', issues: 2 },
-  { name: "encryptionKey under a forced mode: 'replica' with no syncUrl: the mode refusal first", config: { url: FILE, mode: 'replica', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'mode' },
-  { name: "encryptionKey + syncUrl under a forced mode: 'local': the mode refusal first", config: { url: FILE, mode: 'local', syncUrl: REMOTE, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'mode' },
-
-  // ── the same key beside a local url under a forced mode: 'remote' (#25020, patch round 1) ──
-  // Judged by where the database lives, not by the mode: `connect()` hands the url to the libSQL
-  // client the driver builds, which is handed no key. The mirror declares no `mode`, so these rows
-  // are judged by the constructor and the spec contract only (see the header).
-  { name: "encryptionKey beside file: under a forced mode: 'remote'", config: { url: FILE, mode: 'remote', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  { name: "encryptionKey beside an uppercase FILE: url under a forced mode: 'remote'", config: { url: `FILE:${DIR}/upper-remote-key.db`, mode: 'remote', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  { name: "encryptionKey beside file: + timeoutMs under a forced mode: 'remote'", config: { url: FILE, mode: 'remote', timeoutMs: 5000, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  { name: "encryptionKey beside :memory: under a forced mode: 'remote'", config: { url: ':memory:', mode: 'remote', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  { name: "encryptionKey beside file::memory: under a forced mode: 'remote'", config: { url: 'file::memory:', mode: 'remote', encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'encryptionKey' },
-  // ORDER against the forced-remote refusals: the spec contract raises BOTH issues (theirs first); the constructor throws the first.
-  { name: "encryptionKey + syncUrl beside file: under a forced mode: 'remote': the syncUrl refusal first", config: { url: FILE, mode: 'remote', syncUrl: REMOTE, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'syncUrl', issues: 2 },
-  { name: "encryptionKey + sync with no syncUrl beside file: under a forced mode: 'remote': the sync refusal first", config: { url: FILE, mode: 'remote', sync: { onConnect: true }, encryptionKey: KEY }, ctor: 'refuse', refusedOn: 'sync', issues: 2 },
 ];
 
 /**
  * The rows the constructor refuses on a sync key, on a forced replica with no
- * `syncUrl`, on a forced local mode beside a `syncUrl`, or on an
- * `encryptionKey` in a local or replica mode: its message is a copy of the
- * spec's (#20200, #20437, #20586, #25020).
+ * `syncUrl`, or on a forced local mode beside a `syncUrl`: its message is a
+ * copy of the spec's (#20200, #20437, #20586).
  */
 const SYNC_KEY_REFUSALS = ROWS.filter(
-  (r) =>
-    r.ctor === 'refuse' &&
-    (r.refusedOn === 'syncUrl' || r.refusedOn === 'sync' || r.refusedOn === 'mode' || r.refusedOn === 'encryptionKey'),
+  (r) => r.ctor === 'refuse' && (r.refusedOn === 'syncUrl' || r.refusedOn === 'sync' || r.refusedOn === 'mode'),
 );
+
+/**
+ * [#25050] The REMOVED `encryptionKey`: every mode, every value, and beside
+ * every other defect — refused by all three places on `encryptionKey`, in one
+ * text. `withoutKey` is the same config with no key, which the constructor
+ * judges as `ROWS` does; it is what makes "refused FIRST" a reading.
+ */
+const RETIRED_KEY_ROWS: Array<{ name: string; config: Authored; value?: unknown }> = [
+  { name: 'beside a libsql:// url (remote: parsed and dropped until #25050)', config: { url: REMOTE } },
+  { name: 'beside an https:// url', config: { url: 'https://db.example.turso.io' } },
+  { name: 'beside a wss:// url', config: { url: 'wss://db.example.turso.io' } },
+  { name: "beside libsql:// under a forced mode: 'remote'", config: { url: REMOTE, mode: 'remote' } },
+  { name: 'beside a file: url', config: { url: FILE } },
+  { name: 'beside :memory:', config: { url: ':memory:' } },
+  { name: 'on a replica: file: + syncUrl', config: { url: FILE, syncUrl: REMOTE, sync: { onConnect: false } } },
+  { name: "beside file: under a forced mode: 'local'", config: { url: FILE, mode: 'local' } },
+  { name: "beside file: under a forced mode: 'remote'", config: { url: FILE, mode: 'remote' } },
+  { name: 'an EMPTY key beside a file: url (no longer "unset")', config: { url: FILE }, value: '' },
+  { name: 'an EMPTY key beside a libsql:// url', config: { url: REMOTE }, value: '' },
+  // FIRST: each of these is refused on its own, and with the key it meets the retirement.
+  { name: 'beside a bare path: the retirement first', config: { url: './data/app.db' } },
+  { name: 'on a remote url beside syncUrl: the retirement first', config: { url: REMOTE, syncUrl: REMOTE } },
+  { name: 'beside sync with no syncUrl: the retirement first', config: { url: FILE, sync: { intervalSeconds: 60 } } },
+  { name: 'beside timeoutMs on wss://: the retirement first', config: { url: 'wss://db.example.turso.io', timeoutMs: 5000 } },
+  { name: "under a forced mode: 'replica' with no syncUrl: the retirement first", config: { url: FILE, mode: 'replica' } },
+];
 
 /**
  * The driver config a datasource loader builds from an authored one — the
  * reading `buildTursoDriverConfig` / `resolveTursoUrl` in
  * `@objectstack/service-datasource` perform (not a dependency of this package,
  * hence spelled here): the url TRIMMED, an empty `syncUrl` unset, and the
- * authored `timeoutMs` landing on the driver's `timeout`, and an empty
- * `encryptionKey` unset.
+ * authored `timeoutMs` landing on the driver's `timeout`. [#25050] A stored
+ * `encryptionKey` is forwarded as it is, whatever it holds, so the
+ * constructor refuses it (`withKey`).
  */
 function driverConfigOf(authored: Authored): TursoDriverConfig {
-  const { url, syncUrl, sync, mode, timeoutMs, encryptionKey } = authored;
+  const { url, syncUrl, sync, mode, timeoutMs } = authored;
   return {
     url: url.trim(),
     ...(syncUrl ? { syncUrl } : {}),
     ...(sync ? { sync } : {}),
     ...(mode ? { mode } : {}),
     ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
-    ...(encryptionKey ? { encryptionKey } : {}),
   };
 }
 
-function constructorVerdict(authored: Authored): { verdict: 'accept' | 'refuse'; message?: string } {
+/** The loader's config plus a stored `encryptionKey` — untyped, as a stored row is. */
+function withKey(authored: Authored, value: unknown): TursoDriverConfig {
+  return { ...driverConfigOf(authored), encryptionKey: value } as unknown as TursoDriverConfig;
+}
+
+function constructorVerdict(
+  authored: Authored,
+  build: (a: Authored) => TursoDriverConfig = driverConfigOf,
+): { verdict: 'accept' | 'refuse'; message?: string } {
   try {
-    new TursoDriver(driverConfigOf(authored));
+    new TursoDriver(build(authored));
     return { verdict: 'accept' };
   } catch (error) {
     // A refusal is the ADR-0112 envelope, never some other throw.
@@ -309,13 +296,10 @@ describe('turso config: the constructor, the spec contract and this mirror agree
     // [#20586] The forced-local half of the `mode` rows, floored on its own so
     // it cannot shrink behind the forced-replica half.
     expect(ROWS.filter((r) => r.refusedOn === 'mode' && r.config.mode === 'local').length).toBeGreaterThanOrEqual(8);
-    // [#25020] Both modes of the `encryptionKey` refusal, floored apart so the
-    // replica half cannot shrink behind the local half.
-    expect(ROWS.filter((r) => r.refusedOn === 'encryptionKey').length).toBeGreaterThanOrEqual(13);
-    expect(ROWS.filter((r) => r.refusedOn === 'encryptionKey' && (r.config.syncUrl || r.config.mode === 'replica')).length).toBeGreaterThanOrEqual(3);
-    // [#25020, patch round 1] The forced-remote local-url half, floored on its own.
-    expect(ROWS.filter((r) => r.refusedOn === 'encryptionKey' && r.config.mode === 'remote').length).toBeGreaterThanOrEqual(5);
-    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(38);
+    expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(25);
+    // [#25050] The removed key, across every mode and beside other defects.
+    expect(RETIRED_KEY_ROWS.length).toBeGreaterThanOrEqual(15);
+    expect(RETIRED_KEY_ROWS.filter((r) => /^(libsql|https|wss):/i.test(r.config.url)).length).toBeGreaterThanOrEqual(5);
     // [#20200] Exactly zero, not a floor: every key the constructor used to
     // build and ignore is refused at construction now (see the header).
     expect(ROWS.filter((r) => r.inert).length).toBe(0);
@@ -347,12 +331,34 @@ describe('turso config: the constructor, the spec contract and this mirror agree
     });
   });
 
+  // [#25050] The removed key: refused by the constructor, the spec contract
+  // and this mirror, on `encryptionKey`, alone, in ONE text — whatever else the
+  // config gets wrong, and whatever mode it names (the mirror strips `mode`,
+  // but the key is refused before any mode is read).
+  describe.each(RETIRED_KEY_ROWS)('encryptionKey $name', (row) => {
+    const value = 'value' in row ? row.value : KEY;
+    const authored = { ...row.config, encryptionKey: value };
+
+    it('all three refuse it on `encryptionKey`, alone, in one text', () => {
+      const spec = schemaVerdict(SpecTursoConfigSchema, authored);
+      expect(spec.refusedOn, spec.message).toBe('encryptionKey');
+      expect(spec.count).toBe(1);
+      expect(spec.message).toMatch(/^`turso config\.encryptionKey` was removed in @objectstack\/spec 18/);
+
+      expect(schemaVerdict(MirrorTursoConfigSchema, authored)).toEqual(spec);
+
+      const ctor = constructorVerdict(row.config, (a) => withKey(a, value));
+      expect(ctor.verdict).toBe('refuse');
+      expect(ctor.message).toBe(spec.message);
+    });
+  });
+
   // [#20200] The two sync refusals, [#20437] the forced-replica refusal and
   // [#20586] the forced-local one are copies of the spec contract's texts in
   // `../turso-driver.ts` (the spec keeps them module-local); this is the pin
   // that holds each copy equal to the schema's issue, byte for byte.
   describe.each(SYNC_KEY_REFUSALS)('$name', (row) => {
-    it("the constructor's message is the spec contract's, byte for byte (#20200, #20437, #20586, #25020)", () => {
+    it("the constructor's message is the spec contract's, byte for byte (#20200, #20437, #20586)", () => {
       const spec = schemaVerdict(SpecTursoConfigSchema, row.config);
       expect(spec.refusedOn).toBe(row.refusedOn);
       expect(spec.message).toBeTypeOf('string');

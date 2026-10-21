@@ -429,7 +429,7 @@ await k('sys_audit_log').insert({
   id: 'aud_21552', object_name: 'sys_metadata', record_id: 'm_21552', action: 'create',
   new_value: JSON.stringify({
     id: 'm_21552', name: 'ds', type: 'datasource', scope: 'platform',
-    metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: 'cleartext-21552' } }),
+    metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', authToken: 'cleartext-21552' } }),
   }),
 });
 const shard = (await k.raw("select name from sqlite_master where type = 'table' and name glob 'sys_activity__r*'"))[0];
@@ -440,7 +440,7 @@ await k(shard.name).insert({
     old: null,
     new: {
       id: 'm_21552', name: 'ds', type: 'datasource', scope: 'platform',
-      metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: 'cleartext-21552-activity' } }),
+      metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', authToken: 'cleartext-21552-activity' } }),
     },
   }),
 });

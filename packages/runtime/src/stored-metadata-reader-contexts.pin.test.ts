@@ -85,7 +85,7 @@ const API = '/api/v1';
 const ADMIN = { email: 'admin@objectos.ai', password: 'admin123' };
 const MEMBER = { email: 'pin-member@example.invalid', password: 'Member-Pass-123' };
 
-/** The synthetic credential, stored in the datasource body's still-writable credential slot. */
+/** The synthetic credential, stored in the datasource body's primary credential slot (turso's `authToken`). */
 const SENTINEL = 'reader-seam-sentinel-6c1e9b';
 const DS_NAME = 'pin_ds';
 /** Non-credential configuration of the same body: present in a projection of THIS row. */
@@ -434,7 +434,7 @@ beforeAll(async () => {
     name: DS_NAME,
     label: 'Pin datasource',
     driver: 'turso',
-    config: { url: `libsql://${DS_HOST}`, encryptionKey: SENTINEL },
+    config: { url: `libsql://${DS_HOST}`, authToken: SENTINEL },
   });
   if (save.status >= 300) throw new Error(`pin seed refused: ${save.status} ${JSON.stringify(await readJson(save))}`);
 

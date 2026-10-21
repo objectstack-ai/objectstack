@@ -152,14 +152,18 @@ describe('read path: getDatasource() no longer serves a stored credential', () =
     expect(ds!.config).toEqual({ host: 'h', database: 'd' });
   });
 
-  it('turso: the still-writable `encryptionKey` is redacted on read as well', async () => {
+  // #25050 — `encryptionKey` is RETIRED: no new row can carry it, but a legacy
+  // stored row still may, and a retired key is credential-shaped all the same.
+  // A local url, because that is the row the load-path conversion leaves for
+  // its author (beside a remote url it strips the key before this read).
+  it('turso: a legacy stored row\'s RETIRED `encryptionKey` is still redacted on read', async () => {
     const { service } = makeService([{
       name: 'turso_ds', driver: 'turso', origin: 'runtime',
-      config: { url: 'libsql://db.turso.io', authToken: 'jwt-token', encryptionKey: 'aes-256-key' },
+      config: { url: 'file:/var/data/edge.db', encryptionKey: 'aes-256-key' },
     }]);
     const ds = await service.getDatasource('turso_ds');
-    expect(ds!.config).toEqual({ url: 'libsql://db.turso.io' });
-    expect(ds!.redactedConfigKeys).toEqual(['authToken', 'encryptionKey']);
+    expect(ds!.config).toEqual({ url: 'file:/var/data/edge.db' });
+    expect(ds!.redactedConfigKeys).toEqual(['encryptionKey']);
   });
 
   it('pre-#8078 ALIAS spellings are redacted — a stored row never met the parse that renamed them', async () => {
@@ -633,7 +637,7 @@ describe('every accepted spelling of a builtin driver, at the service door', () 
     config: { url: 'file:./fixture.db', [key]: 'fixture-secret' },
   });
 
-  it('getDatasource() withholds the still-writable credential key under each accepted spelling, and names it', async () => {
+  it('getDatasource() withholds the retired credential key under each accepted spelling, and names it', async () => {
     // Population floor: the class is not empty today, so a derivation that
     // silently found nothing fails here instead of passing over zero rows.
     expect(CASES.length).toBeGreaterThan(0);
