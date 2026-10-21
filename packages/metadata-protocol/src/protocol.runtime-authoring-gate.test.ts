@@ -4023,7 +4023,7 @@ describe('runtime authoring gate on VIEW writes that name no package — the who
  *      `INVALID_METADATA` carrying the build's located finding — and nothing
  *      lands;
  *  (b) the same body still saves as a DRAFT (drafts are never gated), and the
- *      draft's promotion is refused;
+ *      draft's promotion and a package's draft publish are refused;
  *  (c) control: `parent` on the field's own `readonlyWhen` saves, and so does a
  *      rule reading `record`.
  *
@@ -4102,6 +4102,20 @@ describe('runtime authoring gate on OBJECT writes — a validations[] predicate 
         const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
         expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
         expect(issue.path).toBe(WHERE);
+        expect(lineRows(rows).map((r) => r.state)).toEqual(['draft']);
+    });
+
+    it("(b) a PACKAGE's draft publish of the same body is refused — nothing goes live", async () => {
+        const { protocol, rows } = hostWithHeader();
+        await expect(
+            saveLine(protocol, line([rule(PARENT)]), { mode: 'draft', packageId: 'app.fx' }),
+        ).resolves.toMatchObject({ success: true });
+
+        const res = await protocol.publishPackageDrafts({ packageId: 'app.fx' });
+
+        expect(res.outcome, JSON.stringify(res)).toBe('refused');
+        expect(res.publishedCount).toBe(0);
+        expect(res.failed).toEqual([expect.objectContaining({ type: 'object', name: 'fx_line', code: 'INVALID_METADATA' })]);
         expect(lineRows(rows).map((r) => r.state)).toEqual(['draft']);
     });
 
