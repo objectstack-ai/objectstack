@@ -71,13 +71,19 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ObjectKernel } from '@objectstack/core';
+import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
+import type { IMetadataService } from '@objectstack/spec/contracts';
 import { MetadataPlugin } from '@objectstack/metadata';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const CALLER = { userId: 'u_mcp', isSystem: false, positions: [], permissions: [], systemPermissions: [] };
+
+/** The `manifest` service door a package registers through (`ObjectQLPlugin`'s `register`). */
+interface ManifestDoor {
+    register(artifact: unknown, options?: { source?: 'code' | 'marketplace' }): Promise<void> | void;
+}
 
 /** A package of two objects, one of them declared off the API. */
 function packageOf(prefix: string) {
@@ -144,17 +150,18 @@ async function bootKernel(
         } as any));
         await kernel.use(new ObjectQLPlugin({ ql: engine, environmentId, hydrateMetadataFromDb: true }));
     }
-    await kernel.use({
+    const host: Plugin = {
         name: 'qa.package-host',
         dependencies: ['com.objectstack.engine.objectql'],
-        init: async (ctx: any) => {
+        init: async (ctx: PluginContext) => {
             if (mcp) ctx.registerService('mcp', mcp);
-            if (when === 'boot') ctx.getService('manifest').register(pkg.artifact());
+            if (when === 'boot') await ctx.getService<ManifestDoor>('manifest').register(pkg.artifact());
         },
-    } as any);
+    };
+    await kernel.use(host);
     await kernel.bootstrap();
     if (when === 'install') {
-        await (kernel.getService('manifest') as any).register(pkg.artifact(), { source: 'marketplace' });
+        await kernel.getService<ManifestDoor>('manifest').register(pkg.artifact(), { source: 'marketplace' });
     }
     await engine.syncSchemas();
     return { kernel, engine, root };
@@ -326,7 +333,7 @@ describe('[#25120] a DISABLED package\'s objects: the bridge omits them as GET /
         booted = await bootKernel(undefined, 'boot', pkg, mcp);
         expect((booted.engine as any).registry.disablePackage('com.qa.qa_off'), 'precondition: disabled').toBeTruthy();
         expect(
-            await (booted.kernel.getService('metadata') as any).getObject(pkg.open),
+            await booted.kernel.getService<IMetadataService>('metadata').getObject(pkg.open),
             'precondition: the metadata service still holds its copy',
         ).toBeTruthy();
         dispatcher = new HttpDispatcher(booted.kernel as any, undefined, { enforceProjectMembership: false });
