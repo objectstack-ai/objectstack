@@ -5,6 +5,8 @@
 
 feat(cli, objectql): `os db orphans` — report the detail rows whose required master-detail master does not exist, and delete them only behind `--delete`, after a pre-delete export
 
+Clause-②: yes (widening)
+
 **What was wrong.** A system-context write is exempt from the write-time reference check, so an elevated writer could store a master-detail id that names no master. Such a row's access derives from that master, so every user door answered 404 for it, the administrator's `GET` and `DELETE` included, and a list query left it out. The integrity audit reported the row and, by design, never rewrites it. No door existed to remove it, so it stayed until someone edited the database by hand.
 
 **`os db orphans` (new command).** An explicit operator command. Nothing on any boot, upgrade, migrate or lifecycle path runs it.
