@@ -25,6 +25,4 @@ export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_notification_delivery.fields.display_title.label": "70f7aadecce647a5",
   "objects.sys_notification_preference.fields.display_title.help": "13aff17d09067e30",
   "objects.sys_notification_preference.fields.display_title.label": "70f7aadecce647a5",
-  "objects.sys_notification_subscription.fields.display_title.help": "1100bd46caf9cb17",
-  "objects.sys_notification_subscription.fields.display_title.label": "70f7aadecce647a5",
 };

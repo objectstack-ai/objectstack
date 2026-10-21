@@ -69,7 +69,9 @@ const ISSUER_DROP = {
   table: 'sys_account',
   column: 'issuer',
   op: { type: 'drop_column', column: 'issuer' },
-  description: 'sys_account.issuer: column exists in the database but not in metadata (orphaned)',
+  // The differ's `message` (`ManagedDriftEntry`), remedy sentence included: the
+  // listing above the gate reads it (#24958).
+  message: 'sys_account.issuer: column exists in the database but not in metadata (orphaned) — "os migrate apply --allow-destructive" to drop it.',
 };
 
 const COLLISIONS = {
@@ -188,7 +190,10 @@ describe('controls', () => {
     const { exit } = await runApply(ARGV);
 
     expect(exit).toBe(1);
-    // Refused by the pre-flight, not by anything earlier on the human face.
+    // Refused by the pre-flight, not by anything earlier on the human face:
+    // its refusal printed, and the pre-flight read once — the listing above
+    // the gate shares the gate's read (#24958).
+    expect(log.mock.calls.map((c: unknown[]) => c.map(String).join(' ')).some((l: string) => l.includes('Refusing to drop sys_account.issuer'))).toBe(true);
     expect(mocks.probeAccountIdentityCollisions).toHaveBeenCalledTimes(1);
     expect(applyMigrationEntries).not.toHaveBeenCalled();
   }, RUN_TIMEOUT);

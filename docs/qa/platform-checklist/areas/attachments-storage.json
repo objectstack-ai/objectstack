@@ -13,7 +13,7 @@
       "requires": [
         "an admin session that holds the `manage_metadata` capability — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough (packages/rest/src/rest-route-ledger.ts, the `PUT /api/v1/meta/:type/:name` row)",
         "system-context write access for the persona bindings (the sys_user_permission_set insert, exactly as showcase-permission-zoo.dogfood.test.ts does it — the same pattern access-security.json's items already use)",
-        "an isolated boot (own port + file DB, dogfood skill §0) — this recipe authors metadata into the running app"
+        "a boot on its own port and file DB (dogfood skill §0) — this recipe authors metadata into the running app"
       ],
       "sequence": [
         {
@@ -126,7 +126,7 @@
           "source": "sys_user_permission_set insert in system context, mirroring showcase-permission-zoo.dogfood.test.ts — the binding shape access-security.json's permission-set items already replay. NOTE (ADR-0090 D5): every authenticated member ALSO holds the everyone baseline additively, so persona B's effective access is the UNION of its grants and that baseline — compute the union before calling a read 'invisible'."
         }
       ],
-      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.attachments (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or simply discard the isolated file DB, which is the cheaper path and the one an isolated boot makes free.",
+      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.attachments (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or simply discard the run's own file DB, which is the cheaper path and the one a boot on its own port and DB makes free.",
       "knownGaps": [
         "The SDK helper `meta.saveItem(type, name, item)` does NOT send the `?package=` query — it PUTs the bare path (packages/client/src/index.ts). Steps 2-4 must therefore be issued as raw HTTP with the query string appended, or the scratch objects land outside the package and the teardown above will not take them with it.",
         "[CLOSED — the three set payloads are pinned in step 6's body, measured on main c91af8ed6 after QA run #23929 recorded their intent] earlier runs (#7635) provisioned the personas through a runtime permission-set/position binding whose exact body was never captured, so the recipe carried intent only. Replay step 6's body literally; if a save answers anything but 200, re-read the citation before assuming the recipe rotted"
@@ -139,7 +139,7 @@
       "app": "showcase",
       "requires": [
         "an admin session that holds the `manage_metadata` capability — same gate as qa-scratch-authz (PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1, packages/rest/src/rest-route-ledger.ts)",
-        "an isolated boot (own port + file DB, dogfood skill §0) — this recipe authors metadata into the running app"
+        "a boot on its own port and file DB (dogfood skill §0) — this recipe authors metadata into the running app"
       ],
       "sequence": [
         {
@@ -157,7 +157,7 @@
           "source": "accept/maxSize are declared FieldSchema keys since ADR-0104 D3 wave 2 (packages/spec/src/data/field.zod.ts#shape — 'Offered to the file picker AND enforced on write'); authoring-call shape identical to qa-scratch-authz step 2 (packages/runtime/src/domains/meta.ts#handleMetadataRequest for ?package=); file-class field set is FILE_REFERENCE_TYPES = image/file/avatar/video/audio (packages/spec/src/data/field-value.zod.ts)"
         }
       ],
-      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.media — or discard the isolated file DB, the cheaper path an isolated boot makes free.",
+      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.media — or discard the run's own file DB, the cheaper path a boot on its own port and DB makes free.",
       "knownGaps": [
         "Same SDK sharp edge as qa-scratch-authz: `meta.saveItem` drops `?package=` (packages/client/src/index.ts) — issue step 2 as raw HTTP or the object lands outside the package and the teardown misses it.",
         "Unlike qa-scratch-authz this recipe has NOT yet been proven by a live run — it is derived from the same authoring path the proven recipe uses plus the FieldSchema declaration. If step 2 4xxs on the constraint keys, re-read field.zod.ts before assuming the recipe rotted; a parse-time strip of accept/maxSize would itself be a finding (the pre-#4001 silent-strip class)."

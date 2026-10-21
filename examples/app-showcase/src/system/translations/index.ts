@@ -602,8 +602,14 @@ export const ShowcaseTranslationBundle = {
         // "Contacts", so the object's own `pluralLabel` above is the right
         // word; the `全部…` spelling the task/project lists use belongs to
         // labels that actually say "All …".
+        //
+        // `_views.create.title` — the sparse `formViews.create` form's own
+        // heading (`title: 'New contact'`), which `translateView` overlays
+        // onto the served form's `config.title`. 新建联系人 follows the
+        // 新建… shape a create heading takes.
         _views: {
           default: { label: '联系人' },
+          create: { title: '新建联系人' },
         },
         // `_sections` — the four groups of the default edit form in
         // `ui/views/contact.view.ts`, plus the sparse `formViews.create`

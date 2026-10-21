@@ -2291,7 +2291,7 @@ const ObjectSchemaBase = strictObject(
    *   DATA**: the RBAC link tables (`sys_user_position`,
    *   `sys_user_permission_set`, `sys_position_permission_set`, governed by
    *   the `DelegatedAdminGate`), `sys_user_preference`, the messaging config
-   *   grids (`sys_notification_subscription`, `_template`, `_preference`). Two
+   *   grids (`sys_notification_template`, `_preference`). Two
    *   boundaries define it: the SCHEMA is the platform's (versioned with the
    *   release, not tenant-modelled — that is `platform`), while the DATA is the
    *   admin's or the user's, written through a governed path (not the engine's —

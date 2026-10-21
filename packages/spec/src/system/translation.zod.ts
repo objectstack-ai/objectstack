@@ -244,6 +244,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    * Convention (auto-resolved by `resolveViewLabel`):
    *   objects.<object>._views.<view_name>.label
    *   objects.<object>._views.<view_name>.description
+   *   objects.<object>._views.<view_name>.title   (a form view's heading)
    *   objects.<object>._views.<view_name>.emptyState.title
    *   objects.<object>._views.<view_name>.emptyState.message
    *   objects.<object>._views.<view_name>.bulkActions.<def_name>.*
@@ -252,7 +253,10 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     surface: 'this view translation',
     history: TRANSLATION_HISTORY,
     aliases: {
-      name: 'label', title: 'label', empty: 'emptyState', emptyMessage: 'emptyState',
+      // `title` is a declared key below (a form view's heading), so it is no
+      // longer named as a rename onto `label`; the heading-shaped neighbours
+      // are named as renames onto it.
+      name: 'label', heading: 'title', formTitle: 'title', empty: 'emptyState', emptyMessage: 'emptyState',
       // The authoring key is `bulkActionDefs`; the translation group drops the
       // `Defs` suffix the way `_actions` drops nothing and `_tabs` drops
       // `tabs[]`'s bracket — one address per surface, and the authoring
@@ -269,6 +273,24 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().optional().describe('Translated view label'),
     description: z.string().optional().describe('Translated view description'),
+    /**
+     * A FORM view's heading — overlays `FormViewSchema.title`, which a served
+     * form item carries at `config.title` (the title an anonymous public form
+     * shows above its sections).
+     *
+     * **Its own key, not the view's `label` key.** They are two authored
+     * strings on two layers: a view item's `label` names the view, and a
+     * form-family container entry (`formViews.<key>`, the default `form`)
+     * carries no `label` at all, while `title` is the heading the form itself
+     * draws. One translation cannot stand for two source strings, so the key
+     * mirrors the authored one, the way `emptyState.title` does.
+     *
+     * Applied by `translateView` only where the form AUTHORS a title: a form
+     * without one gains none, and its heading keeps falling back to the
+     * object label. A list view carries no title, so the key over one
+     * resolves nothing (`objectstack validate` refuses it).
+     */
+    title: z.string().optional().describe("Translated form view title — overlays a form view's own `title` (`FormViewSchema.title`); only a form that authors one is translated"),
     emptyState: strictObject({
       surface: 'this view empty-state translation',
       history: TRANSLATION_HISTORY,
@@ -1064,6 +1086,9 @@ const appTranslationDataShape = () => ({
    *
    *   pages.<name>.components.<componentId>.<key>
    *                             → that component's `properties.<key>` (#6080)
+   *   pages.<name>.components.<tabsId>.items.<value>.label
+   *                             → that `page:tabs` item's `label`, keyed by the
+   *                               item's `value` (see `items` below)
    *
    * When `title` is omitted, the header keeps the title its author wrote.
    * `label` stands in for it only where the header authors no title, or where
@@ -1206,6 +1231,40 @@ const appTranslationDataShape = () => ({
       label: z.string().optional().describe("Translated component label — overlays the component's own `label` when it declares one, else `properties.label`"),
       placeholder: z.string().optional().describe('Translated input placeholder (`element:record_picker`, `element:text_input`)'),
       emptyText: z.string().optional().describe('Translated empty-state text (`element:record_picker`)'),
+      /**
+       * A `page:tabs` component's tab labels, keyed by each item's `value`
+       * (`PageTabsProps.items[].value`) — read by `translatePage`, offered by
+       * `os i18n extract`, judged by `objectstack validate`.
+       *
+       * **Why under the tabs component, keyed by `value`.** A tab item is not
+       * a component: it carries no `id`, so the `components.<id>` route could
+       * never reach it, and a HotCRM home page rendered its three tabs in
+       * English under a translated header. Two addresses were open — give
+       * items an `id`, or key them under the tabs component they belong to.
+       * The item already declares the identifier this needs: `value` is the
+       * stable `?tab=` token the renderer reads and restores, so it is unique
+       * within the strip by construction, and the ruling that settled the
+       * inline-map question (#14749) recorded `tabs item.value` as the
+       * identity a page key builds on. A second identifier would give one tab
+       * two names. The component half stays the tabs component's own `id`,
+       * so `pages.<page>.components.<tabsId>` keeps meaning one component.
+       *
+       * **An item without a `value` has no key.** Its renderer token is
+       * `tab-<index>`, and an array index is never a bundle key: reordering
+       * two tabs would silently swap their translations. Author a `value`,
+       * or localize that label in place with an inline locale map.
+       *
+       * Only `page:tabs` items are addressed. A `page:accordion` panel has
+       * no author-settable identity (its renderer derives `panel-<index>`),
+       * so its label stays an inline-locale-map surface.
+       */
+      items: z.record(z.string(), strictObject({
+        surface: 'this page tab item translation',
+        history: TRANSLATION_HISTORY,
+        aliases: { name: 'label', title: 'label', text: 'label' },
+      }, {
+        label: z.string().optional().describe("Translated tab label — overlays the item's own `label` (`PageTabsProps.items[].label`)"),
+      })).optional().describe('`page:tabs` item labels keyed by the item `value` (`PageTabsProps.items[].value`); an item without a `value` has no key'),
     })).optional().describe('Per-component copy keyed by component id (`PageComponentSchema.id`)'),
   })).optional().describe('Page translations keyed by page name'),
 

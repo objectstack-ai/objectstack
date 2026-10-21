@@ -22,8 +22,10 @@
  * Case 1 drives a REAL report site on a bare instance, so the pin is about what
  * an operator sees rather than about a field's contents. `getReadFilter` with an
  * on-behalf-of context is the one refusal reachable with no `ql`, no `metadata`
- * and no `start()`: it fails closed on the unimplemented D10 delegator
- * intersection (#2852) and reports through `this.logger.error?.()`.
+ * and no `start()`: the ADR-0090 D10 intersection it composes (ADR-0139 D5.1 as
+ * amended) needs the delegator's `sys_user` row, which a bare instance cannot
+ * read, so the link names a delegator who does not exist and the read fails
+ * closed on that dangling link, reporting through `this.logger.error?.()`.
  *
  * Case 2 pins the channel the LEDGER row is about. `error` stays optional by
  * #9754's own ruling (hosts inject reduced sinks); `warn` is the channel a

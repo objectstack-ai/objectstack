@@ -21,7 +21,6 @@ const OWNED_OBJECTS = new Set([
   'sys_notification_receipt',
   'sys_notification_delivery',
   'sys_notification_preference',
-  'sys_notification_subscription',
   'sys_notification_template',
   'sys_http_delivery',
 ]);

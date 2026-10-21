@@ -1,6 +1,6 @@
 # ADR-0030 — Notification Platform Convergence (single ingress, layered pipeline)
 
-**Status**: Accepted (2026-06-01) — **P0–P3b2 shipped** (P3b-2 digest collapse landed); cross-repo objectui cut-over remains. See [§ Implementation status & remaining work](#implementation-status--remaining-work). · **Amended** (2026-09-20, #16194 — P0's idempotent data migration `migrateSysNotificationToEvent` is **retired**: it had zero production callers and no way to be run, and both ways of giving it one — an `os migrate` sub-command and a boot-time invoker — were refused. Pre-ADR-0030 `sys_notification` rows are therefore **not** carried by the platform on this line. ⛔ Nothing else moves: single ingress, the layered object model and the remaining objectui cut-over read exactly as accepted.)
+**Status**: Accepted (2026-06-01) — **P0–P3b2 shipped** (P3b-2 digest collapse landed); cross-repo objectui cut-over remains. See [§ Implementation status & remaining work](#implementation-status--remaining-work). · **Amended** (2026-09-20, #16194 — P0's idempotent data migration `migrateSysNotificationToEvent` is **retired**: it had zero production callers and no way to be run, and both ways of giving it one — an `os migrate` sub-command and a boot-time invoker — were refused. Pre-ADR-0030 `sys_notification` rows are therefore **not** carried by the platform on this line. ⛔ Nothing else moves: single ingress, the layered object model and the remaining objectui cut-over read exactly as accepted.) · **Amended** (2026-10-20, maintainer ruling D on #24770, recorded 6293376907 — the L3 `sys_notification_subscription` object is **retired**: the subscription→recipient expansion was never wired, every producer names an explicit audience (`EmitInput.audience` is required), and the Setup grid let an administrator author subscriptions that made nobody receive anything. The ruling supersedes #9807's keep-with-a-comment decision. The object, its registration, its Setup nav item and its translations leave; existing tables are left in place untouched (ADR-0087 semantic entry `sys-notification-subscription-retired`). L3 is now preference-only; a topic-subscription capability, if real demand appears, returns as a new decision with a who-may-subscribe-whom permission model. ⛔ Nothing else moves.)
 **Supersedes / refines**: [ADR-0012 — Notification Platform](./0012-notification-platform.md) (Draft)
 **Related**: [ADR-0019 — Approval as a Flow Node](./0019-approval-as-flow-node.md), [ADR-0022 — Connectors vs Messaging Channels](./0022-connectors-vs-messaging-channels.md)
 **Build spec**: [docs/design/notification-platform-convergence.md](../design/notification-platform-convergence.md)
@@ -28,7 +28,7 @@ Do **not** merge the two tables into one. **Un-conflate** them back into the ADR
 | Layer | Object | Role |
 |---|---|---|
 | L2 Event | `sys_notification` *(re-modeled to event)* | one row per `emit`: `topic`, `payload`(json), `severity`, **`dedup_key`** (idempotency), `source_object/id`, `actor_id`, `created_at`. **No recipient, no read-state.** |
-| L3 Resolve + Preference | `sys_notification_subscription`, `sys_notification_preference` | audience expansion (`role:` / `owner_of:record` / `team:` / explicit ids; **email→id resolved here**), user×topic×channel toggles, quiet-hours, digest; mandatory topics bypass |
+| L3 Resolve + Preference | `sys_notification_preference` *(`sys_notification_subscription` retired 2026-10-20 — see the status line)* | audience resolution of the producer's explicit audience (`role:` / `owner_of:record` / `team:` / explicit ids; **email→id resolved here**), user×topic×channel toggles, quiet-hours, digest; mandatory topics bypass. ~~Topic-subscription audience expansion~~ — never wired, retired with its object. |
 | L4 Delivery (outbox) | `sys_notification_delivery` | one row per (event × recipient × channel); state machine `pending→sent→failed/dead`; retry/backoff/dedup; the durable spine |
 | L5 Materialize + Receipt | `sys_inbox_message` (in-app), `sys_email`, `sys_user_device` (push), connector dispatch (webhook/Slack); `sys_notification_receipt` | each channel renders delivery into a consumable artifact; **the bell reads `sys_inbox_message`**; read/clicked/dismissed live in `sys_notification_receipt` |
 | Cross-cutting | `sys_notification_template` (topic×channel×locale) | rendering, with generic fallback to `title`/`body` |
@@ -119,9 +119,12 @@ configurable daily send-hour (windows flush at local midnight / Monday 00:00).
   `connector_action` Slack path already works today).
 - **`defineTopic()`** declarative topic catalog (Studio discoverability for topics /
   templates / preferences) — the low-code backbone.
-- **Subscription-driven fan-out**: expand a topic's `sys_notification_subscription`
+- ~~**Subscription-driven fan-out**: expand a topic's `sys_notification_subscription`
   principals when a producer emits without an explicit audience (object exists;
-  expansion not wired).
+  expansion not wired).~~ **Withdrawn (2026-10-20, ruling D on #24770)** — the object
+  is retired instead (status line): zero pull, every producer names its audience,
+  and the expansion would need a permission model nobody asked for. Existing
+  tables are left in place untouched, read by nothing.
 - **MJML** compilation for email (P3a treats `mjml` format as raw HTML).
 - Quiet-hours **tz fallback** to a `sys_user` timezone field (currently
   `quiet_hours.tz` → UTC).

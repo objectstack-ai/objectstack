@@ -19,7 +19,6 @@ import {
     NotificationReceipt,
     NotificationDelivery,
     NotificationPreference,
-    NotificationSubscription,
     NotificationTemplate,
     HttpDelivery,
 } from './objects/index.js';
@@ -298,9 +297,13 @@ export class MessagingServicePlugin implements Plugin {
         ctx.registerService('notification', service);
 
         // Register the messaging objects so their rows can be written. The
-        // preference/subscription objects (ADR-0030 P2) are Studio-configurable,
-        // so contribute them to the Setup app's Configuration slot (ADR-0029 D7)
-        // — they appear in nav only when this plugin is installed.
+        // preference and template objects are Studio-configurable, so
+        // contribute them to the Setup app's Configuration slot (ADR-0029 D7)
+        // — they appear in nav only when this plugin is installed. ADR-0030's
+        // `sys_notification_subscription` is retired (ADR-0087 semantic entry
+        // `sys-notification-subscription-retired`): no reader ever expanded a
+        // subscription into recipients, so it is neither registered nor
+        // offered in nav; an existing database keeps the table untouched.
         ctx.getService<{ register(m: unknown): void }>('manifest').register({
             id: 'com.objectstack.service.messaging',
             name: 'Messaging Service',
@@ -313,7 +316,6 @@ export class MessagingServicePlugin implements Plugin {
                 NotificationReceipt,
                 NotificationDelivery,
                 NotificationPreference,
-                NotificationSubscription,
                 NotificationTemplate,
                 HttpDelivery,
             ],
@@ -324,7 +326,6 @@ export class MessagingServicePlugin implements Plugin {
                     priority: 120,
                     items: [
                         { id: 'nav_notification_preferences', type: 'object', label: 'Notification Preferences', objectName: 'sys_notification_preference', icon: 'bell-ring', requiresObject: 'sys_notification_preference' },
-                        { id: 'nav_notification_subscriptions', type: 'object', label: 'Notification Subscriptions', objectName: 'sys_notification_subscription', icon: 'rss', requiresObject: 'sys_notification_subscription' },
                         { id: 'nav_notification_templates', type: 'object', label: 'Notification Templates', objectName: 'sys_notification_template', icon: 'file-text', requiresObject: 'sys_notification_template' },
                     ],
                 },
@@ -537,7 +538,6 @@ export class MessagingServicePlugin implements Plugin {
             NotificationReceipt,
             NotificationDelivery,
             NotificationPreference,
-            NotificationSubscription,
             NotificationTemplate,
             HttpDelivery,
         ];
