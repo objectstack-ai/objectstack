@@ -28,7 +28,8 @@
  *  - a row naming no master, under a reference required-field validation
  *    judges, is answered by validation as before;
  *  - under a reference required-field validation does not judge, a batch
- *    create naming a master the caller may not edit is refused on that master,
+ *    create naming a master the caller may not edit is refused on that master
+ *    (for an agent, whose own pass runs first, on the empty-master answer),
  *    and every other batch create is still refused whole, as before;
  *  - an update that empties the master reference, under a reference
  *    required-field validation does not judge, is refused — addressed by
@@ -459,8 +460,16 @@ describe('ADR-0055 §1 · §3 — every row a write stores in a controlled_by_pa
       expect(refusal).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
       for (const door of DOORS) {
         const refused = rig.rows([free('rls'), held('rls')]);
-        expect({ caller, door, outcome: envelope(await rig.batch[door](UNJUDGED, refused, context)) })
-          .toEqual({ caller, door, outcome: envelope(refusal) });
+        const outcome = await rig.batch[door](UNJUDGED, refused, context);
+        if (onBehalf) {
+          // The agent's own pass runs first and whole: its sets may edit both
+          // masters, so it meets the batch's empty-master answer before the
+          // member's pass asks the master the member may not edit. Refused all
+          // the same, and nothing is written.
+          expect({ caller, door, outcome }).toMatchObject({ caller, door, outcome: { kind: 'refused', code: 'MISSING_REQUIRED_FIELD', status: 422 } });
+        } else {
+          expect({ caller, door, outcome: envelope(outcome) }).toEqual({ caller, door, outcome: envelope(refusal) });
+        }
         const whole = rig.rows([free('rls'), free('rls', 2)]);
         expect({ caller, door, outcome: await rig.batch[door](UNJUDGED, whole, context) })
           .toMatchObject({ caller, door, outcome: { kind: 'refused', code: 'MISSING_REQUIRED_FIELD', status: 422 } });
