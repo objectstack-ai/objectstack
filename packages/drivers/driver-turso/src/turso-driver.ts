@@ -117,8 +117,13 @@ export interface TursoDriverConfig {
   authToken?: string;
 
   /**
-   * AES-256 encryption key for the local database file.
-   * Only effective in local/replica modes.
+   * Encrypts nothing, in any mode. A non-empty key in a local or replica mode
+   * is REFUSED at construction (`VALIDATION_ERROR` / 400): this driver reads
+   * and writes the local file through better-sqlite3, which has no encryption
+   * codec, so the file would be written in plaintext that any SQLite reader
+   * opens without the key. Drop it, and encrypt the disk or volume the file
+   * lives on instead. A remote database's storage encryption is the server's;
+   * this driver does not forward the key to it.
    */
   encryptionKey?: string;
 
@@ -1451,7 +1456,69 @@ const LOCAL_MODE_WITH_SYNC_URL_REFUSAL =
   "`url: 'file:./data/replica.db'`. For a plain local database, drop `syncUrl` (and `sync`).";
 
 /**
- * Throw one of the four sync-key refusals above as the ADR-0112 envelope.
+ * [#25020] A non-empty `encryptionKey` on the local engine — refused at
+ * construction, in a local mode and in a replica mode alike.
+ *
+ * The key promised "AES-256 encryption key for the local database file", and
+ * nothing that touches that file could honour it. Every read and write of a
+ * local or replica datasource runs through Knex on better-sqlite3, and
+ * better-sqlite3 has no encryption codec: measured on better-sqlite3 13.0.3
+ * (SQLite 3.53.4), no codec compile option is set and `PRAGMA key` is a
+ * silent no-op. So, measured on this package's source before this refusal:
+ *
+ * ```
+ * local   (file: url + encryptionKey)                   -> constructs, connects, writes; the file
+ *                                                          starts `SQLite format 3`, and plain
+ *                                                          better-sqlite3 reads the row back with no key
+ * replica (+ syncUrl, a supplied client)                -> the same: the key reaches nothing
+ * replica (+ syncUrl, the driver builds the sync client) -> `super.connect()` writes the file in plaintext
+ *                                                          first; only then is `@libsql/client` handed the
+ *                                                          key (with no reachable sync server here, its
+ *                                                          construction fails to connect)
+ * @libsql/client + the key, over that plaintext file      -> SQLITE_NOTADB
+ * this driver's replica face over a file @libsql/client
+ * encrypted with the key                                -> DATABASE_ERROR (SQLITE_NOTADB)
+ * ```
+ *
+ * The native libSQL binding DOES encrypt a local file under the key, but it is
+ * not the engine this driver reads and writes through: honouring the key
+ * would mean replacing the Knex / better-sqlite3 path with another engine,
+ * and the ruling on #25020 refuses the key instead of swapping engines. A
+ * replica is refused for the same reason as a local database, because its
+ * sync client and its local engine share one file: whichever opens it with the
+ * key, the other cannot read it, and the engine that serves every read and
+ * write never encrypts it.
+ *
+ * Raised BEFORE `super()`, so no file is opened, and LAST among the
+ * local-engine refusals: a url the engine cannot open, a sync key nothing
+ * would read and a forced mode the driver would ignore each keep their own
+ * message. An empty key is unset, as the datasource loaders read it
+ * (`buildTursoDriverConfig` drops it). A remote mode is not judged here.
+ *
+ * ⚠️ The text is `@objectstack/spec`'s `TursoConfigSchema` refusal on
+ * `encryptionKey`, byte for byte, held equal by
+ * `spec/turso-config-constructor-parity.test.ts`. Edit it there first.
+ */
+function localEncryptionKeyRefusal(mode: 'local' | 'replica'): string {
+  const arm = mode === 'replica' ? 'an embedded replica' : 'a local database';
+  return (
+    `\`encryptionKey\` asks for this datasource's database file to be encrypted, but this datasource is ${arm}, ` +
+    'which runs every read and write through a local SQLite engine that has no encryption codec' +
+    (mode === 'replica'
+      ? ' (the sync client shares that one file, and a file it encrypted could not be opened by that engine)'
+      : '') +
+    ': nothing would encrypt the file, so it would be written in plaintext that any SQLite reader opens ' +
+    'without the key — the turso driver refuses this configuration when it starts. Nothing in this driver ' +
+    'encrypts a local or replica file. Drop `encryptionKey`, and encrypt the disk or volume the file lives ' +
+    "on instead, or keep the data in a remote Turso database, whose storage encryption is the server's to " +
+    "configure, not this key's."
+  );
+}
+
+/**
+ * Throw one of the four sync-key refusals above, or the local-engine
+ * `encryptionKey` refusal ({@link localEncryptionKeyRefusal}), as the
+ * ADR-0112 envelope.
  *
  * Raised BEFORE `super()`, AFTER the three refusals above it in the
  * constructor, so no configuration those already refuse changes which message
@@ -1957,6 +2024,13 @@ export class TursoDriver extends SqlDriver {
     if (mode === 'local' && config.syncUrl) {
       refuseIgnoredSyncKey(LOCAL_MODE_WITH_SYNC_URL_REFUSAL);
     }
+    // [#25020] A key the local engine cannot honour: better-sqlite3 has no
+    // encryption codec, so the file would be written in plaintext. Refused in
+    // a local and a replica mode alike, before `super()` opens the file, in
+    // the spec's words, last. See `localEncryptionKeyRefusal`.
+    if (mode !== 'remote' && config.encryptionKey) {
+      refuseIgnoredSyncKey(localEncryptionKeyRefusal(mode));
+    }
     const knexConfig = TursoDriver.toKnexConfig(config, mode);
     super(knexConfig);
     this.tursoConfig = config;
@@ -2265,10 +2339,13 @@ export class TursoDriver extends SqlDriver {
         // binding's BUSY timeout for local lock contention, not the remote
         // operation timeout `TursoDriverConfig.timeout` promises. That promise
         // is kept on `sync()`, the one remote operation this arm performs.
+        // [#25020] And no `encryptionKey`: a non-empty one is refused at
+        // construction, because this client shares the replica file with the
+        // Knex / better-sqlite3 engine, which cannot encrypt it, and a file
+        // this client encrypted is one that engine cannot open.
         this.libsqlClient = createClient({
           url: this.tursoConfig.url,
           authToken: this.tursoConfig.authToken,
-          encryptionKey: this.tursoConfig.encryptionKey,
           syncUrl: this.tursoConfig.syncUrl,
           concurrency: this.tursoConfig.concurrency,
         });

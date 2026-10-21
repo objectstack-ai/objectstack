@@ -123,10 +123,14 @@ import { getDriverConfigSchema, resolveDriverId } from './driver/config-registry
  * Credential-shaped config keys that remain WRITABLE by deliberate spec choice,
  * and so are never found by the `z.never()` derivation.
  *
- * `encryptionKey` (turso) is an AES-256 key for the local database file. #8078
- * left it writable because the datasource secret binder injects exactly one
- * secret slot and `external.credentialsRef` resolution cannot target a second
- * one; giving it a slot is #8081 scope item 4 and is NOT decided here.
+ * `encryptionKey` (turso) was declared an AES-256 key for the local database
+ * file. #8078 left it writable because the datasource secret binder injects
+ * exactly one secret slot and `external.credentialsRef` resolution cannot
+ * target a second one; giving it a slot is #8081 scope item 4 and is NOT
+ * decided here. Since #25020 the turso contract refuses it for a local or
+ * replica datasource (the driver's SQLite engine cannot encrypt the file), but
+ * a remote datasource still parses with it and a stored row may still carry
+ * it, so it stays on this list.
  *
  * Keyed by CANONICAL driver id and looked up through {@link resolveDriverId},
  * exactly like {@link PASSTHROUGH_SECRET_PATHS} below: every spelling the

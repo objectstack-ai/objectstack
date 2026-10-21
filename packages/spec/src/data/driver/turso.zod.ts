@@ -108,7 +108,16 @@ export type TursoTransportMode = z.input<typeof TursoTransportModeSchema>;
 //    other way round: the driver used to label it local and then run it as an
 //    embedded replica, syncing with the remote on connect and on the interval
 //    while its sync-enabled check answered true. Authoring and the constructor
-//    now refuse it together, in this arm's words.
+//    now refuse it together, in this arm's words;
+//  - a non-empty `encryptionKey` in a local or replica mode (#25020): the
+//    driver runs every read and write of the file through better-sqlite3,
+//    which has no encryption codec (`PRAGMA key` is a silent no-op there), so
+//    the key encrypted nothing and the file was written in plaintext that any
+//    SQLite reader opened without it. An embedded replica is no different:
+//    only its sync client is handed the key, and a file that client encrypted
+//    is one better-sqlite3 cannot open. Authoring and the constructor now
+//    refuse it together, in this arm's words, last among the local-engine
+//    refusals. A remote mode is not judged here.
 //
 // The predicates MIRROR the constructor's on `main` (`localEngineDefect`,
 // `refuseWebSocketTimeout` and `detectMode` in
@@ -164,11 +173,12 @@ interface TursoTransportKeys {
   syncUrl?: unknown;
   mode?: TursoTransportMode;
   timeoutMs?: unknown;
+  encryptionKey?: unknown;
 }
 
 /** One refusal: the key it sits on and its message. */
 interface TursoTransportIssue {
-  path: 'url' | 'syncUrl' | 'timeoutMs' | 'mode';
+  path: 'url' | 'syncUrl' | 'timeoutMs' | 'mode' | 'encryptionKey';
   message: string;
 }
 
@@ -282,6 +292,26 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
           + 'so the declared local mode would be ignored — the turso driver refuses this configuration '
           + 'when it starts. For an embedded replica, drop `mode` and keep `syncUrl` beside the local file: '
           + "`url: 'file:./data/replica.db'`. For a plain local database, drop `syncUrl` (and `sync`).",
+      }];
+    }
+    if (typeof cfg.encryptionKey === 'string' && cfg.encryptionKey.length > 0) {
+      // #25020. The url and the mode are coherent (every other shape met a
+      // refusal above), so what the runtime cannot honour is the KEY: the
+      // local engine has no encryption codec, so the issue sits on
+      // `encryptionKey`. An empty key is unset, as the loaders read it.
+      return [{
+        path: 'encryptionKey',
+        message:
+          `\`encryptionKey\` asks for this datasource's database file to be encrypted, but this datasource is ${arm}, `
+          + 'which runs every read and write through a local SQLite engine that has no encryption codec'
+          + (mode === 'replica'
+            ? ' (the sync client shares that one file, and a file it encrypted could not be opened by that engine)'
+            : '')
+          + ': nothing would encrypt the file, so it would be written in plaintext that any SQLite reader opens '
+          + 'without the key — the turso driver refuses this configuration when it starts. Nothing in this driver '
+          + 'encrypts a local or replica file. Drop `encryptionKey`, and encrypt the disk or volume the file lives '
+          + "on instead, or keep the data in a remote Turso database, whose storage encryption is the server's to "
+          + "configure, not this key's.",
       }];
     }
     return [];
@@ -425,13 +455,23 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
     authToken: refusedInlineCredentialKey('authToken', 'Auth token'),
 
     /**
-     * AES-256 key for the local database file; local/replica modes only.
-     * Placeholder-free since #8336: an unresolved `${…}` here would encrypt
-     * the database with the literal placeholder string as its key — data
-     * unreadable under the key the author believed they set.
+     * Encrypts nothing, in any mode — and is REFUSED in a local or replica
+     * mode since #25020 (see {@link tursoTransportIssues}). This key used to
+     * promise "AES-256 key for the local database file", but the driver reads
+     * and writes that file through better-sqlite3, which has no encryption
+     * codec: a local datasource that declared it was written in plaintext that
+     * any SQLite reader opened without it (measured on the driver source), and
+     * an embedded replica fared no better, because only its sync client was
+     * handed the key. The driver does not forward it to a remote database,
+     * whose storage encryption is the server's.
+     *
+     * Still declared (removing it is a key retirement this refusal does not
+     * make) and still placeholder-free (#8336); the datasource redaction set
+     * withholds it on every read (`STILL_WRITABLE_CREDENTIAL_KEYS` in
+     * `datasource-credential-redaction.ts`).
      */
     encryptionKey: placeholderFree(z.string(), 'encryptionKey').optional()
-      .describe('AES-256 encryption key for the local database file (local/replica modes)')
+      .describe("Not honoured in any mode: refused for a local or replica datasource, whose SQLite engine cannot encrypt the file; a remote database's storage encryption is the server's, not set by this key")
       .meta({ title: 'Encryption key', format: 'password' }),
 
     /** Max concurrent requests to the remote database (replica/remote modes). */
