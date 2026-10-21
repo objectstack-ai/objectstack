@@ -15,6 +15,10 @@
  * has exactly one answer across email, inbox and SMS — a notification cannot
  * arrive in Chinese by mail and in English in the inbox.
  *
+ * [#24978] The same chain picks the language a KEYED notification text is
+ * rendered in (`EmitInput.keyedText`, `notification-text.ts`): rendered at
+ * delivery, ahead of every channel, through {@link resolveRecipientLocale}.
+ *
  * ## The chain
  *
  *  1. the recipient's own `sys_user.locale` ({@link RECIPIENT_LOCALE_FIELD}).

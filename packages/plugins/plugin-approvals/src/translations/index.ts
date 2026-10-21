@@ -8,7 +8,8 @@
  * runtime via the plugin's `kernel:ready` hook (`i18n.loadTranslations`).
  * Regenerate the `objects` bundles with `os i18n extract` against
  * `scripts/i18n-extract.config.ts`; the `pages` entry is hand-authored in
- * `./pages.ts`.
+ * `./pages.ts`, and the `messages` entries — the approval notifications'
+ * sentences (#24978) — in `./messages.ts`.
  */
 
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
@@ -21,6 +22,7 @@ import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
 import { approvalsPageTranslations, pageSourceHashes } from './pages.js';
+import { approvalMessages } from './messages.js';
 
 /**
  * ## The provenance companions are READ here, not merely recorded
@@ -51,20 +53,26 @@ import { approvalsPageTranslations, pageSourceHashes } from './pages.js';
  * superseded draft is the bug; `check:i18n-stale-fill`'s UNSERVED PROVENANCE
  * verdict fails the build if a committed companion stops being consulted here.
  */
-const enSource: TranslationData = { objects: enObjects, pages: approvalsPageTranslations.en };
+const enSource: TranslationData = {
+  objects: enObjects,
+  pages: approvalsPageTranslations.en,
+  // [#24978] The approval notifications' sentences (`./messages.ts`), read by
+  // the messaging service at delivery in each recipient's language.
+  messages: approvalMessages.en,
+};
 
 export const ApprovalsTranslations: TranslationBundle = {
   en: enSource,
   'zh-CN': withSourceFallback(
-    { objects: zhCNObjects, pages: approvalsPageTranslations['zh-CN'] },
+    { objects: zhCNObjects, pages: approvalsPageTranslations['zh-CN'], messages: approvalMessages['zh-CN'] },
     enSource, pageSourceHashes['zh-CN'], zhCNGeneratedSourceHashes,
   ),
   'ja-JP': withSourceFallback(
-    { objects: jaJPObjects, pages: approvalsPageTranslations['ja-JP'] },
+    { objects: jaJPObjects, pages: approvalsPageTranslations['ja-JP'], messages: approvalMessages['ja-JP'] },
     enSource, pageSourceHashes['ja-JP'], jaJPGeneratedSourceHashes,
   ),
   'es-ES': withSourceFallback(
-    { objects: esESObjects, pages: approvalsPageTranslations['es-ES'] },
+    { objects: esESObjects, pages: approvalsPageTranslations['es-ES'], messages: approvalMessages['es-ES'] },
     enSource, pageSourceHashes['es-ES'], esESGeneratedSourceHashes,
   ),
 };

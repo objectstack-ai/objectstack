@@ -1530,15 +1530,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           redirectURLs: {
             label: "Redirect URLs",
-            helpText: "One URL per line. Must use https:// in production."
+            helpText: "One URL per line. Web applications need https:// on a host other than localhost or another loopback address. Native applications may also use http:// on exactly localhost, 127.0.0.1 or [::1], on any port."
           },
           type: {
             label: "Application Type",
+            helpText: "Choose Native for a desktop or mobile app, or for an app in local development that redirects to http://localhost.",
             options: {
               web: "Web",
-              native: "Native",
-              "user-agent-based": "User-agent based",
-              public: "Public"
+              native: "Native"
             }
           }
         },
