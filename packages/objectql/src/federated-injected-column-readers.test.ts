@@ -348,6 +348,14 @@ const READERS: Record<string, Row> = {
       'tells an authored organization_id from the injection while re-planning registered schemas ' +
       '(ADR-0131 D7); it reads definitions, never a row',
   },
+  // [#24822] The insert's static-`readonly` subject, without the tenant column
+  // where the Layer 0 wall's seam declares it judges the insert's organization.
+  'engine.ts#insertStaticReadonlySubject :: organization_id': {
+    disposition: 'not-a-read',
+    why:
+      "leaves the column out of an insert's static-readonly subject where the wall's seam judges it; " +
+      'it reads a schema view and the caller row in hand, never storage',
+  },
   'tenancy/system-write-organization.ts#<module> :: organization_id': {
     disposition: 'not-a-read',
     why: 'the declaration of the default tenant column name',
