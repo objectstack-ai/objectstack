@@ -13,7 +13,7 @@ Clause-②: yes (widening) — `PostHookWriteImageCheck` gains the optional publ
 
 - **`@objectstack/objectql`.**
   - `PostHookWriteImageCheck` (reached as `OperationContext.postHookWriteImageCheck`) gains an optional member, `judgesOrganization?: boolean`. An enforcement layer sets it when the seam's `evaluate` holds every inserted row's `organization_id` to the tenant wall.
-  - `ObjectQL.insert` reads that member, and nothing else. When it is set, a non-system caller's explicit `organization_id` stays out of the pre-hook withhold and out of the static-`readonly` strip. The value is then stored as sent where the wall admits it, and refused by the wall where it does not.
+  - `ObjectQL.insert` reads that member to decide. When it is set and the object's `organization_id` is the platform's injected tenant column, a non-system caller's explicit `organization_id` stays out of the pre-hook withhold and out of the static-`readonly` strip. The injected column is told apart by the registry's provenance reader; an authored column keeps the strip. The value is then stored as sent where the wall admits it, and refused by the wall where it does not.
   - When the member is absent or `false`, both passes run exactly as before. That covers a seam that carries only a business `check`, a stack without an enforcement layer, and `validate()`, which runs no middleware.
 - **`@objectstack/plugin-security`.**
   - Step 3.7 sets the member only where it composes the wall's own parts into an insert's stored-image seam.
