@@ -1007,12 +1007,6 @@ describe('translation unknown-key strictness', () => {
       expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('`title` → `label`');
     });
 
-    it('names `tabs` on a component entry as the rename onto `items`', () => {
-      const result = parse({ home_tabs: { tabs: { my_leads: { label: 'My Leads' } } } });
-      expect(result.success).toBe(false);
-      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('`tabs` → `items`');
-    });
-
     it('carries the `label`/`title` trap alias the dashboard widget face carries', () => {
       // A page's headline is `label`; a component's is `title`. One level
       // apart, opposite spellings — the same trap `dashboards.widgets` names.

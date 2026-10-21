@@ -1188,7 +1188,7 @@ const appTranslationDataShape = () => ({
       // A page component's headline is `title`; the PAGE's is `label`. Same
       // document one level apart with opposite spellings — the same trap
       // `dashboards.widgets` names, so it gets the same alias table.
-      aliases: { name: 'title', heading: 'title', text: 'label', caption: 'description', help: 'description', helpText: 'description', empty: 'emptyText', emptyState: 'emptyText', tabs: 'items' },
+      aliases: { name: 'title', heading: 'title', text: 'label', caption: 'description', help: 'description', helpText: 'description', empty: 'emptyText', emptyState: 'emptyText' },
       guidance: {
         submitLabel:
           '`submitLabel` was removed in @objectstack/spec 17 (ADR-0049) — its only '
