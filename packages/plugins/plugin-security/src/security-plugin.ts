@@ -261,12 +261,14 @@ interface WriteImageCheckSeam {
   /** Set by the engine immediately before `evaluate` runs. */
   honoured?: boolean;
   /**
-   * [#24822] Set by step 3.7, and only by it: on an insert, `evaluate` holds
-   * every row's `organization_id` to the Layer 0 tenant wall's own parts. The
-   * engine then leaves a caller's explicit value on the row for that verdict
-   * instead of stripping it as `readonly`. Never set on a seam that carries the
-   * business `check` alone, or on a crossing platform operator's seam: neither
-   * judges the organization.
+   * [#24822] Set by step 3.7, and only by it: `evaluate` holds every stored
+   * row's `organization_id` to the Layer 0 tenant wall's own parts, on an
+   * insert and on a single-payload update (the by-id image, and every row the
+   * predicate path matched). The engine then leaves a caller's explicit value,
+   * or an update's re-point, on the row for that verdict instead of stripping
+   * it as `readonly`. Never set on a seam that carries the business `check`
+   * alone, on a crossing platform operator's seam, or on an update whose
+   * payload is an array: none of them judges the organization.
    */
   judgesOrganization?: boolean;
 }
@@ -3935,13 +3937,22 @@ export class SecurityPlugin implements Plugin {
       // Both close identically here: a SUPPLIED (non-empty) `organization_id` in
       // the write payload must satisfy the SAME Layer 0 filter the read side uses
       // (isolation active, tenant object, platform-admin posture exemption,
-      // fail-closed on a missing active org). For UPDATE this makes
-      // `organization_id` effectively immutable in non-platform user contexts: the
-      // only value that passes is the caller's active org (which — since the
-      // pre-image already scoped the target to that org — equals the row's current
-      // org), so a re-point to any OTHER tenant is denied. A bulk update carrying a
-      // cross-tenant `organization_id` change-set is caught too (the check inspects
-      // the change-set value here, and [#20013] every stored row in the engine).
+      // fail-closed on a missing active org). For UPDATE that bounds a re-point
+      // by the caller's organization scope, and [#24822] a re-point the wall
+      // admits is STORED as sent. Under `isolated` the only value that passes is
+      // the caller's active org (which, since the pre-image already scoped the
+      // target to that org, equals the row's current org), so a re-point to any
+      // OTHER tenant is denied. Under `group` a re-point to another organization
+      // of the membership set is admitted and stored there, and one outside the
+      // set is denied. On an app object's platform-injected column, the seam
+      // below declares `judgesOrganization`, so the engine's static-`readonly`
+      // strip leaves the admitted value on the row for this wall's verdict
+      // instead of taking it and keeping the row's own organization in silence.
+      // A `sys_` or platform-internal object, and an AUTHORED read-only
+      // `organization_id`, keep that strip. A bulk update carrying a
+      // cross-tenant `organization_id` change-set is caught too (the check
+      // inspects the change-set value here, and [#20013] every stored row in the
+      // engine).
       //
       // [#22278] The invariant, stated whole: wherever the wall applies to a
       // non-system UPDATE, the row's organization after the write is one the
@@ -4326,24 +4337,39 @@ export class SecurityPlugin implements Plugin {
                 if (emptiesOrganization(row)) denyOrganizationRemoval("the stored row's");
               }
             },
-            // ── [#24822 · ADR-0105 D5] The insert's organization is JUDGED here ──
+            // ── [#24822 · ADR-0105 D5] The write's organization is JUDGED here ──
             //
             // The loop above holds a stored row's `organization_id` to the wall
             // whenever the wall has parts, and the payload half above already
-            // refused every supplied value outside them. So on an insert the
-            // engine may leave a caller's explicit value on the row for this
-            // verdict instead of stripping it as `readonly` and storing the
-            // active organization in its place. That replacement was silent:
-            // a 2xx, with the row in another organization than the one the
-            // wall admitted. The member says so, and the engine reads nothing
-            // else. Set ONLY where the wall's own parts are composed in
-            // (`tenantParts` non-empty). The crossing operator's seam
+            // refused every supplied value outside them (and, on an update,
+            // every emptied one). So the engine may leave a caller's explicit
+            // value on the row for this verdict instead of stripping it as
+            // `readonly`: on an insert, rather than storing the active
+            // organization in its place; on an update, rather than keeping the
+            // row's own organization against a re-point the wall admitted.
+            // Both replacements were silent: a 2xx, with the row in another
+            // organization than the one the wall admitted. The member says so,
+            // and the engine reads nothing else.
+            //
+            // Set ONLY where the wall's own parts are composed in (`tenantParts`
+            // non-empty). The crossing operator's seam
             // (`operatorInsertLacksActiveOrganization` with no parts) judges no
             // organization: its loop admits every row. The business `check`
             // seam of step 3.6 never reaches this composition. Neither sets it,
-            // so the strip there runs as before. An update's organization is
-            // not this member's.
-            ...(opCtx.operation === 'insert' && tenantParts.length > 0 ? { judgesOrganization: true } : {}),
+            // so the strip there runs as before.
+            //
+            // And only on the two operations whose stored rows this loop is
+            // handed: an insert (its rows), and an update whose payload is ONE
+            // row (the by-id image, and every row the predicate path matched,
+            // each merged with that payload). An ARRAY update payload never
+            // reaches this composition (the condition above), so it is stated
+            // again here rather than inferred: the member is the seam's own
+            // claim about what it judges, and it must stay true if that
+            // condition ever moves.
+            ...(tenantParts.length > 0 &&
+            (opCtx.operation === 'insert' || (opCtx.operation === 'update' && !Array.isArray(opCtx.data)))
+              ? { judgesOrganization: true }
+              : {}),
           };
           opCtx.postHookWriteImageCheck = writeImageCheckSeam;
           tenantWallSeamInstalled = true;
