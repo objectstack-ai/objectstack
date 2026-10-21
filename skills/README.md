@@ -8,17 +8,20 @@ They ship as the npm package `@objectstack/skills`, released with the other
 copy it from `node_modules` into your agent's directory:
 
 ```bash
-npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+#   npm: npm install --save-dev "@objectstack/skills@…"   ·   yarn: yarn add -D "@objectstack/skills@…"
 npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
 ```
 
-Keep `--copy`: the skills land as real files in `.claude/skills/`, to commit with
-the project; without it they are links into `node_modules`, which a clone does
-not have. Name your own runtime after `--agent` (`codex`, `cursor`, …). To update,
-bump `@objectstack/skills` with the other `@objectstack/*` packages, then re-run
-the sync. The package is published from `18.0.0-next.0` on (there is no 17.x
-release); scaffolded projects, the move from a `skills add` install and the rest
-are in the [Skills reference](https://objectstack.ai/docs/ai/skills-reference#installing-skills).
+Add the package with the manager that installed the project: in a pnpm project,
+`npm install --save-dev` exits `1`. Keep `--copy`: the skills land as real files
+in `.claude/skills/`, to commit with the project; without it they are links into
+`node_modules`, which a clone does not have. Name your own runtime after
+`--agent` (`codex`, `cursor`, …). To update, bump `@objectstack/skills` with the
+other `@objectstack/*` packages, then re-run the sync. The package is published
+from `18.0.0-next.0` on (there is no 17.x release); scaffolded projects, the move
+from a `skills add` install and the rest are in the
+[Skills reference](https://objectstack.ai/docs/ai/skills-reference#installing-skills).
 
 **The `next` channel.** `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`
 reads the catalog straight from the repository's unreleased `main` — for trying

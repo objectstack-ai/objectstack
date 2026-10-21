@@ -626,10 +626,10 @@ function firstPatternMiss(declared: DeclaredPattern, value: unknown): { value: s
  *    `#rrggbbaa`): ADR-0007 declares "hex string", the colour picker emits the
  *    six-digit form, and the reader serves the value as a browser theme colour.
  *
- * `code` is the ADR-0114 `FieldErrorCode` the refusal of this format carries
- * (the catalog's closed set has no colour member, so `color` takes
- * `invalid_format`, the member for "a declared pattern/format the value does
- * not match"). It travels in the verdict so the refusal half reads it from
+ * `code` is the ADR-0114 `FieldErrorCode` the save door's refusal of this
+ * format carries (the catalog's closed set has no colour member, so `color`
+ * takes `invalid_format`, the member for "a declared pattern/format the value
+ * does not match"). It travels in the verdict so the call site reads it from
  * here rather than choosing a second time.
  */
 const DECLARED_VALUE_FORMATS: ReadonlyMap<
@@ -685,17 +685,23 @@ interface FormatMiss {
  * bounds and pattern judges next door are shared: one comparison living on one
  * door only is how #5204 and #6580 happened.
  *
- * ## The verdict WARNS in this major version; it does not refuse
+ * ## Both doors REFUSE a miss
  *
- * Under the standing rule 「甲」 a narrowing that no ADR-0087 conversion can
- * carry ships its loud half first, and refusing these values narrows what the
- * settings door has always accepted. Stored values are runtime state in
- * `sys_setting`, and an `OS_*` override is a deployment's environment, so no
- * conversion can rewrite either. Both call sites therefore REPORT a miss and
- * keep the value: the save is accepted and stored, the override stays in
- * force. The refusal is the next major version's, and it reads `code` from
- * this verdict, so turning the warning into a `FieldError` is a change at each
- * call site and nowhere else.
+ * Refusing these values narrows what the settings door accepted, and no
+ * ADR-0087 conversion can carry that: stored values are runtime state in
+ * `sys_setting`, and an `OS_*` override is a deployment's environment. Under
+ * the standing rule 「甲」 as the maintainer amended it, such a narrowing ships
+ * now, as a breaking minor, rather than waiting on a later major. So a miss is
+ * refused at both doors: the save door answers one `FieldError` for the key,
+ * with `code` (`validatePatch`), and stores nothing; the env door rejects the
+ * override the way it rejects every other family's miss
+ * (`reportRejectedEnvOverride`), so it is not in force and the key resolves
+ * from the next layer of the cascade.
+ *
+ * Neither door judges a value it is not handed. A row already stored that
+ * misses its format is still served by every read, and it does not block a
+ * save that does not TOUCH its key — the gate `validatePatch` applies to every
+ * family, for the reason it gives there.
  *
  * A non-string value is left alone, as `firstPatternMiss` leaves it: a format
  * constrains character shape, and policing the value's type is a different
@@ -804,14 +810,6 @@ export class SettingsService {
    * the value is part of the key and not just the var name.
    */
   private readonly reportedEnvOverrides = new Set<string>();
-  /**
-   * `OS_*` overrides already reported for missing their type's declared format
-   * (#24882), keyed `<envVar>=<value>` for the reason
-   * {@link reportedEnvOverrides} is: `get()` runs the env judgment on every
-   * read, and a genuinely new value must still be heard. The key lives only in
-   * memory; the warning itself never carries the value.
-   */
-  private readonly reportedEnvFormatMisses = new Set<string>();
   /**
    * `<namespace>.<key>` pairs whose fail-closed encryption refusal (#8026) has
    * already been reported to the logger. Deduped for the same reason
@@ -1198,11 +1196,10 @@ export class SettingsService {
     if (!reg) return;
     // Only the keys that declare something enforceable can be rejected, so only
     // they are worth walking: an option table (#5131/#5204), a value window
-    // (#5932), a standard value domain (#5712) or a pattern (#6580). A key whose
-    // TYPE declares a format (#24882) is walked too: its override is never
-    // rejected for the format, but a miss is reported here, at boot, beside the
-    // rest of the startup output. `effectiveEnvOverride` does the judging (and
-    // the reporting); the value it returns is of no interest here.
+    // (#5932), a standard value domain (#5712), a pattern (#6580), or a format
+    // its TYPE declares (#24882) — that last one has no per-key table, so its
+    // keys are found by type. `effectiveEnvOverride` does the judging (and the
+    // reporting); the value it returns is of no interest here.
     const enforceable = new Set([
       ...reg.optionTables.keys(),
       ...reg.bounds.keys(),
@@ -1252,7 +1249,9 @@ export class SettingsService {
    * still judged on one door only, now arrives through the same shared helper
    * the save path calls ({@link firstPatternMiss}), in the same family order
    * the save path applies — options → pattern → valueDomain → bounds — so the
-   * two doors report the same family for the same value.
+   * two doors report the same family for the same value. #24882 appends the
+   * format a key's TYPE declares (`email` / `url` / `phone` / `color`) to the
+   * end of that order, on both doors, through {@link firstFormatMiss}.
    */
   private effectiveEnvOverride(
     reg: RegisteredManifest,
@@ -1353,54 +1352,24 @@ export class SettingsService {
       }
     }
 
-    // The type's declared format (#24882) — judged LAST and never a rejection.
-    // Every refusal family above has passed, so this override IS in force;
-    // under 「甲」 a format miss is reported (`reportEnvFormatMiss`) and the
-    // override keeps winning the cascade and pinning the key, exactly as it did
-    // before this judgment existed. Same helper as the save path
-    // ({@link firstFormatMiss}).
+    // The format the key's TYPE declares (#24882), judged LAST — after every
+    // family above, in the position it holds in `validatePatch`, so a value
+    // that breaks a declared bound and its format is rejected for the bound at
+    // both doors. Same helper as the save path ({@link firstFormatMiss}). The
+    // line never prints the value, for any key: it carries the value's length
+    // instead (`shape`).
     const formatMiss = firstFormatMiss(declaredTypeOf(reg.manifest, key), value);
-    if (formatMiss) this.reportEnvFormatMiss(namespace, key, envName, value, formatMiss);
+    if (formatMiss) {
+      this.reportRejectedEnvOverride(reg, namespace, key, envName, value, {
+        what: `does not match the format its type '${formatMiss.type}' declares for`,
+        detail: `Allowed values: ${formatMiss.expected}.`,
+        fix: formatMiss.expected,
+        shape: formatMiss.shape,
+      });
+      return null;
+    }
 
     return { envName, value };
-  }
-
-  /**
-   * Emit the one warning an in-force `OS_*` override owes its operator when its
-   * value misses the type's declared format (#24882), at most once per
-   * (env var, value) for the life of the service — the dedupe
-   * {@link reportRejectedEnvOverride} applies, for the same reason.
-   *
-   * **Level is `warn`, not `error`.** AGENTS.md → "Degradation log levels": the
-   * override is in force and is served as configured, so nothing the system
-   * claims has failed to land. That is the line between this report and the
-   * `error` a REJECTED override gets.
-   *
-   * **The value is never printed**, for any key — secret-bearing or not: an
-   * environment variable's value does not go into a log line. The line carries
-   * the variable's name, the setting, the type, what the format expects and the
-   * value's length, which is enough to find and fix it. No structured `meta`,
-   * for the reason {@link reportRejectedEnvOverride} gives.
-   */
-  private reportEnvFormatMiss(
-    namespace: string,
-    key: string,
-    envName: string,
-    value: unknown,
-    miss: FormatMiss,
-  ): void {
-    const dedupeAt = `${envName}=${String(value)}`;
-    if (this.reportedEnvFormatMisses.has(dedupeAt)) return;
-    this.reportedEnvFormatMisses.add(dedupeAt);
-    const message =
-      `[SettingsService] env override ${envName} for setting '${namespace}.${key}' ` +
-      `(type '${miss.type}') is not ${miss.expected} — the value is ${miss.shape}. ` +
-      `It IS in force: reads serve it with source 'env' and the key stays locked against saves. ` +
-      `The declared format is reported, not enforced, in this major version; a later major ` +
-      `version refuses it. Fix: set ${envName} to ${miss.expected}, or unset it and ` +
-      `configure '${namespace}.${key}' through the settings UI.`;
-    if (this.logger?.warn) this.logger.warn(message);
-    else console.warn(message);
   }
 
   /**
@@ -1445,8 +1414,12 @@ export class SettingsService {
      * sentence template needs. Passed in rather than branched on here so a
      * third constraint family reuses the dedupe, the redaction rule and the
      * consequence/fix prose instead of growing a second reporter beside them.
+     *
+     * `shape`, when given, replaces the value in the line for EVERY key, not
+     * only an encrypted one: the format family (#24882) reports what the value
+     * looks like (its length) and never the value itself.
      */
-    rejection: { what: string; detail: string; fix: string },
+    rejection: { what: string; detail: string; fix: string; shape?: string },
   ): void {
     const dedupeAt = `${envName}=${String(offending)}`;
     if (this.reportedEnvOverrides.has(dedupeAt)) return;
@@ -1457,7 +1430,9 @@ export class SettingsService {
     // held encrypted, in a message that lands in logs. Same rule, same reason,
     // as the save path's `invalid_option` error.
     const secret = reg.encryptedKeys.has(key);
-    const rejected = secret ? '' : ` Rejected value: '${String(offending)}'.`;
+    const rejected = typeof rejection.shape === 'string'
+      ? ` The rejected value is ${rejection.shape}; it is not printed.`
+      : secret ? '' : ` Rejected value: '${String(offending)}'.`;
     const message =
       `[SettingsService] env override ${envName} ${rejection.what} ` +
       `setting '${namespace}.${key}' — IGNORED.${rejected} ${rejection.detail} ` +
@@ -2457,10 +2432,10 @@ export class SettingsService {
    *   (`invalid_value`, #6199).
    * - The format the specifier TYPE declares (`email` / `url` / `phone` /
    *   `color`, ADR-0007; #24882) + non-empty string value that misses it →
-   *   ACCEPTED, and reported: one `warn` line per key, emitted only when the
-   *   patch as a whole is accepted. Never a `FieldError` in this major version
-   *   (「甲」 — see {@link firstFormatMiss}); judged after every refusal family,
-   *   so it never changes which errors a refused patch carries.
+   *   rejected (`invalid_email` / `invalid_url` / `invalid_phone` /
+   *   `invalid_format`, the code the verdict carries — see
+   *   {@link firstFormatMiss}). Judged after every other family, so a value
+   *   that also breaks one of those is refused for that one.
    * - All-null patches (namespace reset) skip validation rather than block the
    *   write.
    * - A `visible` predicate `evaluateVisibility` cannot parse → the write is
@@ -2479,7 +2454,9 @@ export class SettingsService {
    * for the same reason and one more: bounds get TIGHTENED over a product's
    * life (a `password_min_length` floor raised from 6 to 8), and a workspace
    * sitting below the new floor must still be able to edit its unrelated
-   * settings — it is told about the key only when it writes that key.
+   * settings — it is told about the key only when it writes that key. The
+   * format check (#24882) inherits it for the first reason: a value stored
+   * before that check existed is refused only by a patch that touches its key.
    *
    * At most one `FieldError` per offending key: every branch above `continue`s
    * once it has spoken, so a client is handed the first constraint the value
@@ -2547,9 +2524,6 @@ export class SettingsService {
     // a `key → message` map and could only re-emit the prose — so the code is
     // stamped at the point the check fails rather than inferred from the text.
     const errors: FieldError[] = [];
-    // Format misses (#24882), reported — never refused — once the patch is
-    // known to be accepted. See the format branch at the bottom of the loop.
-    const formatMisses: Array<{ key: string; miss: FormatMiss }> = [];
 
     for (const spec of (reg.manifest.specifiers ?? []) as Array<Record<string, unknown>>) {
       const key = spec.key as string | undefined;
@@ -2799,39 +2773,31 @@ export class SettingsService {
       }
 
       // The format the specifier TYPE declares (ADR-0007; #24882), judged last
-      // so every refusal family above keeps precedence and the errors a refused
-      // patch carries are exactly what they were. Under 「甲」 a miss is
-      // RECORDED, not refused: the save is accepted and the value is stored as
-      // written. The refusal half turns this push into an `errors.push` of a
-      // `FieldError` built from `miss.code` — this branch and the env door's are
-      // the only two sites (`firstFormatMiss`).
+      // so every family above keeps precedence. The code is the one the
+      // verdict carries (`firstFormatMiss`), the same helper the env door
+      // calls. The message names what the format expects and never the value,
+      // for any key, so neither `value` nor a `Received` echo is attached: the
+      // caller sent the value and needs only to be told what to send instead.
+      // `constraint.type` names the declaring property, so a client can tell a
+      // colour's `invalid_format` from a declared pattern's (`constraint.
+      // pattern`) without parsing the sentence (ADR-0114).
       if (!empty) {
         const miss = firstFormatMiss(type, value);
-        if (miss) formatMisses.push({ key, miss });
+        if (miss) {
+          errors.push({
+            field: key,
+            code: miss.code,
+            message: `${label} must be ${miss.expected}.`,
+            label,
+            constraint: { type: miss.type },
+          });
+          continue;
+        }
       }
     }
 
     if (errors.length > 0) {
       throw new SettingsValidationError(namespace, errors);
-    }
-
-    // The patch is accepted. A key whose value misses its declared format is
-    // reported once per save, at `warn`: the value lands and is served, so
-    // nothing the system claims has failed (AGENTS.md → "Degradation log
-    // levels"). The value itself is never printed — not for a secret-bearing
-    // key, and not for any other: the line carries the setting, the type, what
-    // the format expects and the value's length, which is what an operator
-    // needs to find it. No structured `meta`, for the reason
-    // `reportRejectedEnvOverride` gives.
-    for (const { key, miss } of formatMisses) {
-      const message =
-        `[SettingsService] Setting '${namespace}.${key}' (type '${miss.type}') holds a value ` +
-        `that is not ${miss.expected} after this save — the value is ${miss.shape}. ` +
-        `The save is accepted: the value is stored and served as written. The declared format ` +
-        `is reported, not enforced, in this major version; a later major version refuses it. ` +
-        `Fix: save ${miss.expected} for '${namespace}.${key}', or clear it.`;
-      if (this.logger?.warn) this.logger.warn(message);
-      else console.warn(message);
     }
   }
 
