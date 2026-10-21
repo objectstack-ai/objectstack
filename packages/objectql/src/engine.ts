@@ -6140,11 +6140,11 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Per parent object `P`, once per call, in this order:
    *
-   *  1. **D5's three classes are refused, by name** (`INTERNAL_ERROR` / 500),
-   *     before the security service is asked anything: a delegated
-   *     (on-behalf-of) caller; a parent an object-scoped read middleware
-   *     narrows ({@link hasObjectMiddleware}); a parent bound to another
-   *     datasource than `object` ({@link resolveDatasourceBinding}).
+   *  1. **D5's two remaining classes are refused, by name** (`INTERNAL_ERROR`
+   *     / 500), before the security service is asked anything: a parent an
+   *     object-scoped read middleware narrows ({@link hasObjectMiddleware}); a
+   *     parent bound to another datasource than `object`
+   *     ({@link resolveDatasourceBinding}).
    *  2. **A parent the registry does not hold** ⇒ `$in: []`, unasked.
    *  3. **The security service** — absent or unusable ⇒ `$in: []`.
    *  4. **`canReadObject(P)`** (its `explain` fallback when the method is
@@ -6154,6 +6154,17 @@ export class ObjectQL implements IObjectQLEngine {
    *     `$in: []`; any other filter ⇒ composed with it as the scope, marked
    *     `'policy'` and otherwise passed exactly as `P`'s own read passes its
    *     injected scope. The tenant wall is the driver's (D3).
+   *
+   * [ADR-0139 D5.1, as amended] A **delegated (on-behalf-of) caller** is
+   * composed, not refused: both halves are asked with the caller's context
+   * exactly as it stands — `onBehalfOf` intact — and the security service
+   * answers each half for the delegated principal, which under ADR-0090 D10
+   * is the INTERSECTION of the principal's leg and the delegator's. The
+   * engine composes what it is answered and derives no second intersection
+   * of its own: it has one context, the delegated one, and the delegator's
+   * grants are the security service's to resolve. A service that cannot
+   * answer that context answers the deny sentinel, and step 5 turns it into
+   * `$in: []`, closed.
    *
    * Nothing is memoised across calls. `aggregate`'s `having` and its
    * aggregations' own filters are judged here too, so a leaf a middleware
@@ -6174,7 +6185,7 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const sites = collectComposableReadableIds(object, operation, ast.where, 'where');
     if (sites.length === 0) return ast;
-    const parents = this.refuseUncomposableReadableIdsClasses(object, operation, sites, context);
+    const parents = this.refuseUncomposableReadableIdsClasses(object, operation, sites);
 
     const security = this.resolveReadableIdsSecurity();
     if (security.kind !== 'usable' && !this.readableIdsSecurityReported.has(security.kind)) {
@@ -6202,17 +6213,18 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * [ADR-0139 D5] Refuse D5's three classes, by name, and return the distinct
-   * parent objects of `sites` the security service is asked about, in walk
-   * order (every one but a parent the registry does not hold). Reads the
-   * context, the registry and the middleware registrations only — no security
-   * call.
+   * [ADR-0139 D5] Refuse D5's two remaining classes (D5.2 and D5.3), by name,
+   * and return the distinct parent objects of `sites` the security service is
+   * asked about, in walk order (every one but a parent the registry does not
+   * hold). Reads the registry and the middleware registrations only — no
+   * security call, and no reading of the caller's context: a delegated
+   * (on-behalf-of) caller is no longer a class of its own (D5.1, as amended),
+   * it is composed like any other through the security service's answers.
    */
   private refuseUncomposableReadableIdsClasses(
     object: string,
     operation: string,
     sites: readonly ComposableReadableIdsSite[],
-    context: ExecutionContext | undefined,
   ): string[] {
     const firstSite = new Map<string, ComposableReadableIdsSite>();
     for (const site of sites) if (!firstSite.has(site.leaf.object)) firstSite.set(site.leaf.object, site);
@@ -6222,11 +6234,6 @@ export class ObjectQL implements IObjectQLEngine {
       `such leaf ${why}. The query was NOT run and no driver was asked. Read this class through its bounded ` +
       'probe, chosen before the leaf is written.',
     );
-    const delegator = (context as { onBehalfOf?: { userId?: unknown } } | undefined)?.onBehalfOf?.userId;
-    if (delegator) {
-      throw refuse(sites[0], 'for a delegated (on-behalf-of) caller: the parent\'s read scope does not carry the ' +
-        'delegator intersection, so the composed leaf would not answer what a direct read answers');
-    }
     const outer = this.resolveDatasourceBinding(object)?.datasource;
     const composable: string[] = [];
     for (const [parent, site] of firstSite) {
