@@ -45,10 +45,12 @@
  *   - **The database FILE cannot be opened or created, or is not a database —
  *     re-thrown, as in production.** A path under a regular file, a parent
  *     directory the driver cannot make, a permission refusal, a directory where
- *     the file should be, a file whose bytes are not a SQLite database.
+ *     the file should be, a file whose bytes are not a SQLite database, a
+ *     database whose header SQLite cannot read.
  *     `SqlDriver.connect()` names these with the operating system's code
  *     (`EEXIST`, `ENOTDIR`, `ENOENT`, `EACCES`, …) or SQLite's
- *     `SQLITE_CANTOPEN` / `SQLITE_NOTADB`; see {@link isSqliteFileOpenFailure}.
+ *     `SQLITE_CANTOPEN` / `SQLITE_NOTADB` / `SQLITE_CORRUPT`; see
+ *     {@link isSqliteFileOpenFailure}.
  *     A file that is not a database used to step down to wasm SQLite, whose
  *     open moved the operator's file aside and wrote an empty database in its
  *     place (#24960). Every rung opens
@@ -138,9 +140,10 @@ function isEphemeralFilename(filename: string): boolean {
 }
 
 /**
- * Is this probe failure the database FILE failing to open or be created, or
- * not being a database at all, as opposed to the native addon failing to load
- * (#24950, #24960)? Judged on the thrown value's own `code` alone, never on its
+ * Is this probe failure the database FILE failing to open or be created, not
+ * being a database at all, or being one SQLite cannot read, as opposed to the
+ * native addon failing to load (#24950, #24960, #25019)? Judged on the thrown
+ * value's own `code` alone, never on its
  * message. `SqlDriver.connect()` is what refuses such a file, with a
  * `SqliteDatabaseFileError` whose `code` is the answer it got:
  *
@@ -152,7 +155,11 @@ function isEphemeralFilename(filename: string): boolean {
  *   - SQLite's `SQLITE_NOTADB`: the file opens, and its bytes are not a SQLite
  *     database. wasm SQLite reads the same bytes, and its open moves a file it
  *     cannot read aside and starts an empty database in its place, so stepping
- *     down would replace the operator's file rather than read it.
+ *     down would replace the operator's file rather than read it;
+ *   - SQLite's `SQLITE_CORRUPT` (#25019): the file is a SQLite database whose
+ *     header or schema SQLite cannot read, such as one truncated inside its
+ *     header. The connection's first statement answers it only for damage of
+ *     that kind, and wasm SQLite would move it aside the same way.
  *
  * An addon that cannot load never carries any of these. It surfaces at the
  * probe's `SELECT 1`, whose failure `SqlDriver.execute()` hands back as
@@ -167,7 +174,7 @@ function isEphemeralFilename(filename: string): boolean {
 function isSqliteFileOpenFailure(err: unknown): boolean {
   const code = (err as { code?: unknown } | null | undefined)?.code;
   if (typeof code !== 'string') return false;
-  return /^E[A-Z0-9]+$/.test(code) || code === 'SQLITE_CANTOPEN' || code === 'SQLITE_NOTADB';
+  return /^E[A-Z0-9]+$/.test(code) || code === 'SQLITE_CANTOPEN' || code === 'SQLITE_NOTADB' || code === 'SQLITE_CORRUPT';
 }
 
 /** Best-effort close of a probe driver that failed; its own error is not the answer. */
