@@ -28,6 +28,9 @@
  *   grant) deletes fully, and nothing is left naming it but the append-only
  *   `sys_activity` ledger, whose rows are kept (seat decision 6305179819). The
  *   boot composes the audit plugin, as `os serve` does, so that ledger is live.
+ * - An organization whose only rows are an approval request (engine-owned)
+ *   and its actions (append-only) deletes too, and those rows are kept, still
+ *   naming it (seat decision 6307135388).
  * - An organization holding a business unit is refused like one holding any
  *   other record.
  * - (d) The engine refuses the same delete on its own, whatever path reaches
@@ -59,7 +62,7 @@ describe('[#24948] organization delete: refused while it owns records, whole whe
   let ownerToken: string;
   let adminToken: string;
   let ownerId: string;
-  const org = { empty: '', full: '', unit: '' };
+  const org = { empty: '', full: '', unit: '', approval: '' };
 
   /** Every count the delete may touch, for one organization. */
   const snapshot = async (organizationId: string) => {
@@ -119,6 +122,19 @@ describe('[#24948] organization delete: refused while it owns records, whole whe
     org.empty = await createOrg('Org Delete Empty', 'org-delete-empty');
     org.full = await createOrg('Org Delete Full', 'org-delete-full');
     org.unit = await createOrg('Org Delete Unit', 'org-delete-unit');
+    org.approval = await createOrg('Org Delete Approval', 'org-delete-approval');
+    // [seat decision 6307135388] What an approval leaves behind: the request
+    // (engine-owned) and its actions (append-only). The platform writes both.
+    const now = new Date().toISOString();
+    await ql.insert('sys_approval_request', {
+      id: 'apr_org_delete', organization_id: org.approval, process_name: 'expense_approval',
+      object_name: 'showcase_category', record_id: 'cat_gone', status: 'approved', created_at: now,
+    }, { context: SYSTEM_CTX });
+    for (const [id, action] of [['apa_org_delete_1', 'submit'], ['apa_org_delete_2', 'approve']]) {
+      await ql.insert('sys_approval_action', {
+        id, organization_id: org.approval, request_id: 'apr_org_delete', action, created_at: now,
+      }, { context: SYSTEM_CTX });
+    }
     // A business unit is a record its administrator created, not structure.
     await ql.insert('sys_business_unit', { name: 'Field Ops', kind: 'department', organization_id: org.unit }, { context: SYSTEM_CTX });
     for (const id of [org.empty, org.full]) {
@@ -219,6 +235,24 @@ describe('[#24948] organization delete: refused while it owns records, whole whe
       showcase_preference: 0,
     });
     expect(await orphans()).toEqual(orphansBefore);
+  });
+
+  it('an organization whose only rows are an approval request and its actions deletes, and keeps them naming it', async () => {
+    const requestsBefore = await findRows(ql, 'sys_approval_request', { organization_id: org.approval });
+    const actionsBefore = await findRows(ql, 'sys_approval_action', { organization_id: org.approval });
+    expect(requestsBefore.map((r) => r.id), 'PREMISE: the request names the organization').toEqual(['apr_org_delete']);
+    expect(actionsBefore.length, 'PREMISE: its actions name the organization').toBe(2);
+
+    const res = await deleteOrg(ownerToken, org.approval);
+
+    // [seat decision 6307135388] Engine-owned and append-only rows refuse
+    // nothing, and are kept, still naming the deleted organization.
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await findRows(ql, 'sys_organization', { id: org.approval })).toEqual([]);
+    expect(await findRows(ql, 'sys_approval_request', { organization_id: org.approval })).toEqual(requestsBefore);
+    expect(await findRows(ql, 'sys_approval_action', { organization_id: org.approval })).toEqual(actionsBefore);
+    expect(await findRows(ql, 'sys_approval_request', { organization_id: null })).toEqual([]);
+    expect(await findRows(ql, 'sys_approval_action', { organization_id: null })).toEqual([]);
   });
 
   it('an organization holding only a business unit is refused 409 with its count, and nothing changes', async () => {

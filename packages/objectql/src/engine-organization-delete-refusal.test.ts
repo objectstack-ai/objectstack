@@ -170,7 +170,7 @@ const AUDIT_LIKE = {
   },
 };
 
-/** Tenancy disabled, with an `organization_id` attribution column (`sys_approval_request`). */
+/** Tenancy disabled, with an `organization_id` attribution column (the closed rule of seat decision 6305996369, B5). */
 const REQUEST_LIKE = {
   name: 'request_like',
   label: 'Request',
@@ -178,6 +178,28 @@ const REQUEST_LIKE = {
   fields: {
     subject: { name: 'subject', label: 'Subject', type: 'text' as const },
     organization_id: { name: 'organization_id', label: 'Organization', type: 'lookup' as const, reference: 'sys_organization' },
+  },
+};
+
+/**
+ * An engine-owned object with a tenant column (`sys_approval_request`): the
+ * platform writes its rows, an administrator cannot delete them, and they
+ * outlive the organization (seat decision 6307135388).
+ */
+const APPROVAL_LIKE = {
+  name: 'approval_like',
+  label: 'Approval request',
+  managedBy: 'engine-owned' as const,
+  fields: { status: { name: 'status', label: 'Status', type: 'text' as const } },
+};
+/** Its actions: an append-only ledger (`sys_approval_action`). */
+const APPROVAL_ACTION_LIKE = {
+  name: 'approval_action_like',
+  label: 'Approval action',
+  managedBy: 'append-only' as const,
+  fields: {
+    request_id: { name: 'request_id', label: 'Request', type: 'lookup' as const, reference: 'approval_like' },
+    action: { name: 'action', label: 'Action', type: 'text' as const },
   },
 };
 
@@ -301,6 +323,43 @@ describe('[#24948] an append-only ledger neither refuses the delete nor is clear
     const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT, LEDGER]);
     store.seed('activity_like', { id: 'l1', organization_id: ORG_ID });
     expect(await engine.organizationOwnedRowCounts(ORG_ID)).toEqual([]);
+  });
+});
+
+describe('[#24948] an engine-owned object neither refuses the delete nor is cleared by it (seat decision 6307135388)', () => {
+  const seedApproval = (store: ReturnType<typeof makeDriver>) => {
+    store.seed('approval_like', { id: 'ar1', status: 'approved', organization_id: ORG_ID });
+    store.seed('approval_action_like', { id: 'aa1', request_id: 'ar1', action: 'submit', organization_id: ORG_ID });
+    store.seed('approval_action_like', { id: 'aa2', request_id: 'ar1', action: 'approve', organization_id: ORG_ID });
+  };
+
+  it('deletes an organization whose only rows are an approval request and its actions, and keeps them naming it', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT, APPROVAL_LIKE, APPROVAL_ACTION_LIKE]);
+    seedApproval(store);
+    expect(await engine.organizationOwnedRowCounts(ORG_ID)).toEqual([]);
+
+    expect(await deleteOrg(engine)).toBeNull();
+
+    expect(store.rows('sys_organization').map((r) => r.id)).toEqual([OTHER_ORG]);
+    // Kept, and still naming the deleted organization: never NULL, never deleted.
+    expect(store.rows('approval_like').map((r) => [r.id, r.organization_id])).toEqual([['ar1', ORG_ID]]);
+    expect(store.rows('approval_action_like').map((r) => [r.id, r.request_id, r.organization_id])).toEqual([
+      ['aa1', 'ar1', ORG_ID],
+      ['aa2', 'ar1', ORG_ID],
+    ]);
+    expect(store.writes.filter((w) => w.includes('approval_'))).toEqual([]);
+  });
+
+  it('CONTROL: beside them, a record still refuses, and only the record is named', async () => {
+    const { engine, store } = await makeEngine([ORGANIZATION, ACCOUNT, APPROVAL_LIKE, APPROVAL_ACTION_LIKE]);
+    seedApproval(store);
+    store.seed('acct', { id: 'a1', organization_id: ORG_ID });
+
+    const err = await deleteOrg(engine);
+
+    expect(err?.code).toBe('DELETE_RESTRICTED');
+    expect(err?.dependents).toEqual([{ object: 'acct', count: 1 }]);
+    expect(store.writes).toEqual([]);
   });
 });
 

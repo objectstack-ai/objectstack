@@ -20018,45 +20018,52 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * [#24948] Is `child` an append-only ledger, whose rows outlive the
-   * organization they name? Read from the declaration the object already
-   * carries, `managedBy: 'append-only'` (the audit bucket: `sys_activity`,
-   * `sys_audit_log`, `sys_email` and their siblings), never from a list of
-   * names.
+   * [#24948] Do `child`'s rows outlive the organization they name? Read from
+   * the declaration the object already carries, never from a list of names:
    *
-   * Such a row is history, not a record an administrator manages: it ages out
-   * on its own retention, or is the delivery log of something that already
-   * happened. The organization delete itself writes `sys_activity` rows, so a
-   * ledger that counted would refuse every organization delete, the empty ones
-   * included. Neither refusal counts a ledger. Its rows are kept, and so is
-   * their tenant column: it goes on naming the deleted organization, never
-   * NULL (ADR-0131 D1) and never deleted (ADR-0131 §8), and under tenant
-   * scoping the rows read as no organization's (seat decision 6305179819).
+   *   - `managedBy: 'append-only'`, a ledger (the audit bucket: `sys_activity`,
+   *     `sys_audit_log`, `sys_email` and their siblings). Such a row is history:
+   *     it ages out on its own retention, or is the delivery log of something
+   *     that already happened. The organization delete itself writes
+   *     `sys_activity` rows, so a ledger that counted would refuse every
+   *     organization delete, the empty ones included (seat decision 6305179819).
+   *   - `managedBy: 'engine-owned'`, a row the platform writes as a consequence
+   *     of records or activity (approval state, automation runs, notification
+   *     and HTTP deliveries, mirrored mail, record shares, import jobs,
+   *     settings values), which an administrator cannot delete over the data
+   *     API. Counting it would make any organization that has been used
+   *     undeletable through every door (seat decision 6307135388).
+   *
+   * Neither refusal counts such a row. It is kept, and so is every reference it
+   * holds to the organization: it goes on naming the deleted organization,
+   * never NULL (ADR-0131 D1) and never deleted (ADR-0131 §8), and under tenant
+   * scoping the row reads as no organization's.
    */
-  private static isAppendOnlyLedger(child: ServiceObject): boolean {
-    return (child as { managedBy?: unknown })?.managedBy === 'append-only';
+  private static outlivesOrganization(child: ServiceObject): boolean {
+    const managedBy = (child as { managedBy?: unknown })?.managedBy;
+    return managedBy === 'append-only' || managedBy === 'engine-owned';
   }
 
   /**
    * [#24948] Does an organization delete keep `child.fieldName`, a `set_null`
    * lookup into `sys_organization` that is not `child`'s tenant column, as it
-   * is? Two kinds of reference, and only these (seat decisions 6305179819 and
-   * 6305996369):
+   * is? Two kinds of reference, and only these (seat decisions 6305179819,
+   * 6305996369 and 6307135388):
    *
-   *   - every such lookup on an append-only ledger ({@link isAppendOnlyLedger}):
-   *     `sys_audit_log.tenant_id` is the audit log's attribution, not its tenant
-   *     column, and history outlives what it audits;
+   *   - every such lookup on an object whose rows outlive the organization
+   *     ({@link outlivesOrganization}): `sys_audit_log.tenant_id` is the audit
+   *     log's attribution, not its tenant column, and history outlives what it
+   *     audits;
    *   - an attribution column named `organization_id` on an object whose
-   *     tenancy is disabled (`resolveTenantFieldName` answers null), such as
-   *     `sys_approval_request`: an engine-owned row an administrator cannot
-   *     delete, so it is neither counted nor cleared.
+   *     tenancy is disabled (`resolveTenantFieldName` answers null): neither
+   *     counted nor cleared. No object in this tree declares one today.
    *
    * Everything else keeps its `set_null`: a pointer such as a session's or an
    * API key's `active_organization_id`, or a parent-organization lookup, is
    * cleared exactly as before.
    */
   private static keepsOrganizationReference(child: ServiceObject, fieldName: string): boolean {
-    if (ObjectQL.isAppendOnlyLedger(child)) return true;
+    if (ObjectQL.outlivesOrganization(child)) return true;
     return fieldName === SystemFieldName.ORGANIZATION_ID && resolveTenantFieldName(child) === null;
   }
 
@@ -20115,7 +20122,7 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * [#24948] The engine half of organization delete: refuse while any row
    * outside the cascade set still names the organization in its tenant column,
-   * an append-only ledger's excepted ({@link isAppendOnlyLedger}).
+   * a row that outlives the organization excepted ({@link outlivesOrganization}).
    *
    * Runs before the walk touches the first relation, and reads every tenant
    * relation before it throws, so the one refusal names every table that holds
@@ -20143,8 +20150,8 @@ export class ObjectQL implements IObjectQLEngine {
     for (const child of objects) {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
-      // An append-only ledger's rows outlive the organization: not counted, kept as they are.
-      if (!childName || !fields || ObjectQL.isAppendOnlyLedger(child)) continue;
+      // An append-only or engine-owned object's rows outlive the organization: not counted, kept as they are.
+      if (!childName || !fields || ObjectQL.outlivesOrganization(child)) continue;
       for (const [fieldName, fdef] of Object.entries(fields)) {
         const behavior = this.cascadeRelationBehavior(ORGANIZATION_OBJECT, child, fieldName, fdef);
         if (!this.isTenantColumnSetNull(ORGANIZATION_OBJECT, child, fieldName, behavior)) continue;
@@ -20194,8 +20201,8 @@ export class ObjectQL implements IObjectQLEngine {
    * row.
    *
    * `exclude` names the objects the caller removes as part of the delete
-   * itself. An append-only ledger is never counted ({@link isAppendOnlyLedger}),
-   * the same set the engine's own refusal leaves out.
+   * itself. An append-only or engine-owned object is never counted ({@link
+   * outlivesOrganization}), the same set the engine's own refusal leaves out.
    */
   async organizationOwnedRowCounts(
     organizationId: string,
@@ -20206,7 +20213,7 @@ export class ObjectQL implements IObjectQLEngine {
     for (const child of this._registry.getAllObjects()) {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
-      if (!childName || !fields || exclude.has(childName) || ObjectQL.isAppendOnlyLedger(child)) continue;
+      if (!childName || !fields || exclude.has(childName) || ObjectQL.outlivesOrganization(child)) continue;
       const tenantField = resolveTenantFieldName(child);
       if (!tenantField || !fields[tenantField]) continue;
       const fdef = fields[tenantField];
