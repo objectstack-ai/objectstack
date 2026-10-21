@@ -256,6 +256,12 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 // sections' `label` / `description` localized beside the
                 // schema's field labels (see the translation block).
                 let servedForm: any = match.form;
+                // The top-level `label`, served from the TRANSLATED view
+                // when the view authors one (see the translation block). A
+                // view that authors none keeps the route's own reading, so
+                // the console's `label ?? form.title ?? objectSchema.label`
+                // still reaches the form's (translated) title.
+                let servedLabel: any = match.view?.label ?? match.form?.label;
                 try {
                     const p = await this.resolveProtocol(environmentId, req);
                     if (typeof (p as any).getMetaItems === 'function') {
@@ -334,15 +340,23 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                                     // never swapped for the item's `config`. It runs
                                     // BEFORE the strip below and returns each section's
                                     // `fields` untouched, so it cannot re-introduce a
-                                    // stripped field. The top-level `label` keeps its
-                                    // own reading: the translator falls back to the
-                                    // view's machine name where this route falls back
-                                    // to the form's label.
+                                    // stripped field. The same call translates the
+                                    // form's `title` (`objects.OBJECT._views.VIEW.title`,
+                                    // at `config.title`), so the served form carries it.
+                                    //
+                                    // The top-level `label` is taken from the translated
+                                    // view only when the view AUTHORS one: the translator
+                                    // falls back to the view's machine name, which must
+                                    // never shadow the form's title in the console's
+                                    // `label ?? form.title ?? objectSchema.label`.
                                     const view = translateMetadataDocument('view', match.view, bundle, {
                                         ...this.translateOptionsFor(i18n, locale),
                                         packagedBase: this.packagedObjectBase(p, 'view', match.view?.name),
                                     });
                                     if (match.form === match.view?.config) servedForm = view?.config;
+                                    if (match.view?.label !== undefined && view?.label !== undefined) {
+                                        servedLabel = view.label;
+                                    }
                                 }
                             } catch (e: any) {
                                 logError('[REST] Public form schema translation failed:', e);
@@ -389,7 +403,7 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 res.json({
                     slug,
                     object: match.object,
-                    label: match.view?.label ?? match.form?.label,
+                    label: servedLabel,
                     form: safeForm,
                     objectSchema,
                 });

@@ -4,7 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { coerceRow, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './import-field-meta.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
-import { canServeApiOperation, type DroppedFieldsEvent, type EnableLike } from '@objectstack/spec/data';
+import {
+  canServeApiOperation, isVirtualSearchField, resolveDisplayField,
+  type DisplayNameObjectMeta, type DroppedFieldsEvent, type EnableLike, type SearchFieldMeta,
+} from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CreateDataRequest, FindDataRequest, GetMetaItemRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
@@ -210,7 +213,8 @@ export interface ImportProtocolLike {
   /**
    * [#22739] The object-declaration read, the one the door's import template
    * and the connector pull already make. The reference resolution reads a
-   * lookup TARGET's `enable` block through it ({@link servesReferenceTarget}).
+   * lookup TARGET's `enable` block through it ({@link servesReferenceTarget}),
+   * and, from the same read, the target's title field and field map (#24981).
    * A protocol without it has no declaration to judge, and none is fabricated
    * for it; plugin-auth's identity import, whose reads run under the system
    * identity, carries it like every other caller (#22800).
@@ -593,17 +597,50 @@ const REFERENCE_TARGET_OPERATION = 'list';
  * caller. A refused target answers as a target the caller cannot read, which
  * is measured: every cell, matching or not, `reference_not_found`, and nothing
  * is read. A declaration that cannot be read withholds too (fail-closed).
+ *
+ * [#24981] A withheld target answers `null`. A served one answers what the
+ * resolution reads off the SAME declaration ({@link ServedReferenceTarget}),
+ * so the title costs no second read: still one read per target per import.
  */
-async function servesReferenceTarget(p: ImportProtocolLike, target: string): Promise<boolean> {
-  if (typeof p.getMetaItem !== 'function') return true;
-  let enable: EnableLike | null | undefined;
+async function servesReferenceTarget(p: ImportProtocolLike, target: string): Promise<ServedReferenceTarget | null> {
+  if (typeof p.getMetaItem !== 'function') return {};
+  let item: ReferenceTargetDeclaration | undefined;
   try {
-    const found = (await p.getMetaItem({ type: 'object', name: target })) as { item?: { enable?: EnableLike | null } } | undefined;
-    enable = found?.item?.enable;
+    const found = (await p.getMetaItem({ type: 'object', name: target })) as { item?: ReferenceTargetDeclaration } | undefined;
+    item = found?.item;
   } catch {
-    return false;
+    return null;
   }
-  return canServeApiOperation(enable, REFERENCE_TARGET_OPERATION);
+  if (!canServeApiOperation(item?.enable, REFERENCE_TARGET_OPERATION)) return null;
+  if (!item || typeof item !== 'object') return {};
+  return {
+    titleField: resolveDisplayField(item),
+    fields: item.fields as ServedReferenceTarget['fields'],
+  };
+}
+
+/** The slice of a lookup target's declaration the reference resolution reads. */
+type ReferenceTargetDeclaration = DisplayNameObjectMeta & { enable?: EnableLike | null };
+
+/**
+ * [#24981] What a served lookup target tells the reference resolution, read off
+ * its declaration by {@link servesReferenceTarget}.
+ */
+interface ServedReferenceTarget {
+  /**
+   * The field that titles a record of the target: ADR-0079's
+   * `resolveDisplayField`, the one rule the list export writes a lookup cell
+   * by (`withReferenceTitleFields` in `@objectstack/rest`), so a cell the export
+   * wrote is asked by the field it was written from. `undefined` when the
+   * declaration resolves none, or no declaration was read.
+   */
+  titleField?: string;
+  /**
+   * The target's declared field map. It is read for one question only: which
+   * candidate fields are virtual ({@link isVirtualSearchField}), because a
+   * `where` over a virtual field is refused by the engine's filter seam.
+   */
+  fields?: Readonly<Record<string, SearchFieldMeta | undefined>>;
 }
 
 /** Upper bound on rows in one createManyData batch (framework#2678 suggests 100-500). */
@@ -678,24 +715,34 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   // (object, display) so a name repeated across rows costs one query. The
   // target's exposure is asked first, once per target per import (#22739).
   const refCache = new Map<string, RefMatch>();
-  const servedTargets = new Map<string, Promise<boolean>>();
+  const servedTargets = new Map<string, Promise<ServedReferenceTarget | null>>();
   const resolveRef: RefResolver = async (referenceObject, display, meta) => {
     let served = servedTargets.get(referenceObject);
     if (!served) servedTargets.set(referenceObject, served = servesReferenceTarget(p, referenceObject));
-    if (!(await served)) return {};
+    const target = await served;
+    if (!target) return {};
     const cacheKey = `${referenceObject}::${display}`;
     const cached = refCache.get(cacheKey);
     if (cached) return cached;
     // Try an exact id first (authoritative + unique when the user pasted an id),
-    // then the configured display field, then the usual human identifiers.
-    // De-dupe so a field isn't queried twice. The first candidate field to match
-    // wins; if that field matches >1 record we stop and report ambiguity rather
-    // than silently linking the first.
+    // then the configured display field, then the target's own title field
+    // (#24981: ADR-0079's rule, the field the list export writes the cell by),
+    // then the usual human identifiers. De-dupe so a field isn't queried twice.
+    // The first candidate field to match wins; if that field matches >1 record
+    // we stop and report ambiguity rather than silently linking the first.
+    //
+    // A candidate the target declares VIRTUAL (a `formula`) is never asked: the
+    // engine's filter seam (`assertFilterIsMaterializable`) refuses every
+    // `where` over one, judged by this same spec predicate, so its query could
+    // only answer a refusal the catch below reads as "field absent". Skipping
+    // it changes no verdict. A formula title therefore matches no cell here;
+    // whether and how one should is the open half of #24981.
     const candidates = [...new Set([
       'id',
       ...(meta.displayField ? [meta.displayField] : []),
+      ...(target.titleField ? [target.titleField] : []),
       'name', 'title', 'label', 'full_name', 'email', 'username',
-    ])];
+    ])].filter((f) => !isVirtualSearchField(target.fields?.[f]));
     const lookup = async (): Promise<RefMatch> => {
       let match: RefMatch = {};
       for (const f of candidates) {
