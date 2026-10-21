@@ -4,7 +4,7 @@
 
 fix(objectql): a unique refusal's user-facing sentence names the object and the field by label
 
-Clause-②: no (text only: the user-facing sentence names the object and field by label; no code, status, outcome, developer message or export moves)
+Clause-②: no (text only: the user-facing sentence names the object and field by label, and `developerMessage` opens with the API names; no code, status, outcome or export moves)
 
 `DuplicateRecordError.message` is the sentence every door keeps as thrown, so a record save and a screen flow refused by a unique constraint show it to the end user word for word. It named the object, and the field when the driver reported one, by API name: `Duplicate record refused on 'crm_account': …`.
 
