@@ -2635,7 +2635,7 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the fourteen files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the fifteen files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#21733] Joined the population deliberately: the card's acceptance is
         // a plain `os dev` restart on the BUILT packages, and its production leg
@@ -2677,6 +2677,13 @@ export function selfTest() {
         // spawn hands its child `NODE_ENV: undefined`.
         'packages/cli/test/serve-no-storage-boot-guard.integration.test.ts',
         'packages/cli/test/serve-node-env-production-default.e2e.test.ts',
+        // [ADR-0131 D9] Joined the population deliberately, beside
+        // `serve-no-auth-secret-refusal`: its subject is the refusal of a
+        // PRODUCTION boot whose `@objectstack/plugin-auth` fails to load, and
+        // `bin/run-dev.js` sets `NODE_ENV=development` before argv is parsed,
+        // where the failure still warns and boots. Every spawn hands its child
+        // `NODE_ENV: undefined`.
+        'packages/cli/test/serve-plugin-auth-load-failure-refusal.integration.test.ts',
         // [#16630] Joined the population deliberately: the degraded-boot the
         // ready line has to report is only reachable in PRODUCTION posture, and
         // `bin/run-dev.js` sets `NODE_ENV=development` before argv is parsed —
