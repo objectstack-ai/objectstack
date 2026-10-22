@@ -201,7 +201,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       user_id: {
         label: "用户",
-        help: "接收用户 ID,'*' 表示管理员全局默认值。"
+        help: "此偏好适用的用户。留空即为适用于所有用户的默认值。"
       },
       topic: {
         label: "主题",
