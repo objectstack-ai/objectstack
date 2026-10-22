@@ -87,6 +87,52 @@ async function loadSqlJs(
 }
 
 /**
+ * SQLite's own text for `SQLITE_NOTADB` (`sqlite3_errstr(26)`). sql.js throws
+ * a bare `Error` carrying SQLite's message and no result code, so this text is
+ * the only form the code reaches this file in.
+ */
+const SQLITE_NOTADB_ERRSTR = 'file is not a database';
+
+/**
+ * The refusal {@link WasmSqliteConnection.open} throws for a file sql.js cannot
+ * read (#25019), with the SQLite code the native driver answers for the same
+ * file: `SQLITE_NOTADB` when SQLite says the bytes are not a database, and
+ * `SQLITE_CORRUPT` for every other reason a read of the image failed ("database
+ * disk image is malformed", a `quick_check` that does not answer `ok`).
+ *
+ * The code is what makes it one refusal with the native driver's:
+ * `SqlDriver.connect()` names the file with its own words for that code, and
+ * `resolveSqliteDriver` (`@objectstack/service-datasource`) re-throws it rather
+ * than step down. The message is the rest of the answer, and the one thing only
+ * this engine can say: it no longer moves the file aside for the operator, so
+ * it says how to do that.
+ */
+function unreadableDatabaseFileRefusal(
+  filename: string,
+  cause: unknown,
+): UnreadableDatabaseFileRefusal {
+  const reason =
+    typeof cause === 'string' ? cause : (cause as Error | undefined)?.message ?? String(cause);
+  // `cause` is attached by hand: the `ErrorOptions` overload is ES2022 and this
+  // package compiles against ES2020's lib.
+  const refusal = new Error(
+    `wasm SQLite cannot read it (${reason}). To start from an empty database, move the ` +
+      `file aside yourself (mv '${filename}' '${filename}.unreadable') and start again; ` +
+      `to keep its data, restore a copy that opens.`,
+  ) as UnreadableDatabaseFileRefusal;
+  refusal.code = reason === SQLITE_NOTADB_ERRSTR ? 'SQLITE_NOTADB' : 'SQLITE_CORRUPT';
+  refusal.filename = filename;
+  refusal.cause = cause;
+  return refusal;
+}
+
+type UnreadableDatabaseFileRefusal = Error & {
+  code: 'SQLITE_NOTADB' | 'SQLITE_CORRUPT';
+  filename: string;
+  cause: unknown;
+};
+
+/**
  * A sql.js-backed connection that exposes the `prepare`/`exec`/`close`
  * subset used by Knex's SQLite dialect. Mutations are queued through a
  * configurable persistence strategy so the on-disk file stays in sync.
@@ -198,24 +244,37 @@ export class WasmSqliteConnection {
       return;
     }
 
-    await this.quarantineOrphanedWal();
-
-    // Open the on-disk bytes, but guard against a corrupt image. A torn write
-    // (process killed mid-flush before atomic writes existed) or otherwise
-    // damaged file makes `new SQL.Database(bytes)` either throw ("file is not a
-    // database") or open a handle whose every query fails with "database disk
-    // image is malformed" — which, for a background dispatcher on a tick loop,
-    // means the same error spammed forever with no path to recovery. Detect it
-    // once at open, quarantine the bad file, and start fresh so the dev server
-    // becomes usable again instead of wedging.
+    // Open the on-disk bytes, and refuse a file sql.js cannot read (#25019).
+    // A file that is not a database makes the first read throw "file is not a
+    // database"; a damaged one throws "database disk image is malformed" or
+    // fails `quick_check`. Either way every later query would answer the same,
+    // so the open fails here, naming the file, with the code the native driver
+    // answers for the same file (see `unreadableDatabaseFileRefusal`).
+    //
+    // The file is left exactly as it was found. This open used to move it to
+    // `<file>.corrupt-<timestamp>` and start an empty database in its place: a
+    // self-heal written for torn wasm images, which `atomicWriteFile` has since
+    // closed. What still reached it was an operator's file on a declared
+    // datasource — an explicit `sqlite-wasm` one in any mode, and the
+    // development step-down from a native addon that cannot load — which then
+    // read as connected over an empty database.
+    let candidate: Database | undefined;
     try {
-      const candidate = new SQL.Database(bytes);
+      candidate = new SQL.Database(bytes);
       this.assertReadable(candidate);
-      this.db = candidate;
     } catch (err) {
-      await this.quarantineCorruptFile(err);
-      this.db = new SQL.Database();
+      try {
+        candidate?.close();
+      } catch {
+        /* the refusal below is the answer */
+      }
+      throw unreadableDatabaseFileRefusal(this.filename, err);
     }
+
+    // Only a file this open accepts gets its stale log parked: a refused file
+    // keeps everything beside it as well.
+    await this.quarantineOrphanedWal();
+    this.db = candidate;
   }
 
   /**
@@ -230,35 +289,6 @@ export class WasmSqliteConnection {
     const first = res?.[0]?.values?.[0]?.[0];
     if (typeof first === 'string' && first.toLowerCase() !== 'ok') {
       throw new Error(`sqlite quick_check failed: ${first}`);
-    }
-  }
-
-  /**
-   * Move a corrupt database file aside so its bytes are preserved for
-   * post-mortem while a fresh, empty database takes its place. Best-effort:
-   * failures here must not prevent the server from booting on a clean DB.
-   */
-  private async quarantineCorruptFile(cause: unknown): Promise<void> {
-    if (!this.fs) return;
-    const reason =
-      typeof cause === 'string' ? cause : (cause as Error)?.message ?? String(cause);
-    const backup = `${this.filename}.corrupt-${Date.now()}`;
-    try {
-      await this.fs.rename(this.filename, backup);
-      this.logger.warn(
-        `[driver-sqlite-wasm] Database image at ${this.filename} is corrupt ` +
-          `(${reason}). Quarantined to ${backup} and starting from an empty ` +
-          `database so the server can boot.`,
-      );
-    } catch (renameErr) {
-      // Could not move it aside (e.g. permissions) — overwrite is still better
-      // than looping forever on a malformed image. Warn loudly and continue.
-      this.logger.warn(
-        `[driver-sqlite-wasm] Database image at ${this.filename} is corrupt ` +
-          `(${reason}) and could not be quarantined (${String(renameErr)}). ` +
-          `Starting from an empty database; the corrupt file will be overwritten ` +
-          `on the next flush.`,
-      );
     }
   }
 
