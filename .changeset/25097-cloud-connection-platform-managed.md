@@ -6,9 +6,9 @@ fix(cloud-connection)!: a runtime holding the environment service key is platfor
 
 A runtime whose control-plane credential is the environment service key (`controlPlaneApiKey`, or `OS_CLOUD_API_KEY`, which the cloud sets on the environments it hosts) is connected by the platform, not by anyone on the runtime. It still registered the Cloud Connection page in Setup's Apps group, which read "Connected" and offered Disconnect. Disconnecting there cleared the runtime's stored device credential while the service key stayed in use, so the page went on reading "Connected", and the control plane was asked to revoke a connection the platform had made.
 
-Such a runtime now registers neither the page nor its navigation entry, and says so once at boot. A request to disconnect it is refused with `409` and `RESOURCE_CONFLICT`, after the sign-in and Setup Access checks and before anything is revoked or cleared. The message says the platform manages the connection.
+Such a runtime now registers neither the page nor its navigation entry, and says so once at boot. A request to disconnect it is refused with `409` and `RESOURCE_CONFLICT`, after the sign-in and capability checks and before anything is revoked or cleared. The message says the platform manages the connection.
 
-A self-hosted or local runtime, connected through the device-code flow, keeps the page and its disconnect unchanged. Its Cloud Connection entry moves from the Apps group to the Integrations group, after Webhooks, Datasources and Connect an Agent. That group requires `manage_platform_settings`, so a user who holds Setup Access without it, such as an organization administrator, no longer sees the entry. The connect and disconnect requests still take Setup Access alone.
+A self-hosted or local runtime, connected through the device-code flow, keeps the page and its disconnect unchanged. Its Cloud Connection entry moves from the Apps group to the Integrations group, after Webhooks, Datasources and Connect an Agent. That group requires `manage_platform_settings`, so a user who holds Setup Access without it, such as an organization administrator, no longer sees the entry.
 
 Clause-②: no (narrowing)
 
@@ -16,5 +16,5 @@ Clause-②: no (narrowing)
 
 **BREAKING** (on a runtime holding the environment service key, a disconnect request it carried out is now refused, and the Cloud Connection page and its navigation entry are no longer served), shipped as `minor` under the launch-window convention for breaking changes.
 
-- **Unchanged:** a runtime without the service key, apart from the entry's group. The connection status answer is unchanged on every runtime.
+- **Unchanged:** a runtime without the service key, apart from the entry's group and the permission its connect and disconnect requests and its connection details require, which another change in this release raises to `manage_platform_settings`. The connection status answer is otherwise unchanged on every runtime.
 - **Nothing to rewrite:** a cloud-hosted environment's connection is the platform's to manage. A self-hosted server leaves `OS_CLOUD_API_KEY` unset, as the deployment guide says; one that sets it is platform-managed by this rule.

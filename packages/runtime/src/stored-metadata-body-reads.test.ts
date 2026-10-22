@@ -52,7 +52,7 @@ function storedRow(): Record<string, unknown> {
         id: 'row_1',
         type: 'datasource',
         name: 'unit_ds',
-        metadata: JSON.stringify({ name: 'unit_ds', driver: 'turso', config: { url: 'libsql://unit.example.invalid', encryptionKey: SENTINEL } }),
+        metadata: JSON.stringify({ name: 'unit_ds', driver: 'turso', config: { url: 'libsql://unit.example.invalid', authToken: SENTINEL } }),
         checksum: `sha256:${'b2'.repeat(32)}`,
     };
 }

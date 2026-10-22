@@ -30,7 +30,7 @@
  *
  * - The refusal as the ADR-0112 envelope (`code` + `status`) plus its first
  *   sentence and both ways out, on a `file:` url in any letter case, on an
- *   in-memory url, beside `sync`, `timeout` and `encryptionKey`, and beside a
+ *   in-memory url, beside `sync` and `timeout`, and beside a
  *   supplied client (refused before any client work: the client is never
  *   synced). The full message is the spec contract's issue text byte for byte;
  *   that equality is pinned in `spec/turso-config-constructor-parity.test.ts`,
@@ -112,7 +112,6 @@ describe("a forced `mode: 'local'` beside a `syncUrl` — refused at constructio
     ['file::memory:', () => ({ url: 'file::memory:', mode: 'local', syncUrl: PRIMARY })],
     ['beside sync', () => ({ url: files.next(), mode: 'local', syncUrl: PRIMARY, sync: { intervalSeconds: 60, onConnect: true } })],
     ['beside a timeout', () => ({ url: files.next(), mode: 'local', syncUrl: PRIMARY, timeout: 5000 })],
-    ['beside an encryptionKey', () => ({ url: files.next(), mode: 'local', syncUrl: PRIMARY, encryptionKey: 'aes-256-key' })],
   ])("%s: VALIDATION_ERROR / 400, in the spec contract's words", (_name, config) => {
     const refusal = refusalOf(() => new TursoDriver(config()));
 

@@ -17,7 +17,7 @@ export const entry: SemanticMigration = {
   surface: 'restServer.api.responseFormat / restServer.api.documentation.enabled',
   replacement:
     '(removed — delete each key; neither had an effect to preserve. Whether the server publishes its '
-    + 'OpenAPI document and the docs viewer is `api.enableOpenApi`, the switch the mount already reads. '
+    + 'OpenAPI document is `api.enableOpenApi`, the switch the mount already reads. '
     + 'Response shapes are fixed — each route answers in the response schema `@objectstack/spec/api` '
     + 'declares for it — and are not a server-wide option, so there is no replacement for `responseFormat`.)',
   reason:
@@ -43,7 +43,7 @@ export const entry: SemanticMigration = {
     + 'the REST plugin\'s `start`) with the retirement prescription, naming the key and '
     + '`RestApiConfigSchema`, instead of being accepted and ignored; `tsc` refuses the key at the '
     + 'authoring site (`never`). A host that meant "serve no OpenAPI document" sets `api.enableOpenApi: '
-    + 'false` and sees `GET /openapi.json` and `GET /docs` unmounted. Every client that parses REST '
+    + 'false` and sees `GET /openapi.json` unmounted. Every client that parses REST '
     + 'responses reads each route\'s declared response shape. Every LIVE key of the `api` block — '
     + 'including `documentation`\'s other members — parses byte-identically to before, and the mounted '
     + 'REST surface is unchanged: '

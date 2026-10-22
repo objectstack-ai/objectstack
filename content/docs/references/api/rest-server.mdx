@@ -245,7 +245,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableUi** | `boolean` | optional (default: `true`) | Enable UI API endpoints (Views, Menus, Layouts) |
 | **enableBatch** | `boolean` | optional (default: `true`) | Enable batch operation endpoints |
 | **enableDiscovery** | `boolean` | optional (default: `true`) | Enable API discovery endpoint |
-| **enableOpenApi** | `boolean` | optional (default: `true`) | Enable OpenAPI 3.1 spec & docs viewer endpoints |
+| **enableOpenApi** | `boolean` | optional (default: `true`) | Enable the OpenAPI 3.1 document endpoint (`GET <basePath>/openapi.json`) |
 | **enableSearch** | `boolean` | optional (default: `true`) | Enable structured search endpoints (server-wide search opt-out; embedder-only, not settable from `os serve`) |
 | **enableProjectScoping** | `boolean` | optional (default: `false`) | Enable project-scoped routing for data/meta/AI APIs |
 | **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | optional (default: `"auto"`) | Project ID resolution strategy |
@@ -257,7 +257,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `never` | optional | [REMOVED] `api.documentation.enabled` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever read it: whether the server publishes its OpenAPI document is decided by the sibling `api.enableOpenApi` at the mount, so `enabled: false` turned nothing off. Delete the key; `api.enableOpenApi: false` is the switch that leaves the `/openapi.json` document and its `/docs` viewer unmounted. |
+| **enabled** | `never` | optional | [REMOVED] `api.documentation.enabled` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever read it: whether the server publishes its OpenAPI document is decided by the sibling `api.enableOpenApi` at the mount, so `enabled: false` turned nothing off. Delete the key; `api.enableOpenApi: false` is the switch that leaves the `/openapi.json` document unmounted. |
 | **title** | `string` | optional | Title of the served OpenAPI document (`info.title`); unset keeps the bundled title |
 | **description** | `string` | optional | Description of the served OpenAPI document (`info.description`); unset keeps the bundled description. Your app's own release number belongs here |
 | **version** | `never` | optional | [REMOVED] `api.documentation.version` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever read it, and the served OpenAPI document's `info.version` has one source: the protocol version, i.e. the version of the `@objectstack/spec` package that generated the document, which no deployment configuration overrides. Delete the key. To publish your app's own release number, write it into `api.documentation.description`, which the served `info.description` carries. |
@@ -293,7 +293,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableUi** | `boolean` | optional (default: `true`) | Enable UI API endpoints (Views, Menus, Layouts) |
 | **enableBatch** | `boolean` | optional (default: `true`) | Enable batch operation endpoints |
 | **enableDiscovery** | `boolean` | optional (default: `true`) | Enable API discovery endpoint |
-| **enableOpenApi** | `boolean` | optional (default: `true`) | Enable OpenAPI 3.1 spec & docs viewer endpoints |
+| **enableOpenApi** | `boolean` | optional (default: `true`) | Enable the OpenAPI 3.1 document endpoint (`GET <basePath>/openapi.json`) |
 | **enableSearch** | `boolean` | optional (default: `true`) | Enable structured search endpoints (server-wide search opt-out; embedder-only, not settable from `os serve`) |
 | **enableProjectScoping** | `boolean` | optional (default: `false`) | Enable project-scoped routing for data/meta/AI APIs |
 | **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | optional (default: `"auto"`) | Project ID resolution strategy |

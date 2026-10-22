@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT } from './engine.js';
+import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT, type UnservableControlledByParentMaster } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
@@ -78,6 +78,40 @@ interface ProtocolWithDbRestore {
 }
 
 /** Type guard — checks whether the service exposes `loadMetaFromDb`. */
+/**
+ * [ADR-0139 D5.2 / D5.3 · ADR-0049] The boot refusal for every
+ * `controlled_by_parent` detail whose master the engine composes no
+ * `ReadableIds` leaf over (`ObjectQL#findUnservableControlledByParentMasters`),
+ * or `undefined` when there is none. Names each detail, its master field, the
+ * master and the class, and the three remedies — an error, never a warning:
+ * such a detail's access derives from a master the read path refuses by name.
+ */
+export function describeUnservableControlledByParentMasters(
+  found: readonly UnservableControlledByParentMaster[],
+): (Error & { code: string; status: number; httpStatus: number }) | undefined {
+  if (found.length === 0) return undefined;
+  const lines = found.map((u) => {
+    const head = `'${u.detail}' (master field '${u.field}') over master '${u.master}'`;
+    return u.class === 'object-scoped-read-middleware'
+      ? `${head}, whose rows an object-scoped read middleware narrows (ADR-0139 D5.2)`
+      : `${head}, which is bound to datasource '${String(u.parentDatasource)}' while '${u.detail}' is bound to `
+        + `'${String(u.objectDatasource)}' (ADR-0139 D5.3)`;
+  });
+  const err = new Error(
+    `${lines.length === 1 ? 'A controlled_by_parent detail derives its' : `${lines.length} controlled_by_parent details derive their`} `
+    + `access from a master the engine cannot compose a read over: ${lines.join('; ')}. The detail's rows are `
+    + 'readable through its master\'s readable ids, and the engine composes no such read over a master an '
+    + 'object-scoped read middleware narrows (that WHERE is built at read time and is no part of the master\'s '
+    + 'read scope) or over a master on another datasource (no driver evaluates a subquery across two), so every '
+    + 'read of the detail would fail. Bind the detail and its master to one datasource; or choose a master without '
+    + 'an object-scoped read middleware; or declare the detail without `controlled_by_parent`.',
+  ) as Error & { code: string; status: number; httpStatus: number };
+  err.code = 'INVALID_METADATA';
+  err.status = 422;
+  err.httpStatus = 422;
+  return err;
+}
+
 function hasLoadMetaFromDb(service: unknown): service is ProtocolWithDbRestore {
   return (
     typeof service === 'object' &&
@@ -990,6 +1024,18 @@ export class ObjectQLPlugin implements Plugin {
     // would tell a brand-new deployment its gates are open moments after they
     // were closed.
     ctx.hook('kernel:bootstrapped', async () => {
+        // [ADR-0139 D5.2 / D5.3] A `controlled_by_parent` detail over a master
+        // the engine composes no read over fails the boot, naming both and the
+        // remedy. Judged HERE, not at `kernel:ready`: the object-scoped read
+        // middlewares are registered by their plugins' own `kernel:ready`
+        // handlers (mailbox, audit, attachment), which run after this plugin's,
+        // so only now are both facts — every binding and every registration —
+        // final. Still a boot refusal: `kernel:listening` has not opened the
+        // socket, so no request is served by a deployment this rejects.
+        const unservable = describeUnservableControlledByParentMasters(
+            this.ql?.findUnservableControlledByParentMasters() ?? [],
+        );
+        if (unservable) throw unservable;
         await this.ql?.announceOpenMigrationGates();
     });
     ctx.hook('metadata:reloaded', async (payload?: unknown) => {
