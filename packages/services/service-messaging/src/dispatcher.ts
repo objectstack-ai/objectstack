@@ -3,7 +3,7 @@
 import type { MessagingChannel, MessagingChannelContext, Notification, SendResult } from './channel.js';
 import type { AckResult, ClaimedDeliveryRecord, INotificationOutbox, NotificationDeliveryRecord } from './outbox.js';
 import { classifyDeliveryAttempt } from './backoff.js';
-import { renderDigest } from './digest-render.js';
+import { digestHeading, renderDigest, type DigestRenderResult } from './digest-render.js';
 import { readNotificationTextKeys, type NotificationTextRenderer } from './notification-text.js';
 import { DispatchLoop } from '@objectstack/core';
 
@@ -295,7 +295,7 @@ export class NotificationDispatcher {
             return;
         }
 
-        const digest = renderDigest(await this.localizedForRecipient(recipient, rows));
+        const digest = await this.localizedDigest(recipient, rows);
         const notification: Notification = {
             notificationId: rows[0].notificationId, // representative event id
             organizationId: rows[0].organizationId,
@@ -329,18 +329,27 @@ export class NotificationDispatcher {
     }
 
     /**
-     * [#24978] A digest group's rows with each keyed row's title and body
-     * rendered in the group's ONE recipient's language (one locale read for
-     * the group), so the items the digest lists read in that language. Rows
-     * that carry no keys, and every row when no renderer is composed, are
-     * handed back as they are.
+     * A digest group's collapsed message, its text rendered in the group's ONE
+     * recipient's language, with one locale read for the whole group:
+     *
+     *  - [#24978] each keyed row's title and body, so the items the digest
+     *    lists read in that language — a row that carries no keys is listed as
+     *    it is;
+     *  - [#25015] for a group of two or more, the heading
+     *    ({@link digestHeading}), which this service keys from its own
+     *    translation bundle, so it is ALWAYS keyed: the group's items and its
+     *    heading go to the renderer in one call.
+     *
+     * With no renderer composed, every row and the heading are their literal
+     * text.
      */
-    private async localizedForRecipient(
+    private async localizedDigest(
         recipient: string,
         rows: ClaimedDeliveryRecord[],
-    ): Promise<ClaimedDeliveryRecord[]> {
+    ): Promise<DigestRenderResult> {
+        const heading = rows.length > 1 ? digestHeading(rows.length) : undefined;
         const renderer = this.opts.textRenderer;
-        if (!renderer) return rows;
+        if (!renderer) return renderDigest(rows, heading?.literal.title);
         const items = rows.map((row) => {
             const p = row.payload ?? {};
             return {
@@ -351,11 +360,11 @@ export class NotificationDispatcher {
                 },
             };
         });
-        if (!items.some((item) => item.keys)) return rows;
-        const rendered = await renderer.renderAllFor(recipient, items);
-        return rows.map((row, i) => items[i].keys
+        const rendered = await renderer.renderAllFor(recipient, heading ? [...items, heading] : items);
+        const localized = rows.map((row, i) => items[i].keys
             ? { ...row, payload: { ...row.payload, title: rendered[i].title, body: rendered[i].body } }
             : row);
+        return renderDigest(localized, heading ? rendered[rows.length].title : undefined);
     }
 
     private async processRow(row: ClaimedDeliveryRecord): Promise<void> {
