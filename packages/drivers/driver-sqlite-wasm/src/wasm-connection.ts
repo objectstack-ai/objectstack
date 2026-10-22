@@ -126,8 +126,11 @@ function unreadableDatabaseFileRefusal(
   return refusal;
 }
 
+/** SQLite's own result-code names for a file it cannot read, as the native driver carries them. */
+type UnreadableDatabaseFileCode = 'SQLITE_NOTADB' | 'SQLITE_CORRUPT';
+
 type UnreadableDatabaseFileRefusal = Error & {
-  code: 'SQLITE_NOTADB' | 'SQLITE_CORRUPT';
+  code: UnreadableDatabaseFileCode;
   filename: string;
   cause: unknown;
 };
