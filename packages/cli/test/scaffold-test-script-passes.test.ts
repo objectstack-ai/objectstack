@@ -162,14 +162,25 @@ function runTestScript(root: string, manifest: Manifest) {
     ? (JSON.parse(fs.readFileSync(report, 'utf8')) as {
         numPassedTests: number;
         numFailedTests: number;
-        testResults: { name: string; status: string; message?: string }[];
+        testResults: {
+          name: string;
+          status: string;
+          message?: string;
+          assertionResults?: { fullName: string; status: string; failureMessages?: string[] }[];
+        }[];
       })
     : null;
   // The JSON reporter replaces the console one, so a failing run prints little
-  // of its own; the report's per-file messages are what says why it failed.
+  // of its own: the report says why it failed, a file that would not load in
+  // its `message` and a failed test in its `failureMessages`.
   const failures = (json?.testResults ?? [])
     .filter((r) => r.status !== 'passed')
-    .map((r) => `${path.relative(root, r.name)}: ${r.message ?? r.status}`)
+    .flatMap((r) => [
+      ...(r.message ? [`${path.relative(root, r.name)}: ${r.message}`] : []),
+      ...(r.assertionResults ?? [])
+        .filter((a) => a.status !== 'passed')
+        .map((a) => `${path.relative(root, r.name)} > ${a.fullName}: ${(a.failureMessages ?? []).join('\n')}`),
+    ])
     .join('\n');
   return { code: res.status, output: `${res.stdout ?? ''}${res.stderr ?? ''}${failures}`, json };
 }
