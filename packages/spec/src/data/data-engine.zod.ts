@@ -950,6 +950,8 @@ export const QueryPageWindowParamSchema = lazySchema(() => z.union([
 ]).describe('Page window — a non-negative integer, or the digits a querystring carries it as'));
 
 export type QueryPageWindow = z.input<typeof QueryPageWindowSchema>;
+/** Post-parse shape of {@link QueryPageWindow} — the same count; named so a parse result has its ADR-0122 name. */
+export type QueryPageWindowParsed = z.infer<typeof QueryPageWindowSchema>;
 export type QueryPageWindowParam = z.input<typeof QueryPageWindowParamSchema>;
 /** Post-parse shape of {@link QueryPageWindowParam} — the count, the querystring digits converted (ADR-0122). */
 export type QueryPageWindowParamParsed = z.infer<typeof QueryPageWindowParamSchema>;
