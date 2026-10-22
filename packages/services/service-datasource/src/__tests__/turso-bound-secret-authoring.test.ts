@@ -36,8 +36,8 @@
  *    carry" — pins both halves at once: the door refuses the inline key AND the
  *    bound one arrives. On main the first half passed and the second failed,
  *    which is the dead end stated above.
- *  - "binds the secret to authToken alone, leaving the encryptionKey question
- *    open" — red on main via its `authToken` half. The `encryptionKey` half is
+ *  - "binds the secret to authToken alone, never to the retired encryptionKey"
+ *    — red on main via its `authToken` half. The `encryptionKey` half is
  *    forward-facing and is asserted BESIDE that one rather than alone, because
  *    alone it is green on main for the useless reason (main emitted neither key).
  *
@@ -207,16 +207,16 @@ describe('#8152 — the credential route a NEW turso datasource has left', () =>
     expect(buildTursoDriverConfig(spec, resolveTursoUrl(spec)).authToken).toBe(THE_BOUND_JWT);
   });
 
-  // ⛔ Step 1 is one slot: the primary credential. `encryptionKey` is a different
-  // secret (an AES-256 key for a local file, not a bearer token for a remote) and
-  // whether the binder needs a second slot for it is deliberately undecided —
-  // #8126's read-time redaction of it grants and removes no slot. This pin fails
-  // if a later change reads the one bound secret as though it were both.
+  // ⛔ Step 1 is one slot: the primary credential. The question of a second
+  // slot for `encryptionKey` is closed: #25050 retired the key (it never
+  // encrypted anything) and the driver constructor refuses it in every mode, so
+  // binding the secret there would hand the driver a key it refuses. This pin
+  // fails if a later change reads the one bound secret as though it were both.
   //
   // Both halves asserted together on purpose: `not.toHaveProperty` alone is
   // green on main for the useless reason (main emitted neither key), which is
   // exactly the vacuity this file is written to avoid. RED on main.
-  it('RED ON MAIN — binds the secret to authToken alone, leaving the encryptionKey question open', async () => {
+  it('RED ON MAIN — binds the secret to authToken alone, never to the retired encryptionKey', async () => {
     const { seen } = await authorThenConnect(THE_BOUND_JWT);
     const config = buildTursoDriverConfig(seen[0]!, resolveTursoUrl(seen[0]!));
     expect(config.authToken).toBe(THE_BOUND_JWT);

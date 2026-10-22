@@ -60,8 +60,8 @@ describe('TursoConfigSchema', () => {
   // `libsql://` url, a configuration the driver refuses at construction and
   // this schema now refuses too.
   // [#25020] `encryptionKey` left this fixture: the driver never encrypted the
-  // replica file with it (its local engine has no encryption codec), and a
-  // local or replica config that declares it is refused now — pinned in
+  // replica file with it (its local engine has no encryption codec). [#25050]
+  // It is a tombstone now, refused in every mode — pinned in
   // `turso-config-constructor-parity.test.ts`.
   it('should accept config with all fields', () => {
     const config = TursoConfigSchema.parse({

@@ -195,15 +195,14 @@ ObjectStack — is what makes them secrets:
 | `mongodb` | `options.key` | TLS private key material (PEM) |
 | `mongodb` | `options.passphrase` | TLS key passphrase |
 | `mongodb` | `options.authMechanismProperties.AWS_SESSION_TOKEN` | AWS STS session token (`MONGODB-AWS` auth) |
-| `turso` \| `libsql` | `encryptionKey` | A key the driver never applies (see below) |
 
 Unlike `password` / `authToken` (typed `never` in their schemas — the parse
-refuses them outright), these six keys are **writable**: the parse accepts
+refuses them outright), these five keys are **writable**: the parse accepts
 them, and they are stored **at rest in `sys_metadata` as plain text**, right
 alongside the rest of the datasource row. The protection that exists today is
 on the READ side only — every one of them is stripped before a datasource
 record is ever served back over the admin API or shown in the Setup UI
-(`PASSTHROUGH_SECRET_PATHS` / `STILL_WRITABLE_CREDENTIAL_KEYS` in
+(`PASSTHROUGH_SECRET_PATHS` in
 `datasource-credential-redaction.ts`, shipped in
 [#9040](https://github.com/objectstack-ai/objectstack/issues/9040)). That stops the value
 round-tripping through a read; it is not encryption at rest, and an operator
@@ -231,19 +230,17 @@ that needs an authenticated proxy or a passphrase-protected key converts
 that group into named binder-slot support — one mechanism covering those
 four keys — rather than the current per-key accept-and-document posture.
 
-Turso's `encryptionKey` is no longer part of that trade-off either. It was
-declared as an AES-256 key for the local database file, but the driver reads
-and writes that file through better-sqlite3, which has no encryption codec, so
-the file was written in plaintext whatever the key said. A local or
-embedded-replica turso datasource that declares it is now refused at write
-time and when the driver is built: drop the key, and put the file on an
-encrypted disk or volume if it must be encrypted at rest. A remote turso
-datasource (a `libsql://`, `https://` or `ws(s)://` url) still parses with the
-key, which the driver does not forward (a remote database's storage encryption
-is the server's), while a `file:` url or `:memory:` under a forced
-`mode: 'remote'` is refused like a local one, because the libSQL client the
-driver builds for it is handed no key; a stored value is redacted on read like
-the rest of this table.
+Turso's `encryptionKey` is not part of that trade-off: it was **removed** in
+`@objectstack/spec` 18 ([#25050](https://github.com/objectstack-ai/objectstack/issues/25050), ADR-0049).
+It was declared as an AES-256 key for the local database file, but the driver
+reads and writes that file through better-sqlite3, which has no encryption
+codec, and it never handed the key to a remote database, whose storage
+encryption the server configures. So it encrypted nothing, in any mode. The
+parse and the driver constructor now refuse it in every mode: delete the key,
+and put a local file on an encrypted disk or volume if it must be encrypted at
+rest. `os migrate meta --from 17` deletes it for you where it was unset or
+beside a remote url; a stored legacy row that still carries it is redacted on
+read like the keys above.
 </Callout>
 
 ## Startup: a driver that cannot connect aborts the boot

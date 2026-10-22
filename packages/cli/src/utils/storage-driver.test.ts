@@ -645,7 +645,6 @@ describe('#7314 — the shared libSQL config builder against the real TursoDrive
       config: {
         url: 'libsql://my-db.turso.io',
         authToken: 'jwt-token',
-        encryptionKey: 'aes-256-key',
         concurrency: 7,
         syncUrl: 'libsql://replica.turso.io',
         sync: { intervalSeconds: 30, onConnect: false },
@@ -656,10 +655,14 @@ describe('#7314 — the shared libSQL config builder against the real TursoDrive
     const built = buildTursoDriverConfig(spec, resolveTursoUrl(spec));
     const pinned: TursoDriverConfig = built;
 
-    expect(pinned.encryptionKey).toBe('aes-256-key');
+    // `encryptionKey` is retired (#25050): typed `never` on BOTH sides, so the
+    // compile-time pin above holds it as read-and-forwarded (a legacy stored
+    // row reaches the constructor's refusal), and no datasource can declare it.
+    expect(pinned).not.toHaveProperty('encryptionKey');
     expect(pinned.syncUrl).toBe('libsql://replica.turso.io');
     expect(pinned.sync).toEqual({ intervalSeconds: 30, onConnect: false });
-    expect(Object.keys(built).sort()).toEqual([...TURSO_DRIVER_CONFIG_KEYS].sort());
+    expect(Object.keys(built).sort())
+      .toEqual(TURSO_DRIVER_CONFIG_KEYS.filter((k) => k !== 'encryptionKey').sort());
   });
 });
 

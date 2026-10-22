@@ -54,15 +54,13 @@
  *     renamed it — the wizard persists through `metadata.register`, whose
  *     validation is a structural name/label check. So the only place these can
  *     still be found is exactly the place this module reads: a stored row.
- *  3. **Credential-shaped keys that are still WRITABLE** ({@link
- *     STILL_WRITABLE_CREDENTIAL_KEYS}) — today just turso's `encryptionKey`, a
- *     key the binder has no slot for (#8081 scope item 4, which owns the
- *     decision about giving it one). Since #25020 it is refused for a local
- *     database file and honoured by the driver in no mode, but a remote
- *     datasource still parses with it and a stored row may still carry it.
- *     Redacting it on READ neither grants nor removes a slot: where the key is
- *     still writable it stays stored. It simply stops being served back in
- *     cleartext, which is the one question this module answers.
+ *  3. **Retired credential-shaped keys** ({@link RETIRED_CREDENTIAL_KEYS}) —
+ *     today just turso's `encryptionKey`. Source 1 cannot see it: it is a
+ *     `retiredKey()` tombstone since #25050, and a tombstone is excluded there
+ *     by design. But a stored row written before the retirement may still
+ *     carry the value, and that value is still a secret the author typed, so
+ *     it stops being served back in cleartext all the same, which is the one
+ *     question this module answers.
  *
  * For a driver the platform ships no contract for, source 1 is empty — the
  * registry is saying "nothing to check against", not "nothing to protect". The
@@ -122,24 +120,28 @@ import { getDriverConfigSchema, resolveDriverId } from './driver/config-registry
 // lives unchanged in `datasource-credential-redaction.test.ts`.
 
 /**
- * Credential-shaped config keys that remain WRITABLE by deliberate spec choice,
- * and so are never found by the `z.never()` derivation.
+ * RETIRED config keys whose stored values are still credential material, so
+ * the derivation's tombstone exclusion (source 1) must not let them through.
  *
  * `encryptionKey` (turso) was declared an AES-256 key for the local database
- * file. #8078 left it writable because the datasource secret binder injects
- * exactly one secret slot and `external.credentialsRef` resolution cannot
- * target a second one; giving it a slot is #8081 scope item 4 and is NOT
- * decided here. Since #25020 the turso contract refuses it for a local or
- * replica datasource (the driver's SQLite engine cannot encrypt the file), but
- * a remote datasource still parses with it and a stored row may still carry
- * it, so it stays on this list.
+ * file and was honoured in no mode; #25050 retired it (`retiredKey()` on the
+ * spec contract), so no door accepts it any more. A row stored before that
+ * may still hold the value the author typed as a key, and serving it back in
+ * cleartext would be a leak under any boundary, so it stays hidden on read.
+ * The D2 conversion `turso-config-encryption-key-removed` strips it from a
+ * converted row where it changed nothing; this list is what covers a row read
+ * raw, and a local-url row the conversion leaves for the author.
+ *
+ * It was `STILL_WRITABLE_CREDENTIAL_KEYS` until #25050, when its one member
+ * stopped being writable. A credential-shaped key that IS still writable
+ * belongs in neither this list nor the derivation; it needs its own decision.
  *
  * Keyed by CANONICAL driver id and looked up through {@link resolveDriverId},
  * exactly like {@link PASSTHROUGH_SECRET_PATHS} below: every spelling the
  * write door judges against a driver's contract is redacted as that driver,
  * and an id that resolves to no builtin indexes nothing (#21955).
  */
-const STILL_WRITABLE_CREDENTIAL_KEYS: Record<string, readonly string[]> = {
+const RETIRED_CREDENTIAL_KEYS: Record<string, readonly string[]> = {
   turso: ['encryptionKey'],
 };
 
@@ -177,7 +179,7 @@ const STILL_WRITABLE_CREDENTIAL_KEYS: Record<string, readonly string[]> = {
  *    `options.passphrase` — TLS key material and passphrases, declared in the
  *    client's own OPTIONS table. Still WRITABLE (the binder has exactly one
  *    secret slot — the login password — so there is no working refusal remedy;
- *    turso-`encryptionKey` posture, #8081 item 4), but never SERVED back:
+ *    #8081 item 4), but never SERVED back:
  *    redacting on read neither grants nor removes the write capability.
  *  - `options.authMechanismProperties.AWS_SESSION_TOKEN` — under MONGODB-AWS
  *    the v7 client throws on it; under any other mechanism nothing reads it.
@@ -377,13 +379,13 @@ export function refusedCredentialKeys(driver: unknown): string[] {
     .map(([key]) => key);
 }
 
-/** Every config key this module hides for `driver`, canonical + alias + writable-but-secret. */
+/** Every config key this module hides for `driver`, canonical + alias + retired-but-secret. */
 export function redactableConfigKeys(driver: unknown): string[] {
   const derived = refusedCredentialKeys(driver);
   const canonical = derived.length > 0 ? derived : [...CANONICAL_CREDENTIAL_KEYS];
   const id = resolveDriverId(driver);
-  const stillWritable = id ? (STILL_WRITABLE_CREDENTIAL_KEYS[id] ?? []) : [];
-  return [...new Set([...canonical, ...FORMER_CREDENTIAL_ALIASES, ...stillWritable])];
+  const retired = id ? (RETIRED_CREDENTIAL_KEYS[id] ?? []) : [];
+  return [...new Set([...canonical, ...FORMER_CREDENTIAL_ALIASES, ...retired])];
 }
 
 /**

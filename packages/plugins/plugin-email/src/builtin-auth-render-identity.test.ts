@@ -40,6 +40,8 @@ const DATA = {
   magicLinkUrl: 'https://example.test/magic?token=m1&next=/home',
   acceptUrl: 'https://example.test/accept?invite=i1&next=/home',
   setPasswordUrl: 'https://example.test/reset-password/s1?callbackURL=%2Fset&next=/home',
+  signInUrl: 'https://example.test/_console/login?next=/home&from=signup',
+  resetPasswordUrl: 'https://example.test/_console/forgot-password?next=/home&from=signup',
   expiresInMinutes: 30,
   otp: '424242',
   newEmail: 'ada+new@example.test',
@@ -201,6 +203,29 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
     html: 'cc817fe06bbf628a98b1ad06d34ad51fcfc4749b3ee0d2536cad94632cb6edbb',
     text: '13e8e63f4df3367b410fa2ca7a0acdf47eb3b8b060d1e5e96119f17cfbfd03bd',
   },
+  // Added after the row path was deleted (#25060), so these four were never
+  // seeded rows: they are captured from this same registry render in the
+  // commit that added the template, and pin its bytes from then on.
+  'auth.existing_account_sign_up@en-US': {
+    subject: 'You already have an account on Acme & <Co>',
+    html: 'a202e07c920824c43614981036741ca4928a118ac8b6def0e280110c27447796',
+    text: '2134c939c462278030be798c4d08289885016e69b2a90ddb67ae5c02e680a585',
+  },
+  'auth.existing_account_sign_up@zh-CN': {
+    subject: '您已拥有 Acme & <Co> 账号',
+    html: '6a77dae95e1993b95cc91f4bb371e1889c918e43ab05cd29f3af1074693f1f1d',
+    text: 'd869d97a3f1febc0a0657d7b462d7a8df0b0706f1a9c50f1226392c03cc0cdc6',
+  },
+  'auth.existing_account_sign_up@ja-JP': {
+    subject: 'Acme & <Co> のアカウントはすでにお持ちです',
+    html: '1909c0c2d9a0e6d35923444af81e7f184e7359b4aa9cb276516223d7ca3ec334',
+    text: 'a75aba0b49bbbe5ccaec0253be1faf5b0b757580457b16fd4e9f4f15a3e06e39',
+  },
+  'auth.existing_account_sign_up@es-ES': {
+    subject: 'Ya tienes una cuenta de Acme & <Co>',
+    html: 'c6abe9c3fc761d1dc88b0517ee65bce3dcedb01a425e6cdd3daebdd77aff1a00',
+    text: '7d65c60ed0e8b415fe7aae7aff5c544318f81e3ab6c87525067af112a30d238b',
+  },
 };
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
@@ -238,7 +263,7 @@ describe('every built-in auth mail renders byte-identical from the registry', ()
       rendered[`${tpl.name}@${tpl.locale}`] = { subject: r.subject, html: sha256(r.html), text: sha256(r.text) };
     }
 
-    expect(Object.keys(rendered)).toHaveLength(28);
+    expect(Object.keys(rendered)).toHaveLength(32);
     expect(rendered).toEqual(RENDERED);
   });
 });
