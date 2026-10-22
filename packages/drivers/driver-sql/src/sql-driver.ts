@@ -8488,6 +8488,92 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * The reservations {@link issueAutonumbers} made, keyed by the caller's row
+   * object, so its collision call can tell a number it issued from one the
+   * caller typed — the distinction `create()` draws from its own local
+   * `reservations`. Weak, so a row the caller drops takes its entry with it.
+   */
+  private readonly issuedAutoNumbers = new WeakMap<object, AutoNumberReservation[]>();
+
+  /**
+   * [#25073] `IDataDriver.issueAutonumbers`: {@link fillAutoNumberFields} on
+   * request, ahead of the write, so the engine can compute a stored field
+   * whose `expression` reads the number before it hands the row to
+   * {@link create} / {@link bulkCreate}. Those find the slot filled and
+   * reserve nothing, so the row goes in as ONE statement carrying the number
+   * the engine computed from.
+   *
+   * After a collision it is {@link create}'s and {@link bulkCreate}'s own
+   * re-seed (#5495, #6943), split at the point where only the caller can go
+   * on: which numbers collided is decided as there
+   * ({@link collidingAutoNumberReservations}, so a duplicate on a value the
+   * caller typed is never this counter's), each stale counter is re-seeded
+   * ONCE, and every slot drawn from a stale counter is emptied — on a batch
+   * that includes rows whose own value did not collide, for the reason
+   * {@link bulkCreate} gives. The caller issues again; this method never
+   * re-issues on its own, because the caller has to recompute what reads
+   * the number. Inside a caller's transaction nothing is retried, as
+   * {@link create} retries nothing there (Postgres has aborted the handle).
+   *
+   * Inherited by `driver-sqlite-wasm` and `driver-turso`: the remote face
+   * issues through its own `getNextSequenceValue` and probes through its own
+   * `autoNumberValueExists` / `resyncSequenceToDataMax`, the overrides its
+   * `create()` already calls.
+   */
+  async issueAutonumbers(
+    object: string,
+    rows: Record<string, unknown>[],
+    options?: DriverOptions,
+    afterCollision?: unknown,
+  ): Promise<string[][]> {
+    if (afterCollision === undefined) {
+      const filled: string[][] = [];
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') {
+          filled.push([]);
+          continue;
+        }
+        const reserved = await this.fillAutoNumberFields(object, row as Record<string, any>, options);
+        // A value kept from an earlier issue on this row is still this
+        // driver's, so it stays described beside the fresh ones (#6943).
+        const fresh = new Set(reserved.map((r) => r.field));
+        const kept = (this.issuedAutoNumbers.get(row) ?? []).filter((r) => !fresh.has(r.field));
+        this.issuedAutoNumbers.set(row, [...kept, ...reserved]);
+        filled.push(reserved.map((r) => r.field));
+      }
+      return filled;
+    }
+
+    const none = rows.map((): string[] => []);
+    if (options?.transaction !== undefined) return none;
+    const issued = rows.map((row) => (row && typeof row === 'object' ? this.issuedAutoNumbers.get(row) ?? [] : []));
+    const colliding = await this.collidingAutoNumberReservations(afterCollision, issued.flat(), options);
+    if (colliding.length === 0) return none;
+
+    const stale = new Set<string>();
+    for (const reservation of colliding) {
+      const key = this.autoNumberCounterKey(reservation);
+      if (stale.has(key)) continue;
+      stale.add(key);
+      await this.resyncSequenceToDataMax(reservation);
+    }
+    return rows.map((row, i) => {
+      const emptied: string[] = [];
+      const kept: AutoNumberReservation[] = [];
+      for (const reservation of issued[i]) {
+        if (stale.has(this.autoNumberCounterKey(reservation))) {
+          delete row[reservation.field];
+          emptied.push(reservation.field);
+        } else {
+          kept.push(reservation);
+        }
+      }
+      if (emptied.length > 0) this.issuedAutoNumbers.set(row, kept);
+      return emptied;
+    });
+  }
+
+  /**
    * Does a row already hold `reservation.value` in the partition this
    * counter covers? (#5495)
    *
