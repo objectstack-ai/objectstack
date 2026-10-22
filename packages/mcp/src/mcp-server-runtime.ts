@@ -526,8 +526,13 @@ export interface McpMergedMetadataRead {
  * the reason `packages/rest` reads it defensively at every one of its own call
  * sites: this is a duck-typed seam across a package boundary, and a host may
  * hand back the bare array.
+ *
+ * [#25138] Exported within the package for the stdio data bridge's object
+ * listing (`stdio-data-bridge.ts`), so the two merged reads on this transport
+ * cannot disagree about which answers they accept. `index.ts` does not
+ * publish it.
  */
-function metaItemsArray(answer: unknown): unknown[] {
+export function metaItemsArray(answer: unknown): unknown[] {
   if (Array.isArray(answer)) return answer;
   const items = (answer as { items?: unknown } | null | undefined)?.items;
   return Array.isArray(items) ? items : [];
