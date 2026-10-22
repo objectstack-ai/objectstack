@@ -4752,6 +4752,52 @@ function repeatedQueryParamError(param: string, count: number): Error {
 }
 
 /**
+ * [#25229] The page window (`limit` / `offset`, spelled `$top` / `top` /
+ * `$skip` / `skip` on the wire) as the non-negative integer every driver
+ * needs, or a refusal naming the parameter the caller wrote (#4226).
+ *
+ * The bare `Number(...)` this replaces failed three ways, none of them loud:
+ *
+ *  - `NaN` (`?$top=abc`) and a negative limit (`?$top=-1`) reached the driver,
+ *    which drops a window it cannot read — every row answered under a 200, the
+ *    #7321 class (a malformed window served as if no window was sent);
+ *  - a negative offset (`?$skip=-1`, `{"offset": -1}`) reached knex's
+ *    `QueryBuilder.offset`, which throws — a 500 for a caller's mistake;
+ *  - a blank value (`?$top=`) is `Number('') === 0`, an empty page nobody
+ *    asked for.
+ *
+ * A blank value is refused, not read as absent. The blank `?filter=` is
+ * absent because an empty filter and no filter mean the same thing; an empty
+ * window does not — absent means "every row", so reading `?$top=` that way is
+ * the silent widening above under another name, and reading it as `0` is the
+ * guess this replaces. `0` itself stays valid: `$top=0` asks for the total
+ * alone.
+ *
+ * Only the two arms a door can deliver are read: a number (a JSON body) and a
+ * string (a querystring). Anything else — `true`, which `Number` would quietly
+ * make `1` — is refused like any other value that is not a count.
+ */
+function pageWindowValue(value: unknown, param: string): number {
+    const n = typeof value === 'number'
+        ? value
+        : typeof value === 'string' && value.trim() !== ''
+            ? Number(value)
+            : Number.NaN;
+    if (Number.isSafeInteger(n) && n >= 0) return n;
+    // `String` for a number: `JSON.stringify(Infinity)` is `null`.
+    const shown = typeof value === 'number' ? String(value) : JSON.stringify(value) ?? String(value);
+    const err: any = new Error(
+        `Query parameter '${param}' must be a non-negative integer; got `
+        + `${shown.length > 64 ? `${shown.slice(0, 64)}…` : shown}. The query was not run: a window `
+        + 'the driver cannot read is either dropped, answering every row, or rejected by the database.',
+    );
+    err.status = 400;
+    err.code = 'INVALID_REQUEST';
+    err.param = param;
+    throw err;
+}
+
+/**
  * [#7321] Refuse a repeated occurrence of any list-query parameter this
  * normalizer reads as single-valued, and normalise the benign one-element array
  * away so nothing below has to know the union existed.
@@ -14624,8 +14670,15 @@ export class ObjectStackProtocolImplementation implements
         // (`options.limit = Number(options.top)` — the alias overwrote the
         // canonical key, so `{top: 1, limit: 3}` answered 1 over HTTP and 3
         // through a direct engine call).
-        if (options.limit != null) options.limit = Number(options.limit);
-        if (options.offset != null) options.offset = Number(options.offset);
+        //
+        // [#25229] The coercion is CHECKED, not bare (see
+        // {@link pageWindowValue}). This is the one statement every list door
+        // reaches with the window still unvalidated — `GET /data/:object`'s
+        // querystring, `POST /data/:object/query`'s body (whose schema checks
+        // the type, not the sign) and the runtime dispatcher — so the refusal
+        // lives here, once.
+        if (options.limit != null) options.limit = pageWindowValue(options.limit, slotParam('limit'));
+        if (options.offset != null) options.offset = pageWindowValue(options.offset, slotParam('offset'));
 
         // Projection: comma-separated string → array. A single-value
         // querystring param arrives as a bare string — `?fields=name` or the
