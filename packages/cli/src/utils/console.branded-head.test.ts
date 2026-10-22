@@ -237,7 +237,7 @@ describe('the branding read is the visitor\'s own request, re-addressed', () => 
   it('forwards the host and cookies, and drops the headers that would change the answer\'s encoding or status', async () => {
     const app = await mount({ stub: { kind: 'json', body: { branding: { productName: 'Acme' } } } });
     await app.request('/_console/', {
-      headers: { cookie: 'session=abc', 'accept-encoding': 'gzip', 'if-none-match': '"x"', accept: 'text/html' },
+      headers: { host: 'share.example.test', cookie: 'session=abc', 'accept-encoding': 'gzip', 'if-none-match': '"x"', accept: 'text/html' },
     });
     expect(app.probeHeaders).toHaveLength(1);
     const sent = app.probeHeaders[0];
