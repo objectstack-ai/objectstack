@@ -40,14 +40,16 @@
  * the disable (measured on the base tree `258f4e6aa`, both shapes: `200` with
  * its handler's result), while the protocol's by-name read withheld it
  * (`GET /meta/action/NAME` answers `404`) and the MCP `run_action` tool
- * answered "not found". The owning package comes from the action item. A
- * withheld declaration is no declaration: the door answers the "no
+ * answered "not found". The declaration resolution now reads a standalone
+ * action through that same by-name protocol read (ruling 6353801421 on the
+ * card), so a withheld item is no declaration: the door answers the "no
  * declaration" `404` a name nothing declares gets, byte for byte but the name,
- * so the answer discloses nothing the by-name read withholds. The pins hold it
- * on both spellings and shapes, on an enabled object's route too (a route the
- * resolution lets an object-less action answer on), against an
- * environment-authored object-less action that keeps running through the
- * disable, and through a re-enable.
+ * and discloses nothing the by-name read withholds. The pins hold it on both
+ * spellings and shapes, on an enabled object's route too (a route the
+ * resolution lets an object-less action answer on), for the package's action
+ * bound to an enabled package's object, against an environment-authored
+ * object-less action that keeps running through the disable, and through a
+ * re-enable.
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -76,7 +78,7 @@ interface ManifestDoor {
  * script action gated by `requiredPermissions`, and a top-level action bound
  * to the object.
  */
-function actionPackageOf(prefix: string) {
+function actionPackageOf(prefix: string, bindTo?: string) {
     const object = `${prefix}_obj`;
     return {
         id: `com.qa.${prefix}`,
@@ -99,11 +101,14 @@ function actionPackageOf(prefix: string) {
             actions: [
                 { name: 'bound_done', label: 'Bound done', type: 'script', operation: 'update', patch: { name: 'done' }, objectName: object },
                 { name: `${prefix}_gping`, label: 'Global ping', type: 'script', target: `${prefix}_ghandler` },
+                ...(bindTo ? [{ name: `${prefix}_xping`, label: 'Bound elsewhere', type: 'script', target: `${prefix}_ghandler`, objectName: bindTo }] : []),
             ],
         }),
         /** [#25308] The package's top-level action that names no object, and its handler. */
         globalAction: `${prefix}_gping`,
         globalHandler: `${prefix}_ghandler`,
+        /** [#25308] With `bindTo`: the package's top-level action bound to that (another package's) object. */
+        boundElsewhere: `${prefix}_xping`,
     };
 }
 
@@ -373,8 +378,8 @@ for (const { shape, environmentId } of SHAPES) {
     });
 
     describe(`[#25308] REST /actions and a DISABLED package's object-less action — ${shape}: answered as a name nothing declares, the environment-authored one still runs`, () => {
-        const pkg = actionPackageOf('qa_goff');
         const side = actionPackageOf('qa_gside');
+        const pkg = actionPackageOf('qa_goff', side.object);
         let booted: Booted | undefined;
 
         beforeAll(async () => {
@@ -422,6 +427,15 @@ for (const { shape, environmentId } of SHAPES) {
             const nowhere = await dispatchWithMessage(booted!.kernel, 'POST', `/actions/${side.object}/qa_nowhere`, {});
             expect(answer.status).toBe(404);
             expect(undeclaredShape(answer, pkg.globalAction)).toEqual(undeclaredShape(nowhere, 'qa_nowhere'));
+            expect(booted!.globalPings.mock.calls.length, 'the handler never ran').toBe(before);
+        });
+
+        it('answers the package\'s action bound to an ENABLED package\'s object as a name nothing declares there', async () => {
+            const before = booted!.globalPings.mock.calls.length;
+            const answer = await dispatchWithMessage(booted!.kernel, 'POST', `/actions/${side.object}/${pkg.boundElsewhere}`, {});
+            const nowhere = await dispatchWithMessage(booted!.kernel, 'POST', `/actions/${side.object}/qa_nowhere`, {});
+            expect(answer.status).toBe(404);
+            expect(undeclaredShape(answer, pkg.boundElsewhere)).toEqual(undeclaredShape(nowhere, 'qa_nowhere'));
             expect(booted!.globalPings.mock.calls.length, 'the handler never ran').toBe(before);
         });
 
