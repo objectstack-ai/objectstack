@@ -11,8 +11,9 @@
  *
  * ## The failure this exists for, in both of the directions it happened
  *
- * `packages/objectql/src/tenancy/platform-object-tenancy.ts` carried the census
- * as PROSE: three digits and a parenthetical explaining them. Nothing re-derived
+ * The per-table tenancy ledger's header (`platform-object-tenancy.ts`, since
+ * retired by ADR-0131 D13) carried the census as PROSE: three digits and a
+ * parenthetical explaining them. Nothing re-derived
  * it, so it was true only until the population moved, and it failed silently
  * when it did -- twice, in the two different ways a hand-written count can:
  *
@@ -39,7 +40,9 @@
  *    check: the artefact carries no line numbers, so a pure displacement cannot
  *    move it and there is exactly one mechanical repair path
  *    (`node scripts/platform-object-tenancy-census.mjs --write`).
- * 2. **The header still points here.** Grain 1's fix was to DELETE the digits,
+ * 2. **The header still points here.** The header is now
+ *    `resolveTenantFieldName`'s docblock (`HEADER` in the generator says why it
+ *    moved when the ledger retired). Grain 1's fix was to DELETE the digits,
  *    so what is left to protect is the pointer and the predicate sentence. These
  *    are required to be PRESENT, not to be right -- a count is exactly what must
  *    not come back, and the way it comes back is by someone helpfully restating
