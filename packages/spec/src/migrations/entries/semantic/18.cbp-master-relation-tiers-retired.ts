@@ -50,9 +50,9 @@ export const entry: SemanticMigration = {
     + 'what deleting the master does to every row, and whether an object should instead stop being '
     + 'controlled by its parent is a product decision only its author can make. The same rule refuses a one '
     + 'master marked `readonly: true` or `system: true`: ADR-0055 §1 derives the '
-    + 'master from a reference every write of a detail supplies, record validation skips those two flags before '
-    + 'its required check, and `os lint` alone reported them, so `os validate`, `os build` and the save door '
-    + 'accepted a master that was required in name only. It is not converted: dropping the flag changes who may '
+    + 'master from a reference every write of a detail supplies, a field carrying either flag is not one an '
+    + 'author\'s write supplies, and `os lint` alone reported them, so `os validate`, `os build` and the save '
+    + 'door accepted a master that could not be the one master. It is not converted: dropping the flag changes who may '
     + 'write the reference.',
   acceptanceCriteria:
     'Every object declaring `sharingModel: \'controlled_by_parent\'` declares exactly one `master_detail` '

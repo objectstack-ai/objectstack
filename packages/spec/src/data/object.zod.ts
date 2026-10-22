@@ -2186,9 +2186,8 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
  * [#25092, ruling 6328204856 route A] The one master must also be WRITABLE:
  * a required `master_detail` declared `readonly: true` or `system: true` is
  * refused at `['fields']` (shape `master-not-writable`). ADR-0055 §1 derives
- * the master from a reference every write of a detail supplies, and record
- * validation skips those two flags before its required check, so such a
- * master is required in name only. Unlike the shapes above, the runtime still
+ * the master from a reference every write of a detail supplies, and a field
+ * carrying either flag is not one an author's write supplies. Unlike the shapes above, the runtime still
  * resolves this one (the flags do not change which field is the master), so
  * this half of the rule lives at the parse alone, the authoring contract, and
  * the runtime is not changed by it. `os lint`'s

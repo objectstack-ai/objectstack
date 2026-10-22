@@ -58,10 +58,9 @@
  * - `master-not-writable` — exactly one required `master_detail`, declared
  *   `readonly: true` or `system: true`. ADR-0055 §1 derives the master from a
  *   reference every write of a detail supplies, and those two flags mark a
- *   field record validation skips before its required check is reached (one
- *   the platform fills, or one a write may not set), so the one master would be
- *   required in name only. Dropping the flag is the owner's call: it changes
- *   who may write the reference.
+ *   field an author's write does not supply (one the platform fills, or one a
+ *   write may not set), so it cannot be the one master. Dropping the flag is
+ *   the owner's call: it changes who may write the reference.
  */
 export type ControlledByParentMasterShape =
   | 'several-required-masters'
@@ -146,9 +145,9 @@ export function controlledByParentMasterRefusal(
         `Object '${name}' declares sharingModel 'controlled_by_parent' with its one required \`master_detail\`, `
         + `\`${master}\`, marked ${flags.map((f) => `\`${f}: true\``).join(' and ')}. ADR-0055 §1: since `
         + '@objectstack/spec 18, a controlled-by-parent object derives its master from exactly one required '
-        + '`master_detail` field that every write of a detail supplies, and a `readonly` or `system` field is '
-        + 'one record validation skips before its required check, so this reference would be required in name '
-        + `only. Remove ${flags.map((f) => `\`${f}: true\``).join(' and ')} from \`${master}\` and declare the `
+        + '`master_detail` field that every write of a detail supplies, and a field marked `readonly` or '
+        + '`system` is not one an author\'s write supplies, so this reference cannot be that master. '
+        + `Remove ${flags.map((f) => `\`${f}: true\``).join(' and ')} from \`${master}\` and declare the `
         + 'master reference as an ordinary required field; if the rows must outlive their parent, this object '
         + "is not a detail: give it its own sharingModel ('private', 'public_read' or 'public_read_write').",
     };
