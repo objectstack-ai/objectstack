@@ -80,8 +80,8 @@
  * So the invariant is enforced at the WRITE, on the chokepoints every path goes
  * through — `beforeUpdate` and `beforeDelete` on `sys_user`, `sys_member`,
  * `sys_user_permission_set` and `sys_organization` (which names the Default
- * Organization), and `beforeInsert` / `beforeUpdate` on the activation
- * ledger — rather than at any
+ * Organization, so its `beforeInsert` is judged too), and `beforeInsert` /
+ * `beforeUpdate` on the activation ledger — rather than at any
  * individual endpoint.
  * HTTP-level guards protect only the endpoints they are attached to; these hold
  * for the admin ban / remove endpoints, `updateMemberRole`, the SCIM adapter
@@ -325,6 +325,7 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import { SystemObjectName, SystemUserId } from '@objectstack/spec/system';
 import { isMissingTableError, resolveTenancyPosture } from '@objectstack/types';
 import {
+  findDefaultOrganization,
   isGrantActive,
   matchesConfiguredPlatformAdmin,
   resolvePlatformAdminEmails,
@@ -379,6 +380,13 @@ export interface LastAdminGuardOptions {
 
 const DEFAULT_MAX_SCAN = 1000;
 
+/**
+ * [ADR-0131 D5] The id an inserted organization is simulated under when its
+ * payload names none yet. No grant can name it, so it anchors nobody's
+ * standing — the one property the simulation needs of it.
+ */
+const INSERTED_ORGANIZATION_ID = '(the organization being created)';
+
 /** Reads run as system: this is a safety proof, never RLS-scoped to a caller. */
 const SYSTEM_READ: BaseEngineOptions = { context: { isSystem: true } };
 
@@ -405,6 +413,7 @@ type GuardedOp =
   | 'activation-insert'
   | 'activation-update'
   | 'user-standing-update'
+  | 'organization-insert'
   | 'organization-update'
   | 'organization-delete';
 
@@ -419,6 +428,12 @@ interface OpWords {
   subject: string;
   /** The table this op writes — what a refusal reports as `err.object`. */
   table: string;
+  /**
+   * How this write takes the standing away, for a write whose row is not
+   * itself the evidence — `accounts` reads "that account" or "those accounts".
+   * Absent: the row is the evidence, and the refusal says so.
+   */
+  moves?: (accounts: string) => string;
 }
 
 const OP_WORDS: Record<GuardedOp, OpWords> = {
@@ -501,7 +516,21 @@ const OP_WORDS: Record<GuardedOp, OpWords> = {
   // [ADR-0131 D5] The organization whose `admin_full_access` grant anchors
   // platform standing under `single` is the Default Organization, named by its
   // `slug` (or by being the only one) — so re-slugging or deleting it is a
-  // standing write.
+  // standing write, and so is adding one: a second organization beside a sole
+  // one not slugged `default` leaves no Default Organization, and one slugged
+  // `default` becomes it.
+  'organization-insert': {
+    noun: 'organization creation',
+    verb: 'create',
+    gerund: 'creating',
+    Verb: 'Create',
+    subject: 'organizations',
+    table: SystemObjectName.ORGANIZATION,
+    moves: (accounts) =>
+      `A new '${SystemObjectName.ORGANIZATION}' row moves this deployment's Default Organization off ` +
+      `the organization whose '${ADMIN_FULL_ACCESS}' grant is what MAKES ${accounts} an administrator, ` +
+      'so creating it has the same end state as revoking that grant',
+  },
   'organization-update': {
     noun: 'organization change',
     verb: 'change',
@@ -531,7 +560,16 @@ const OP_WORDS: Record<GuardedOp, OpWords> = {
  * does. Sending THAT operator to look at an IdP group would send them into a
  * system they may not even run.
  */
-function standingOrigin(table: string, noun: string): string {
+function standingOrigin(table: string, noun: string, op?: GuardedOp): string {
+  if (op === 'organization-insert') {
+    return (
+      'Under the single tenancy posture the Default Organization is the one slugged \'default\', else ' +
+      'the only organization, so a second organization beside a sole one with another slug leaves ' +
+      'none, and a new one slugged \'default\' takes its place. Grant another account administrator ' +
+      'standing first, or give the current Default Organization the slug \'default\' first (while it ' +
+      'is the only organization that changes nothing else), then create the organization.'
+    );
+  }
   if (table === METADATA_ACTIVATION) {
     return (
       `If the ${noun} came from a disable action, an upgrade step or a script, revoke the ` +
@@ -626,8 +664,10 @@ interface PendingStandingWrite {
   /** The update payload, or `undefined` for a delete. */
   patch?: Record<string, unknown>;
   /**
-   * [ADR-0131 D3] A row this write INSERTS — the activation ledger's only
-   * standing write that addresses no existing row (`ids` is then empty).
+   * [ADR-0131 D3] A row this write INSERTS — a standing write that addresses
+   * no existing row (`ids` is then empty): an activation-ledger row switched
+   * off, or (ADR-0131 D5) an organization, which can move the Default
+   * Organization.
    */
   inserted?: Record<string, unknown>;
   /**
@@ -997,14 +1037,20 @@ export function registerLastAdminGuard(
   };
 
   /**
-   * [ADR-0131 D5] The Default Organization once `pending` lands — the
-   * resolver's definition (`readDefaultOrganizationId`,
-   * `resolve-authz-context.ts`): the organization with `slug = 'default'`, else
-   * the only one; `undefined` when neither exists. With a pending organization
-   * write, the rows it addresses are read as well — an update can move a row
-   * onto or off `default`, a delete removes it — and judged as they would read
-   * after it. A composition that registers no organization object holds none
-   * (the read is not issued).
+   * [ADR-0131 D5] The Default Organization once `pending` lands: the one
+   * definition (`findDefaultOrganization`, `@objectstack/core` — the
+   * organization with `slug = 'default'`, else the only one; `undefined` when
+   * neither exists), the definition the resolver reads the anchor by.
+   *
+   * The read is the guard's own on purpose, and is why this does not call the
+   * resolver's `readDefaultOrganizationId`: it answers with the rows as
+   * `pending` would leave them. The rows a pending organization write addresses
+   * are read as well — an update can move a row onto or off `default`, a delete
+   * removes it — and an inserted row is added to both reads. Its reads also go
+   * through {@link scan}, so an unreadable or oversized store refuses the write
+   * ({@link failClosed}) where the resolver would answer the request. A
+   * composition that registers no organization object holds none (the read is
+   * not issued).
    */
   const readDefaultOrganizationId = async (
     op: GuardedOp,
@@ -1023,21 +1069,27 @@ export function registerLastAdminGuard(
       if (missing.length === 0) return rows;
       return [...rows, ...(await scan(op, SystemObjectName.ORGANIZATION, { where: { id: { $in: missing } }, fields }))];
     };
-    const after = (rows: Array<Record<string, unknown>>) =>
-      rows.map((row) => applyPending(row, pending, SystemObjectName.ORGANIZATION))
+    const after = (rows: Array<Record<string, unknown>>) => {
+      const kept = rows.map((row) => applyPending(row, pending, SystemObjectName.ORGANIZATION))
         .filter((row): row is Record<string, unknown> => row !== undefined);
-    const bySlug = after(await addressed(await scan(op, SystemObjectName.ORGANIZATION, { where: { slug: 'default' }, fields })))
-      .find((row) => row.slug === 'default' && toId(row.id));
-    if (bySlug) return toId(bySlug.id);
-    // "The only organization" asks 0 / 1 / several, so it reads a page just wide
-    // enough to still tell several apart after the rows a pending delete removes.
-    const page = await engine.find(
-      SystemObjectName.ORGANIZATION,
-      { where: {}, fields, limit: 2 + (orgWrite?.ids.size ?? 0) },
-      SYSTEM_READ,
-    );
-    const remaining = after(Array.isArray(page) ? page : []);
-    return remaining.length === 1 ? toId(remaining[0]!.id) : undefined;
+      return orgWrite?.inserted ? [...kept, orgWrite.inserted] : kept;
+    };
+    const found = await findDefaultOrganization(async (where, limit) => {
+      if ('slug' in where) {
+        const rows = after(await addressed(await scan(op, SystemObjectName.ORGANIZATION, { where: { slug: where.slug }, fields })));
+        return rows.filter((row) => row.slug === where.slug && toId(row.id));
+      }
+      // "The only organization" asks 0 / 1 / several, so it reads a page just
+      // wide enough to still tell several apart after the rows a pending
+      // delete removes.
+      const page = await engine.find(
+        SystemObjectName.ORGANIZATION,
+        { where: {}, fields, limit: limit + (orgWrite?.ids.size ?? 0) },
+        SYSTEM_READ,
+      );
+      return after(Array.isArray(page) ? page : []);
+    });
+    return found.id;
   };
 
   /**
@@ -1645,12 +1697,15 @@ export function registerLastAdminGuard(
         `Refusing this ${words.noun}: it would revoke the administrator standing of ` +
           `${losing.map((id) => `'${id}'`).join(', ')}, ` +
           `${many ? 'who are the last administrators' : 'who is the last administrator'} this ` +
-          `system has that ${many ? 'are' : 'is'} not already banned. The ` +
-          `'${table}' row is what MAKES ${many ? 'those accounts' : 'that account'} an ` +
-          `administrator, so ${words.gerund} it has the same end state as ${words.gerund} ` +
-          `${many ? 'the users themselves' : 'the user themselves'}: nobody would be able to ` +
+          `system has that ${many ? 'are' : 'is'} not already banned. ` +
+          (words.moves
+            ? words.moves(many ? 'those accounts' : 'that account')
+            : `The '${table}' row is what MAKES ${many ? 'those accounts' : 'that account'} an ` +
+              `administrator, so ${words.gerund} it has the same end state as ${words.gerund} ` +
+              `${many ? 'the users themselves' : 'the user themselves'}`) +
+          `: nobody would be able to ` +
           `administer the system or restore anyone's access (${BREAK_GLASS_CITATION}). ` +
-          `${REMEDY} ${standingOrigin(table, words.noun)}`,
+          `${REMEDY} ${standingOrigin(table, words.noun, op)}`,
         words.table,
       );
     });
@@ -1807,6 +1862,35 @@ export function registerLastAdminGuard(
     await enforceStanding('organization-delete', SystemObjectName.ORGANIZATION, ctx.input);
   };
 
+  /**
+   * [ADR-0131 D5] The insert half. The Default Organization is the one slugged
+   * `default`, else the only one, so ADDING an organization can move it with no
+   * grant row touched: a second organization beside a sole one with another
+   * slug leaves none, and a new `default`-slugged one takes its place — either
+   * way the grant the promotion wrote no longer anchors. Judged like every
+   * other standing write, and refused only when it would leave nobody who can
+   * sign in and administer; an organization owner or admin, a configured
+   * administrator, or a `default`-slugged Default Organization that stays put
+   * admits it. ⛔ Not a standing-preservation rule: a platform administrator who
+   * also owns an organization keeps that, which the invariant counts, so the
+   * insert is admitted and the grant stops anchoring.
+   *
+   * Under a wall no grant anchors (`anchorOwnerTest`), so no organization row
+   * feeds the enumeration and the insert costs no reads. A batch insert is
+   * dispatched per row, so each row is judged against the stored rows without
+   * its siblings — which reads the anchor as moved no later than the whole
+   * batch would.
+   */
+  const guardOrganizationInsert = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== SystemObjectName.ORGANIZATION) return;
+    if (postureEnforcesWall(resolveTenancyPosture())) return;
+    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
+    // A payload that names no id yet is still an organization, and owns no grant.
+    const inserted = { ...data, id: toId(data.id) ?? INSERTED_ORGANIZATION_ID };
+    await enforceStanding('organization-insert', SystemObjectName.ORGANIZATION, ctx.input, undefined, inserted);
+  };
+
   // Priority 20: AFTER the ADR-0092 identity write guard's checks (10), before
   // default-priority hooks (100) spend work on a write this may refuse. The
   // four standing hooks (#5978) and the two activation-ledger hooks (#6084) are
@@ -1858,6 +1942,11 @@ export function registerLastAdminGuard(
     priority: 20,
     packageId,
   });
+  engine.registerHook('beforeInsert', guardOrganizationInsert, {
+    object: SystemObjectName.ORGANIZATION,
+    priority: 20,
+    packageId,
+  });
   engine.registerHook('beforeUpdate', guardOrganizationUpdate, {
     object: SystemObjectName.ORGANIZATION,
     priority: 20,
@@ -1872,8 +1961,8 @@ export function registerLastAdminGuard(
   logger?.info(
     '[LastAdminGuard] last-administrator guard registered on sys_user (ban + delete, and the ' +
       'email/email_verified pair the deployment-config anchor derives from), sys_member and ' +
-      'sys_user_permission_set (standing revocation), sys_organization (the Default ' +
-      'Organization the grant anchor reads) and sys_metadata_activation ' +
+      'sys_user_permission_set (standing revocation), sys_organization (creating, re-slugging ' +
+      'or removing the Default Organization the grant anchor reads) and sys_metadata_activation ' +
       '(switching admin_full_access off) — ADR-0135 D5.2',
   );
 

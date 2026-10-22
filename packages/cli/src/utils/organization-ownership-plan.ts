@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { createHash } from 'node:crypto';
-import { emailTemplateDefinitionFromRow } from '@objectstack/core';
+import { DEFAULT_ORGANIZATION_SLUG, emailTemplateDefinitionFromRow, findDefaultOrganization } from '@objectstack/core';
 import { dialectOfDriver } from '@objectstack/metadata-core';
 import { hasPlatformObjectPrefix } from '@objectstack/spec/system';
 import {
@@ -490,7 +490,6 @@ const ORG = 'organization_id';
 const ID = 'id';
 const PAGE = 500;
 const IN_CHUNK = 200;
-const DEFAULT_ORGANIZATION_SLUG = 'default';
 
 /** A name the plan may interpolate as a quoted identifier. */
 export const SAFE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -1336,20 +1335,27 @@ export async function buildOrganizationOwnershipPlan(opts: {
   // them `default`, name none: there is no single owner to derive, and the
   // rows are reported. ⛔ One definition: the ceremony attributing to an
   // organization the boot would not (or the reverse) leaves rows the post-check
-  // calls blocking on a database v18 would serve. The "one definition of the
-  // Default Organization" pin (organization-ownership-apply.test.ts) holds the
-  // two together over the same fixtures.
+  // calls blocking on a database v18 would serve. So the rule is the one
+  // `@objectstack/core` exports (`findDefaultOrganization`), and only the read
+  // is the ceremony's own: raw SQL against the database it certifies, with no
+  // engine, where a store with no `slug` column has no `default` to find. The
+  // "one definition of the Default Organization" pin
+  // (organization-ownership-apply.test.ts) holds the two together over the same
+  // fixtures.
   const hasSlug = hasOrganizations && catalog.columns.get('sys_organization')?.has('slug') === true;
   let defaultOrganization: { id: string; slug: string | null } | null = null;
   if (hasOrganizations) {
     const t = sql.q('sys_organization', 'sys_organization');
     const select = `SELECT ${sql.q(ID, 'sys_organization')} AS id${hasSlug ? `, ${sql.q('slug', 'sys_organization')} AS slug` : ''} FROM ${t}`;
-    const bySlug = hasSlug
-      ? await sql.read('sys_organization', `${select} WHERE ${sql.q('slug', 'sys_organization')} = ?`, [DEFAULT_ORGANIZATION_SLUG])
-      : [];
-    const named = bySlug.length > 0 ? bySlug : await sql.read('sys_organization', `${select} ORDER BY ${sql.q(ID, 'sys_organization')} LIMIT 2`, []);
-    const id = bySlug.length > 0 || named.length === 1 ? nonEmpty(named[0]?.id) : null;
-    if (id !== null) defaultOrganization = { id, slug: hasSlug ? nonEmpty(named[0]!.slug) : null };
+    const found = await findDefaultOrganization(async (where, limit) => {
+      if ('slug' in where) {
+        return hasSlug
+          ? sql.read('sys_organization', `${select} WHERE ${sql.q('slug', 'sys_organization')} = ?`, [where.slug])
+          : [];
+      }
+      return sql.read('sys_organization', `${select} ORDER BY ${sql.q(ID, 'sys_organization')} LIMIT ${Number(limit)}`, []);
+    });
+    if (found.id !== undefined) defaultOrganization = { id: found.id, slug: hasSlug ? nonEmpty(found.row?.slug) : null };
   }
   const defaultOrganizationId = defaultOrganization?.id ?? null;
   // [ADR-0131 D3, D10 fate 3] Under `single` the Default Organization owns

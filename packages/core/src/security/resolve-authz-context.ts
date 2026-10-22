@@ -72,6 +72,7 @@ import { isGrantActive, nextGrantValidityBoundary } from './grant-validity.js';
 import { openUserGrantsCache } from './resolve-user-grants-cache.js';
 import { openRequestGrantsMemo, withRequestGrantsMemo } from './request-grants-memo.js';
 import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from './platform-admin.js';
+import { findDefaultOrganization } from './default-organization.js';
 import { derivePosture } from './posture-ladder.js';
 import { securityCatalogReaderOf, type SecurityCatalogReader } from './security-catalog.js';
 import { resolveSystemWriteOrganization, type SystemWriteOrganizationDecision } from './system-write-organization.js';
@@ -949,25 +950,26 @@ function grantAnchorsPlatformStanding(
 }
 
 /**
- * [ADR-0131 D3/D5] The deployment's Default Organization: the one with
- * `slug = 'default'`, else the only organization there is; `undefined` when
- * neither exists (several organizations, none of them `default`, name none).
- * The definition plugin-auth's boot invariant (`default-organization-invariant.ts`)
- * creates the organization by, read-only here — and the one plugin-security's
- * promotion resolves the owner of the grant it writes by, so the row it writes
- * is the row this resolver reads as the anchor.
+ * [ADR-0131 D3/D5] The deployment's Default Organization, as this resolver
+ * reads it: the one definition ({@link findDefaultOrganization}: `slug =
+ * 'default'`, else the only organization) over this file's own read
+ * ({@link tryFind}), so a store that cannot be reached fails loud
+ * (`AuthzStoreUnavailableError`) and one never provisioned holds none.
+ * `undefined` when none can be named. plugin-auth's boot invariant creates the
+ * organization by the same definition, and plugin-security's promotion
+ * resolves the owner of the grant it writes by it, so the row it writes is the
+ * row this resolver reads as the anchor.
  *
  * A composition that registers no organization object holds none, and is not
  * read: the engine refuses an unregistered name as "object not found".
+ *
+ * Exported for the readers that read an engine under this policy. A reader
+ * with another read policy hands its own read to `findDefaultOrganization`.
  */
-async function readDefaultOrganizationId(ql: any): Promise<string | undefined> {
+export async function readDefaultOrganizationId(ql: any): Promise<string | undefined> {
   if (!registryHoldsObject(ql, SystemObjectName.ORGANIZATION)) return undefined;
-  const idOf = (row: any): string | undefined =>
-    row?.id === undefined || row?.id === null || String(row.id) === '' ? undefined : String(row.id);
-  const bySlug = await tryFind(ql, SystemObjectName.ORGANIZATION, { slug: 'default' }, 1);
-  if (idOf(bySlug[0])) return idOf(bySlug[0]);
-  const all = await tryFind(ql, SystemObjectName.ORGANIZATION, {}, 2);
-  return all.length === 1 ? idOf(all[0]) : undefined;
+  const found = await findDefaultOrganization((where, limit) => tryFind(ql, SystemObjectName.ORGANIZATION, where, limit));
+  return found.id;
 }
 
 /**
