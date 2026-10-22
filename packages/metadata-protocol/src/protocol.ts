@@ -7345,12 +7345,12 @@ export class ObjectStackProtocolImplementation implements
      *    not decide. Every judge above reads its body defensively, and the
      *    runtime gate reports a rule that throws instead of blocking on it.
      *  - ADR-0070 D1's read-only-base create refusal
-     *    (`SysMetadataRepository.readOnlyBaseCreateError`). A restore names no
-     *    package: it writes into the active row's own binding, which `put`
-     *    keeps, and `put` answers the package-writability condition for every
-     *    door that carries a row's own binding. Extending D1 to them would
-     *    refuse the repair of legacy package-bound rows (see `put`'s
-     *    package-door note).
+     *    (`SysMetadataRepository.readOnlyBaseCreateError`). D1 judges a
+     *    package a caller NAMES for a new item; a restore names none and
+     *    writes into the active row's own binding, which `put` keeps. `put`'s
+     *    package-door note records why D1 is not extended to the doors that
+     *    carry a row's own binding: it would refuse the repair of legacy
+     *    package-bound rows.
      *  - the credential channel's `store` refusal. A restore stores no
      *    credential: the channel keeps its current one
      *    ({@link restoredBodyDerivation}).
