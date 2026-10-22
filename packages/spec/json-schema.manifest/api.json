@@ -29,8 +29,6 @@
     "api/ApiRoutes",
     "api/ApiTestCollection",
     "api/ApiTestRequest",
-    "api/ApiTestingUiConfig",
-    "api/ApiTestingUiType",
     "api/AppDefinitionResponse",
     "api/ApproveAiPendingActionResponse",
     "api/AssembledInstalledPackage",
