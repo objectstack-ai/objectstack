@@ -263,7 +263,9 @@ organization declares `systemFields.tenant: false` (or `tenancy.enabled: false`,
 > 2. **`os migrate plan` lists the tenant columns still nullable**, in an advisory section that names
 >    `os migrate organization-ownership` as the remedy. The section is not drift, proposes no op and
 >    changes no exit code. No boot line is added. The same advisory goes into the 18.0 upgrade notes.
->    This is #25134's execution, in flight.
+>    #25179 (`6251f59051`) shipped it: each listed column is marked `tightens` or `leaves`, with the
+>    reason, and `--json` carries it as `nullableTenantColumns`. The ceremony now reports a shard the
+>    driver created NOT NULL as `already-not-null`.
 > 3. **Order.** The advisory's "the ceremony leaves nullable only …" holds only once a production boot
 >    that composes no organization object is refused (#25155, `ab488d9b7d`; see the D9 note).
 
