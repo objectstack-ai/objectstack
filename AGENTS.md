@@ -295,7 +295,7 @@ localStorage / auth gotchas.
     in neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
     spent approval or a standing record IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses a
     governed diff without its tier's record; CODEOWNERS routes every Tier H surface to the approvers, and the relay
-    requests them on drafts — a summons, no barrier; the post-merge audit (`scripts/pm/check-governed-merges.mjs`) lists
+    requests them on drafts (a summons, no barrier); the post-merge audit (`scripts/pm/check-governed-merges.mjs`) lists
     every governed-surface merge with its approver and merger — a merger the maintainer does not recognise, any agent
     approval, or a Tier S merge without a PASS record is a seat violation, filed and rolled back. No seat judges this.
 
