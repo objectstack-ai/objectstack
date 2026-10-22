@@ -1,27 +1,30 @@
 ---
 title: Documentation schema — API Protocol reference
 navTitle: Documentation
-description: "Provides schemas for generating interactive API documentation and testing interfaces similar to Swagger UI, Postman, etc."
+description: "Provides schemas for describing API documentation and test collections."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 API Documentation & Testing Interface Protocol
 
-Provides schemas for generating interactive API documentation and testing
-interfaces similar to Swagger UI, Postman, etc.
+Provides schemas for describing API documentation and test collections.
 
 Features:
 - OpenAPI/Swagger specification generation
-- Interactive API testing playground
+- API test requests and collections
 - API versioning and changelog
 - Code generation templates
 - Mock server configuration
 
 Architecture Alignment:
-- Swagger UI: Interactive API documentation
+- OpenAPI: the machine-readable API description
 - Postman: API testing collections
-- Redoc: Documentation rendering
+
+The platform serves no HTML documentation viewer: the API origin publishes
+the OpenAPI document (`GET {basePath}/openapi.json`) and nothing else. The
+viewer configuration this module used to declare (`ui`, typed by
+`ApiTestingUiConfigSchema`) is retired — see `API_DOCUMENTATION_UI_RETIRED`.
 
 **Documentation Config**
 ```typescript
@@ -30,11 +33,6 @@ const docConfig: ApiDocumentationConfig = {
   title: 'ObjectStack API',
   version: '1.0.0',
   servers: [{ url: 'https://api.example.com', description: 'Production' }],
-  ui: {
-    type: 'swagger-ui',
-    theme: 'light',
-    enableTryItOut: true
-  }
 }
 ```
 
@@ -45,8 +43,8 @@ const docConfig: ApiDocumentationConfig = {
 ## TypeScript Usage
 
 ```typescript
-import { ApiChangelogEntrySchema, ApiDocumentationConfigSchema, ApiTestCollectionSchema, ApiTestRequestSchema, ApiTestingUiConfigSchema, ApiTestingUiType, CodeGenerationTemplateSchema, GeneratedApiDocumentationSchema, OpenApiSecuritySchemeSchema, OpenApiServerSchema, OpenApiSpecSchema } from '@objectstack/spec/api';
-import type { ApiChangelogEntry, ApiDocumentationConfig, ApiTestCollection, ApiTestRequest, ApiTestingUiConfig, ApiTestingUiType, CodeGenerationTemplate, GeneratedApiDocumentation, OpenApiSecurityScheme, OpenApiServer, OpenApiSpec } from '@objectstack/spec/api';
+import { ApiChangelogEntrySchema, ApiDocumentationConfigSchema, ApiTestCollectionSchema, ApiTestRequestSchema, CodeGenerationTemplateSchema, GeneratedApiDocumentationSchema, OpenApiSecuritySchemeSchema, OpenApiServerSchema, OpenApiSpecSchema } from '@objectstack/spec/api';
+import type { ApiChangelogEntry, ApiDocumentationConfig, ApiTestCollection, ApiTestRequest, CodeGenerationTemplate, GeneratedApiDocumentation, OpenApiSecurityScheme, OpenApiServer, OpenApiSpec } from '@objectstack/spec/api';
 
 // Validate data
 const result = ApiChangelogEntrySchema.parse(data);
@@ -90,7 +88,7 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **version** | `string` | ✅ | API version |
 | **description** | `string` | optional | API description |
 | **servers** | `{ url: string; description?: string; variables?: Record<string, object> }[]` | optional (default: `[]`) | API server URLs |
-| **ui** | `{ type: Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphiql' \| 'postman' \| 'custom'>; path?: string; theme?: Enum<'light' \| 'dark' \| 'auto'>; enableTryItOut?: boolean; … }` | optional | Testing UI configuration |
+| **ui** | `never` | optional | [REMOVED] `ApiDocumentationConfig.ui` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — nothing ever read it: no viewer was ever mounted from it, and the platform serves no HTML API documentation viewer at all, only the machine-readable OpenAPI document. Delete the key. The OpenAPI document is served at `GET /api/v1/openapi.json` under the REST server's default `api.basePath` and `api.version` (the path follows both) while `api.enableOpenApi` is on; point any viewer or client generator you run yourself at that document. |
 | **generateOpenApi** | `boolean` | optional (default: `true`) | Generate OpenAPI 3.0 specification |
 | **generateTestCollections** | `boolean` | optional (default: `true`) | Generate API test collections |
 | **testCollections** | `{ name: string; description?: string; variables?: Record<string, any>; requests: object[]; … }[]` | optional (default: `[]`) | Predefined test collections |
@@ -110,23 +108,6 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **url** | `string` | ✅ | Server base URL |
 | **description** | `string` | optional | Server description |
 | **variables** | `Record<string, { default: string; description?: string; enum?: string[] }>` | optional | URL template variables |
-
-### Nested Shape: `ApiDocumentationConfig.ui`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphiql' \| 'postman' \| 'custom'>` | ✅ | Testing UI implementation |
-| **path** | `string` | optional (default: `"/api-docs"`) | URL path for documentation UI |
-| **theme** | `Enum<'light' \| 'dark' \| 'auto'>` | optional (default: `"light"`) | UI color theme |
-| **enableTryItOut** | `boolean` | optional (default: `true`) | Enable interactive API testing |
-| **enableFilter** | `boolean` | optional (default: `true`) | Enable endpoint filtering |
-| **enableCors** | `boolean` | optional (default: `true`) | Enable CORS for browser testing |
-| **defaultModelsExpandDepth** | `integer` | optional (default: `1`) | Default expand depth for schemas (-1 = fully expand) |
-| **displayRequestDuration** | `boolean` | optional (default: `true`) | Show request duration |
-| **syntaxHighlighting** | `boolean` | optional (default: `true`) | Enable syntax highlighting |
-| **customCssUrl** | `string` | optional | Custom CSS stylesheet URL |
-| **customJsUrl** | `string` | optional | Custom JavaScript URL |
-| **layout** | `{ showExtensions?: boolean; showCommonExtensions?: boolean; deepLinking?: boolean; displayOperationId?: boolean; … }` | optional | Layout configuration |
 
 ### Nested Shape: `ApiDocumentationConfig.testCollections[number]`
 
@@ -216,57 +197,6 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **body** | `any` | optional | Request body |
 | **variables** | `Record<string, any>` | optional (default: `{}`) | Template variables |
 | **expectedResponse** | `{ statusCode: integer; body?: any }` | optional | Expected response for validation |
-
-
----
-
-## ApiTestingUiConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphiql' \| 'postman' \| 'custom'>` | ✅ | Testing UI implementation |
-| **path** | `string` | optional (default: `"/api-docs"`) | URL path for documentation UI |
-| **theme** | `Enum<'light' \| 'dark' \| 'auto'>` | optional (default: `"light"`) | UI color theme |
-| **enableTryItOut** | `boolean` | optional (default: `true`) | Enable interactive API testing |
-| **enableFilter** | `boolean` | optional (default: `true`) | Enable endpoint filtering |
-| **enableCors** | `boolean` | optional (default: `true`) | Enable CORS for browser testing |
-| **defaultModelsExpandDepth** | `integer` | optional (default: `1`) | Default expand depth for schemas (-1 = fully expand) |
-| **displayRequestDuration** | `boolean` | optional (default: `true`) | Show request duration |
-| **syntaxHighlighting** | `boolean` | optional (default: `true`) | Enable syntax highlighting |
-| **customCssUrl** | `string` | optional | Custom CSS stylesheet URL |
-| **customJsUrl** | `string` | optional | Custom JavaScript URL |
-| **layout** | `{ showExtensions?: boolean; showCommonExtensions?: boolean; deepLinking?: boolean; displayOperationId?: boolean; … }` | optional | Layout configuration |
-
-### Nested Shape: `ApiTestingUiConfig.layout`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **showExtensions** | `boolean` | optional (default: `false`) | Show vendor extensions |
-| **showCommonExtensions** | `boolean` | optional (default: `false`) | Show common extensions |
-| **deepLinking** | `boolean` | optional (default: `true`) | Enable deep linking |
-| **displayOperationId** | `boolean` | optional (default: `false`) | Display operation IDs |
-| **defaultModelRendering** | `Enum<'example' \| 'model'>` | optional (default: `"example"`) | Default model rendering mode |
-| **defaultModelsExpandDepth** | `integer` | optional (default: `1`) | Models expand depth |
-| **defaultModelExpandDepth** | `integer` | optional (default: `1`) | Single model expand depth |
-| **docExpansion** | `Enum<'list' \| 'full' \| 'none'>` | optional (default: `"list"`) | Documentation expansion mode |
-
-
----
-
-## ApiTestingUiType
-
-### Allowed Values
-
-* `swagger-ui`
-* `redoc`
-* `rapidoc`
-* `stoplight`
-* `scalar`
-* `graphiql`
-* `postman`
-* `custom`
 
 
 ---
