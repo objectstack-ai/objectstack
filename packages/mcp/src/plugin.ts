@@ -32,7 +32,7 @@ import { readEnvWithDeprecation, isMcpServerEnabled, resolveMcpStdioAutoStart } 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { IAIService, IAuthService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { MCPServerRuntime } from './mcp-server-runtime.js';
+import { MCPServerRuntime, setRuntimeObjectView } from './mcp-server-runtime.js';
 import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
@@ -42,6 +42,7 @@ import {
   GATED_ACTIONS,
   serveStoredMetadataHashes,
   serveStoredMetadataRow,
+  stdioObjectView,
   type StdioObjectReads,
   type StdioProtocolObjectReads,
   type StoredHashDigest,
@@ -441,6 +442,23 @@ export class MCPServerPlugin implements Plugin {
       );
     }
 
+    // [#25138] The protocol's object reads — the merged listing behind
+    // `list_objects` / `describe_object` and the by-name read behind the
+    // exposure gate — resolved at each use, never captured here: an absence
+    // read in `start()` is a verdict the rest of the boot can still
+    // contradict. `undefined` when this host registers no protocol, and the
+    // bridge then reads the metadata service, as before.
+    // [#25245] Hoisted out of the stdio branch: the `objectstack://objects`
+    // resources read the same merged view, and they are bridged below whether
+    // or not this process starts the stdio transport.
+    const protocolReads = (): StdioProtocolObjectReads | undefined => {
+      try {
+        return ctx.getService<StdioProtocolObjectReads>('protocol') ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
     // ── stdio auto-start decision (opt-in, its OWN switch) ──
     // Deliberately stricter than the HTTP-surface default (`isMcpServerEnabled`,
     // default-on): start() attaches a long-lived transport claiming the
@@ -705,19 +723,6 @@ export class MCPServerPlugin implements Plugin {
         if (gate) throw stdioAuthGateRefusal(gate);
         return ec;
       };
-      // [#25138] The protocol's object reads — the merged listing behind
-      // `list_objects` / `describe_object` and the by-name read behind the
-      // exposure gate — resolved at each use, never captured here: an absence
-      // read in `start()` is a verdict the rest of the boot can still
-      // contradict. `undefined` when this host registers no protocol, and the
-      // bridge then reads the metadata service, as before.
-      const protocolReads = (): StdioProtocolObjectReads | undefined => {
-        try {
-          return ctx.getService<StdioProtocolObjectReads>('protocol') ?? undefined;
-        } catch {
-          return undefined;
-        }
-      };
       if (metadataService) {
         dataBridge = createStdioDataBridge({
           engine: scopedQl,
@@ -792,6 +797,11 @@ export class MCPServerPlugin implements Plugin {
     }
 
     if (metadataService) {
+      // [#25245] The object resources read the view `list_objects` /
+      // `describe_object` answer from (`stdioObjectView`), never the metadata
+      // service alone: on a kernel with an `environmentId` that service holds
+      // no copy of an object a package registered during the boot.
+      setRuntimeObjectView(this.runtime, stdioObjectView({ metadataService, protocol: protocolReads }));
       this.runtime.bridgeResources(metadataService, getRecord);
       // Awaited: the prompt bridge reads `skill` metadata to project each
       // skill's instructions onto an MCP prompt (#3905), so the surface must be

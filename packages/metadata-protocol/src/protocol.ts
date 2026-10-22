@@ -176,6 +176,7 @@ import {
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
     type ValidationAdvisoryEvent,
     discriminateDefaultValueShape,
+    externalBindingDatasourceRefusal,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal, METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 // [#13331] The cluster fan-out transport type only — the protocol never
@@ -22498,6 +22499,117 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [ADR-0015 §4.2 · #25211] The save doors' half of "`object.external` only
+     * on a datasource whose `schemaMode` is not 'managed'": the pair of the item
+     * being saved and the stored or registered item on the other side of it,
+     * which no parse can see.
+     *
+     * `ObjectSchema`'s refinement judges a binding on the primary datasource
+     * (`'default'`, written or omitted) inside the schema gate, and
+     * `defineStack` / `composeStacks` a binding on a datasource a stack
+     * declares (#25168). A binding on a datasource stored or registered here
+     * reached neither. Measured before this: an object saved `external` on a
+     * managed `wh`, and `wh` saved as managed (or with no `schemaMode`, the
+     * spec default) under objects bound to it with `external`, were both
+     * stored, in draft and in publish mode and under `force`, and the runtime
+     * then disagrees with itself about the object: its schema sync skips the
+     * DDL as federated while the boot validation and the write gate judge it
+     * as managed.
+     *
+     * Both directions, because either item can be the one saved last:
+     *  - an `object` with `external`: judged against the datasource it names,
+     *    as this door's own by-name read resolves it ({@link readMetaItem}: the
+     *    environment's stored row, else the definition the code layer
+     *    registers);
+     *  - a `datasource`: judged against every object that binds it with
+     *    `external` ({@link objectsBoundExternallyTo}). Only the `managed`
+     *    verdict counts here; a binding on the primary datasource is a fact
+     *    about the object alone, which its own save is refused for.
+     * The judgement is the spec's ({@link externalBindingDatasourceRefusal}),
+     * ⛔ never a copy, so a finding reads as the parse's and `defineStack`'s
+     * do. A datasource neither layer holds gets no verdict.
+     *
+     * Asked in draft and in publish mode by {@link saveMetaItem}, after the
+     * schema gate, and again by {@link promoteDraftForPublish} on the draft
+     * body, because the other half can change between a draft's save and its
+     * publish. An object's draft is not among the objects a datasource save
+     * meets: the draft is judged at its own publish. `force` does not reach
+     * it: `force` acknowledges a destructive diff, and this is no diff.
+     * Answered as the schema gate answers: `422 INVALID_METADATA`, the
+     * findings in `issues`, at `external` for an object and at `schemaMode`
+     * for a datasource.
+     */
+    private async externalBindingSaveRefusal(
+        singularType: string,
+        item: unknown,
+        name: string,
+        writeFace?: MetadataWriteFace,
+    ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+        const body = item as { external?: unknown; datasource?: unknown };
+        const issues: MetadataIssueEntry[] = [];
+        if (singularType === 'object') {
+            if (body.external === undefined || body.external === null) return undefined;
+            const datasource = typeof body.datasource === 'string' && body.datasource !== '' ? body.datasource : undefined;
+            const definition = datasource === undefined
+                ? undefined
+                : (await this.readMetaItem({ type: 'datasource', name: datasource }))?.item;
+            const refusal = externalBindingDatasourceRefusal(
+                name, body.external, datasource,
+                definition && typeof definition === 'object' ? definition as { schemaMode?: unknown } : undefined,
+            );
+            if (refusal) issues.push({ path: refusal.path, message: refusal.message, code: 'custom' });
+        } else if (singularType === 'datasource') {
+            for (const bound of await this.objectsBoundExternallyTo(name)) {
+                const refusal = externalBindingDatasourceRefusal(bound.name, bound.external, name, item as { schemaMode?: unknown });
+                if (refusal?.shape === 'managed') issues.push({ path: 'schemaMode', message: refusal.message, code: 'custom' });
+            }
+        }
+        if (issues.length === 0) return undefined;
+        const err = new Error(
+            `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+        ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+        err.code = 'INVALID_METADATA';
+        err.status = 422;
+        err.issues = issues;
+        return err;
+    }
+
+    /**
+     * [#25211] Every object this environment holds that binds `datasource`
+     * with `external`, for {@link externalBindingSaveRefusal}'s datasource
+     * half: the environment's stored active rows ({@link readActiveOverlayRows},
+     * read as the list read parses them), and the registry's objects no stored
+     * row overlays (an object's stored row is its base layer, ADR-0029 D9).
+     * Drafts are not read: a draft does not bind anything until its publish,
+     * which is judged on its own.
+     */
+    private async objectsBoundExternallyTo(datasource: string): Promise<Array<{ name: string; external: unknown }>> {
+        const bound = new Map<string, unknown>();
+        let records: any[] = [];
+        try {
+            records = await this.readActiveOverlayRows({ type: 'object' });
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        const stored = this.storedOverlayEntries({ type: 'object' }, records);
+        const storedNames = new Set(stored.map((entry) => entry.name));
+        const take = (name: string, obj: unknown) => {
+            const o = obj as { datasource?: unknown; external?: unknown } | null | undefined;
+            if (o?.datasource === datasource && o.external !== undefined && o.external !== null) bound.set(name, o.external);
+        };
+        for (const entry of stored) take(entry.name, entry.data);
+        const registry = this.engine.registry;
+        if (typeof registry?.getAllObjects === 'function') {
+            for (const obj of registry.getAllObjects() as Array<{ name?: unknown }>) {
+                if (typeof obj?.name !== 'string' || storedNames.has(obj.name)) continue;
+                take(obj.name, obj);
+            }
+        }
+        return [...bound].map(([name, external]) => ({ name, external }));
+    }
+
+    /**
      * [ADR-0138 D2b] The flow half of the anonymous door × elevated flow
      * refusal: a flow published with `runAs: 'system'` while an
      * `authRequired: false` endpoint of `type: 'flow'` names it.
@@ -23994,6 +24106,17 @@ export class ObjectStackProtocolImplementation implements
         {
             const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, request.item, request.name);
             if (defaultPageRefusal) throw defaultPageRefusal;
+        }
+
+        // [ADR-0015 §4.2 · #25211] An `object` bound `external` to a datasource
+        // this environment holds as managed, or a `datasource` saved as managed
+        // while objects bind it with `external`, is refused, in draft and in
+        // publish mode, after the schema (the body is the type it says, and the
+        // parse has judged a binding on the primary datasource) and before the
+        // authoring gate and every write. See {@link externalBindingSaveRefusal}.
+        {
+            const bindingRefusal = await this.externalBindingSaveRefusal(singularType, request.item, request.name, request.writeFace);
+            if (bindingRefusal) throw bindingRefusal;
         }
 
         // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an
@@ -25736,6 +25859,17 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, draftForGate.body, request.name, 'published');
             if (defaultPageRefusal) throw defaultPageRefusal;
+        }
+        // [ADR-0015 §4.2 · #25211] …and an object draft bound `external` to a
+        // datasource that is managed by the time it is published, or a
+        // datasource draft that would go `active` as managed under objects that
+        // bind it with `external`: the draft save judged the other half as it
+        // stood then. Judged again here, on the draft body and with the save
+        // door's predicate and envelope, before `repo.promoteDraft` writes, so a
+        // batch publish aborts on it too. See {@link externalBindingSaveRefusal}.
+        if (draftForGate) {
+            const bindingRefusal = await this.externalBindingSaveRefusal(singularType, draftForGate.body, request.name);
+            if (bindingRefusal) throw bindingRefusal;
         }
         // [ADR-0138 D2b] …and a flow draft that would go `active` with
         // `runAs: 'system'` while an anonymous endpoint of `type: 'flow'` names

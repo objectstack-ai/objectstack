@@ -13,6 +13,9 @@ import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // predicate write, which also bounds the id list a predicate write's read
 // question composes (see PREDICATE_WRITE_READABLE_ID_CAP).
 import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, MAX_BULK_PER_ROW_HOOK_ROWS, ReadableIds, type FieldMaskingRule } from '@objectstack/spec/data';
+// [ADR-0055 §1] The parse's own one-master judgement, asked of an object that
+// reached the registry without the parse (see `resolveCbpRelation`).
+import { controlledByParentMasterRefusal } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { NumberComparandDoorFieldMeta } from '@objectstack/spec/data';
 // [#7414] The SHARED operation-message catalog #7307 built for the data path's
@@ -92,6 +95,7 @@ import {
   isPlatformOwnershipFloorPolicy,
   masterGateCoversOperation,
   masterGovernsRowWrites,
+  OWD_DELEGATING_ROW_WRITES,
   owdDeclaresOpenRowWrites,
   owdOpenWritesCoversOperation,
   withOwnershipFloorAlternates,
@@ -140,6 +144,7 @@ import {
   MasterDetailRelationMissingError,
   DetailRecordNotFoundError,
   MasterReferenceMissingError,
+  MasterReferenceNotWritableError,
   MaskedValueWriteError,
 } from './errors.js';
 // [ADR-0138 D4] The guest entry's organization step, and the located refusal
@@ -697,6 +702,53 @@ interface CbpRelation {
    * for why.
    */
   omissionRefusedByValidation: boolean;
+  /**
+   * [ADR-0055 §1 · #25095] The relation's one master reference is not
+   * writable: its field def carries `readonly: true` or `system: true`, the
+   * declaration the parse refuses as `master-not-writable`. Then this is the
+   * parse's own sentence for it, else `null`.
+   *
+   * Read from the SAME field def the relation came from, like
+   * {@link CbpRelation.omissionRefusedByValidation}, and the relation still
+   * resolves, on purpose: the read leg, the cache and the unresolved report do
+   * not change, so the rows already stored keep the master their reads derive
+   * from. What it changes is the write gate's answer
+   * ({@link MasterReferenceNotWritableError}): every insert, and every update
+   * whose body carries the reference key, is refused before anything is
+   * written. The engine does not take a caller's value in a field the
+   * declaration keeps from the author as an ordinary master reference, so such
+   * a write could mint or re-point a detail outside the master its access
+   * derives from. One rule for both flags, with one prescription.
+   */
+  masterNotWritable: string | null;
+}
+
+/**
+ * [ADR-0055 §1] {@link CbpRelation.masterNotWritable} for a resolved relation:
+ * the parse's refusal of its one master reference, judged on that one def,
+ * else `null`. `controlledByParentMasterRefusal` reads `readonly === true` and
+ * `system === true` on it, so the flags and the sentence are spelled once, in
+ * the parse, and never re-derived here.
+ */
+function masterNotWritableRefusal(object: string, fk: string, def: unknown): string | null {
+  const refusal = controlledByParentMasterRefusal(object, OWD_DELEGATING_ROW_WRITES, { [fk]: def });
+  return refusal?.shape === 'master-not-writable' ? refusal.message : null;
+}
+
+/**
+ * [ADR-0055 §1] Does this write set the master reference `fk`? An insert sets
+ * every field of the rows it creates, so always, single or batch and whatever
+ * its body names. An update sets it when its body carries the key as an own
+ * property, whatever the value, `null` included; an upsert reaches the gate as
+ * one of those two. A delete, and every other write the gate judges, sets no
+ * field.
+ */
+function writesMasterReference(operation: string, data: unknown, fk: string): boolean {
+  if (operation === 'insert') return true;
+  if (operation !== 'update') return false;
+  const carries = (row: unknown) =>
+    row != null && typeof row === 'object' && !Array.isArray(row) && Object.prototype.hasOwnProperty.call(row, fk);
+  return Array.isArray(data) ? data.some(carries) : carries(data);
 }
 
 /**
@@ -8900,6 +8952,8 @@ export class SecurityPlugin implements Plugin {
         // mirrors and cannot widen if the resolver ever changes.
         omissionRefusedByValidation:
           def?.type === 'master_detail' && !!def?.required && !def?.readonly && !def?.system,
+        // [#25095] From the same def, asked of the parse's own predicate.
+        masterNotWritable: masterNotWritableRefusal(object, String(found[0]), def),
       };
     }
     this.cbpRelCache.set(object, rel);
@@ -9561,6 +9615,13 @@ export class SecurityPlugin implements Plugin {
    * An update whose body empties the reference is the insert shape's twin and
    * is answered by the same rule (#25049).
    *
+   * [#25095] The first of them has a sibling, answered before any master is
+   * asked: a relation whose one master reference is `readonly` or `system`
+   * ({@link CbpRelation.masterNotWritable}) refuses every write that sets it,
+   * every insert and every update whose body carries the key, `422
+   * INVALID_METADATA` ({@link MasterReferenceNotWritableError}), with the
+   * parse's own refusal of the declaration.
+   *
    * [#7505] A seventh outcome is not a leg of this gate at all: if the store
    * cannot be read, the engine's own error propagates (typically
    * `ERR_DATASOURCE_UNAVAILABLE` → `503`) and this gate answers nothing. It
@@ -9617,6 +9678,16 @@ export class SecurityPlugin implements Plugin {
     // narrowing is real — the non-null assertions this branch used to need
     // (`rel!.fk`) were the load-bearing half of the same defect.
     if (!rel) throw new MasterDetailRelationMissingError(object, operation);
+    // [ADR-0055 §1 · #25095] Also a metadata defect, and answered before any
+    // master is asked: a declaration the parse refuses because its one master
+    // reference is not writable ({@link CbpRelation.masterNotWritable}). Every
+    // write that sets that reference is refused, for every caller the gate
+    // judges: an insert (single or batch), and an update whose body carries
+    // the key. A delete, and an update that leaves the key alone, take the
+    // path below as before, so the rows already stored keep their master.
+    if (rel.masterNotWritable !== null && writesMasterReference(operation, opCtx.data, rel.fk)) {
+      throw new MasterReferenceNotWritableError(object, operation, rel.masterNotWritable);
+    }
 
     // [ADR-0055 §3 · #25044] Every master the write involves is asked, not one
     // of them. A body that names a master reference involves that master too,
@@ -9736,51 +9807,26 @@ export class SecurityPlugin implements Plugin {
       // every later by-id write through the stored-row leg below. The residual
       // envelope asymmetry is confined to exactly those shapes.
       //
-      // [#8959, re-measured 2026-09-01] "Confined" is now a PARTIAL publish-time
-      // bound: of the three shapes above, ONE is fenced at authoring time and
-      // two are not. The 2026-08-16 ruling (recorded in commit 8abada3ba) ordered a
-      // ramp with two code legs, of which exactly one has landed.
-      // Direction 2 (#9138) IS merged: `ObjectSchema.create()` now runs
-      // `forceCbpMasterDetailRequired` (`packages/spec/src/data/object.zod.ts`)
-      // — under `controlled_by_parent`, a `master_detail` reference with
-      // `required` omitted is forced to `required: true`, and an explicit
-      // `required: false` is refused with a located error. Direction 1
-      // (`relationship/master-detail-required` promoted `warning` → `error`,
-      // scoped to `controlled_by_parent`, #9139) has NOT landed — that card is
-      // open and `pm:on-hold`, deliberately held for the **v18** boundary
-      // (`main` is still 17.x as of this note).
+      // [#8959 → #25095] "Confined" is now a closed publish-time bound. Both
+      // legs of the 2026-08-16 ruling (recorded in commit 8abada3ba) have
+      // landed — the builder force (#9138, `forceCbpMasterDetailRequired`) and
+      // the lint's `error` tier for all three shapes (#9139,
+      // `relationship/master-detail-required` in
+      // `packages/lint/src/data-model-rules.ts`) — and the parse refuses all
+      // three at every door that parses (`controlledByParentMasterRefusal`: a
+      // missing `required` since #23100 ruling B, `readonly` / `system` on the
+      // one master since #25092). They reach the runtime only through a door
+      // that does not parse, and there no insert of theirs gets this far:
+      //   • no `required` — `resolveCbpRelation` resolves only a required
+      //     `master_detail`, so the object meets the `!rel` 422 above;
+      //   • `required` + `readonly` and `required` + `system` — every insert,
+      //     with or without a master in its body, is refused above
+      //     ({@link CbpRelation.masterNotWritable}, ruling 6345869077).
       //
-      // ⛔ #9138 landing is NOT "the residue is gone". It narrows the FIRST
-      // shape only, and only on the builder path:
-      //   • no `required` — no longer newly authorable through
-      //     `ObjectSchema.create()`, but it survives on the raw
-      //     `.parse()`/`.safeParse()` path, which #9138 left untouched ON
-      //     PURPOSE so metadata already at rest keeps loading (its docblock
-      //     says so). Measured: `safeParse` of a `controlled_by_parent` object
-      //     takes both an omitted `required` and an explicit `required: false`.
-      //     ⚠️ [#23100, ruling B] SUPERSEDED for this shape: the parse now
-      //     refuses it, and `resolveCbpRelation` resolves only a required
-      //     `master_detail`, so a non-required one never becomes `rel` and this
-      //     branch is unreachable for it (the object meets the `!rel` 422
-      //     above instead). The freeze below still binds the other two shapes.
-      //   • `required` + `readonly` and `required` + `system` — STILL newly
-      //     authorable through `ObjectSchema.create()` itself: the force
-      //     returns early on `required === true` and never inspects
-      //     `readonly`/`system`. It in fact MINTS them — a `readonly`/`system`
-      //     master reference authored with no `required` comes out of
-      //     `create()` as `required: true` plus the flag, which is exactly a
-      //     shape `validateRecord` skips.
-      //
-      // And nothing warns on the way past: the lint measured by #8959 is
-      // unchanged — the predicate is still `def.required !== true` at
-      // `severity: 'warning'` (`packages/lint/src/data-model-rules.ts`), so the
-      // two flagged shapes draw NO finding at ANY severity and only the
-      // un-flagged one draws a warning. A freshly authored detail therefore
-      // still reaches this branch and its `422`: for the two flagged shapes
-      // straight through the builder, for the third through raw parse. It is a
-      // live surface, not a shrinking legacy tail. Re-check this paragraph
-      // before trusting it — it goes stale when #9139 lands, or when the
-      // builder force grows to cover the two flagged shapes.
+      // What still reaches this branch for the two flagged shapes is the
+      // stored-row shape below. The freeze is no less binding for it: it is
+      // what keeps an omitted master refused if either refusal above ever
+      // moves.
       //
       // ⛔ [#9137] FREEZE NOTE — maintainer ruling (commit 8abada3ba), Direction 4,
       // "immediately": until the two legs above both land, this `if` is the

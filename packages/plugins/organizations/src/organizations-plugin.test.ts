@@ -176,8 +176,8 @@ describe('OrganizationsPlugin', () => {
     expect(opCtx.data.organization_id).toBeUndefined();
   });
 
-  // [#2937] The legitimate "set org_id on behalf" path (per-org seed replay /
-  // orphan-claim, migrations) runs under SYSTEM_CTX — it must keep an explicit
+  // [#2937] The legitimate "set org_id on behalf" path (per-org seed replay,
+  // migrations) runs under SYSTEM_CTX — it must keep an explicit
   // cross-org value verbatim, and it meets neither the stamp nor the wall.
   it('[#2937] system context preserves an explicit cross-org organization_id (on-behalf writes unaffected)', async () => {
     const plugin = new OrganizationsPlugin();

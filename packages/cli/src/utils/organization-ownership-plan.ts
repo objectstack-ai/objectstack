@@ -8,6 +8,7 @@ import {
   APPLICATION_OBJECT_FATE,
   LEGACY_SHIPPED_SET_SEEDS,
   LEGACY_SHIPPED_SET_SEEDS_CATEGORY,
+  MEMBERSHIP_OBJECT,
   ORGANIZATION_OWNERSHIP_INVENTORY,
   advisoryDepartureReason,
   type Anchor,
@@ -16,6 +17,7 @@ import {
   type OrganizationOwnershipFate,
   type RowCondition,
   type RowPredicate,
+  type SoleMembershipAnchor,
 } from './organization-ownership-inventory.js';
 import { physicalTableListSql, rotationBaseOf } from './unmanaged-tables.js';
 import { planGrantRewrite, type GrantCollision, type LegacySetRow } from './organization-ownership-grants.js';
@@ -896,6 +898,100 @@ async function applyAnchor(
 }
 
 /**
+ * Resolve rows through the inventory's {@link SoleMembershipAnchor}; returns
+ * the rows it could not derive. Under a wall only (the caller asks).
+ */
+async function applySoleMembership(
+  ctx: PlanContext,
+  anchor: SoleMembershipAnchor,
+  table: string,
+  columns: ReadonlySet<string>,
+  rows: PendingRow[],
+  derived: Record<string, number>,
+  assigned: AttributionAssignment[],
+): Promise<PendingRow[]> {
+  const label = `sole-membership:${anchor.userKey}->${MEMBERSHIP_OBJECT}`;
+  const memberDb = locate(ctx, MEMBERSHIP_OBJECT);
+  const memberCols = memberDb?.catalog.columns.get(MEMBERSHIP_OBJECT);
+  if (!memberDb || memberDb.catalog.bases.get(MEMBERSHIP_OBJECT)?.length !== 1 || !memberCols?.has('user_id') || !memberCols.has(ORG)) {
+    return rows.map((row) => ({ ...row, reason: `${row.reason}; ${MEMBERSHIP_OBJECT} holds no user_id / ${ORG} to derive from` }));
+  }
+  const users = [...new Set(rows.map((r) => nonEmpty(r.values[anchor.userKey])).filter((u): u is string => u !== null))];
+  const memberships = new Map<string, Set<string>>();
+  const msql = memberDb.sql;
+  const m = msql.q(MEMBERSHIP_OBJECT, MEMBERSHIP_OBJECT);
+  const mUser = msql.q('user_id', MEMBERSHIP_OBJECT);
+  const mOrg = msql.q(ORG, MEMBERSHIP_OBJECT);
+  for (let i = 0; i < users.length; i += IN_CHUNK) {
+    const chunk = users.slice(i, i + IN_CHUNK);
+    const found = await msql.read(
+      MEMBERSHIP_OBJECT,
+      `SELECT ${mUser} AS u, ${mOrg} AS org FROM ${m} WHERE ${mUser} IN (${chunk.map(() => '?').join(', ')}) AND ${mOrg} IS NOT NULL`,
+      chunk,
+    );
+    for (const row of found) {
+      const set = memberships.get(String(row.u)) ?? new Set<string>();
+      set.add(String(row.org));
+      memberships.set(String(row.u), set);
+    }
+  }
+  // The key a row would hold once owned; one already held there is the
+  // operator's to resolve, as is a second NULL row this walk derives onto it.
+  const keyColumns = anchor.keyColumns.filter((c) => columns.has(c));
+  const { sql } = ctx;
+  const t = sql.q(table, table);
+  const taken = new Set<string>();
+  const left: PendingRow[] = [];
+  for (const row of rows) {
+    const user = nonEmpty(row.values[anchor.userKey]);
+    const orgs = user === null ? undefined : memberships.get(user);
+    if (user === null) {
+      left.push({ ...row, reason: `${row.reason}; no ${anchor.userKey}` });
+      continue;
+    }
+    if (!orgs) {
+      left.push({ ...row, reason: `${row.reason}; user ${user} is a member of no organization` });
+      continue;
+    }
+    if (orgs.size > 1) {
+      left.push({ ...row, reason: `${row.reason}; user ${user} is a member of ${orgs.size} organizations, so the grant's is not derivable` });
+      continue;
+    }
+    const organizationId = [...orgs][0]!;
+    let held: string | null = null;
+    for (const column of keyColumns) {
+      const value = nonEmpty(row.values[column]);
+      if (value === null) continue;
+      const key = `${column}\u0000${user}\u0000${value}\u0000${organizationId}`;
+      if (taken.has(key)) {
+        held = `another NULL row of user ${user} with ${column} ${value}`;
+        break;
+      }
+      const other = await sql.read(
+        table,
+        `SELECT ${sql.q(ID, table)} AS id FROM ${t} WHERE ${sql.q(anchor.userKey, table)} = ? AND ${sql.q(column, table)} = ? AND ${sql.q(ORG, table)} = ? LIMIT 1`,
+        [user, value, organizationId],
+      );
+      if (other.length > 0) {
+        held = `row ${String(other[0]!.id)}`;
+        break;
+      }
+    }
+    if (held !== null) {
+      left.push({ ...row, reason: `${row.reason}; user ${user}'s sole membership names ${organizationId}, where ${held} already holds this key` });
+      continue;
+    }
+    for (const column of keyColumns) {
+      const value = nonEmpty(row.values[column]);
+      if (value !== null) taken.add(`${column}\u0000${user}\u0000${value}\u0000${organizationId}`);
+    }
+    derived[label] = (derived[label] ?? 0) + 1;
+    assigned.push({ id: row.id, table: row.shard, ...(ctx.database !== PRIMARY_DATABASE ? { database: ctx.database } : {}), organizationId, via: label });
+  }
+  return left;
+}
+
+/**
  * Overlay-key columns that arrived after 17.x: `sys_metadata.bundle_member`
  * first shipped in 18.0.0-next.0. Both the plan and the apply boot with schema
  * changes held, so on the 17.x databases this ceremony migrates the column is
@@ -1172,7 +1268,13 @@ async function walkNullRows(
   const { sql } = ctx;
   const t = sql.q(table, table);
   const id = sql.q(ID, table);
-  const anchorCols = [...new Set((entry.anchors ?? []).flatMap(anchorColumns))];
+  const membership = entry.fate === 'attribution' && ctx.posture !== 'single' ? entry.soleMembership : undefined;
+  const anchorCols = [
+    ...new Set([
+      ...(entry.anchors ?? []).flatMap(anchorColumns),
+      ...(membership ? [membership.userKey, ...membership.keyColumns].filter((c) => columns.has(c)) : []),
+    ]),
+  ];
   const departureSql = (entry.departures ?? []).map((d, i) => {
     const where = predicateSql(sql, table, columns, d.where);
     return { text: `CASE WHEN ${where.text} THEN 1 ELSE 0 END AS ${sql.q(`dep_${i}`, table)}`, params: where.params };
@@ -1209,6 +1311,7 @@ async function walkNullRows(
         if (pending.length === 0) break;
         pending = await applyAnchor(ctx, anchor, pending, derived, assigned);
       }
+      if (membership && pending.length > 0) pending = await applySoleMembership(ctx, membership, table, columns, pending, derived, assigned);
       if (pending.length > 0 && ctx.posture === 'single' && (ctx.defaultOrganizationId !== null || ctx.defaultOrganizationCreatable)) {
         derived['default-organization'] = (derived['default-organization'] ?? 0) + pending.length;
         // The plan's own run counts the rows the Default Organization `--apply`

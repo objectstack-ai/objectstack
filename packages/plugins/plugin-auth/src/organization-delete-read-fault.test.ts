@@ -154,6 +154,21 @@ function recordAttemptedWrites(engine: ObjectQL): string[] {
   return attempted;
 }
 
+/**
+ * The first `AuthManager` method on `stack`: an `AuthManager.<method>` frame,
+ * or [#25224] a frame of a method's body moved whole into
+ * `auth-manager-actor-guards.ts`, which runs under the method's own name (a
+ * helper of that module that is no method of the class does not count).
+ */
+function firstAuthManagerMethod(stack: string): string | undefined {
+  const methods = new Set(Object.getOwnPropertyNames(AuthManager.prototype));
+  for (const match of stack.matchAll(/AuthManager\.(\w+)|at (?:async )?(?:Object\.)?(\w+) \([^)\n]*auth-manager-actor-guards\.ts:/g)) {
+    if (match[1] !== undefined) return match[1];
+    if (methods.has(match[2])) return match[2];
+  }
+  return undefined;
+}
+
 /** The current stack, deep enough to reach the request's frames (V8 keeps ten by default). */
 function deepStack(): string {
   const limit = Error.stackTraceLimit;
@@ -191,7 +206,7 @@ function failAdmissionRead(engine: ObjectQL, read: AdmissionRead) {
     const real = target[method].bind(engine);
     return vi.spyOn(target, method).mockImplementation(async (name: string, ...rest: unknown[]) => {
       const stack = deepStack();
-      const first = /AuthManager\.(\w+)/.exec(stack)?.[1];
+      const first = firstAuthManagerMethod(stack);
       if (fired < times && name === object && stack.includes('assertOrganizationDeletable') && stack.includes(frame) && first === caller) {
         fired += 1;
         throw new Error(`${object} store unavailable (injected)`);

@@ -434,7 +434,8 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_MEMBER',
-        file: 'packages/plugins/plugin-auth/src/auth-manager.ts',
+        // [#25224] The stamp moved with `assertRemoveMemberPermitted`'s body.
+        file: 'packages/plugins/plugin-auth/src/auth-manager-actor-guards.ts',
         shape: 'objlitconst',
         door: 'none',
         verdict: 'foreign-vocabulary',

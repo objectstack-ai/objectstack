@@ -230,7 +230,7 @@ describe('ADR-0131 D10 inventory — every censused object has one fate and a ci
  * platform states. Compile-time: both directions of `extends` must hold, so a
  * key added to either side without the other fails `tsc` on this file.
  */
-type HostAuthoredKeys = Exclude<keyof InventoryEntry, 'census' | 'cloudCarried' | 'external' | 'underivableDeparture'>;
+type HostAuthoredKeys = Exclude<keyof InventoryEntry, 'census' | 'cloudCarried' | 'external' | 'underivableDeparture' | 'soleMembership'>;
 type SpecRowKeys = OrganizationOwnershipSupplementEntry extends infer Row ? (Row extends unknown ? keyof Row : never) : never;
 const KEYS_AGREE: [HostAuthoredKeys] extends [SpecRowKeys] ? ([SpecRowKeys] extends [HostAuthoredKeys] ? true : false) : false = true;
 
@@ -270,7 +270,7 @@ describe('the inventory row and the spec\'s supplement row are one shape', () =>
     // anchor, category and departure form) is declared in the spec: a host can
     // author anything the platform's own rows say.
     const refused: string[] = [];
-    for (const { census: _census, cloudCarried: _cloud, external: _external, underivableDeparture: _underivable, ...row } of ORGANIZATION_OWNERSHIP_INVENTORY) {
+    for (const { census: _census, cloudCarried: _cloud, external: _external, underivableDeparture: _underivable, soleMembership: _membership, ...row } of ORGANIZATION_OWNERSHIP_INVENTORY) {
       const result = OrganizationOwnershipSupplementEntrySchema.safeParse(row);
       if (!result.success) refused.push(`${row.object}: ${result.error.issues[0]?.message}`);
     }
