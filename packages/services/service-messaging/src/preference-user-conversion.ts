@@ -52,6 +52,13 @@ export const LEGACY_WILDCARD_USER = '*';
 /** The engine's own code for a refused duplicate (ADR-0112) — branched on before any driver shape. */
 const DUPLICATE_RECORD_CODE = 'DUPLICATE_RECORD';
 
+/**
+ * The table this conversion rewrites, spelled at its call sites so the tenant
+ * audit census can place them (an imported name reads as a runtime value). The
+ * type ties it to `PREFERENCE_OBJECT`: a different literal does not compile.
+ */
+const OBJECT: typeof PREFERENCE_OBJECT = 'sys_notification_preference';
+
 /** How many rows one pass reads — the same ceiling `PreferenceResolver.loadRows` reads with. */
 const PASS_LIMIT = 10000;
 
@@ -86,13 +93,6 @@ export interface PreferenceUserConversionResult {
     detail?: string;
 }
 
-/** The system context this conversion runs under (ADR-0118 D3: a migration is an entry point). */
-function systemContext(organizationId: string | null): Record<string, unknown> {
-    // The row's own organization is threaded on the write, so it is tenant-scoped
-    // like any other write to this object — no audit bypass is needed for it.
-    return organizationId ? { isSystem: true, tenantId: organizationId } : { isSystem: true };
-}
-
 function textOrNull(value: unknown): string | null {
     return value === null || value === undefined ? null : String(value);
 }
@@ -105,14 +105,13 @@ function textOrNull(value: unknown): string | null {
 export async function convertWildcardPreferenceUsers(
     engine: IDataEngine | undefined,
     logger?: PreferenceUserConversionLogger,
-    opts: { objectName?: string } = {},
 ): Promise<PreferenceUserConversionResult> {
     // An engine that cannot read and write rows has no rows to convert either:
     // the same probe `provisionSystemTables` makes of `syncObjectSchema`.
     if (!engine || typeof engine.find !== 'function' || typeof engine.update !== 'function') {
         return { status: 'no-engine', converted: 0, missed: [] };
     }
-    const object = opts.objectName ?? PREFERENCE_OBJECT;
+    const object = OBJECT;
 
     let converted = 0;
     const missed: PreferenceUserConversionMiss[] = [];
@@ -124,14 +123,14 @@ export async function convertWildcardPreferenceUsers(
         let rows: Array<Record<string, unknown>>;
         try {
             rows = (await engine.find(
-                object,
+                OBJECT,
                 {
                     where: { user_id: LEGACY_WILDCARD_USER },
                     fields: ['id', 'organization_id', 'topic', 'channel'],
                     limit: PASS_LIMIT,
                 },
                 // Every organization's rows: the read is the platform's own, not a tenant's.
-                { context: { isSystem: true } } as never,
+                { context: { isSystem: true } },
             )) ?? [];
         } catch (err) {
             // No table yet holds no '*' row — a fresh database, or a boot whose
@@ -157,10 +156,14 @@ export async function convertWildcardPreferenceUsers(
             seen.add(id);
             const organizationId = textOrNull(row.organization_id);
             try {
+                // ADR-0118 D3: a migration is an entry point, so it states the
+                // system context itself. The row's own organization is threaded
+                // on the write, so it is tenant-scoped like any other write to
+                // this object and needs no audit bypass.
                 await engine.update(
-                    object,
+                    OBJECT,
                     { user_id: null },
-                    { where: { id }, context: systemContext(organizationId) } as never,
+                    { where: { id }, context: { isSystem: true, tenantId: organizationId ?? undefined } },
                 );
                 converted += 1;
             } catch (err) {

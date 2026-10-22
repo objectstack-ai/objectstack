@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 236 |
-| Object name statically decidable | 159 |
+| Write call sites | 237 |
+| Object name statically decidable | 160 |
 | Object name chosen at run time | 77 |
-| Against a tenancy-enabled object | 158 |
+| Against a tenancy-enabled object | 159 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 177 |
+| Threading a tenant context | 178 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 51 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 134 |
+| Threading a decidably elevated context | 135 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 94 |
 
@@ -90,13 +90,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-20 at `a454cbcc4`.
+Measured on 2026-10-22 at `452e9963c`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 684 |
-| engine-shaped types recognised | 82 |
-| declared objects in the registry | 118 |
+| tracked non-test sources scanned | 700 |
+| engine-shaped types recognised | 86 |
+| declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 169 |
 
 ## Every site
@@ -221,6 +221,7 @@ Measured on 2026-10-20 at `a454cbcc4`.
 | `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `RECEIPT_OBJECT` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `update` | `RECEIPT_OBJECT` | undecidable | options unreadable | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `sys_notification` | enabled | context, elevation undecidable | 1 |
+| `packages/services/service-messaging/src/preference-user-conversion.ts` | `update` | `sys_notification_preference` | enabled | elevated | 1 |
 | `packages/services/service-messaging/src/sql-http-outbox.ts` | `insert` | `this.objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | context, elevation undecidable | 4 |
 | `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 1 |

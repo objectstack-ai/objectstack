@@ -130,7 +130,7 @@ describe('the write door refuses an id no user holds', () => {
         const { ql } = await boot();
         const ann = await user(ql, 'Ann', 'ann@example.com');
         const row = await ql.insert(PREFERENCE_OBJECT, { user_id: ann, topic: 'deal.won', channel: 'email' }, ADMIN);
-        const { error, status } = await refusal(ql.update(PREFERENCE_OBJECT, { user_id: LEGACY_WILDCARD_USER }, { where: { id: row.id }, ...ADMIN } as any));
+        const { error, status } = await refusal(ql.update(PREFERENCE_OBJECT, { user_id: LEGACY_WILDCARD_USER }, { where: { id: row.id }, context: ADMIN.context }));
         expect(error.code).toBe('VALIDATION_FAILED');
         expect(status).toBe(400);
         expect((await storedRows(ql))[0]!.user_id).toBe(ann);
@@ -178,7 +178,7 @@ describe('deleting a user deletes their preferences (cascade)', () => {
         await ql.insert(PREFERENCE_OBJECT, { user_id: eve, topic: 'deal.won', channel: 'sms', enabled: false }, SYS);
         await ql.insert(PREFERENCE_OBJECT, { topic: 'deal.lost', channel: 'sms', enabled: true }, SYS);
 
-        await ql.delete('sys_user', { where: { id: eve }, context: { isSystem: true } } as any);
+        await ql.delete('sys_user', { where: { id: eve }, context: { isSystem: true } });
 
         const rows = await storedRows(ql);
         expect(rows.map((r) => [r.user_id, r.topic])).toEqual([[null, 'deal.lost']]);

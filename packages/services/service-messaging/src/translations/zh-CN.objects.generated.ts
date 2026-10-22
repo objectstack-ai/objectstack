@@ -197,7 +197,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the user, the topic and the channel this toggle covers (computed on read)"
+        help: "记录标题:此开关适用的人员(或 All users)、主题和通道(读取时计算)"
       },
       user_id: {
         label: "用户",

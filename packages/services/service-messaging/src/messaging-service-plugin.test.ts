@@ -465,7 +465,7 @@ describe("MessagingServicePlugin — converts stored user_id '*' to the empty re
             id: 'p_star', organization_id: DEFAULT_ORGANIZATION_ID, user_id: '*', topic: 'deal.won', channel: 'email', enabled: false,
         });
         const userIdOf = async () =>
-            (await ql.findOne('sys_notification_preference', { where: { id: 'p_star' } }, { context: { isSystem: true } } as any))!.user_id ?? null;
+            (await ql.findOne('sys_notification_preference', { where: { id: 'p_star' } }, { context: { isSystem: true } }))!.user_id ?? null;
         return { ql, logs, userIdOf, fireReady: async () => { for (const fn of readyHooks) await fn(); } };
     }
 
