@@ -330,6 +330,12 @@ async function boot(
   });
   session.notify('notifications/initialized');
 
+  const readResource = async (uri: string): Promise<any> => {
+    const frame = await session.rpc('resources/read', { uri });
+    expect(frame.error, `resources/read ${uri} failed at the protocol level`).toBeUndefined();
+    return JSON.parse(frame.result.contents[0].text as string);
+  };
+
   return {
     kernel,
     engine,
@@ -344,13 +350,9 @@ async function boot(
       return { isError: frame.result.isError === true, text, json };
     },
     async readRecord(object, id) {
-      return this.readResource(`objectstack://objects/${object}/records/${id}`);
+      return readResource(`objectstack://objects/${object}/records/${id}`);
     },
-    async readResource(uri) {
-      const frame = await session.rpc('resources/read', { uri });
-      expect(frame.error, `resources/read ${uri} failed at the protocol level`).toBeUndefined();
-      return JSON.parse(frame.result.contents[0].text as string);
-    },
+    readResource,
   };
 }
 
