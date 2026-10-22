@@ -12,10 +12,11 @@ import {
   VISIBILITY_PREDICATE_SYNTAX,
   VISIBILITY_PREDICATE_OVER_BUDGET,
   VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
+  VISIBILITY_PREDICATE_HAS_ARGUMENT,
 } from './validate-visibility-predicates.js';
 import { explainRule } from './rule-explanations.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
-import { CEL_STDLIB_FUNCTIONS } from '@objectstack/formula';
+import { CEL_STDLIB_FUNCTIONS, celEngine } from '@objectstack/formula';
 
 // [#22161] Each finding of the rule ids this file's rule shortened is one
 // verdict sentence; the reasoning it used to carry is the id's `os explain`
@@ -29,6 +30,7 @@ const SHORTENED_RULE_IDS: readonly string[] = [
   VISIBILITY_PREDICATE_OVER_BUDGET,
   VISIBILITY_PREDICATE_SYNTAX,
   VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
+  VISIBILITY_PREDICATE_HAS_ARGUMENT,
   VISIBILITY_BARE_IDENTIFIER,
 ];
 const firedShortened: Array<{ rule: string; message: string; hint: string }> = [];
@@ -895,12 +897,19 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(findings[0].hint).toContain('`record.status`');
     });
 
-    it('row 3 — `has(status)` ALONE stays silent (the negative control)', () => {
+    it('row 3 — `has(status)` ALONE draws no BARE-IDENTIFIER finding (the negative control)', () => {
       // The exclusion stays: a `has()` argument is a select target, so the one
       // occurrence that IS the argument earns no bare-identifier verdict. Pinned
       // so a later refactor cannot delete the exclusion wholesale and still read
       // green off row 2.
-      expect(validateVisibilityPredicates(formStack('has(status)'))).toEqual([]);
+      //
+      // Flipped by ruling 6351260886 on #25281, not silently: this row used to
+      // pin the WHOLE set as `[]`. The argument shape itself is now refused, by
+      // `visibility-predicate-has-argument` and only by it, so the set is that
+      // ONE finding — the mask is what keeps it from being two.
+      expect(bareFindings(formStack('has(status)'))).toEqual([]);
+      expect(validateVisibilityPredicates(formStack('has(status)')).map((f) => f.rule))
+        .toEqual([VISIBILITY_PREDICATE_HAS_ARGUMENT]);
     });
 
     it('a prefixed guard beside a bare use still reports the bare use', () => {
@@ -922,15 +931,20 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(findings[0].message).toContain('`overdue`');
     });
 
-    it('several bare `has()` arguments and nothing else stay silent', () => {
-      expect(validateVisibilityPredicates(formStack('has(status) && has(owner)'))).toEqual([]);
+    it('several bare `has()` arguments draw no bare-identifier finding — one `has()` finding instead', () => {
+      // Flipped with row 3 (ruling 6351260886): was `[]` for the whole set.
+      expect(validateVisibilityPredicates(formStack('has(status) && has(owner)')).map((f) => f.rule))
+        .toEqual([VISIBILITY_PREDICATE_HAS_ARGUMENT]);
     });
 
     it('a comprehension variable behind a `has()` guard is still not a bare identifier', () => {
       // The checker remains the oracle for macro-bound names: the body is handed
       // to it unchanged, so `t` keeps resolving the way it does without a guard.
       expect(validateVisibilityPredicates(formStack("has(record.tags) && record.tags.all(t, t != '')"))).toEqual([]);
-      expect(validateVisibilityPredicates(formStack("has(tags) && record.tags.all(t, t != '')"))).toEqual([]);
+      // `has(tags)` is itself refused since ruling 6351260886 — by the `has()`
+      // rule, never as a bare identifier, and `t` stays unreported.
+      expect(validateVisibilityPredicates(formStack("has(tags) && record.tags.all(t, t != '')")).map((f) => f.rule))
+        .toEqual([VISIBILITY_PREDICATE_HAS_ARGUMENT]);
     });
   });
 });
@@ -1078,7 +1092,7 @@ describe('visibility-predicate-syntax (#6253)', () => {
       // would be a fresh false statement.
       expect(validateVisibilityPredicates(formStack('upper(1, 2)'))).toEqual([]);
 
-      // ── #13594 narrows this pin by exactly one axis ──────────────────
+      // ── #13594 and #25281 narrow this pin by exactly two axes ────────
       //
       // The maintainer's 2026-08-31 ruling is a SCOPED supersession of the
       // parse-only decision quoted above: a call to a name the environment does
@@ -1087,6 +1101,12 @@ describe('visibility-predicate-syntax (#6253)', () => {
       // the narrowing is visible where the old absolute claim used to be.
       expect(validateVisibilityPredicates(formStack('totallyBogusFn(1,2)')).map((f) => f.rule))
         .toEqual([VISIBILITY_PREDICATE_UNKNOWN_FUNCTION]);
+      // The second axis, ruling 6351260886 on #25281, updated the same way: a
+      // `has()` whose argument is not a field selection. Data-independent like
+      // the first — the CEL definition refuses the shape before any type is
+      // known — and every line above it stays exactly as blind as it was.
+      expect(validateVisibilityPredicates(formStack('has(status)')).map((f) => f.rule))
+        .toEqual([VISIBILITY_PREDICATE_HAS_ARGUMENT]);
     });
 
     it('a `DEFAULT_LIMITS` overrun is NOT this rule any more — it is `over-budget` (#7217)', () => {
@@ -1666,6 +1686,206 @@ describe('emitted prose names the surface, not a source file (#8042)', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────
+// `visibility-predicate-has-argument` — #25281 (ruling 6351260886, letter A).
+//
+// `has(status)` and `has(record.items[0])` published clean through this gate
+// and faulted `has() invalid argument` on every evaluation, so the console drew
+// the guarded element for every user. The CEL definition admits one form,
+// `has(e.f)`; the refusal is a fact about the source, decided before any type
+// is known — the property #13594's arm was admitted on — and the arm reads
+// nothing else about types.
+// ─────────────────────────────────────────────────────────────────────
+
+/** Only the `has()` argument findings (#25281). */
+function hasArgFindings(stack: Record<string, unknown>, opts?: { layer: 'runtime' | 'metadata' }) {
+  return validateVisibilityPredicates(stack, opts).filter((f) => f.rule === VISIBILITY_PREDICATE_HAS_ARGUMENT);
+}
+
+/** The engine's own verdict: does `celEngine.compile` refuse `source` as `has() invalid argument`? */
+function engineRefusesHasArgument(source: string): boolean {
+  const compiled = celEngine.compile(source);
+  return !compiled.ok && compiled.error.message.split('\n')[0].trim() === 'has() invalid argument';
+}
+
+describe('visibility-predicate-has-argument (#25281)', () => {
+  describe('the acceptance pair', () => {
+    it.each([
+      ['has(status)', 'a bare name', '`status`'],
+      ['has(record.items[0])', 'an index as the last step', '`record.items[0]`'],
+    ])('%s (%s) is an ERROR — the one finding, quoting the engine', (predicate, _shape, subject) => {
+      const findings = validateVisibilityPredicates(formStack(predicate));
+      // The WHOLE set: the #16118 mask keeps the bare-identifier rule off the
+      // argument occurrence, so this rule's finding is the only one.
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_HAS_ARGUMENT]);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].path).toBe('views[0].sections[0].fields[0]');
+      expect(findings[0].message).toContain(subject);
+      expect(findings[0].message).toContain('has() invalid argument');
+      // Non-vacuous: the engine really refuses what the finding reports.
+      expect(engineRefusesHasArgument(predicate)).toBe(true);
+    });
+
+    it('the control: `has(record.status)` is clean, and the engine compiles it', () => {
+      expect(validateVisibilityPredicates(formStack('has(record.status)'))).toEqual([]);
+      expect(celEngine.compile('has(record.status)').ok).toBe(true);
+    });
+  });
+
+  // The arm walks the canonical AST (mechanism (b) of the ruling); these pins
+  // are what make that the ENGINE's verdict and not a second one. Every shape
+  // in the first table is refused by `compile`, and by the arm; every one in
+  // the second compiles, and the arm accepts it.
+  describe('the engine is the oracle — pinned in both directions', () => {
+    const REFUSED = [
+      'has(status)',
+      'has(record)',
+      'has(record.items[0])',
+      "has(record['k'])",
+      'has(record.items[0][1])',
+      'has(record.items[size(record.items) - 1])',
+      'has(record.?a)',
+      'has(record.a.?b)',
+      'has(1)',
+      "has('x')",
+      'has(true)',
+      'has(null)',
+      'has(record.x.size())',
+      'has(upper(record.x))',
+      'has(-record.a)',
+      'has(!record.a)',
+      'has(record.a == 1)',
+      'has(record.a + 1)',
+      'has(record.a ? record.b : record.c)',
+      'has(record.x) || has(y)',
+      'record.items.exists(i, has(i))',
+      'has (status)',
+    ];
+    const ACCEPTED = [
+      'has(record.a)',
+      'has(record.a.b.c.d)',
+      'has((record.a))',
+      'has(record.items[0].x)',
+      "has(record['a'].b)",
+      'has(record.a.b[0].c)',
+      'has(dyn(record).a)',
+      'has(record.a.?b.c)',
+      'record.items.exists(i, has(i.x))',
+      "has(record.a) && record.a != ''",
+    ];
+
+    it.each(REFUSED)('%s — refused by `compile`, and by this arm', (predicate) => {
+      expect(engineRefusesHasArgument(predicate), 'the engine refuses it').toBe(true);
+      expect(hasArgFindings(formStack(predicate))).toHaveLength(1);
+    });
+
+    it.each(ACCEPTED)('%s — compiles, and this arm accepts it', (predicate) => {
+      expect(celEngine.compile(predicate).ok, 'the engine compiles it').toBe(true);
+      expect(hasArgFindings(formStack(predicate))).toEqual([]);
+    });
+  });
+
+  describe('the prescription names the spelling the definition admits', () => {
+    it('a bare name: the field on the root this layer binds', () => {
+      expect(hasArgFindings(formStack('has(status)'))[0].hint)
+        .toBe("`has()` tests a field on a namespace: write `has(record.status)` or `'status' in record`");
+      expect(hasArgFindings(formStack('has(status)'), { layer: 'metadata' })[0].hint)
+        .toContain("`has(data.status)` or `'status' in data`");
+    });
+
+    it('a bare ROOT: a field of it, never `record.record`', () => {
+      const hint = hasArgFindings(formStack('has(record)'))[0].hint;
+      expect(hint).toContain("`has(record.<field>)` or `'<field>' in record`");
+      expect(hint).not.toContain('record.record');
+      expect(hasArgFindings(formStack('has(current_user)'))[0].hint).toContain('`has(current_user.<field>)`');
+    });
+
+    it('a CEL type name is not a root: `has(type)` is told `has(record.type)`', () => {
+      expect(hasArgFindings(formStack('has(type)'))[0].hint).toContain('`has(record.type)`');
+    });
+
+    it('an index as the last step: `size(e) > i`, or `in` for a string key', () => {
+      expect(hasArgFindings(formStack('has(record.items[0])'))[0].hint).toContain('`size(record.items) > 0`');
+      expect(hasArgFindings(formStack("has(record['k'])"))[0].hint).toContain("`'k' in record`");
+    });
+
+    it('an optional selection: the plain selection', () => {
+      expect(hasArgFindings(formStack('has(record.?a)'))[0].hint).toContain('`has(record.a)`');
+    });
+
+    it('anything else: the one form, with the layer root', () => {
+      expect(hasArgFindings(formStack('has(upper(record.x))'))[0].hint).toContain('`has(record.<field>)`');
+      expect(hasArgFindings(formStack('has(upper(data.x))'), { layer: 'metadata' })[0].hint)
+        .toContain('`has(data.<field>)`');
+    });
+
+    it('repeats no null-guard advice (`validate-null-guards` owns it), and every line is one line of ≤ 200', () => {
+      for (const predicate of ['has(status)', 'has(record)', 'has(record.items[0])', "has(record['k'])", 'has(record.?a)', 'has(1)']) {
+        const [finding] = hasArgFindings(formStack(predicate));
+        expect(finding.hint, predicate).not.toContain('!= null');
+        expect(finding.hint, predicate).not.toContain('\n');
+        expect(finding.hint.length, finding.hint).toBeLessThanOrEqual(200);
+      }
+    });
+  });
+
+  describe('the #16118 mask stays load-bearing', () => {
+    it('`has(status) && status == ...` keeps its bare-identifier finding on the unwrapped occurrence, beside this one', () => {
+      const findings = validateVisibilityPredicates(formStack("has(status) && status == 'qualified'"));
+      expect(findings.map((f) => f.rule).sort()).toEqual([VISIBILITY_BARE_IDENTIFIER, VISIBILITY_PREDICATE_HAS_ARGUMENT].sort());
+      expect(findings.find((f) => f.rule === VISIBILITY_BARE_IDENTIFIER)!.message).toContain('`status`');
+    });
+
+    it('one finding per predicate, for the first refused call', () => {
+      const findings = hasArgFindings(formStack('has(owner) && has(record.items[0])'));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain('`owner`');
+    });
+  });
+
+  describe('the boundaries — #13594\'s scope discipline stands verbatim', () => {
+    it.each([
+      ["type == 'grid'", 'a CEL type name compared — refused by `compile`, not by this'],
+      ['type(record.x) == string', 'legitimate CEL over the same names'],
+      ['upper(1, 2)', 'a registered function called wrongly'],
+      ["1 + 'a'", 'an operator overload nobody judges'],
+      ["record.note == 'has(x)'", 'a `has(` inside a string literal'],
+      ['record.tags.has(x)', 'a member call named `has`, not the macro'],
+      ['has()', 'no argument — the engine refuses it under another message'],
+      ['has(record.a, record.b)', 'two arguments — likewise'],
+    ])('%s draws no `has()` finding (%s)', (predicate) => {
+      expect(hasArgFindings(formStack(predicate))).toEqual([]);
+    });
+  });
+
+  describe('every carrier the schema declares', () => {
+    it('a form SECTION predicate', () => {
+      const stack = { views: [{ name: 'f', sections: [{ visibleWhen: 'has(status)', fields: [] }] }] };
+      expect(hasArgFindings(stack).map((f) => f.path)).toEqual(['views[0].sections[0]']);
+    });
+
+    it('a PAGE COMPONENT predicate', () => {
+      const stack = {
+        pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: 'has(record.items[0])' }] }] }],
+      };
+      const findings = hasArgFindings(stack);
+      expect(findings.map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
+      expect(findings[0].where).toBe('page "p"');
+    });
+
+    it('resolves a `{ dialect, source }` envelope the same as a bare string', () => {
+      expect(hasArgFindings(formStack({ dialect: 'cel', source: 'has(status)' }))).toHaveLength(1);
+    });
+
+    it('reaches a container\'s `formViews.<key>`', () => {
+      const stack = {
+        views: [{ object: 'showcase_task', formViews: { edit: { sections: [{ fields: [{ field: 'n', visibleWhen: 'has(status)' }] }] } } }],
+      };
+      expect(hasArgFindings(stack).map((f) => f.path)).toEqual(['views[0].formViews.edit.sections[0].fields[0]']);
+    });
+  });
+});
+
 describe('[#22161] one-line verdicts — the rule ids this file shortened', () => {
   it('every verdict the cases above fired for those ids is one line of at most 200 characters', () => {
     // The coverage control first: each shortened id fired at least once, so
@@ -1683,6 +1903,7 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
     [VISIBILITY_PREDICATE_OVER_BUDGET]: ['falls OPEN', 'settled behaviour', 'SIZE fault', '`maxListElements` is 64'],
     [VISIBILITY_PREDICATE_SYNTAX]: ['falls OPEN', 'settled behaviour', 'ADR-0032', '`===`'],
     [VISIBILITY_PREDICATE_UNKNOWN_FUNCTION]: ['`throwOnError: true`', 'falls CLOSED', '`console.warn`', 'CEL_STDLIB_FUNCTIONS'],
+    [VISIBILITY_PREDICATE_HAS_ARGUMENT]: ['`has(e.f)`', 'falls OPEN', '`size(record.items) > 0`', '`has(record.items[0].name)`'],
     [VISIBILITY_BARE_IDENTIFIER]: ['never flattened', 'falls OPEN', 'predicate-rhs-path-shaped'],
   };
 

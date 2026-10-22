@@ -267,6 +267,7 @@ export {
   VISIBILITY_PREDICATE_SYNTAX,
   VISIBILITY_PREDICATE_OVER_BUDGET,
   VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
+  VISIBILITY_PREDICATE_HAS_ARGUMENT,
 } from './validate-visibility-predicates.js';
 export type {
   VisibilityFinding,

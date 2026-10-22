@@ -50,7 +50,7 @@
  * normalized tier, and none was affected by the retirement.
  *
  * One advisory rule (`warning` — nothing is broken, a mis-rooted predicate just
- * never matches) plus FOUR **gating** rules (`error` — the predicate can never
+ * never matches) plus FIVE **gating** rules (`error` — the predicate can never
  * evaluate at all):
  *
  * - `visibility-predicate-syntax` (**error**, #6253) — a predicate the canonical
@@ -66,8 +66,14 @@
  *   that PARSES perfectly and calls a function the CEL environment does not
  *   register (`current_user.canApprove(object, verb)`, `totallyBogusFn(1,2)`).
  *   See the §Function existence block below for the ruling that put it here, for
- *   why it is the one `check()` verdict this file adopts, and for the four
+ *   why it was the first `check()` verdict this file adopted, and for the four
  *   things it deliberately still does not report.
+ * - `visibility-predicate-has-argument` (**error**, #25281) — a predicate that
+ *   PARSES and hands `has()` an argument that is not a `.` field selection
+ *   (`has(status)`, `has(record.items[0])`), which the engine refuses as
+ *   `has() invalid argument` on every evaluation. See §`has()` argument shape
+ *   below for the ruling and for why it is the second data-independent verdict
+ *   this file adopts, and the last one §Function existence leaves room for.
  * - `visibility-bare-identifier` (**error**, #6128 / #5149 requirement 3) — a
  *   predicate referencing a top-level identifier that no binding root can
  *   resolve (`status == 'active'` instead of `record.status == 'active'`). See
@@ -218,7 +224,10 @@
  *    refused only when it NAMES something that does not exist. `type(record.x)
  *    == string` still passes, `type == 'grid'` is still a blind spot, `upper(1,
  *    2)` is still not our business, and `1 + 'a'` is still nobody's. The blind
- *    spot narrowed by exactly one axis and is pinned that way.
+ *    spot narrows by exactly TWO axes and is pinned that way: function
+ *    existence (this ruling) and the `has()` argument shape (ruling 6351260886
+ *    on #25281, §`has()` argument shape below). Both are data-independent;
+ *    neither reads a type that flows through the predicate.
  * 3. **It cannot be a false positive.** The validation environment and the
  *    runtime environment are the same builder (53 probes, 0 divergence), so a
  *    call this refuses is a call that WILL fault when evaluated. The old ruling's
@@ -274,6 +283,66 @@
  * and allowlists key on the id. #7073 / PR #7209 made the same correction at
  * ADR-0032's shared producer, which this gate deliberately does not go through
  * (that is the paragraph above) — hence the same defect had to be fixed here too.
+ *
+ * ## `has()` argument shape — the second data-independent verdict (#25281)
+ *
+ * ### The gap
+ *
+ * `has(status)` and `has(record.items[0])` published clean through this gate
+ * and then faulted on every evaluation, so the console drew the guarded element
+ * for every user. Nothing here judged them: the #16118 mask below removes every
+ * `has(…)` call before the bare-identifier check sees the source, and the one
+ * `check()` verdict §Function existence adopted reads only the call template.
+ * The engine refuses both as `has() invalid argument` at `compile` and at
+ * `evaluate`, whatever the record holds.
+ *
+ * ### The ruling
+ *
+ * Ruling 6351260886 on #25281, letter A (a ruling under the maintainer's
+ * delegation, reversible on one word): this gate refuses, as an `error`, a
+ * `has()` call whose single argument is not a `.` field selection. It is a
+ * scoped extension BESIDE
+ * #13594, not a revision of it: that ruling's approved scope — function
+ * existence, no general type checking, `dyn` untouched — stands in full.
+ *
+ * ### Why it is the same kind of verdict as function existence
+ *
+ * The CEL definition gives the macro one form, `has(e.f)`, and says `f` must
+ * syntactically be an identifier; only the select notation is supported. A
+ * bare name and an index are not field selections, and no binding, scope or
+ * value makes them evaluate. So the refusal is a fact about the SOURCE, decided
+ * before any type is known — the property that admitted function existence
+ * ("It cannot be a false positive", point 3 above) — and it reads nothing about
+ * the types flowing through the predicate.
+ *
+ * ### How the verdict is decided
+ *
+ * On the canonical AST this file already walks for the #16118 mask: a `has`
+ * call with exactly one argument whose node is not `.`. That is the engine's
+ * verdict by construction — `rewriteIndexedHas` (#25267) lowers every `.`
+ * selection over an indexed or call receiver, so after it the engine refuses
+ * exactly the arguments that are not `.` — and the equivalence is pinned
+ * against `celEngine.compile` in both directions in this file's suite. A call
+ * with no argument or with several is not this arm's; the engine refuses it
+ * under another message.
+ *
+ * ### What it reports
+ *
+ * One finding per predicate, for the first such call, quoting the engine's
+ * wording and the argument as written. The hint names the spelling the
+ * definition admits and nothing else — `has(<root>.x)` or `'x' in <root>` for a
+ * bare name, with the root this layer binds; `size(e) > i` for an index as the
+ * last step (`'k' in e` when the index is a string key) — and repeats no
+ * null-guard advice, which is `validate-null-guards`' to give.
+ *
+ * ### What it does NOT change
+ *
+ * `has(e.f)` for any `e`, including the indexed and call receivers #25267
+ * lowers; every `dyn` predicate; `type == 'grid'`, `type(record.x) == string`,
+ * `upper(1, 2)`, `1 + 'a'`; the #16118 mask, which stays load-bearing so a
+ * refused `has(status)` yields ONE finding (this one) and `has(status) &&
+ * status == 'x'` keeps its bare-identifier finding on the unwrapped occurrence;
+ * the render-side fail-open (ADR-0137 D3).
  *
  * ## Bare identifiers — the gap between two gates that both wave it through
  *
@@ -359,7 +428,8 @@
  *   way #4953 is eventually settled. The exclusion a `has()` argument earns is
  *   keyed to that ARGUMENT's occurrence, never to its name: the same identifier
  *   written bare elsewhere in the predicate is reported exactly as it would be
- *   with no guard beside it (#16118).
+ *   with no guard beside it (#16118). Whether the argument is one `has()`
+ *   accepts at all is §`has()` argument shape's verdict, not this rule's.
  * - **A predicate the canonical front end will not parse.** `parseCelToAst`
  *   returns `null` there, so the declaredness check has no AST to reason about
  *   and this rule gives no BARE-IDENTIFIER verdict on it. That is a division of
@@ -385,14 +455,15 @@
  *   measured blind spot in the safe direction — a missed catch, never a false
  *   build error — pinned by a test so it reads as a decision.
  *
- *   ⚠️ **Function existence excepted (#13594).** The pin used to read "the
- *   CEL-type blind spot stays a blind spot" without qualification; the ruling in
- *   §Function existence narrows it by exactly one axis. `type == 'grid'` and
- *   `type(record.x) == string` are unchanged — the first is refused as `no such
- *   overload: type == string`, which is not a call verdict, and the second
- *   type-checks clean. What is no longer blind is a call to a name the
- *   environment does not register at all. Everything the checker says about the
- *   TYPES flowing through a `dyn` predicate stays unread.
+ *   ⚠️ **Function existence and the `has()` argument shape excepted (#13594,
+ *   #25281).** The pin used to read "the CEL-type blind spot stays a blind
+ *   spot" without qualification; the two rulings narrow it by exactly two axes.
+ *   `type == 'grid'` and `type(record.x) == string` are unchanged — the first
+ *   is refused as `no such overload: type == string`, which is neither verdict,
+ *   and the second type-checks clean. What is no longer blind is a call to a
+ *   name the environment does not register at all, and a `has()` whose argument
+ *   is not a field selection. Everything the checker says about the TYPES
+ *   flowing through a `dyn` predicate stays unread.
  *
  * ### The one position this rule does not judge (#7696)
  *
@@ -463,6 +534,7 @@ import {
   firstUnknownFunctionCall,
   parseCelToAst,
   parseCelToAstWithReason,
+  SCOPE_ROOTS,
 } from '@objectstack/formula';
 import type { CelAstNode, CelBoundsOverrun, UnknownFunctionCall } from '@objectstack/formula';
 
@@ -491,6 +563,14 @@ export const VISIBILITY_PREDICATE_OVER_BUDGET = 'visibility-predicate-over-budge
  * and `--json` consumers key on the id.
  */
 export const VISIBILITY_PREDICATE_UNKNOWN_FUNCTION = 'visibility-predicate-unknown-function';
+/**
+ * A predicate handing `has()` an argument that is not a `.` field selection —
+ * `has(status)`, `has(record.items[0])` — which the engine refuses as
+ * `has() invalid argument` (#25281, ruling 6351260886; see the module note's
+ * §`has()` argument shape). A separate id for the reason `unknown-function` is
+ * one: the source parses, and the fix is a different edit.
+ */
+export const VISIBILITY_PREDICATE_HAS_ARGUMENT = 'visibility-predicate-has-argument';
 
 export type VisibilitySeverity = 'error' | 'warning';
 
@@ -522,9 +602,10 @@ export interface VisibilityOptions {
 export interface VisibilityFinding {
   /**
    * `warning` for the ADR-0089 D3b advisory (`visibility-root-mislayered`);
-   * `error` for the four rules that gate — `visibility-predicate-syntax`,
-   * `visibility-predicate-over-budget`, `visibility-predicate-unknown-function`
-   * and `visibility-bare-identifier` (see module note).
+   * `error` for the five rules that gate — `visibility-predicate-syntax`,
+   * `visibility-predicate-over-budget`, `visibility-predicate-unknown-function`,
+   * `visibility-predicate-has-argument` and `visibility-bare-identifier` (see
+   * module note).
    */
   severity: VisibilitySeverity;
   /** Diagnostic rule id, e.g. `visibility-root-mislayered`. */
@@ -892,6 +973,131 @@ function maskHasCalls(source: string, ast: unknown): string {
   return masked;
 }
 
+// ── `visibility-predicate-has-argument` (#25281) ────────────────────
+
+/**
+ * A `has()` call whose one argument is not a `.` field selection — what the
+ * engine refuses as `has() invalid argument` — and how the author wrote it:
+ *
+ * - `bare`  — a name alone (`has(status)`);
+ * - `index` — an index as the LAST step (`has(record.items[0])`);
+ * - `other` — anything else that is not a selection (`has(record.?a)`,
+ *   `has(f(x))`, `has(record.a == 1)`, a literal).
+ */
+interface RefusedHasArgument {
+  kind: 'bare' | 'index' | 'other';
+  /** The argument as written. */
+  argument: string;
+  /** `bare`: the name. */
+  name?: string;
+  /** `index`: the indexed receiver and the index, as written. */
+  receiver?: string;
+  index?: string;
+  /** `index`: the index is a string literal (`e['k']`), so it names a map key. */
+  stringKey?: string;
+  /** `other`, written `e.?f`: the receiver and the field. */
+  optional?: { receiver: string; field: string };
+}
+
+/** The source text `node` spans, or `undefined` when the AST carries no usable span. */
+function spanText(node: unknown, source: string): string | undefined {
+  if (!isNode(node)) return undefined;
+  const { start, end } = node as { start?: unknown; end?: unknown };
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return undefined;
+  const from = start as number;
+  const to = end as number;
+  if (from < 0 || to > source.length || to <= from) return undefined;
+  return source.slice(from, to);
+}
+
+/**
+ * The first `has()` call in `ast`, in source order, whose single argument is
+ * not a `.` field selection — or `null` when every `has()` takes one.
+ *
+ * The test is the one the module note's §`has()` argument shape states: the
+ * canonical AST (`parseCelToAst`, the tree {@link hasCallSpans} already walks)
+ * keeps the authored `has(…)` call, and the engine refuses exactly the one-
+ * argument calls whose argument node is not `.` — after `rewriteIndexedHas`
+ * lowers every `.` selection over an indexed or call receiver, no `.` argument
+ * is refused and every other one is. `validate-visibility-predicates.test.ts`
+ * pins that equivalence against `celEngine.compile`. A call with no argument or
+ * with several is not this arm's: the engine refuses it under another message,
+ * and nothing here names a shape for it.
+ */
+function firstRefusedHasArgument(node: unknown, source: string): RefusedHasArgument | null {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = firstRefusedHasArgument(child, source);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!isNode(node)) return null;
+  const args = node.args;
+  if (node.op === 'call' && Array.isArray(args) && args[0] === 'has'
+    && Array.isArray(args[1]) && args[1].length === 1) {
+    const arg: unknown = args[1][0];
+    if (isNode(arg) && arg.op !== '.') {
+      const argument = spanText(arg, source) ?? 'its argument';
+      const parts: unknown[] = Array.isArray(arg.args) ? arg.args : [];
+      if (arg.op === 'id' && typeof arg.args === 'string') {
+        return { kind: 'bare', argument, name: arg.args };
+      }
+      if (arg.op === '[]') {
+        const index = parts[1];
+        const stringKey = isNode(index) && index.op === 'value' && typeof index.args === 'string'
+          ? index.args
+          : undefined;
+        return {
+          kind: 'index',
+          argument,
+          receiver: spanText(parts[0], source),
+          index: spanText(index, source),
+          stringKey,
+        };
+      }
+      if (arg.op === '.?' && typeof parts[1] === 'string') {
+        const receiver = spanText(parts[0], source);
+        if (receiver) return { kind: 'other', argument, optional: { receiver, field: parts[1] } };
+      }
+      return { kind: 'other', argument };
+    }
+  }
+  return firstRefusedHasArgument(args, source);
+}
+
+/**
+ * The corrective line for a refused `has()` argument: the spelling the CEL
+ * definition admits (`has(e.f)`, `f` an identifier), or the test the author
+ * was reaching for. Null-guard advice is `validate-null-guards`' to give and is
+ * not repeated here.
+ */
+function hasArgumentHint(refused: RefusedHasArgument, root: string): string {
+  if (refused.kind === 'bare' && refused.name) {
+    const name = refused.name;
+    // A name the surface binds as a namespace (`record`, `current_user`, …)
+    // is the root itself: the fix names a field OF it, never `record.record`.
+    // Read off the root LIST, not the declaredness oracle, which also declares
+    // CEL's own type names (`type`, `string`, …) — see `SCOPE_ROOTS`.
+    const roots: readonly string[] = [...SCOPE_ROOTS, ...VIEW_PAGE_EXTRA_ROOTS];
+    if (roots.includes(name)) {
+      return `\`has()\` tests a field of \`${name}\`, never \`${name}\` itself: write ` +
+        `\`has(${name}.<field>)\` or \`'<field>' in ${name}\``;
+    }
+    return `\`has()\` tests a field on a namespace: write \`has(${root}.${name})\` or \`'${name}' in ${root}\``;
+  }
+  if (refused.kind === 'index' && refused.receiver && refused.index) {
+    return refused.stringKey !== undefined
+      ? `\`has()\` cannot test a bracketed key: write \`'${refused.stringKey}' in ${refused.receiver}\``
+      : `\`has()\` cannot test an element: write \`size(${refused.receiver}) > ${refused.index}\``;
+  }
+  if (refused.optional) {
+    const { receiver, field } = refused.optional;
+    return `\`has()\` takes a plain selection: write \`has(${receiver}.${field})\``;
+  }
+  return `\`has()\` takes one field selection, e.g. \`has(${root}.<field>)\`, never a call, literal or operator`;
+}
+
 /**
  * The first identifier in `source` that no binding root can resolve — a bare
  * value or, since #22212, the root of a namespace nobody binds — or `null` when
@@ -1011,8 +1217,8 @@ const MISLAYER_BY_LAYER: Record<
 /**
  * Inspect one element carrying a visibility predicate. Emits the mis-layered-root
  * finding (when the effective predicate's binding root does not match `layer`),
- * the syntax / over-budget finding, the unknown-function finding (#13594), and
- * the bare-identifier finding.
+ * the syntax / over-budget finding, the unknown-function finding (#13594), the
+ * `has()` argument finding (#25281), and the bare-identifier finding.
  *
  * There is no alias-KEY step here: `visibility-alias-deprecated` was retired
  * under #6318 (see the module note for the per-site measurement and for the D2
@@ -1152,6 +1358,38 @@ function checkElement(
     });
   }
 
+  // (3b) #25281 — a `has()` whose argument is not a `.` field selection. GATES,
+  // by ruling 6351260886, quoted in the module note's §`has()` argument shape:
+  // the engine refuses the call (`has() invalid argument`) whatever the data,
+  // so the predicate never evaluates and the console falls open. Reached only
+  // when the front end ACCEPTED the source, like (3).
+  //
+  // Independent of (3) and (4), for the reason (3) gives: a different token,
+  // a different fix. Two facts keep it from doubling up with (4). The #16118
+  // mask still removes the `has()` argument occurrence before the bare-
+  // identifier check, so `has(status)` alone is ONE finding — this one, which
+  // carries the prescription — and `has(status) && status == 'x'` keeps its
+  // bare-identifier finding on the unwrapped `status` beside it. And (3)
+  // cannot fire on the same call: the engine phrases this refusal outside the
+  // call template `firstUnknownFunctionCall` reads.
+  const ast = source && !refusal ? parseCelToAst(source) : null;
+  const refusedHas = ast && source ? firstRefusedHasArgument(ast, source) : null;
+  if (source && refusedHas) {
+    findings.push({
+      severity: 'error',
+      rule: VISIBILITY_PREDICATE_HAS_ARGUMENT,
+      where,
+      path,
+      // The engine's own wording, quoted; no tracker id (`check:doc-authoring`).
+      message:
+        `visibility predicate passes \`${quoteSource(refusedHas.argument)}\` to \`has()\`, which takes only a ` +
+        `field selection (has() invalid argument), ${NEVER_EVALUATES}`,
+      // One remedy line, the spelling the CEL definition admits; why the
+      // engine refuses the shape is `os explain visibility-predicate-has-argument`.
+      hint: hasArgumentHint(refusedHas, CANONICAL_ROOT_BY_LAYER[layer]),
+    });
+  }
+
   // (4) #6128 — a reference no binding root can resolve. Unlike (1) this one
   // GATES: a mis-rooted predicate is at least a statement about a namespace
   // someone binds somewhere, while a bare identifier resolves nowhere, on no
@@ -1234,7 +1472,8 @@ function isFieldObject(entry: unknown): entry is AnyRec {
  * Returns findings (empty = clean). `visibility-root-mislayered` is advisory
  * (`warning`); `visibility-predicate-syntax` (#6253),
  * `visibility-predicate-over-budget` (#7217),
- * `visibility-predicate-unknown-function` (#13594) and
+ * `visibility-predicate-unknown-function` (#13594),
+ * `visibility-predicate-has-argument` (#25281) and
  * `visibility-bare-identifier` (#6128) are `error` and the caller is expected to
  * fail the build on them.
  *
