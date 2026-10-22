@@ -2,7 +2,8 @@
 
 /**
  * PIN — every standalone manifest `os init` and `os create` emit carries the
- * npm `overrides` block, built from the one vitest constant.
+ * npm `overrides` block, built from the vitest constant and the two `uuid`
+ * constants (the `uuid` entry is an advisory route; its pins are at the end).
  *
  * ## The defect
  *
@@ -26,8 +27,8 @@
  * Every equality is DERIVED from the exported constants, never a literal: a
  * pin comparing against a spelled-out range would stay green on a tree where
  * the constant moved and one emission was left behind — the drift it exists
- * to catch. The one literal is a LOWER bound, the advisory's fixed release, in
- * the floor pin at the end of this file.
+ * to catch. The literals are LOWER bounds, the advisories' fixed releases, in
+ * the floor pins at the end of this file.
  *
  *   1. Each emission's `overrides.vitest` IS `SCAFFOLD_VITEST_RANGE`.
  *   2. Where an emission also declares `vitest` directly, the two are equal —
@@ -47,6 +48,8 @@ import { describe, it, expect } from 'vitest';
 import {
   renderScaffoldPackageJson,
   SCAFFOLD_NPM_OVERRIDES,
+  SCAFFOLD_UUID_OVERRIDE_RANGE,
+  SCAFFOLD_UUID_OVERRIDE_SELECTOR,
   SCAFFOLD_VITEST_RANGE,
   TEMPLATES,
 } from '../src/commands/init.js';
@@ -84,8 +87,10 @@ describe('npm overrides in every standalone scaffold manifest', () => {
     expect(direct.map((m) => m.id)).toEqual(expect.arrayContaining(['os init -t plugin', 'os create plugin']));
   });
 
-  it('the override map is built from the vitest constant', () => {
+  it('the override map is built from the vitest and uuid constants, and nothing else', () => {
     expect(SCAFFOLD_NPM_OVERRIDES.vitest).toBe(SCAFFOLD_VITEST_RANGE);
+    expect(SCAFFOLD_NPM_OVERRIDES[SCAFFOLD_UUID_OVERRIDE_SELECTOR]).toBe(SCAFFOLD_UUID_OVERRIDE_RANGE);
+    expect(Object.keys(SCAFFOLD_NPM_OVERRIDES).sort()).toEqual(['vitest', SCAFFOLD_UUID_OVERRIDE_SELECTOR].sort());
     expect(Object.isFrozen(SCAFFOLD_NPM_OVERRIDES)).toBe(true);
   });
 
@@ -141,5 +146,49 @@ describe('the scaffold vitest range stays outside GHSA-qxg6-89mg-rqv8', () => {
     expect(fixed, `no advisory floor is recorded for vitest ${floor[0]}.x — read the advisory, then add the row`).toBeDefined();
     const atOrAbove = floor[1] !== fixed![1] ? floor[1] > fixed![1] : floor[2] >= fixed![2];
     expect(atOrAbove, `SCAFFOLD_VITEST_RANGE "${SCAFFOLD_VITEST_RANGE}" admits ${floor.join('.')}, below the fix ${fixed!.join('.')}`).toBe(true);
+  });
+});
+
+/**
+ * The `uuid` override must keep routing exceljs's `uuid ^8.3.0` (reached
+ * through `@objectstack/rest`) out of GHSA-w5hq-g745-h8pq. The advisory affects
+ * `uuid` below 11.1.1, and 12.0.0 and 13.0.0; the fixed releases are 11.1.1,
+ * 12.0.1 and 13.0.1 (read from the npm registry's bulk advisory endpoint,
+ * 2026-10-22).
+ * Two properties, both read off the constants:
+ *
+ *   1. The TARGET's lowest admitted version is at or above the fix for its
+ *      major. A major with no row is refused: moving the target there is the
+ *      moment to read the advisory for that line.
+ *   2. The SELECTOR is `uuid@<M.0.0` with M the major right above the target,
+ *      so every edge that can resolve below the fix is rewritten (the
+ *      exceljs edge is `^8.3.0`), and a later advisory on the target line
+ *      moves the target alone.
+ */
+const UUID_FIXED_FLOOR_BY_MAJOR: Readonly<Record<number, readonly [number, number, number]>> = {
+  11: [11, 1, 1],
+  12: [12, 0, 1],
+  13: [13, 0, 1],
+};
+
+describe('the scaffold uuid override stays outside GHSA-w5hq-g745-h8pq', () => {
+  it('its target admits nothing below the advisory fix for its major', () => {
+    const match = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(SCAFFOLD_UUID_OVERRIDE_RANGE);
+    expect(match, `SCAFFOLD_UUID_OVERRIDE_RANGE "${SCAFFOLD_UUID_OVERRIDE_RANGE}" is not a ^X.Y.Z range`).not.toBeNull();
+    const floor = match!.slice(1).map(Number) as [number, number, number];
+    const fixed = UUID_FIXED_FLOOR_BY_MAJOR[floor[0]];
+    expect(fixed, `no advisory floor is recorded for uuid ${floor[0]}.x — read the advisory, then add the row`).toBeDefined();
+    const atOrAbove = floor[1] !== fixed![1] ? floor[1] > fixed![1] : floor[2] >= fixed![2];
+    expect(
+      atOrAbove,
+      `SCAFFOLD_UUID_OVERRIDE_RANGE "${SCAFFOLD_UUID_OVERRIDE_RANGE}" admits ${floor.join('.')}, below the fix ${fixed!.join('.')}`,
+    ).toBe(true);
+  });
+
+  it('its selector covers every version below the target line, bounded at the next major', () => {
+    const selector = /^uuid@<(\d+)\.0\.0$/.exec(SCAFFOLD_UUID_OVERRIDE_SELECTOR);
+    expect(selector, `SCAFFOLD_UUID_OVERRIDE_SELECTOR "${SCAFFOLD_UUID_OVERRIDE_SELECTOR}" is not uuid@<M.0.0`).not.toBeNull();
+    const targetMajor = Number(/^\^(\d+)\./.exec(SCAFFOLD_UUID_OVERRIDE_RANGE)?.[1]);
+    expect(Number(selector![1])).toBe(targetMajor + 1);
   });
 });
