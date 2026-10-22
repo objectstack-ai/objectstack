@@ -67,6 +67,7 @@ import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core
 import { MCPServerPlugin, MCPServerRuntime } from '@objectstack/mcp';
 import { MetadataPlugin } from '@objectstack/metadata';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
+import type { IMetadataService } from '@objectstack/spec/contracts';
 
 type Stores = Map<string, Map<string, Record<string, unknown>>>;
 
@@ -466,7 +467,7 @@ for (const { shape, environmentId } of SHAPES) {
           // into the `metadata` service, and the copy outlives the disable.
           for (const name of [pkg.open, pkg.gated]) {
             expect(
-              await kernel.getService<any>('metadata').getObject(name),
+              await kernel.getService<IMetadataService>('metadata').getObject(name),
               `precondition: the metadata service still holds ${name}'s copy`,
             ).toBeTruthy();
           }
