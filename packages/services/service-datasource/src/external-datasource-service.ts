@@ -454,14 +454,12 @@ function importNameRefusedError(message: string): Error {
  * the engine's write gate exempts the default datasource, so nothing would
  * stand behind it.
  *
- * `code` is the one the calling door serves (`EXTERNAL_IMPORT_ERROR` for the
- * import, `EXTERNAL_DATASOURCE_ERROR` for the rest), so the declaration and
- * the served envelope agree, as for `importNameRefusedError` above.
+ * The code is the one the calling door serves (see {@link FederationDoor}), so
+ * the declaration and the served envelope agree, as for
+ * `importNameRefusedError` above.
  */
-function primaryDatasourceNotFederatedError(
-  datasource: string,
-  code: 'EXTERNAL_DATASOURCE_ERROR' | 'EXTERNAL_IMPORT_ERROR',
-): Error {
+function primaryDatasourceNotFederatedError(datasource: string, door: FederationDoor): Error {
+  const code = door === 'import' ? 'EXTERNAL_IMPORT_ERROR' : 'EXTERNAL_DATASOURCE_ERROR';
   const err = new Error(
     `Datasource '${datasource}' is the platform's managed primary datasource, not a federation source: ` +
       `its tables are the platform's own objects, so there are no remote tables to list, draft or import ` +
@@ -471,6 +469,19 @@ function primaryDatasourceNotFederatedError(
   err.status = 400;
   return err;
 }
+
+/**
+ * [#24837] Which federation door is refusing, which decides the code its
+ * refusal carries: the import serves its own registered code,
+ * `EXTERNAL_IMPORT_ERROR`, and every door that only introspects (listing,
+ * draft, catalog refresh) serves `EXTERNAL_DATASOURCE_ERROR`. Those are the
+ * codes the two route families answer any refusal from these methods with.
+ *
+ * A door KIND, not a code parameter, on purpose: each refusal helper below
+ * spells both codes as literals, so `check:dispatcher-error-vocabulary` reads
+ * them at the stamp instead of reporting a helper whose codes it cannot see.
+ */
+type FederationDoor = 'import' | 'introspect';
 
 /**
  * [#24837] Is `ds` a federation source: a datasource DEFINITION whose
@@ -507,13 +518,10 @@ function isFederationSource(ds: DatasourceLike | undefined): ds is DatasourceLik
  * imported over a managed one would go through ungated.
  *
  * Same status and codes as the primary datasource's refusal, by the same
- * reasoning: `code` is the one the calling door serves.
+ * reasoning: the code is the one the calling door serves.
  */
-function notAFederationSourceError(
-  datasource: string,
-  ds: DatasourceLike | undefined,
-  code: 'EXTERNAL_DATASOURCE_ERROR' | 'EXTERNAL_IMPORT_ERROR',
-): Error {
+function notAFederationSourceError(datasource: string, ds: DatasourceLike | undefined, door: FederationDoor): Error {
+  const code = door === 'import' ? 'EXTERNAL_IMPORT_ERROR' : 'EXTERNAL_DATASOURCE_ERROR';
   const lead = !ds
     ? `Datasource '${datasource}' has no datasource definition, so nothing declares it a federation source`
     : ds.schemaMode
@@ -563,7 +571,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   /**
    * [#24837] The one guard every federation door runs first: listing remote
    * tables, drafting one, importing one, refreshing the catalog. Each door
-   * passes the `code` its route serves.
+   * names its {@link FederationDoor} kind, which decides the refusal's code.
    *
    * Two refusals, in this order, and nothing else:
    *
@@ -581,13 +589,10 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * @returns the datasource's definition, which the listing reads next for
    *          `external.allowedSchemas`, so the door reads it once.
    */
-  private async assertFederationSource(
-    datasource: string,
-    code: 'EXTERNAL_DATASOURCE_ERROR' | 'EXTERNAL_IMPORT_ERROR',
-  ): Promise<DatasourceLike> {
-    if (datasource === DEFAULT_DATASOURCE_NAME) throw primaryDatasourceNotFederatedError(datasource, code);
+  private async assertFederationSource(datasource: string, door: FederationDoor): Promise<DatasourceLike> {
+    if (datasource === DEFAULT_DATASOURCE_NAME) throw primaryDatasourceNotFederatedError(datasource, door);
     const ds = await this.config.getDatasource(datasource);
-    if (!isFederationSource(ds)) throw notAFederationSourceError(datasource, ds, code);
+    if (!isFederationSource(ds)) throw notAFederationSourceError(datasource, ds, door);
     return ds;
   }
 
@@ -607,7 +612,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     datasource: string,
     opts?: { schema?: string },
   ): Promise<RemoteTable[]> {
-    const ds = await this.assertFederationSource(datasource, 'EXTERNAL_DATASOURCE_ERROR');
+    const ds = await this.assertFederationSource(datasource, 'introspect');
     const schema = await this.config.introspect(datasource);
     const allowed = ds.external?.allowedSchemas;
     const requested = opts?.schema ? opts.schema : undefined;
@@ -698,7 +703,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     remoteName: string,
     opts: GenerateDraftOpts = {},
   ): Promise<ObjectDraft> {
-    await this.assertFederationSource(datasource, 'EXTERNAL_DATASOURCE_ERROR');
+    await this.assertFederationSource(datasource, 'introspect');
     return this.draftObject(datasource, remoteName, opts);
   }
 
@@ -805,7 +810,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     // [#24772, #24837] First: no store configuration makes the primary
     // datasource, or any other managed one, a federation source, so that
     // refusal is the true answer whatever else holds.
-    await this.assertFederationSource(datasource, 'EXTERNAL_IMPORT_ERROR');
+    await this.assertFederationSource(datasource, 'import');
     if (!this.config.persistObject) {
       throw new Error(
         `importObject requires a writable metadata store, but none is wired ` +
@@ -858,7 +863,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   }
 
   async refreshCatalog(datasource: string): Promise<ExternalCatalog> {
-    await this.assertFederationSource(datasource, 'EXTERNAL_DATASOURCE_ERROR');
+    await this.assertFederationSource(datasource, 'introspect');
     const schema = await this.config.introspect(datasource);
     // Parse through the Zod schema so the persisted record is canonical
     // (defaults applied, shape validated) and matches the `external_catalog`
