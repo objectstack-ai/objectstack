@@ -265,7 +265,7 @@ organization declares `systemFields.tenant: false` (or `tenancy.enabled: false`,
 >    changes no exit code. No boot line is added. The same advisory goes into the 18.0 upgrade notes.
 >    This is #25134's execution, in flight.
 > 3. **Order.** The advisory's "the ceremony leaves nullable only …" holds only once a production boot
->    that composes no organization object is refused (#25133; see the D9 note).
+>    that composes no organization object is refused (#25155, `ab488d9b7d`; see the D9 note).
 
 > **Note (2026-10-22, record `6323222024` on #24583) — the driver creates the tenant column NOT NULL.**
 > From step 7 part 7b-0 on (#24940, `5e9b100743`), a table the SQL or Turso driver creates carries its
@@ -720,10 +720,11 @@ scope — and its ledger retires (D13).
 > 2. **A production boot that composes no organization object is refused.** 7b-3 refused `os serve`
 >    when it serves a data API with the auth tier on and no secret resolved (#24845, under the seat
 >    decision `6284744613`, rule A1 of #3963). Ruling `6328987873` extends that to every production
->    boot: `os serve` or `os start` without `--dev`, with the `auth` tier off and no `AuthPlugin`
->    mounted, or with the tier on and no secret, is refused whether or not `--server`. A migrate-and-exit
->    job is such a boot. The refusal texts no longer offer `--no-server` as the remedy. The `host-kernel`
->    reason (the cloud runtime) keeps its warn-only path. This is #25133's fix, in flight.
+>    boot, and #25155 (`ab488d9b7d`, the fix for #25133) shipped it: `os serve` or `os start` without
+>    `--dev`, with the `auth` tier off and no `AuthPlugin` mounted, or with the tier on and no secret, is
+>    refused whether or not `--server`, before any plugin starts. A migrate-and-exit job is such a boot.
+>    The refusal texts no longer offer `--no-server` as the remedy. The `host-kernel` reason (the cloud
+>    runtime) keeps its warn-only path.
 > 3. **So the exception holds only for programmatic embedding and `--dev`** (`os dev` included). No
 >    served production composition reaches it.
 >
