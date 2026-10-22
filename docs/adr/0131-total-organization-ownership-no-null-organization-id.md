@@ -678,9 +678,11 @@ has a NULL arm; no layer has a shared-owner set (there are no shared owners — 
 
 > **Note (2026-10-22, seat decision `6325596117` on #25140, Q1 letter A) — one organization-less
 > answer is left, on an uncertified database only.** `organizationOutOfWriteReach`
-> (`packages/services/service-storage/src/metadata-store.ts`), which storage's three upload doors ask
-> before their first write, answers "in reach" for an upload row stamped with no organization; the
-> comment at `packages/services/service-storage/src/storage-routes.ts:761` says so. Under this decision
+> (`packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach`), which
+> storage's three upload doors ask before their first write, answers "in reach" for an upload row
+> stamped with no organization; the comment above
+> `packages/services/service-storage/src/storage-routes.ts#requireStartingOrganization` says so
+> ("a row stamped with no organization stays in reach"). Under this decision
 > no scoped read reaches that row, so the answer is wrong. The row can exist only on a database that has
 > not been through the D10 ceremony, which `os serve` refuses at boot, and a table 7b-0's driver
 > created refuses it at NOT NULL. The seat kept the function as it is, and records the case here.
