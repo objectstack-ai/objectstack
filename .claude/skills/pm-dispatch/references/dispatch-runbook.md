@@ -134,6 +134,19 @@
 - 该答案与从不存在不可区分,⛔ 永不读作死亡信号。
 - 跨账号接班活性只认 GitHub 产出读数,draft-PR 时点交报正为此存在。
 
+## 卡线程(`mode:thread`)
+
+- 识别:席位会话是项目线程(载有 coordinator 通道工具)⇒ 每卡开一个项目线程,线程即 dev。
+- 席位留认领文本、派发令、契约复核、ACCEPT 与落地;线程实施、开 draft PR、驱动 CI。
+- 披露纪律卡(私密细节不得离开席位会话)留席内 `mode:subagent`,认领写明;卡线程照计 `batch`。
+- 派发令落项目共享目录 `/mnt/project-files/<席位>/dispatch-<N>.md`:线程读不到席位 scratchpad。
+- 请 coordinator 开线程附维护者原话消息:它只凭维护者明言设线程的 model 与 effort。
+- 认领由线程代贴:`Branch:` 须是线程的指定分支(关单门禁读它),席位开线程后才知道。
+- 派发令带认领全文,只留 session、分支两个占位;原子对两笔都由线程执行,先认领后标签。
+- worktree 照建,分支用线程的指定推送分支;仓 `.claude/agents` 未加载(实测),照读 `os-dev.md`。
+- 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);审核期线程不关,接 FAIL。
+- 容器重启杀本地后台循环:席位等服务端信号(PR 订阅事件、座位 Routine),本地 watcher 可选。
+
 ## subagent 批派发前置:先把本地检出钉到 main
 
 - subagent 读 PM 容器本地检出的 agent 定义与技能文本,不读 `origin/main`:过期则整批过期。
