@@ -69,6 +69,8 @@ export const SysInvitation = ObjectSchema.create({
       // sys_organization.create_organization). The recipient-side
       // accept/reject actions below stay record-gated — they are
       // unreachable in single-org anyway (no invitation rows exist).
+      // Hidden while cloud-managed, as on the other three mirrors.
+      visible: 'features.cloudManaged != true',
       requiresFeature: 'organization',
       requiresMembershipReach: 'invite_member',
       // `${result.email}`: the invitee's address from the invitation row

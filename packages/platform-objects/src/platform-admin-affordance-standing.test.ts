@@ -167,6 +167,9 @@ async function loadActions(): Promise<{ files: number; actions: FirstPartyAction
 const FEATURES = {
   organization: true, multiOrgEnabled: true, twoFactor: true,
   oidcProvider: true, admin: true, phoneNumber: true, apiKey: true, sso: true,
+  // The managed mode off. It is hide-when-on, so ON would hide `create_user`
+  // and `set_user_password` from the platform admin too, by design.
+  cloudManaged: false,
 };
 
 type Subject = { id: string; email: string; isPlatformAdmin: boolean; positions: string[] };

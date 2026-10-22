@@ -171,9 +171,12 @@ describe('invite_user — the mirrors agree (#11544)', () => {
     // The grade gate composes AHEAD of it (`requiresMembershipReach:
     // 'invite_member'`), so the mirrors also agree on WHO is offered
     // the button: owner, admin and delegated_admin — never a plain member.
+    // And ahead of both, the authored cloud-managed gate: every mirror is
+    // hidden while the environment is cloud-managed (hide-when-on).
     expect(action(object, 'invite_user').visible?.source).toBe(
-      "('org_owner' in current_user.positions || 'org_admin' in current_user.positions"
-        + " || 'delegated_admin' in current_user.positions) && features.organization != false",
+      "((features.cloudManaged != true) && ('org_owner' in current_user.positions"
+        + " || 'org_admin' in current_user.positions || 'delegated_admin' in current_user.positions))"
+        + ' && features.organization != false',
     );
   });
 

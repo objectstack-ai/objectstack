@@ -7,8 +7,9 @@
  *
  * 1. Forward (registry → objects): every `gatedInputs` path must resolve to a
  *    real action/param whose lowered `visible` predicate carries the flag's
- *    gate. Removing a `requiresFeature` annotation (or the whole input)
- *    without updating the registry turns this red.
+ *    gate as one top-level `&&` conjunct (see {@link carriesGateConjunct}).
+ *    Removing a `requiresFeature` annotation (or the whole input) without
+ *    updating the registry turns this red.
  * 2. Reverse (objects → registry): every `features.<name>` reference inside
  *    any action/param `visible` predicate must name a registry flag AND be
  *    booked in that flag's `gatedInputs`. Adding a gate without registry
@@ -53,6 +54,79 @@ const flagEntries = Object.entries(PUBLIC_AUTH_FEATURES) as Array<
   [PublicAuthFeatureName, (typeof PUBLIC_AUTH_FEATURES)[PublicAuthFeatureName]]
 >;
 
+/**
+ * Split `source` at the given depth-0 operator — outside parentheses, brackets
+ * and string literals. One part means the operator does not occur there.
+ */
+function splitTopLevel(source: string, op: '&&' | '||' | '?'): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (quote) {
+      if (ch === '\\') i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(' || ch === '[') depth++;
+    else if (ch === ')' || ch === ']') depth--;
+    else if (depth === 0 && source.startsWith(op, i)) {
+      parts.push(source.slice(start, i));
+      start = i + op.length;
+      i += op.length - 1;
+    }
+  }
+  parts.push(source.slice(start));
+  return parts.map((part) => part.trim());
+}
+
+/** Whether `source` is one parenthesised group from its first to its last character. */
+function isWrappedInParens(source: string): boolean {
+  if (!source.startsWith('(') || !source.endsWith(')')) return false;
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (quote) {
+      if (ch === '\\') i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(') depth++;
+    else if (ch === ')' && --depth === 0 && i < source.length - 1) return false;
+  }
+  return true;
+}
+
+/**
+ * The `&&` conjuncts of a CEL predicate, flattened through the parentheses
+ * that only group conjuncts. A disjunction (`||`) or a conditional (`?:`) at
+ * some level is one opaque conjunct there, so a gate under it is not a gate:
+ * `a || gate` shows nothing, and neither does `!(gate)`.
+ */
+function conjuncts(source: string): string[] {
+  let expr = source.trim();
+  while (isWrappedInParens(expr)) expr = expr.slice(1, -1).trim();
+  if (splitTopLevel(expr, '||').length > 1 || splitTopLevel(expr, '?').length > 1) return [expr];
+  const parts = splitTopLevel(expr, '&&');
+  return parts.length === 1 ? [expr] : parts.flatMap(conjuncts);
+}
+
+/**
+ * Whether `gate` is one of `source`'s `&&` conjuncts — the whole predicate,
+ * its final `&& gate`, or a conjunct inside a parenthesised group of
+ * conjuncts, which is where a second flag's gate lands when an input is
+ * gated on two flags (one through `requiresFeature`, which names one flag,
+ * the other written in `visible`). Never a substring match.
+ */
+function carriesGateConjunct(source: string, gate: string): boolean {
+  return conjuncts(source).some((conjunct) => conjunct === gate);
+}
+
 /** Resolve `<object>.actions.<action>[.params.<name|field>]` to its `visible`. */
 function resolveGatedInput(path: string): { visibleSource: string | undefined } {
   const match = /^([a-z0-9_]+)\.actions\.([a-z0-9_]+)(?:\.params\.([A-Za-z0-9_]+))?$/.exec(path);
@@ -84,8 +158,32 @@ describe('feature-gate completeness guard (#2874)', () => {
       const gate = featureGatePredicate(flag);
       const { visibleSource } = resolveGatedInput(path);
       expect(visibleSource, `${path} has a visible predicate`).toBeDefined();
-      const matches = visibleSource === gate || visibleSource!.endsWith(`&& ${gate}`);
-      expect(matches, `${path}: "${visibleSource}" must equal or end with "&& ${gate}"`).toBe(true);
+      expect(
+        carriesGateConjunct(visibleSource!, gate),
+        `${path}: "${visibleSource}" must carry "${gate}" as one of its && conjuncts`,
+      ).toBe(true);
+    });
+  });
+
+  describe('the conjunct matcher the forward rows use', () => {
+    const gate = 'features.cloudManaged != true';
+    it.each([
+      [gate],
+      [`(current_user.isPlatformAdmin == true) && ${gate}`],
+      [`(current_user.isPlatformAdmin == true && ${gate}) && features.admin == true`],
+      [`((${gate}) && ('org_owner' in current_user.positions || 'org_admin' in current_user.positions)) && features.organization != false`],
+    ])('finds the gate in %s', (source) => {
+      expect(carriesGateConjunct(source, gate)).toBe(true);
+    });
+    it.each([
+      [`current_user.isPlatformAdmin == true || ${gate}`],
+      [`a == 1 || b == 2 && ${gate}`],
+      [`!(${gate})`],
+      [`a == 1 ? ${gate} : true`],
+      [`a == 1 && ${gate}x`],
+      [`a == "x && ${gate}"`],
+    ])('refuses %s', (source) => {
+      expect(carriesGateConjunct(source, gate)).toBe(false);
     });
   });
 
