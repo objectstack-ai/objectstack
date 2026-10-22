@@ -41,7 +41,7 @@ function matches(row: Row, where: Record<string, unknown> | undefined): boolean 
  */
 function makeQl(
   tables: Record<string, Row[]>,
-  opts: { organizationObject?: boolean; organizationReadFails?: boolean; ignoreWhere?: boolean } = {},
+  opts: { organizationObject?: boolean } = {},
 ) {
   const settingQueries: Array<Record<string, unknown> | undefined> = [];
   const ql = {
@@ -51,9 +51,8 @@ function makeQl(
         name === 'sys_organization' && opts.organizationObject === false ? undefined : { name },
     },
     find: async (object: string, options: any) => {
-      if (object === 'sys_organization' && opts.organizationReadFails) throw new Error('connection reset');
       if (object === 'sys_setting') settingQueries.push(options?.where);
-      const rows = (tables[object] ?? []).filter((r) => opts.ignoreWhere || matches(r, options?.where));
+      const rows = (tables[object] ?? []).filter((r) => matches(r, options?.where));
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
   };
@@ -104,7 +103,12 @@ describe('the direct localization fallback reads the caller organization only (A
   });
 
   it('the organization is compared in memory too — an engine that drops the filter still cannot leak', async () => {
-    const ql = makeQl(TWO_ORGS, { ignoreWhere: true });
+    const base = makeQl(TWO_ORGS);
+    // Drops the organization condition, as an engine that ignored it would.
+    const ql = { ...base, find: async (object: string, options: any) => {
+      const { organization_id: _dropped, ...where } = options?.where ?? {};
+      return base.find(object, { ...options, where });
+    } };
     expect((await resolveLocalizationContext({ ql, tenantId: 'org_a' })).timezone).toBe('Europe/Paris');
   });
 
@@ -155,10 +159,14 @@ describe('a caller that names no organization (ADR-0131 D9)', () => {
 
   it('an organization read that fails derives nothing and reads nothing — never a guess', async () => {
     vi.stubEnv('OS_TENANCY_POSTURE', 'single');
-    const ql = makeQl({ sys_organization: [{ id: 'org_a' }], sys_setting: [tz('org_a', 'Europe/Paris')] }, { organizationReadFails: true });
+    const base = makeQl({ sys_organization: [{ id: 'org_a' }], sys_setting: [tz('org_a', 'Europe/Paris')] });
+    const ql = { ...base, find: async (object: string, options: any) => {
+      if (object === 'sys_organization') throw new Error('connection reset');
+      return base.find(object, options);
+    } };
     const settings = throwingSettings(new Error('settings down'));
     expect((await resolveLocalizationContext({ ql, settings })).timezone).toBe('UTC');
-    expect(ql.settingQueries).toEqual([]);
+    expect(base.settingQueries).toEqual([]);
   });
 });
 
