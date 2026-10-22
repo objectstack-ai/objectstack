@@ -9,13 +9,15 @@
 // The journey is the whole sign-up a walled deployment sees: a stranger
 // self-registers (the verification mail is sent), creates their organization
 // (their first membership), and invites a second stranger (the invitation
-// mail is sent), who self-registers and accepts it (their first membership).
+// mail is sent), who signs up and accepts it (their first membership).
 // Three framework writers act on tenant-column objects along the way, and on
 // a wall none of them may fall back to an organization-less row:
 //
-//   - the self-registration grant (`sys_user_permission_set`) settles on each
-//     registrant's FIRST MEMBERSHIP, owned by that membership's organization
-//     (ADR-0131 D3) — never at sign-up, when there is no organization yet;
+//   - the self-registration grant (`sys_user_permission_set`) settles on the
+//     self-registrant's FIRST MEMBERSHIP, owned by that membership's
+//     organization (ADR-0131 D3) — never at sign-up, when there is no
+//     organization yet; the invitee is admitted by the invitation, not by the
+//     open posture, and is owed no declared set;
 //   - the activity writer (`sys_activity`) stamps the organization of the
 //     record it is about, and writes NO row about a record that has none
 //     (ADR-0131 D9; ruling of record 6257510973 item 3, Q3 A);
@@ -197,18 +199,25 @@ for (const posture of ['group', 'isolated'] as const) {
       expect(foreign, 'rows owned by an organization other than the journey\'s').toEqual([]);
     });
 
-    it('the grant writer: each registrant holds exactly one declared grant, owned by their first membership', async () => {
-      for (const userId of [registrantId, inviteeId]) {
-        const grants = await ql.find('sys_user_permission_set', { where: { user_id: userId }, ...SYS });
-        expect(grants.map((g: Row) => [g.permission_set, g.organization_id]), `${userId}: grants`).toEqual([[SET, orgId]]);
-      }
+    it('the grant writer: the self-registrant holds exactly one declared grant, owned by their first membership', async () => {
+      const grants = await ql.find('sys_user_permission_set', { where: { user_id: registrantId }, ...SYS });
+      expect(grants.filter((g: Row) => g.permission_set === SET).map((g: Row) => g.organization_id), 'the declared grant').toEqual([orgId]);
+      // The creator's `organization_admin` (the auto org-admin grant) rides
+      // the same membership; every grant names the organization.
+      expect(grants.filter((g: Row) => g.organization_id !== orgId), 'grants outside the organization').toEqual([]);
+      // The invitee was admitted by the invitation, not by the open posture, so
+      // is owed no declared set (`decideAudienceAdmission`); whatever it holds
+      // names the organization too.
+      const inviteeGrants = await ql.find('sys_user_permission_set', { where: { user_id: inviteeId }, ...SYS });
+      expect(inviteeGrants.filter((g: Row) => g.permission_set === SET), 'the invitee holds no declared grant').toEqual([]);
+      expect(inviteeGrants.filter((g: Row) => g.organization_id !== orgId), 'invitee grants outside the organization').toEqual([]);
     });
 
     it('the activity writer: activity about each grant and about the invitation mail names the organization', async () => {
       const written = await journeyRows();
       const activity = written.filter((r) => r.table === 'sys_activity' || r.table.startsWith('sys_activity__'));
-      const grants = await ql.find('sys_user_permission_set', { where: { user_id: { $in: [registrantId, inviteeId] } }, ...SYS });
-      expect(grants.length).toBe(2);
+      const grants = await ql.find('sys_user_permission_set', { where: { user_id: registrantId }, ...SYS });
+      expect(grants.map((g: Row) => g.permission_set), 'the registrant\'s grants').toContain(SET);
       for (const grant of grants) {
         const about = activity.filter((a) => a.object_name === 'sys_user_permission_set' && a.record_id === grant.id);
         expect(about.length, `activity about the grant ${String(grant.id)}`).toBeGreaterThan(0);
