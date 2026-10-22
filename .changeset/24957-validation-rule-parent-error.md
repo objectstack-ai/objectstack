@@ -5,10 +5,11 @@
 fix(lint)!: `os build` and the object save door refuse a `validations[]` rule whose predicate reads `parent` (#24957)
 
 Clause-②: no (narrowing: `os build` and the object save door refuse a `validations[]` rule whose predicate reads `parent`, which the server's rule evaluator never binds)
+Metadata-protocol: narrowed
 
 A `validations[]` rule's predicates are a `script` or `cross_field` rule's `condition`, a `conditional` rule's `when`, and the same slots on the rules nested in its `then` / `otherwise`. The server evaluates them against `record` and `previous` only. The master-detail header is bound as `parent` for a field's own `readonlyWhen` and `requiredWhen` alone, on an object with exactly one `master_detail`. A rule that reads `parent`, such as `parent.status == 'paid'`, faults (`Unknown variable: parent`) on every write it judges, and the server refuses that write as unevaluable, the seed's own rows at boot included.
 
-The build's expression rule (`validateStackExpressions`) reported such a predicate at `warning` (#24720). It now refuses it at `error`, at the same location (`object 'NAME' · validation 'RULE'`, `… when`, or the nested rule's label), with the same rule id (`expression-invalid`). The message no longer says it is a warning. The object save door runs the same pass, so its verdict is the build's finding.
+The build's expression rule (`validateStackExpressions`) reported such a predicate at `warning` (#24720). This entry supersedes that entry's sentence "Nothing new is refused in 18.x" and its plan to refuse in 19.0: the refusal ships now, in this release, and this entry is the current statement. The rule now refuses such a predicate at `error`, at the same location (`object 'NAME' · validation 'RULE'`, `… when`, or the nested rule's label), with the same rule id (`expression-invalid`). The message no longer says it is a warning. The object save door runs the same pass, so its verdict is the build's finding.
 
 **BREAKING — what moves for consumers.**
 
