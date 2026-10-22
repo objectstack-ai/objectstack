@@ -43,21 +43,29 @@ now costs nothing, and the population is **re-derivable** rather than quoted.
 
 ## What the control does, and what a call site controls
 
-`auditMissingTenant(object, op, options)` is gated in this order:
+`auditMissingTenant(object, op, options, insertRows)` is gated in this order:
 
 1. `OS_TENANT_AUDIT=0` — off entirely;
 2. `options.bypassTenantAudit` — on an `ExecutionContext.isSystem` write the
    engine sets it only where the object's schema puts the write out of scope:
    an object with no tenant field, or a federated one (ObjectQL's
-   `buildDriverOptions`). A caller may still pass it explicitly;
+   `buildDriverOptions`). It also sets it on a predicate write the
+   organization wall exempted (ADR-0131 D8: the recorded Layer 0 verdict is
+   `none` where the wall would otherwise apply). A caller may still pass it
+   explicitly;
 3. a present `options.tenantId` — the engine fills it from `execCtx.tenantId`;
 4. the deployment posture — the warning is only meaningful on a walled install;
-5. the object having a tenant field.
+5. the object having a tenant field;
+6. for `create` and `bulkCreate` only, every inserted row carrying that field —
+   an insert is confined to the organizations its rows name. Updates, deletes
+   and upserts are audited whatever their payload says.
 
-Both of the guards a *caller* can move are downstream of one decision at the call
-site: **whether it threads an execution context at all**. Thread an elevated one
-and guard 2 silences the warning; thread a tenant-bearing one and guard 3 does;
-thread none and the site is what this census counts.
+The guards a *caller* can move are downstream of one decision at the call
+site: **whether it threads an execution context at all**. Thread a
+tenant-bearing one and guard 3 silences the warning; thread an elevated one and
+an object with a tenant column is still audited, unless the write inserts rows
+that name their organization (guard 6); thread none and the site is what this
+census counts.
 
 ## How the population is decided
 
