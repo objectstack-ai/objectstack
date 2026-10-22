@@ -5,13 +5,14 @@
  *
  * ## The gap this closes
  *
- * Two migrations in this directory tighten an existing UNIQUE index into a
+ * Three migrations in this directory tighten an existing UNIQUE index into a
  * NULL-safe (and sometimes row-scoped) form at `kernel:ready`:
  *
  * | migration | table | index(es) |
  * |---|---|---|
  * | `ensureMetadataOverlayIndexes` | `sys_metadata` | active + draft |
  * | `ensureSysSettingIdentityIndex` | `sys_setting` | row identity |
+ * | `ensureNotificationPreferenceIdentityIndex` | `sys_notification_preference` | one global default per key |
  *
  * A third, `ensureViewDefinitionActiveIndex` (`sys_view_definition`), retired
  * with its table under ADR-0131 D13: no writer or reader of that table's rows
@@ -92,6 +93,13 @@ import {
     buildSysSettingPresenceSql,
     sysSettingIdentityKeyParts,
 } from './sys-setting-identity-index.js';
+import {
+    NOTIFICATION_PREFERENCE_IDENTITY_INDEX_NAME,
+    NOTIFICATION_PREFERENCE_TABLE,
+    buildNotificationPreferenceDuplicateProbeSql,
+    buildNotificationPreferencePresenceSql,
+    notificationPreferenceIdentityKeyParts,
+} from './notification-preference-identity-index.js';
 
 /** The column every one of the duplicate-listing queries counts into. */
 const DUPLICATE_ROWS_COLUMN = 'duplicate_rows';
@@ -168,7 +176,7 @@ function isMysqlClient(client?: string): boolean {
 }
 
 /**
- * Every index the `kernel:ready` migrations tighten — THREE, from two
+ * Every index the `kernel:ready` migrations tighten — FOUR, from three
  * migrations, because `ensureMetadataOverlayIndexes` builds one index per
  * overlay state and either can be blocked independently.
  *
@@ -177,7 +185,7 @@ function isMysqlClient(client?: string): boolean {
  * `sys_setting`'s listing query is the only one whose bare spelling is not
  * merely unidiomatic on MySQL but a parse error: `key` is a RESERVED word
  * there, measured as `ERROR 1064` on MySQL 8.0.46 (#9434), which is why the
- * migration already ships a MySQL-spelled variant. The other two queries name
+ * migration already ships a MySQL-spelled variant. The other queries name
  * no MySQL-reserved identifier, so the platform's own spelling — the one the
  * migration prints in its boot report — runs on all three dialects, and
  * compiling a second variant of them would buy nothing and add a second
@@ -212,6 +220,18 @@ export function runtimeIndexProbes(opts: { client?: string } = {}): RuntimeIndex
             duplicateSql: isMysqlClient(opts.client)
                 ? buildSysSettingDuplicateProbeSqlMysql()
                 : buildSysSettingDuplicateProbeSql(),
+        },
+        {
+            migration: 'ensureNotificationPreferenceIdentityIndex',
+            table: NOTIFICATION_PREFERENCE_TABLE,
+            index: NOTIFICATION_PREFERENCE_IDENTITY_INDEX_NAME,
+            keyParts: notificationPreferenceIdentityKeyParts(),
+            // No `WHERE`: every row, global defaults included — they are the
+            // rows the NULL-safe key exists to constrain.
+            rowScope: null,
+            // The migration's own fallback presence statement, as for `sys_setting`.
+            presenceSql: buildNotificationPreferencePresenceSql(),
+            duplicateSql: buildNotificationPreferenceDuplicateProbeSql(),
         },
     ];
 }

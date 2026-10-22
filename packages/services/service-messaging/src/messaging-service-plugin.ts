@@ -14,6 +14,7 @@ import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
 import { NotificationTemplateStore } from './template-renderer.js';
 import { NotificationTextRenderer, type NotificationTextI18n } from './notification-text.js';
+import { convertWildcardPreferenceUsers } from './preference-user-conversion.js';
 import {
     InboxMessage,
     NotificationReceipt,
@@ -362,6 +363,20 @@ export class MessagingServicePlugin implements Plugin {
             ctx.hook('kernel:ready', async () => {
                 const engine = getData();
                 if (engine) await this.provisionSystemTables(engine, ctx);
+            });
+        }
+
+        // [ADR-0118 D1] `sys_notification_preference.user_id` is a `sys_user`
+        // reference whose EMPTY value is the admin-global default; a row stored
+        // as the text column's `'*'` sentinel matches no recipient any more.
+        // Rewrite those rows to the empty reference on every boot, after the
+        // table provisioning above (hooks run in registration order), so no
+        // admin default silently stops applying across the upgrade and the
+        // resolver carries no `'*'` tolerance. Idempotent and never throws; see
+        // {@link convertWildcardPreferenceUsers}.
+        if (typeof ctx.hook === 'function') {
+            ctx.hook('kernel:ready', async () => {
+                await convertWildcardPreferenceUsers(getData(), ctx.logger);
             });
         }
 
