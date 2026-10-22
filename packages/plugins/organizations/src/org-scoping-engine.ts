@@ -5,12 +5,13 @@
  * erased.
  *
  * The back-fill (`claimOrgSeedOwnership`) used to take `ql: any`. That is not a
- * style preference in this corpus: the tenant-audit census reads the RECEIVER's declared type to decide whether a write call site
- * is an engine write at all, and an `any` receiver has no type to read. Sites it
- * cannot place are reported as `unledgered` -- an error, never a default,
- * because a write it cannot see is a write the tenant-audit population does not
- * certify. Naming the doors here places its sites by their TYPE, which is the
- * one placement route that needs no ledger row.
+ * style preference in this corpus: the tenant-audit census reads the RECEIVER's
+ * declared type to decide whether a write call site is an engine write at all,
+ * and an `any` receiver has no type to read. Sites it cannot place are reported
+ * as `unledgered` -- an error, never a default, because a write it cannot see is
+ * a write the tenant-audit population does not certify. Naming the doors here
+ * places its sites by their TYPE, which is the one placement route that needs no
+ * ledger row.
  *
  * ⛔ Deliberately narrow, following `OrphanCleanupEngine` in `plugin-sharing`:
  * it declares only what that function calls, so it cannot drift into a
