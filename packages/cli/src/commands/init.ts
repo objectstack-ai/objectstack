@@ -1006,6 +1006,45 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
 
 export default ${toCamelCase(namespace)}Item;
 `,
+      // The starter test the `test` script above runs (#25175). Without a test
+      // file, `vitest run` exits 1 with "No test files found", so a fresh
+      // project failed its own `npm test`. It loads the package's stack —
+      // `defineStack`'s strict parse, the protocol's own refusal path — and
+      // asserts what a host receives: a `plugin` that hands every object the
+      // `src/objects` barrel exports to the stack. It deliberately boots no
+      // engine: that needs `@objectstack/verify` declared and a vitest config
+      // for the boot's timeout and logs, and the comment points the author at
+      // the documented harness for that step instead.
+      // `test/scaffold-test-script-passes.test.ts` runs it in a sandbox, and
+      // `test/scaffold-emission-typechecks.test.ts` type-checks it.
+      'package.test.ts': () => `import { describe, expect, it } from 'vitest';
+import stack from './objectstack.config';
+import * as objects from './src/objects';
+
+// This package is the stack objectstack.config.ts exports: what another stack
+// receives when it loads the package. Importing that file runs defineStack(),
+// which checks the definition against the ObjectStack protocol and throws on
+// anything the protocol refuses, so a definition another stack would refuse
+// fails this file before any test in it runs.
+//
+// The test below reads what the package declares. To test what the engine
+// does with a record, such as refusing an item saved without its required
+// name, boot the stack with @objectstack/verify:
+// https://objectstack.ai/docs/protocol/kernel/plugin-spec#plugin-testing
+describe('this package', () => {
+  it('is a plugin that hands every object in src/objects to the stack', () => {
+    expect(stack.manifest?.type).toBe('plugin');
+
+    // An object src/objects/index.ts exports is loaded only when the config
+    // hands it to the stack. One the config drops is never loaded, and
+    // \`objectstack validate\` neither counts nor checks it.
+    const loaded = (stack.objects ?? []).map((object) => object.name);
+    for (const object of Object.values(objects)) {
+      expect(loaded).toContain(object.name);
+    }
+  });
+});
+`,
     }),
   },
 
