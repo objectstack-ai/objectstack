@@ -4972,8 +4972,7 @@ export class SecurityPlugin implements Plugin {
     }
 
     // Per-organization seed DATA replay on `sys_organization` insert (business
-    // records) lives in `@objectstack/organizations`, along with
-    // `claimOrphanOrgRows` / `cloneOrgSeedData`. Install that plugin for
+    // records) lives in `@objectstack/organizations`. Install that plugin for
     // multi-tenant deployments. The RBAC catalog needs no such replay: this
     // plugin writes no catalog row, and every organization reads the same
     // registry (ADR-0131 D3).

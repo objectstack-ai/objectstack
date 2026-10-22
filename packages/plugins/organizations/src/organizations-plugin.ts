@@ -1,7 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext } from '@objectstack/core';
-import { claimOrphanOrgRows } from './claim-orphan-org-rows.js';
 import type { OrgScopingEngine } from './org-scoping-engine.js';
 import { createEnsureDefaultOrganizationOnce, isDefaultOrganizationBootstrapTrigger } from '@objectstack/plugin-auth';
 import { claimOrgSeedOwnership } from './claim-org-seed-ownership.js';
@@ -92,11 +91,11 @@ export interface OrganizationsPluginOptions {
  * possibly absent.
  *
  * It extends `OrgScopingEngine` because this plugin does not only CALL the slot,
- * it FORWARDS it: `claimOrphanOrgRows(ql, ...)` below writes through this very
- * value. While that parameter was `any` the forwarded doors were a coupling the
- * types did not state and the tenant-audit census could not read. Naming them
- * here is the narrow claim -- only the doors that are actually forwarded, not
- * the engine's full contract.
+ * it FORWARDS it: the default-org bootstrap below hands this very value to
+ * `claimOrgSeedOwnership`, which writes through it. While that parameter was
+ * `any` the forwarded doors were a coupling the types did not state and the
+ * tenant-audit census could not read. Naming them here is the narrow claim --
+ * only the doors that are actually forwarded, not the engine's full contract.
  */
 interface OrgScopingQuerySlot extends OrgScopingEngine {
   registerMiddleware(mw: (opCtx: any, next: () => Promise<void>) => Promise<void>): void;
@@ -138,19 +137,25 @@ interface OrgScopingMetadataSlot {
  *      who just created them.
  *
  *   2. **per-org seed replay** — after `sys_organization` insert, load
- *      the APP's own demo seed data into the new org. Two paths:
- *        a. replay registered `seed-datasets` via the kernel-level
- *           `seed-replayer` callable (set by AppPlugin),
- *        b. for the FIRST org, `claimOrphanOrgRows` adopts any
- *           NULL-org rows a previous inline-seed may have inserted.
- *      Neither reads another organization's rows, and that is the
- *      INVARIANT (cloud#1345): a new organization's data comes from
- *      the app's seed definitions, or the organization starts empty.
- *      A third path used to exist — `cloneOrgSeedData` shallow-cloned
- *      the FIRST organization's business rows into every subsequent
- *      one — and it is retired, not disabled: on a self-serve SaaS
- *      deployment it handed customer #2 a copy of customer #1's
- *      records. ⛔ Do not re-add a donor-clone path here in any form.
+ *      the APP's own demo seed data into the new org, by replaying the
+ *      registered `seed-datasets` through the kernel-level
+ *      `seed-replayer` callable (set by AppPlugin). It reads no other
+ *      organization's rows, and that is the INVARIANT (cloud#1345): a
+ *      new organization's data comes from the app's seed definitions,
+ *      or the organization starts empty.
+ *      Two other paths used to exist, and both are retired, not
+ *      disabled. `cloneOrgSeedData` shallow-cloned the FIRST
+ *      organization's business rows into every subsequent one: on a
+ *      self-serve SaaS deployment it handed customer #2 a copy of
+ *      customer #1's records. ⛔ Do not re-add a donor-clone path here
+ *      in any form. `claimOrphanOrgRows` gave every organization-less
+ *      application row to the FIRST organization created — an owner by
+ *      guess, which ADR-0131 D9 and D10 forbid: being created first is
+ *      not an anchor. ⛔ Do not re-add it either. An organization-less
+ *      row belongs to the organization-ownership ceremony
+ *      (`os migrate organization-ownership`), which attributes it where
+ *      an anchor or the `single` posture names the owner and otherwise
+ *      leaves it NULL and reports it.
  *
  *   3. **default-org bootstrap** — on `kernel:ready` and after every
  *      `sys_user_permission_set` insert, ensure the platform admin has
@@ -397,26 +402,6 @@ export class OrganizationsPlugin implements Plugin {
       const datasets: any[] | undefined =
         Array.isArray(datasetsRaw) && datasetsRaw.length > 0 ? datasetsRaw : undefined;
 
-      // Count existing orgs to pick the right fallback path.
-      let orgCount = 0;
-      try {
-        const allOrgs = await ql.find(
-          'sys_organization',
-          { limit: 2, fields: ['id'] },
-          { context: { isSystem: true } },
-        );
-        const list: any[] = Array.isArray(allOrgs)
-          ? allOrgs
-          : Array.isArray(allOrgs?.records)
-            ? allOrgs.records
-            : [];
-        orgCount = list.length;
-      } catch (e) {
-        ctx.logger.warn('[org-scoping] failed to count organizations', {
-          error: (e as Error).message,
-        });
-      }
-
       // Primary path: SeedLoader replay scoped to newOrgId.
       let replayed = false;
       try {
@@ -446,26 +431,16 @@ export class OrganizationsPlugin implements Plugin {
       }
       if (replayed) return;
 
-      // Fallback A: legacy claim for first org.
-      if (orgCount === 1) {
-        try {
-          const claims = await claimOrphanOrgRows(ql, newOrgId, { logger: ctx.logger });
-          if (claims.length > 0) {
-            const total = claims.reduce((s, c) => s + c.count, 0);
-            ctx.logger.info(
-              `[org-scoping] claimed ${total} orphan seed row(s) for first organization ${newOrgId}`,
-              { breakdown: claims },
-            );
-            return;
-          }
-        } catch (e) {
-          ctx.logger.warn('[org-scoping] claim-orphan-org-rows failed', {
-            error: (e as Error).message,
-          });
-        }
-      }
-
-      // ⛔ NO THIRD PATH (cloud#1345). There used to be a "Fallback B"
+      // ⛔ NO ORPHAN CLAIM (ADR-0131 D9, D10). There used to be a
+      // "Fallback A" here: for the FIRST organization, `claimOrphanOrgRows`
+      // wrote this organization's id onto every `organization_id IS NULL`
+      // row of every application object. Being created first names no
+      // owner, so under a wall it handed rows the ceremony refuses to
+      // attribute to whichever organization happened to exist. Those rows
+      // belong to `os migrate organization-ownership`, never to this
+      // middleware.
+      //
+      // ⛔ NO DONOR CLONE (cloud#1345). There used to be a "Fallback B"
       // here: for every org after the first, `cloneOrgSeedData`
       // shallow-copied the FIRST organization's business rows into the
       // new one. On a self-serve SaaS deployment — one database, orgs
@@ -486,15 +461,13 @@ export class OrganizationsPlugin implements Plugin {
       // the app's own seed definitions replayed per tenant — the
       // primary path above. An org whose deployment ships no seed
       // datasets simply starts EMPTY, which is the correct outcome.
-      if (orgCount > 1 && !replayed) {
-        ctx.logger.info(
-          `[org-scoping] organization ${newOrgId} starts empty: no app seed datasets replayed. ` +
-            // The invariant's tracker id (cloud#1345) stays in the comment block
-            // above and out of the log line — a log reader cannot resolve it.
-            'Demo data on signup comes from the app\'s own seed definitions — never from another organization\'s rows.',
-          { organizationId: newOrgId },
-        );
-      }
+      ctx.logger.info(
+        `[org-scoping] organization ${newOrgId} starts empty: no app seed datasets replayed. ` +
+          // The invariant's tracker id (cloud#1345) stays in the comment block
+          // above and out of the log line — a log reader cannot resolve it.
+          'Demo data on signup comes from the app\'s own seed definitions — never from another organization\'s rows.',
+        { organizationId: newOrgId },
+      );
     });
 
     // ── Default-org bootstrap on kernel:ready + on admin grant ────────
