@@ -18,7 +18,6 @@
 - 卡引用面:裁决/卡片点名的每张 issue 逐个读当前 open/closed/assignee。
 - 引用读到的现状,⛔ 不引用裁决写作时的描述。
 - 工作项面:卡片与分诊评论列的每条工作项逐条对树核验是否仍未完成,⛔ 不对卡核验。
-- 每条工作项写进派发令时都是 dev 首先证伪的前提。
 - `batch` 封顶全部子代理,等待不填槽;同批独立按文件面不相交判,⛔ 不按包、不按 check 名。
 - single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。
 - 第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。
@@ -149,7 +148,6 @@
 - 首张这类派发实测固定开销(安装 + 拉缓存)并记在其卡上。
 - 归档义务只落在云卡;OOM 死的单独重派;判定连同档位写进认领评论。
 - 一次性云卡用 `create_session`,⛔ 不用 create_trigger+fire;trigger 流只留给定时/重复型。
-- 云会话 `SendMessage` not-reachable 是设计非故障,⛔ 不复测。
 - 接手中断的 dev:先试 SendMessage 复活,不可用才走接手协议,⛔ 不重跑原派发词。
 
 ## 收集
