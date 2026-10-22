@@ -80,13 +80,14 @@ export function holePlacementMessage(refused: readonly TemplateHtmlHole[]): stri
         .map((hole) => `${hole.text} in ${HOLE_PLACEMENT_LABELS[hole.placement]}`)
         .join('; ');
     const rest = refused.length > LISTED_HOLES ? `; and ${refused.length - LISTED_HOLES} more` : '';
-    const supported = SUPPORTED_HOLE_PLACEMENTS.map((p) => HOLE_PLACEMENT_LABELS[p]).join(' and in ');
+    const supported = SUPPORTED_HOLE_PLACEMENTS.map((p) => HOLE_PLACEMENT_LABELS[p]).join(' and ');
+    // The refused holes and the way out come first: an import row reports the
+    // message's head only (`sanitizeRowError` keeps 300 characters).
     return (
-        `${BODY_LABEL}: a value is encoded for where it lands only in ${supported}, so an html or mjml template ` +
-        `body may place a hole only there. Refused: ${listed}${rest}. Move each refused hole into element text or ` +
-        `a quoted plain-text attribute value, or set the format to text or markdown. A link whose address comes ` +
-        `from a value belongs in an email template (email_template), which declares that variable as a URL; ` +
-        `name it in the notify step's template.`
+        `${BODY_LABEL}: an html or mjml body encodes a hole's value only for ${supported}, so a hole may sit only ` +
+        `there. Refused: ${listed}${rest}. Move each refused hole there, or set the format to text or markdown. ` +
+        `A link whose address comes from a value belongs in an email template (email_template), which declares ` +
+        `that variable as a URL; name it in the notify step's template.`
     );
 }
 
