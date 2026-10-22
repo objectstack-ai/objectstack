@@ -17,7 +17,7 @@ ADR-0055 §1 derives a `controlled_by_parent` detail's access from exactly one r
 - **Before.** An insert under that declaration was written when it named a master. An update could set the reference.
 - **Now.** Every write that sets the reference answers `INVALID_METADATA` (422) and writes nothing, before any master is asked: every insert, single or batch, whether or not it names a master, and every update whose body carries the reference key, whatever the value, `null` included. The message is the parse's own refusal of the declaration, prefixed with the write it refused, so it names the object, the field, each flag and the fix. It is the same for every caller the gate judges.
 - **Unchanged.**
-  - The rows already stored: the gate still derives their read access from that field, so they keep their master and are read as before.
+  - The rows already stored: the security plugin still derives their read access from that field, so they keep their master and are read as before.
   - A delete, and an update whose body leaves the reference key out.
   - System contexts, every object declared with an ordinary required master, and every object that does not declare `controlled_by_parent`.
 

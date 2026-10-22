@@ -153,7 +153,7 @@ export class MasterDetailRelationMissingError extends Error {
  * `master-not-writable`), so an object reaches this only through a door that
  * does not parse: a raw `registerObject` / `registerApp`, a non-strict
  * `defineStack`, or a stored row the boot registers under its
- * `[metadata_spec_invalid]` diagnostic. The write gate still derives the
+ * `[metadata_spec_invalid]` diagnostic. The security plugin still derives the
  * object's READ access from that field, so rows already stored keep their
  * master, and a delete or an update that leaves the key alone is answered as
  * before. The engine does not take a caller's value in a field the

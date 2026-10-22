@@ -27,8 +27,9 @@
  *
  * Real stack: `ObjectQL` over better-sqlite3, the real `SecurityPlugin`, the
  * real sharing service and middleware, a member's context assembled by
- * `resolveAuthzContext` and `assembleExecutionContext`, and a platform admin's
- * carried posture.
+ * `resolveAuthzContext` and `assembleExecutionContext`, a platform admin's
+ * carried posture, and the engine's security source wired as a kernel wires
+ * it, so a detail read composes the engine's `ReadableIds` leaf over its master.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
@@ -48,6 +49,7 @@ import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.j
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
+import { wireEngineSecuritySource } from './engine-security-source.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const ORG = 'org_cbp_unw';
@@ -236,6 +238,8 @@ async function boot() {
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The engine's security source, as `ObjectQLPlugin.init` wires it on a kernel (ADR-0139 D2).
+  wireEngineSecuritySource(engine, () => plugin);
   sharing = new SharingService({ engine: engine as never, securityService: () => security as never });
   engine.registerMiddleware(buildSharingMiddleware(sharing, ctx.logger) as never, { object: '*' });
   // The row gates log the writes they refuse.
