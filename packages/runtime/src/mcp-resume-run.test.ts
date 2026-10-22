@@ -194,8 +194,15 @@ function makeEngine() {
 
 type Engine = ReturnType<typeof makeEngine>;
 
-/** Lead rows with an owner; the data double answers a caller only its own rows (RLS). */
-function makeHarness(opts: { actions?: any[]; engine?: Engine } = {}) {
+/**
+ * Lead rows with an owner; the data double answers a caller only its own rows (RLS).
+ *
+ * [#25139] `merged` adds a `protocol` whose merged listing (`getMetaItems`)
+ * serves the object, and empties the metadata service's `listObjects()`, the
+ * way an `environmentId` kernel holds no copy of a package's object; `'throws'`
+ * makes that listing fail while the metadata service still lists the object.
+ */
+function makeHarness(opts: { actions?: any[]; engine?: Engine; merged?: 'listing' | 'throws' } = {}) {
     const engine = opts.engine ?? makeEngine();
     const leads: Array<{ id: string; owner: string; name: string }> = [
         { id: 'lead_1', owner: 'u1', name: 'Ada' },
@@ -223,10 +230,17 @@ function makeHarness(opts: { actions?: any[]; engine?: Engine } = {}) {
         isActionEnabled: (name: string) => !disabled.has(name),
     };
     const metadata: any = {
-        listObjects: vi.fn(async () => [object]),
+        listObjects: vi.fn(async () => (opts.merged === 'listing' ? [] : [object])),
         getObject: vi.fn(async () => object),
     };
     const services: Record<string, unknown> = { objectql: ql, data: ql, metadata, automation: engine };
+    const protocol = {
+        getMetaItems: vi.fn(async (request: { type: string }) => {
+            if (opts.merged === 'throws') throw new Error('merged listing unavailable');
+            return { type: request.type, items: request.type === 'object' ? [object] : [] };
+        }),
+    };
+    if (opts.merged) services.protocol = protocol;
     const resolve = (name: string) => services[name] ?? null;
     const kernel: any = {
         getService: resolve,
@@ -242,6 +256,8 @@ function makeHarness(opts: { actions?: any[]; engine?: Engine } = {}) {
     return {
         engine,
         leads,
+        metadata,
+        protocol,
         dispatcher,
         ctxFor,
         disable: (name: string) => { disabled = new Set([...disabled, name]); },
@@ -528,5 +544,41 @@ describe('MCP resumeRun — (e) the refusal a flow node met crosses the bridge a
         expect(thrown?.userMessage).toBe(USER_TEXT);
         expect(thrown?.userMessage).toBe(rest.response?.body?.error?.userMessage);
         expect(thrown?.message).toBe("Node 'mk' failed: create_record(crm_task) failed: boom");
+    });
+});
+
+describe('[#25139] MCP resumeRun — the flow action that admits the run is read from the listing list_objects serves', () => {
+    const VALUES = { subject: 'Call back' };
+
+    it('where the metadata service holds no copy of the object, run_action starts the flow and resumeRun completes it from the merged listing', async () => {
+        const h = makeHarness({ merged: 'listing' });
+        const runId = await startPaused(h);
+        const resumed = await h.bridgeFor('u1').resumeRun(runId, { values: VALUES });
+
+        expect(resumed).toMatchObject({ ok: true, action: SCHEDULE.name, objectName: OBJECT, recordId: 'lead_1' });
+        expect(h.engine.tasks).toHaveLength(1);
+        expect(h.protocol.getMetaItems).toHaveBeenCalledWith({ type: 'object' });
+        expect(h.metadata.listObjects).not.toHaveBeenCalled();
+    });
+
+    it('list_actions lists the object\'s flow actions from the same listing', async () => {
+        const h = makeHarness({ merged: 'listing' });
+        const names = ((await h.bridgeFor('u1').listActions()) as any[]).map((a) => a.name).sort();
+
+        // Exposed to AI and permitted: GATED needs a capability u1 lacks, CONSOLE_ONLY is not exposed.
+        expect(names).toEqual([CONFIRMED.name, WIZARD.name, SCHEDULE.name].sort());
+        expect(h.metadata.listObjects).not.toHaveBeenCalled();
+    });
+
+    it('a merged listing that throws fails list_actions, run_action and resumeRun with its error, and the metadata service is not asked', async () => {
+        const h = makeHarness({ merged: 'throws' });
+        const bridge = h.bridgeFor('u1');
+        const started = await h.engine.execute(SCHEDULE.target, { userId: 'u1', object: OBJECT, record: { id: 'lead_1' } });
+
+        await expect(bridge.listActions()).rejects.toThrow('merged listing unavailable');
+        await expect(bridge.runAction(SCHEDULE.name, { recordId: 'lead_1' })).rejects.toThrow('merged listing unavailable');
+        await expect(bridge.resumeRun(started.runId, { values: VALUES })).rejects.toThrow('merged listing unavailable');
+        expect(h.metadata.listObjects).not.toHaveBeenCalled();
+        expect(h.engine.resume).not.toHaveBeenCalled();
     });
 });

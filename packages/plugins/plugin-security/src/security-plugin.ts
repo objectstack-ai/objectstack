@@ -48,11 +48,11 @@ import {
   explainAccessForAsker,
   buildContextForUser,
   resolveDelegatorContext,
+  delegatedOrganizationRefusal,
   intersectFieldMasks,
   intersectDelegatedScope,
   d10NarrowingStatement,
 } from './explain-engine.js';
-import { declaredComparisonColumns } from './declared-comparison-columns.js';
 import { jsonColumnCheckRefusalCarriedBy, storedFormCheckJudge } from './rls-check-stored-form.js';
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
 import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -89,8 +89,28 @@ import {
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
 import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readDisabledCatalogNames } from '@objectstack/core';
-import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
-import { objectDefaultRowScopePolicy } from './object-default-row-scope.js';
+// [#25223 cut 1] The leaf readers (policy collection, unresolved-posture
+// probes, field masks, field-name tables); the methods of the same names below
+// hand each body the members it reads (`ObjectInputsHost`).
+import {
+  admitCollectedPolicy,
+  collectRLSPolicies,
+  computeForbiddenFieldWrites,
+  computePartialMaskRules,
+  computeQueryGuardFieldPerms,
+  computeReadPartialMaskRules,
+  extractTargetField,
+  foldFieldRequiredPermissions,
+  getObjectFieldNames,
+  loadObjectFieldNames,
+  maskOperationResult,
+  probeMetadataOutage,
+  probeUnpublishedDraft,
+  resolveUnresolvedCause,
+  warnAuthoredTenantPolicyOnce,
+  writeCheckFieldOptions,
+  type ObjectInputsHost,
+} from './security-plugin-object-inputs.js';
 import {
   isPlatformOwnershipFloorPolicy,
   masterGateCoversOperation,
@@ -98,7 +118,6 @@ import {
   OWD_DELEGATING_ROW_WRITES,
   owdDeclaresOpenRowWrites,
   owdOpenWritesCoversOperation,
-  withOwnershipFloorAlternates,
   type OwnershipFloorAlternate,
 } from './platform-ownership-policies.js';
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
@@ -466,24 +485,6 @@ function isPrincipalLessContext(context: any): boolean {
   const positions = context?.positions ?? [];
   const explicitPermissionSets = context?.permissions ?? [];
   return positions.length === 0 && explicitPermissionSets.length === 0 && !context?.userId;
-}
-
-/**
- * [ADR-0090 D10; ruling of record 6278784335 on #24341, letter B] Whether
- * `context` is a DELEGATED principal's own leg — an agent acting on behalf of
- * a user, whose sets are its ceiling and whose row bound is the delegator's
- * leg, AND-ed in beside it. The spelling is the read door's own test for the
- * delegated case (`onBehalfOf.userId`); the delegator's leg runs on the
- * context `resolveDelegatorContext` rebuilt, which carries none.
- *
- * Read by {@link SecurityPlugin.collectRLSPolicies} alone: a ceiling's silence
- * is not Layer 1 silence, so the object's declared default row scope is not
- * collected on that leg. Every row bound comes from the delegator, as before
- * the identity objects declared their defaults.
- */
-function isDelegatedPrincipalLeg(context: unknown): boolean {
-  const onBehalfOf = (context as { onBehalfOf?: { userId?: unknown } } | null | undefined)?.onBehalfOf;
-  return typeof onBehalfOf?.userId === 'string' && onBehalfOf.userId !== '';
 }
 
 /**
@@ -2385,6 +2386,10 @@ export class SecurityPlugin implements Plugin {
             // A dangling delegator is a fail-CLOSED DENIAL upstream, not a
             // narrowing — the read never returns rows for this to describe.
             if (del.kind !== 'resolved') return none;
+            // [#25107] Nor is a delegator who is not a member of the
+            // organization the read runs in, on a walled posture: the prologue
+            // refuses the read ({@link delegatedOrganizationRefusal}).
+            if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return none;
             const meta = await this.getObjectSecurityMeta(object);
             const sets = await this.resolvePermissionSetsForContext(context);
             const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
@@ -5195,11 +5200,14 @@ export class SecurityPlugin implements Plugin {
      *
      * A delegation link naming no user (`missing`) answers `null`: the write
      * path refuses such a principal before any gate runs, and so does every
-     * gate built on this.
+     * gate built on this. [#25107] So does a delegator who is not a member of
+     * the organization the write runs in, on a walled posture: the prologue
+     * refuses it there ({@link delegatedOrganizationRefusal}).
      */
     const delegatedWriteContexts = async (o: string, c: any): Promise<{ agent: any; delegator: any } | null> => {
       const del = await resolveDelegatorContext(this.ql, c);
       if (del.kind !== 'resolved') return null;
+      if (delegatedOrganizationRefusal(c, del.context, this.tenancyPosture) !== undefined) return null;
       const [sets, delegatorSets, meta] = await Promise.all([
         this.resolvePermissionSetsForContext(c),
         this.resolvePermissionSetsForContext(del.context),
@@ -5264,6 +5272,9 @@ export class SecurityPlugin implements Plugin {
           return this.computeReadPartialMaskRules(meta, sets as any, delSets as any, basePerms, delBasePerms);
         },
         baselinePermissionSets: this.baselinePermissionSets,
+        // [#25107] The prologue's posture, for its organization-membership
+        // refusal of a delegated context ({@link delegatedOrganizationRefusal}).
+        tenancyPosture: this.tenancyPosture,
         // ── record-grained deps (only consulted when recordId is present) ──
         computeLayeredRlsFilter: async (sets, o, engineOp, c) =>
           this.computeLayeredRlsFilter(
@@ -6013,15 +6024,10 @@ export class SecurityPlugin implements Plugin {
     // walled posture the find path refuses every operation of a delegated
     // context whose live active organization the delegator's own membership
     // does not back, so the scope that agrees with it is zero rows, on every
-    // object. One ask of the one spelling of the rule, with the inputs the
-    // prologue passes; under `single` the claim stands, and a context with no
-    // active organization is not this rule's (ADR-0123 D2).
-    const liveOrganization =
-      context.tenantId != null && context.tenantId !== '' ? String(context.tenantId) : undefined;
-    if (
-      liveOrganization !== undefined &&
-      vetOrganizationClaim(liveOrganization, delegatorContext?.accessible_org_ids ?? [], this.tenancyPosture) === undefined
-    ) {
+    // object. [#25107] The prologue's own ask ({@link delegatedOrganizationRefusal}),
+    // with the inputs it passes; under `single` the claim stands, and a context
+    // with no active organization is not this rule's (ADR-0123 D2).
+    if (delegatedOrganizationRefusal(context, delegatorContext, this.tenancyPosture) !== undefined) {
       this.logger.warn?.(
         `[security] getReadFilter received an on-behalf-of context for object '${object}' whose delegator is not a ` +
           `member of the organization it runs in — denying, as the operation prologue refuses it (ADR-0090 D10, fail-closed)`,
@@ -6267,7 +6273,10 @@ export class SecurityPlugin implements Plugin {
     // [ADR-0090 D10] On an on-behalf-of request the projection must NOT widen
     // past the DELEGATOR's — intersect the delegator's field mask too. A
     // dangling delegator fails CLOSED (expose no columns), the same fail-closed
-    // stance the CRUD middleware takes on a 'missing' delegator. [#20995] Asked
+    // stance the CRUD middleware takes on a 'missing' delegator; [#25107] and so
+    // does a delegator who is not a member of the organization the request runs
+    // in, on a walled posture, which the middleware's prologue refuses
+    // ({@link delegatedOrganizationRefusal}). [#20995] Asked
     // only when the caller resolved a set, as the middleware asks it: a caller
     // who resolved none reaches here only for its masking rules and [#21063]
     // its field capability contract, and every one of them already applies to
@@ -6278,6 +6287,9 @@ export class SecurityPlugin implements Plugin {
       const del = await resolveDelegatorContext(this.ql, context);
       if (del.kind === 'missing') return { kind: 'answer', fields: [] };
       if (del.kind === 'resolved') {
+        if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) {
+          return { kind: 'answer', fields: [] };
+        }
         delegatorSets = await this.resolvePermissionSetsForContext(del.context);
         delBasePerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
         let delFieldPerms = this.foldFieldRequiredPermissions(delBasePerms, secMeta.fieldRequiredPermissions, delegatorSets);
@@ -6428,12 +6440,16 @@ export class SecurityPlugin implements Plugin {
       if (permissionSets.length === 0) return false;
 
       // [ADR-0090 D10] Resolve the delegator ONCE — arms 4 and 6 both need it,
-      // and a dangling link denies before either runs.
+      // and a dangling link denies before either runs. [#25107] So does a
+      // delegator who is not a member of the organization the read runs in, on
+      // a walled posture: the middleware's prologue refuses the read there
+      // ({@link delegatedOrganizationRefusal}).
       let delegatorSets: PermissionSet[] | null = null;
       if (context?.onBehalfOf?.userId) {
         const del = await resolveDelegatorContext(this.ql, context);
         if (del.kind === 'missing') return false;
         if (del.kind === 'resolved') {
+          if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return false;
           delegatorSets = await this.resolvePermissionSetsForContext(del.context);
         }
       }
@@ -6770,13 +6786,17 @@ export class SecurityPlugin implements Plugin {
       if (unresolved) return false;
 
       // [ADR-0090 D10] Resolve the delegator ONCE — the arms below need it,
-      // and a dangling link denies before any of them runs.
+      // and a dangling link denies before any of them runs. [#25107] So does a
+      // delegator who is not a member of the organization the write runs in,
+      // on a walled posture: the middleware's prologue refuses the write there
+      // ({@link delegatedOrganizationRefusal}).
       let delegatorSets: PermissionSet[] | null = null;
       let delegatorContext: unknown = null;
       if (context?.onBehalfOf?.userId) {
         const del = await resolveDelegatorContext(this.ql, context);
         if (del.kind === 'missing') return false;
         if (del.kind === 'resolved') {
+          if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return false;
           delegatorContext = del.context;
           delegatorSets = await this.resolvePermissionSetsForContext(del.context);
         }
@@ -6883,10 +6903,14 @@ export class SecurityPlugin implements Plugin {
     // middleware and {@link getReadableFields} take. [#21079] So does a
     // delegator who resolves NO set: the evaluator answers that empty list's
     // export as it answers any list, and the middleware refuses its read.
+    // [#25107] So does a delegator who is not a member of the organization the
+    // export runs in, on a walled posture: the middleware's prologue refuses
+    // the read there ({@link delegatedOrganizationRefusal}).
     if (context?.onBehalfOf?.userId) {
       const del = await resolveDelegatorContext(this.ql, context);
       if (del.kind === 'missing') return false;
       if (del.kind === 'resolved') {
+        if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return false;
         const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
         if (
           !this.permissionEvaluator.checkObjectPermission('export', objectName, delegatorSets, { isPrivate })
@@ -9301,8 +9325,8 @@ export class SecurityPlugin implements Plugin {
    *   access for a non-existent user).
    * - [#25063 · ADR-0090 D10] A delegated operation runs in the LIVE principal's
    *   active organization, and the delegator context inherits that organization
-   *   (`resolveDelegatorContext`: the agent and its delegator are in the same
-   *   organization). On a walled posture that is a precondition, never an
+   *   (`resolveDelegatorContext` hands the delegator the organization the
+   *   operation runs in). On a walled posture that is a precondition, never an
    *   assumption: when the delegator's own membership does not back the live
    *   organization, the operation is REFUSED here, for every verb. Left to run,
    *   the delegator's leg could not bound it: the inherited organization feeds
@@ -9310,8 +9334,11 @@ export class SecurityPlugin implements Plugin {
    *   on-behalf-of write could land outside every organization the delegator
    *   belongs to. The test is `vetOrganizationClaim`, the one spelling of "a
    *   membership backs this organization", which answers the claim unchanged
-   *   under `single`. A context with no active organization is not this
-   *   rule's: its answers stay with ADR-0123 D2.
+   *   under `single`, asked through `delegatedOrganizationRefusal` [#25107]:
+   *   the one ask every reader of a resolved delegator shares, so the probes,
+   *   the field projections, the read scope and the explanation answer this
+   *   refusal where it is made. A context with no active organization is not
+   *   this rule's: its answers stay with ADR-0123 D2.
    */
   private async resolveOperationPrincipals(
     operation: string,
@@ -9351,12 +9378,8 @@ export class SecurityPlugin implements Plugin {
         );
       }
       if (del.kind === 'resolved') {
-        const liveOrganization =
-          context.tenantId != null && context.tenantId !== '' ? String(context.tenantId) : undefined;
-        if (
-          liveOrganization !== undefined &&
-          vetOrganizationClaim(liveOrganization, del.context?.accessible_org_ids ?? [], this.tenancyPosture) === undefined
-        ) {
+        const liveOrganization = delegatedOrganizationRefusal(context, del.context, this.tenancyPosture);
+        if (liveOrganization !== undefined) {
           this.logger.warn?.(
             `[Security] on-behalf-of ${operation} '${object}' REFUSED — the delegator is not a member of the ` +
               `organization the request runs in (ADR-0090 D10, fail-closed)`,
@@ -10370,33 +10393,16 @@ export class SecurityPlugin implements Plugin {
     heldPositions: string[] | undefined,
     principal: unknown,
   ): RowLevelSecurityPolicy[] {
-    const allPolicies: RowLevelSecurityPolicy[] = [];
-    const floorAlternates = this.ownershipFloorAlternates.all();
-
-    for (const ps of permissionSets) {
-      if (ps.rowLevelSecurity) {
-        // [#21729] A contributed alternate match lands BESIDE the floor policy
-        // it relieves, in the floor's own domain, and only in a set that ships
-        // an enabled floor of its limb (`withOwnershipFloorAlternates`). Every
-        // reader of the collection — the by-id pre-image gate, the bulk write
-        // filter, the post-image check, `checkAuthoredRowWrite`, explain — sees
-        // the same list, because this is the one place they all collect from.
-        for (const policy of withOwnershipFloorAlternates(ps.rowLevelSecurity, floorAlternates)) {
-          if (this.admitCollectedPolicy(policy, objectName)) allPolicies.push(policy);
-        }
-      }
-    }
-
-    const held = this.rlsCompiler.getApplicablePolicies(objectName, operation, allPolicies, heldPositions);
-    if (held.length > 0 || isDelegatedPrincipalLeg(principal)) return held;
-    // [#24164 ruling E′] The held sets are silent on this object and
-    // operation: the object's own `defaultRowScope`, if it declares one. Read
-    // from the registry the engine compiles every find against, only here, on
-    // an empty collection (two in-memory map lookups, no I/O).
-    const schema = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(objectName) : null;
-    const objectDefault = objectDefaultRowScopePolicy(objectName, schema);
-    if (objectDefault === null || !this.admitCollectedPolicy(objectDefault, objectName)) return held;
-    return this.rlsCompiler.getApplicablePolicies(objectName, operation, [objectDefault], heldPositions);
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readQl = () => this.ql;
+    const readRlsCompiler = () => this.rlsCompiler;
+    const host: Pick<ObjectInputsHost, 'admitCollectedPolicy' | 'ownershipFloorAlternates' | 'ql' | 'rlsCompiler'> = {
+      admitCollectedPolicy: (...a) => this.admitCollectedPolicy(...a),
+      ownershipFloorAlternates: this.ownershipFloorAlternates,
+      get ql() { return readQl(); },
+      get rlsCompiler() { return readRlsCompiler(); },
+    };
+    return collectRLSPolicies.call(host, permissionSets, objectName, operation, heldPositions, principal);
   }
 
   /**
@@ -10417,13 +10423,13 @@ export class SecurityPlugin implements Plugin {
    * copy is (the provenance key is `(object, name, using)`).
    */
   private admitCollectedPolicy(policy: RowLevelSecurityPolicy, objectName: string): boolean {
-    if (!this.orgScopingEnabled && isPlatformTenantPolicy(policy)) {
-      return false;
-    }
-    if (!this.orgScopingEnabled && isAuthoredTenantPolicy(policy)) {
-      this.warnAuthoredTenantPolicyOnce(policy, objectName);
-    }
-    return true;
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readOrgScopingEnabled = () => this.orgScopingEnabled;
+    const host: Pick<ObjectInputsHost, 'orgScopingEnabled' | 'warnAuthoredTenantPolicyOnce'> = {
+      get orgScopingEnabled() { return readOrgScopingEnabled(); },
+      warnAuthoredTenantPolicyOnce: (...a) => this.warnAuthoredTenantPolicyOnce(...a),
+    };
+    return admitCollectedPolicy.call(host, policy, objectName);
   }
 
   /**
@@ -10438,15 +10444,13 @@ export class SecurityPlugin implements Plugin {
     policy: RowLevelSecurityPolicy,
     objectName: string,
   ): void {
-    const key = `${objectName} ${policy.name ?? ''}`;
-    if (this.warnedAuthoredTenantPolicies.has(key)) return;
-    this.warnedAuthoredTenantPolicies.add(key);
-    this.logger.warn?.(
-      '[security/ADR-0105] authored RLS policy references the active organization but org isolation ' +
-        'is inactive — it is retained and will fail closed (zero rows). Install ' +
-        '@objectstack/organizations (or drop the policy) if this is not intended.',
-      { object: objectName, policy: policy.name, using: policy.using },
-    );
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readLogger = () => this.logger;
+    const host: Pick<ObjectInputsHost, 'logger' | 'warnedAuthoredTenantPolicies'> = {
+      get logger() { return readLogger(); },
+      warnedAuthoredTenantPolicies: this.warnedAuthoredTenantPolicies,
+    };
+    warnAuthoredTenantPolicyOnce.call(host, policy, objectName);
   }
 
   /**
@@ -10576,9 +10580,13 @@ export class SecurityPlugin implements Plugin {
    * Every leg that cannot reach a positive verdict lands on `'unknown'`, whose
    * wording covers all cases.
    */
-  private async resolveUnresolvedCause(object: string): Promise<UnresolvedPostureCause> {
-    if (await this.probeMetadataOutage(object)) return 'metadata_unavailable';
-    return await this.probeUnpublishedDraft(object);
+  private resolveUnresolvedCause(object: string): Promise<UnresolvedPostureCause> {
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const host: Pick<ObjectInputsHost, 'probeMetadataOutage' | 'probeUnpublishedDraft'> = {
+      probeMetadataOutage: (...a) => this.probeMetadataOutage(...a),
+      probeUnpublishedDraft: (...a) => this.probeUnpublishedDraft(...a),
+    };
+    return resolveUnresolvedCause.call(host, object);
   }
 
   /**
@@ -10625,17 +10633,13 @@ export class SecurityPlugin implements Plugin {
    * Like the draft probe, this can never turn a resolved posture into a denial
    * nor a refusal into a grant — it is read after the deny decision is made.
    */
-  private async probeMetadataOutage(object: string): Promise<boolean> {
-    const service = this.metadata as
-      | { getDiagnosed?: (type: string, name: string) => Promise<{ degraded?: unknown }> }
-      | undefined;
-    if (typeof service?.getDiagnosed !== 'function') return false;
-    try {
-      const diagnosed = await service.getDiagnosed('object', object);
-      return diagnosed?.degraded === true;
-    } catch {
-      return false;
-    }
+  private probeMetadataOutage(object: string): Promise<boolean> {
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readMetadata = () => this.metadata;
+    const host: Pick<ObjectInputsHost, 'metadata'> = {
+      get metadata() { return readMetadata(); },
+    };
+    return probeMetadataOutage.call(host, object);
   }
 
   /**
@@ -10670,17 +10674,13 @@ export class SecurityPlugin implements Plugin {
    *   "a draft declaration exists but no published one" a true statement about
    *   this runtime, which is all the message claims.
    */
-  private async probeUnpublishedDraft(object: string): Promise<UnresolvedPostureCause> {
-    if (typeof this.ql?.findOne !== 'function') return 'unknown';
-    try {
-      const row = await this.ql.findOne('sys_metadata', {
-        where: { type: 'object', name: object, state: 'draft' },
-        context: { isSystem: true },
-      });
-      return row ? 'unpublished_draft' : 'unknown';
-    } catch {
-      return 'unknown';
-    }
+  private probeUnpublishedDraft(object: string): Promise<UnresolvedPostureCause> {
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readQl = () => this.ql;
+    const host: Pick<ObjectInputsHost, 'ql'> = {
+      get ql() { return readQl(); },
+    };
+    return probeUnpublishedDraft.call(host, object);
   }
 
   /**
@@ -10710,20 +10710,12 @@ export class SecurityPlugin implements Plugin {
     permissionSets: PermissionSet[],
     delegatorSets: PermissionSet[] | null,
   ): Record<string, FieldMaskingRule> {
-    const entries = Object.entries(secMeta.fieldMaskingRules ?? {});
-    if (entries.length === 0) return {};
-    const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
-    const delHeld = delegatorSets ? this.permissionEvaluator.getSystemPermissions(delegatorSets) : null;
-    const out: Record<string, FieldMaskingRule> = {};
-    for (const [field, rule] of entries) {
-      const caps = secMeta.fieldRequiredPermissions[field] ?? [];
-      const unmasked =
-        caps.length > 0 &&
-        caps.every((c) => held.has(c)) &&
-        (!delHeld || caps.every((c) => delHeld.has(c)));
-      if (!unmasked) out[field] = rule;
-    }
-    return out;
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<ObjectInputsHost, 'permissionEvaluator'> = {
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+    };
+    return computePartialMaskRules.call(host, secMeta, permissionSets, delegatorSets);
   }
 
   /**
@@ -10756,20 +10748,14 @@ export class SecurityPlugin implements Plugin {
     permissionSets: PermissionSet[],
     delegatorSets: PermissionSet[] | null,
   ): Record<string, { readable: boolean; editable: boolean }> {
-    let guard = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
-    guard = this.foldFieldRequiredPermissions(guard, secMeta.fieldRequiredPermissions, permissionSets);
-    if (delegatorSets) {
-      let delegatorGuard = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
-      delegatorGuard = this.foldFieldRequiredPermissions(delegatorGuard, secMeta.fieldRequiredPermissions, delegatorSets);
-      guard = intersectFieldMasks(guard, delegatorGuard);
-    }
-    const out: Record<string, { readable: boolean; editable: boolean }> = { ...guard };
-    for (const f of Object.keys(this.computePartialMaskRules(secMeta, permissionSets, delegatorSets))) {
-      if (out[f]?.readable !== false) {
-        out[f] = { readable: false, editable: out[f]?.editable ?? false };
-      }
-    }
-    return out;
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<ObjectInputsHost, 'computePartialMaskRules' | 'foldFieldRequiredPermissions' | 'permissionEvaluator'> = {
+      computePartialMaskRules: (...a) => this.computePartialMaskRules(...a),
+      foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+    };
+    return computeQueryGuardFieldPerms.call(host, objectName, secMeta, permissionSets, delegatorSets);
   }
 
   /**
@@ -10792,15 +10778,15 @@ export class SecurityPlugin implements Plugin {
     permissionSets: PermissionSet[],
     delegatorSets: PermissionSet[] | null,
   ): string[] {
-    let fieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
-    fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
-    if (delegatorSets) {
-      let delFieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
-      delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, secMeta.fieldRequiredPermissions, delegatorSets);
-      fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
-    }
-    if (Object.keys(fieldPerms).length === 0) return [];
-    return this.fieldMasker.detectForbiddenWrites(data, fieldPerms);
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readFieldMasker = () => this.fieldMasker;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<ObjectInputsHost, 'fieldMasker' | 'foldFieldRequiredPermissions' | 'permissionEvaluator'> = {
+      get fieldMasker() { return readFieldMasker(); },
+      foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+    };
+    return computeForbiddenFieldWrites.call(host, objectName, data, secMeta, permissionSets, delegatorSets);
   }
 
   /**
@@ -10830,13 +10816,11 @@ export class SecurityPlugin implements Plugin {
     basePerms: Record<string, { readable?: boolean; editable?: boolean }>,
     delBasePerms: Record<string, { readable?: boolean; editable?: boolean }> | null,
   ): Record<string, FieldMaskingRule> {
-    const rules = this.computePartialMaskRules(secMeta, permissionSets, delegatorSets);
-    for (const f of Object.keys(rules)) {
-      if (basePerms[f]?.readable === false || delBasePerms?.[f]?.readable === false) {
-        delete rules[f];
-      }
-    }
-    return rules;
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const host: Pick<ObjectInputsHost, 'computePartialMaskRules'> = {
+      computePartialMaskRules: (...a) => this.computePartialMaskRules(...a),
+    };
+    return computeReadPartialMaskRules.call(host, secMeta, permissionSets, delegatorSets, basePerms, delBasePerms);
   }
 
   /**
@@ -10859,29 +10843,16 @@ export class SecurityPlugin implements Plugin {
     secMeta: ObjectSecurityMeta,
     delegatorSets: PermissionSet[] | null,
   ): void {
-    if (opCtx.result && ['find', 'findOne', 'insert', 'update'].includes(opCtx.operation)) {
-      const basePerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
-      // [ADR-0066 D3] AND-gate field-level requiredPermissions into the mask.
-      let fieldPerms = this.foldFieldRequiredPermissions(basePerms, secMeta.fieldRequiredPermissions, permissionSets);
-      // [ADR-0090 D10] Mask any field the delegator cannot read, too.
-      let delBasePerms: Record<string, { readable: boolean; editable: boolean }> | null = null;
-      if (delegatorSets) {
-        delBasePerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, delegatorSets);
-        let delFieldPerms = this.foldFieldRequiredPermissions(delBasePerms, secMeta.fieldRequiredPermissions, delegatorSets);
-        fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
-      }
-      // [#8993] Partial masking: fields whose declared rule applies to this
-      // caller are REPLACED with their masked value instead of deleted —
-      // EXCEPT where a permission set explicitly marks the field
-      // non-readable (strictest wins: a masking rule never widens an
-      // explicit deny, so those callers keep getting the key deleted).
-      const partialRules = this.computeReadPartialMaskRules(
-        secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
-      );
-      if (Object.keys(fieldPerms).length > 0 || Object.keys(partialRules).length > 0) {
-        opCtx.result = this.fieldMasker.maskResults(opCtx.result, fieldPerms, opCtx.object, partialRules);
-      }
-    }
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readFieldMasker = () => this.fieldMasker;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<ObjectInputsHost, 'computeReadPartialMaskRules' | 'fieldMasker' | 'foldFieldRequiredPermissions' | 'permissionEvaluator'> = {
+      computeReadPartialMaskRules: (...a) => this.computeReadPartialMaskRules(...a),
+      get fieldMasker() { return readFieldMasker(); },
+      foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+    };
+    maskOperationResult.call(host, opCtx, permissionSets, secMeta, delegatorSets);
   }
 
   private foldFieldRequiredPermissions(
@@ -10889,38 +10860,29 @@ export class SecurityPlugin implements Plugin {
     fieldRequiredPermissions: Record<string, string[]>,
     permissionSets: PermissionSet[],
   ): Record<string, { readable: boolean; editable: boolean }> {
-    const entries = Object.entries(fieldRequiredPermissions ?? {});
-    if (entries.length === 0) return baseFieldPerms;
-    const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
-    const merged: Record<string, { readable: boolean; editable: boolean }> = { ...baseFieldPerms };
-    for (const [field, caps] of entries) {
-      if (caps.length > 0 && !caps.every((c) => held.has(c))) {
-        merged[field] = { readable: false, editable: false };
-      }
-    }
-    return merged;
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<ObjectInputsHost, 'permissionEvaluator'> = {
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+    };
+    return foldFieldRequiredPermissions.call(host, baseFieldPerms, fieldRequiredPermissions, permissionSets);
   }
 
   /**
    * Resolve the column-name set for an object (lowercased). Returns
    * `null` if the schema can't be loaded — caller should fail-closed.
    */
-  private async getObjectFieldNames(
+  private getObjectFieldNames(
     metadata: any,
     objectName: string,
     ql?: any,
   ): Promise<Set<string> | null> {
-    if (this.fieldNamesCache.has(objectName)) {
-      return this.fieldNamesCache.get(objectName) ?? null;
-    }
-    const result = await this.loadObjectFieldNames(metadata, objectName, ql);
-    // Only cache positive resolutions — a `null` may simply mean the
-    // schema isn't registered yet at boot, and we want subsequent calls
-    // to retry rather than be permanently denied.
-    if (result) {
-      this.fieldNamesCache.set(objectName, result);
-    }
-    return result;
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const host: Pick<ObjectInputsHost, 'fieldNamesCache' | 'loadObjectFieldNames'> = {
+      fieldNamesCache: this.fieldNamesCache,
+      loadObjectFieldNames: (...a) => this.loadObjectFieldNames(...a),
+    };
+    return getObjectFieldNames.call(host, metadata, objectName, ql);
   }
 
   /**
@@ -10940,78 +10902,29 @@ export class SecurityPlugin implements Plugin {
    * hands the same matcher, so the two judges of one policy read one
    * declaration one way.
    */
-  private async writeCheckFieldOptions(object: string): Promise<MatchesFilterOptions | undefined> {
-    let obj: any;
-    try {
-      obj = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(object) : null;
-      if (!obj || !obj.fields) obj = await this.metadata?.get?.('object', object);
-    } catch {
-      return undefined;
-    }
-    return declaredComparisonColumns(obj);
+  private writeCheckFieldOptions(object: string): Promise<MatchesFilterOptions | undefined> {
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const readMetadata = () => this.metadata;
+    const readQl = () => this.ql;
+    const host: Pick<ObjectInputsHost, 'metadata' | 'ql'> = {
+      get metadata() { return readMetadata(); },
+      get ql() { return readQl(); },
+    };
+    return writeCheckFieldOptions.call(host, object);
   }
 
-  private async loadObjectFieldNames(
+  private loadObjectFieldNames(
     metadata: any,
     objectName: string,
     ql?: any,
   ): Promise<Set<string> | null> {
-    try {
-      // Prefer ObjectQL's per-engine SchemaRegistry as the source of truth
-      // for the live field set: it reflects registry-time augmentations
-      // (system-field auto-injection like `organization_id`) that the
-      // standalone metadata artifact loaded at boot may not include.
-      // Fall back to the metadata service for objects ObjectQL doesn't
-      // know about (system tables registered through other paths).
-      let obj: any = typeof ql?.getSchema === 'function' ? ql.getSchema(objectName) : null;
-      if (!obj || !obj.fields) {
-        obj = await metadata?.get?.('object', objectName);
-      }
-      if (!obj || !obj.fields) return null;
-      // Populate the tenancy opt-out cache alongside the field set so
-      // the RLS filter pass can decide whether a wildcard
-      // `organization_id` policy is genuinely "applicable but
-      // uncompilable" (deny) versus "not applicable on this object"
-      // (skip without contributing to the deny sentinel).
-      const tenancyDisabled =
-        (obj as any)?.tenancy?.enabled === false ||
-        (obj as any)?.systemFields?.tenant === false;
-      this.tenancyDisabledCache.set(objectName, !!tenancyDisabled);
-      const set = new Set<string>(['id']);
-      // [ADR-0053 D-D1 item 7 — #5930] The `datetime` columns, from the same
-      // declaration (see `datetimeFieldNamesCache`).
-      const datetime = new Set<string>();
-      // [#21242] …and every column's type as the number-comparand verdict
-      // reads it (see `numberComparandFieldsCache`). The verdict decides which
-      // are numeric; this pass only records what each column declares.
-      const number = new Map<string, NumberComparandDoorFieldMeta>();
-      const noteNumberMeta = (name: string, def: any): void => {
-        if (!def || typeof def !== 'object' || typeof def.type !== 'string') return;
-        number.set(name, typeof def.returnType === 'string' ? { type: def.type, returnType: def.returnType } : { type: def.type });
-      };
-      if (Array.isArray(obj.fields)) {
-        for (const f of obj.fields) {
-          if (f?.name) set.add(String(f.name));
-          if (f?.name && f.type === 'datetime') datetime.add(String(f.name));
-          if (f?.name) noteNumberMeta(String(f.name), f);
-        }
-      } else if (typeof obj.fields === 'object') {
-        for (const key of Object.keys(obj.fields)) {
-          set.add(key);
-          const v = (obj.fields as Record<string, any>)[key];
-          if (v && typeof v === 'object' && v.name) set.add(String(v.name));
-          if (v && typeof v === 'object' && v.type === 'datetime') datetime.add(key);
-          noteNumberMeta(key, v);
-        }
-      } else {
-        return null;
-      }
-      this.datetimeFieldNamesCache.set(objectName, datetime);
-      this.numberComparandFieldsCache.set(objectName, number);
-      return set;
-    } catch {
-      return null;
-    }
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    const host: Pick<ObjectInputsHost, 'datetimeFieldNamesCache' | 'numberComparandFieldsCache' | 'tenancyDisabledCache'> = {
+      datetimeFieldNamesCache: this.datetimeFieldNamesCache,
+      numberComparandFieldsCache: this.numberComparandFieldsCache,
+      tenancyDisabledCache: this.tenancyDisabledCache,
+    };
+    return loadObjectFieldNames.call(host, metadata, objectName, ql);
   }
 
   /**
@@ -11033,22 +10946,7 @@ export class SecurityPlugin implements Plugin {
    * deliberately skips.
    */
   private extractTargetField(using?: string): string | null {
-    if (!using) return null;
-    // Match `field ==` (canonical CEL), `field =` (legacy SQL-ish), or
-    // `field IN`/`in`. [#2936] `==` MUST be listed before `=` in the
-    // alternation: alternation is ordered, so a bare `=` branch would match
-    // the first `=` of `==` and then the `(?=\s|\()` lookahead — seeing the
-    // SECOND `=`, not whitespace — would fail, leaving `==` unrecognized (the
-    // original bug: real seeds/business policies author equality as `==`, so
-    // the field-existence and tenancy-disabled safety nets that consume this
-    // were inert for them). `\b` is omitted after the operator because `=` is
-    // non-word and the next char (space) is non-word too — a word boundary
-    // cannot exist between two non-word chars — so we require the operator to
-    // be followed by whitespace or `(` instead. `!=`/`>`/`<`/`>=`/`<=` are
-    // deliberately NOT recognized: returning `null` keeps such a policy (the
-    // conservative default), matching the pre-#2936 behavior for any shape the
-    // regex did not match.
-    const m = using.match(/^\s*([a-z_][a-z0-9_]*)\s*(?:==|=|IN|in)(?=\s|\()/);
-    return m ? m[1] : null;
+    // [#25223 cut 1] The body moved to `security-plugin-object-inputs.ts` (see `ObjectInputsHost`).
+    return extractTargetField(using);
   }
 }
