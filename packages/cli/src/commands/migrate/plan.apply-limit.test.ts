@@ -24,8 +24,9 @@
  *  2. The footer offers `--allow-destructive` only for a destructive entry the
  *     database can apply, and names how many listed entries it cannot.
  *  3. CONTROL: a driver that declares nothing reads exactly as before.
- *  4. The `--json` document is the report, unchanged: the same keys, and each
- *     entry's message as the differ wrote it.
+ *  4. The `--json` document is the report, unchanged: the same keys (the
+ *     ADR-0131 D1 `nullableTenantColumns` advisory among them, which these
+ *     limits do not move), and each entry's message as the differ wrote it.
  *
  * `bootSchemaStack` is stubbed, so this runs without a database; the same
  * cases run against a real `sqld` in `apply.remote-face.integration.test.ts`.
@@ -245,7 +246,7 @@ describe('a driver that declares what its apply door cannot perform', () => {
     const { payload, exitCode } = await run(['--json']);
     expect(exitCode).toBe(0);
     expect(Object.keys(payload).sort()).toEqual(
-      ['changes', 'database', 'databaseSource', 'duration', 'managedTables', 'pending', 'schemaSync', 'total', 'unmanagedTables'],
+      ['changes', 'database', 'databaseSource', 'duration', 'managedTables', 'nullableTenantColumns', 'pending', 'schemaSync', 'total', 'unmanagedTables'],
     );
     expect(payload.changes.map((c: Entry) => c.message)).toEqual([DROP.message, TIGHTEN.message, RELAX.message]);
   }, CASE_TIMEOUT_MS);
@@ -430,7 +431,7 @@ describe('#24925 — a database the organization-ownership ceremony has not veri
     const { payload, exitCode } = await run(['--json']);
     expect(exitCode).toBe(0);
     expect(Object.keys(payload).sort()).toEqual(
-      ['changes', 'database', 'databaseSource', 'duration', 'managedTables', 'pending', 'total', 'unmanagedTables'],
+      ['changes', 'database', 'databaseSource', 'duration', 'managedTables', 'nullableTenantColumns', 'pending', 'total', 'unmanagedTables'],
     );
     expect(payload.changes.map((c: Entry) => c.message)).toEqual([INDEX.message, ORG_JOB.message, LEGACY.message]);
     expect(getService).not.toHaveBeenCalled();
