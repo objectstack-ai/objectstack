@@ -63,6 +63,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { composeReadableIdsInMemory } from './readable-ids-in-memory.testkit.js';
 
 // ── metadata: the showcase invoice graph, exactly as it ships ──────────────
 
@@ -446,7 +447,15 @@ async function makeStack(opts: { orgScoping?: boolean } = {}): Promise<Stack> {
       let result: any[] = [];
       await securityMw(opCtx, async () => {
         await sharingMw(opCtx, async () => {
-          result = await engine.find(object, { where: opCtx.ast.where });
+          // [ADR-0139 D6] A controlled_by_parent read carries the engine's
+          // leaf over the master; this double is no engine, so the composition
+          // is done for it (`readable-ids-in-memory.testkit.ts`).
+          const where = await composeReadableIdsInMemory(opCtx.ast.where, opCtx.context, {
+            rows: (o) => engine._tables[o],
+            readAdmission: (o, c) => security.canReadObject(o, c),
+            readScope: (o, c) => security.getReadFilter(o, c),
+          });
+          result = await engine.find(object, { where });
         });
       });
       return result;

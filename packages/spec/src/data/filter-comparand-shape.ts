@@ -440,10 +440,14 @@
  *   non-enumerable brand; the copy is refused here as a non-list, ⛔ never
  *   dropped (dropping the `$in` would serve every row the rest of the branch
  *   matches).
- * - **Every caller but the engine's filter seam refuses it.** This door is
- *   also the authoring lowering's ({@link parseFilterAST}), the save door's,
- *   the analytics doors' and the RLS compiler's, and none of them composes the
- *   leaf; they pass no option and keep refusing it.
+ * - **Every caller that composes nothing refuses it.** The callers that pass
+ *   the option are the engine's filter seam, which composes the leaf at the
+ *   executor boundary, and the analytics service's engine-bound merges, which
+ *   judge the scope the engine will then run and hand it to the engine's own
+ *   aggregate boundary to compose (ADR-0139 D6, the seventh consumer). This
+ *   door is also the authoring lowering's ({@link parseFilterAST}), the save
+ *   door's, the analytics raw-SQL compiler's and the RLS compiler's, and none
+ *   of those composes the leaf; they pass no option and keep refusing it.
  *
  * ## Refusal envelope
  *

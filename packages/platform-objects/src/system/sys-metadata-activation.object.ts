@@ -122,7 +122,7 @@ export const SysMetadataActivation = ObjectSchema.create({
       required: true,
       searchable: true,
       maxLength: 100,
-      description: "The artifact's registry type ('flow', 'permission', …).",
+      description: "The artifact's registry type ('flow', 'action', 'position', 'permission', 'sharing_rule', 'webhook').",
       group: 'Identity',
     }),
 

@@ -12,7 +12,7 @@ import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#21829] `MAX_BULK_PER_ROW_HOOK_ROWS`: the platform's row ceiling for one
 // predicate write, which also bounds the id list a predicate write's read
 // question composes (see PREDICATE_WRITE_READABLE_ID_CAP).
-import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, MAX_BULK_PER_ROW_HOOK_ROWS, type FieldMaskingRule } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, MAX_BULK_PER_ROW_HOOK_ROWS, ReadableIds, type FieldMaskingRule } from '@objectstack/spec/data';
 // [ADR-0055 §1] The parse's own one-master judgement, asked of an object that
 // reached the registry without the parse (see `resolveCbpRelation`).
 import { controlledByParentMasterRefusal } from '@objectstack/spec/data';
@@ -592,16 +592,22 @@ interface RlsFilterOptions {
  * {@link SecurityPlugin.resolveCbpRelation} and cached.
  */
 /**
- * [ADR-0055 amendment] How many `controlled_by_parent` hops the master-set derivation and
- * the master-write gate will walk before they fail CLOSED.
+ * [ADR-0055 amendment] How many `controlled_by_parent` hops the read derivation's
+ * chain walk and the master-write gate will walk before they fail CLOSED.
  *
  * ⚠️ This is a COST ceiling, not a semantic rule, and it is deliberately not a
  * "supported chain length". Termination is already guaranteed without it — both
  * walks carry the set of objects already visited on the branch and refuse to
- * re-enter one, over a finite schema registry. What the bound caps is WORK: one
- * extra master-id `find` per hop per `controlled_by_parent` object per request,
- * which is the per-request cost ADR-0055 already books as a known limit. A
- * runaway generated schema should pay a bounded price, not an unbounded one.
+ * re-enter one, over a finite schema registry. What the bound caps is WORK. On
+ * the write side, one master-row probe per hop. On the read side the
+ * derivation answers the engine's `ReadableIds` leaf (ADR-0139 D6), which the
+ * engine composes into ONE statement with one nested subquery per hop; the
+ * engine refuses a chain past its own `READABLE_IDS_MAX_CHAIN_DEPTH` by name
+ * (INTERNAL_ERROR / 500), and this bound is the SAME cut, judged here first
+ * over the registry alone, so a chain the engine would refuse answers zero
+ * rows from this plugin and the engine never meets it. ⛔ The two values must
+ * stay equal: a plugin bound above the engine's turns an over-depth chain from
+ * zero rows into the engine's 500; one below it is over-denial.
  *
  * HOW THE VALUE WAS CHOSEN — no value is derivable from the tree, so the
  * derivation is stated rather than implied. Measured on this repo: every
@@ -612,14 +618,27 @@ interface RlsFilterOptions {
  * never derived. The consumer that motivated the ADR-0055 amendment needs **two**
  * (`crm_quote_line_item` → `crm_quote` → `crm_account`). 8 is four times the
  * deepest chain any consumer has asked for, so it cannot be reached by
- * authoring that means anything, and it still caps the walk at 8 queries.
+ * authoring that means anything, and it still caps the walk at 8 hops.
  *
- * AT THE BOUND: the read derivation returns the EMPTY master set and the write
- * gate DENIES, each logging the chain it refused. ⛔ Never "no restriction" —
- * that is precisely the failure the ADR-0055 amendment closed, and a bound that widened on
- * overflow would reintroduce it at depth 9 instead of depth 2.
+ * AT THE BOUND: the read derivation answers the EMPTY master set (`$in: []`)
+ * and the write gate DENIES, each logging the chain it refused. ⛔ Never "no
+ * restriction" — that is precisely the failure the ADR-0055 amendment closed,
+ * and a bound that widened on overflow would reintroduce it at depth 9
+ * instead of depth 2.
  */
 const CBP_MAX_CHAIN_DEPTH = 8;
+
+/**
+ * [ADR-0139 D1] The engine verbs whose `where` may carry a `ReadableIds`
+ * leaf — the engine's own `READABLE_IDS_READ_VERBS`. The read derivation
+ * answers its leaf for these and nothing for a write verb's predicate: a
+ * predicate write is narrowed to the rows the read door returns for the
+ * caller's own predicate ({@link SecurityPlugin.readableRowsScopeForPredicateWrite},
+ * where the leaf composes) and judged per master by the 2.8 gate
+ * ({@link SecurityPlugin.assertControlledByParentWrite}, a verdict, never a
+ * scope), so no master set is composed into a write's predicate.
+ */
+const CBP_LEAF_READ_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
 
 /**
  * [ADR-0055] Which leg of the master-detail write check a refusal came from,
@@ -4336,12 +4355,12 @@ export class SecurityPlugin implements Plugin {
         if (rlsFilter) extra.push(rlsFilter);
         let tenantLayer0Verdict = layered.tenantLayer0Verdict;
         // ADR-0055: a controlled_by_parent object derives its read scope from the
-        // master record — `masterFK IN (accessible master ids)`, AND-ed in.
-        const cbpFilter = await this.computeControlledByParentFilter(
-          permissionSets,
-          opCtx.object,
-          opCtx.context,
-        );
+        // master record — `masterFK IN (<the master ids this caller may read>)`,
+        // AND-ed in as the engine's `ReadableIds` leaf over the master
+        // (ADR-0139 D6), which the engine composes at its executor boundary
+        // from this very service's `canReadObject` / `getReadFilter` of the
+        // master. Nothing for a write verb's predicate (ADR-0139 D1).
+        const cbpFilter = this.computeControlledByParentFilter(opCtx.object, opCtx.operation, opCtx.context);
         if (cbpFilter) extra.push(cbpFilter);
         // [ADR-0090 D10] AND the delegator's read RLS (and CBP) into the same
         // where — the delegated principal sees only rows BOTH may see. Computed
@@ -4355,7 +4374,12 @@ export class SecurityPlugin implements Plugin {
           // recorded verdict is their intersection — what the composed wall
           // decided, not the caller's half alone.
           tenantLayer0Verdict = intersectTenantLayer0Verdicts(tenantLayer0Verdict, delLayered.tenantLayer0Verdict);
-          const delCbp = await this.computeControlledByParentFilter(delegatorSets, opCtx.object, delegatorContext);
+          // The delegator's half writes the same leaf over the master; the
+          // engine composes it with the request's delegated context, whose
+          // scope `getReadFilter` answers as the ADR-0090 D10 intersection
+          // (ADR-0139 D5.1 as amended), so both halves carry one subquery
+          // twice — correct rows, measured, and left as it is.
+          const delCbp = this.computeControlledByParentFilter(opCtx.object, opCtx.operation, delegatorContext);
           if (delCbp) extra.push(delCbp);
         }
         // [#21829] The write doors' rule on the PREDICATE door: a row the
@@ -5800,7 +5824,11 @@ export class SecurityPlugin implements Plugin {
    *
    *   1. {@link computeRlsFilter} — tenant Layer 0 + RLS policies;
    *   2. {@link computeControlledByParentFilter} — ADR-0055, `masterFK IN
-   *      (accessible master ids)`;
+   *      (<the master ids this caller may read>)`, spelled as the engine's
+   *      `ReadableIds` leaf over the master (ADR-0139 D6): the engine composes
+   *      it from this service's own answers about the master before any
+   *      driver sees it, and the analytics faces hand it to the engine or
+   *      decline it (`NativeSQLStrategy.canHandle`), never compile it;
    *   3. {@link resolveSharingReadFilter} — plugin-sharing's OWD / record-share
    *      visibility filter, contributed by the sibling middleware.
    *
@@ -5901,17 +5929,13 @@ export class SecurityPlugin implements Plugin {
       if (permissionSets.length === 0) return RLS_DENY_FILTER;
       const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
       // [#5815] ADR-0055 — the SECOND thing the middleware ANDs into `ast.where`
-      // for a read. Resolved from the sets already resolved above, exactly as
-      // the middleware feeds it its own, so the derived master id set is
-      // computed for this identity once and never re-resolved. It stands down
-      // (null) for any object that is not controlled_by_parent, and it is
-      // internally fail-closed; a THROW propagates to the catch below, which
+      // for a read: the leaf over the master, the same answer the middleware
+      // writes for a find. It stands down (null) for any object that is not
+      // controlled_by_parent, and it is internally fail-closed (the deny
+      // sentinel for an unresolvable relation, `$in: []` for a chain the
+      // registry walk refuses); a THROW propagates to the catch below, which
       // denies — the same posture as the surrounding layers.
-      const cbpFilter = await this.computeControlledByParentFilter(
-        permissionSets,
-        object,
-        context,
-      );
+      const cbpFilter = this.computeControlledByParentFilter(object, 'find', context);
       // [#4467] RLS AND controlled-by-parent AND sharing — the same
       // AND-composition the middlewares achieve by all writing into `ast.where`.
       // Any layer may be absent; `andComposeLayers` returns the others, or null
@@ -6026,9 +6050,9 @@ export class SecurityPlugin implements Plugin {
 
     // Layers 1 to 4 — the security middleware's own four, in its order.
     const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
-    const cbpFilter = await this.computeControlledByParentFilter(permissionSets, object, context);
+    const cbpFilter = this.computeControlledByParentFilter(object, 'find', context);
     const delFilter = await this.computeRlsFilter(delegatorSets, object, 'find', delegatorContext);
-    const delCbpFilter = await this.computeControlledByParentFilter(delegatorSets, object, delegatorContext);
+    const delCbpFilter = this.computeControlledByParentFilter(object, 'find', delegatorContext);
 
     const securityLayers = andComposeLayers(andComposeLayers(filter, cbpFilter), andComposeLayers(delFilter, delCbpFilter));
     const sharingLayers = andComposeLayers(sharingFilter, delegatorSharingFilter);
@@ -9066,195 +9090,171 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * ADR-0055 — master-detail "controlled by parent" READ derivation.
+   * ADR-0055 — master-detail "controlled by parent" READ derivation, answered
+   * as the engine's `ReadableIds` leaf (ADR-0139 D6: `controlled_by_parent`
+   * is the leaf's seventh consumer, in the end-state form).
    *
    * For an object whose `sharingModel` is `controlled_by_parent`, access is
-   * derived from the master: return a filter `masterFK IN (<master ids this user
-   * can read>)`. The id set is resolved under a system context — no middleware
-   * re-entry, so no recursion — against BOTH halves of the master's own read
-   * scope, the same two the engine ANDs into a direct `find` of the master:
+   * derived from the master: the answer is `{ masterFK: { $in:
+   * ReadableIds.of(master) } }` — "the ids of the master's records this
+   * caller may read". The engine replaces the leaf at its executor boundary,
+   * immediately before the driver call, with a scope it composes from THIS
+   * service's own two halves of a read of the master, asked with the caller's
+   * context exactly as it stands (`ObjectQL#composeReadableIdsAtBoundary`):
    *
-   *   1. the master's read RLS (`computeRlsFilter` — tenant Layer 0 + policies), and
-   *   2. plugin-sharing's OWD / record-share visibility filter
-   *      (`resolveSharingReadFilter` — the owner-match widened by READ depth,
-   *      OR-ed with the caller's `sys_record_share` grants).
+   *   1. `canReadObject(master)` — the object-level read admission
+   *      ({@link objectReadAdmission}); refused ⇒ `$in: []`, no detail is read;
+   *   2. `getReadFilter(master)` — the master's row scope: its read RLS
+   *      (tenant Layer 0 + policies), plugin-sharing's OWD / record-share
+   *      visibility filter, and the master's OWN `controlled_by_parent`
+   *      derivation, which is this method again and so another leaf — the
+   *      chain composes recursively, one nested subquery per hop, inside the
+   *      one statement the driver runs. The deny sentinel ⇒ `$in: []`.
    *
-   * [#5386] Half 2 used to be missing, and its absence was not a narrow gap: an
-   * app that authors NO `rowLevelSecurity` on the master got an UNRESTRICTED
-   * master id set, so the declared narrowing restricted nothing at all — every
-   * detail row was readable by any holder of object-level read. Authoring RLS on
-   * the master was no workaround either, since RLS is ANDed with (not OR-ed
-   * into) the sharing filter and so cuts off the very rows a grant shared in.
-   * Which half applies is decided by the MASTER's own effective sharing model —
-   * `buildReadFilter` returns null for a non-`private` master — so the derived
-   * set stays point-for-point equal to what a direct find of the master returns.
+   * The driver compiles the composed leaf as `masterFK IN (SELECT id FROM
+   * master WHERE scope AND tenant)` (ADR-0139 D3), so a detail read is one
+   * statement whatever the master's cardinality: no master id list is
+   * materialised, nothing is bound per master, and the dialect's variable
+   * limit is never reached. Before this, the derivation pre-scanned the
+   * master under a system context and bound every readable id into `$in` —
+   * twice per request (find, then count), unbounded — so a child read answered
+   * `DATABASE_ERROR` / 500 past ~32,800 masters (the dialect's bind limit), and
+   * its CPU grew with the master table.
    *
-   * [ADR-0055 §3] Both halves scope ROWS. Ahead of them the master's OBJECT-level
-   * read admission is asked ({@link objectReadAdmission}, the predicate
-   * `canReadObject` asks), for the principal whose sets this call was handed: a
-   * principal the master's own read door refuses at the object gate gets the
-   * empty master set, so the equality with a direct find of the master holds for
-   * that principal too, and with the engine's ReadableIds leaf, which asks
-   * `canReadObject` before it scopes a parent's rows.
+   * [#5386] The master's scope is the SAME scope a direct find of the master
+   * runs under, point for point: both halves above are the ones the engine
+   * middleware chain ANDs into a direct read of the master, asked of the same
+   * service, so the derived set cannot drift from the direct one. That
+   * equality used to be re-established here by composing the halves by hand
+   * (RLS, sharing, the master's own derivation) around a system-context scan;
+   * it now follows from the engine asking this service's public doors.
    *
-   * An empty set yields `{ masterFK: { $in: [] } }`, which matches no rows (fail
-   * closed), as does a failure to resolve the sharing half. A misconfigured
-   * object (not exactly one required master_detail to derive from, ADR-0055 §1)
-   * denies all reads (defense-in-depth; the spec's parse refuses authoring it
-   * since #23100). Returns null when the object is not controlled_by_parent.
+   * [ADR-0090 D10] A DELEGATED (on-behalf-of) caller is composed, not routed:
+   * the engine asks both halves with the delegated context intact, and
+   * `getReadFilter(master)` answers the ADR-0090 D10 intersection through
+   * {@link computeDelegatedReadFilter} (ADR-0139 D5.1 as amended). The
+   * middleware's delegator half writes the same leaf, so a delegated read
+   * carries one subquery twice; correct rows, measured, left as it is.
    *
-   * [ADR-0055 amendment] The derivation COMPOSES ACROSS A CHAIN. It used to resolve the
-   * master set from the two halves above and nothing else, which made a master
-   * that is ITSELF `controlled_by_parent` resolve to "no restriction" on both:
-   * its RLS half is `null` (a derived object authors no policy — that is the
-   * whole point of the declaration) and its sharing half is `null` too, because
-   * `effectiveSharingModel` maps `controlled_by_parent` to `public` and
-   * `buildReadFilter` opts out of every non-`private` model. Composed: `null`,
-   * so `find(master, {})` ran as SYSTEM and returned EVERY master row. A
-   * two-level chain was therefore enforced at level one and org-wide at level
-   * two — read and write — with metadata that reads as if it were narrowed.
+   * [ADR-0139 D1] The leaf is a READ scope and a write's predicate never
+   * carries one: `null` for a write verb ({@link CBP_LEAF_READ_VERBS}). A
+   * predicate write of a detail is narrowed to the rows the read door returns
+   * for the caller's own predicate ({@link readableRowsScopeForPredicateWrite},
+   * where this leaf composes) and judged per master by the 2.8 gate
+   * ({@link assertControlledByParentWrite}, a verdict, never a scope).
    *
-   * So the master's own derivation is now the THIRD half, AND-ed in with the
-   * other two: the master set is exactly the set a direct read of the master
-   * returns, at every level, which is the same equality #5386 established for
-   * one level. ⛔ This is NOT a blanket refusal for chained declarations — that
-   * would deny the single-level case #5386 fixed and that measurement shows
-   * correct today. A detail under a reachable master stays reachable.
+   * [ADR-0139 D5.2 / D5.3] The two master shapes the engine composes no leaf
+   * over — a master on another datasource, a master an object-scoped read
+   * middleware narrows — are refused at boot (`ObjectQLPlugin`, on
+   * `kernel:bootstrapped`), so no up-front routing to a bounded list is made
+   * here: every `controlled_by_parent` object answers the leaf.
    *
-   * ⚠️ ADR-0055 records "single-level only in v1" as an honest limit and lists
-   * transitive chains under Non-goals. That scope line is what this closes; the
-   * ADR itself is a governed surface and is amended separately.
+   * A misconfigured object (not exactly one required master_detail to derive
+   * from, ADR-0055 §1) answers the deny sentinel by reference (the engine
+   * answers `$in: []` for it when it is a master's scope; a direct read of the
+   * object matches no row). Returns null when the object is not
+   * controlled_by_parent, or when the caller is the system.
    *
-   * Two guards bound the walk, both fail-CLOSED (an empty master set), never
-   * "no restriction" — the direction that made this a security defect:
+   * [ADR-0055 amendment] The derivation COMPOSES ACROSS A CHAIN — a master
+   * that is itself `controlled_by_parent` is scoped by ITS master, at every
+   * level — and two guards bound the chain, both fail-CLOSED (`$in: []`, the
+   * empty master set), never "no restriction", the direction that made the
+   * unbounded form a security defect. Both are judged here over the REGISTRY
+   * alone, before the leaf is written and before any store work
+   * ({@link controlledByParentChainRefusal}), so the engine's own cycle and
+   * depth refusals (`INTERNAL_ERROR` / 500, `READABLE_IDS_MAX_CHAIN_DEPTH`)
+   * are never reached for a declared chain:
    *
-   *   - **Cycle protection.** `ancestors` carries the objects already being
-   *     resolved on this branch. Re-entering one is a metadata cycle (`A`'s
-   *     master is `B`, `B`'s master is `A`, or an object mastered by itself),
-   *     and it denies. Termination does not depend on the depth bound: the
-   *     ancestor set is strictly growing over a finite schema registry.
+   *   - **Cycle protection.** The walk carries the objects already on the
+   *     chain and a chain that re-enters one (`A`'s master is `B`, `B`'s
+   *     master is `A`, or an object mastered by itself) denies. Termination
+   *     does not depend on the depth bound: the visited set is strictly
+   *     growing over a finite schema registry.
    *   - **Depth bound** ({@link CBP_MAX_CHAIN_DEPTH}). A COST ceiling, not a
-   *     semantic rule — see the constant for how the value was chosen.
+   *     semantic rule, and the engine's own cut — see the constant.
    */
-  private async computeControlledByParentFilter(
-    permissionSets: PermissionSet[],
+  private computeControlledByParentFilter(
     object: string,
+    /** The engine verb the answer is composed onto; a write verb answers `null` (ADR-0139 D1). */
+    operation: string,
     context: any,
-    /**
-     * [ADR-0055 amendment] The `controlled_by_parent` objects already being resolved on
-     * this branch of the walk, outermost first. Empty at five of the six call
-     * sites — the CRUD middleware (caller and D10 delegator), `getReadFilter`
-     * and `computeDelegatedReadFilter` (principal and delegator) — and grown by
-     * one at the sixth, the recursive hop.
-     */
-    ancestors: readonly string[] = [],
-  ): Promise<Record<string, unknown> | null> {
+  ): Record<string, unknown> | null {
     if (!this.ql || !context?.userId) return null;
     const schema = typeof this.ql.getSchema === 'function' ? this.ql.getSchema(object) : null;
     const sharingModel = schema?.sharingModel ?? schema?.security?.sharingModel;
     if (sharingModel !== 'controlled_by_parent') return null;
+    if (!CBP_LEAF_READ_VERBS.has(operation)) return null;
 
     const rel = this.resolveCbpRelation(object);
     // No resolvable master: the deny sentinel, by reference (ADR-0139 D2 step 2).
     if (!rel) return RLS_DENY_FILTER;
 
-    // [ADR-0055 amendment] Chain guards, BEFORE any store work. Both answer with the empty
-    // master set — the same shape the #5386 sharing-resolution failure answers
-    // with, and the same posture: a chain this derivation cannot resolve denies,
-    // because the alternative ("no restriction") is the defect being fixed.
-    if (ancestors.includes(object)) {
+    // [ADR-0055 amendment] Chain guards, over the registry, BEFORE the leaf is
+    // written. Both answer with the empty master set — the same shape the
+    // #5386 sharing-resolution failure answered with, and the same posture: a
+    // chain this derivation cannot resolve denies, because the alternative
+    // ("no restriction") is the defect being fixed, and the other alternative
+    // (the engine's refusal of the same chain) is a 500 for a declared shape.
+    const refusal = this.controlledByParentChainRefusal(object, rel);
+    if (refusal?.kind === 'cycle') {
       this.logger.error?.(
         `[security] controlled_by_parent derivation found a CYCLE resolving '${object}' ` +
-          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
+          `(chain: ${refusal.chain.join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
           `cannot resolve admits no child rather than leaving it unrestricted)`,
       );
       return { [rel.fk]: { $in: [] } };
     }
-    if (ancestors.length >= CBP_MAX_CHAIN_DEPTH) {
+    if (refusal?.kind === 'depth') {
       this.logger.error?.(
         `[security] controlled_by_parent derivation exceeded the chain depth bound ` +
           `(${CBP_MAX_CHAIN_DEPTH}) resolving '${object}' ` +
-          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
+          `(chain: ${refusal.chain.join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
           `cannot resolve admits no child rather than leaving it unrestricted)`,
       );
       return { [rel.fk]: { $in: [] } };
     }
+    return { [rel.fk]: { $in: ReadableIds.of(rel.master) } };
+  }
 
-    // [ADR-0055 §3] "Reading a detail requires READ access to its master", and
-    // the OBJECT-level read admission is the first half of that access — the
-    // half the master's own read door asks before any row filter, and the half
-    // the engine's ADR-0139 ReadableIds leaf asks (`canReadObject`). Asked here
-    // through the one predicate both read ({@link objectReadAdmission}), for
-    // the principal whose sets this call was handed, before the master's rows
-    // are scoped below under a system context. A principal the master's own
-    // door does not admit reads no master, so the master set is empty and no
-    // detail is read; at every hop of a chain alike, since the recursion below
-    // asks the same question of the next master. A throw denies too
-    // (fail-closed), as the sharing half's resolution failure does.
-    let masterObjectReadable: boolean;
-    try {
-      masterObjectReadable = await this.objectReadAdmission(rel.master, permissionSets, null);
-    } catch (e) {
-      this.logger.error?.(
-        `[security] controlled_by_parent derivation could not resolve the object-level read admission ` +
-          `of master '${rel.master}' for '${object}' (user ${context?.userId ?? 'unknown'}) ` +
-          `— denying (fail-closed: a child is readable only where its master is, so a master whose ` +
-          `admission cannot be resolved admits no child)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
-      return { [rel.fk]: { $in: [] } };
+  /**
+   * [ADR-0055 amendment] Walk the `controlled_by_parent` chain above `object`
+   * through the registry — no store work, no security call — and name the
+   * first guard it trips: a cycle, or the depth bound. `null` when the chain
+   * is one the engine composes whole.
+   *
+   * The walk follows exactly the chain the engine's composition will follow:
+   * each master that is itself `controlled_by_parent` contributes another leaf
+   * to its own read scope, so the chain is the run of derived masters, and it
+   * ends at the first master that governs its own rows, at a master the
+   * registry does not hold, or at a derived master with no resolvable
+   * relation (whose own derivation answers the deny sentinel, which the engine
+   * answers `$in: []` — closed, and no refusal). `chain` is the objects on the
+   * branch outermost first, the re-entered or over-depth master last — what
+   * the refusal log prints.
+   *
+   * The depth cut is the engine's: a chain of {@link CBP_MAX_CHAIN_DEPTH}
+   * derived objects composes (the read's object and up to seven derived
+   * masters above it), and the next derived master is refused — here as the
+   * empty master set, in the engine as its loud refusal of the same chain,
+   * which this walk therefore pre-empts.
+   */
+  private controlledByParentChainRefusal(
+    object: string,
+    rel: CbpRelation,
+  ): { kind: 'cycle' | 'depth'; chain: string[] } | null {
+    const chain: string[] = [object];
+    let master = rel.master;
+    for (;;) {
+      if (chain.includes(master)) return { kind: 'cycle', chain: [...chain, master] };
+      const schema = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(master) : null;
+      const model = schema?.sharingModel ?? schema?.security?.sharingModel;
+      if (model !== 'controlled_by_parent') return null;
+      if (chain.length >= CBP_MAX_CHAIN_DEPTH) return { kind: 'depth', chain: [...chain, master] };
+      chain.push(master);
+      const next = this.resolveCbpRelation(master);
+      if (!next) return null;
+      master = next.master;
     }
-    if (!masterObjectReadable) return { [rel.fk]: { $in: [] } };
-
-    const masterRlsFilter = await this.computeRlsFilter(permissionSets, rel.master, 'find', context);
-    // [#5386] The OWD / record-share half, resolved through the SAME helper
-    // `getReadFilter` uses, so the derived path and the direct path cannot
-    // drift. A resolution failure denies (empty master set) rather than
-    // silently widening the children back to everyone.
-    let masterSharingFilter: Record<string, unknown> | null;
-    try {
-      masterSharingFilter = await this.resolveSharingReadFilter(rel.master, context, permissionSets);
-    } catch (e) {
-      this.logger.error?.(
-        `[security] controlled_by_parent derivation could not resolve the sharing (OWD) read ` +
-          `scope of master '${rel.master}' for '${object}' (user ${context?.userId ?? 'unknown'}) ` +
-          `— denying (fail-closed: a child is readable only where its master is, so a master scope that ` +
-          `cannot be resolved admits no child)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
-      return { [rel.fk]: { $in: [] } };
-    }
-    // [ADR-0055 amendment] The THIRD half — the master's OWN `controlled_by_parent`
-    // derivation, resolved through this very method so the recursion cannot
-    // drift from the top-level answer. `null` for a master that is not derived
-    // (the single-level case, unchanged), and internally fail-closed at every
-    // level. This is the whole fix on the read side: without it both halves
-    // above are `null` for a derived master and the system `find` below
-    // returned every row.
-    const masterCbpFilter = await this.computeControlledByParentFilter(
-      permissionSets,
-      rel.master,
-      context,
-      [...ancestors, object],
-    );
-    const masterFilter = andComposeLayers(
-      andComposeLayers(masterRlsFilter, masterSharingFilter),
-      masterCbpFilter,
-    );
-    let masterIds: string[] = [];
-    try {
-      const rows = await this.ql.find(rel.master, {
-        where: masterFilter ?? {},
-        fields: ['id'],
-        context: { isSystem: true },
-      });
-      masterIds = (Array.isArray(rows) ? rows : [])
-        .map((r: any) => r?.id)
-        .filter((id: any) => id != null);
-    } catch {
-      masterIds = [];
-    }
-    return { [rel.fk]: { $in: masterIds } };
   }
 
   /**

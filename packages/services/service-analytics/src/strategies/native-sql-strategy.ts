@@ -36,7 +36,7 @@ import {
   numberComparandRefusalMessage,
 } from '@objectstack/spec/data';
 import { findCrossFieldComparand, findUninterpretableTemporalMember } from '../comparand-shape.js';
-import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
+import { assertReadScopeCannotVacate, compileScopedFilterToSql, findReadableIdsLeaf } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator-sql.js';
 // [#20986] The one resolver of the object a relationship-path hop reads.
@@ -736,8 +736,45 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // is the native fast path for every gated object, and on an engine that
     // cannot answer, for every object. See {@link readsObjectWithEngineMiddleware}.
     if (this.readsObjectWithEngineMiddleware(query, ctx)) return false;
+    // ── [ADR-0139 D6] DECLINE a read scope carrying the engine's leaf ──────
+    //
+    // A `controlled_by_parent` object's read scope carries the engine's
+    // `ReadableIds` leaf over its master — "the ids of the master this caller
+    // may read" — since the security service's derivation answers it in
+    // place of a pre-resolved id list (the id list answered 500 past the
+    // dialect's bind limit, and this strategy bound it as `IN ($1, …)`). The
+    // leaf is composed only at the engine's executor boundary, from the
+    // security service's own `canReadObject` / `getReadFilter` of the master,
+    // recursively for a master chain; this strategy runs raw SQL through the
+    // driver and composes nothing, and `compileScopedFilterToSql` refuses the
+    // leaf by name. So the query routes to the ObjectQL strategy, whose
+    // `withReadScope` admits the leaf and hands it to `engine.aggregate`,
+    // where it composes as it does on a find. The content-based decline the
+    // #7598 ruling accepted for a `{ $field }` comparand, for the same
+    // reason: one owner of the composition, no second copy here. Every object
+    // the statement scopes is read, as the cross-field decline reads them.
+    if (this.readScopeCarriesReadableIds(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
+  }
+
+  /**
+   * [ADR-0139 D6] Does the read scope of any object this statement scopes
+   * carry the engine's `ReadableIds` leaf? See the decline at
+   * {@link canHandle}. The objects are the set the door scoped
+   * (`readScopedObjects`), or the cube's base object and declared joins for a
+   * context built without it, as {@link crossFieldComparisonIn} reads them. A
+   * context with no `getReadScope` scopes nothing and carries no leaf.
+   */
+  private readScopeCarriesReadableIds(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    if (typeof ctx.getReadScope !== 'function') return false;
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    const scoped = (ctx as DatasetScopedStrategyContext).readScopedObjects;
+    const objects = scoped
+      ? [...scoped]
+      : [this.extractObjectName(cube), ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
+    return objects.some((object) => findReadableIdsLeaf(ctx.getReadScope!(object)) !== null);
   }
 
   /**

@@ -49,6 +49,7 @@ import { matchesFilterCondition } from '@objectstack/formula';
 import { validateRecord, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { ObjectSchema, controlledByParentMasterRefusal } from '@objectstack/spec/data';
+import { composeReadableIdsInMemory } from './readable-ids-in-memory.testkit.js';
 
 const REP = 'usr_rep';
 const OTHER = 'usr_other';
@@ -398,8 +399,23 @@ async function boot(options: BootOptions = {}) {
 
   const repContext = () => ({ userId: REP, tenantId: 'org-1', positions: [], permissions: [] });
 
-  /** The READ face: run the middleware, then apply the filter it injected. */
-  const visibleContacts = async (): Promise<string[]> => {
+  /**
+   * [ADR-0139 D6] The derivation answers the engine's `ReadableIds` leaf over
+   * the master, composed by the engine at its executor boundary from this
+   * service's own `canReadObject` / `getReadFilter` of the master. This double
+   * is no engine, so the composition is done for it the same way
+   * (`readable-ids-in-memory.testkit.ts`), with the real service — and the
+   * real sharing service behind it — answering the master's scope.
+   */
+  const compose = (where: unknown, context: any) =>
+    composeReadableIdsInMemory(where, context, {
+      rows: (object) => store.rows[object],
+      readAdmission: (object, c) => plugin.canReadObject(object, c),
+      readScope: (object, c) => plugin.getReadFilter(object, c),
+    });
+
+  /** Run the middleware for a find of the contacts and return the `where` it injected, uncomposed. */
+  const injectedForContacts = async (): Promise<unknown> => {
     const opCtx: any = {
       object: 'crm_contact',
       operation: 'find',
@@ -408,20 +424,29 @@ async function boot(options: BootOptions = {}) {
       context: repContext(),
     };
     await middleware(opCtx, async () => {});
+    return opCtx.ast.where ?? null;
+  };
+
+  /** The READ face: run the middleware, compose the leaf it injected, then apply the filter. */
+  const visibleContacts = async (): Promise<string[]> => {
+    const where = await compose(await injectedForContacts(), repContext());
     return (store.rows.crm_contact ?? [])
-      .filter((r) => matchesFilterCondition(r, opCtx.ast.where ?? null))
+      .filter((r) => matchesFilterCondition(r, where as any))
       .map((r) => String(r.id));
   };
 
   /**
    * [#5815] The ANALYTICS read face: the scope `getReadFilter` hands the
-   * raw-SQL path, applied to the same rows. No middleware runs here — this
-   * method IS the whole enforcement on that surface.
+   * analytics service, which hands it to the engine (the raw-SQL strategy
+   * declines a scope carrying the leaf), applied to the same rows. No
+   * middleware runs here — this method IS the whole enforcement on that
+   * surface.
    */
   const analyticsVisibleContacts = async (context?: any): Promise<string[]> => {
     const filter = await plugin.getReadFilter('crm_contact', context ?? repContext());
+    const where = await compose((filter ?? null) as unknown, context ?? repContext());
     return (store.rows.crm_contact ?? [])
-      .filter((r) => matchesFilterCondition(r, (filter ?? null) as any))
+      .filter((r) => matchesFilterCondition(r, where as any))
       .map((r) => String(r.id));
   };
 
@@ -480,6 +505,8 @@ async function boot(options: BootOptions = {}) {
     ctx,
     plugin,
     repContext,
+    injectedForContacts,
+    compose,
     visibleContacts,
     analyticsVisibleContacts,
     updateContact,
@@ -554,18 +581,23 @@ describe('[#5386] controlled_by_parent folds the master\'s ownership and share g
   });
 
   // ── boundary conditions ──────────────────────────────────────────────────
-  it('the fold reads the grant table, resolves the master ONCE, and never re-enters the detail', async () => {
+  it('the derivation does NO store work; the grant table is read when the master\'s scope is composed, and the detail is never re-entered', async () => {
     const h = await boot({ shareLevel: 'edit' });
     h.store.find.mockClear();
-    await h.visibleContacts();
+    // [ADR-0139 D6] The middleware writes the leaf and walks the chain over
+    // the registry: no pre-scan of the master, no read of anything.
+    const injected = await h.injectedForContacts();
+    const during = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
+    expect(during).not.toContain('crm_account');
+    expect(during).not.toContain('crm_contact');
+    // The master's scope is composed by the engine (here, by the testkit):
+    // THAT is where the grant table is consulted — direct evidence the sharing
+    // half runs inside the composition and not merely that some filter came
+    // back — and the detail itself is never read to answer its own scope.
+    await h.compose(injected, h.repContext());
     const reads = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
-    // The grant table was consulted — direct evidence the sharing half ran and
-    // not merely that some filter came back.
     expect(reads).toContain('sys_record_share');
-    // The master id set is resolved by ONE system-context read. More than one
-    // would mean the derivation re-entered the middleware (v1 is single-level,
-    // ADR-0055 — the master's own controlled_by_parent is not walked).
-    expect(reads.filter((o) => o === 'crm_account')).toHaveLength(1);
+    expect(reads).not.toContain('crm_account');
     expect(reads).not.toContain('crm_contact');
   });
 
@@ -621,10 +653,16 @@ describe('[#5815] getReadFilter enforces the same read scope as the engine middl
     const h = await boot({ shareLevel: 'edit' });
     const filter = await h.plugin.getReadFilter('crm_contact', h.repContext());
     // Before the fix this was `undefined` (RLS null AND sharing null), which
-    // the raw-SQL path spreads into a WHERE that constrains nothing.
+    // the raw-SQL path spreads into a WHERE that constrains nothing. The
+    // predicate is the engine's leaf over the master (ADR-0139 D6): it names
+    // the master and binds no master id, and composed it admits exactly the
+    // contacts under the accounts the caller may read.
     expect(filter).toBeDefined();
-    expect(JSON.stringify(filter)).toContain('acct_own');
-    expect(JSON.stringify(filter)).not.toContain('acct_eu');
+    expect(JSON.stringify(filter)).toContain('"object":"crm_account"');
+    expect(JSON.stringify(filter)).not.toMatch(/acct_own|acct_eu|acct_us/);
+    const composed = await h.compose(filter, h.repContext());
+    expect(JSON.stringify(composed)).toContain('acct_own');
+    expect(JSON.stringify(composed)).not.toContain('acct_eu');
   });
 
   it('PARITY with no grant at all: both surfaces narrow to the caller-owned master', async () => {
@@ -655,15 +693,23 @@ describe('[#5815] getReadFilter enforces the same read scope as the engine middl
     expect(await h.analyticsVisibleContacts()).toEqual(await h.visibleContacts());
   });
 
-  it('fail-closed: the derivation resolves the master ONCE per call, never re-entering the detail', async () => {
+  it('getReadFilter does NO store work for the derivation: the master is read only when the engine composes the leaf', async () => {
     const h = await boot({ shareLevel: 'edit' });
     h.store.find.mockClear();
-    await h.analyticsVisibleContacts();
+    const filter = await h.plugin.getReadFilter('crm_contact', h.repContext());
+    // [ADR-0139 D6] `getReadFilter(contact)` resolves the contact's OWN
+    // sharing half (the grant table) and writes the leaf for the master; it
+    // pre-scans no master and never re-enters the detail.
+    const before = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
+    expect(before).not.toContain('crm_account');
+    expect(before).not.toContain('crm_contact');
+    // Composing the leaf asks `getReadFilter(account)`, whose sharing half
+    // reads the grant table — direct evidence the derivation runs on THIS
+    // path rather than a filter merely coming back from somewhere.
+    h.store.find.mockClear();
+    await h.compose(filter ?? null, h.repContext());
     const reads = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
-    // Direct evidence the derivation (and its sharing half) ran on THIS path
-    // rather than a filter merely coming back from somewhere.
     expect(reads).toContain('sys_record_share');
-    expect(reads.filter((o) => o === 'crm_account')).toHaveLength(1);
     expect(reads).not.toContain('crm_contact');
   });
 

@@ -241,6 +241,21 @@ chosen up front, never reached by catching a refusal.
    (ADR-0057 §3.6, `packages/objectql/src/engine.ts#LIFECYCLE_DATASOURCE`): there the leaf serves consumer 1 nothing,
    and letter C's loud bound is what that deployment class has. Recorded as a limit, not solved.
 
+**The seventh consumer routes nothing to a probe (2026-10-22, #24932 — the plugin-security switch, ruling Q1 C / Q2 A
+[`6329027469`](https://github.com/objectstack-ai/objectstack/issues/24932#issuecomment-6329027469)).**
+`controlled_by_parent`'s read derivation (`packages/plugins/plugin-security/src/security-plugin.ts#computeControlledByParentFilter`)
+answers the leaf for EVERY `controlled_by_parent` object, with no up-front routing to a bounded id list, because the two
+classes above cannot occur for its master: the boot **refuses** a `controlled_by_parent` detail whose master is bound to
+another datasource (D5.3) or narrowed by an object-scoped read middleware (D5.2) — `ObjectQLPlugin`, on
+`kernel:bootstrapped`, `INVALID_METADATA` / 422 ([#25144](https://github.com/objectstack-ai/objectstack/issues/25144),
+PR [#25166](https://github.com/objectstack-ai/objectstack/pull/25166)). "Refuses at boot" is the accurate form: the
+refusal judges the artifacts present at boot, and an artifact registered later (the `manifest` service,
+`metadata:reloaded`) is admitted, its detail then answering this record's D5 refusal at read, never a wrong row set; no
+public entry reaches that path today, and the engine lane re-measures it now that the leaf is written on every read. The
+plugin's own two guards stay: a metadata cycle and a chain past `CBP_MAX_CHAIN_DEPTH` answer zero rows from a
+registry-only walk, made before the leaf is written, so this record's cycle and depth refusals are never reached for a
+declared chain; the two bounds are one cut.
+
 ### D6 — What ADR-0055 and ADR-0056 now say
 
 ADR-0055's row (a) is reversed **for this one leaf and nothing else**: the leaf is composed by the engine from the
@@ -249,7 +264,9 @@ IN-form and deliberate lack of a subquery form are unchanged
 (`packages/plugins/plugin-security/src/rls-compiler.ts#RLSCompiler`, `#compileExpression`: a subquery shape compiles to
 `null` and fails closed). §2's mechanism (b) for
 `controlled_by_parent` stands, set-size ceiling included; whether that id set becomes a seventh consumer was ⛔ not
-decided here. ADR-0056's non-goal stands as written for the compiler and is revisited only as the engine-side leaf.
+decided here (as accepted; decided 2026-10-21 by ruling B, and landed 2026-10-22 by the plugin-security switch,
+#24932 — ADR-0055's own amendment of that date retires its mechanism (b) and the ceiling; D5's seventh-consumer note
+records the routing). ADR-0056's non-goal stands as written for the compiler and is revisited only as the engine-side leaf.
 Each record carries one pointer to this one, landed with this record — ADR-0055's status line, ADR-0056's non-goal
 bullet; nothing else in either moves.
 
