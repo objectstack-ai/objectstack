@@ -91,6 +91,15 @@ export interface ClaimedDeliveryRecord extends NotificationDeliveryRecord {
 export interface EnqueueDeliveryInput {
     notificationId: string;
     recipientId: string;
+    /**
+     * [#25194] `recipientId` again, when it is a `sys_user` id the caller has
+     * READ — never a guess. The SQL store writes it to `recipient_user_id`, the
+     * reference the row's title names the person through, past the engine's
+     * reference check (system context), so an unread id here would be stored
+     * as a dangling reference. Absent for an address recipient. Display-only:
+     * no claim, ack or send reads it.
+     */
+    recipientUserId?: string;
     channel: string;
     topic?: string;
     payload: DeliveryPayload;
