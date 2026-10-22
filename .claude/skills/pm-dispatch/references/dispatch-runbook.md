@@ -136,11 +136,16 @@
 
 ## 卡线程(`mode:thread`)
 
-- 识别:席位会话是项目线程(载有 coordinator 通道工具)⇒ 每卡开一个项目线程,线程即 dev。
-- 席位留认领文本、派发令、契约复核、ACCEPT 与落地;线程实施、开 draft PR、驱动 CI。
-- 披露纪律卡(私密细节不得离开席位会话)留席内 `mode:subagent`,认领写明;卡线程照计 `batch`。
-- 派发令落项目共享目录 `/mnt/project-files/<席位>/dispatch-<N>.md`:线程读不到席位 scratchpad。
+- 席位会话是项目线程(载 coordinator 通道工具)⇒ M 及以上、p1、`security` 卡一卡一线程。
+- S 级机械卡留席内 `mode:subagent`:开线程要重新克隆、重读技能与 `os-dev.md`,起步成本不值。
+- 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明;卡线程照计 `batch`。
+- 项目里 coordinator 任总监、跨席位统一调度卡线程;每席一个线程跑 PM 循环,卡线程即 dev。
+- 席位随时把候选卡交 coordinator,附优先级、派发令文件与建议 effort,⛔ 不等自己的槽位。
+- coordinator 按优先级开线程,p1 先;全项目上限 = 各席 `batch` 之和,满即排队。
+- 卡线程交回或其 PR 合入,席位当即告知 coordinator 释放槽位。
 - 请 coordinator 开线程附维护者原话消息:它只凭维护者明言设线程的 model 与 effort。
+- 席位留认领文本、派发令、契约复核、ACCEPT 与落地;线程实施、开 draft PR、驱动 CI。
+- 派发令落项目共享目录 `/mnt/project-files/<席位>/dispatch-<N>.md`:线程读不到席位 scratchpad。
 - 认领由线程代贴:`Branch:` 须是线程的指定分支(关单门禁读它),席位开线程后才知道。
 - 派发令带认领全文,只留 session、分支两个占位;原子对两笔都由线程执行,先认领后标签。
 - worktree 照建,分支用线程的指定推送分支;仓 `.claude/agents` 未加载(实测),照读 `os-dev.md`。
