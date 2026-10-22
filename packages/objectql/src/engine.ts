@@ -2425,9 +2425,10 @@ function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined):
  *  1. `wallJudgesOrganization`: the seam the wall installed on THIS write
  *     declares that it judges the stored rows' organization
  *     (`PostHookWriteImageCheck.judgesOrganization`). The caller reads that
- *     member once, for a non-system caller only. Nothing here derives it:
- *     where no wall judged the column, the strip takes a caller's value
- *     exactly as before.
+ *     member once, for a non-system caller only. [#25062] The write preview
+ *     reads the same value from the wall's verdict on each row
+ *     (`WriteWallRowVerdict`). Nothing here derives it: where no wall judged
+ *     the column, the strip takes a caller's value exactly as before.
  *  2. The object is one the INSERT strip judges, with the column in that
  *     subject ({@link staticReadonlyInsertSubject}). So never the reserved
  *     `sys_` namespace or a platform-internal `managedBy` bucket, whose own
@@ -2467,7 +2468,7 @@ function staticReadonlySparesOrganization(schema: unknown, wallJudgesOrganizatio
  *
  * ONE function for both passes that read the subject, the pre-hook withhold
  * and the post-hook strip, so the hook view and the stored row cannot
- * disagree about the column.
+ * disagree about the column. [#25062] The write preview's strip reads it too.
  */
 function insertStaticReadonlySubject(
   schema: unknown,
@@ -2493,7 +2494,8 @@ function insertStaticReadonlySubject(
  * strips (what is stored), and {@link staticReadonlyStoredView}, which the
  * `readonlyWhen` strips and the master-detail settlement read. `update()`
  * reads the wall's flag once and hands that one value to all of them, so the
- * hook view and the stored row cannot disagree about the column.
+ * hook view and the stored row cannot disagree about the column. [#25062] The
+ * `update`-mode preview's strip reads it too.
  */
 function updateStaticReadonlySubject(schema: unknown, wallJudgesOrganization: boolean): unknown {
   if (!staticReadonlySparesOrganization(schema, wallJudgesOrganization)) return schema;
@@ -3848,7 +3850,9 @@ export interface PostHookWriteImageCheck {
    * Absent or `false`, the strip runs exactly as before. The engine never
    * sets it, and never derives it from the posture or the context: that
    * would be a mirror of the wall, and a mirror is wider than the wall
-   * wherever the wall is not mounted.
+   * wherever the wall is not mounted. [#25062] The write preview, which
+   * installs no seam, reads the same value from the wall's verdict on each
+   * row instead ({@link WriteWallRowVerdict}, `ObjectQL.registerWriteWallVerdict`).
    */
   judgesOrganization?: boolean;
 }
@@ -3982,6 +3986,43 @@ export type FieldOwnedFileReadAuthorizer = (
   ownerIds: string[],
   context: ExecutionContext,
 ) => Promise<Set<string>>;
+
+/**
+ * [#25062] The Layer 0 tenant write wall's answer for ONE row of a write
+ * preview ({@link ObjectQL.validate}): admitted, saying whether the wall judges
+ * the row's `organization_id` (the value
+ * {@link PostHookWriteImageCheck.judgesOrganization} is set from on the
+ * write), or refused with the write's own `code` and `message`. A refused
+ * `field` is `organization_id` when the wall refused a value the row carries,
+ * and `_record` when it refused the caller's state (no active organization).
+ */
+export type WriteWallRowVerdict =
+  | { readonly admitted: true; readonly judgesOrganization: boolean }
+  | {
+      readonly admitted: false;
+      readonly field: 'organization_id' | '_record';
+      readonly code: string;
+      readonly message: string;
+    };
+
+/**
+ * [#25062] "What does the Layer 0 tenant write wall answer for each of these
+ * rows?" One verdict per row, in order, or `null` when the wall is not asked
+ * for this write (the engine then judges the rows as if nothing were
+ * registered).
+ *
+ * The engine declares this shape but never implements it. The wall has one
+ * definition, the enforcement layer's own (`@objectstack/plugin-security`'s
+ * step 3.7), and the verdict travels here as a value: a copy of the wall in
+ * the engine would be the mirror the `judgesOrganization` member forbids. See
+ * `ObjectQL.registerWriteWallVerdict`.
+ */
+export type WriteWallVerdict = (
+  object: string,
+  operation: 'insert' | 'update',
+  context: unknown,
+  rows: readonly Record<string, unknown>[],
+) => Promise<readonly WriteWallRowVerdict[] | null>;
 
 /**
  * The stack collections the engine decomposes into individual registry items —
@@ -6207,8 +6248,15 @@ export class ObjectQL implements IObjectQLEngine {
    * D10 dangling delegator), the ADR-0066 D3 capability AND-gate for both
    * principals, the `allowCreate`/`allowEdit` CRUD grant, the ADR-0090 D10
    * delegator's independent grant, the middleware's own step 2.5 FLS write gate
-   * over the keys THIS payload names, and its ADR-0123 D2 organization wall
-   * (step 3.7). The gate says nothing about any refusal not in that list.
+   * over the keys THIS payload names, and its ADR-0123 D2 no-active-organization
+   * refusal (step 3.7's scope pre-test, asked with no row, so it refuses a
+   * caller class). The gate says nothing about any refusal not in that list.
+   * [#25062] ⛔ In particular it is not step 3.7's judgement of a ROW's
+   * organization (the forge guard, an emptied organization, an insert with
+   * nowhere to land): it is handed no row to judge, and it answers `true` for
+   * a caller whose payload names an organization the write refuses. That is
+   * the write-wall verdict's question, asked per row
+   * ({@link registerWriteWallVerdict}).
    * `@objectstack/plugin-security`'s `can-write-object-admission.test.ts` pins
    * the probe's answer equal to the registered middleware's on its equivalence
    * block's cases, and pins one D12 UPDATE case as a direction: the probe
@@ -6237,8 +6285,11 @@ export class ObjectQL implements IObjectQLEngine {
    *    The step 2.7 `using` pre-image, the ADR-0055 controlled-by-parent
    *    master-edit check (step 2.8), the RLS `check` post-image (step 3.6) and
    *    the Layer 0 tenant post-image (step 3.7) each judge a ROW: a prior
-   *    image, a master record, or a pre-image merged with the change set. The
-   *    preview reads nothing and holds none of them, so it judges none of them.
+   *    image, a master record, or a pre-image merged with the change set. This
+   *    gate is handed none of them, so it judges none of them. [#25062] The
+   *    tenant wall's judgement of the row the preview holds comes through
+   *    {@link registerWriteWallVerdict} instead: it decides what the preview
+   *    answers for that row, never whether this gate's related read happens.
    *  - **Payload-VALUE refusals — the same caller passes by not sending the
    *    value.** The masked-echo write refusal (step 2.5a) and the `owner_id`
    *    ownership forge (step 3.5) refuse a VALUE, not a caller: the identical
@@ -6292,6 +6343,41 @@ export class ObjectQL implements IObjectQLEngine {
   ): void {
     this._writeGateProbe = fn;
     this.logger.debug('Registered write-gate probe for validate() relationship resolution');
+  }
+
+  /**
+   * [#25062] The Layer 0 tenant write wall's verdict on each row of a write
+   * preview — supplied by the security plugin, never decided here.
+   *
+   * `validate()` runs no middleware, so the wall's judgement of a row's
+   * `organization_id` never reached it: the preview ran the static-`readonly`
+   * strip unconditionally, reported a caller's organization DROPPED where the
+   * write stores it as sent (the wall judges it, `judgesOrganization`), and
+   * answered VALID a row naming an organization the write refuses 403. The
+   * write-gate probe cannot carry this: it answers whether a CALLER may write,
+   * one boolean for the set; the wall judges a VALUE a row carries. Two
+   * questions, two members. ⛔ Nor is the verdict derived here from the posture,
+   * `tenantId` or `accessible_org_ids`: that would be a mirror of the wall.
+   *
+   * `rows` are the preview's own: after the defaults (insert) and before any
+   * hook, the caller's rows on an update. `validate()` reads each row's verdict
+   * and nothing else: an admitted row whose organization the wall judges keeps
+   * the column out of the static-`readonly` strip, exactly where
+   * `insert()` / `update()` keep it; a refused row is answered `valid: false`
+   * with the write's code and message, on its own, as the preview answers
+   * every other refusal.
+   *
+   * Unregistered is a DEFINED state, as for the members beside it: no wall, no
+   * verdict, and the strip runs as it always has, which is also what the write
+   * does in a composition without the security plugin. A seam that throws
+   * rejects the preview, as a refusal to resolve fails the write.
+   */
+  private _writeWallVerdict?: WriteWallVerdict;
+
+  /** Wire the write wall's per-row verdict for `validate()` (#25062). Last registration wins. */
+  registerWriteWallVerdict(fn: WriteWallVerdict): void {
+    this._writeWallVerdict = fn;
+    this.logger.debug('Registered write-wall verdict for validate() organization judgement');
   }
 
   /**
@@ -15635,6 +15721,27 @@ export class ObjectQL implements IObjectQLEngine {
    * caller cannot read binds as a missing one. ⛔ Unlike the write, a header
    * column the read door served transformed or not at all is judged as empty.
    *
+   * ## The Layer 0 tenant wall answers for its own rows (#25062)
+   *
+   * A row's `organization_id` is judged on the write by the tenant wall, which
+   * lives in the enforcement layer's middleware and so never runs here. The
+   * preview asks that wall for its verdict on each row
+   * ({@link registerWriteWallVerdict}) and answers from it, and it asks where
+   * the write does: on the row before the strips, and again on a row the
+   * strips changed, which is the row the write's stored-image half judges. A
+   * row whose organization the wall judges keeps the column through the
+   * static `readonly` strip (no `droppedFields` entry), as the write stores
+   * it; a row the wall refuses is `valid: false` with the write's own code
+   * (`PERMISSION_DENIED`) and message, under `organization_id` when the wall
+   * refused the value and `_record` when it refused the caller's state, and it
+   * drops nothing. Unregistered, the strip runs as before.
+   *
+   * Named limit: the wall judges the row as the preview holds it, after the
+   * defaults and before any hook. An organization a `beforeInsert` /
+   * `beforeUpdate` hook writes is judged by the write's stored-image half
+   * alone, so a row a hook places outside the caller's scope previews valid
+   * and is refused by the write.
+   *
    * Nothing is written and no sequence is consumed. Reads do happen: the
    * stored row above, the master-detail headers, and the related rows a
    * traversing rule names (see the `previewRelatedForRow` block below).
@@ -15741,6 +15848,41 @@ export class ObjectQL implements IObjectQLEngine {
         ) as Record<string, unknown>)
       : rawRows.slice();
 
+    // [#25062] THE LAYER 0 TENANT WALL'S VERDICT on each row, from the layer
+    // that owns the wall ({@link registerWriteWallVerdict}), over the rows as
+    // the preview holds them: after the defaults, before any hook. The write
+    // asks its wall twice, and so does this: on the payload before the strips
+    // (here; the write's middleware), and on the rows the strips leave (below;
+    // the write's stored-image seam). A refused row is answered with the
+    // write's refusal (the `results` block below) and reaches nothing the write
+    // does not run for it; an admitted row whose organization the wall judges
+    // keeps the column through the static `readonly` strip, as `insert()` /
+    // `update()` keep it. `null` (nothing registered, or the wall not asked)
+    // leaves every row to the strip, exactly as before. ⛔ Nothing here reads
+    // the posture or the context's organizations: the verdict is the wall's
+    // own, read as a value.
+    const askWriteWall = async (asked: Record<string, unknown>[]) => {
+      if (!this._writeWallVerdict || asked.length === 0) return null;
+      const verdicts = await this._writeWallVerdict(object, mode, options?.context, asked);
+      if (verdicts && verdicts.length !== asked.length) {
+        throw new Error(
+          `[ObjectQL] the write-wall verdict answered ${verdicts.length} verdict(s) for ` +
+            `${asked.length} row(s) of '${object}'`,
+        );
+      }
+      return verdicts;
+    };
+    const refusalIn = (verdict: WriteWallRowVerdict | undefined) =>
+      verdict && verdict.admitted === false ? verdict : undefined;
+    const wallVerdicts = await askWriteWall(rows);
+    const wallRefusals = rows.map((_, i) => refusalIn(wallVerdicts?.[i]));
+    const wallRefusalOf = (i: number) => wallRefusals[i];
+    const wallJudgesOrganizationOf = (i: number): boolean => {
+      const verdict = wallVerdicts?.[i];
+      return verdict?.admitted === true && verdict.judgesOrganization === true;
+    };
+    const heldBeforeStrips = rows.slice();
+
     // [#20805] 3. The caller-write strips, over the defaulted rows with the
     // caller's rows as `supplied` — where the write runs them (after the
     // defaults; the write's hooks, which this preview does not run, sit in
@@ -15777,6 +15919,7 @@ export class ObjectQL implements IObjectQLEngine {
       const preserveAudit = options?.context?.preserveAudit === true;
       if (mode === 'insert') {
         for (let i = 0; i < rows.length; i++) {
+          if (wallRefusalOf(i)) continue;
           const stripped = stripRuntimeOwnedFields(
             schemaForValidation as any, rows[i], rawRows[i] ?? {}, undefined, { preserveAudit },
           ) as Record<string, unknown>;
@@ -15784,26 +15927,33 @@ export class ObjectQL implements IObjectQLEngine {
           collectTaken(i, rows[i]!, stripped);
           rows[i] = stripped;
         }
-        const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
-        if (readonlySubject) {
-          for (let i = 0; i < rows.length; i++) {
-            const pass = await this.staticReadonlyCreateStrip(
-              object, readonlySubject, rows[i]!, rawRows[i] ?? {}, options?.context,
-              { logger: undefined, strictReadonlyWrites: false, hookWrittenKeys: undefined, nowSnap: nowSnapshot, permissionResolution },
-            );
-            recordTaken(i, pass.taken);
-            // The write fails on this resolution failure outside partial mode;
-            // a preview has no partial mode, so it fails the same way.
-            if (pass.error !== undefined) throw pass.error;
-            rows[i] = pass.row;
-          }
+        // [#25062] The subject per row, as the write's strip judges that row:
+        // without `organization_id` where the wall judges it
+        // (`insertStaticReadonlySubject`, the write's own view).
+        for (let i = 0; i < rows.length; i++) {
+          if (wallRefusalOf(i)) continue;
+          const readonlySubject = insertStaticReadonlySubject(schemaForValidation, wallJudgesOrganizationOf(i));
+          if (!readonlySubject) continue;
+          const pass = await this.staticReadonlyCreateStrip(
+            object, readonlySubject, rows[i]!, rawRows[i] ?? {}, options?.context,
+            { logger: undefined, strictReadonlyWrites: false, hookWrittenKeys: undefined, nowSnap: nowSnapshot, permissionResolution },
+          );
+          recordTaken(i, pass.taken);
+          // The write fails on this resolution failure outside partial mode;
+          // a preview has no partial mode, so it fails the same way.
+          if (pass.error !== undefined) throw pass.error;
+          rows[i] = pass.row;
         }
       } else {
         for (let i = 0; i < rows.length; i++) {
+          if (wallRefusalOf(i)) continue;
           const supplied: Record<string, unknown> = { ...(rawRows[i] ?? {}) };
           delete supplied.id;
+          // [#25062] The update's own view (`updateStaticReadonlySubject`):
+          // the whole schema, without `organization_id` where the wall judges it.
           const stripped = stripReadonlyFields(
-            schemaForValidation as any, rows[i], supplied, undefined, { preserveAudit },
+            updateStaticReadonlySubject(schemaForValidation, wallJudgesOrganizationOf(i)) as any,
+            rows[i], supplied, undefined, { preserveAudit },
           ) as Record<string, unknown>;
           if (stripped === rows[i]) continue;
           collectTaken(i, rows[i]!, stripped);
@@ -15811,9 +15961,32 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
     }
+    // [#25062] …and the wall's STORED-IMAGE half, on each row the strips
+    // changed: the row as the write would store it, which the wall has not
+    // seen. Where the wall does not judge the organization (a platform
+    // operator crossing it with no active organization), the strip takes a
+    // caller's organization and the stored row has nowhere to land; the write
+    // refuses it there, after its strips, and so does this. A row the strips
+    // left alone was answered above. Only a refusal is read here: the spare
+    // was decided on the first answer, as the write decides it before its
+    // strips.
+    const restripped = rows.flatMap((row, i) => (!wallRefusals[i] && row !== heldBeforeStrips[i] ? [i] : []));
+    const storedImageVerdicts = await askWriteWall(restripped.map((i) => rows[i]!));
+    restripped.forEach((rowIndex, k) => {
+      wallRefusals[rowIndex] = refusalIn(storedImageVerdicts?.[k]);
+    });
+
     const onFieldsDropped = options?.onFieldsDropped;
     if (typeof onFieldsDropped === 'function') {
-      const drops = droppedFieldEvents(object, computedStrip.dropped, readonlyDropped);
+      // [#25062] A row the wall refuses drops nothing: the write that refuses
+      // it reports no drop. So the batch union is the admitted rows' alone.
+      const admittedTook = (perRow: readonly (readonly string[])[], key: string) =>
+        perRow.some((taken, i) => !wallRefusals[i] && taken.includes(key));
+      const drops = droppedFieldEvents(
+        object,
+        computedStrip.dropped.filter((key) => admittedTook(computedStrip.droppedPerRow, key)),
+        readonlyDropped.filter((key) => admittedTook(readonlyDroppedPerRow, key)),
+      );
       for (const drop of drops) {
         try {
           onFieldsDropped(drop);
@@ -15992,6 +16165,16 @@ export class ObjectQL implements IObjectQLEngine {
           message: `${field} has an invalid ${type} value: ${detail}`,
         });
       };
+      // [#25062] A row the tenant wall refuses is answered with the write's
+      // refusal, which the write gives before it validates anything.
+      const wallRefusal = wallRefusalOf(i);
+      if (wallRefusal) {
+        return {
+          valid: false,
+          errors: [{ field: wallRefusal.field, code: wallRefusal.code, message: wallRefusal.message }],
+          warnings,
+        };
+      }
       try {
         // [#21663] `'include'` in both modes: the caller-write strips ran
         // above, so this is the payload the write stores — and the write

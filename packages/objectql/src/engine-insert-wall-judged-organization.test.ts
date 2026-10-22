@@ -21,8 +21,9 @@
 //    the strip takes the value exactly as before (reported, withheld from the
 //    hook, refused under strict). Seam presence is not the signal: a business
 //    `check` installs a seam with no wall behind it;
-//  - `validate()` runs no middleware, so it holds no seam, and its preview is
-//    unchanged.
+//  - `validate()` runs no middleware, so it holds no seam: with no write-wall
+//    verdict registered its preview is unchanged. The verdict it reads instead
+//    ([#25062]) is pinned in `validate-write-wall-verdict.test.ts`.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
@@ -263,7 +264,7 @@ describe('[#24822] engine.insert spares organization_id only where the seam decl
     expect(stored()).toEqual([NAMED, NAMED]);
   });
 
-  it('validate() runs no middleware, so it holds no seam: its preview still reports the strip it always reported', async () => {
+  it('validate() runs no middleware, so it holds no seam: with no write-wall verdict registered its preview still reports the strip', async () => {
     const preview = await engine.validate(OBJECT, { name: 'one', organization_id: NAMED }, { mode: 'insert', context: SESSION as any });
 
     expect(preview.results[0]?.droppedFields).toEqual([{ object: OBJECT, fields: ['organization_id'], reason: 'readonly' }]);
