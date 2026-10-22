@@ -53,10 +53,11 @@
  *     too (the row's `alone`), for the same reason: its token carries
  *     `actions: write`. Its one key is `run_id`, a positive integer; a
  *     workflow, an attempt, a job, an event or the platform's debug-logging
- *     flag beside it is refused by name. The four fences on the RUN — the
- *     workflow, the event, once, failed (`RERUN_FAILED_FENCES` in `ops.mjs`)
- *     — are facts this file cannot see: the executor judges them on the run
- *     read immediately before its POST;
+ *     flag beside it is refused by name. The five fences on the RUN and its
+ *     pull — the workflow, the event, once, failed, the head
+ *     (`RERUN_FAILED_FENCES` in `ops.mjs`) — are facts this file cannot see:
+ *     the executor judges them on the run and the pull's own answer, read
+ *     immediately before its POST;
  *   - a `pr_create` may carry `assignees` and `labels`, the typed lists
  *     `assign` and `labels_add` take — judged here as every list is — and the
  *     op table turns each into a later request of the SAME action, sent by
@@ -139,6 +140,7 @@ import {
   rerunFailedFenceFailures,
   rerunFailedFenceText,
   rerunFailedLandedText,
+  rerunFailedPullNumber,
   rerunFailedReadBack,
 } from './ops.mjs';
 
@@ -776,7 +778,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the token scope: ONE repository for every op but transfer, source + target for a transfer stroke, and the workflow mints from that list': 8,
   'the workflow_dispatch row: a closed allowlist of files matched whole, each with its closed inputs, ref main alone, a stroke of exactly that one action, actions write minted for that stroke alone, and the dispatch call and the failed-jobs re-run the ONLY actions paths any row reaches': 18,
   "the release.yml entry: refresh_version_pr true and nothing beside it — force, false, absent, a string or any other input refused by name; the wire spells the table's value as a string; every entry's inputs declared on disk; and the file's own guards, evaluated, start the bookkeeping lane alone": 22,
-  "the run_rerun_failed row: run_id alone, a positive integer, nothing that widens it; one bodiless POST to the run's rerun-failed-jobs; a stroke of exactly that one action; actions write minted for that stroke and EMPTY for every other, through the workflow's existing input; the four fences on the run, each accepted and refused; the read-back's judgment; and every other actions path still refused": 30,
+  "the run_rerun_failed row: run_id alone, a positive integer, nothing that widens it; one bodiless POST to the run's rerun-failed-jobs; a stroke of exactly that one action; actions write minted for that stroke and EMPTY for every other, through the workflow's existing input; the five fences on the run and its pull, each accepted and refused — the head by the pull's own answer, never the run's embedded copy, and a run naming no pull refused by name; the read-back's judgment; and every other actions path still refused": 33,
 });
 // Raised 11 → 12 with the run_rerun_failed battery: one battery, one row.
 const SELF_TEST_BATTERY_FLOOR = 12;
@@ -1195,7 +1197,7 @@ export async function selfTest() {
   }
 
   // ── the run_rerun_failed row ──────────────────────────────────────────────
-  battery("the run_rerun_failed row: run_id alone, a positive integer, nothing that widens it; one bodiless POST to the run's rerun-failed-jobs; a stroke of exactly that one action; actions write minted for that stroke and EMPTY for every other, through the workflow's existing input; the four fences on the run, each accepted and refused; the read-back's judgment; and every other actions path still refused");
+  battery("the run_rerun_failed row: run_id alone, a positive integer, nothing that widens it; one bodiless POST to the run's rerun-failed-jobs; a stroke of exactly that one action; actions write minted for that stroke and EMPTY for every other, through the workflow's existing input; the five fences on the run and its pull, each accepted and refused — the head by the pull's own answer, never the run's embedded copy, and a run naming no pull refused by name; the read-back's judgment; and every other actions path still refused");
   {
     const REPO = `${TARGET_OWNER}/objectstack`;
     const RUN = 39713789453;
@@ -1241,19 +1243,28 @@ export async function selfTest() {
     const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/fleet-write.yml'), 'utf8');
     const mintsFromOutput = [...workflowText.matchAll(/^\s+permission-actions:\s*\$\{\{\s*steps\.validate\.outputs\.permission_actions\s*\}\}\s*$/gm)].length;
     t('⭐ ruling 3, no workflow edit: fleet-write.yml mints permission-actions from the validator\'s permission_actions output — the one input this row rides — and names neither this op nor its path', [mintsFromOutput, workflowText.includes('run_rerun_failed'), workflowText.includes('rerun-failed-jobs')], [1, false, false]);
-    // The four fences on the run — the closed values, then each accepted and refused on the run's own answer.
-    t('the fences on the run: the closed workflow list is exactly ci.yml, frozen; the event pull_request; the attempt 1; completed with failure; and the read-back accepts queued and in_progress alone', [[...RERUN_FAILED_WORKFLOWS], Object.isFrozen(RERUN_FAILED_WORKFLOWS), RERUN_FAILED_EVENT, RERUN_FAILED_ATTEMPT, RERUN_FAILED_STATUS, RERUN_FAILED_CONCLUSION, [...RERUN_FAILED_RERUN_STATES], RERUN_FAILED_FENCES.map((f) => f.fence)], [['.github/workflows/ci.yml'], true, 'pull_request', 1, 'completed', 'failure', ['queued', 'in_progress'], ['workflow', 'event', 'once', 'failed']]);
+    // The five fences on the run and its pull — the closed values, then each accepted and refused on the run's and the pull's own answers.
+    t('the fences on the run: the closed workflow list is exactly ci.yml, frozen; the event pull_request; the attempt 1; completed with failure; and the read-back accepts queued and in_progress alone', [[...RERUN_FAILED_WORKFLOWS], Object.isFrozen(RERUN_FAILED_WORKFLOWS), RERUN_FAILED_EVENT, RERUN_FAILED_ATTEMPT, RERUN_FAILED_STATUS, RERUN_FAILED_CONCLUSION, [...RERUN_FAILED_RERUN_STATES], RERUN_FAILED_FENCES.map((f) => f.fence)], [['.github/workflows/ci.yml'], true, 'pull_request', 1, 'completed', 'failure', ['queued', 'in_progress'], ['workflow', 'event', 'once', 'failed', 'head']]);
     t('every listed workflow is a file on disk that runs on pull_request — so the list names a run the fences can accept', RERUN_FAILED_WORKFLOWS.map((p) => [p, existsSync(resolve(repoRoot, p)) && /^ {2}pull_request:/m.test(readFileSync(resolve(repoRoot, p), 'utf8'))]), RERUN_FAILED_WORKFLOWS.map((p) => [p, true]));
     // The measured run as its attempt 1 read before the maintainer re-ran it (run 39713789453; fields as the run endpoint answers them).
-    const MEASURED = { id: RUN, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, status: 'completed', conclusion: 'failure' };
-    const fenced = (patch) => rerunFailedFenceFailures({ ...MEASURED, ...patch }).map((f) => f.fence);
-    t('accepted: the measured run passes all four fences', rerunFailedFenceFailures(MEASURED), []);
+    // It ran on pull #25155's head; PULL is that pull's OWN answer (GET /pulls/25155), which the head fence reads — never the copy the run embeds.
+    const HEAD = '25b3a6c4bff905d462d4ff44030e5465c342254a';
+    const MOVED = '9f0e1d2c3b4a59687766554433221100ffeeddcc';
+    const MEASURED = { id: RUN, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, status: 'completed', conclusion: 'failure', head_sha: HEAD, pull_requests: [{ number: 25155, head: { sha: HEAD } }] };
+    const PULL = { number: 25155, state: 'open', head: { sha: HEAD } };
+    // `fenced` takes ONE argument — it is passed to Array.map, whose index would otherwise land in the pull's place.
+    const fencedWith = (patch, pull) => rerunFailedFenceFailures({ ...MEASURED, ...patch }, pull).map((f) => f.fence);
+    const fenced = (patch) => fencedWith(patch, PULL);
+    t('accepted: the measured run passes all five fences — its head_sha is the current head of the pull it names, by that pull\'s own answer', [rerunFailedPullNumber(MEASURED), rerunFailedFenceFailures(MEASURED, PULL)], [25155, []]);
+    t('⛔ fence head, refused: a stale head (the pull was pushed to since), an answer for another pull, a run with no head_sha, and no pull answer at all — each naming the head fence alone', [fencedWith({}, { ...PULL, head: { sha: MOVED } }), fencedWith({}, { ...PULL, number: 25156 }), fenced({ head_sha: undefined }), fencedWith({}, null)], [['head'], ['head'], ['head'], ['head']]);
+    t("⛔ fence head, refused: the run's EMBEDDED copy of the pull is never read — it agrees with head_sha, and the pull's own answer that moved on still refuses", [MEASURED.pull_requests[0].head.sha === MEASURED.head_sha, fencedWith({}, { ...PULL, head: { sha: MOVED } })], [true, ['head']]);
+    t("⛔ fence head, refused by name: a run naming no pull request — pull_requests empty (a fork pull request's run), absent, or an entry with no number — and the sentence says so", [[], undefined, [{ head: { sha: HEAD } }]].map((pull_requests) => [rerunFailedPullNumber({ ...MEASURED, pull_requests }), fencedWith({ pull_requests }, null)]).concat([rerunFailedFenceText(rerunFailedFenceFailures({ ...MEASURED, pull_requests: [] }, null)).includes('fence `head`: the run reads "no pull_requests entry')]), [[null, ['head']], [null, ['head']], [null, ['head']], true]);
     t('⛔ fence workflow, refused: another workflow, the bare file name, a ref-suffixed path, a missing path — each naming the workflow fence alone', [{ path: '.github/workflows/lint.yml' }, { path: 'ci.yml' }, { path: '.github/workflows/ci.yml@refs/heads/main' }, { path: undefined }].map(fenced), [['workflow'], ['workflow'], ['workflow'], ['workflow']]);
     t('⛔ fence event, refused: push, merge_group, schedule, release, workflow_dispatch and pull_request_target runs — each naming the event fence alone', ['push', 'merge_group', 'schedule', 'release', 'workflow_dispatch', 'pull_request_target'].map((event) => fenced({ event })), [['event'], ['event'], ['event'], ['event'], ['event'], ['event']]);
     t('⛔ fence once, refused: attempt 2, attempt 3, the string "1" and a missing attempt — each naming the once fence alone', [{ run_attempt: 2 }, { run_attempt: 3 }, { run_attempt: '1' }, { run_attempt: undefined }].map(fenced), [['once'], ['once'], ['once'], ['once']]);
     t('⛔ fence failed, refused: still in progress, completed with success, completed cancelled, completed with no conclusion — each naming the failed fence alone', [{ status: 'in_progress', conclusion: null }, { conclusion: 'success' }, { conclusion: 'cancelled' }, { conclusion: null }].map(fenced), [['failed'], ['failed'], ['failed'], ['failed']]);
     const all = rerunFailedFenceFailures({ path: '.github/workflows/release.yml', event: 'push', run_attempt: 2, status: 'completed', conclusion: 'success' });
-    t('every failing fence is named in ONE pass, and the sentence quotes what the run read beside what the relay re-runs', [all.map((f) => f.fence), rerunFailedFenceText(all).includes('fence `once`: the run reads 2'), rerunFailedFenceText(all).includes('"push"'), rerunFailedFenceText(all).split('; ').length], [['workflow', 'event', 'once', 'failed'], true, true, 4]);
+    t('every failing fence is named in ONE pass, and the sentence quotes what the run read beside what the relay re-runs', [all.map((f) => f.fence), rerunFailedFenceText(all).includes('fence `once`: the run reads 2'), rerunFailedFenceText(all).includes('"push"'), rerunFailedFenceText(all).split('; ').length], [['workflow', 'event', 'once', 'failed', 'head'], true, true, 5]);
     // The read-back's judgment, on the measured attempts (jobs by name and state, as the attempts endpoint lists them).
     const attempt1 = [
       { id: 119611140808, name: 'Test Core (3/6)', run_attempt: 1, status: 'completed', conclusion: 'failure' },

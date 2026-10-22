@@ -196,7 +196,7 @@
  * shard was listed at once and started two seconds later; and the aggregate
  * job that needs every shard was listed only when its need finished, 16
  * minutes later. It spends the `actions: write` `workflow_dispatch` spends, so
- * it is fenced the same way. These are the six fences:
+ * it is fenced the same way. These are the seven fences:
  *
  *   - the WORKFLOW: the run's `path` is one of `RERUN_FAILED_WORKFLOWS`, a
  *     closed list matched whole and joined only by a PR that adds the path
@@ -207,6 +207,13 @@
  *   - ONCE: the run's `run_attempt` is 1. A second failure is real, and a
  *     re-send after a landing meets attempt 2 here and is refused;
  *   - FAILED: the run is `completed` with `conclusion` `failure`;
+ *   - the HEAD: the run's `head_sha` is its pull request's CURRENT head. The
+ *     pull is the run's `pull_requests[0].number`, and its head is read with
+ *     the pull's own `GET /repos/{repo}/pulls/{n}`, never from the copy the
+ *     run embeds. `ci.yml`'s concurrency group is keyed by the pull number
+ *     with `cancel-in-progress: true`, so a stale head's re-run would cancel
+ *     the current head's run. A run with no `pull_requests` entry (a fork
+ *     pull request's run, or the field empty) is refused by name;
  *   - ALONE: a stroke carrying it carries exactly that one action (`alone`),
  *     so the wider token serves one request;
  *   - the GRANT: `actions: write` is minted for that stroke alone, through the
@@ -216,14 +223,15 @@
  *
  * The payload is `run_id` and nothing else: no workflow, attempt, job or
  * debug-logging key exists for it, and the POST carries no body. The first
- * four fences are facts about the RUN, not the request, so the EXECUTOR judges
- * them (`RERUN_FAILED_FENCES`) on `GET /repos/{repo}/actions/runs/{run_id}`,
- * read immediately before the POST. A run that changed between the seat's
- * request and the relay's run, for example re-run by a person meanwhile, is
- * refused THERE with zero writes. The seat's wrapper
- * (`scripts/pm/rerun-failed.mjs`) reads the same four before it dispatches.
- * That is an early refusal naming the fence that fails, and it never replaces
- * the executor's.
+ * five fences are facts about the RUN and its pull, not the request, so the
+ * EXECUTOR judges them (`RERUN_FAILED_FENCES`) on
+ * `GET /repos/{repo}/actions/runs/{run_id}` and then the pull's
+ * `GET /repos/{repo}/pulls/{n}`, the last two reads before the POST. A run
+ * that changed between the seat's request and the relay's run, for example
+ * re-run by a person meanwhile, or a pull that a push moved on, is refused
+ * THERE with zero writes. The seat's wrapper (`scripts/pm/rerun-failed.mjs`)
+ * reads the same five before it dispatches. That is an early refusal naming
+ * the fence that fails, and it never replaces the executor's.
  *
  * The 201 the POST answers is an acceptance, not a landing. The executor reads
  * the run again until it shows `run_attempt` 2, then that attempt's job list,
@@ -394,13 +402,27 @@ export const RERUN_FAILED_RERUN_STATES = Object.freeze(['queued', 'in_progress']
 export const RERUN_FAILED_PATH_SHAPE = /\/actions\/runs\/\d+\/rerun-failed-jobs$/;
 
 /**
- * The four fences on the RUN (the header's `run_rerun_failed` section), each
- * judged on the run's own answer: `fence` its name, `wants` what the relay
- * re-runs, `reads` the field(s) the failure sentence quotes, `holds` the
- * predicate. The other two fences — alone in its stroke, the stroke-scoped
- * grant — are the validator's. The executor judges these on the read taken
- * immediately before the POST; the seat's wrapper judges them earlier, as an
- * advisory refusal.
+ * The pull request a run's `head` fence reads: the run's `pull_requests[0].number`, or `null` when the run names
+ * none (a fork pull request's run, whose `pull_requests` the platform leaves empty, or a missing field). Pure.
+ */
+export function rerunFailedPullNumber(run) {
+  const n = Array.isArray(run?.pull_requests) ? run.pull_requests[0]?.number : undefined;
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+const shortHead = (sha) => (typeof sha === 'string' ? sha.slice(0, 10) : null);
+
+/**
+ * The five fences on the RUN and its pull (the header's `run_rerun_failed`
+ * section): `fence` its name, `wants` what the relay re-runs, `reads` the
+ * field(s) the failure sentence quotes, `holds` the predicate. Each takes
+ * `(run, pull)`: `run` the run's own answer, `pull` the answer of
+ * `GET /repos/{repo}/pulls/{n}` for the pull `rerunFailedPullNumber` names,
+ * or `null` when the run names none. ⛔ The `head` fence never reads the copy
+ * of the pull the run embeds. The other two fences — alone in its stroke, the
+ * stroke-scoped grant — are the validator's. The executor judges these on the
+ * two reads taken immediately before the POST; the seat's wrapper judges them
+ * earlier, as an advisory refusal.
  */
 export const RERUN_FAILED_FENCES = Object.freeze([
   Object.freeze({
@@ -427,11 +449,29 @@ export const RERUN_FAILED_FENCES = Object.freeze([
     reads: (run) => `status ${run?.status ?? null}, conclusion ${run?.conclusion ?? null}`,
     holds: (run) => run?.status === RERUN_FAILED_STATUS && run?.conclusion === RERUN_FAILED_CONCLUSION,
   }),
+  Object.freeze({
+    fence: 'head',
+    wants:
+      "a run whose head_sha is its pull request's CURRENT head (the pull named by pull_requests[0], read with its own GET, " +
+      "never the run's embedded copy), since ci.yml's concurrency group is keyed by the pull number and a stale head's re-run cancels the current head's run",
+    reads: (run, pull) => {
+      const n = rerunFailedPullNumber(run);
+      if (n === null) return "no pull_requests entry — a fork pull request's run, or none";
+      return `head_sha ${shortHead(run?.head_sha)}, and pull #${n}'s own GET answers #${pull?.number ?? null} at head ${shortHead(pull?.head?.sha)}`;
+    },
+    holds: (run, pull) => {
+      const n = rerunFailedPullNumber(run);
+      return n !== null && typeof run?.head_sha === 'string' && run.head_sha !== '' && pull?.number === n && pull?.head?.sha === run.head_sha;
+    },
+  }),
 ]);
 
-/** The fences a run's answer fails: `[{ fence, wants, got }]`, in `RERUN_FAILED_FENCES` order; `[]` when all four hold. Pure. */
-export function rerunFailedFenceFailures(run) {
-  return RERUN_FAILED_FENCES.filter((f) => !f.holds(run)).map((f) => ({ fence: f.fence, wants: f.wants, got: f.reads(run) ?? null }));
+/**
+ * The fences a run's answer and its pull's fail: `[{ fence, wants, got }]`, in `RERUN_FAILED_FENCES` order; `[]`
+ * when all five hold. `pull` is the pull's own answer, or `null` when the run names no pull. Pure.
+ */
+export function rerunFailedFenceFailures(run, pull = null) {
+  return RERUN_FAILED_FENCES.filter((f) => !f.holds(run, pull)).map((f) => ({ fence: f.fence, wants: f.wants, got: f.reads(run, pull) ?? null }));
 }
 
 /** The sentence a fence refusal prints — every failing fence by name, what the run read and what the relay re-runs. Pure. */
@@ -911,8 +951,8 @@ export const OPS = Object.freeze({
     },
   }),
   // The second row whose token carries `actions: write`, minted for a stroke carrying this op alone — see the header.
-  // `run_id` is its one key. The four fences on the run (`RERUN_FAILED_FENCES`) are judged by the executor on the run's
-  // own answer, read immediately before this POST, and the POST carries NO body: the platform's optional
+  // `run_id` is its one key. The five fences on the run and its pull (`RERUN_FAILED_FENCES`) are judged by the executor
+  // on their own answers, read immediately before this POST, and the POST carries NO body: the platform's optional
   // debug-logging flag is never sent.
   run_rerun_failed: Object.freeze({
     permission: 'actions',

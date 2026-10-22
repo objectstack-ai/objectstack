@@ -20,17 +20,20 @@
  *
  * ## What it does, in order
  *
- *   1. It reads the run (`GET /repos/{repo}/actions/runs/{id}`) and judges the
- *      four fences on the run with the predicates the relay's executor uses
- *      (`RERUN_FAILED_FENCES` in `fleet-write/ops.mjs`): the workflow, the
- *      event, once, failed. A run that fails one is REFUSED here (exit 2) with
- *      every failing fence named and nothing sent. It then reads attempt 1's
- *      job list and names the jobs that failed there, which are what the
- *      relay's read-back looks for. A list with no failed job is refused the
- *      same way. ⛔ This check is ADVISORY: an early refusal with its reason.
- *      The executor judges the four fences again on the run it reads
- *      immediately before its POST, and that check is the authoritative one;
- *      a pass here never stands in for it.
+ *   1. It reads the run (`GET /repos/{repo}/actions/runs/{id}`) and the pull
+ *      it names (`pull_requests[0].number`, by the pull's own
+ *      `GET /repos/{repo}/pulls/{n}`), and judges the five fences on them with
+ *      the predicates the relay's executor uses (`RERUN_FAILED_FENCES` in
+ *      `fleet-write/ops.mjs`): the workflow, the event, once, failed, the head
+ *      (the run's `head_sha` is the pull's CURRENT head, never the copy the
+ *      run embeds; a run naming no pull is refused by name). A run that fails
+ *      one is REFUSED here (exit 2) with every failing fence named and nothing
+ *      sent. It then reads attempt 1's job list and names the jobs that failed
+ *      there, which are what the relay's read-back looks for. A list with no
+ *      failed job is refused the same way. ⛔ This check is ADVISORY: an early
+ *      refusal with its reason. The executor judges the five fences again on
+ *      the run and pull it reads immediately before its POST, and that check
+ *      is the authoritative one; a pass here never stands in for it.
  *   2. It packs ONE action, `{ op: 'run_rerun_failed', run_id }`, which the
  *      shared validator judges (alone in its stroke, `run_id` alone), and
  *      sends it as ONE `repository_dispatch` (`fleet-write/dispatch.mjs`'s
@@ -38,9 +41,9 @@
  *   3. After a `success` run it reads the run back at the seat, its attempt
  *      and attempt 2's re-run jobs, and prints their ids. That is a READING
  *      for the seat's note, never a verdict: the executor's own read-back
- *      landed the action. After a FAILED run it re-reads the run and prints
- *      what the fences say now, so the seat learns why without the job log it
- *      cannot read.
+ *      landed the action. After a FAILED run it re-reads the run and its pull
+ *      and prints what the fences say now, so the seat learns why without the
+ *      job log it cannot read.
  *
  * ## RELAY-ONLY
  *
@@ -62,8 +65,8 @@
  *       payload is printed, nothing sent.
  *   2   usage, a fence the run fails or a run with no failed job (advisory,
  *       nothing sent), or the payload refused by the validator.
- *   3   PREREQUISITE NOT MET — no token, the run or its jobs unreadable, no
- *       session, or a route that is not the relay. Nothing sent.
+ *   3   PREREQUISITE NOT MET — no token, the run, its pull or its jobs
+ *       unreadable, no session, or a route that is not the relay. Nothing sent.
  *   5   the dispatch was refused, or the relay's run FAILED: its executor
  *       refused at a fence, or the re-run did not read back. Go READ the run;
  *       ⛔ do not re-send blind (a re-send after a landing meets the once fence).
@@ -88,6 +91,7 @@ import {
   failedJobNames,
   rerunFailedFenceFailures,
   rerunFailedFenceText,
+  rerunFailedPullNumber,
 } from './fleet-write/ops.mjs';
 import { refusalText } from './fleet-write/validate.mjs';
 
@@ -202,6 +206,24 @@ async function readRun(call, repo, runId) {
   return { run: r.json };
 }
 
+/**
+ * The fences' two reads, the executor's order: the run, then the pull it names by the pull's OWN GET (never the
+ * copy the run embeds) — `{ run, pull, failures }`, `pull` null when the run names none (the head fence then
+ * fails by name), or `{ fail }` for a read that did not answer. Never throws.
+ */
+async function readFences(call, repo, runId) {
+  const read = await readRun(call, repo, runId);
+  if (read.fail) return { fail: read.fail };
+  const number = rerunFailedPullNumber(read.run);
+  let pull = null;
+  if (number !== null) {
+    const p = await call(`/repos/${repo}/pulls/${number}`);
+    if (p.status !== 200 || !isObject(p.json)) return { run: read.run, fail: `${p.call} -> HTTP ${p.status}${p.detail ? ` (${p.detail})` : ''}: pull #${number}, the run's pull request, could not be read, so the head fence was not judged` };
+    pull = p.json;
+  }
+  return { run: read.run, pull, failures: rerunFailedFenceFailures(read.run, pull) };
+}
+
 // ---------------------------------------------------------------------------
 // The run
 // ---------------------------------------------------------------------------
@@ -220,13 +242,13 @@ export async function runRerunFailed(options, deps = {}) {
   const out = { repo, run: runId, exit: null, fences: [], failed: [], transport: null, relay: null, reading: null };
 
   // ── 1. the fences, advisory ────────────────────────────────────────────────
-  const read = await readRun(call, repo, runId);
+  const read = await readFences(call, repo, runId);
+  if (read.run) log(`rerun-failed: ${runLine(repo, read.run)}`);
   if (read.fail) {
-    log(`rerun-failed: PREREQUISITE NOT MET — ${read.fail}. ⛔ NOT MEASURED: no fence was judged and nothing was sent.`);
+    log(`rerun-failed: PREREQUISITE NOT MET — ${read.fail}. ⛔ NOT MEASURED: ${read.run ? 'the fences were not all judged' : 'no fence was judged'} and nothing was sent.`);
     return { ...out, exit: EXIT_PREREQUISITE };
   }
-  log(`rerun-failed: ${runLine(repo, read.run)}`);
-  const failures = rerunFailedFenceFailures(read.run);
+  const { failures } = read;
   if (failures.length) {
     log(`rerun-failed: REFUSED before the dispatch — ${rerunFailedFenceText(failures)}. The relay judges the same fences on the run again and would refuse it too. ⛔ Nothing sent.`);
     return { ...out, fences: failures, exit: EXIT_USAGE };
@@ -241,7 +263,7 @@ export async function runRerunFailed(options, deps = {}) {
     log(`rerun-failed: REFUSED before the dispatch — attempt ${RERUN_FAILED_ATTEMPT} lists ${baseline.jobs.length} job(s) and none concluded failure, so the relay's read-back would have nothing to confirm and the relay refuses it. ⛔ Nothing sent.`);
     return { ...out, exit: EXIT_USAGE };
   }
-  log(`rerun-failed: the four fences hold (advisory — the relay judges them again on the run it reads before its POST); attempt ${RERUN_FAILED_ATTEMPT} failed ${failed.map((n) => `\`${n}\``).join(', ')}.`);
+  log(`rerun-failed: the five fences hold — the run's head is pull #${read.pull?.number}'s current head (advisory — the relay judges them again on the run and pull it reads before its POST); attempt ${RERUN_FAILED_ATTEMPT} failed ${failed.map((n) => `\`${n}\``).join(', ')}.`);
   const action = { op: OP, run_id: runId };
 
   // ── 2. the stroke — relay-only ─────────────────────────────────────────────
@@ -289,8 +311,8 @@ export async function runRerunFailed(options, deps = {}) {
       return { ...out, failed, exit: EXIT_UNCONFIRMED };
     }
     if (result.state === 'failure') {
-      const now = await readRun(call, repo, runId);
-      const why = now.fail ? `${now.fail} either` : `${runLine(repo, now.run)}; ${rerunFailedFenceFailures(now.run).length ? `the fences now read: ${rerunFailedFenceText(rerunFailedFenceFailures(now.run))}` : 'the four fences still hold, so the relay refused or the re-run did not read back for another reason — read the relay run'}`;
+      const now = await readFences(call, repo, runId);
+      const why = now.fail ? `${now.fail} either` : `${runLine(repo, now.run)}; ${now.failures.length ? `the fences now read: ${rerunFailedFenceText(now.failures)}` : 'the five fences still hold, so the relay refused or the re-run did not read back for another reason — read the relay run'}`;
       log(`rerun-failed: ✗ the relay's run FAILED (${result.detail ?? 'conclusion failure'})${result.run?.url ? ` ${result.run.url}` : ''} — its executor refused at a fence, or the re-run did not read back as attempt ${RERUN_FAILED_ATTEMPT + 1}. Read now: ${why}. ⛔ Do not re-send blind.`);
       return { ...out, failed, exit: exitForResult(result) };
     }
@@ -314,12 +336,17 @@ export async function runRerunFailed(options, deps = {}) {
 
 const PROBE_RUN = 39713789453;
 
-/** An offline board for the probe and the self-test: a run and its two attempts' job lists, every read recorded. */
-function fakeBoard({ run = {}, attempt1 = null, attempt2 = null, after = null } = {}) {
+const PROBE_PULL = 25155;
+const PROBE_HEAD = '25b3a6c4bff905d462d4ff44030e5465c342254a';
+
+/** An offline board for the probe and the self-test: a run, its pull and its two attempts' job lists, every read recorded. */
+function fakeBoard({ run = {}, pull = {}, attempt1 = null, attempt2 = null, after = null } = {}) {
   const calls = [];
   const REPO = RELAY_REPO;
-  // `run: null` is a run the platform does not answer for; an object patches the measured run.
-  const base = run === null ? null : { id: PROBE_RUN, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, status: 'completed', conclusion: 'failure', head_sha: '25b3a6c4bff905d462d4ff44030e5465c342254a', pull_requests: [{ number: 25155 }], ...run };
+  // `run: null` is a run the platform does not answer for; an object patches the measured run, which EMBEDS a copy of its pull.
+  const base = run === null ? null : { id: PROBE_RUN, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, status: 'completed', conclusion: 'failure', head_sha: PROBE_HEAD, pull_requests: [{ number: PROBE_PULL, head: { sha: PROBE_HEAD } }], ...run };
+  // `pull: null` is a pull the platform does not answer for; an object patches the pull's OWN answer (its current head).
+  const pullAnswer = pull === null ? null : { number: PROBE_PULL, state: 'open', head: { sha: PROBE_HEAD }, ...pull };
   const jobs1 = attempt1 ?? [
     { id: 119611140808, name: 'Test Core (3/6)', run_attempt: 1, status: 'completed', conclusion: 'failure' },
     { id: 119611140839, name: 'Test Core (1/6)', run_attempt: 1, status: 'completed', conclusion: 'success' },
@@ -338,6 +365,7 @@ function fakeBoard({ run = {}, attempt1 = null, attempt2 = null, after = null } 
       const json = runReads > 1 && after && base ? { ...base, ...after } : base;
       return json === null ? { status: 404, json: { message: 'Not Found' }, detail: 'Not Found', call: `GET ${p}` } : { status: 200, json, detail: '', call: `GET ${p}` };
     }
+    if (p === `/repos/${REPO}/pulls/${PROBE_PULL}`) return pullAnswer === null ? { status: 404, json: { message: 'Not Found' }, detail: 'Not Found', call: `GET ${p}` } : { status: 200, json: pullAnswer, detail: '', call: `GET ${p}` };
     if (p === `/repos/${REPO}/actions/runs/${PROBE_RUN}/attempts/1/jobs`) return jobs1 === 'unread' ? { status: 403, json: { message: 'Forbidden' }, detail: 'Forbidden', call: `GET ${p}` } : { status: 200, json: { total_count: jobs1.length, jobs: jobs1 }, detail: '', call: `GET ${p}` };
     if (p === `/repos/${REPO}/actions/runs/${PROBE_RUN}/attempts/2/jobs`) return { status: 200, json: { total_count: jobs2.length, jobs: jobs2 }, detail: '', call: `GET ${p}` };
     return { status: 404, json: { message: 'Not Found' }, detail: 'Not Found', call: `GET ${p}` };
@@ -363,7 +391,8 @@ export async function relayMissProbe({ route, send }) {
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'the command line: --run a positive integer, --repo in the one organization, the board repo by default, anything else refused': 6,
-  'the fences at the seat, advisory: the measured run passes all four; each failing fence refused by name with nothing sent; a run or job list that cannot be read, or one with no failed job, sends nothing': 8,
+  // 8 → 11 with the head fence: a stale head, a run naming no pull, a pull that cannot be read.
+  "the fences at the seat, advisory: the measured run passes all five, its head the pull's current head by the pull's own answer; each failing fence refused by name with nothing sent — a stale head and a run naming no pull among them; a run, pull or job list that cannot be read, or one with no failed job, sends nothing": 11,
   'relay-only: a direct route, or a route that errs, refuses with zero writes and no dispatch; the dispatch route packs ONE action, run_id alone; --dry-run prints it and sends nothing': 5,
   "the outcomes: a success run is read back at the seat naming attempt 2's re-run job ids; a failed run re-reads the run and names what the fences say now, exit 5; no run or none completed is UNCONFIRMED, exit 6; never a second dispatch": 6,
   'the wiring: this file issues no write of its own, imports the fences rather than restating them, and declares itself relay-only': 3,
@@ -407,6 +436,8 @@ export async function selfTest() {
     return { ...r, calls: b.calls, sent, text: lines.join('\n') };
   };
   const RUN_PATH = `GET /repos/${RELAY_REPO}/actions/runs/${PROBE_RUN}`;
+  const PULL_PATH = `GET /repos/${RELAY_REPO}/pulls/${PROBE_PULL}`;
+  const MOVED = '9f0e1d2c3b4a59687766554433221100ffeeddcc';
   const A1_PATH = `GET /repos/${RELAY_REPO}/actions/runs/${PROBE_RUN}/attempts/1/jobs`;
   const A2_PATH = `GET /repos/${RELAY_REPO}/actions/runs/${PROBE_RUN}/attempts/2/jobs`;
 
@@ -422,18 +453,22 @@ export async function selfTest() {
   }
 
   // ── the fences at the seat ────────────────────────────────────────────────
-  battery('the fences at the seat, advisory: the measured run passes all four; each failing fence refused by name with nothing sent; a run or job list that cannot be read, or one with no failed job, sends nothing');
+  battery("the fences at the seat, advisory: the measured run passes all five, its head the pull's current head by the pull's own answer; each failing fence refused by name with nothing sent — a stale head and a run naming no pull among them; a run, pull or job list that cannot be read, or one with no failed job, sends nothing");
   {
     const ok = await drive({});
-    t('accepted: the measured run passes the four fences — the run read, then attempt 1\'s jobs — and the line names the failed jobs and the pull request head', [ok.exit, ok.calls.slice(0, 2), ok.text.includes('attempt 1 failed `Test Core (3/6)`, `Test Core`'), ok.text.includes('head 25b3a6c · pull #25155')], [EXIT_OK, [RUN_PATH, A1_PATH], true, true], ok.text);
-    const fenced = async (run, fence) => {
-      const r = await drive({}, { board: { run } });
+    t('accepted: the measured run passes the five fences — the run read, then its pull by the pull\'s own GET, then attempt 1\'s jobs — and the line names the failed jobs, the pull request head and that it is the pull\'s current head', [ok.exit, ok.calls.slice(0, 3), ok.text.includes('attempt 1 failed `Test Core (3/6)`, `Test Core`'), ok.text.includes('head 25b3a6c · pull #25155'), ok.text.includes("the run's head is pull #25155's current head")], [EXIT_OK, [RUN_PATH, PULL_PATH, A1_PATH], true, true, true], ok.text);
+    const fenced = async (run, fence, board = {}) => {
+      const r = await drive({}, { board: { run, ...board } });
       return [r.exit, r.sent.length, r.calls.length, r.text.includes(`fence \`${fence}\``) && r.text.includes('Nothing sent')];
     };
-    t('⛔ fence workflow, refused at the seat: a run of lint.yml — exit 2, no dispatch, no further read', await fenced({ path: '.github/workflows/lint.yml' }, 'workflow'), [EXIT_USAGE, 0, 1, true]);
-    t('⛔ fence event, refused at the seat: a merge_group run', await fenced({ event: 'merge_group' }, 'event'), [EXIT_USAGE, 0, 1, true]);
-    t('⛔ fence once, refused at the seat: a run already at attempt 2 — a second failure is real', await fenced({ run_attempt: 2 }, 'once'), [EXIT_USAGE, 0, 1, true]);
-    t('⛔ fence failed, refused at the seat: a run that succeeded', await fenced({ conclusion: 'success' }, 'failed'), [EXIT_USAGE, 0, 1, true]);
+    t('⛔ fence workflow, refused at the seat: a run of lint.yml — exit 2, no dispatch, no further read', await fenced({ path: '.github/workflows/lint.yml' }, 'workflow'), [EXIT_USAGE, 0, 2, true]);
+    t('⛔ fence event, refused at the seat: a merge_group run', await fenced({ event: 'merge_group' }, 'event'), [EXIT_USAGE, 0, 2, true]);
+    t('⛔ fence once, refused at the seat: a run already at attempt 2 — a second failure is real', await fenced({ run_attempt: 2 }, 'once'), [EXIT_USAGE, 0, 2, true]);
+    t('⛔ fence failed, refused at the seat: a run that succeeded', await fenced({ conclusion: 'success' }, 'failed'), [EXIT_USAGE, 0, 2, true]);
+    t('⛔ fence head, refused at the seat: a stale head — the pull was pushed to since the run, by the pull\'s own answer, while the run\'s embedded copy still agrees', await fenced({}, 'head', { pull: { head: { sha: MOVED } } }), [EXIT_USAGE, 0, 2, true]);
+    t("⛔ fence head, refused at the seat by name: a run naming no pull request (pull_requests empty — a fork pull request's run) — and no pull is read", await fenced({ pull_requests: [] }, 'head'), [EXIT_USAGE, 0, 1, true]);
+    const pullUnread = await drive({}, { board: { pull: null } });
+    t('a pull that cannot be read leaves the head fence unjudged: exit 3, no dispatch, NOT MEASURED', [pullUnread.exit, pullUnread.sent.length, pullUnread.text.includes('the head fence was not judged') && pullUnread.text.includes('NOT MEASURED')], [EXIT_PREREQUISITE, 0, true], pullUnread.text);
     const unread = await drive({}, { board: { run: null } });
     t('a run that cannot be read is NOT MEASURED: exit 3, no dispatch', [unread.exit, unread.sent.length, unread.text.includes('NOT MEASURED')], [EXIT_PREREQUISITE, 0, true]);
     const noJobs = await drive({}, { board: { attempt1: 'unread' } });
@@ -446,7 +481,7 @@ export async function selfTest() {
   battery('relay-only: a direct route, or a route that errs, refuses with zero writes and no dispatch; the dispatch route packs ONE action, run_id alone; --dry-run prints it and sends nothing');
   {
     const direct = await drive({}, { route: DIRECT_ROUTE });
-    t('⛔ a direct route is a PREREQUISITE refusal: exit 3, no dispatch, the reads only, the line saying RELAY-ONLY and never a direct write', [direct.exit, direct.sent.length, direct.calls, direct.text.includes('RELAY-ONLY') && direct.text.includes('Not falling back')], [EXIT_PREREQUISITE, 0, [RUN_PATH, A1_PATH], true]);
+    t('⛔ a direct route is a PREREQUISITE refusal: exit 3, no dispatch, the reads only, the line saying RELAY-ONLY and never a direct write', [direct.exit, direct.sent.length, direct.calls, direct.text.includes('RELAY-ONLY') && direct.text.includes('Not falling back')], [EXIT_PREREQUISITE, 0, [RUN_PATH, PULL_PATH, A1_PATH], true]);
     const erring = await drive({}, { route: { requested: 'dispatch', transport: 'dispatch', reason: 'x', error: 'OS_FLEET_TRANSPORT=dispatch but the relay is not live.', session: SESSION } });
     t('⛔ a route that errs is a PREREQUISITE refusal, its error printed, no dispatch', [erring.exit, erring.sent.length, erring.text.includes('the relay is not live')], [EXIT_PREREQUISITE, 0, true]);
     const sent = await drive({});
@@ -461,11 +496,11 @@ export async function selfTest() {
   battery("the outcomes: a success run is read back at the seat naming attempt 2's re-run job ids; a failed run re-reads the run and names what the fences say now, exit 5; no run or none completed is UNCONFIRMED, exit 6; never a second dispatch");
   {
     const landed = await drive({}, { board: { after: { run_attempt: 2, status: 'queued', conclusion: null } } });
-    t('⭐ success: exit 0 after ONE dispatch, the run and attempt 2\'s jobs read back, the line naming the re-run job id', [landed.exit, landed.sent.length, landed.calls.slice(2), landed.text.includes('attempt 2 · `Test Core (3/6)` job 119642047246 queued'), landed.reading?.jobs], [EXIT_OK, 1, [RUN_PATH, A2_PATH], true, [{ name: 'Test Core (3/6)', id: 119642047246, status: 'queued' }]], landed.text);
+    t('⭐ success: exit 0 after ONE dispatch, the run and attempt 2\'s jobs read back, the line naming the re-run job id', [landed.exit, landed.sent.length, landed.calls.slice(3), landed.text.includes('attempt 2 · `Test Core (3/6)` job 119642047246 queued'), landed.reading?.jobs], [EXIT_OK, 1, [RUN_PATH, A2_PATH], true, [{ name: 'Test Core (3/6)', id: 119642047246, status: 'queued' }]], landed.text);
     const unreadAfter = await drive({}, { board: { after: { run_attempt: 1 } } });
     t('…a reading that does not see attempt 2 at the seat is SAID, and the exit stays 0 — the executor\'s read-back is the verdict, this is a reading', [unreadAfter.exit, unreadAfter.text.includes('a reading, not a verdict')], [EXIT_OK, true]);
     const failed = await drive({}, { outcome: 'failure', board: { after: { run_attempt: 2, status: 'in_progress', conclusion: null } } });
-    t('⛔ a failed relay run: exit 5, ONE dispatch, the run re-read and the fence that fails NOW named — here a person re-ran it first', [failed.exit, failed.sent.length, failed.text.includes('FAILED') && failed.text.includes('fence `once`: the run reads 2')], [EXIT_PLATFORM_REFUSAL, 1, true], failed.text);
+    t('⛔ a failed relay run: exit 5, ONE dispatch, the run and its pull re-read and the fence that fails NOW named — here a person re-ran it first', [failed.exit, failed.sent.length, failed.text.includes('FAILED') && failed.text.includes('fence `once`: the run reads 2')], [EXIT_PLATFORM_REFUSAL, 1, true], failed.text);
     const failedHolding = await drive({}, { outcome: 'failure' });
     t('…and when the fences still hold, the line says to read the relay run, never to re-send', [failedHolding.exit, failedHolding.text.includes('read the relay run') && failedHolding.text.includes('Do not re-send blind')], [EXIT_PLATFORM_REFUSAL, true]);
     const noRun = await drive({}, { outcome: 'no-run' });
@@ -515,7 +550,7 @@ export async function selfTest() {
     return 1;
   }
   console.log(
-    `✓ rerun-failed self-test: ${cases.length} cases pass across ${declared.length} batteries — the four fences judged at the seat as an advisory refusal ` +
+    `✓ rerun-failed self-test: ${cases.length} cases pass across ${declared.length} batteries — the five fences, the pull's current head among them, judged at the seat as an advisory refusal ` +
       'naming each failing one, nothing sent; relay-only, a direct route refused with zero writes; ONE dispatch of ONE action carrying run_id alone; ' +
       "a success read back naming attempt 2's job ids, a failure re-read and explained, and no run UNCONFIRMED — never a second dispatch.",
   );

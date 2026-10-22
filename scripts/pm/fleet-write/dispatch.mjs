@@ -242,8 +242,9 @@
  *     IS that confirmation; the seat reads the new head with one
  *     `GET /repos/{repo}/pulls/{n}` after, and this file reads nothing back;
  *   - `run_rerun_failed` carries no body, names no workflow and is
- *     confirmed INSIDE the run too: the executor judges the four fences on
- *     the run before its POST and lands the action only when the run reads
+ *     confirmed INSIDE the run too: the executor judges the five fences on
+ *     the run and its pull's current head before its POST, and lands the
+ *     action only when the run reads
  *     back as attempt 2 with its failed jobs queued or in progress
  *     (`execute.mjs`, `confirmRerunFailed`). So a `success` run IS that
  *     confirmation and this file reads nothing back; the seat's wrapper
