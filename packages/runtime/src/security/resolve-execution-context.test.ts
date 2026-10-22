@@ -190,7 +190,10 @@ describe('resolveExecutionContext — API key verify path', () => {
  */
 describe('resolveExecutionContext — localization (timezone + locale)', () => {
   const RAW = 'osk_tz';
-  const apiKeyRows = [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', expires_at: FUTURE }];
+  // The key's organization is the caller's: the direct `sys_setting` fallback
+  // reads that organization's rows only (ADR-0131 D8).
+  const ORG = 'org_tz';
+  const apiKeyRows = [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', active_organization_id: ORG, expires_at: FUTURE }];
 
   /** Fake `settings` service doing the 4-tier `get(namespace, key)` resolution. */
   function makeSettings(values: Record<string, unknown>) {
@@ -259,9 +262,9 @@ describe('resolveExecutionContext — localization (timezone + locale)', () => {
   it('falls back to a direct tenant-scoped sys_setting read when no settings service', async () => {
     const ctx = await resolveExecutionContext(makeTzOpts({
       settings: [
-        { namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'Asia/Tokyo' },
-        { namespace: 'localization', key: 'locale', scope: 'tenant', value: 'ja-JP' },
-        { namespace: 'localization', key: 'currency', scope: 'tenant', value: 'JPY' },
+        { namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: ORG, value: 'Asia/Tokyo' },
+        { namespace: 'localization', key: 'locale', scope: 'tenant', organization_id: ORG, value: 'ja-JP' },
+        { namespace: 'localization', key: 'currency', scope: 'tenant', organization_id: ORG, value: 'JPY' },
       ],
     }));
     expect(ctx.timezone).toBe('Asia/Tokyo');
@@ -272,7 +275,7 @@ describe('resolveExecutionContext — localization (timezone + locale)', () => {
   it('ignores per-user sys_user_preference rows (organization-level only)', async () => {
     const ctx = await resolveExecutionContext(makeTzOpts({
       prefs: [{ user_id: 'u1', key: 'timezone', value: 'America/New_York' }],
-      settings: [{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'Europe/Paris' }],
+      settings: [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: ORG, value: 'Europe/Paris' }],
     }));
     expect(ctx.timezone).toBe('Europe/Paris'); // org default, NOT the user pref
   });
