@@ -3825,6 +3825,33 @@ function collectExternalBindingDatasourceErrors(config: ObjectStackDefinition): 
 }
 
 /**
+ * [ADR-0015 §4.2 · #25211] {@link collectExternalBindingDatasourceErrors} over
+ * a COMPOSITION: an `external` object of one input bound to a datasource
+ * another input declares managed (or with no `schemaMode`).
+ *
+ * `defineStack` resolves a binding against its own stack's `datasources`, so a
+ * pair split across two inputs reached the artifact with no verdict: each input
+ * is legal alone, and the composed artifact registers both, the object as
+ * federated and its datasource as managed. Judged here over the objects the
+ * artifact carries (step 2's merge, after the conflict strategy) and the
+ * `datasources` of every input, by the same collector, so the finding reads
+ * exactly as the per-stack one does.
+ *
+ * What this can newly refuse: a cross-input pair, and, as with the artifact
+ * pass's other rules, a same-stack pair in an input built with
+ * `strict: false`, which never reached the per-stack pass. A strict input holds
+ * no same-stack pair. A datasource name two inputs declare is judged against
+ * the later declaration (the collector keeps the last one it meets).
+ */
+function collectComposedExternalBindingDatasourceErrors(
+  stacks: readonly ObjectStackDefinition[],
+  composedObjects: ObjectStackDefinition['objects'],
+): string[] {
+  const datasources = stacks.flatMap((stack) => (Array.isArray(stack.datasources) ? stack.datasources : []));
+  return collectExternalBindingDatasourceErrors({ objects: composedObjects, datasources } as ObjectStackDefinition);
+}
+
+/**
  * Perform strict cross-reference validation on a parsed stack definition.
  * Returns an array of error messages (empty if valid).
  *
@@ -6597,7 +6624,7 @@ function composeBuiltStacks(
   // 0. [#20367 ruling B] Every input must be a stack a producer built. The
   //    per-stack refusals run only inside `defineStack`, so an input that never
   //    passed through it is unjudged, and nothing below re-judges it (the
-  //    artifact pass in step 3b re-runs two artifact-scoped rules, not the
+  //    artifact pass in step 3b re-runs the artifact-scoped rules, not the
   //    family). FIRST, and before the single-input early return, so a lone
   //    plain object is refused as well rather than handed straight back.
   const unbuilt = stacks.flatMap((stack, i) => {
@@ -6712,12 +6739,16 @@ function composeBuiltStacks(
   //     inputs, each legal on its own: one deployment holds them both. It needs
   //     no object to resolve against, so it is not behind that pass's
   //     object-count early return.
+  //     [ADR-0015 §4.2 · #25211] …and an `external` object of one input bound
+  //     to a datasource another input declares managed: see
+  //     {@link collectComposedExternalBindingDatasourceErrors}.
   const artifactCrossRefErrors = [
     ...collectArtifactCrossReferenceErrors(
       stacks,
       objects as readonly { name: string }[] | undefined,
     ),
     ...collectComposedDefaultRecordPageErrors(stacks, opts.manifest === 'preserve'),
+    ...collectComposedExternalBindingDatasourceErrors(stacks, objects),
   ];
   if (artifactCrossRefErrors.length > 0) {
     const count = artifactCrossRefErrors.length;

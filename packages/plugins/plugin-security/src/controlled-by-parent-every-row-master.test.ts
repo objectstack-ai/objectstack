@@ -27,16 +27,16 @@
  *  - each master a batch names is asked once, in row order;
  *  - a row naming no master, under a reference required-field validation
  *    judges, is answered by validation as before;
- *  - under a reference required-field validation does not judge, a batch
- *    create naming a master the caller may not edit is refused on that master
- *    (for an agent, whose own pass runs first, on the empty-master answer),
- *    and every other batch create is still refused whole, as before;
- *  - an update that empties the master reference, under a reference
- *    required-field validation does not judge, is refused — addressed by
- *    `where`, in its body and by predicate — with the empty-master refusal, and
- *    nothing is written; under a reference validation judges, validation's
- *    answer is unchanged; and an update that leaves the reference out lands as
- *    it did.
+ *  - under a reference required-field validation does not judge — one the
+ *    declaration keeps from the author, which the parse refuses — every batch
+ *    create is refused whole as the declaration defect it is (#25095), before
+ *    any master is asked, and nothing is written;
+ *  - an update that empties the master reference is refused — addressed by
+ *    `where`, in its body and by predicate — and nothing is written: under a
+ *    reference validation judges, by validation as before, after the master
+ *    the row is stored under is asked; under one it does not judge, as the
+ *    declaration defect (#25095); and an update that leaves the reference out
+ *    lands as it did.
  *
  * Real stack: `ObjectQL` over better-sqlite3, the real `SecurityPlugin`, the
  * real sharing service and middleware, the real protocol, and contexts
@@ -84,7 +84,9 @@ const D = { rls: 'qa_cbp_erm_detail_rls', chain: 'qa_cbp_erm_detail_chain' } as 
 /**
  * A detail under `M.rls` whose master reference required-field validation does
  * not judge (`validateRecord` skips a provenance-flagged field), so the gate is
- * the one thing that holds the reference populated.
+ * the one thing that holds the reference populated. The parse refuses the
+ * declaration (`master-not-writable`), and since #25095 the gate refuses every
+ * write that sets the reference as that defect.
  */
 const UNJUDGED = 'qa_cbp_erm_detail_unjudged';
 
@@ -460,27 +462,20 @@ describe('ADR-0055 §1 · §3 — every row a write stores in a controlled_by_pa
     });
   });
 
-  it('under a reference validation does not judge: a batch create naming a master the caller may not edit is refused on that master, and every other batch create is still refused whole', async () => {
+  it('under a reference validation does not judge: every batch create is refused whole as the declaration defect, before any master is asked, and nothing is written', async () => {
     for (const caller of Object.keys(CALLERS) as Caller[]) {
       const { user, onBehalf } = CALLERS[caller];
       const context = await rig.contextOf(user, onBehalf);
+      // [#25095] The single create's answer, even naming a master the caller may not edit.
       const refusal = await rig.insert(UNJUDGED, rig.rows([held('rls')])[0]!, context);
-      expect(refusal).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+      expect(refusal).toMatchObject({ kind: 'refused', code: 'INVALID_METADATA', status: 422 });
       for (const door of DOORS) {
         const refused = rig.rows([free('rls'), held('rls')]);
-        const outcome = await rig.batch[door](UNJUDGED, refused, context);
-        if (onBehalf) {
-          // The agent's own pass runs first and whole: its sets may edit both
-          // masters, so it meets the batch's empty-master answer before the
-          // member's pass asks the master the member may not edit. Refused all
-          // the same, and nothing is written.
-          expect({ caller, door, outcome }).toMatchObject({ caller, door, outcome: { kind: 'refused', code: 'MISSING_REQUIRED_FIELD', status: 422 } });
-        } else {
+        const whole = rig.rows([free('rls'), free('rls', 2)]);
+        for (const rows of [refused, whole]) {
+          const outcome = await rig.batch[door](UNJUDGED, rows, context);
           expect({ caller, door, outcome: envelope(outcome) }).toEqual({ caller, door, outcome: envelope(refusal) });
         }
-        const whole = rig.rows([free('rls'), free('rls', 2)]);
-        expect({ caller, door, outcome: await rig.batch[door](UNJUDGED, whole, context) })
-          .toMatchObject({ caller, door, outcome: { kind: 'refused', code: 'MISSING_REQUIRED_FIELD', status: 422 } });
         const after = await rig.stored(UNJUDGED, [...ids(refused), ...ids(whole)]);
         for (const [id, row] of Object.entries(after)) expect({ caller, door, id, row }).toEqual({ caller, door, id, row: null });
       }
@@ -489,13 +484,13 @@ describe('ADR-0055 §1 · §3 — every row a write stores in a controlled_by_pa
 
   describe('an update never empties the master reference a detail derives its access from', () => {
     for (const caller of Object.keys(CALLERS) as Caller[]) {
-      it(`${caller}: under a reference validation does not judge, it is refused on every update shape, and nothing is written`, async () => {
+      it(`${caller}: under a reference validation does not judge, it is refused on every update shape as the declaration defect, and nothing is written`, async () => {
         const { user, onBehalf } = CALLERS[caller];
         const context = await rig.contextOf(user, onBehalf);
         for (const shape of UPDATES) {
           const id = await rig.seed(UNJUDGED, free('rls'), user);
           const outcome = await rig.update[shape](UNJUDGED, id, { master: null, note: 'written' }, context);
-          expect({ shape, outcome }).toMatchObject({ shape, outcome: { kind: 'refused', code: 'MISSING_REQUIRED_FIELD', status: 422 } });
+          expect({ shape, outcome }).toMatchObject({ shape, outcome: { kind: 'refused', code: 'INVALID_METADATA', status: 422 } });
           expect({ shape, row: (await rig.stored(UNJUDGED, [id]))[id] }).toEqual({ shape, row: { master: free('rls'), note: 'seed' } });
           // The control: the same update leaving the reference out lands.
           const control = await rig.update[shape](UNJUDGED, id, { note: 'written' }, context);
@@ -518,10 +513,10 @@ describe('ADR-0055 §1 · §3 — every row a write stores in a controlled_by_pa
     it('the master the row is stored under is asked first: one the caller may not edit refuses on it', async () => {
       const context = await rig.contextOf(MEMBER, false);
       for (const shape of UPDATES) {
-        const id = await rig.seed(UNJUDGED, held('rls'), MEMBER);
-        const outcome = await rig.update[shape](UNJUDGED, id, { master: null }, context);
+        const id = await rig.seed(D.rls, held('rls'), MEMBER);
+        const outcome = await rig.update[shape](D.rls, id, { master: null }, context);
         expect({ shape, outcome }).toMatchObject({ shape, outcome: { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 } });
-        expect({ shape, row: (await rig.stored(UNJUDGED, [id]))[id] }).toEqual({ shape, row: { master: held('rls'), note: 'seed' } });
+        expect({ shape, row: (await rig.stored(D.rls, [id]))[id] }).toEqual({ shape, row: { master: held('rls'), note: 'seed' } });
       }
     });
   });
