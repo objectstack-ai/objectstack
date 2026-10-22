@@ -219,9 +219,12 @@ describe('[ADR-0131 D5] better-auth organization/update: no re-slug makes anothe
 
   it('a read of the Default Organization that fails refuses (the guard fails closed), and the slug is not changed', async () => {
     const { engine, manager, cookie } = await ownerOfB(TWO_NONE_DEFAULT);
+    // Only this rule's read (`{ slug: 'default' }`, limit 1) fails: the
+    // break-glass half reads the same slug through a wider page, and must not
+    // be what refuses here.
     const real = engine.find.bind(engine);
     vi.spyOn(engine, 'find').mockImplementation(async (object: string, query?: any, ...rest: any[]) => {
-      if (object === 'sys_organization' && query?.where?.slug === 'default') throw new Error('sys_organization store unavailable (injected)');
+      if (object === 'sys_organization' && query?.where?.slug === 'default' && query?.limit === 1) throw new Error('sys_organization store unavailable (injected)');
       return (real as any)(object, query, ...rest);
     });
 
@@ -261,7 +264,7 @@ describe('[ADR-0131 D5] the engine door (a seed, a plugin, a script): the same r
     const { engine } = await ownerOfB(TWO_NONE_DEFAULT);
     const real = engine.find.bind(engine);
     vi.spyOn(engine, 'find').mockImplementation(async (object: string, query?: any, ...rest: any[]) => {
-      if (object === 'sys_organization' && query?.where?.slug === 'default') throw new Error('sys_organization store unavailable (injected)');
+      if (object === 'sys_organization' && query?.where?.slug === 'default' && query?.limit === 1) throw new Error('sys_organization store unavailable (injected)');
       return (real as any)(object, query, ...rest);
     });
 
