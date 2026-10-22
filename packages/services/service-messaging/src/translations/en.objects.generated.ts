@@ -197,11 +197,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the user, the topic and the channel this toggle covers (computed on read)"
+        help: "Record title: the person (or All users), the topic and the channel this toggle covers (computed on read)"
       },
       user_id: {
         label: "User",
-        help: "Recipient user id, or '*' for the admin-global default."
+        help: "The user this preference applies to. Leave empty for the default that applies to all users."
       },
       topic: {
         label: "Topic",
