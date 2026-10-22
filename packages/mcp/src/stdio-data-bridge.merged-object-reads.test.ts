@@ -26,6 +26,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import {
   createStdioDataBridge,
   enforceApiExposure,
@@ -79,10 +80,19 @@ function makeProtocol(objects: Array<Record<string, unknown>> = PACKAGE_OBJECTS)
 function makeEngine() {
   return {
     find: vi.fn(async () => [{ id: 'r1', name: 'row' }]),
-    findOne: vi.fn(async () => ({ id: 'r1', name: 'row' })),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => {
+      assertEngineFindOnePredicate(object, query);
+      return { id: 'r1', name: 'row' };
+    }),
     insert: vi.fn(async (_object: string, data: Record<string, unknown>): Promise<Record<string, unknown>> => ({ id: 'r9', ...data })),
-    update: vi.fn(async () => ({})),
-    delete: vi.fn(async () => true),
+    update: vi.fn(async (_object: string, data: Record<string, unknown>, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      return {};
+    }),
+    delete: vi.fn(async (_object: string, options?: any) => {
+      assertEngineDeleteDispatch(options);
+      return true;
+    }),
     count: vi.fn(async () => 1),
     aggregate: vi.fn(async () => [{ n: 1 }]),
   };
