@@ -19,10 +19,12 @@
  *     the column is INJECTED (`applySystemFields`, `injected-system-columns.ts`)
  *     and the tenancy census lists the object `reach: "in"` with
  *     `tenantField: "organization_id"`;
- *   - REST / session writes fill it (`SqlDriver.injectTenantOnInsert`); seed
- *     replay does not (`seed-loader.ts` withholds its `fallbackOrgId` from
- *     every `sys_` object); elevated system-context writes do not either
- *     (`unclassified` in `PLATFORM_OBJECT_TENANCY`, tracked as #14570).
+ *   - REST / session writes fill it (`SqlDriver.injectTenantOnInsert`), and
+ *     since ADR-0131 so do seed replay (C1) and an elevated system-context
+ *     insert (D9: the derived organization or a refusal, judged by the tenant
+ *     column with no per-table exemption left, D13). A NULL that remains is
+ *     pre-18.0 residue the ownership ceremony attributes, or a lean
+ *     composition with no organization object.
  *
  *   ⇒ a NULL there means UNKNOWN tenancy, not "platform-global", and routing
  *   approval authority over tenant A's record to an identity of unknown
@@ -39,8 +41,8 @@
  *         ONLY the request organization's users, at both depths of the walk.
  *   B2  — THE CONTROL: an org-stamped unit still routes its own members —
  *         strict, not broken — and still drops the other tenant's row.
- *   B3  — THE DECLARED COST: org-less membership rows (seed replay, elevated
- *         writes) do NOT route when the request carries an organization; the
+ *   B3  — THE DECLARED COST: org-less membership rows (pre-18.0 residue)
+ *         do NOT route when the request carries an organization; the
  *         slot falls to the literal and the #3807 warning fires, so the empty
  *         slate is loud rather than silent.
  *   B4  — a request carrying no organization is untouched: every member
@@ -215,8 +217,8 @@ describe('#14946 business-unit MEMBER org screen', () => {
   });
 
   it('B3 — THE DECLARED COST: org-less membership rows do NOT route when the request carries an organization, and the empty slate is LOUD', async () => {
-    // Seed replay and elevated system writes both leave `organization_id`
-    // NULL (#14570). Unknown tenancy is not "this organization": the slot
+    // A membership row written before 18.0 can still carry a NULL
+    // `organization_id`. Unknown tenancy is not "this organization": the slot
     // falls to the literal, which #3807's warning already reports.
     engine._tables['sys_business_unit_member'] = [
       { id: 'bm_seeded', business_unit_id: 'bu_seeded', user_id: 'u_seeded', organization_id: null },
