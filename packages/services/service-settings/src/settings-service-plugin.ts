@@ -18,6 +18,9 @@ import {
   // admission seam at once -- see `tenancyServiceResolver` below for the half
   // that stays this seam's own.
   classifyAdmissionTenancyPosture,
+  // [ADR-0131 D9] The organization a caller that names none acts in — the
+  // engine's own predicate, answered from the composition's facts.
+  resolveGuestOrganization,
   type TenancyPostureSource,
   type TenancyServiceResolver,
 } from '@objectstack/core';
@@ -332,6 +335,14 @@ export class SettingsServicePlugin implements Plugin {
             // it — so the service and the door it sits behind agree on whether
             // organizations are walled off. Read live at each use.
             tenancyPosture: () => this.resolveAdmissionTenancyPosture(ctx),
+            // [ADR-0131 D8/D9] The one organization a caller that names none
+            // reads and writes as where no wall stands — the process-wide
+            // readers (the email brand name, the boot-time locale) included —
+            // asked the way the engine asks it for a system write: derived at
+            // exactly one organization under `single`, none at zero or several,
+            // and no organization object in a lean composition.
+            organization: async () =>
+              resolveGuestOrganization(engine, await this.resolveAdmissionTenancyPosture(ctx)),
           },
         );
         // Each namespace's `readPermission`, applied at the generic data
