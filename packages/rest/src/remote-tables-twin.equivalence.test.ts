@@ -231,7 +231,7 @@ const makeQl = () => bindTestSecurityCatalog({
 function mountBoth() {
   const service = new ExternalDatasourceService({
     introspect: async () => REMOTE,
-    getDatasource: async (name: string) => ({ name }),
+    getDatasource: async (name: string) => ({ name, schemaMode: 'external' as const }),
     getObject: async () => undefined,
     listObjects: async () => [],
   });
