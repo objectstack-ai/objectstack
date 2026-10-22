@@ -302,7 +302,15 @@ describe('os serve — the machine channels announce an address only when an HTT
   it(
     'production --no-server (the card\'s command): no objectstack:listening, no state file, seed-settled alone',
     async () => {
-      const { banner, messages, stateFilesEverSeen, stop } = await boot(plainDir, {}, ['--no-server', '--preset', 'minimal']);
+      // [ADR-0131 D9] The card's `--preset minimal` composes no auth, and a
+      // production boot with no auth is now refused whether or not `--server`;
+      // the same kernel-only boot with auth composed (a secret and a store) is
+      // today's production `--no-server`.
+      const { banner, messages, stateFilesEverSeen, stop } = await boot(
+        plainDir,
+        { OS_DATABASE_URL: 'file:./nos.db', OS_AUTH_SECRET: AUTH_SECRET },
+        ['--no-server'],
+      );
       stop();
       const seen = `\n--- messages ---\n${JSON.stringify(messages)}\n--- banner ---\n${banner}`;
       // `soft`: three independent channels, each reported on its own when it regresses.
@@ -356,8 +364,9 @@ describe('os serve — the machine channels announce an address only when an HTT
     async () => {
       const { banner, messages, stateAtListening, stop } = await boot(
         honoDir,
-        { OS_DATABASE_URL: 'file:./ctl.db' },
-        ['--no-server', '--preset', 'minimal'],
+        // [ADR-0131 D9] With auth composed — `--preset minimal` composes none, which a production boot now refuses.
+        { OS_DATABASE_URL: 'file:./ctl.db', OS_AUTH_SECRET: AUTH_SECRET },
+        ['--no-server'],
       );
       const seen = `\n--- messages ---\n${JSON.stringify(messages)}\n--- banner ---\n${banner}`;
       try {

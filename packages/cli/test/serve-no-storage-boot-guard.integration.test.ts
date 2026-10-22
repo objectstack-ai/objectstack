@@ -37,8 +37,14 @@ import {
  *   1. no driver + the auth service under the `single` posture ⇒ REFUSED, exit 1,
  *      naming the remedies, before any start() (the fixture's own plugin
  *      initialized and never started), and neither downstream line prints;
- *   2. no driver + no auth composed (`--no-server --preset minimal`) ⇒ ONE line
- *      before any start(), and the boot still reaches its banner;
+ *   2. no driver + no auth composed ⇒ ONE line before any start(), and the
+ *      boot still reaches its banner. [ADR-0131 D9] This used to be reached
+ *      with `--no-server --preset minimal`; a production boot that composes no
+ *      auth is now refused whether or not `--server`, so the leg boots the one
+ *      production composition that still composes no auth — the cloud
+ *      runtime's host kernel ({@link HOST_KERNEL_PLUGIN}, `tiers: ['core',
+ *      'auth']` so the tier is on and skipped there), still `--no-server
+ *      --preset minimal`, with no secret;
  *   3. a stack plugin whose NAME no driver test matches registers a `driver.*`
  *      service in init() ⇒ silent, and the boot reaches its banner (this shape
  *      booted before the guard and must keep booting);
@@ -95,6 +101,9 @@ const HOST_PLUGIN = `{
   start: async () => { process.stderr.write(${JSON.stringify(`${MARKER_START}\n`)}); },
 }`;
 
+/** The cloud runtime's host kernel, as `isHostKernelComposition` recognises it: auth is skipped with a warning. */
+const HOST_KERNEL_PLUGIN = `{ name: 'com.objectstack.runtime.objectos-environment', version: '0.0.0', init: async () => {}, start: async () => {} }`;
+
 /** What `spawn(…, { stdio: ['ignore', 'pipe', 'pipe'] })` returns — no `stdin`. */
 type BootChild = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -104,6 +113,8 @@ let root: string;
 let plainDir: string;
 /** The same, plus a plugin that registers a SQL driver as `driver.*` in init(). */
 let driverDir: string;
+/** The same, on the cloud runtime's host kernel — see case 2. */
+let hostKernelDir: string;
 
 /**
  * Make `@objectstack/driver-sql` resolvable from `dir`: a symlink to the
@@ -123,10 +134,10 @@ function linkDriverSql(dir: string): void {
   symlinkSync(pkgRoot, join(scope, 'driver-sql'), 'dir');
 }
 
-function writeFixture(dir: string, header: string, plugins: string): void {
+function writeFixture(dir: string, header: string, plugins: string, extra = ''): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fx-23573', private: true, type: 'module' }));
-  const source = defineStackSourceFromLiteral(`{ manifest: ${MANIFEST}, objects: [${OBJECT}], plugins: [${plugins}] }`);
+  const source = defineStackSourceFromLiteral(`{ manifest: ${MANIFEST}, ${extra}objects: [${OBJECT}], plugins: [${plugins}] }`);
   writeFileSync(join(dir, 'objectstack.config.ts'), `${header}${source}`);
   linkSpec(dir);
 }
@@ -205,6 +216,9 @@ beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'os-serve-no-storage-'));
   plainDir = join(root, 'plain');
   writeFixture(plainDir, '', HOST_PLUGIN);
+  hostKernelDir = join(root, 'host-kernel');
+  // `tiers` opens `auth`, which the host-kernel path skips; `--preset minimal` keeps the always-on slate out, as before.
+  writeFixture(hostKernelDir, '', `${HOST_PLUGIN}, ${HOST_KERNEL_PLUGIN}`, "tiers: ['core', 'auth'], ");
   driverDir = join(root, 'driver');
   writeFixture(
     driverDir,
@@ -260,7 +274,7 @@ describe('os serve — a production host config with no storage (#23573)', () =>
   it(
     'prints one line before any plugin starts and keeps booting when no auth is composed',
     async () => {
-      const { output, ready } = await boot(plainDir, {}, ['--no-server', '--preset', 'minimal']);
+      const { output, ready } = await boot(hostKernelDir, {}, ['--no-server', '--preset', 'minimal']);
       const seen = `\n--- output ---\n${output}`;
 
       expect(ready, `a boot that booted before the guard no longer reaches its banner${seen}`).toBe(true);
