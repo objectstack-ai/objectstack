@@ -208,6 +208,17 @@ describe('bundled template declared version surfaces', () => {
     //   "vitest": "~4.0.0"   npm 10.9.x / 11.21.x exit 0, every one the same tree
     //                                             as npm 11 installs without it
     //
+    // The range has since moved to `~4.1.12`: 4.0.18's `@vitest/mocker` is inside
+    // GHSA-qxg6-89mg-rqv8, which has no 4.0.x fix. Re-measured 2026-10-22 on this
+    // template against the published 18.0.0, each leg with a fresh `--cache`:
+    //
+    //   "~4.1.12", no override npm 10.9.9         exit 1, the crash (vitest 4.1.12
+    //                                             itself peers the contradiction now)
+    //   "~4.1.12" + override  npm 10.9.4 / 10.9.9 exit 0, one vitest and one
+    //                         / 11.21.1           @vitest/mocker, both 4.1.12; `npm
+    //                                             audit` lists no vitest entry, and
+    //                                             `npm test` passes on npm 10.9.9
+    //
     // The override routes every `vitest` edge in the npm graph to the range this
     // project declares, the vitest npm 11 already dedupes the whole tree to. pnpm
     // ignores npm's `overrides` field (measured on 10.28.0): pnpm users see no change.

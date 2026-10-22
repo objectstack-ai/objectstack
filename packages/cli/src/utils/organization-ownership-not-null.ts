@@ -12,6 +12,12 @@ export interface NotNullTarget {
   isDeclared(table: string): boolean;
   /** The declared table a rotation shard belongs to (`sys_activity__r20261019` → `sys_activity`), or `null`. */
   shardBaseOf?(table: string): string | null;
+  /**
+   * Whether the table's column is NOT NULL already, read from the database the
+   * plan placed it in; `null` when it cannot be read. Asked of a rotation shard
+   * only: a shard the driver created NOT NULL has nothing left to do.
+   */
+  isNotNull?(table: string, column: string, database: string | undefined): Promise<boolean | null>;
 }
 
 /**
@@ -25,10 +31,14 @@ export interface NotNullTarget {
  * `tighten_not_null`, handed to the one driver that holds the table. A table
  * the composition does not declare is not rebuilt (`not-declared`); a
  * transport whose apply door cannot perform the op (the Turso remote face,
- * `driftApplyLimit`) is `unsupported`, never attempted; so is a rotation
- * shard: the apply door rebuilds a table against its own declaration, which a
- * shard does not have, and every shard rotated in later is created from the
- * base's declaration, nullable — the shard family holds NOT NULL nowhere.
+ * `driftApplyLimit`) is `unsupported`, never attempted.
+ *
+ * A rotation shard is never rebuilt: the apply door rebuilds a table against
+ * its own declaration, which a shard does not have. The driver creates every
+ * shard it rotates in with the tenant column NOT NULL (`ensureShardTable`), so
+ * a shard rotated in by this release is `already-not-null`, nothing to do. A
+ * shard rotated in before the driver did that stays nullable and is
+ * `unsupported`; it is dropped when its period leaves the base's retention.
  */
 export async function applyNotNullThroughDrift(target: NotNullTarget, columns: readonly NotNullColumn[]): Promise<NotNullOutcome[]> {
   const outcomes: NotNullOutcome[] = [];
@@ -39,11 +49,17 @@ export async function applyNotNullThroughDrift(target: NotNullTarget, columns: r
     }
     const base = target.shardBaseOf?.(table) ?? null;
     if (base !== null && base !== table) {
+      if ((await target.isNotNull?.(table, column, database)) === true) {
+        outcomes.push({ table, column, outcome: 'already-not-null' });
+        continue;
+      }
       outcomes.push({
         table,
         column,
         outcome: 'unsupported',
-        detail: `${table} is a rotation shard of ${base}: the drift apply door rebuilds only a declared table, and each new shard is created with ${base}'s nullable column`,
+        detail:
+          `${table} is a rotation shard of ${base}, rotated in before shards were created with ${column} NOT NULL: the ` +
+          `drift apply door rebuilds only a declared table, and the shard is dropped when its period leaves ${base}'s retention`,
       });
       continue;
     }

@@ -865,6 +865,14 @@ export default class OrganizationOwnershipCeremony extends Command {
             const { StorageNameMapping } = await import('@objectstack/spec/system');
             const { rotationBaseOf } = await import('../../utils/unmanaged-tables.js');
             const { applyNotNullThroughDrift } = await import('../../utils/organization-ownership-not-null.js');
+            const { readColumnNullability } = await import('../../utils/nullable-tenant-columns.js');
+            const { normalizeRows } = await import('@objectstack/metadata-protocol');
+            const driverFor = (database: string | undefined): unknown =>
+              database === undefined
+                ? liveStack.driver
+                : database === TELEMETRY_DATASOURCE && liveStack.telemetryDatabase
+                  ? liveStack.drivers[1]
+                  : undefined;
             const declared = new Set(
               (liveStack.allObjects() as Array<{ name?: unknown } | null>)
                 .map((o) => o?.name)
@@ -875,12 +883,13 @@ export default class OrganizationOwnershipCeremony extends Command {
               {
                 isDeclared: (table) => declared.has(rotationBaseOf(table) ?? table),
                 shardBaseOf: (table) => rotationBaseOf(table) ?? null,
-                driverFor: (database) =>
-                  (database === undefined
-                    ? liveStack.driver
-                    : database === TELEMETRY_DATASOURCE && liveStack.telemetryDatabase
-                      ? liveStack.drivers[1]
-                      : undefined) as never,
+                // [ADR-0131 D1] A shard the driver created NOT NULL is reported
+                // so, never as one the ceremony could not tighten.
+                isNotNull: async (table, column, database) => {
+                  const read = await readColumnNullability(driverFor(database), [column], normalizeRows);
+                  return 'detail' in read ? null : read.tables.get(table)?.get(column) ?? null;
+                },
+                driverFor: (database) => driverFor(database) as never,
               },
               columns,
             );
