@@ -12,8 +12,9 @@
  *     that ends the last one.
  *  2. **The guard judges the organization writes that move the anchor.** The
  *     Default Organization is the one with `slug = 'default'`, else the only
- *     one — so re-slugging it while another organization exists, or deleting
- *     it, takes the standing away with no grant row touched.
+ *     one — so re-slugging it while another organization exists, deleting it,
+ *     or creating a second organization beside a sole one not slugged
+ *     `default`, takes the standing away with no grant row touched.
  *
  * Same method as `last-admin-guard.config-anchor.test.ts`: a REAL ObjectQL
  * engine over better-sqlite3 `:memory:`, so the engine dispatches the hooks.
@@ -104,7 +105,9 @@ afterEach(async () => {
  * writes — owned by the Default Organization — and nothing else (no
  * membership, so the organization-owner half of the enumeration counts nobody).
  */
-async function promotedSingle(opts: { secondOrganization?: boolean; grantOwner?: string } = {}): Promise<ObjectQL> {
+async function promotedSingle(
+  opts: { secondOrganization?: boolean; grantOwner?: string; defaultSlug?: string } = {},
+): Promise<ObjectQL> {
   const engine = new ObjectQL();
   engines.push(engine);
   engine.registerDriver(
@@ -117,7 +120,7 @@ async function promotedSingle(opts: { secondOrganization?: boolean; grantOwner?:
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
   guard = registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard.default-org' });
 
-  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, SYSTEM);
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: opts.defaultSlug ?? 'default' }, SYSTEM);
   if (opts.secondOrganization) {
     await engine.insert('sys_organization', { id: 'org_b', name: 'B', slug: 'b' }, SYSTEM);
   }
@@ -172,6 +175,68 @@ describe('[ADR-0131 D5] the organization writes that move the anchor off that gr
     await expect(engine.update('sys_organization', { id: 'org_default', name: 'Acme Inc' }, SYSTEM)).resolves.toBeDefined();
     // …and the administrator is still counted afterwards.
     await expect(ban(engine, 'usr_admin')).rejects.toMatchObject(refusal);
+  });
+});
+
+describe('[ADR-0131 D5] creating an organization that moves the anchor off that grant is judged', () => {
+  // A sole organization is the Default Organization whatever its slug, so the
+  // fixture's `acme` organization owns the anchoring grant until a second
+  // organization arrives: then none is the Default Organization (the second
+  // one has another slug), or the second one is (it is slugged `default`).
+  const organizationIds = async (engine: ObjectQL) =>
+    ((await engine.find('sys_organization', { where: {}, ...SYSTEM })) as Array<Record<string, unknown>>)
+      .map((row) => row.id)
+      .sort();
+
+  it('a second organization beside a sole one not slugged `default` is refused, and nothing is written', async () => {
+    const engine = await promotedSingle({ defaultSlug: 'acme' });
+    await expect(engine.insert('sys_organization', { id: 'org_b', name: 'B', slug: 'b' }, SYSTEM))
+      .rejects.toMatchObject({ ...refusal, object: 'sys_organization' });
+    expect(await organizationIds(engine)).toEqual(['org_default']);
+    // The grant still anchors: its holder is still the last administrator.
+    await expect(ban(engine, 'usr_admin')).rejects.toMatchObject(refusal);
+  });
+
+  it('a new organization slugged `default` beside a sole one with another slug is refused', async () => {
+    const engine = await promotedSingle({ defaultSlug: 'acme' });
+    await expect(engine.insert('sys_organization', { id: 'org_b', name: 'B', slug: 'default' }, SYSTEM))
+      .rejects.toMatchObject({ ...refusal, object: 'sys_organization' });
+    expect(await organizationIds(engine)).toEqual(['org_default']);
+  });
+
+  it('the refusal names the remedy that keeps the anchor: slug the current one `default` first, then the insert is admitted', async () => {
+    const engine = await promotedSingle({ defaultSlug: 'acme' });
+    const err = await engine.insert('sys_organization', { id: 'org_b', name: 'B', slug: 'b' }, SYSTEM)
+      .then(() => undefined, (e: unknown) => e as Error);
+    expect(err?.message).toContain('organization creation');
+    await expect(engine.update('sys_organization', { id: 'org_default', slug: 'default' }, SYSTEM)).resolves.toBeDefined();
+    await expect(engine.insert('sys_organization', { id: 'org_b', name: 'B', slug: 'b' }, SYSTEM)).resolves.toBeDefined();
+    await expect(ban(engine, 'usr_admin')).rejects.toMatchObject(refusal);
+  });
+
+  it('CONTROL — a `default`-slugged Default Organization stays put, so a second organization is admitted', async () => {
+    const engine = await promotedSingle();
+    await expect(engine.insert('sys_organization', { id: 'org_b', name: 'B', slug: 'b' }, SYSTEM)).resolves.toBeDefined();
+    await expect(ban(engine, 'usr_admin')).rejects.toMatchObject(refusal);
+  });
+
+  it('CONTROL — an administrator left standing elsewhere admits the insert: the guard is break-glass, not standing preservation', async () => {
+    const engine = await promotedSingle({ defaultSlug: 'acme' });
+    await engine.insert('sys_member', { id: 'mem_owner', user_id: 'usr_admin', organization_id: 'org_default', role: 'owner' }, SYSTEM);
+    await expect(engine.insert('sys_organization', { id: 'org_b', name: 'B', slug: 'b' }, SYSTEM)).resolves.toBeDefined();
+  });
+
+  it('CONTROL — under a wall no grant anchors, so the insert is admitted without a read', async () => {
+    const engine = await promotedSingle({ defaultSlug: 'acme' });
+    process.env[POSTURE_ENV] = 'isolated';
+    const reads: string[] = [];
+    const find = engine.find.bind(engine);
+    (engine as unknown as { find: typeof engine.find }).find = ((object: string, ...rest: unknown[]) => {
+      reads.push(object);
+      return (find as (...a: unknown[]) => unknown)(object, ...rest);
+    }) as typeof engine.find;
+    await expect(engine.insert('sys_organization', { id: 'org_b', name: 'B', slug: 'b' }, SYSTEM)).resolves.toBeDefined();
+    expect(reads).toEqual([]);
   });
 });
 

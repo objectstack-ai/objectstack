@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { permissionSetDefinitionFromRow } from '@objectstack/core';
+import { permissionSetDefinitionFromRow, readDefaultOrganizationId } from '@objectstack/core';
 import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn, hashSpec } from '@objectstack/metadata-core';
 import { buildOrganizationOwnershipPlan, inventoryDigest } from './organization-ownership-plan.js';
 import {
@@ -83,7 +83,7 @@ function executor(opts: { failOnceOn?: RegExp } = {}): ApplyExecutor {
  * Like the registry, it serves a saved definition only from the next boot on
  * ({@link boot}), never the moment it is saved.
  */
-function catalog(): CatalogPort & MetadataDoorPort & TemplatePort & {
+function catalog(opts: { adminSetDeclared?: boolean } = {}): CatalogPort & MetadataDoorPort & TemplatePort & {
   saved: Map<string, Record<string, unknown>>;
   templates: Map<string, Record<string, unknown>>;
   /** Environment `view` saves, in order, with the package each was saved into. */
@@ -92,6 +92,11 @@ function catalog(): CatalogPort & MetadataDoorPort & TemplatePort & {
 } {
   const declared = new Map<string, Record<string, unknown>>([
     ['permission|member_default', permissionSetDefinitionFromRow(MEMBER_DEFAULT_ROW)],
+    // The composed security plugin ships it; `adminSetDeclared: false` is a
+    // catalog composed without that plugin.
+    ...(opts.adminSetDeclared === false
+      ? []
+      : [['permission|admin_full_access', permissionSetDefinitionFromRow(ADMIN_FULL_ACCESS_ROW)] as [string, Record<string, unknown>]]),
     ['position|org_admin', { name: 'org_admin', label: 'Org Admin', delegatable: false, permissionSets: ['member_default'] }],
   ]);
   const saved = new Map<string, Record<string, unknown>>();
@@ -276,6 +281,14 @@ const MEMBER_DEFAULT_ROW = {
   system_permissions: '[]',
 };
 
+/** The platform set the `single` first-user promotion grants (plugin-security ships it). */
+const ADMIN_FULL_ACCESS_ROW = {
+  name: 'admin_full_access',
+  label: 'Full Access',
+  object_permissions: '{}',
+  system_permissions: '[]',
+};
+
 /** A 17.x-shaped database carrying every fate, on the post-stage-8 shape. */
 function seed(): void {
   db.exec(`
@@ -290,7 +303,8 @@ function seed(): void {
       ('ps_null', NULL, 'member_default', 'Member', 'platform', 1, '{"crm_deal":{"allowRead":true}}', '[]'),
       ('ps_org', 'org_default', 'member_default', 'Member', 'package', 1, '{"crm_deal":{"allowRead":true}}', '[]'),
       ('ps_auth', 'org_default', 'field_auditor', 'Field Auditor', 'admin', 1,
-        '{"crm_deal":{"allowRead":true,"allowEdit":true}}', '["export_reports"]');
+        '{"crm_deal":{"allowRead":true,"allowEdit":true}}', '["export_reports"]'),
+      ('ps_admin_mirror', NULL, 'admin_full_access', 'Full Access', 'platform', 1, '{}', '[]');
     CREATE TABLE sys_position (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, label TEXT, managed_by TEXT,
       delegatable INTEGER, active INTEGER);
     INSERT INTO sys_position VALUES
@@ -334,7 +348,11 @@ function seed(): void {
       ('grant_1', 'org_default', 'usr_1', 'ps_org', NULL),
       ('grant_2', NULL, 'usr_2', 'ps_null', NULL),
       ('grant_3', 'org_default', 'usr_3', 'ps_auth', NULL),
-      ('grant_4', 'org_default', 'usr_4', 'ps_null', 'member_default');
+      ('grant_4', 'org_default', 'usr_4', 'ps_null', 'member_default'),
+      -- the first-user promotion's grant as an earlier release wrote it: no
+      -- organization (ADR-0131 D5 — the ceremony attributes it to the Default
+      -- Organization, the owner the resolver reads the anchor by)
+      ('grant_promoted', NULL, 'usr_admin', 'ps_admin_mirror', NULL);
     CREATE TABLE sys_business_unit (id TEXT PRIMARY KEY, organization_id TEXT, parent_business_unit_id TEXT);
     INSERT INTO sys_business_unit VALUES ('bu_b', 'org_b', NULL);
     CREATE TABLE sys_user_position (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT, position TEXT, business_unit_id TEXT);
@@ -396,6 +414,21 @@ function accessBefore(): string[] {
   }
   return [...out].sort();
 }
+
+/**
+ * The fixture database as an engine answers `find` — the one-argument
+ * spelling the authorization resolver's reads use — so a reader that takes an
+ * engine reads these same rows.
+ */
+const sqliteEngine = () => ({
+  async find(object: string, query: { where?: Record<string, unknown>; limit?: number }) {
+    const where = query.where ?? {};
+    const keys = Object.keys(where);
+    return db.prepare(
+      `SELECT * FROM "${object}"${keys.length ? ` WHERE ${keys.map((k) => `"${k}" = ?`).join(' AND ')}` : ''} ORDER BY id LIMIT ${query.limit ?? 100}`,
+    ).all(...keys.map((k) => where[k] as string)) as Record<string, unknown>[];
+  },
+});
 
 /** Effective access AFTER — the v18 reading, on the next boot: every reference is a name, resolved in the catalog. */
 async function accessAfter(c: ReturnType<typeof catalog>): Promise<string[]> {
@@ -519,6 +552,7 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
   it('comes through with effective access identical, mirrors gone, owners written, the orphan reported and holding certification, counts reconciling', async () => {
     const before = accessBefore();
     const countsBefore = counts();
+    const defaultOrganizationBefore = await readDefaultOrganizationId(sqliteEngine());
     const c = catalog();
     const l = ledger();
 
@@ -582,6 +616,7 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
       { id: 'grant_2', permission_set: 'member_default' },
       { id: 'grant_3', permission_set: 'field_auditor' },
       { id: 'grant_4', permission_set: 'member_default' },
+      { id: 'grant_promoted', permission_set: 'admin_full_access' },
     ]);
     expect(rows(`SELECT name FROM pragma_table_info('sys_user_permission_set') WHERE name = 'permission_set_id'`)).toEqual([]);
     expect(writes).toContain('ALTER TABLE sys_user_permission_set DROP COLUMN permission_set_id');
@@ -591,6 +626,14 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     expect(rows(`SELECT organization_id FROM sys_attachment WHERE id = 'att_1'`)).toEqual([{ organization_id: 'org_b' }]);
     expect(rows(`SELECT organization_id FROM crm_deal WHERE id = 'deal_2'`)).toEqual([{ organization_id: 'org_default' }]);
     expect(rows(`SELECT organization_id FROM sys_user_permission_set WHERE id = 'grant_2'`)).toEqual([{ organization_id: 'org_default' }]);
+    // [ADR-0131 D5] The promotion's organization-less `admin_full_access` grant
+    // is owned by the organization the resolver reads the anchor by — the
+    // answer of `readDefaultOrganizationId` (`@objectstack/core`) over this
+    // same database — so the grant that anchored platform standing before the
+    // ceremony is the one that anchors it after.
+    expect(defaultOrganizationBefore).toBe('org_default');
+    expect(rows(`SELECT organization_id FROM sys_user_permission_set WHERE id = 'grant_promoted'`))
+      .toEqual([{ organization_id: defaultOrganizationBefore }]);
 
     // The unattributable row is still present, still NULL — never guessed,
     // never deleted — reported by id, and held with its count and remedy.
@@ -922,7 +965,9 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(rows(`SELECT organization_id FROM sys_file WHERE id = 'file_1'`)).toEqual([{ organization_id: 'org_b' }]);
     expect(c.saved.size).toBe(0);
     expect(report.steps.find((s) => s.step === 'mirror-deletion')!.status).toBe('not-reached');
-    expect(rows('SELECT COUNT(*) AS n FROM sys_permission_set')).toEqual([{ n: 3 }]);
+    expect(rows('SELECT COUNT(*) AS n FROM sys_permission_set')).toEqual([{ n: 4 }]);
+    // The promotion's organization-less grant is not attributed under a wall.
+    expect(rows(`SELECT organization_id FROM sys_user_permission_set WHERE id = 'grant_promoted'`)).toEqual([{ organization_id: null }]);
     // The promotion runs under every posture; nothing is deleted before mirror deletion.
     expect([...c.templates.keys()].sort()).toEqual(['auth.reset_password|en-US', 'crm.memo|en-US', 'crm.note|en-US', 'crm.renewal|zh-CN']);
     expect(rows('SELECT COUNT(*) AS n FROM sys_email_template')).toEqual([{ n: 6 }]);
@@ -2102,7 +2147,7 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
         ('grant_nobypass', 'org_default', 'usr_admin', NULL, 'organization_admin_no_bypass'),
         ('grant_unknown', 'org_default', 'usr_9', NULL, 'zz_unknown_set');
     `);
-    const report = await apply(catalog(), ledger(), { securityPlugin: NO_SECRET });
+    const report = await apply(catalog({ adminSetDeclared: false }), ledger(), { securityPlugin: NO_SECRET });
 
     const rewrite = step(report, 'rewrite');
     expect(rewrite.status).toBe('blocked');
@@ -2128,7 +2173,7 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
         ('grant_admin_legacy', 'org_default', 'usr_admin', 'ps_admin', NULL),
         ('grant_gone_legacy', 'org_default', 'usr_9', 'ps_gone', NULL);
     `);
-    const report = await apply(catalog(), ledger(), { securityPlugin: NO_SECRET });
+    const report = await apply(catalog({ adminSetDeclared: false }), ledger(), { securityPlugin: NO_SECRET });
 
     const rewrite = step(report, 'rewrite');
     expect(rewrite.status).toBe('blocked');
@@ -2145,7 +2190,7 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
 
   it('authored-conversion: the seeded everyone binding gets the composition, never removal; an undeclared position keeps its remedy', async () => {
     db.exec(v17Bindings);
-    const report = await apply(catalog(), ledger(), { securityPlugin: NO_SECRET });
+    const report = await apply(catalog({ adminSetDeclared: false }), ledger(), { securityPlugin: NO_SECRET });
 
     const conversion = step(report, 'authored-conversion');
     expect(conversion.status).toBe('blocked');
@@ -2161,7 +2206,7 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
 
   it('under a wall, the rewrite gate: the everyone binding gets the composition; an undeclared position gets the walled remedy', async () => {
     db.exec(v17Bindings);
-    const report = await apply(catalog(), ledger(), { posture: 'isolated', securityPlugin: NO_SECRET });
+    const report = await apply(catalog({ adminSetDeclared: false }), ledger(), { posture: 'isolated', securityPlugin: NO_SECRET });
 
     expect(step(report, 'authored-conversion').status).toBe('done');
     const rewrite = step(report, 'rewrite');
@@ -2181,7 +2226,7 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
     ['not said', undefined],
   ])('control (%s): authored-conversion keeps the remedy — the composition is the boot\'s answer, never inferred', async (_label, securityPlugin) => {
     db.exec(v17Bindings);
-    const conversion = step(await apply(catalog(), ledger(), { securityPlugin }), 'authored-conversion');
+    const conversion = step(await apply(catalog({ adminSetDeclared: false }), ledger(), { securityPlugin }), 'authored-conversion');
     expect(blockerOf(conversion, 'position everyone ')).toMatch(/or remove the bindings/);
     expect(conversion.blockers.join('\n')).not.toContain(COMPOSITION);
   });
@@ -2194,7 +2239,7 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
       INSERT INTO sys_user_permission_set VALUES ('grant_admin', 'org_default', 'usr_admin', NULL, 'admin_full_access');
       ${v17Bindings}
     `);
-    const rewrite = step(await apply(catalog(), ledger(), { posture: 'isolated', securityPlugin }), 'rewrite');
+    const rewrite = step(await apply(catalog({ adminSetDeclared: false }), ledger(), { posture: 'isolated', securityPlugin }), 'rewrite');
     expect(blockerOf(rewrite, 'the permission set admin_full_access,')).toMatch(/or remove the grants/);
     // Not the pointer. This fake catalog declares no `everyone` (a composed boot declares it, sealed), so which
     // walled remedy follows is not this control's question.
