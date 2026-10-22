@@ -172,9 +172,11 @@ export const POLICY_STAMPS = [
     // The npm override that routes exceljs's `uuid ^8.3.0` (through
     // `@objectstack/rest`) out of GHSA-w5hq-g745-h8pq. The field is
     // `SCAFFOLD_UUID_OVERRIDE_SELECTOR`, spelled here as the key the template
-    // declares; `os init` / `os create` emit it from that constant, and the
-    // CLI's scaffold-emission-policy e2e pin holds the on-ramp's whole
-    // `overrides` block equal to theirs, so the two spellings cannot part.
+    // declares; `os init` / `os create` emit it from that constant. This
+    // script's `--check` compares VALUES only, so the key spellings are held
+    // equal by `packages/cli/test/scaffold-emission-policy.e2e.test.ts`
+    // (nightly tier), which compares the on-ramp's whole `overrides` block
+    // with theirs.
   },
 ];
 
