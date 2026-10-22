@@ -81,13 +81,15 @@ const DECLARED_RULE_ORGANIZATION_PAGE = 500;
  * [ADR-0131 D2] The scopes declared sharing rules are served in
  * (`SharingRuleService.setDeclaredRuleScopes`): exactly one organization-less
  * scope under `single`, and under a wall EVERY organization, read by a keyset
- * walk on `id` until a short page. These are the passes the retired seeder
- * made, as reads (#10103).
+ * walk on `id` until a short page — short as READ, never as kept: a page that
+ * came back full is followed, whatever it held. These are the passes the
+ * retired seeder made, as reads (#10103).
  *
- * `null` when the enumeration failed at any page: an unreadable
- * `sys_organization` means "we do not know", never "there are no tenants" —
- * and never a partial list, because the scopes decide which name-keyed grants
- * the boot sweep keeps. The caller marks the scopes UNKNOWN
+ * `null` when the enumeration failed at any page, or a page answered a row
+ * whose `id` the walk cannot read: an unreadable `sys_organization` means "we
+ * do not know", never "there are no tenants" — and never a partial list,
+ * because the scopes decide which name-keyed grants the boot sweep keeps. The
+ * caller marks the scopes UNKNOWN
  * (`SharingRuleService.setDeclaredRuleScopesUnknown`): no declared rule is
  * served, and no declared rule's grant is revoked.
  */
@@ -116,11 +118,22 @@ export async function resolveDeclaredRuleScopes(
         'and restart.', { error: e?.message, read: ids.length });
       return null;
     }
-    const page = (Array.isArray(rows) ? rows : [])
+    const read: any[] = Array.isArray(rows) ? rows : [];
+    const page = read
       .map((r: any) => r?.id)
       .filter((id: unknown): id is string => typeof id === 'string' && id !== '');
+    // A row without a readable id is a failed read, not a shorter page: judged
+    // on the kept ids, a full page holding one would end the walk early and
+    // answer the partial list this function never answers.
+    if (page.length !== read.length) {
+      logger?.warn?.('SharingServicePlugin: sys_organization answered a row with no readable id — declared ' +
+        'sharing rules are served in NO organization until the next boot, and no declared rule\'s grant is ' +
+        'revoked meanwhile (the standing grants keep answering). Remedy: give every sys_organization row ' +
+        'its id and restart.', { read: ids.length });
+      return null;
+    }
     ids.push(...page);
-    if (page.length < DECLARED_RULE_ORGANIZATION_PAGE) return ids;
+    if (read.length < DECLARED_RULE_ORGANIZATION_PAGE) return ids;
     after = page[page.length - 1];
   }
 }
