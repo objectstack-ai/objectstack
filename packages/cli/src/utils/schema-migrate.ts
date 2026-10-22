@@ -1564,8 +1564,9 @@ export async function bootSchemaStack(
           + 'has a database whose apply limit can be read.',
         );
       }
-      // A driver that declares nothing applies what the differ means it to.
-      return owner.driftApplyLimit ? owner.driftApplyLimit(entry.op.type) : null;
+      // The entry's own limit first (a unique index its rows violate, ADR-0120
+      // D4), then the driver's for its op type; neither, and it applies.
+      return entry.applyLimit ?? (owner.driftApplyLimit ? owner.driftApplyLimit(entry.op.type) : null);
     },
     managedTableCount,
     kernel,

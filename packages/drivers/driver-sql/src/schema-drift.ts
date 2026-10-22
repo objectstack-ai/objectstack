@@ -404,6 +404,18 @@ export interface ManagedDriftEntry extends SchemaDiffEntry {
   op: DriftOp;
   /** Human one-liner with an actionable hint. */
   message: string;
+  /**
+   * [ADR-0120 D4] Why the reporting driver's apply door will not perform THIS
+   * entry on this database, read from its data when the entry was reported —
+   * absent when nothing in the data stops it. The duplicate pre-flight sets it
+   * on a unique index the existing rows already violate (the conflicting
+   * groups are the reason): the apply refuses it however it is confirmed, so
+   * `os migrate plan` / `apply` list the entry with this reason and never offer
+   * `--allow-destructive` for it. The one structured form of that judgement;
+   * ⛔ never re-derived from {@link message}. A limit of a whole op type on a
+   * transport is the driver's own `driftApplyLimit`, not this.
+   */
+  applyLimit?: string;
 }
 
 /**

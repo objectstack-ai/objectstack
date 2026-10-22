@@ -14190,6 +14190,10 @@ export class SqlDriver implements IDataDriver {
       const report = formatDuplicateGroups(duplicates);
       d.category = 'destructive';
       d.severity = 'error';
+      // The block, declared on the entry: `os migrate plan` / `apply` read it
+      // here and never offer `--allow-destructive` for an op the apply refuses
+      // on this data however it is confirmed.
+      d.applyLimit = `existing rows already violate the unique key: ${report}`;
       d.message = nullSafeKey
         ? `${op.table}: cannot ${tighten ? 'tighten' : 'create'} '${op.indexName}' as ${signature} — existing rows ` +
           `already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted: SQL ` +
