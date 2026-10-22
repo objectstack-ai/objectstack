@@ -4,7 +4,7 @@
 
 fix(core)!: `resolveLocalizationContext`'s direct `sys_setting` fallback reads the caller's organization's rows only, never another organization's row or a row with no organization outside a lean embedding
 
-Clause-②: yes (narrowing)
+Clause-②: no (narrowing)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) Which stored `sys_setting` row the localization fallback takes changes. No key of any metadata schema is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite and no tombstone is needed. No export, type, error code or route is removed or renamed: `resolveLocalizationContext` keeps its signature. The remedy for the rows this stops reading is the existing organization-ownership ceremony, stated below. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this read (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
