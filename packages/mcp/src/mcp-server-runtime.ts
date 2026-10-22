@@ -781,6 +781,38 @@ export interface ObjectSchemaResourceResult {
 }
 
 /**
+ * [#25245] Where the two object resources read their objects from: the same
+ * two reads {@link IMetadataService} names, so the service itself is one (the
+ * default, and what a host with no merged read reads). The stdio host gives the
+ * merged view its data bridge answers `list_objects` / `describe_object` from
+ * (`stdioObjectView`, `stdio-data-bridge.ts`), so the resources and the tools
+ * are one reading of the environment's objects. The completeness verdict is
+ * never asked of it: it stays the metadata service's.
+ */
+export type McpObjectView = Pick<IMetadataService, 'listObjects' | 'getObject'>;
+
+/**
+ * [#25245] The object view each runtime's object resources read, where its host
+ * gave one ({@link setRuntimeObjectView}).
+ *
+ * Package-internal on purpose, and not a parameter of `bridgeResources`: that
+ * method is published (`MCPServerRuntime` is exported), so a new parameter would
+ * widen the package's public surface, a new type reachable from it, for wiring
+ * between this package's own plugin and its own runtime. Keyed weakly, so a
+ * runtime and its view are collected together.
+ */
+const runtimeObjectViews = new WeakMap<MCPServerRuntime, McpObjectView>();
+
+/**
+ * [#25245] Give `runtime`'s two object resources `objects` to read in place of
+ * the metadata service. Read at each `resources/read`, so the call may come
+ * before or after `bridgeResources`. `index.ts` does not publish it.
+ */
+export function setRuntimeObjectView(runtime: MCPServerRuntime, objects: McpObjectView): void {
+  runtimeObjectViews.set(runtime, objects);
+}
+
+/**
  * [#6055] Resolve the `objectstack://objects/{objectName}` answer for one call.
  *
  * The `agent_prompt` sibling of this fix, on the second occurrence of the same
@@ -800,13 +832,16 @@ export async function buildObjectSchemaResource(
   metadataService: IMetadataService,
   objectName: string,
   logger?: Logger,
+  objects: McpObjectView = metadataService,
 ): Promise<ObjectSchemaResourceResult> {
   const uri = `objectstack://objects/${objectName}`;
   const body = (payload: unknown): ObjectSchemaResourceResult => ({
     contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(payload) }],
   });
 
-  const objectDef = await metadataService.getObject(objectName);
+  // [#25245] The object from `objects` ({@link McpObjectView}); the verdict
+  // on a miss is still the metadata service's.
+  const objectDef = await objects.getObject(objectName);
 
   if (!objectDef) {
     const { degraded, errors } = await diagnoseEmptyRead(metadataService, 'object', objectName);
@@ -893,8 +928,11 @@ export async function buildObjectSchemaResource(
 export async function buildObjectListResource(
   metadataService: IMetadataService,
   logger?: Logger,
+  view: McpObjectView = metadataService,
 ): Promise<ObjectSchemaResourceResult> {
-  const objects = await metadataService.listObjects();
+  // [#25245] The items from `view` ({@link McpObjectView}); the verdict below
+  // is still the metadata service's.
+  const objects = await view.listObjects();
   const summary = ((objects ?? []) as ObjectDef[]).map(o => ({
     name: o.name,
     label: o.label ?? o.name,
@@ -1183,12 +1221,17 @@ export class MCPServerRuntime {
    * - `objectstack://objects/{objectName}` — Get object schema
    * - `objectstack://objects/{objectName}/records/{recordId}` — Get a specific record
    * - `objectstack://metadata/types` — List all metadata types
+   *
+   * [#25245] The two object resources read the view this runtime's host gave
+   * (`setRuntimeObjectView`, package-internal), at each read; without one they
+   * read `metadataService`, as before.
    */
   bridgeResources(
     metadataService: IMetadataService,
     getRecord?: (objectName: string, recordId: string) => Promise<Record<string, unknown> | null>,
   ): void {
     const logger = this.config.logger;
+    const objects = (): McpObjectView => runtimeObjectViews.get(this) ?? metadataService;
     let resourceCount = 0;
 
     // ── Static resource: List all objects ──
@@ -1202,7 +1245,7 @@ export class MCPServerRuntime {
       async () =>
         // [#6504] The completeness of the count lives in the builder — see
         // {@link buildObjectListResource}.
-        buildObjectListResource(metadataService, logger),
+        buildObjectListResource(metadataService, logger, objects()),
     );
     resourceCount++;
 
@@ -1217,7 +1260,7 @@ export class MCPServerRuntime {
       async (_uri, variables) =>
         // [#6055] Outage vs. miss lives in the builder — see
         // {@link buildObjectSchemaResource}.
-        buildObjectSchemaResource(metadataService, String(variables.objectName), logger),
+        buildObjectSchemaResource(metadataService, String(variables.objectName), logger, objects()),
     );
     resourceCount++;
 
