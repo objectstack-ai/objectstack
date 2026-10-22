@@ -131,12 +131,12 @@ describe('[#22161] one-line fixes — title-format-retired and title-unresolvabl
     const findings = validateRecordTitle(objStack({ titleFormat: '{{record.amount}}', fields: { amount: { type: 'currency' } } }));
     const byRule = new Map(findings.map((f) => [f.rule, f.hint]));
     expect(byRule.get(TITLE_FORMAT_RETIRED)).toBe(
-      "Set nameField: '<field>' for a single-field title, or add a formula field (returnType: 'text') and " +
-        'designate it via nameField; then drop titleFormat',
+      "Set nameField: '<field>' for one field; a composite title to import, sort or search by is a text " +
+        'field with an expression, stored on write (a text formula is display-only); drop titleFormat',
     );
     expect(byRule.get(TITLE_UNRESOLVABLE)).toBe(
-      "Set nameField to a text/email field (or a formula field with returnType: 'text'), or add a text " +
-        'field named "name"/"title"',
+      'Set nameField to a text/email field (a composite title to import, sort or search by: a text field ' +
+        'with an expression; a text formula is display-only), or add a text field named "name"/"title"',
     );
   });
 

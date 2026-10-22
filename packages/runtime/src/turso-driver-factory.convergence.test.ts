@@ -60,7 +60,6 @@ const FULL_SPEC: DatasourceConnectionSpec = {
   config: {
     url: 'libsql://my-db.turso.io',
     authToken: 'jwt-token',
-    encryptionKey: 'aes-256-key',
     concurrency: 7,
     syncUrl: 'libsql://replica.turso.io',
     sync: { intervalSeconds: 30, onConnect: false },
@@ -94,7 +93,6 @@ describe('#7314 point 3 — the host loader reads the whole libSQL config, not t
     expect(seen[0]).toEqual({
       url: 'libsql://my-db.turso.io',
       authToken: 'jwt-token',
-      encryptionKey: 'aes-256-key',
       concurrency: 7,
       syncUrl: 'libsql://replica.turso.io',
       sync: { intervalSeconds: 30, onConnect: false },
@@ -114,7 +112,11 @@ describe('#7314 point 3 — the host loader reads the whole libSQL config, not t
     factory.create(FULL_SPEC);
 
     expect(seen[0]).toEqual(buildTursoDriverConfig(FULL_SPEC, 'libsql://my-db.turso.io'));
-    expect(Object.keys(seen[0] as object).sort()).toEqual([...TURSO_DRIVER_CONFIG_KEYS].sort());
+    // `encryptionKey` is the one reader no datasource can satisfy: the key is
+    // retired (#25050), and its reader exists only to forward a legacy stored
+    // value to the driver constructor's refusal. Every other key is declared.
+    expect(Object.keys(seen[0] as object).sort())
+      .toEqual(TURSO_DRIVER_CONFIG_KEYS.filter((k) => k !== 'encryptionKey').sort());
   });
 
   // Absent ≠ present-and-undefined: `@libsql/client` reads some options by

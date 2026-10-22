@@ -78,7 +78,7 @@ const BODIES: Record<string, { type: string; body: Record<string, unknown> }> = 
   },
   ds_turso: {
     type: 'datasource',
-    body: { name: 'ds_turso', driver: 'turso', config: { url: 'libsql://db.example.invalid', encryptionKey: TURSO_CRED } },
+    body: { name: 'ds_turso', driver: 'turso', config: { url: 'libsql://db.example.invalid', authToken: TURSO_CRED } },
   },
   extra: { type: EXTRA_TYPE, body: { name: 'extra', label: 'Extra', token: EXTRA_CRED } },
   // Controls: a redactor-bearing type with nothing to withhold, and a type with no redactor.

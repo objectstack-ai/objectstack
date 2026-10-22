@@ -516,14 +516,13 @@ package-published Spec / Studio mirror in `packages/drivers/driver-turso/src/spe
 Neither declares a key the driver does not read — the direction ADR-0049 (enforce-or-remove)
 governs. The converse does not hold, and the mirror is the shorter list: it does not declare
 `mode`, which the driver does read (`TursoDriverConfig.mode`). The mirror keeps its retired keys
-(`timeout` → `timeoutMs`; `localPath` and `wasm`, removed) as `z.never()` tombstones whose refusal
+(`timeout` → `timeoutMs`; `localPath`, `wasm` and — since #25050, because it encrypted nothing in any mode — `encryptionKey`, removed) as `z.never()` tombstones whose refusal
 carries the prescription. The live keys:
 
 | Property | Type | Default | Description |
 |:---|:---|:---:|:---|
 | `url` | `string` | (required) | Database URL (`libsql://`, `https://`, `file:`, `:memory:`) — in replica mode, also the local file |
 | `authToken` | `string?` | — | JWT auth token for remote databases |
-| `encryptionKey` | `string?` | — | Encrypts nothing, in any mode: refused for a local or replica datasource (`VALIDATION_ERROR` / 400 at construction, a `custom` issue at authoring), because the local engine (better-sqlite3) has no encryption codec, and for a `file:` url or `:memory:` under a forced `mode: 'remote'`, whose libSQL client is handed no key; a remote database's storage encryption is the server's, not set by this key |
 | `concurrency` | `number` | `20` | Maximum concurrent requests |
 | `syncUrl` | `string?` | — | Remote sync URL for embedded replica mode |
 | `sync.intervalSeconds` | `number` | `60` | Periodic sync interval (0 = manual only) |

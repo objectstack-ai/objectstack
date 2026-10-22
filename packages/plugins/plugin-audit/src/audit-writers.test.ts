@@ -2431,7 +2431,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
 describe('[#21120] stored metadata body copies are redacted at write time', () => {
   const CRED = 'writer-cred-5d02';
   const dsBody = (cred = CRED) =>
-    JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: cred } });
+    JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', authToken: cred } });
 
   // sys_metadata is a stored-metadata-body table: a `type` + `metadata` row.
   const SCHEMAS = {
@@ -2456,7 +2456,7 @@ describe('[#21120] stored metadata body copies are redacted at write time', () =
     // The audit copy still records the change: type survives, the projected body is present.
     const newValue = JSON.parse(audit!.row.new_value);
     expect(newValue.type).toBe('datasource');
-    expect(JSON.parse(newValue.metadata).config.encryptionKey).toBeUndefined();
+    expect(JSON.parse(newValue.metadata).config.authToken).toBeUndefined();
     expect(JSON.parse(newValue.metadata).config.url).toBe('libsql://db.turso.io');
     expect(JSON.stringify(activity!.row)).not.toContain(CRED);
   });

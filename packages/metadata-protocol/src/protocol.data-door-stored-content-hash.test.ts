@@ -40,7 +40,7 @@ const dsBody = (cred: string) => ({
     name: 'edge_cache',
     label: 'Edge Cache',
     driver: 'turso',
-    config: { url: 'file:/var/data/edge.db', encryptionKey: cred },
+    config: { url: 'file:/var/data/edge.db', authToken: cred },
 });
 const viewBody = { name: 'all_tasks', label: 'All Tasks', type: 'grid' };
 

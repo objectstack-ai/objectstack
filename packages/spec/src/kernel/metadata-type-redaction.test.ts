@@ -111,7 +111,7 @@ describe('FAIL-CLOSED: the datasource redactor is a BUILT-IN, not a plugin regis
     expect(stored.config.url).toBe('postgresql://admin:hunter2@db.internal:5432/app');
   });
 
-  it('turso: alias spellings and the still-writable encryptionKey are covered end-to-end', () => {
+  it('turso: alias spellings and the retired encryptionKey are covered end-to-end', () => {
     const result = getMetadataTypeRedactor('datasource')!({
       name: 't',
       driver: 'turso',

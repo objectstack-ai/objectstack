@@ -138,8 +138,12 @@ the diagnostic is advisory, not an error:
 > consumed by the release)
 
 **Migration is stated, not left to the author**: a single-field title becomes
-`nameField: '<field>'`; a **composite** title becomes a `formula` field with
-`returnType: 'text'`, designated as the `nameField`
+`nameField: '<field>'`; a **composite** title that must be queried (matched by
+an import, sorted, searched) becomes a stored computed field (a non-formula
+field with an `expression`, written on write), designated as the `nameField`,
+the remedy addendum item 9 states for sort and search and ruling record
+6308445871 extends to import; a `formula` field with `returnType: 'text'`
+designated as the `nameField` stays legal for a title shown for display only
 (`packages/lint/src/validate-record-title.ts`; the worked example is
 `content/docs/data-modeling/formulas.mdx`).
 

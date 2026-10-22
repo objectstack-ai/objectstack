@@ -36,7 +36,7 @@ const SECRETS = [
     'stored-nested-token',
 ] as const;
 
-/** A legacy turso row: the still-writable key plus an alias spelling. */
+/** A legacy turso row: the RETIRED `encryptionKey` (#25050), which a stored row may still carry, plus an alias spelling. */
 const TURSO_BODY = {
     name: 'edge_cache',
     label: 'Edge Cache',

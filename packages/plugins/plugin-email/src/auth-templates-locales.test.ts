@@ -369,3 +369,121 @@ describe('#24154 — the invitation names the role label, and both faces say the
     expect(named(text), `${locale} text body`).toEqual(declared);
   });
 });
+
+// ── #25060 — auth.existing_account_sign_up, in all four locales ────────────
+
+/**
+ * The mail an address's holder receives when someone signs up with an address
+ * that already has an account (ruling 1B on #25040; `plugin-auth`'s
+ * `signup-existing-address-success-shape.test.ts` owns the sender half). Same
+ * discipline as above: every expectation is an independent literal.
+ */
+const EXISTING_ACCOUNT = 'auth.existing_account_sign_up';
+const SIGN_IN_URL = 'https://acme.test/_console/login';
+const RESET_PAGE_URL = 'https://acme.test/_console/forgot-password';
+const EXISTING_ACCOUNT_DATA = {
+  user: { name: 'Ada', email: 'ada@acme.test', id: 'u1' },
+  signInUrl: SIGN_IN_URL,
+  resetPasswordUrl: RESET_PAGE_URL,
+  appName: 'Acme',
+};
+
+async function renderExistingAccount(locale: Locale | undefined, data: Record<string, unknown> = EXISTING_ACCOUNT_DATA) {
+  const transport = new CaptureTransport();
+  const svc = new EmailService({ transport, defaultFrom: { address: 'no-reply@acme.test' }, templateLoader: seededLoader });
+  await svc.sendTemplate({ template: EXISTING_ACCOUNT, to: 'ada@acme.test', ...(locale ? { locale } : {}), data });
+  return transport;
+}
+
+const EXISTING_ACCOUNT_SUBJECT: Record<Locale, string> = {
+  'en-US': 'You already have an account on Acme',
+  'zh-CN': '您已拥有 Acme 账号',
+  'ja-JP': 'Acme のアカウントはすでにお持ちです',
+  'es-ES': 'Ya tienes una cuenta de Acme',
+};
+
+/** What happened, and that nothing changed — the reader who did not sign up needs both. */
+const EXISTING_ACCOUNT_PHRASES: Record<Locale, string[]> = {
+  'en-US': ['Someone just tried to create a new Acme account with', 'no new account was created and nothing on your account has changed'],
+  'zh-CN': ['刚刚有人尝试使用', '没有创建新账号，您的账号也没有任何变化'],
+  'ja-JP': ['の新しいアカウントを作成しようとする操作がありました', '新しいアカウントは作成されておらず、お客様のアカウントにも変更はありません'],
+  'es-ES': ['Alguien acaba de intentar crear una cuenta nueva de Acme con', 'no se ha creado ninguna cuenta nueva y no ha cambiado nada en tu cuenta'],
+};
+
+const EXISTING_ACCOUNT_BUTTON: Record<Locale, string> = {
+  'en-US': 'Sign in',
+  'zh-CN': '登录',
+  'ja-JP': 'サインイン',
+  'es-ES': 'Iniciar sesión',
+};
+
+describe('#25060 — auth.existing_account_sign_up is a registered built-in in all four locales', () => {
+  it('has exactly one row per supported locale, each a valid EmailTemplateDefinition', () => {
+    const rows = BUILTIN_AUTH_TEMPLATES.filter((t) => t.name === EXISTING_ACCOUNT);
+    expect(rows.map((t) => t.locale).sort()).toEqual([...SUPPORTED_LOCALES].sort());
+    for (const t of rows) {
+      const parsed = EmailTemplateDefinitionSchema.safeParse(t);
+      expect(parsed.success, `${t.locale}: ${parsed.error?.message}`).toBe(true);
+    }
+  });
+
+  it('declares exactly what the sender holds — two page links and no token', () => {
+    for (const t of BUILTIN_AUTH_TEMPLATES.filter((r) => r.name === EXISTING_ACCOUNT)) {
+      expect((t.variables ?? []).map((v) => [v.name, v.type, v.required === true]), t.locale).toEqual([
+        ['user.name', 'string', false],
+        ['user.email', 'string', true],
+        ['signInUrl', 'url', true],
+        ['resetPasswordUrl', 'url', true],
+        ['appName', 'string', false],
+      ]);
+    }
+  });
+});
+
+describe('#25060 — auth.existing_account_sign_up renders its own text in each locale', () => {
+  for (const locale of SUPPORTED_LOCALES) {
+    it(`${locale}: subject, what happened, both links and the footer`, async () => {
+      const sent = (await renderExistingAccount(locale)).sent[0]!;
+      expect(sent.subject).toBe(EXISTING_ACCOUNT_SUBJECT[locale]);
+      const html = String(sent.html);
+      const text = String(sent.text);
+      const prose = [sent.subject, html, text].join('\n');
+      for (const phrase of EXISTING_ACCOUNT_PHRASES[locale]) expect(prose, phrase).toContain(phrase);
+      expect(prose).toContain('ada@acme.test');
+      expect(html).toContain(EXISTING_ACCOUNT_BUTTON[locale]);
+      expect(html).toContain(`href="${SIGN_IN_URL}"`);
+      expect(html).toContain(`href="${RESET_PAGE_URL}"`);
+      expect(text).toContain(SIGN_IN_URL);
+      expect(text).toContain(RESET_PAGE_URL);
+      expect(html).toContain(EXPECTED_FOOTER[locale]);
+      expect(prose).not.toContain('{{');
+    });
+  }
+
+  it('a zh-CN, ja-JP or es-ES send carries none of the en-US text', async () => {
+    for (const locale of ['zh-CN', 'ja-JP', 'es-ES'] as const) {
+      const sent = (await renderExistingAccount(locale)).sent[0]!;
+      const prose = [sent.subject, sent.html, sent.text].join('\n');
+      expect(prose, locale).not.toContain(EXISTING_ACCOUNT_SUBJECT['en-US']);
+      for (const phrase of EXISTING_ACCOUNT_PHRASES['en-US']) expect(prose, `${locale}: ${phrase}`).not.toContain(phrase);
+      expect(prose, locale).not.toContain(EXPECTED_FOOTER['en-US']);
+    }
+  });
+
+  it('a send naming no locale resolves en-US — the documented default', async () => {
+    const sent = (await renderExistingAccount(undefined)).sent[0]!;
+    expect(sent.subject).toBe(EXISTING_ACCOUNT_SUBJECT['en-US']);
+  });
+
+  it.each(['user.email', 'signInUrl', 'resetPasswordUrl'])('without %s the send is refused and nothing reaches the transport', async (name) => {
+    const data = structuredClone(EXISTING_ACCOUNT_DATA) as Record<string, any>;
+    if (name === 'user.email') delete data.user.email;
+    else delete data[name];
+    const transport = new CaptureTransport();
+    const svc = new EmailService({ transport, defaultFrom: { address: 'no-reply@acme.test' }, templateLoader: seededLoader });
+    await expect(
+      svc.sendTemplate({ template: EXISTING_ACCOUNT, to: 'ada@acme.test', locale: 'en-US', data }),
+    ).rejects.toThrow(new RegExp(`^MISSING_VARIABLES: ${name.replace('.', '\\.')}$`));
+    expect(transport.sent).toEqual([]);
+  });
+});

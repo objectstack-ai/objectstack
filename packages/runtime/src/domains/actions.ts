@@ -824,9 +824,16 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 // other thrower (#8016 / #9106 — its closed `details` list is
                 // deliberate, not a gap this branch works around).
                 if (actionExec.isFlowActionRefusal(err)) {
+                    // [#24914, ruling B′] `runDetails` now carries the
+                    // `innerRefusal` a node's data call met (the declared third
+                    // key), and the carrier's producer-marked `userMessage`
+                    // goes to the envelope's top level through the deps slot.
                     return {
                         handled: true,
-                        response: deps.error(err.message, err.status, { code: err.code, ...err.runDetails }),
+                        response: deps.error(
+                            err.message, err.status, { code: err.code, ...err.runDetails },
+                            err.userMessage !== undefined ? { userMessage: err.userMessage } : undefined,
+                        ),
                     };
                 }
                 throw err;
