@@ -2601,16 +2601,21 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         envId?: string;
         ec: any;
         getMeta: () => any;
+        // [#25139] The objects whose `actions[]` the name is resolved against —
+        // the MCP bridge passes the listing `list_objects` serves (the
+        // protocol's merged read). Left out, the metadata service's
+        // `listObjects()` is read, as before.
+        readObjects?: () => Promise<readonly any[]>;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
     },
 ): Promise<any> {
-    const { driver, envId, ec, getMeta, callData } = wiring;
+    const { driver, envId, ec, getMeta, readObjects, callData } = wiring;
     const meta: any = await getMeta();
     const params = input?.params && typeof input.params === 'object' ? input.params : {};
     const recordId = typeof input?.recordId === 'string' && input.recordId.length > 0 ? input.recordId : undefined;
 
     // Resolve the action def by declarative name (optionally scoped).
-    const resolved = await resolveActionByName(deps, meta, name, input?.objectName);
+    const resolved = await resolveActionByName(deps, meta, name, input?.objectName, await readObjects?.());
     if (!resolved) {
         throw new Error(
             input?.objectName
@@ -2822,13 +2827,16 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
  * optionally scoped to a single object. Returns the action plus its owning
  * object name, or `null`. Throws when the name is ambiguous across objects
  * and no `objectName` was supplied (so `run_action` can ask for one).
+ *
+ * `objects` is handed to {@link collectActionDeclarations} unchanged.
  */
 export async function resolveActionByName(deps: ActionExecutionDeps, 
     meta: any,
     name: string,
     objectName?: string,
+    objects?: readonly any[],
 ): Promise<{ action: any; objectName: string; obj: any } | null> {
-    const decls = await collectActionDeclarations(deps, meta);
+    const decls = await collectActionDeclarations(deps, meta, objects);
     if (objectName) {
         const hit = decls.find((d) => d.objectName === objectName && d.action?.name === name);
         return hit ? { action: hit.action, objectName, obj: hit.obj } : null;
@@ -2860,11 +2868,19 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
  * declaration is the one that matches what actually runs. All MCP gating
  * (`ai.exposed`, ADR-0066 D4, headless-invokability) applies downstream of
  * this collection, unchanged.
+ *
+ * [#25139] `objects` are the definitions shape 1 reads; left out, the metadata
+ * service's `listObjects()`. The MCP bridge passes the protocol's merged
+ * listing, the one `list_objects` serves: on a kernel with an `environmentId`
+ * the metadata service holds no copy of an object a package registered during
+ * the boot, so its actions were neither listed nor resolved while REST's
+ * `/actions` door ran them. Shape 2 still reads the metadata service.
  */
 export async function collectActionDeclarations(deps: ActionExecutionDeps, 
     meta: any,
+    objects?: readonly any[],
 ): Promise<Array<{ action: any; objectName: string; obj: any }>> {
-    const objs: any[] = (await meta?.listObjects?.()) ?? [];
+    const objs: readonly any[] = objects ?? (await meta?.listObjects?.()) ?? [];
     const objByName = new Map<string, any>();
     for (const obj of objs) {
         if (typeof obj?.name === 'string') objByName.set(obj.name, obj);

@@ -45,6 +45,7 @@ import {
   explainAccessForAsker,
   buildContextForUser,
   resolveDelegatorContext,
+  delegatedOrganizationRefusal,
   intersectFieldMasks,
   intersectDelegatedScope,
   d10NarrowingStatement,
@@ -2368,6 +2369,10 @@ export class SecurityPlugin implements Plugin {
             // A dangling delegator is a fail-CLOSED DENIAL upstream, not a
             // narrowing — the read never returns rows for this to describe.
             if (del.kind !== 'resolved') return none;
+            // [#25107] Nor is a delegator who is not a member of the
+            // organization the read runs in, on a walled posture: the prologue
+            // refuses the read ({@link delegatedOrganizationRefusal}).
+            if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return none;
             const meta = await this.getObjectSecurityMeta(object);
             const sets = await this.resolvePermissionSetsForContext(context);
             const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
@@ -5178,11 +5183,14 @@ export class SecurityPlugin implements Plugin {
      *
      * A delegation link naming no user (`missing`) answers `null`: the write
      * path refuses such a principal before any gate runs, and so does every
-     * gate built on this.
+     * gate built on this. [#25107] So does a delegator who is not a member of
+     * the organization the write runs in, on a walled posture: the prologue
+     * refuses it there ({@link delegatedOrganizationRefusal}).
      */
     const delegatedWriteContexts = async (o: string, c: any): Promise<{ agent: any; delegator: any } | null> => {
       const del = await resolveDelegatorContext(this.ql, c);
       if (del.kind !== 'resolved') return null;
+      if (delegatedOrganizationRefusal(c, del.context, this.tenancyPosture) !== undefined) return null;
       const [sets, delegatorSets, meta] = await Promise.all([
         this.resolvePermissionSetsForContext(c),
         this.resolvePermissionSetsForContext(del.context),
@@ -5247,6 +5255,9 @@ export class SecurityPlugin implements Plugin {
           return this.computeReadPartialMaskRules(meta, sets as any, delSets as any, basePerms, delBasePerms);
         },
         baselinePermissionSets: this.baselinePermissionSets,
+        // [#25107] The prologue's posture, for its organization-membership
+        // refusal of a delegated context ({@link delegatedOrganizationRefusal}).
+        tenancyPosture: this.tenancyPosture,
         // ── record-grained deps (only consulted when recordId is present) ──
         computeLayeredRlsFilter: async (sets, o, engineOp, c) =>
           this.computeLayeredRlsFilter(
@@ -5996,15 +6007,10 @@ export class SecurityPlugin implements Plugin {
     // walled posture the find path refuses every operation of a delegated
     // context whose live active organization the delegator's own membership
     // does not back, so the scope that agrees with it is zero rows, on every
-    // object. One ask of the one spelling of the rule, with the inputs the
-    // prologue passes; under `single` the claim stands, and a context with no
-    // active organization is not this rule's (ADR-0123 D2).
-    const liveOrganization =
-      context.tenantId != null && context.tenantId !== '' ? String(context.tenantId) : undefined;
-    if (
-      liveOrganization !== undefined &&
-      vetOrganizationClaim(liveOrganization, delegatorContext?.accessible_org_ids ?? [], this.tenancyPosture) === undefined
-    ) {
+    // object. [#25107] The prologue's own ask ({@link delegatedOrganizationRefusal}),
+    // with the inputs it passes; under `single` the claim stands, and a context
+    // with no active organization is not this rule's (ADR-0123 D2).
+    if (delegatedOrganizationRefusal(context, delegatorContext, this.tenancyPosture) !== undefined) {
       this.logger.warn?.(
         `[security] getReadFilter received an on-behalf-of context for object '${object}' whose delegator is not a ` +
           `member of the organization it runs in — denying, as the operation prologue refuses it (ADR-0090 D10, fail-closed)`,
@@ -6250,7 +6256,10 @@ export class SecurityPlugin implements Plugin {
     // [ADR-0090 D10] On an on-behalf-of request the projection must NOT widen
     // past the DELEGATOR's — intersect the delegator's field mask too. A
     // dangling delegator fails CLOSED (expose no columns), the same fail-closed
-    // stance the CRUD middleware takes on a 'missing' delegator. [#20995] Asked
+    // stance the CRUD middleware takes on a 'missing' delegator; [#25107] and so
+    // does a delegator who is not a member of the organization the request runs
+    // in, on a walled posture, which the middleware's prologue refuses
+    // ({@link delegatedOrganizationRefusal}). [#20995] Asked
     // only when the caller resolved a set, as the middleware asks it: a caller
     // who resolved none reaches here only for its masking rules and [#21063]
     // its field capability contract, and every one of them already applies to
@@ -6261,6 +6270,9 @@ export class SecurityPlugin implements Plugin {
       const del = await resolveDelegatorContext(this.ql, context);
       if (del.kind === 'missing') return { kind: 'answer', fields: [] };
       if (del.kind === 'resolved') {
+        if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) {
+          return { kind: 'answer', fields: [] };
+        }
         delegatorSets = await this.resolvePermissionSetsForContext(del.context);
         delBasePerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
         let delFieldPerms = this.foldFieldRequiredPermissions(delBasePerms, secMeta.fieldRequiredPermissions, delegatorSets);
@@ -6411,12 +6423,16 @@ export class SecurityPlugin implements Plugin {
       if (permissionSets.length === 0) return false;
 
       // [ADR-0090 D10] Resolve the delegator ONCE — arms 4 and 6 both need it,
-      // and a dangling link denies before either runs.
+      // and a dangling link denies before either runs. [#25107] So does a
+      // delegator who is not a member of the organization the read runs in, on
+      // a walled posture: the middleware's prologue refuses the read there
+      // ({@link delegatedOrganizationRefusal}).
       let delegatorSets: PermissionSet[] | null = null;
       if (context?.onBehalfOf?.userId) {
         const del = await resolveDelegatorContext(this.ql, context);
         if (del.kind === 'missing') return false;
         if (del.kind === 'resolved') {
+          if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return false;
           delegatorSets = await this.resolvePermissionSetsForContext(del.context);
         }
       }
@@ -6753,13 +6769,17 @@ export class SecurityPlugin implements Plugin {
       if (unresolved) return false;
 
       // [ADR-0090 D10] Resolve the delegator ONCE — the arms below need it,
-      // and a dangling link denies before any of them runs.
+      // and a dangling link denies before any of them runs. [#25107] So does a
+      // delegator who is not a member of the organization the write runs in,
+      // on a walled posture: the middleware's prologue refuses the write there
+      // ({@link delegatedOrganizationRefusal}).
       let delegatorSets: PermissionSet[] | null = null;
       let delegatorContext: unknown = null;
       if (context?.onBehalfOf?.userId) {
         const del = await resolveDelegatorContext(this.ql, context);
         if (del.kind === 'missing') return false;
         if (del.kind === 'resolved') {
+          if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return false;
           delegatorContext = del.context;
           delegatorSets = await this.resolvePermissionSetsForContext(del.context);
         }
@@ -6866,10 +6886,14 @@ export class SecurityPlugin implements Plugin {
     // middleware and {@link getReadableFields} take. [#21079] So does a
     // delegator who resolves NO set: the evaluator answers that empty list's
     // export as it answers any list, and the middleware refuses its read.
+    // [#25107] So does a delegator who is not a member of the organization the
+    // export runs in, on a walled posture: the middleware's prologue refuses
+    // the read there ({@link delegatedOrganizationRefusal}).
     if (context?.onBehalfOf?.userId) {
       const del = await resolveDelegatorContext(this.ql, context);
       if (del.kind === 'missing') return false;
       if (del.kind === 'resolved') {
+        if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return false;
         const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
         if (
           !this.permissionEvaluator.checkObjectPermission('export', objectName, delegatorSets, { isPrivate })
@@ -9131,8 +9155,8 @@ export class SecurityPlugin implements Plugin {
    *   access for a non-existent user).
    * - [#25063 · ADR-0090 D10] A delegated operation runs in the LIVE principal's
    *   active organization, and the delegator context inherits that organization
-   *   (`resolveDelegatorContext`: the agent and its delegator are in the same
-   *   organization). On a walled posture that is a precondition, never an
+   *   (`resolveDelegatorContext` hands the delegator the organization the
+   *   operation runs in). On a walled posture that is a precondition, never an
    *   assumption: when the delegator's own membership does not back the live
    *   organization, the operation is REFUSED here, for every verb. Left to run,
    *   the delegator's leg could not bound it: the inherited organization feeds
@@ -9140,8 +9164,11 @@ export class SecurityPlugin implements Plugin {
    *   on-behalf-of write could land outside every organization the delegator
    *   belongs to. The test is `vetOrganizationClaim`, the one spelling of "a
    *   membership backs this organization", which answers the claim unchanged
-   *   under `single`. A context with no active organization is not this
-   *   rule's: its answers stay with ADR-0123 D2.
+   *   under `single`, asked through `delegatedOrganizationRefusal` [#25107]:
+   *   the one ask every reader of a resolved delegator shares, so the probes,
+   *   the field projections, the read scope and the explanation answer this
+   *   refusal where it is made. A context with no active organization is not
+   *   this rule's: its answers stay with ADR-0123 D2.
    */
   private async resolveOperationPrincipals(
     operation: string,
@@ -9181,12 +9208,8 @@ export class SecurityPlugin implements Plugin {
         );
       }
       if (del.kind === 'resolved') {
-        const liveOrganization =
-          context.tenantId != null && context.tenantId !== '' ? String(context.tenantId) : undefined;
-        if (
-          liveOrganization !== undefined &&
-          vetOrganizationClaim(liveOrganization, del.context?.accessible_org_ids ?? [], this.tenancyPosture) === undefined
-        ) {
+        const liveOrganization = delegatedOrganizationRefusal(context, del.context, this.tenancyPosture);
+        if (liveOrganization !== undefined) {
           this.logger.warn?.(
             `[Security] on-behalf-of ${operation} '${object}' REFUSED — the delegator is not a member of the ` +
               `organization the request runs in (ADR-0090 D10, fail-closed)`,
