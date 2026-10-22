@@ -113,6 +113,7 @@
  *   flows.<flow>.screens.<node_id>.fields.<field>.options.<value>   (#22507)
  *   flows.<flow>.successMessage / .errorMessage                (#22507)
  *   flows.<flow>.refusals.<node_id>.message                    (#22450)
+ *   flows.<flow>.approvals.<node_id>.label                     (#24916)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
@@ -146,6 +147,7 @@ import {
 import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
+import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
 import { authorWarnedProperties, walkPageComponents } from '@objectstack/lint';
 import { collectFilledFromHashes } from '@objectstack/platform-objects/apps';
@@ -1910,18 +1912,28 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
     // by the schema, so this is authored text in practice; `pushOptional`
     // keeps a label-less flow from seeding an empty string anyway.
     //
-    // Demanded only for a flow with a `screen` node, at any depth of the same
-    // node universe the screens walk below reads. The predicate mirrors the one
-    // reader of the key: the console's `FlowRunner` names the flow by it, in
-    // its header and its completion toast, and the runner opens only on a run
-    // paused at a screen. A flow that can never pause there (record-triggered,
-    // scheduled, an API flow with no screen) has no surface that shows its
-    // translated label, so demanding one would ask an author for a string that
-    // is stored and never read. When a reader of a non-screen flow's label
-    // lands (a run-result toast, say), this predicate widens in the same change
-    // as that reader.
+    // Demanded for a flow with a `screen` node or an `approval` node, at any
+    // depth of the same node universe the walks below read. The predicate
+    // mirrors the two readers of the key, and nothing wider:
+    //
+    // - the console's `FlowRunner` names the flow by it, in its header and its
+    //   completion toast, and the runner opens only on a run paused at a screen;
+    // - [#24916] the approvals door names a request's flow by it in the
+    //   reader's locale (`plugin-approvals` `reader-locale-labels.ts`, the
+    //   inbox, the record's approval panel and the request page), and a request
+    //   exists only where an `approval` node opened one.
+    //
+    // A flow with neither (record-triggered, scheduled or an API flow that
+    // only does work) has no surface that shows its translated label: the
+    // console's launch hosts toast the action's copy or the flow's own
+    // `successMessage` / `errorMessage`, never its label. Demanding one would
+    // ask an author for a string that is stored and never read, so `Flow.label`
+    // being required by the schema is not the test. When a reader of such a
+    // flow's label lands, this predicate widens in the same change as that
+    // reader.
     const hasScreen = nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE);
-    if (hasScreen) {
+    const approvalNodes = nodes.filter((node) => node && typeof node === 'object' && node.type === APPROVAL_NODE_TYPE);
+    if (hasScreen || approvalNodes.length > 0) {
       pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
     }
 
@@ -2007,6 +2019,23 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
       if (!nodeId) continue;
       pushOptional(out, ['flows', flowName, 'refusals', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
+    }
+
+    // [#24916] `flows.<flow>.approvals.<node_id>.label` — an `approval` node's
+    // step label, the name its request shows the submitter and the approvers.
+    // The approvals door reads that key in the reader's locale for the
+    // request's `current_step`, which is the node's `FlowNode.id`, and its step
+    // progress names every approval step the same way; the stored
+    // `current_step_label` is the authored `FlowNode.label` the seed carries.
+    // The key's one leaf is `label` because the node config declares no
+    // person-facing heading of its own (`translation.zod.ts`, `approvals`).
+    // Same node universe as the walks above, so the walk reaches every id
+    // `os validate` accepts the key for.
+    for (const node of approvalNodes) {
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      // No id, no key: the request's `current_step` could not name the node.
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'approvals', nodeId, 'label'], node.label, 'flow', scope);
     }
   }
 }

@@ -359,13 +359,15 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // `.description` (#22507), and the per-field `label` / `placeholder` /
   // option labels), the terminal
   // toasts (`flows.<f>.successMessage` / `.errorMessage`, #22507) and a refused
-  // `end` node's message (`flows.<f>.refusals.<n>.message`, #22450) — the
-  // author's own text, so
+  // `end` node's message (`flows.<f>.refusals.<n>.message`, #22450), and an
+  // approval flow's label with each `approval` node's step label
+  // (`flows.<f>.approvals.<n>.label`, #24916) — the author's own text, so
   // it keeps its own bucket and reports as `i18n/missing-flow` rather than
   // folding away with `--include-platform`. Until this bucket existed the
   // family could not report a screen-flow gap at all: HotCRM measured
   // `0 i18n/missing-*` while six screen dialogs rendered English in all four
-  // locales (#11485).
+  // locales (#11485). Its six approval flows stayed that invisible until
+  // #24916.
   flow: 'flow',
   metadataType: 'metadataForm',
   metadataFormSection: 'metadataForm',
@@ -429,7 +431,7 @@ const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
   dataset: 'datasets',
   picklist: 'picklists',
   page: 'pages',
-  flow: 'flow screens, toasts and refusals',
+  flow: 'flow screens, approval steps, toasts and refusals',
   metadataForm: 'metadata forms',
 };
 
