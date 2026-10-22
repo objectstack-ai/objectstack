@@ -63,6 +63,7 @@
  */
 
 import { resolveLocale } from '@objectstack/core';
+import type { IDataEngine } from '@objectstack/core';
 import { normalizeRecipientLocale } from '@objectstack/service-messaging';
 import { authContextOf, type LinkingDbAdapter } from './implicit-account-linking.js';
 
@@ -157,10 +158,7 @@ export function decideIdpLocaleWrite(state: IdpLocaleState): IdpLocaleWrite {
 }
 
 /** The slice of the data engine the settle step uses. */
-export interface IdpLocaleEngine {
-  findOne(object: string, query: Record<string, unknown>): Promise<Record<string, unknown> | null>;
-  update(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
-}
+export type IdpLocaleEngine = Pick<IDataEngine, 'findOne' | 'update'>;
 
 export interface IdpLocaleSyncDeps {
   getEngine(): IdpLocaleEngine | undefined;
@@ -212,7 +210,7 @@ export class IdpLocaleSync {
         }
         return;
       }
-      const engine = this.deps.getEngine();
+      const engine: IdpLocaleEngine | undefined = this.deps.getEngine();
       if (!engine) return;
       const auth = authContextOf(ctx) ?? (await this.deps.resolveAuth());
       if (!auth) throw new Error('the auth store is unavailable');
@@ -235,7 +233,7 @@ export class IdpLocaleSync {
       if (write.locale !== (storedLocaleOf(row.locale) ?? null)) {
         await engine.update('sys_user', { id: userId, locale: write.locale }, { context: SYSTEM_CTX });
       }
-      await writeRecord(auth.adapter, userId, write.record, claim.providerId);
+      await replaceIdpLocaleRecord(auth.adapter, userId, write.record, claim.providerId);
     } catch (e) {
       this.deps.warn(
         '[auth] the IdP locale claim was not applied: the sign-in succeeded, and the user keeps the ' +
@@ -277,7 +275,7 @@ function recordedLocaleOf(record: unknown): string | undefined {
 }
 
 /** Replace the user's record with `locale`, or drop it when `locale` is `null`. */
-async function writeRecord(
+async function replaceIdpLocaleRecord(
   adapter: LinkingDbAdapter,
   userId: string,
   locale: string | null,
