@@ -444,8 +444,8 @@ async function readMergedSkillRows(
  * reads it — or `undefined` when this host has no merged read to offer.
  *
  * The one place this file unwraps `getMetaItems`, shared by the skill read
- * above and the object reads in {@link buildMcpBridge}, so the three cannot
- * disagree about which answers they accept. Its three outcomes are the ones
+ * above and the object and action reads in {@link buildMcpBridge}, so they
+ * cannot disagree about which answers they accept. Its three outcomes are the ones
  * {@link readMergedSkillRows} documents: `undefined` is STRUCTURAL absence (no
  * protocol in the slot, or one without the list verb), and the caller answers
  * from the metadata service exactly as before; a throw travels to the caller,
@@ -453,7 +453,7 @@ async function readMergedSkillRows(
  */
 async function readMergedItems(
     protocol: McpMergedMetadataRead | undefined | null,
-    type: 'skill' | 'object',
+    type: 'skill' | 'object' | 'action',
 ): Promise<unknown[] | undefined> {
     if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
     const answer = await protocol.getMetaItems({ type });
@@ -612,6 +612,19 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         const meta: any = await getMeta();
         return ((await meta?.listObjects?.()) ?? []) as any[];
     };
+
+    /**
+     * [#25297] The standalone `action` items `list_actions`, `run_action` and
+     * `resume_run` collect beside the objects' embedded ones: the merged
+     * listing, the read `GET /api/v1/meta/action` serves. The metadata
+     * service's `loadMany('action')` holds the compiled artifact's actions
+     * alone, so a package's object-less action and an environment-authored
+     * one were never listed, and a disabled artifact package's still was.
+     * `undefined` = no merged read on this host, and the collection reads the
+     * metadata service, exactly as before.
+     */
+    const readServedActions = async (): Promise<any[] | undefined> =>
+        (await readMergedItems(await getProtocol(), 'action')) as any[] | undefined;
 
     const listObjectSummaries = async (): Promise<any[]> => {
         const objs = await readServedObjects();
@@ -810,7 +823,10 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 await deps.getObjectQL(context, envId).catch(() => undefined),
             );
             const out: any[] = [];
-            for (const { action, objectName, obj } of await actionExec.collectActionDeclarations(deps, meta, await readServedObjects())) {
+            const declarations = await actionExec.collectActionDeclarations(
+                deps, meta, await readServedObjects(), await readServedActions(),
+            );
+            for (const { action, objectName, obj } of declarations) {
                 if (!objectName || isSystemObjectName(objectName)) continue; // fail-closed on sys_*
                 if (!actionExec.isHeadlessInvokableAction(deps, action, hasAutomation)) continue;
                 // The script arm — every action `invokeBusinessAction` sends to
@@ -851,7 +867,7 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
             name: string,
             input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
         ) => actionExec.invokeBusinessAction(deps, context, name, input ?? {}, {
-            driver, envId, ec, getMeta, readObjects: readServedObjects, callData,
+            driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
         }),
         // [#15705] `resume_run`: continue the caller's own paused screen run.
         // Admitted by the same gates as `run_action`; see
@@ -860,7 +876,7 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
             runId: string,
             input: { values?: Record<string, unknown> } & AIActionConfirmation,
         ) => resumeActionRun(deps, context, runId, input ?? {}, {
-            driver, envId, ec, getMeta, readObjects: readServedObjects, callData,
+            driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
         }),
     };
 }
@@ -991,10 +1007,12 @@ export async function resumeActionRun(
         getMeta: () => Promise<any>;
         /** [#25139] As `invokeBusinessAction`'s: the objects whose `actions[]` admit the run. */
         readObjects?: () => Promise<readonly any[]>;
+        /** [#25297] As `invokeBusinessAction`'s: the standalone `action` items that admit the run. */
+        readActions?: () => Promise<readonly any[] | undefined>;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
     },
 ): Promise<any> {
-    const { driver, envId, ec, getMeta, readObjects, callData } = wiring;
+    const { driver, envId, ec, getMeta, readObjects, readActions, callData } = wiring;
     if (typeof runId !== 'string' || runId === '') {
         throw resumeDoorError(deps, 'runId is required', 400);
     }
@@ -1031,7 +1049,8 @@ export async function resumeActionRun(
     const flowName: unknown = run.flowName;
     const runObject = typeof trigger?.object === 'string' && trigger.object !== '' ? trigger.object : undefined;
     const meta: any = await getMeta();
-    const candidates = (await actionExec.collectActionDeclarations(deps, meta, await readObjects?.())).filter(({ action, objectName }) =>
+    const declarations = await actionExec.collectActionDeclarations(deps, meta, await readObjects?.(), await readActions?.());
+    const candidates = declarations.filter(({ action, objectName }) =>
         action?.type === 'flow'
         && !actionExec.isDeclarativeUpdateAction(action)
         && typeof action?.target === 'string'
