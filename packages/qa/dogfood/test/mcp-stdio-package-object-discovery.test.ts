@@ -442,7 +442,7 @@ for (const { shape, environmentId } of SHAPES) {
         expect(await k!.readRecord(pkg.gated, 'r_any')).toMatchObject({ code: 'OBJECT_API_DISABLED', status: 404 });
       });
 
-      it('CONTROL: the package\'s exposed object is queried and written, and its internal: true field is not echoed', async () => {
+      it('the package\'s exposed object is queried and written, and create_record does not echo its internal: true field', async () => {
         expect(outcome(await k!.call('query_records', { objectName: pkg.open }))).toBe('SERVED');
         const created = await k!.call('create_record', { objectName: pkg.open, data: { name: 'rec-1', vault_secret: 'v' } });
         expect(created.isError, created.text).toBe(false);
