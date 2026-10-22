@@ -22,8 +22,8 @@ The Data Engine acts as the "Driver" layer in the Hexagonal Architecture.
 ## TypeScript Usage
 
 ```typescript
-import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineAggregateRequestSchema, DataEngineCountOptionsSchema, DataEngineCountRequestSchema, DataEngineDeleteOptionsSchema, DataEngineDeleteRequestSchema, DataEngineExecuteRequestSchema, DataEngineFilterSchema, DataEngineFindOneRequestSchema, DataEngineFindRequestSchema, DataEngineInsertOptionsSchema, DataEngineInsertRequestSchema, DataEngineQueryOptionsSchema, DataEngineRequestSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DataEngineUpdateRequestSchema, DataEngineVectorFindRequestSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema, QueryTransportParamsSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '@objectstack/spec/data';
-import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineExecuteRequest, DataEngineFilter, DataEngineInsertOptions, DataEngineInsertRequest, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DataEngineVectorFindRequest, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions, QueryTransportParams, QueryWithTransport, ValidationAdvisoryEvent } from '@objectstack/spec/data';
+import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineAggregateRequestSchema, DataEngineCountOptionsSchema, DataEngineCountRequestSchema, DataEngineDeleteOptionsSchema, DataEngineDeleteRequestSchema, DataEngineExecuteRequestSchema, DataEngineFilterSchema, DataEngineFindOneRequestSchema, DataEngineFindRequestSchema, DataEngineInsertOptionsSchema, DataEngineInsertRequestSchema, DataEngineQueryOptionsSchema, DataEngineRequestSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DataEngineUpdateRequestSchema, DataEngineVectorFindRequestSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema, QueryPageWindowSchema, QueryPageWindowParamSchema, QueryTransportParamsSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '@objectstack/spec/data';
+import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineExecuteRequest, DataEngineFilter, DataEngineInsertOptions, DataEngineInsertRequest, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DataEngineVectorFindRequest, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions, QueryPageWindow, QueryPageWindowParam, QueryTransportParams, QueryWithTransport, ValidationAdvisoryEvent } from '@objectstack/spec/data';
 
 // Validate data
 const result = BaseEngineOptionsSchema.parse(data);
@@ -1260,6 +1260,40 @@ QueryAST-aligned options for DataEngine.update operations
 
 ---
 
+## QueryPageWindow
+
+Page window — a non-negative integer (0 asks for the total alone)
+
+**Type:** `integer`
+
+
+---
+
+## QueryPageWindowParam
+
+Page window — a non-negative integer, or the digits a querystring carries it as
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Page window — a non-negative integer (0 asks for the total alone)
+
+Type: `integer`
+
+---
+
+#### Option 2
+
+Type: `string`
+
+---
+
+
+---
+
 ## QueryTransportParams
 
 Transport spellings of the QueryAST slots — folded to canonical keys at the boundary
@@ -1270,8 +1304,8 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | :--- | :--- | :--- | :--- |
 | **$filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` (OData `$filter`) |
 | **filters** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` (plural of `filter`) |
-| **$top** | `number \| string \| null` | optional | Transport spelling of `limit` (OData `$top`) — a number, or the digits a querystring carries it as |
-| **$skip** | `number \| string \| null` | optional | Transport spelling of `offset` (OData `$skip`) — a number, or the digits a querystring carries it as |
+| **$top** | `integer \| string \| null` | optional | Transport spelling of `limit` (OData `$top`) — a non-negative integer, or the digits a querystring carries it as |
+| **$skip** | `integer \| string \| null` | optional | Transport spelling of `offset` (OData `$skip`) — a non-negative integer, or the digits a querystring carries it as |
 | **$orderby** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` (OData `$orderby`) |
 | **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
@@ -1282,7 +1316,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
 | **select** | `string \| string[] \| null` | optional | Transport spelling of `fields` |
 | **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` |
-| **skip** | `number \| string \| null` | optional | Transport spelling of `offset` |
+| **skip** | `integer \| string \| null` | optional | Transport spelling of `offset` — a non-negative integer, or the digits a querystring carries it as |
 | **populate** | `string \| string[] \| null` | optional | Transport spelling of `expand` |
 
 ### Nested Shape: `QueryTransportParams.$expand[string]`
@@ -1335,9 +1369,9 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
 | **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
-| **limit** | `number` | optional | Max records to return (LIMIT) |
-| **offset** | `number` | optional | Records to skip (OFFSET) |
-| **top** | `number` | optional | Alias for limit (OData compatibility) |
+| **limit** | `integer` | optional | Max records to return (LIMIT) |
+| **offset** | `integer` | optional | Records to skip (OFFSET) |
+| **top** | `integer` | optional | Alias for limit (OData compatibility) |
 | **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
 | **joins** | `never` | optional | [REMOVED] `query.joins` was removed in @objectstack/spec 17 (ADR-0049) — no engine or driver ever read it: a query carrying `joins` behaved exactly as if the key were absent, while its name squatted on the reserved REST parameter set. Delete the key. Related records are read through `expand` — `expand: { owner_id: { object: 'user', fields: ['name'] } }` — which the engine resolves via batch $in queries, and whose nested query selects the related record's own columns. Keep the foreign key in your own projection (`fields: ['title', 'owner_id']`): the relation is carried by that column, so projecting it away leaves expansion nothing to resolve. A dotted `fields` path is NOT a replacement — no driver ever resolved one and the ingress refuses it (`400 INVALID_FIELD`). |
 | **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional | Aggregation functions |
@@ -1348,8 +1382,8 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
 | **$filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` (OData `$filter`) |
 | **filters** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` (plural of `filter`) |
-| **$top** | `number \| string \| null` | optional | Transport spelling of `limit` (OData `$top`) — a number, or the digits a querystring carries it as |
-| **$skip** | `number \| string \| null` | optional | Transport spelling of `offset` (OData `$skip`) — a number, or the digits a querystring carries it as |
+| **$top** | `integer \| string \| null` | optional | Transport spelling of `limit` (OData `$top`) — a non-negative integer, or the digits a querystring carries it as |
+| **$skip** | `integer \| string \| null` | optional | Transport spelling of `offset` (OData `$skip`) — a non-negative integer, or the digits a querystring carries it as |
 | **$orderby** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` (OData `$orderby`) |
 | **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
@@ -1360,7 +1394,7 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
 | **select** | `string \| string[] \| null` | optional | Transport spelling of `fields` |
 | **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` |
-| **skip** | `number \| string \| null` | optional | Transport spelling of `offset` |
+| **skip** | `integer \| string \| null` | optional | Transport spelling of `offset` — a non-negative integer, or the digits a querystring carries it as |
 | **populate** | `string \| string[] \| null` | optional | Transport spelling of `expand` |
 
 ### Nested Shape: `QueryWithTransport.search`

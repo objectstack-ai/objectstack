@@ -327,3 +327,76 @@ describe('[#25211] controls — what the doors do not refuse', () => {
         expect((await protocol.saveMetaItem({ type: 'datasource', name: 'wh', item: datasource('wh') })).success).toBe(true);
     });
 });
+
+/**
+ * [#25279] `os migrate meta --stored` lists the object rows the object save
+ * door above refuses: a stored object bound `external` to a stored or
+ * registered managed datasource. The row is planted as stored before that door
+ * existed (straight into the table), then the pass is run in preview, and the
+ * same body is offered to the door, so the listing and the refusal are read
+ * off one environment.
+ */
+describe('[#25279] the stored-migration pass lists the object rows that door refuses', () => {
+    const plantObjectRow = (rows: Map<string, Row>, body: Record<string, unknown>) => {
+        const id = `r_${rows.size + 1}`;
+        rows.set(id, {
+            id, type: 'object', name: String(body.name), state: 'active', package_id: null,
+            metadata: JSON.stringify(body),
+        });
+    };
+    const LISTED_ID = 'object-external-binding-managed-datasource-refused';
+    const listedRows = (report: any) =>
+        report.rows
+            .filter((r: any) => r.todos.some((t: any) => t.conversionId === LISTED_ID))
+            .map((r: any) => `${r.type}/${r.name}|${r.outcome}`);
+
+    for (const [shape, dsExtra] of MANAGED_SHAPES) {
+        it(`a stored object on a stored datasource with ${shape} is listed, and its next save is refused`, async () => {
+            const { protocol, rows } = makeSession();
+            await protocol.saveMetaItem({ type: 'datasource', name: 'wh', item: datasource('wh', dsExtra) });
+            plantObjectRow(rows, object('wh_order'));
+
+            const report = await protocol.migrateStoredMetadata({});
+
+            expect(listedRows(report)).toEqual(['object/wh_order|skipped']);
+            const todo = report.rows.find((r: any) => r.name === 'wh_order').todos.find((t: any) => t.conversionId === LISTED_ID);
+            expect(todo.path).toBe('objects[0].external');
+            expect(todo.reason).toContain(managedFinding('wh_order'));
+            const err = await refusalOf(protocol.saveMetaItem({ type: 'object', name: 'wh_order', item: object('wh_order') }));
+            expectRefusal(err, 'object/wh_order', 'external', ['wh_order']);
+        });
+    }
+
+    it('a stored object on a datasource the code layer registers as managed is listed the same way', async () => {
+        const { protocol, rows } = makeSession({ registryDatasources: { wh: datasource('wh', { schemaMode: 'managed' }) } });
+        plantObjectRow(rows, object('wh_order'));
+
+        expect(listedRows(await protocol.migrateStoredMetadata({}))).toEqual(['object/wh_order|skipped']);
+    });
+
+    it("the environment's stored datasource row is the one judged, over the registered definition", async () => {
+        const { protocol, rows } = makeSession({ registryDatasources: { wh: datasource('wh', { schemaMode: 'managed' }) } });
+        await protocol.saveMetaItem({ type: 'datasource', name: 'wh', item: datasource('wh', FEDERATED) });
+        plantObjectRow(rows, object('wh_order'));
+
+        const report = await protocol.migrateStoredMetadata({});
+
+        expect(listedRows(report)).toEqual([]);
+        expect(report.canonical).toBeGreaterThanOrEqual(1);
+        await expect(protocol.saveMetaItem({ type: 'object', name: 'wh_order', item: object('wh_order') })).resolves.toBeDefined();
+    });
+
+    it.each([
+        ['a federated stored datasource', (p: any) => p.saveMetaItem({ type: 'datasource', name: 'wh', item: datasource('wh', FEDERATED) })],
+        ['a datasource no layer holds', async () => {}],
+    ])('a stored object on %s is not listed', async (_label, seed) => {
+        const { protocol, rows } = makeSession();
+        await seed(protocol);
+        plantObjectRow(rows, object('wh_order'));
+
+        const report = await protocol.migrateStoredMetadata({});
+
+        expect(listedRows(report)).toEqual([]);
+        expect(report.rows.filter((r: any) => r.name === 'wh_order')).toEqual([]);
+    });
+});

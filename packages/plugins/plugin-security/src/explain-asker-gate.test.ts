@@ -500,6 +500,7 @@ describe('the read question, engine level: who it is asked of, and how often', (
     getFieldMask: () => ({}),
     getPartialMaskRules: async () => ({}),
     baselinePermissionSets: [],
+    tenancyPosture: 'single',
     computeLayeredRlsFilter: async () => ({ layer0: null, layer1: null }),
     fetchRecord: async (_o, id) => (id === STORED.id ? { ...STORED } : null),
     recordAbsentToCaller: question,

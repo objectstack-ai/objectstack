@@ -904,9 +904,9 @@ Enable package response
 | **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
 | **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
 | **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | Sorting instructions (ORDER BY) |
-| **limit** | `number` | optional | Max records to return (LIMIT) |
-| **offset** | `number` | optional | Records to skip (OFFSET) |
-| **top** | `number` | optional | Alias for limit (OData compatibility) |
+| **limit** | `integer` | optional | Max records to return (LIMIT) |
+| **offset** | `integer` | optional | Records to skip (OFFSET) |
+| **top** | `integer` | optional | Alias for limit (OData compatibility) |
 | **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
 | **joins** | `never` | optional | [REMOVED] `query.joins` was removed in @objectstack/spec 17 (ADR-0049) — no engine or driver ever read it: a query carrying `joins` behaved exactly as if the key were absent, while its name squatted on the reserved REST parameter set. Delete the key. Related records are read through `expand` — `expand: { owner_id: { object: 'user', fields: ['name'] } }` — which the engine resolves via batch $in queries, and whose nested query selects the related record's own columns. Keep the foreign key in your own projection (`fields: ['title', 'owner_id']`): the relation is carried by that column, so projecting it away leaves expansion nothing to resolve. A dotted `fields` path is NOT a replacement — no driver ever resolved one and the ingress refuses it (`400 INVALID_FIELD`). |
 | **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional | Aggregation functions |
@@ -917,8 +917,8 @@ Enable package response
 | **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
 | **$filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` (OData `$filter`) |
 | **filters** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` (plural of `filter`) |
-| **$top** | `number \| string \| null` | optional | Transport spelling of `limit` (OData `$top`) — a number, or the digits a querystring carries it as |
-| **$skip** | `number \| string \| null` | optional | Transport spelling of `offset` (OData `$skip`) — a number, or the digits a querystring carries it as |
+| **$top** | `integer \| string \| null` | optional | Transport spelling of `limit` (OData `$top`) — a non-negative integer, or the digits a querystring carries it as |
+| **$skip** | `integer \| string \| null` | optional | Transport spelling of `offset` (OData `$skip`) — a non-negative integer, or the digits a querystring carries it as |
 | **$orderby** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` (OData `$orderby`) |
 | **$select** | `string \| string[] \| null` | optional | Transport spelling of `fields` (OData `$select`) |
 | **$expand** | `string \| string[] \| Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }> \| null` | optional | Transport spelling of `expand` (OData `$expand`) |
@@ -929,7 +929,7 @@ Enable package response
 | **filter** | `[string, string, any] \| [string, string] \| [string, object, ...object[]] \| object[] \| Record<string, any> \| any \| null` | optional | Transport spelling of `where` |
 | **select** | `string \| string[] \| null` | optional | Transport spelling of `fields` |
 | **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order?: Enum<'asc' \| 'desc'> }[] \| null` | optional | Transport spelling of `orderBy` |
-| **skip** | `number \| string \| null` | optional | Transport spelling of `offset` |
+| **skip** | `integer \| string \| null` | optional | Transport spelling of `offset` — a non-negative integer, or the digits a querystring carries it as |
 | **populate** | `string \| string[] \| null` | optional | Transport spelling of `expand` |
 
 
@@ -2055,8 +2055,8 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **select** | `string` | optional | Comma-separated list of fields to retrieve. |
 | **sort** | `string` | optional | Sort expression (e.g. "name asc,created_at desc" or "-created_at"). |
 | **orderBy** | `string` | optional | Alias for sort (OData compatibility). |
-| **top** | `number` | optional | Max records to return (limit). |
-| **skip** | `number` | optional | Records to skip (offset). |
+| **top** | `integer \| string` | optional | Max records to return (limit) — a non-negative integer. |
+| **skip** | `integer \| string` | optional | Records to skip (offset) — a non-negative integer. |
 | **expand** | `string` | optional | Comma-separated list of lookup/master_detail field names to expand. Resolved to populate array and passed to the engine for batch $in expansion. |
 | **search** | `string` | optional | Full-text search query. |
 | **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |

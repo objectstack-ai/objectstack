@@ -288,6 +288,7 @@ describe('the tenant layer of a by-id write explanation of a row the caller cann
     getFieldMask: () => ({}),
     getPartialMaskRules: async () => ({}),
     baselinePermissionSets: [],
+    tenancyPosture: 'single',
     computeLayeredRlsFilter: async () => ({ layer0: WALL, layer1: null }),
     fetchRecord: async () => stored,
     ...(read ? { recordAbsentToCaller: async () => read.absent } : {}),

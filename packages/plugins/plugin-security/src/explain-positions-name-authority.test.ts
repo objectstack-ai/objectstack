@@ -82,6 +82,7 @@ function makeDeps(): ExplainEngineDeps {
     getFieldMask: () => ({}),
     getPartialMaskRules: async () => ({}),
     baselinePermissionSets: ['member_default'],
+    tenancyPosture: 'single',
   };
 }
 

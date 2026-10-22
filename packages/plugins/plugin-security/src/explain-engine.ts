@@ -26,6 +26,7 @@ import {
   readDisabledCatalogNames,
   resolveUserAuthzGrants,
   securityCatalogReaderOf,
+  vetOrganizationClaim,
 } from '@objectstack/core';
 import {
   crossFieldClassRefusalCarriedBy,
@@ -51,6 +52,7 @@ import type {
   ExplainMatchedRule,
   ExplainOperation,
   ExplainRecordAttribution,
+  TenancyPosture,
 } from '@objectstack/spec/security';
 import type { PermissionEvaluator } from './permission-evaluator.js';
 import { superuserBypassBitForOperation } from './permission-evaluator.js';
@@ -335,6 +337,18 @@ export interface ExplainEngineDeps {
    * anything at all".
    */
   baselinePermissionSets: string[];
+  /**
+   * [#25107 · ADR-0090 D10] The tenancy posture enforcement runs under, the
+   * one the delegated-principal prologue hands {@link delegatedOrganizationRefusal},
+   * so an on-behalf-of context whose live organization the delegator's
+   * membership does not back is explained as the denial the operation answers.
+   *
+   * REQUIRED, deliberately, as {@link getPartialMaskRules} is: an engine wired
+   * without it would explain such a context as admitted, the misreport this
+   * member exists to close, and a required member makes the omission a compile
+   * error.
+   */
+  tenancyPosture: TenancyPosture;
 
   // ── [C2 / ADR-0095] Record-grained deps. All OPTIONAL: absent → the engine
   // stays object-level and byte-compatible. Present → the sharing / rls / owd /
@@ -746,10 +760,14 @@ export type DelegatorResolution =
  *    intersect against baseline-level access. The `sys_user` existence check is
  *    the only correct fail-closed point.
  *  - **Tenant-scoped bags are inherited from the live principal, and the
- *    inheritance still WINS.** The agent and its delegator are, by construction,
- *    in the same org, so `tenantId` / `org_user_ids` carry over — delegator-side
- *    RLS that substitutes them then compiles faithfully instead of collapsing to
- *    the deny sentinel. Since #6352, `buildContextForUser` returns the resolver's
+ *    inheritance still WINS.** The delegated operation runs in the live
+ *    principal's organization, so `tenantId` / `org_user_ids` carry over —
+ *    delegator-side RLS that substitutes them then compiles faithfully instead
+ *    of collapsing to the deny sentinel. [#25107] That the delegator belongs to
+ *    that organization is not assumed here: on a walled posture it is the
+ *    precondition {@link delegatedOrganizationRefusal} vets, and every reader of
+ *    this resolution asks it before it uses the delegator (the operation
+ *    prologue refuses the operation, each probe answers that refusal). Since #6352, `buildContextForUser` returns the resolver's
  *    own `org_user_ids`; the live principal's org peer set is the answer the
  *    delegated request runs under, so the assignment below overwrites it
  *    exactly as before. The delegator's GRANTS are the one tenant-scoped thing
@@ -803,7 +821,9 @@ export async function resolveDelegatorContext(
     ? context.tenantId
     : undefined;
   const dctx = await buildContextForUser(ql, oboId, nowMs, liveTenantId);
-  // Inherit tenant-scoped substitution bags from the live principal (same org).
+  // Inherit tenant-scoped substitution bags from the live principal: the
+  // organization the operation runs in, which the delegator's membership must
+  // back on a walled posture ({@link delegatedOrganizationRefusal}).
   if (context?.tenantId != null) dctx.tenantId = context.tenantId;
   if (context?.org_user_ids != null) dctx.org_user_ids = context.org_user_ids;
   // [ADR-0105 D2] The delegator's own org access set is NOT inherited — it is
@@ -812,6 +832,44 @@ export async function resolveDelegatorContext(
   // set would widen the delegator past their own memberships.
   if (user.email != null && user.email !== '') dctx.email = user.email;
   return { kind: 'resolved', context: dctx };
+}
+
+/**
+ * [#25063 · ADR-0090 D10] The organization a delegated operation is REFUSED
+ * in: the live principal's active organization, answered where the
+ * delegator's own membership does not back it on this tenancy posture, and
+ * `undefined` where the operation may run there.
+ *
+ * A delegated operation runs in the live principal's organization and is
+ * bounded by the delegator's scope; {@link resolveDelegatorContext} hands the
+ * delegator that organization. On a walled posture the bound holds only while
+ * the delegator is a member of it, so the delegated-principal prologue
+ * (`resolveOperationPrincipals`) refuses every verb where this answers an
+ * organization. [#25106 / #25107] Every reader that resolves a delegator on
+ * its own asks it too, at the prologue's point (a delegator that resolved,
+ * before its sets resolve), and answers that refusal: the raw-SQL read scope
+ * the deny sentinel, the admission probes `false`, the field projections no
+ * field, the explanation a denial, the narrowing diagnostic nothing.
+ *
+ * It is {@link vetOrganizationClaim} asked once, with the prologue's inputs:
+ * the live organization (`context.tenantId`), the delegator's OWN memberships
+ * (`accessible_org_ids`, never inherited), and the posture. Under `single`
+ * the claim stands, and a context with no active organization is not this
+ * rule's (ADR-0123 D2). ⛔ Not a second spelling of the membership rule: a
+ * reader that needs it calls this, and this calls the one function that
+ * spells it.
+ */
+export function delegatedOrganizationRefusal(
+  context: any,
+  delegatorContext: any,
+  tenancyPosture: TenancyPosture,
+): string | undefined {
+  const liveOrganization =
+    context?.tenantId != null && context.tenantId !== '' ? String(context.tenantId) : undefined;
+  if (liveOrganization === undefined) return undefined;
+  return vetOrganizationClaim(liveOrganization, delegatorContext?.accessible_org_ids ?? [], tenancyPosture) === undefined
+    ? liveOrganization
+    : undefined;
 }
 
 const SCOPE_ORDER = ['own', 'own_and_reports', 'unit', 'unit_and_below', 'org'] as const;
@@ -2228,6 +2286,11 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   // fail-closed denial like a missing delegator, never "no delegation", which
   // would let the agent's own grants decide alone.
   let delegatorUnresolved = false;
+  // [#25107 · ADR-0090 D10] The organization the operation runs in, when the
+  // delegator's own membership does not back it on a walled posture: the
+  // prologue refuses every verb there, so this report is that denial, made
+  // like a missing delegator's before any delegator set resolves.
+  let delegatorOutsideOrganization: string | undefined;
   let delegatorNames: string[] = [];
   if (context?.onBehalfOf?.userId) {
     const del = await settle(resolveDelegatorContext(deps.ql, context));
@@ -2236,11 +2299,15 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
     } else if (del.kind === 'missing') {
       delegatorMissing = true;
     } else if (del.kind === 'resolved') {
-      delegatorContextForRls = del.context;
-      delegatorSets = await deps.resolveSets(del.context).catch(() => [] as PermissionSet[]);
-      delegatorNames = delegatorSets.map((s: any) => String(s.name ?? '?'));
+      delegatorOutsideOrganization = delegatedOrganizationRefusal(context, del.context, deps.tenancyPosture);
+      if (delegatorOutsideOrganization === undefined) {
+        delegatorContextForRls = del.context;
+        delegatorSets = await deps.resolveSets(del.context).catch(() => [] as PermissionSet[]);
+        delegatorNames = delegatorSets.map((s: any) => String(s.name ?? '?'));
+      }
     }
   }
+  const delegatorRefused = delegatorMissing || delegatorUnresolved || delegatorOutsideOrganization !== undefined;
   const positions: string[] = context?.positions ?? [];
   const viaOf = (name: string): string => {
     if (deps.baselinePermissionSets.includes(name)) return 'additive baseline (ADR-0090 D5)';
@@ -2282,7 +2349,7 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   const delegatorOf = (from: string): string => positionDelegators.get(from) ?? from;
   layers.push({
     layer: 'principal',
-    verdict: delegatorMissing || delegatorUnresolved ? 'denies' : 'neutral',
+    verdict: delegatorRefused ? 'denies' : 'neutral',
     detail:
       `Principal ${principalPerson} holds position(s) [${positions.join(', ') || 'none'}] ` +
       `resolving to permission set(s) [${setNames.join(', ') || 'none'}] (union-merged, most-permissive).` +
@@ -2291,7 +2358,10 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
           ? ` Acting on behalf of ${delegatorPerson}, who no longer exists — D10 fails CLOSED (access denied).`
           : delegatorUnresolved
             ? ` Acting on behalf of ${delegatorPerson}, whose grants could not be resolved (the lookup threw) — D10 fails CLOSED (access denied).`
-            : ` Acting on behalf of ${delegatorPerson} — effective access is the D10 INTERSECTION with the delegator's set(s) [${delegatorNames.join(', ') || 'none'}].`
+            : delegatorOutsideOrganization !== undefined
+              ? ` Acting on behalf of ${delegatorPerson}, who is not a member of organization '${delegatorOutsideOrganization}', ` +
+                `the one this request runs in — D10 fails CLOSED (access denied).`
+              : ` Acting on behalf of ${delegatorPerson} — effective access is the D10 INTERSECTION with the delegator's set(s) [${delegatorNames.join(', ') || 'none'}].`
         : '') +
       (delegatedPositions.length > 0
         ? ` ${delegatedPositions.length} position(s) held via delegation (ADR-0091 D3): [${delegatedPositions
@@ -2408,7 +2478,7 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   // that layer's grant is computed FROM, and reporting the real cause beats a
   // misleading "no set grants it" when the sets were never the problem.
   const postureUnresolved = secMeta.unresolved === true;
-  const crudAllowed = agentCrud && delegatorCrud && !delegatorMissing && !delegatorUnresolved && !postureUnresolved;
+  const crudAllowed = agentCrud && delegatorCrud && !delegatorRefused && !postureUnresolved;
   const granting = postureUnresolved
     ? []
     : sets
@@ -2429,10 +2499,13 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
           ? `Delegator no longer exists — D10 fails closed (access denied).`
           : delegatorUnresolved
             ? `The delegator's grants could not be resolved — D10 fails closed (access denied).`
-            : agentCrud && !delegatorCrud
-              ? `The agent grants ${operation} on '${object}' but the DELEGATOR does not — D10 intersection denies (an agent may not exceed the user it acts for).`
-              : `No resolved permission set grants ${operation} on '${object}'` +
-                (secMeta.isPrivate ? " (object is 'private' posture — non-superuser '*' wildcards are excluded, ADR-0066 D2)." : '.'),
+            : delegatorOutsideOrganization !== undefined
+              ? `The delegator is not a member of organization '${delegatorOutsideOrganization}', the one this request ` +
+                `runs in — D10 fails closed (access denied).`
+              : agentCrud && !delegatorCrud
+                ? `The agent grants ${operation} on '${object}' but the DELEGATOR does not — D10 intersection denies (an agent may not exceed the user it acts for).`
+                : `No resolved permission set grants ${operation} on '${object}'` +
+                  (secMeta.isPrivate ? " (object is 'private' posture — non-superuser '*' wildcards are excluded, ADR-0066 D2)." : '.'),
     contributors: granting.map((n) => ({ kind: 'permission_set' as const, name: n, via: viaOf(n) })),
   });
 

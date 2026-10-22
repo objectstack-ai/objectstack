@@ -7756,8 +7756,19 @@ export class ObjectQL implements IObjectQLEngine {
     const isTenantAuditInScope =
       resolveTenantFieldName(objectSchema) !== null &&
       !isFederated;
+    // [ADR-0131 D8 · 8c-1] The wall's exemption, declared to the driver. An
+    // exempt platform admin's predicate write reaches the driver with no
+    // `tenantId` because the wall lifted the scope on purpose, and the
+    // driver's `[tenant-audit]` line tells such a write to declare
+    // `bypassTenantAudit: true` — an option no REST caller can set. The
+    // exemption is decided once, by `computeTenantLayer0Verdict`, and arrives
+    // here as the recorded verdict; this reads it, it does not re-decide it
+    // (see {@link wallExemptedOperation}).
+    const wallExempt =
+      tenantObject && isTenantAuditInScope && !scope.writeTarget &&
+      this.wallExemptedOperation(execCtx, scope.recordedVerdict);
     const preserveAudit = (execCtx as any)?.preserveAudit === true;
-    if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit) return base;
+    if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit && !wallExempt) return base;
     const opts: any = base && typeof base === 'object' ? { ...base } : {};
     if (hasTx && opts.transaction === undefined) {
       opts.transaction = tx;
@@ -7797,6 +7808,13 @@ export class ObjectQL implements IObjectQLEngine {
       // line. It changes nothing about what any write touches.
       opts.bypassTenantAudit = true;
     }
+    if (wallExempt && opts.bypassTenantAudit === undefined) {
+      // The same fill-in-only rule as the isSystem mute above: a caller's own
+      // value wins. Diagnostics only — the driver's scope is already the
+      // verdict's (no `tenantId`), and this option silences a warning and
+      // touches nothing else; on a read it is inert.
+      opts.bypassTenantAudit = true;
+    }
     if (preserveAudit && opts.preserveAudit === undefined) {
       // Historical import (#3493): let the driver keep a supplied `updated_at`
       // instead of force-stamping now on the update path.
@@ -7824,23 +7842,7 @@ export class ObjectQL implements IObjectQLEngine {
         ? String(execCtx.tenantId)
         : undefined;
     const recorded = recordedVerdict === undefined ? undefined : TenantLayer0VerdictSchema.safeParse(recordedVerdict);
-    const verdict = recorded?.success
-      ? recorded.data
-      : computeTenantLayer0Verdict({
-          tenancyPosture: this.resolveEnginePosture(),
-          organizationId: activeOrganization,
-          accessibleOrgIds: accessibleOrganizationsOf(execCtx),
-          // Left to the driver, which resolves the tenant column from the
-          // table it actually built (`resolveTenantField`): an object with no
-          // such column is unscoped there whatever this says. `undefined` is
-          // the verdict's "assume a tenant object", as Layer 0 reads an
-          // unresolved field set.
-          objectHasOrgIdField: undefined,
-          tenancyDisabled: false,
-          // The engine holds no permission sets: no exemption is ITS to grant.
-          posturePermitsCrossTenant: false,
-          isPlatformAdmin: false,
-        });
+    const verdict = recorded?.success ? recorded.data : this.engineLayer0Verdict(execCtx, activeOrganization);
     switch (verdict.kind) {
       case 'none':
         return undefined;
@@ -7851,6 +7853,59 @@ export class ObjectQL implements IObjectQLEngine {
       case 'deny':
         return activeOrganization !== undefined ? { tenantId: activeOrganization } : undefined;
     }
+  }
+
+  /**
+   * The Layer 0 verdict over the engine's OWN facts — what {@link driverReadScope}
+   * falls back to where no wall was recorded. The one ladder,
+   * `computeTenantLayer0Verdict`, with the exemption's facts withheld.
+   */
+  private engineLayer0Verdict(
+    execCtx: ExecutionContext | undefined,
+    activeOrganization: string | undefined,
+  ): TenantLayer0Verdict {
+    return computeTenantLayer0Verdict({
+      tenancyPosture: this.resolveEnginePosture(),
+      organizationId: activeOrganization,
+      accessibleOrgIds: accessibleOrganizationsOf(execCtx),
+      // Left to the driver, which resolves the tenant column from the
+      // table it actually built (`resolveTenantField`): an object with no
+      // such column is unscoped there whatever this says. `undefined` is
+      // the verdict's "assume a tenant object", as Layer 0 reads an
+      // unresolved field set.
+      objectHasOrgIdField: undefined,
+      tenancyDisabled: false,
+      // The engine holds no permission sets: no exemption is ITS to grant.
+      posturePermitsCrossTenant: false,
+      isPlatformAdmin: false,
+    });
+  }
+
+  /**
+   * [ADR-0131 D8 · 8c-1] Did the wall's EXEMPTION lift this operation's scope?
+   * True when the recorded verdict is `none` while the same ladder over the
+   * engine's own facts — every rung but the exemption — would have walled it.
+   * That is plugin-security's own `crossedByPlatformAdmin` test (the ladder
+   * asked a second time with only the exemption withheld), with the engine's
+   * existing fallback ({@link engineLayer0Verdict}, what an unrecorded
+   * operation is scoped by) as the second asking: no rung is computed beside
+   * the one ladder, and a `single` posture answers `none` both ways, so it is
+   * no crossing. The #12974 owner bypass records `none` on READS only, where
+   * the declaration is inert.
+   *
+   * Absence is not exemption: a by-id write, a system context or a stack with
+   * no security layer records nothing, and answers false. A recorded value
+   * that does not parse answers false too — junk never lifts anything.
+   */
+  private wallExemptedOperation(execCtx: ExecutionContext | undefined, recordedVerdict: unknown): boolean {
+    if (recordedVerdict === undefined) return false;
+    const recorded = TenantLayer0VerdictSchema.safeParse(recordedVerdict);
+    if (!recorded.success || recorded.data.kind !== 'none') return false;
+    const activeOrganization =
+      execCtx?.tenantId !== undefined && execCtx.tenantId !== null && String(execCtx.tenantId) !== ''
+        ? String(execCtx.tenantId)
+        : undefined;
+    return this.engineLayer0Verdict(execCtx, activeOrganization).kind !== 'none';
   }
 
   /**

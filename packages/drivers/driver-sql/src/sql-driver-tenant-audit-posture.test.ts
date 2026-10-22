@@ -57,9 +57,15 @@ const bootDriver = async () => {
   await driver.initObjects(objects);
 };
 
-/** Writes WITHOUT a tenantId — the case the audit exists to catch. */
+/**
+ * Writes WITHOUT a tenantId — the case the audit exists to catch. A delete:
+ * an insert whose row carries its organization is not audited (ADR-0131 8c-1,
+ * pinned in `sql-driver-tenant-audit-insert-carries-tenant.test.ts`), and one
+ * whose row does not is refused by the NOT NULL organization column after the
+ * audit has run. The row need not exist: the audit precedes the statement.
+ */
 const writeWithoutTenant = async (id: string) => {
-  await driver.create('account', { id, organization_id: 'org_a', name: id });
+  await driver.delete('account', id);
 };
 
 const tenantAuditWarned = () => warns.some((w) => w.msg.includes('[tenant-audit]'));
@@ -93,7 +99,7 @@ describe('#5262 — tenant-audit fires on a posture-only walled deployment', () 
     await writeWithoutTenant('x1');
 
     expect(tenantAuditWarned()).toBe(true);
-    expect(warns[0].meta).toMatchObject({ object: 'account', op: 'create', tenantField: 'organization_id' });
+    expect(warns[0].meta).toMatchObject({ object: 'account', op: 'delete', tenantField: 'organization_id' });
   });
 
   it('`group` is a walled posture too', async () => {
@@ -140,11 +146,7 @@ describe('#5262 — tenant-audit fires on a posture-only walled deployment', () 
 
   it('bypassTenantAudit still silences a walled deployment', async () => {
     setEnv({ posture: 'isolated' });
-    await driver.create(
-      'account',
-      { id: 'x1', organization_id: 'org_a', name: 'X1' },
-      { bypassTenantAudit: true },
-    );
+    await driver.delete('account', 'x1', { bypassTenantAudit: true });
     expect(tenantAuditWarned()).toBe(false);
   });
 
@@ -210,7 +212,7 @@ describe('#5262 — the verdict is taken LIVE, never frozen at first write', () 
 describe('the [tenant-audit] line names both readings and the remedy for each', () => {
   it('a wall-exempt cross-organization updateMany is not told to pass tenantId', async () => {
     setEnv({ posture: 'isolated' });
-    await writeWithoutTenant('x1');
+    await driver.create('account', { id: 'x1', organization_id: 'org_a', name: 'x1' });
     warns = [];
     // The exempt admin's shape: a predicate update with no tenantId.
     await driver.updateMany('account', { where: { name: 'x1' } } as any, { name: 'renamed' });
