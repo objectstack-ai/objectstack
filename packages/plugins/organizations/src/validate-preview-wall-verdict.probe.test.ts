@@ -172,6 +172,56 @@ describe('#25062 PROBE: the preview and the walled write, side by side (origin/m
   });
 });
 
+describe('#25062 PROBE: the HTTP validate door — `POST /api/v1/data/:object/import`, dry run vs commit', () => {
+  // The real RestServer route and import runner, over the real protocol
+  // (`validateData` / `createData`) over the walled engine. Only the request's
+  // execution context is supplied, as the dry-run parity suite supplies it.
+  const importDoor = async (b: Booted, context: object) => {
+    const { RestServer } = await import('@objectstack/rest');
+    // Probe-only relative reach: this package does not declare metadata-protocol.
+    const { ObjectStackProtocolImplementation } = await import('../../../metadata-protocol/src/index.js');
+    const noop = () => {};
+    const server = { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
+    const protocol = new ObjectStackProtocolImplementation(b.engine as never);
+    const rest = new RestServer(server as never, protocol as never, { api: { requireAuth: false } } as never);
+    (rest as unknown as { resolveExecCtx: () => Promise<object> }).resolveExecCtx = async () => ({ ...context });
+    rest.registerRoutes();
+    const route = rest.getRoutes().find((r: any) => r.method === 'POST' && r.path === '/api/v1/data/:object/import') as any;
+    return async (rows: unknown[], dryRun: boolean) => {
+      const res: any = {
+        write: () => true, end: () => {}, header: () => res,
+        status: (code: number) => { res._status = code; return res; },
+        json: (body: unknown) => { res._json = body; return res; },
+      };
+      await route.handler({ params: { object: INJECTED }, body: { format: 'json', rows, dryRun }, headers: {} }, res);
+      return { status: res._status ?? 200, body: res._json };
+    };
+  };
+
+  it('M5 cell (a), `group`: the dry run reports organization_id dropped, the commit stores it as sent', async () => {
+    const b = await boot('group');
+    const door = await importDoor(b, GROUP_CTX);
+    const dry = await door([{ id: 'r2', name: 'n', organization_id: SISTER_ORG }], true);
+    const commit = await door([{ id: 'r2', name: 'n', organization_id: SISTER_ORG }], false);
+    console.log('M5a', JSON.stringify({ dry: dry.body?.results, commit: commit.body?.results, stored: await b.table() }));
+    expect(dry.body.results[0]).toMatchObject({ ok: true, droppedFields: [{ object: INJECTED, fields: ['organization_id'], reason: 'readonly' }] });
+    expect(commit.body.results[0]).toMatchObject({ ok: true });
+    expect(commit.body.results[0]).not.toHaveProperty('droppedFields');
+    expect(await b.table()).toContainEqual({ id: 'r2', organization_id: SISTER_ORG });
+  });
+
+  it('M5 cell (b), `isolated`: the dry run answers ok, the commit refuses the row 403', async () => {
+    const b = await boot('isolated');
+    const door = await importDoor(b, MEMBER_CTX);
+    const dry = await door([{ id: 'r2', name: 'n', organization_id: FOREIGN_ORG }], true);
+    const commit = await door([{ id: 'r2', name: 'n', organization_id: FOREIGN_ORG }], false);
+    console.log('M5b', JSON.stringify({ dry: dry.body?.results, commit: commit.body?.results, stored: await b.table() }));
+    expect(dry.body.results[0]).toMatchObject({ ok: true });
+    expect(commit.body.results[0]).toMatchObject({ ok: false });
+    expect(await b.table()).toEqual([{ id: 'r1', organization_id: OWN_ORG }]);
+  });
+});
+
 describe('#25062 PROBE: the one existing preview seam, `registerWriteGateProbe` (security: `canWriteObject`)', () => {
   it('M3: answers one boolean for the whole set, the same `true` for an admitted, a refused and an unwalled organization', async () => {
     const answers: Record<string, unknown> = {};
