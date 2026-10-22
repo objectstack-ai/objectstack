@@ -1,10 +1,12 @@
 ---
 '@objectstack/spec': minor
+'@objectstack/lint': minor
 ---
 
 feat(spec)!: a `user` field whose `reference` names an object other than `sys_user` is refused at parse, and every `user` field resolves to `sys_user`
 
 Clause-②: no (narrowing)
+Metadata-protocol: narrowed
 
 <!-- adr-0087: registered user-field-foreign-reference-refused -->
 
@@ -16,4 +18,6 @@ Clause-②: no (narrowing)
 - **Unchanged:** a `user` field without `reference`, with `reference: 'sys_user'` or with a blank `reference`, and `Field.user()`'s output for every typed call.
 - **Fix:** change such a field to a `lookup` on the object it names, `{ type: 'lookup', reference: 'TARGET' }` (`Field.lookup('TARGET', …)`), and choose its `deleteBehavior` on purpose: a `lookup` defaults to `'set_null'` when the target record is deleted, which a `user` field never did. A `current_user` default is not legal on a `lookup` to an object other than `sys_user`. If a person was meant, drop `reference`.
 - **Why no automatic rewrite.** No ADR-0087 conversion can carry the change losslessly: a `lookup` joins the referential delete walk and `deleteBehavior` has no value that means "leave it". `objectstack migrate meta` reports the semantic entry `user-field-foreign-reference-refused` instead.
-- **Also:** the `@objectstack/lint` advisory `user-field-foreign-reference`, added for 18.x and never published, is withdrawn: the parse refusal replaces it. No published `@objectstack/lint` export changes.
+**Supersedes the `user-field-foreign-reference` warning entry in this release.** That entry announced a `@objectstack/lint` advisory `user-field-foreign-reference`, the `USER_FIELD_FOREIGN_REFERENCE` export and its `os explain` entry, and said such a field would still parse. All three are withdrawn before release and never ship: a foreign `reference` on a `user` field is now refused by `FieldSchema` instead, so there is nothing left for the advisory to warn about.
+
+- **For `@objectstack/lint`:** no `user-field-foreign-reference` rule, no `USER_FIELD_FOREIGN_REFERENCE` export and no `RULE_EXPLANATIONS` entry for it. `OBJECT_REFERENCE_UNKNOWN` and every other export are unchanged. The refusal arrives as a `FieldSchema` issue at `reference`, not as a lint advisory.
