@@ -468,7 +468,6 @@ export type Iso_api_dispatcher__DispatcherErrorCode = Assert<Eq< z.input< typeof
 export type Iso_api_dispatcher__DispatcherErrorResponseSchema = Assert<Eq< z.input< typeof M18.DispatcherErrorResponseSchema >, z.infer< typeof M18.DispatcherErrorResponseSchema > >>;
 
 // api/documentation.zod.ts
-export type Iso_api_documentation__ApiTestingUiType = Assert<Eq< z.input< typeof M19.ApiTestingUiType >, z.infer< typeof M19.ApiTestingUiType > >>;
 export type Iso_api_documentation__CodeGenerationTemplateSchema = Assert<Eq< z.input< typeof M19.CodeGenerationTemplateSchema >, z.infer< typeof M19.CodeGenerationTemplateSchema > >>;
 export type Iso_api_documentation__OpenApiSecuritySchemeSchema = Assert<Eq< z.input< typeof M19.OpenApiSecuritySchemeSchema >, z.infer< typeof M19.OpenApiSecuritySchemeSchema > >>;
 export type Iso_api_documentation__OpenApiServerSchema = Assert<Eq< z.input< typeof M19.OpenApiServerSchema >, z.infer< typeof M19.OpenApiServerSchema > >>;

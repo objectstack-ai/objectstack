@@ -3,8 +3,6 @@ import {
   OpenApiServerSchema,
   OpenApiSecuritySchemeSchema,
   OpenApiSpecSchema,
-  ApiTestingUiType,
-  ApiTestingUiConfigSchema,
   ApiTestRequestSchema,
   ApiTestCollectionSchema,
   ApiChangelogEntrySchema,
@@ -185,72 +183,6 @@ describe('API Documentation Protocol', () => {
       const result = OpenApiSpecSchema.parse(spec);
       expect(result.openapi).toBe('3.0.0');
       expect(result.servers).toEqual([]);
-    });
-  });
-
-  describe('ApiTestingUiType', () => {
-    it('should accept valid UI types', () => {
-      expect(ApiTestingUiType.parse('swagger-ui')).toBe('swagger-ui');
-      expect(ApiTestingUiType.parse('redoc')).toBe('redoc');
-      expect(ApiTestingUiType.parse('rapidoc')).toBe('rapidoc');
-      expect(ApiTestingUiType.parse('stoplight')).toBe('stoplight');
-      expect(ApiTestingUiType.parse('scalar')).toBe('scalar');
-        expect(ApiTestingUiType.parse('graphiql')).toBe('graphiql');
-      expect(ApiTestingUiType.parse('postman')).toBe('postman');
-      expect(ApiTestingUiType.parse('custom')).toBe('custom');
-    });
-
-    it('should reject invalid UI types', () => {
-      expect(() => ApiTestingUiType.parse('invalid')).toThrow();
-    });
-  });
-
-  describe('ApiTestingUiConfigSchema', () => {
-    it('should validate Swagger UI config', () => {
-      const config = {
-        type: 'swagger-ui' as const,
-        path: '/api-docs',
-        theme: 'light' as const,
-        enableTryItOut: true,
-        enableFilter: true,
-        enableCors: true,
-        defaultModelsExpandDepth: 1,
-        layout: {
-          deepLinking: true,
-          displayOperationId: false,
-          defaultModelRendering: 'example' as const,
-          docExpansion: 'list' as const,
-        },
-      };
-
-      const result = ApiTestingUiConfigSchema.parse(config);
-      expect(result.type).toBe('swagger-ui');
-      expect(result.theme).toBe('light');
-      expect(result.enableTryItOut).toBe(true);
-    });
-
-    it('should apply defaults', () => {
-      const config = {
-        type: 'swagger-ui' as const,
-      };
-
-      const result = ApiTestingUiConfigSchema.parse(config);
-      expect(result.path).toBe('/api-docs');
-      expect(result.theme).toBe('light');
-      expect(result.enableTryItOut).toBe(true);
-      expect(result.enableFilter).toBe(true);
-    });
-
-    it('should support custom CSS and JS', () => {
-      const config = {
-        type: 'swagger-ui' as const,
-        customCssUrl: 'https://example.com/custom.css',
-        customJsUrl: 'https://example.com/custom.js',
-      };
-
-      const result = ApiTestingUiConfigSchema.parse(config);
-      expect(result.customCssUrl).toBe('https://example.com/custom.css');
-      expect(result.customJsUrl).toBe('https://example.com/custom.js');
     });
   });
 
@@ -467,11 +399,6 @@ describe('API Documentation Protocol', () => {
             description: 'Staging',
           },
         ],
-        ui: {
-          type: 'swagger-ui' as const,
-          theme: 'light' as const,
-          enableTryItOut: true,
-        },
         generateOpenApi: true,
         generateTestCollections: true,
         testCollections: [
