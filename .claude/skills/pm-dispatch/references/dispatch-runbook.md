@@ -143,6 +143,7 @@
 - 分支约定仍是 `claude/issue-<n>-<slug>`;线程只能推指定分支是实测平台例外,认领如实写。
 - worktree 照建;仓 `.claude/agents` 类型未加载(实测),线程照读 `os-dev.md`。
 - 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);审核期线程不关,接 FAIL。
+- 终报 `needs_decision` ⇒ 席位交 coordinator 开 `CONTRACT_REVIEW_TIER` 裁决线程(`lanes/director.md`)。
 - 容器重启杀本地后台循环:席位等服务端信号(PR 订阅事件、座位 Routine),本地 watcher 可选。
 
 ## subagent 批派发前置:先把本地检出钉到 main
