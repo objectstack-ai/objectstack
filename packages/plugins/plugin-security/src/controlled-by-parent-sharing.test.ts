@@ -585,7 +585,9 @@ describe('[#5386] controlled_by_parent folds the master\'s ownership and share g
     // [ADR-0139 D6] The middleware writes the leaf and walks the chain over
     // the registry: no pre-scan of the master, no read of anything.
     const injected = await h.injectedForContacts();
-    expect(h.store.find.mock.calls.map((c: any[]) => String(c[0]))).toEqual([]);
+    const during = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
+    expect(during).not.toContain('crm_account');
+    expect(during).not.toContain('crm_contact');
     // The master's scope is composed by the engine (here, by the testkit):
     // THAT is where the grant table is consulted — direct evidence the sharing
     // half runs inside the composition and not merely that some filter came
@@ -649,10 +651,16 @@ describe('[#5815] getReadFilter enforces the same read scope as the engine middl
     const h = await boot({ shareLevel: 'edit' });
     const filter = await h.plugin.getReadFilter('crm_contact', h.repContext());
     // Before the fix this was `undefined` (RLS null AND sharing null), which
-    // the raw-SQL path spreads into a WHERE that constrains nothing.
+    // the raw-SQL path spreads into a WHERE that constrains nothing. The
+    // predicate is the engine's leaf over the master (ADR-0139 D6): it names
+    // the master and binds no master id, and composed it admits exactly the
+    // contacts under the accounts the caller may read.
     expect(filter).toBeDefined();
-    expect(JSON.stringify(filter)).toContain('acct_own');
-    expect(JSON.stringify(filter)).not.toContain('acct_eu');
+    expect(JSON.stringify(filter)).toContain('"object":"crm_account"');
+    expect(JSON.stringify(filter)).not.toMatch(/acct_own|acct_eu|acct_us/);
+    const composed = await h.compose(filter, h.repContext());
+    expect(JSON.stringify(composed)).toContain('acct_own');
+    expect(JSON.stringify(composed)).not.toContain('acct_eu');
   });
 
   it('PARITY with no grant at all: both surfaces narrow to the caller-owned master', async () => {

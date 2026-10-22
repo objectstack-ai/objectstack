@@ -62,6 +62,19 @@ import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
+/**
+ * The dialects this rig runs on: SQLite always; live PostgreSQL when
+ * `OS_TEST_POSTGRES_URL` names one (the ruling's measurement condition for
+ * the switch: driver-sql's readable-ids conformance on PostgreSQL, and this
+ * rig's row sets and statements on it). The PostgreSQL cell builds its tables
+ * in a schema of its own and drops it on teardown. PostgreSQL binds up to
+ * 65,535 parameters, so the bind-limit case below does not discriminate the
+ * id-list form there; its row set is still read.
+ */
+interface Cell { readonly label: 'sqlite' | 'postgres'; readonly url?: string }
+const PG_URL = process.env.OS_TEST_POSTGRES_URL;
+const CELLS: readonly Cell[] = [{ label: 'sqlite' }, ...(PG_URL ? [{ label: 'postgres' as const, url: PG_URL }] : [])];
+
 const SYS = { context: { isSystem: true } } as never;
 const ORG = 'org_cbp_leaf';
 
@@ -149,12 +162,23 @@ function deepChain(): Record<string, unknown>[] {
   return out;
 }
 
-async function boot() {
+async function boot(cell: Cell) {
   const engine = new ObjectQL();
-  engine.registerDriver(
-    new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
-    true,
-  );
+  let dropSchema: (() => Promise<void>) | undefined;
+  if (cell.label === 'postgres') {
+    const schema = `qa_cbp_leaf_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const admin = new SqlDriver({ client: 'pg', connection: cell.url, pool: { min: 0, max: 1 } } as never);
+    await admin.execute(`create schema "${schema}"`);
+    dropSchema = async () => {
+      try { await admin.execute(`drop schema "${schema}" cascade`); } finally { await admin.disconnect?.(); }
+    };
+    engine.registerDriver(new SqlDriver({ client: 'pg', connection: cell.url, searchPath: [schema] } as never) as never, true);
+  } else {
+    engine.registerDriver(
+      new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
+      true,
+    );
+  }
   await engine.init();
   const everyDeep = Array.from({ length: DEEP_LINKS + 1 }, (_, k) => `${DEEP}_${k}`);
   engine.registerApp({
@@ -370,6 +394,7 @@ async function boot() {
     teardown: async () => {
       try { await engine.destroy(); } catch { /* noop */ }
       releaseAsyncContexts(engine, plugin);
+      await dropSchema?.();
     },
   };
 }
@@ -392,214 +417,216 @@ function leavesIn(node: unknown, out: string[] = []): string[] {
   return out;
 }
 
-describe('[ADR-0139 D6] controlled_by_parent answers the leaf: every caller shape keeps its row set', () => {
-  let rig: Rig;
-  beforeAll(async () => { rig = await boot(); }, 120_000);
-  afterAll(async () => { await rig.teardown(); });
+for (const cell of CELLS) describe(`on ${cell.label}`, () => {
+  describe('[ADR-0139 D6] controlled_by_parent answers the leaf: every caller shape keeps its row set', () => {
+    let rig: Rig;
+    beforeAll(async () => { rig = await boot(cell); }, 120_000);
+    afterAll(async () => { await rig.teardown(); });
 
-  it('the accounts, measured apart: the owner-match plus the one share for each identity, and every row for view-all', async () => {
-    expect(await rig.read(ACCOUNT, member(HUMAN, SET.member))).toEqual(['a_open', 'a_secret', 'a_shared']);
-    expect(await rig.read(ACCOUNT, member(OTHER, SET.member))).toEqual(['a_other', 'a_shared']);
-    expect(await rig.read(ACCOUNT, member(VIEW_ALL, SET.viewAll))).toEqual(['a_open', 'a_other', 'a_secret', 'a_shared']);
-  });
-
-  it('a restricted caller reads the contacts of the accounts it may read — find and count, both identities', async () => {
-    for (const [user, expected] of [
-      [HUMAN, ['c_open', 'c_secret', 'c_shared']],
-      [OTHER, ['c_other', 'c_shared']],
-    ] as const) {
-      const context = member(user, SET.member);
-      expect(await rig.read(CONTACT, context), user).toEqual([...expected]);
-      expect(await rig.count(CONTACT, context), user).toBe(expected.length);
-    }
-  });
-
-  it('an unrestricted master scope (viewAllRecords) reads every contact whose account exists — never the null or dangling pointer (ruling B item 4)', async () => {
-    const context = member(VIEW_ALL, SET.viewAll);
-    expect(await rig.read(CONTACT, context)).toEqual(['c_open', 'c_other', 'c_secret', 'c_shared']);
-    expect(await rig.count(CONTACT, context)).toBe(4);
-  });
-
-  it('a caller the master object does not admit reads no contact: canReadObject(ACCOUNT) is false, the leaf is $in: []', async () => {
-    const context = member(NO_ACCOUNT_READ, SET.noAccount);
-    expect(await rig.readOutcome(ACCOUNT, context)).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
-    expect(await rig.canReadObject(ACCOUNT, context)).toBe(false);
-    expect(await rig.read(CONTACT, context)).toEqual([]);
-    expect(await rig.count(CONTACT, context)).toBe(0);
-  });
-
-  it("a delegated caller reads the intersection: the delegator's accounts the ceiling admits", async () => {
-    const context = await rig.onBehalfOf(HUMAN);
-    expect(await rig.read(ACCOUNT, context)).toEqual(['a_open', 'a_shared']);
-    expect(await rig.read(CONTACT, context)).toEqual(['c_open', 'c_shared']);
-    expect(await rig.count(CONTACT, context)).toBe(2);
-  });
-
-  it('the two-level chain composes: a line is readable where its quote is, and a quote where its account is', async () => {
-    expect(await rig.read(QUOTE, member(HUMAN, SET.member))).toEqual(['q_open']);
-    expect(await rig.read(LINE, member(HUMAN, SET.member))).toEqual(['l_open']);
-    expect(await rig.read(LINE, member(OTHER, SET.member))).toEqual(['l_other']);
-    expect(await rig.read(LINE, member(VIEW_ALL, SET.viewAll))).toEqual(['l_open', 'l_other']);
-    expect(await rig.read(LINE, await rig.onBehalfOf(HUMAN))).toEqual(['l_open']);
-    expect(await rig.count(LINE, member(VIEW_ALL, SET.viewAll))).toBe(2);
-  });
-
-  it('CONTROL — a system context reads every detail whose master pointer is set, the chain composed with no restriction', async () => {
-    expect(await rig.read(CONTACT, { isSystem: true })).toEqual(['c_dangling', 'c_null', 'c_open', 'c_other', 'c_secret', 'c_shared']);
-  });
-});
-
-describe('[ADR-0139 D6] statements per request: one per find, two per find + count, no scan of the master', () => {
-  let rig: Rig;
-  beforeAll(async () => { rig = await boot(); }, 120_000);
-  afterAll(async () => { await rig.teardown(); });
-
-  const shapes = (): Array<[string, string, unknown | Promise<unknown>, string]> => [
-    ['plain', CONTACT, member(HUMAN, SET.member), ACCOUNT],
-    ['unrestricted', CONTACT, member(VIEW_ALL, SET.viewAll), ACCOUNT],
-    ['two-level chain', LINE, member(HUMAN, SET.member), QUOTE],
-  ];
-
-  it.each(shapes())('%s: the find is one statement, the master inside its subquery, and find + count is two', async (_shape, object, contextOrPromise, master) => {
-    const context = await contextOrPromise;
-    const reading = (statements: string[]) => statements.filter((sql) => readsTable(object)(sql) || readsTable(master)(sql) || readsTable(ACCOUNT)(sql));
-    const find = await rig.statementsDuring(() => rig.engine.find(object, { context: { ...(context as object) } } as never));
-    const findAll = `find:\n${find.join('\n')}`;
-    expect(reading(find), findAll).toHaveLength(1);
-    expect(reading(find)[0], findAll).toMatch(new RegExp(`^select .* from .${object}. where .*in \\(select .id. from .${master}.`, 'i'));
-    // No statement reads the master on its own: the leaf stands where the
-    // pre-resolved id list stood, so the master is never pre-scanned.
-    expect(find.filter(readsTable(master)), findAll).toHaveLength(0);
-    expect(find.filter(readsTable(ACCOUNT)), findAll).toHaveLength(0);
-    const both = await rig.statementsDuring(async () => {
-      await rig.engine.find(object, { context: { ...(context as object) } } as never);
-      await rig.engine.count(object, { context: { ...(context as object) } } as never);
+    it('the accounts, measured apart: the owner-match plus the one share for each identity, and every row for view-all', async () => {
+      expect(await rig.read(ACCOUNT, member(HUMAN, SET.member))).toEqual(['a_open', 'a_secret', 'a_shared']);
+      expect(await rig.read(ACCOUNT, member(OTHER, SET.member))).toEqual(['a_other', 'a_shared']);
+      expect(await rig.read(ACCOUNT, member(VIEW_ALL, SET.viewAll))).toEqual(['a_open', 'a_other', 'a_secret', 'a_shared']);
     });
-    const bothAll = `find + count:\n${both.join('\n')}`;
-    expect(reading(both), bothAll).toHaveLength(2);
-    for (const sql of reading(both)) expect(sql, bothAll).toMatch(/in \(select/i);
-  });
 
-  it('a delegated find is one statement too: both halves write the leaf, the engine composes the master once, the subquery is carried twice', async () => {
-    const context = await rig.onBehalfOf(HUMAN);
-    const find = await rig.statementsDuring(() => rig.engine.find(CONTACT, { context: { ...context } } as never));
-    const all = `delegated find:\n${find.join('\n')}`;
-    const reads = find.filter((sql) => readsTable(CONTACT)(sql) || readsTable(ACCOUNT)(sql));
-    expect(reads, all).toHaveLength(1);
-    expect(reads[0].match(new RegExp(`in \\(select .id. from .${ACCOUNT}.`, 'gi')) ?? [], all).toHaveLength(2);
-    expect(find.filter(readsTable(ACCOUNT)), all).toHaveLength(0);
-  });
-
-  it('the two-level chain is one statement with the subqueries nested: quote inside the line, account inside the quote', async () => {
-    const find = await rig.statementsDuring(() => rig.engine.find(LINE, { context: member(HUMAN, SET.member) } as never));
-    const reads = find.filter(readsTable(LINE));
-    expect(reads, find.join('\n')).toHaveLength(1);
-    expect(reads[0]).toMatch(new RegExp(`in \\(select .id. from .${QUOTE}. where .*in \\(select .id. from .${ACCOUNT}.`, 'i'));
-  });
-});
-
-describe('[ADR-0139 D6] past the dialect\'s variable limit', () => {
-  let rig: Rig;
-  beforeAll(async () => { rig = await boot(); }, 180_000);
-  afterAll(async () => { await rig.teardown(); });
-
-  it(`a detail under ${BIG_MASTERS} readable masters answers 200 with exactly the right rows, and count agrees`, async () => {
-    const context = member(HUMAN, SET.member);
-    expect(await rig.read(BIG_MASTER, { isSystem: true })).toHaveLength(BIG_MASTERS + 1);
-    const find = await rig.readOutcome(BIG_CHILD, context);
-    expect(find.kind, JSON.stringify(find)).toBe('landed');
-    expect(ids((find as { value: unknown }).value)).toEqual(['bc1', 'bc2']);
-    const count = await rig.countOutcome(BIG_CHILD, context);
-    expect(count).toEqual({ kind: 'landed', value: 2 });
-  });
-
-  it('…in one statement that binds the owner, never a master id', async () => {
-    const find = await rig.statementsDuring(() => rig.engine.find(BIG_CHILD, { context: member(HUMAN, SET.member) } as never));
-    const reads = find.filter(readsTable(BIG_CHILD));
-    expect(reads, find.join('\n')).toHaveLength(1);
-    expect(reads[0]).toMatch(new RegExp(`in \\(select .id. from .${BIG_MASTER}. where`, 'i'));
-    expect(find.filter(readsTable(BIG_MASTER))).toHaveLength(0);
-  });
-});
-
-describe('[ADR-0055 amendment] the two guards answer zero rows from the registry walk, never the engine\'s refusal', () => {
-  let rig: Rig;
-  beforeAll(async () => { rig = await boot(); }, 120_000);
-  afterAll(async () => { await rig.teardown(); });
-
-  it('a metadata cycle: zero rows, 200, reported as a cycle, and no statement scans either object', async () => {
-    rig.logger.error.mockClear();
-    const statements = await rig.statementsDuring(async () => {
-      expect(await rig.readOutcome(CYC_A, member(HUMAN, SET.member))).toMatchObject({ kind: 'landed', value: [] });
-      expect(await rig.countOutcome(CYC_B, member(HUMAN, SET.member))).toEqual({ kind: 'landed', value: 0 });
+    it('a restricted caller reads the contacts of the accounts it may read — find and count, both identities', async () => {
+      for (const [user, expected] of [
+        [HUMAN, ['c_open', 'c_secret', 'c_shared']],
+        [OTHER, ['c_other', 'c_shared']],
+      ] as const) {
+        const context = member(user, SET.member);
+        expect(await rig.read(CONTACT, context), user).toEqual([...expected]);
+        expect(await rig.count(CONTACT, context), user).toBe(expected.length);
+      }
     });
-    const messages = rig.logger.error.mock.calls.map((c: unknown[]) => String(c[0]));
-    expect(messages.some((m) => m.includes('CYCLE') && m.includes(CYC_A))).toBe(true);
-    expect(statements.filter((sql) => /in \(select/i.test(sql))).toHaveLength(0);
-  });
 
-  it('a chain past the depth bound: zero rows, 200, reported naming the bound', async () => {
-    rig.logger.error.mockClear();
-    expect(await rig.readOutcome(`${DEEP}_0`, member(HUMAN, SET.member))).toMatchObject({ kind: 'landed', value: [] });
-    expect(await rig.readOutcome(`${DEEP}_1`, member(HUMAN, SET.member))).toMatchObject({ kind: 'landed', value: [] });
-    const messages = rig.logger.error.mock.calls.map((c: unknown[]) => String(c[0]));
-    expect(messages.some((m) => m.includes('depth bound') && m.includes(`${DEEP}_0`))).toBe(true);
-  });
-
-  it("the cut is the engine's: eight derived objects compose into one statement with eight nested subqueries, and the row is served", async () => {
-    // `deep_2 → deep_3 → … → deep_9` are eight derived objects over the
-    // `private` root HUMAN owns. The engine composes a chain at most eight
-    // scopes deep; the plugin's bound refuses the ninth (`deep_1`, above).
-    const context = member(HUMAN, SET.member);
-    const statements = await rig.statementsDuring(async () => {
-      expect(await rig.read(`${DEEP}_2`, context)).toEqual([`${DEEP}_2_r`]);
+    it('an unrestricted master scope (viewAllRecords) reads every contact whose account exists — never the null or dangling pointer (ruling B item 4)', async () => {
+      const context = member(VIEW_ALL, SET.viewAll);
+      expect(await rig.read(CONTACT, context)).toEqual(['c_open', 'c_other', 'c_secret', 'c_shared']);
+      expect(await rig.count(CONTACT, context)).toBe(4);
     });
-    const reads = statements.filter(readsTable(`${DEEP}_2`));
-    expect(reads, statements.join('\n')).toHaveLength(1);
-    expect(reads[0].match(/in \(select/gi) ?? []).toHaveLength(8);
-    expect(await rig.read(`${DEEP}_${DEEP_LINKS - 1}`, context)).toEqual([`${DEEP}_${DEEP_LINKS - 1}_r`]);
-  });
-});
 
-describe('[ADR-0139 D1] a write verb\'s predicate carries no leaf', () => {
-  let rig: Rig;
-  beforeAll(async () => { rig = await boot(); }, 120_000);
-  afterAll(async () => { await rig.teardown(); });
+    it('a caller the master object does not admit reads no contact: canReadObject(ACCOUNT) is false, the leaf is $in: []', async () => {
+      const context = member(NO_ACCOUNT_READ, SET.noAccount);
+      expect(await rig.readOutcome(ACCOUNT, context)).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+      expect(await rig.canReadObject(ACCOUNT, context)).toBe(false);
+      expect(await rig.read(CONTACT, context)).toEqual([]);
+      expect(await rig.count(CONTACT, context)).toBe(0);
+    });
 
-  it('a bulk update of the contacts lands, narrowed to the rows whose account the caller may read and edit', async () => {
-    const context = member(OTHER, SET.member);
-    const outcome = await outcomeOf(rig.engine.update(CONTACT, { note: 'bulk' }, { where: {}, multi: true, context: { ...context } } as never));
-    expect(outcome.kind, JSON.stringify(outcome)).toBe('landed');
-    const after = (await rig.engine.find(CONTACT, { context: { isSystem: true } } as never)) as Array<{ id: string; note: string }>;
-    const noted = after.filter((r) => r.note === 'bulk').map((r) => r.id).sort();
-    expect(noted).toEqual(['c_other', 'c_shared']);
-  });
-});
+    it("a delegated caller reads the intersection: the delegator's accounts the ceiling admits", async () => {
+      const context = await rig.onBehalfOf(HUMAN);
+      expect(await rig.read(ACCOUNT, context)).toEqual(['a_open', 'a_shared']);
+      expect(await rig.read(CONTACT, context)).toEqual(['c_open', 'c_shared']);
+      expect(await rig.count(CONTACT, context)).toBe(2);
+    });
 
-describe('[ADR-0139 D6] the scope getReadFilter answers carries the leaf — the spelling the analytics faces receive', () => {
-  let rig: Rig;
-  beforeAll(async () => { rig = await boot(); }, 120_000);
-  afterAll(async () => { await rig.teardown(); });
+    it('the two-level chain composes: a line is readable where its quote is, and a quote where its account is', async () => {
+      expect(await rig.read(QUOTE, member(HUMAN, SET.member))).toEqual(['q_open']);
+      expect(await rig.read(LINE, member(HUMAN, SET.member))).toEqual(['l_open']);
+      expect(await rig.read(LINE, member(OTHER, SET.member))).toEqual(['l_other']);
+      expect(await rig.read(LINE, member(VIEW_ALL, SET.viewAll))).toEqual(['l_open', 'l_other']);
+      expect(await rig.read(LINE, await rig.onBehalfOf(HUMAN))).toEqual(['l_open']);
+      expect(await rig.count(LINE, member(VIEW_ALL, SET.viewAll))).toBe(2);
+    });
 
-  it('a direct caller: one leaf over the master, and nothing bound per master', async () => {
-    const scope = await rig.readFilter(CONTACT, member(HUMAN, SET.member));
-    expect(leavesIn(scope)).toEqual([ACCOUNT]);
-    expect(JSON.stringify(scope)).not.toMatch(/a_open|a_secret|a_shared/);
+    it('CONTROL — a system context reads every detail whose master pointer is set, the chain composed with no restriction', async () => {
+      expect(await rig.read(CONTACT, { isSystem: true })).toEqual(['c_dangling', 'c_null', 'c_open', 'c_other', 'c_secret', 'c_shared']);
+    });
   });
 
-  it('a delegated caller: one leaf per leg, both over the master', async () => {
-    const scope = await rig.readFilter(CONTACT, await rig.onBehalfOf(HUMAN));
-    expect(leavesIn(scope)).toEqual([ACCOUNT, ACCOUNT]);
+  describe('[ADR-0139 D6] statements per request: one per find, two per find + count, no scan of the master', () => {
+    let rig: Rig;
+    beforeAll(async () => { rig = await boot(cell); }, 120_000);
+    afterAll(async () => { await rig.teardown(); });
+
+    const shapes = (): Array<[string, string, unknown | Promise<unknown>, string]> => [
+      ['plain', CONTACT, member(HUMAN, SET.member), ACCOUNT],
+      ['unrestricted', CONTACT, member(VIEW_ALL, SET.viewAll), ACCOUNT],
+      ['two-level chain', LINE, member(HUMAN, SET.member), QUOTE],
+    ];
+
+    it.each(shapes())('%s: the find is one statement, the master inside its subquery, and find + count is two', async (_shape, object, contextOrPromise, master) => {
+      const context = await contextOrPromise;
+      const reading = (statements: string[]) => statements.filter((sql) => readsTable(object)(sql) || readsTable(master)(sql) || readsTable(ACCOUNT)(sql));
+      const find = await rig.statementsDuring(() => rig.engine.find(object, { context: { ...(context as object) } } as never));
+      const findAll = `find:\n${find.join('\n')}`;
+      expect(reading(find), findAll).toHaveLength(1);
+      expect(reading(find)[0], findAll).toMatch(new RegExp(`^select .* from .${object}. where .*in \\(select .id. from .${master}.`, 'i'));
+      // No statement reads the master on its own: the leaf stands where the
+      // pre-resolved id list stood, so the master is never pre-scanned.
+      expect(find.filter(readsTable(master)), findAll).toHaveLength(0);
+      expect(find.filter(readsTable(ACCOUNT)), findAll).toHaveLength(0);
+      const both = await rig.statementsDuring(async () => {
+        await rig.engine.find(object, { context: { ...(context as object) } } as never);
+        await rig.engine.count(object, { context: { ...(context as object) } } as never);
+      });
+      const bothAll = `find + count:\n${both.join('\n')}`;
+      expect(reading(both), bothAll).toHaveLength(2);
+      for (const sql of reading(both)) expect(sql, bothAll).toMatch(/in \(select/i);
+    });
+
+    it('a delegated find is one statement too: both halves write the leaf, the engine composes the master once, the subquery is carried twice', async () => {
+      const context = await rig.onBehalfOf(HUMAN);
+      const find = await rig.statementsDuring(() => rig.engine.find(CONTACT, { context: { ...context } } as never));
+      const all = `delegated find:\n${find.join('\n')}`;
+      const reads = find.filter((sql) => readsTable(CONTACT)(sql) || readsTable(ACCOUNT)(sql));
+      expect(reads, all).toHaveLength(1);
+      expect(reads[0].match(new RegExp(`in \\(select .id. from .${ACCOUNT}.`, 'gi')) ?? [], all).toHaveLength(2);
+      expect(find.filter(readsTable(ACCOUNT)), all).toHaveLength(0);
+    });
+
+    it('the two-level chain is one statement with the subqueries nested: quote inside the line, account inside the quote', async () => {
+      const find = await rig.statementsDuring(() => rig.engine.find(LINE, { context: member(HUMAN, SET.member) } as never));
+      const reads = find.filter(readsTable(LINE));
+      expect(reads, find.join('\n')).toHaveLength(1);
+      expect(reads[0]).toMatch(new RegExp(`in \\(select .id. from .${QUOTE}. where .*in \\(select .id. from .${ACCOUNT}.`, 'i'));
+    });
   });
 
-  it("a derived master's scope carries the leaf over ITS master, so the chain composes inside the engine", async () => {
-    expect(leavesIn(await rig.readFilter(QUOTE, member(HUMAN, SET.member)))).toEqual([ACCOUNT]);
-    expect(leavesIn(await rig.readFilter(LINE, member(HUMAN, SET.member)))).toEqual([QUOTE]);
+  describe('[ADR-0139 D6] past the dialect\'s variable limit', () => {
+    let rig: Rig;
+    beforeAll(async () => { rig = await boot(cell); }, 180_000);
+    afterAll(async () => { await rig.teardown(); });
+
+    it(`a detail under ${BIG_MASTERS} readable masters answers 200 with exactly the right rows, and count agrees`, async () => {
+      const context = member(HUMAN, SET.member);
+      expect(await rig.read(BIG_MASTER, { isSystem: true })).toHaveLength(BIG_MASTERS + 1);
+      const find = await rig.readOutcome(BIG_CHILD, context);
+      expect(find.kind, JSON.stringify(find)).toBe('landed');
+      expect(ids((find as { value: unknown }).value)).toEqual(['bc1', 'bc2']);
+      const count = await rig.countOutcome(BIG_CHILD, context);
+      expect(count).toEqual({ kind: 'landed', value: 2 });
+    });
+
+    it('…in one statement that binds the owner, never a master id', async () => {
+      const find = await rig.statementsDuring(() => rig.engine.find(BIG_CHILD, { context: member(HUMAN, SET.member) } as never));
+      const reads = find.filter(readsTable(BIG_CHILD));
+      expect(reads, find.join('\n')).toHaveLength(1);
+      expect(reads[0]).toMatch(new RegExp(`in \\(select .id. from .${BIG_MASTER}. where`, 'i'));
+      expect(find.filter(readsTable(BIG_MASTER))).toHaveLength(0);
+    });
   });
 
-  it('a caller the master object does not admit still receives the leaf; the engine answers it $in: [] (canReadObject false)', async () => {
-    const context = member(NO_ACCOUNT_READ, SET.noAccount);
-    expect(leavesIn(await rig.readFilter(CONTACT, context))).toEqual([ACCOUNT]);
-    expect(await rig.canReadObject(ACCOUNT, context)).toBe(false);
+  describe('[ADR-0055 amendment] the two guards answer zero rows from the registry walk, never the engine\'s refusal', () => {
+    let rig: Rig;
+    beforeAll(async () => { rig = await boot(cell); }, 120_000);
+    afterAll(async () => { await rig.teardown(); });
+
+    it('a metadata cycle: zero rows, 200, reported as a cycle, and no statement scans either object', async () => {
+      rig.logger.error.mockClear();
+      const statements = await rig.statementsDuring(async () => {
+        expect(await rig.readOutcome(CYC_A, member(HUMAN, SET.member))).toMatchObject({ kind: 'landed', value: [] });
+        expect(await rig.countOutcome(CYC_B, member(HUMAN, SET.member))).toEqual({ kind: 'landed', value: 0 });
+      });
+      const messages = rig.logger.error.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(messages.some((m) => m.includes('CYCLE') && m.includes(CYC_A))).toBe(true);
+      expect(statements.filter((sql) => /in \(select/i.test(sql))).toHaveLength(0);
+    });
+
+    it('a chain past the depth bound: zero rows, 200, reported naming the bound', async () => {
+      rig.logger.error.mockClear();
+      expect(await rig.readOutcome(`${DEEP}_0`, member(HUMAN, SET.member))).toMatchObject({ kind: 'landed', value: [] });
+      expect(await rig.readOutcome(`${DEEP}_1`, member(HUMAN, SET.member))).toMatchObject({ kind: 'landed', value: [] });
+      const messages = rig.logger.error.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(messages.some((m) => m.includes('depth bound') && m.includes(`${DEEP}_0`))).toBe(true);
+    });
+
+    it("the cut is the engine's: eight derived objects compose into one statement with eight nested subqueries, and the row is served", async () => {
+      // `deep_2 → deep_3 → … → deep_9` are eight derived objects over the
+      // `private` root HUMAN owns. The engine composes a chain at most eight
+      // scopes deep; the plugin's bound refuses the ninth (`deep_1`, above).
+      const context = member(HUMAN, SET.member);
+      const statements = await rig.statementsDuring(async () => {
+        expect(await rig.read(`${DEEP}_2`, context)).toEqual([`${DEEP}_2_r`]);
+      });
+      const reads = statements.filter(readsTable(`${DEEP}_2`));
+      expect(reads, statements.join('\n')).toHaveLength(1);
+      expect(reads[0].match(/in \(select/gi) ?? []).toHaveLength(8);
+      expect(await rig.read(`${DEEP}_${DEEP_LINKS - 1}`, context)).toEqual([`${DEEP}_${DEEP_LINKS - 1}_r`]);
+    });
+  });
+
+  describe('[ADR-0139 D1] a write verb\'s predicate carries no leaf', () => {
+    let rig: Rig;
+    beforeAll(async () => { rig = await boot(cell); }, 120_000);
+    afterAll(async () => { await rig.teardown(); });
+
+    it('a bulk update of the contacts lands, narrowed to the rows whose account the caller may read and edit', async () => {
+      const context = member(OTHER, SET.member);
+      const outcome = await outcomeOf(rig.engine.update(CONTACT, { note: 'bulk' }, { where: {}, multi: true, context: { ...context } } as never));
+      expect(outcome.kind, JSON.stringify(outcome)).toBe('landed');
+      const after = (await rig.engine.find(CONTACT, { context: { isSystem: true } } as never)) as Array<{ id: string; note: string }>;
+      const noted = after.filter((r) => r.note === 'bulk').map((r) => r.id).sort();
+      expect(noted).toEqual(['c_other', 'c_shared']);
+    });
+  });
+
+  describe('[ADR-0139 D6] the scope getReadFilter answers carries the leaf — the spelling the analytics faces receive', () => {
+    let rig: Rig;
+    beforeAll(async () => { rig = await boot(cell); }, 120_000);
+    afterAll(async () => { await rig.teardown(); });
+
+    it('a direct caller: one leaf over the master, and nothing bound per master', async () => {
+      const scope = await rig.readFilter(CONTACT, member(HUMAN, SET.member));
+      expect(leavesIn(scope)).toEqual([ACCOUNT]);
+      expect(JSON.stringify(scope)).not.toMatch(/a_open|a_secret|a_shared/);
+    });
+
+    it('a delegated caller: one leaf per leg, both over the master', async () => {
+      const scope = await rig.readFilter(CONTACT, await rig.onBehalfOf(HUMAN));
+      expect(leavesIn(scope)).toEqual([ACCOUNT, ACCOUNT]);
+    });
+
+    it("a derived master's scope carries the leaf over ITS master, so the chain composes inside the engine", async () => {
+      expect(leavesIn(await rig.readFilter(QUOTE, member(HUMAN, SET.member)))).toEqual([ACCOUNT]);
+      expect(leavesIn(await rig.readFilter(LINE, member(HUMAN, SET.member)))).toEqual([QUOTE]);
+    });
+
+    it('a caller the master object does not admit still receives the leaf; the engine answers it $in: [] (canReadObject false)', async () => {
+      const context = member(NO_ACCOUNT_READ, SET.noAccount);
+      expect(leavesIn(await rig.readFilter(CONTACT, context))).toEqual([ACCOUNT]);
+      expect(await rig.canReadObject(ACCOUNT, context)).toBe(false);
+    });
   });
 });

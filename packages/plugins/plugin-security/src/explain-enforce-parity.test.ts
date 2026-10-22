@@ -91,6 +91,7 @@ import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.j
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { wireEngineSecuritySource } from './engine-security-source.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -366,6 +367,8 @@ async function bootRls(predicate: string, opts: { grantCrud?: boolean } = {}) {
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The engine's security source, as `ObjectQLPlugin.init` wires it on a kernel (ADR-0139 D2).
+  wireEngineSecuritySource(engine, () => plugin);
   // The driver logs the refused comparison it withholds from the caller.
   vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
 
@@ -552,6 +555,8 @@ async function bootPrincipal(source: PostureSource) {
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The engine's security source, as `ObjectQLPlugin.init` wires it on a kernel (ADR-0139 D2).
+  wireEngineSecuritySource(engine, () => plugin);
   const security = services.security as { resolvePermissionSetsForContext: (c: unknown) => Promise<Array<{ name: string }>> };
   /** The posture admission hands the resolver: the `tenancy` service's, or none when it is not registered. */
   const admissionPosture = 'tenancy' in source ? source.tenancy : undefined;
@@ -724,6 +729,8 @@ async function bootSharing(opts: { faultReadFilter?: boolean; authored?: boolean
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The engine's security source, as `ObjectQLPlugin.init` wires it on a kernel (ADR-0139 D2).
+  wireEngineSecuritySource(engine, () => plugin);
   sharing = new SharingService({ engine: engine as never, securityService: () => security as never });
   if (opts.faultReadFilter) {
     sharing.buildReadFilter = async () => { throw new Error('share store unavailable'); };
@@ -931,6 +938,8 @@ async function bootDelegated(posture: TenancyPosture) {
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The engine's security source, as `ObjectQLPlugin.init` wires it on a kernel (ADR-0139 D2).
+  wireEngineSecuritySource(engine, () => plugin);
   sharing = new SharingService({ engine: engine as never, securityService: () => security as never });
   engine.registerMiddleware(buildSharingMiddleware(sharing, ctx.logger) as never, { object: '*' });
   // The pre-image gate logs the rows it refuses.

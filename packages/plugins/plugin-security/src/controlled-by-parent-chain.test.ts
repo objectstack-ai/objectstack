@@ -518,17 +518,34 @@ describe("[#11082] controlled_by_parent composes across a chain — READ", () =>
 
   it('the DELEGATOR call site composes the chain too — not only the caller\'s', async () => {
     // The derivation has FOUR consumers (the CRUD middleware's caller leg, its
-    // D10 delegator leg, and `getReadFilter`); the recursion lives inside the
+    // D10 delegator leg, and `getReadFilter`); the chain walk lives inside the
     // shared helper so all of them inherit it. This pins the delegator leg
     // specifically, because it is the one a fix aimed at "the" call site misses.
     //
-    // Agent REP reaches {quote_us (grant), quote_own (ownership)}; delegator
-    // OTHER owns acct_us and acct_jp, so reaches {quote_us, quote_jp}. The
-    // delegated read is the INTERSECTION — `line_us` alone. Before the fix the
-    // delegator's own derivation was org-wide, so the intersection collapsed to
-    // the agent's set and `line_own` came back too.
+    // [ADR-0139 D6] Both legs write the leaf over the master, and the engine
+    // composes it ONCE with the delegated context as it stands, asking
+    // `getReadFilter(master)` — the ADR-0090 D10 delegated spelling: the
+    // principal's leg at the ceiling's DECLARED depth ('org' when the ceiling
+    // declares none, the D10 ruling's rule), the delegator's leg at the
+    // delegator's own effective depth. So the detail reads exactly the rows a
+    // delegated direct read of its master reads. Here the ceiling (`crm_rep`)
+    // declares no depth, so the principal's leg scopes nothing and the
+    // delegator OTHER's accounts {acct_us, acct_jp} decide: `line_us` and
+    // `line_jp`. Before the switch the id-list derivation resolved the
+    // principal's half at the agent's own EFFECTIVE depth ('own' on a private
+    // master) and answered `line_us` alone — narrower than the delegated direct
+    // read of the master, the drift ADR-0055 §2's equality forbids. The shape
+    // is this rig's hand-built one (two different humans as agent and
+    // delegator); the assembled on-behalf-of context (`@objectstack/core`'s
+    // `assembleExecutionContext`) makes the agent run AS the delegator, where
+    // the two spellings agree — pinned on the real stack in
+    // `controlled-by-parent-leaf-switch.test.ts`. The leak this case guards
+    // is unchanged: `line_own` (the agent's own account, which the delegator
+    // cannot read) stays out.
     const h = await boot();
-    expect(await h.delegatedVisible('crm_quote_line_item', OTHER)).toEqual(['line_us']);
+    const rows = await h.delegatedVisible('crm_quote_line_item', OTHER);
+    expect(rows).toEqual(['line_us', 'line_jp']);
+    expect(rows).not.toContain('line_own');
   });
 
   it('CONTROL: a detail under a `private` master is untouched — `[]` throughout', async () => {
