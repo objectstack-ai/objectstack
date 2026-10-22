@@ -602,6 +602,7 @@
     "QueryPageWindowParam (type)",
     "QueryPageWindowParamParsed (type)",
     "QueryPageWindowParamSchema (const)",
+    "QueryPageWindowParsed (type)",
     "QueryPageWindowSchema (const)",
     "QuerySchema (const)",
     "QueryTransportParams (type)",

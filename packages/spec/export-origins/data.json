@@ -591,6 +591,7 @@
     "QueryPageWindowParam": "src/data/data-engine.zod.ts#QueryPageWindowParam (type)",
     "QueryPageWindowParamParsed": "src/data/data-engine.zod.ts#QueryPageWindowParamParsed (type)",
     "QueryPageWindowParamSchema": "src/data/data-engine.zod.ts#QueryPageWindowParamSchema (const)",
+    "QueryPageWindowParsed": "src/data/data-engine.zod.ts#QueryPageWindowParsed (type)",
     "QueryPageWindowSchema": "src/data/data-engine.zod.ts#QueryPageWindowSchema (const)",
     "QuerySchema": "src/data/query.zod.ts#QuerySchema (const)",
     "QueryTransportParams": "src/data/data-engine.zod.ts#QueryTransportParams (type)",
