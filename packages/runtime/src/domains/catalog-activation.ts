@@ -53,6 +53,7 @@
  */
 
 import { AUDIENCE_ANCHOR_POSITIONS, GUEST_POSITION } from '@objectstack/spec/identity';
+import type { ISharingRuleService } from '@objectstack/spec/contracts';
 import {
     METADATA_ACTIVATION_TABLE,
     ObjectStoreMetadataActivationStore,
@@ -111,10 +112,12 @@ const NOUN: Readonly<Record<CatalogActivationType, string>> = {
  * the code, whether or not the ledger has it switched off. A rule an
  * organization authored is a `sys_sharing_rule` row with a switch of its own
  * (`active`) and is never addressed here.
+ *
+ * The reader is the contract's own optional member,
+ * `ISharingRuleService.declaredRuleNamed` (`@objectstack/spec/contracts`): this
+ * door probes for its presence and answers 503 when it is absent.
  */
-interface DeclaredSharingRuleReader {
-    declaredRuleNamed(name: string): Promise<{ name: string; packageId?: string } | null>;
-}
+type DeclaredSharingRuleReader = Required<Pick<ISharingRuleService, 'declaredRuleNamed'>>;
 
 function declaredSharingRuleReaderOf(service: unknown): DeclaredSharingRuleReader | undefined {
     const candidate = service as Partial<DeclaredSharingRuleReader> | null | undefined;
