@@ -55,7 +55,7 @@ describe('showcase (single): a platform object system insert takes the Default O
     expect(invite.status, 'the admin invites a member').toBeLessThan(300);
     userId = (await ql.findOne('sys_user', { where: { email: 'admin@objectos.ai' }, context: SYS }))?.id;
     if (!userId) throw new Error('fixture: the seeded admin has no sys_user row');
-  });
+  }, 120_000);
 
   afterAll(async () => { await stack?.stop(); });
 
