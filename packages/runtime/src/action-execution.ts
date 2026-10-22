@@ -383,6 +383,33 @@ function isObjectPackageDisabledRefusal(err: unknown): boolean {
 }
 
 /**
+ * [#25296] Throw the protocol's own `404 OBJECT_PACKAGE_DISABLED` when
+ * `object`'s owning package is disabled, and return otherwise. The question
+ * the REST `/actions` door asks before it reads an action's declaration: an
+ * object the data plane refuses has no action that may run, so neither its
+ * declaration gates nor its handler are reached.
+ *
+ * The read is {@link readExposureDeclaration}'s, the by-name object read the
+ * data verbs' exposure gate makes, and the refusal is the one constructor the
+ * protocol raises from it and from its data plane: ⛔ never a second copy of
+ * the package predicate or of the refusal. Any other answer of that read is
+ * not this gate's to give: an absent object is the declaration resolution's
+ * to answer, and so is an unreadable metadata plane (ADR-0110 D3), so they
+ * pass here unanswered.
+ */
+export async function refuseDisabledPackageObject(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    object: string,
+    scopeId?: string,
+): Promise<void> {
+    try {
+        await readExposureDeclaration(deps, requestContext, object, scopeId);
+    } catch (err) {
+        if (isObjectPackageDisabledRefusal(err)) throw err;
+    }
+}
+
+/**
  * ── Object-level API exposure gate (ADR-0049, #1889) ─────
  * Honour the object's `apiEnabled` / `apiMethods` declarations for external
  * traffic: throws the refusal ({@link checkApiExposure}'s `404` / `405`) when

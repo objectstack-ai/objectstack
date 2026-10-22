@@ -41,6 +41,7 @@ import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core
 import { MetadataPlugin } from '@objectstack/metadata';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const CALLER = { userId: 'u_actions', tenantId: 'org_qa', isSystem: false, positions: [], permissions: [], systemPermissions: [] };
@@ -146,7 +147,7 @@ async function shutdown(booted: Booted | undefined): Promise<void> {
 /** The refusal's `code` in the dispatcher's envelope: nested under `error`, or beside a string `error`. */
 const codeOf = (body: any): unknown => (body?.error && typeof body.error === 'object' ? body.error.code : body?.code);
 
-/** What the runtime dispatcher answers `caller` on `method path`, through `dispatch()`. */
+/** What the runtime dispatcher answers `caller` on `method path`, through `dispatch()` and the host's exit for a throw. */
 async function dispatchAs(kernel: ObjectKernel, method: string, path: string, body: Record<string, unknown>, caller: Record<string, unknown> = CALLER) {
     const dispatcher = new HttpDispatcher(kernel as any, undefined, { enforceProjectMembership: false });
     (dispatcher as any).timedResolveExecutionContext = async () => ({ ...caller });
@@ -155,8 +156,14 @@ async function dispatchAs(kernel: ObjectKernel, method: string, path: string, bo
         headers: { 'content-type': 'application/json' },
         ...(method === 'GET' ? {} : { body: JSON.stringify(body) }),
     });
-    const out: any = await dispatcher.dispatch(method, path, body, {}, { request: raw } as any, '/api/v1');
-    return { status: out.response?.status, code: codeOf(out.response?.body), data: out.response?.body?.data };
+    try {
+        const out: any = await dispatcher.dispatch(method, path, body, {}, { request: raw } as any, '/api/v1');
+        return { status: out.response?.status, code: codeOf(out.response?.body), data: out.response?.body?.data };
+    } catch (e) {
+        // A throw out of `dispatch()` is rendered by the host's exit, through this one rule.
+        const thrown = resolveThrownHttpError(e);
+        return { status: thrown.status, code: thrown.code, data: undefined };
+    }
 }
 
 /** Every protocol / engine call an action invocation could reach the record or a handler through. */
