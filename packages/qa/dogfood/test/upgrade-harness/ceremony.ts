@@ -24,14 +24,21 @@ const CLI_BIN = join(CLI_ROOT, 'bin', 'run.js');
 export const OWNERSHIP_MARKER = 'adr-0131-organization-ownership';
 
 /**
+ * The environment a production `os serve` of the showcase is started with: an
+ * auth secret, without which it is refused, and its auth family (the tenant
+ * tables among them) is not composed.
+ */
+export const SERVED_ENV: NodeJS.ProcessEnv = { OS_AUTH_SECRET: 'dogfood-upgrade-harness-auth-secret-0123456789' };
+
+/**
  * Run the ceremony on `file`: the plan into `dir/<tag>-plan.json`, then
  * `--apply --plan-file … --backup-taken`. The apply report. Throws, with both
- * runs' output, when either exits non-zero.
+ * runs' output, when either exits non-zero. `env` is laid over this process's.
  */
-export function runOwnershipCeremony(dir: string, file: string, tag: string): Record<string, unknown> {
+export function runOwnershipCeremony(dir: string, file: string, tag: string, env: NodeJS.ProcessEnv = {}): Record<string, unknown> {
   const run = (args: string[]) => spawnSync(process.execPath, [
     CLI_BIN, 'migrate', 'organization-ownership', '--database-url', `file:${file}`, ...args,
-  ], { cwd: SHOWCASE_DIR, encoding: 'utf8', timeout: 300_000, env: { ...process.env, NO_COLOR: '1' } });
+  ], { cwd: SHOWCASE_DIR, encoding: 'utf8', timeout: 300_000, env: { ...process.env, ...env, NO_COLOR: '1' } });
   const planFile = join(dir, `${tag}-plan.json`);
   const plan = run(['--out', planFile]);
   if (plan.status !== 0) throw new Error(`the ceremony's plan exited ${plan.status}:\n${plan.stdout}\n${plan.stderr}`);
@@ -52,14 +59,28 @@ export interface SchemaPlanChange {
  * `os migrate plan --json` on `file`, the real binary in the showcase's
  * directory, as an operator reads the drift before serving a database. Writes
  * no row or table. The parsed document; throws, with the run's output, when it
- * exits non-zero.
+ * exits non-zero. `env` is laid over this process's.
  */
-export function runSchemaPlan(file: string): { total: number; changes: SchemaPlanChange[]; pending: unknown[] } {
+/** One tenant column `os migrate plan` lists as still nullable: its advisory, never drift (ADR-0131 D1). */
+export interface NullableTenantColumn {
+  table: string;
+  column: string;
+  database?: string;
+  ceremony: 'tightens' | 'leaves';
+  reason?: string;
+}
+
+export function runSchemaPlan(file: string, env: NodeJS.ProcessEnv = {}): {
+  total: number;
+  changes: SchemaPlanChange[];
+  pending: unknown[];
+  nullableTenantColumns: { status: 'read'; remedy: string; columns: NullableTenantColumn[] } | { status: 'unreadable'; detail: string };
+} {
   const plan = spawnSync(process.execPath, [CLI_BIN, 'migrate', 'plan', '--json', '--database-url', `file:${file}`], {
     cwd: SHOWCASE_DIR,
     encoding: 'utf8',
     timeout: 300_000,
-    env: { ...process.env, NO_COLOR: '1' },
+    env: { ...process.env, ...env, NO_COLOR: '1' },
   });
   if (plan.status !== 0) throw new Error(`os migrate plan exited ${plan.status}:\n${plan.stdout}\n${plan.stderr}`);
   return JSON.parse(plan.stdout);

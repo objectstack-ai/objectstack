@@ -36,6 +36,11 @@ import {
   renderUnmanagedTables,
   type UnmanagedTablesReport,
 } from '../../utils/unmanaged-tables.js';
+import {
+  collectNullableTenantColumns,
+  renderNullableTenantColumns,
+  type NullableTenantColumnsReport,
+} from '../../utils/nullable-tenant-columns.js';
 import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import {
@@ -107,6 +112,15 @@ import {
  * `os migrate comment-reactions --apply` is recorded. Each gate's predicate
  * and read live in `utils/apply-drop-gates.ts`, which `apply` asks too; a held
  * drop names what it waits for, and the footer names each gate's command.
+ *
+ * [ADR-0131 D1; ruling record 6328195425, letter A] Every tenant column the
+ * database still holds nullable is listed in its own advisory section, with
+ * `os migrate organization-ownership` as the remedy: a database the published
+ * 18.0.0 created is certified with them nullable, and the ceremony that
+ * tightens them is voluntary there. Each column says whether the ceremony
+ * tightens it or leaves it, and why. It is not drift: it proposes no op, adds
+ * nothing to the change count, and changes no exit code; under `--json` it is
+ * the separate `nullableTenantColumns` field (`utils/nullable-tenant-columns.ts`).
  */
 export default class MigratePlan extends Command {
   static override description =
@@ -263,6 +277,18 @@ export default class MigratePlan extends Command {
         normalize: normalizeRows,
       });
 
+      // [ADR-0131 D1] The tenant columns still nullable — advisory only, beside
+      // the drift and never in it. Computed before the "in sync" return below:
+      // an 18.0.0-born database has no drift and every such column.
+      const nullableTenantColumns: NullableTenantColumnsReport = await collectNullableTenantColumns({
+        databases: distinctDatabaseDrivers(stack.drivers).map((driver) => (
+          driver === stack.drivers[0] ? { driver } : { driver, database: stack.databaseOf(driver) ?? 'a planned database' }
+        )),
+        tenantDrivers: stack.drivers,
+        mirrored: stack.composition.servedBoot.mirrored,
+        normalize: normalizeRows,
+      });
+
       // [ADR-0120 D5e, advisory form] Installation-wide uniques on app objects
       // are a decision point under the `isolated` posture — organizations there
       // are separate CUSTOMERS. The HARD gate runs at app install; this covers
@@ -302,6 +328,10 @@ export default class MigratePlan extends Command {
           // key on the clean case would make those two byte-identical, which
           // is the blind spot this section exists to remove.
           unmanagedTables,
+          // [ADR-0131 D1] Advisory, not drift: never counted in `total` and
+          // never in `changes`. Present whenever a SQL driver was found, so
+          // `columns: []` (read, none nullable) is not `unreadable`.
+          nullableTenantColumns,
           ...(uniqueScopeAdvisory.length > 0
             ? {
                 uniqueScopeAdvisory: {
@@ -394,6 +424,16 @@ export default class MigratePlan extends Command {
       if (unmanagedLines.length > 0) {
         printInfo(unmanagedLines[0]!);
         for (const line of unmanagedLines.slice(1)) console.log(chalk.dim(`      ${withJournalNote(line)}`));
+        console.log('');
+      }
+
+      // [ADR-0131 D1] Its own block, above the drift verdict: an advisory about
+      // what the voluntary ceremony would tighten, never a change this plan or
+      // `os migrate apply` makes. Silent when every tenant column is NOT NULL.
+      const nullableLines = renderNullableTenantColumns(nullableTenantColumns);
+      if (nullableLines.length > 0) {
+        printInfo(nullableLines[0]!);
+        for (const line of nullableLines.slice(1)) console.log(chalk.dim(`      ${line}`));
         console.log('');
       }
 

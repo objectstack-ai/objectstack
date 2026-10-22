@@ -346,6 +346,11 @@ The strips these two options cover are the engine's legal ones:
 | Implicitly-readonly runtime-owned type (#5503 — `RUNTIME_OWNED_FIELD_TYPES`, today `autonumber`) | `readonly` | `insert` **and** `update` | `isSystem`, `preserveAudit` (#3493) |
 | Primary-key strip of a payload `id` the update dispatch already ruled is not an identifier (#6437) | `primary_key` | `update` | none |
 | A value for a `formula` field, which the engine computes on read and no driver has a column for (#20805) | `computed` | `insert` **and** `update` | none — every context, `isSystem` included |
+| A value for a stored field (any type but `formula`) that declares `expression`, when it differs from the value the engine computes on every write and stores in its place | `stored_expression` | `insert` **and** `update` | none — every context, `isSystem` included |
+
+The `stored_expression` row is a replacement, not a removal: the field is written,
+with the computed value in place of the caller's. A caller that sends the computed
+value, or no value for the field, is neither reported nor refused.
 
 Of the two AUTHOR-DECLARED strips only `readonlyWhen` is insert-exempt at this seam
 (a conditional lock has no prior record on a create); the static `readonly` strip runs
@@ -361,10 +366,10 @@ interface WriteObservabilityOptions {
 
 interface DroppedFieldsEvent {
   object: string;   // resolved object name
-  fields: string[]; // caller-supplied fields that were dropped
+  fields: string[]; // caller-supplied fields whose value was not stored
   // why they were dropped — an OPEN vocabulary that grows with the write
   // path's legal strips; branch on it exhaustively, never with a binary test
-  reason: 'readonly' | 'readonly_when' | 'primary_key' | 'computed';
+  reason: 'readonly' | 'readonly_when' | 'primary_key' | 'computed' | 'stored_expression';
 }
 
 interface ValidationAdvisoryEvent {

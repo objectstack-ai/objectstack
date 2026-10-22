@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { RestServer } from '@objectstack/rest';
 import { runAdminImportUsers, IMPORT_USERS_MAX_ROWS, type IdentityImportDeps } from './admin-import-users.js';
 import { settleImportResetDelivery } from './account-invitation-marker.js';
 import type { AdminActor } from './admin-user-endpoints.js';
@@ -716,6 +717,75 @@ describe('runAdminImportUsers — CSV payloads', () => {
     const data = res.body.data as any;
     expect(data.summary.created).toBe(2);
     expect(m.createUser.mock.calls.map((c) => c[0].body.email).sort()).toEqual(['c1@x.co', 'c2@x.co']);
+  });
+});
+
+/**
+ * [#25078] Export → admin user import round trip, through the CSV text-cell rule.
+ *
+ * `@objectstack/rest`'s CSV export writes a text cell its consumer would
+ * interpret in a form that consumer reads as text, and its CSV import parse
+ * (`parseCsvToRows`, reached through `prepareImportRequest`) reverses exactly
+ * that. This door parses a `csv` body through that same `prepareImportRequest`,
+ * so a user list exported as CSV and imported back here must hand better-auth's
+ * `createUser` every stored name exactly.
+ *
+ * The file comes from the REAL export route of `@objectstack/rest`'s
+ * `RestServer`, over a protocol double serving a two-field `sys_user` schema and
+ * the rows below. The rule is pinned at its readers in `@objectstack/rest`
+ * (`csv-text-cell.test.ts`), and its other CSV doors in that package's
+ * `csv-text-cell-round-trip.test.ts`.
+ */
+describe('runAdminImportUsers — CSV export → import round trip (#25078)', () => {
+  /** Plain words after a trigger character: marked by the export. */
+  const MARKED = ['=Total', '+Name', '-Note', '@acme'];
+  /** Ordinary business values, and a user-authored name that begins with the mark itself. */
+  const UNMARKED = ['+86 138 0013 8000', '+1 555 010 0000', '-120.50', 'Acme Ltd', '120.50', "'Quoted"];
+  const NAMES = [...MARKED, ...UNMARKED];
+
+  async function exportUsersCsv(rows: Array<Record<string, string>>): Promise<string> {
+    const noop = () => {};
+    const server = { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
+    const schema = { name: 'sys_user', fields: { email: { name: 'email', type: 'email' }, name: { name: 'name', type: 'text' } } };
+    const protocol = {
+      getMetaItem: vi.fn(async () => ({ type: 'object', name: 'sys_user', item: schema })),
+      findData: vi.fn(async () => ({ object: 'sys_user', records: rows, total: rows.length })),
+    };
+    const rest = new RestServer(server as any, protocol as any, { api: { requireAuth: false } } as any);
+    (rest as any).resolveExecCtx = async () => ({ userId: ACTOR.id });
+    rest.registerRoutes();
+    const route: any = rest.getRoutes().find(
+      (r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export',
+    );
+    expect(route).toBeDefined();
+    const chunks: string[] = [];
+    const res: any = {
+      write: (s: unknown) => { chunks.push(String(s)); return true; },
+      end: () => {},
+      header: () => res,
+      status: () => res,
+      json: () => res,
+    };
+    await route.handler({ params: { object: 'sys_user' }, query: { format: 'csv' } }, res);
+    return chunks.join('');
+  }
+
+  it('hands createUser every exported name exactly', async () => {
+    const rows = NAMES.map((name, i) => ({ email: `user${i + 1}@example.com`, name }));
+    const csv = await exportUsersCsv(rows);
+
+    // The file carried the marks, so the round trip below is not a pass-through.
+    expect(csv.split('\r\n')[0]).toBe('email,name');
+    for (const [i, v] of MARKED.entries()) expect(csv).toContain(`user${i + 1}@example.com,'${v}\r\n`);
+    expect(csv).toContain(',+86 138 0013 8000\r\n');
+    expect(csv).toContain(",'Quoted\r\n");
+
+    const m = makeDeps();
+    const res = await runAdminImportUsers(m.deps, makeRequest({ passwordPolicy: 'temporary', csv }), ACTOR);
+    expect(res.status).toBe(200);
+    expect((res.body.data as any).summary.created).toBe(NAMES.length);
+    const byEmail = new Map(m.createUser.mock.calls.map((c: any[]) => [c[0].body.email, c[0].body.name]));
+    expect(rows.map((r) => byEmail.get(r.email))).toEqual(NAMES);
   });
 });
 

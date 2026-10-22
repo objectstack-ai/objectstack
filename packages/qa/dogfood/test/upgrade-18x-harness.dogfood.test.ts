@@ -55,7 +55,7 @@ import type { VerifyStack } from '@objectstack/verify';
 import { columnsOf, type FixtureManifest } from './upgrade-harness/fixture-manifest.js';
 import { FIXTURE_NAMES, FIXTURE_PEOPLE, bootFixture } from './upgrade-harness/populate-fixture.js';
 import { loadSqlIntoSqlite } from './upgrade-harness/sqlite-text-dump.js';
-import { OWNERSHIP_MARKER, runOwnershipCeremony, runSchemaPlan } from './upgrade-harness/ceremony.js';
+import { OWNERSHIP_MARKER, SERVED_ENV, runOwnershipCeremony, runSchemaPlan } from './upgrade-harness/ceremony.js';
 
 const FIXTURE = new URL('./upgrade-harness/fixture-18.0/', import.meta.url);
 const MARKER = OWNERSHIP_MARKER;
@@ -303,7 +303,37 @@ describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.s
 // columns. 18.0.0's own shape is the baseline: a tenant column still nullable,
 // and the COALESCE form of a unique index over it. A later step that reshapes
 // either owes this database a migration, and this leg is where it shows.
+//
+// [ADR-0131 D1; ruling record 6328195425, letter A] The ceremony stays
+// voluntary on it, and `os migrate plan` says so: its advisory lists every
+// tenant column still nullable, as one the ceremony tightens, apart from the
+// residue it leaves. After the ceremony only that residue is listed, and the
+// shard this release rotated in NOT NULL is reported so by the ceremony. A
+// fresh store of this release lists nothing.
 const GA_FIXTURE = new URL('./upgrade-harness/fixture-18.0.0/', import.meta.url);
+
+/** The physical tables of `file` whose `organization_id` is nullable. */
+function nullableOrganizationTables(file: string): string[] {
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    return (db.prepare(
+      `SELECT m.name AS name FROM sqlite_master m JOIN pragma_table_info(m.name) p
+        WHERE m.type = 'table' AND p.name = 'organization_id' AND p."notnull" = 0 ORDER BY m.name`,
+    ).all() as Array<{ name: string }>).map((r) => r.name);
+  } finally {
+    db.close();
+  }
+}
+
+/** The tables carrying a column named `organization_id` that are no tenant column of what HEAD declares. */
+const NOT_A_TENANT_COLUMN = [
+  // Retired, its table left in place by ruling: no object declares it (the unmanaged-table section lists it).
+  'sys_notification_subscription',
+  // tenancy.enabled: false: better-auth's provider relation, not the tenancy anchor.
+  'sys_sso_provider',
+];
+
+const isShard = (table: string): boolean => /__r\d{6,8}$/.test(table);
 const gaManifest = JSON.parse(readFileSync(new URL('manifest.json', GA_FIXTURE), 'utf8')) as FixtureManifest;
 const gaFixtureSql = readFileSync(new URL('database.sql', GA_FIXTURE), 'utf8');
 
@@ -335,6 +365,26 @@ describe(`[#24884] an 18.0.0 database (fixture from ${gaManifest.ref} @ ${gaMani
   it('HEAD\'s schema plan over it holds no destructive change', () => {
     const plan = runSchemaPlan(file);
     expect(plan.changes.filter((c) => c.category === 'destructive'), 'destructive drift').toEqual([]);
+  }, 320_000);
+
+  it('[ADR-0131 D1] HEAD\'s schema plan lists its nullable tenant columns as an advisory naming the ceremony, and as no drift', () => {
+    const plan = runSchemaPlan(file, SERVED_ENV);
+    const advisory = plan.nullableTenantColumns;
+    if (advisory.status !== 'read') throw new Error(`the advisory did not read: ${advisory.detail}`);
+    expect(advisory.remedy).toBe('os migrate organization-ownership');
+    const nullable = nullableOrganizationTables(file);
+    const listed = advisory.columns.map((c) => c.table);
+    // Every nullable tenant column, and only those: the two that are no tenant column are the difference.
+    expect(nullable.filter((t) => !listed.includes(t))).toEqual(NOT_A_TENANT_COLUMN);
+    expect(listed.filter((t) => !nullable.includes(t))).toEqual([]);
+    expect(advisory.columns.every((c) => c.column === 'organization_id')).toBe(true);
+    // The ceremony tightens all of them but its residue, each marked with why.
+    const leaves = advisory.columns.filter((c) => c.ceremony === 'leaves');
+    expect(leaves.map((c) => c.table).filter((t) => !isShard(t))).toEqual(['sys_email_template']);
+    expect(leaves.every((c) => typeof c.reason === 'string' && c.reason.length > 0)).toBe(true);
+    expect(advisory.columns.filter((c) => c.ceremony === 'tightens').length).toBeGreaterThan(50);
+    // Advisory, not drift: no change names a tenant column's nullability.
+    expect(plan.changes.filter((c) => c.column === 'organization_id' && c.kind === 'nullability_mismatch')).toEqual([]);
   }, 320_000);
 
   it('HEAD boots it with no refusal, and serves the fixture\'s people and task', async () => {
@@ -369,4 +419,38 @@ describe(`[#24884] an 18.0.0 database (fixture from ${gaManifest.ref} @ ${gaMani
       db.close();
     }
   });
+
+  it('[ADR-0131 D1] after the voluntary ceremony the advisory lists only the residue it leaves, and the ceremony reports HEAD\'s shard NOT NULL', () => {
+    expect(stack, 'HEAD has stopped before the ceremony reads the file').toBeUndefined();
+    const ceremonied = join(dir, 'ga.ceremonied.db');
+    copyFileSync(file, ceremonied);
+    const report = runOwnershipCeremony(dir, ceremonied, 'ga-voluntary', SERVED_ENV) as {
+      complete?: boolean;
+      steps?: Array<{ step: string; summary: Record<string, number>; notes: string[] }>;
+    };
+    expect(report.complete).toBe(true);
+    const notNull = report.steps!.find((s) => s.step === 'not-null')!;
+    // The shard HEAD's boot rotated in was created NOT NULL: nothing to do, never "unsupported".
+    expect(notNull.summary.alreadyNotNull, JSON.stringify(notNull)).toBeGreaterThanOrEqual(1);
+    expect(notNull.notes.filter((n) => /created with \S+ nullable column/.test(n))).toEqual([]);
+
+    const plan = runSchemaPlan(ceremonied, SERVED_ENV);
+    const advisory = plan.nullableTenantColumns;
+    if (advisory.status !== 'read') throw new Error(`the advisory did not read: ${advisory.detail}`);
+    expect(advisory.columns.filter((c) => c.ceremony === 'tightens'), 'a column the ceremony would still tighten').toEqual([]);
+    const residue = advisory.columns.map((c) => c.table);
+    expect(residue.filter((t) => !isShard(t))).toEqual(['sys_email_template']);
+    expect(residue.filter(isShard).length, residue.join(', ')).toBeGreaterThanOrEqual(1);
+    expect(residue.sort()).toEqual(nullableOrganizationTables(ceremonied).filter((t) => !NOT_A_TENANT_COLUMN.includes(t)));
+  }, 900_000);
+
+  it('[ADR-0131 D1] a fresh store of HEAD lists no nullable tenant column', async () => {
+    const fresh = join(dir, 'fresh.db');
+    const booted = await bootFixture(fresh);
+    await booted.stop();
+    const plan = runSchemaPlan(fresh, SERVED_ENV);
+    expect(plan.nullableTenantColumns).toEqual({ status: 'read', adr: 'ADR-0131 D1', remedy: 'os migrate organization-ownership', columns: [] });
+    // Its only nullable `organization_id` is the opt-out, which is no tenant column.
+    expect(nullableOrganizationTables(fresh)).toEqual(['sys_sso_provider']);
+  }, 320_000);
 });

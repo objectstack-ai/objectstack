@@ -888,7 +888,14 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // user fields resolve to a name (via injected $expand), select fields to
     // their option label, booleans to the caller's yes / no words, dates to
     // YYYY-MM-DD. When the schema is unavailable the raw stored values stream
-    // through unchanged.
+    // through unchanged, but for the csv rule below.
+    //
+    // [#25078] csv only, on both paths: a text cell its consumer would
+    // interpret is written in a form that consumer reads as text, by the CSV
+    // text-cell rule (`markCsvTextCell`, `./export-format.ts`), and the CSV
+    // import parse reverses exactly that (`parseCsvToRows`), so the file
+    // re-imports to the stored value (one exception: `unmarkCsvTextCell`).
+    // xlsx and json are unaffected.
     //
     // [#24945] Boolean / toggle cells are written in the language of the
     // header row: `templateText(locale).booleanWords` (yes / no, or 是 / 否 for

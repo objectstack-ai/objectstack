@@ -1715,10 +1715,10 @@ function optionVisibleWhenUserMemberIssue(
 }
 
 /**
- * [#24720] The root verdict for a `validations[]` rule's own predicates — a
+ * [#24720, #24957] The root verdict for a `validations[]` rule's own predicates — a
  * `script` / `cross_field` rule's `condition`, a `conditional` rule's `when`,
  * and the same two slots on every rule nested in its `then` / `otherwise`: a
- * predicate that reads `parent` is reported, at `warning` (18.x).
+ * predicate that reads `parent` is refused, at `error`.
  *
  * ## Why it is reported
  *
@@ -1734,17 +1734,17 @@ function optionVisibleWhenUserMemberIssue(
  * bare-reference check stays silent. The field-rule slots one level up accept
  * the same text, which is what makes it the shape an author copies.
  *
- * ## Why a warning, and when it becomes a refusal
+ * ## Why an error
  *
  * A rule the runtime cannot evaluate must not pass a door (ADR-0049), so the
- * end state is `error`. But refusing it narrows what `os build` and the object
- * save door accept (a rule marked `active: false`, or a `conditional` branch
- * whose `when` is never true, builds and writes today), and no ADR-0087
- * conversion can rewrite a predicate that reads `parent`. Under the standing
- * post-GA ruling (甲), a narrowing no conversion carries ships only its loud
- * half in 18.x: this verdict reports at `warning`, which neither fails
- * `os build` nor refuses a save (the door lists it among its advisories). The
- * refusal — the same finding at `error` — is planned for 19.0.
+ * verdict is `error`: it fails `os build` and the object save door refuses a
+ * publish-mode write that carries it. The rule is judged as written, so a rule
+ * marked `active: false`, a rule whose `events` a stack never fires, and a
+ * `conditional` branch whose `when` is never true are refused too. No ADR-0087
+ * conversion can rewrite a predicate that reads `parent`; the repair is the
+ * author's. The refusal ships without a deprecation window under the standing
+ * ruling (甲, as amended: a protocol narrowing ships as soon as it can, with no
+ * retirement release), which first shipped this verdict at `warning`.
  *
  * ## Why `parent` alone
  *
@@ -1772,8 +1772,7 @@ function validationRuleParentIssue(
     `\`${slot}\` of validation rule '${ruleName}' reads \`parent\`, but the server evaluates a ` +
     `\`validations[]\` rule against \`record\` and \`previous\` only, so \`parent\` is unbound there. ` +
     `The rule can never be evaluated, and the server REFUSES every write it judges — a rule that ` +
-    `cannot be evaluated fails closed, seed rows included. This is a warning today; ` +
-    `\`os build\` and the object save door will refuse it from 19.0. The master-detail header is bound as ` +
+    `cannot be evaluated fails closed, seed rows included. The master-detail header is bound as ` +
     `\`parent\` only for a field's own \`readonlyWhen\` and \`requiredWhen\`, on an object with exactly ` +
     `one \`master_detail\`: to lock or require a field on the header's state, write the predicate on ` +
     `that field's \`readonlyWhen\` or \`requiredWhen\` instead. For any other check, read a column ` +
@@ -2931,8 +2930,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         const at = p.depth > 0
           ? `object '${objectName}' · ${p.label}`
           : p.slot === 'when' ? `${where} when` : where;
-        // `warning` in 18.x, `error` from 19.0: see the docblock's ruling.
-        issues.push({ where: at, message, source: source!, severity: 'warning' });
+        // `error`: a rule the runtime cannot evaluate must not pass a door; see the docblock.
+        issues.push({ where: at, message, source: source!, severity: 'error' });
       }
       // #4763 — null-guard gate over every predicate the rule carries, nested
       // `then`/`otherwise` branches included.

@@ -28,10 +28,22 @@
  * Fourth contract, on the year (#20602): every `date` and `datetime` cell takes
  * its day from core's `temporalStorageForm` `date` rule — see
  * {@link calendarDay} — so the year keeps four digits and the export re-imports.
+ *
+ * Fifth contract, CSV only (#25078): the value formatters above stay
+ * pass-throughs on the raw path, but the CSV writer applies the CSV text-cell
+ * rule ({@link markCsvTextCell}) to every text cell on BOTH paths, and the CSV
+ * import parse reverses it ({@link unmarkCsvTextCell}). xlsx and json never
+ * read it.
  */
 
 import { temporalStorageForm, type ExportFieldMeta } from '@objectstack/core';
-import { resolveDisplayField } from '@objectstack/spec/data';
+import {
+  resolveDisplayField,
+  NUMERIC_VALUE_TYPES,
+  BOOLEAN_VALUE_TYPES,
+  CALENDAR_DATE_TYPES,
+  INSTANT_TYPES,
+} from '@objectstack/spec/data';
 import { templateText, type TemplateText } from './import-template.js';
 
 // `ExportFieldMeta` and `buildFieldMetaMap` live in `@objectstack/core`
@@ -189,6 +201,95 @@ export async function withReferenceTitleFields(
 /** Header label for a column: schema label when present, else the field name. */
 export function headerLabel(field: string, metaMap: Map<string, ExportFieldMeta>): string {
   return metaMap.get(field)?.label || field;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#25078] The CSV text-cell rule — defined ONCE, read by both directions.
+//
+// The CSV export writes a TEXT cell that the program its consumer opens the
+// file in would interpret, rather than read as text, in a form that program
+// reads as text: one {@link CSV_TEXT_CELL_MARK} in front of the cell's content
+// ({@link markCsvTextCell}, called by the CSV writer `rowsToCsv` in
+// `./rest-server.ts`). The CSV import parse (`parseCsvToRows` in
+// `./import-prepare.ts`) reverses exactly that ({@link unmarkCsvTextCell}), so
+// an export → import round trip returns the stored value, with the one
+// exception {@link unmarkCsvTextCell} states.
+//
+// Scope, by construction: CSV only — the xlsx and json formats and the json
+// import door never read this rule. Which cells are TEXT cells is the writer's
+// question and is answered by the field's DECLARED type
+// ({@link isCsvTextColumn}), never by the value's JS type. The import side
+// cannot ask the same question before a named mapping has renamed its columns
+// (core's `applyMappingToRows` runs after the parse), so it asks only what the
+// cell's text says: the trigger is a property of the text alone, and the set of
+// cells it can reverse is exactly the set the export can have marked.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The one character the CSV export puts in front of a text cell it marks (U+0027). */
+export const CSV_TEXT_CELL_MARK = "'";
+
+/**
+ * The first characters that make a CSV text cell one its consumer would
+ * interpret. TAB and CR are spelled as escapes, never as raw bytes.
+ */
+const CSV_TEXT_CELL_LEADS: ReadonlySet<string> = new Set(['=', '+', '-', '@', '\t', '\r']);
+
+/**
+ * A cell made ONLY of these characters is left as written whatever its first
+ * character: digits, space, `+`, `-`, `(`, `)`, `.` and `,` — the characters a
+ * signed amount or a phone number is written with, which stay byte-identical.
+ */
+const CSV_NUMERIC_TEXT_ONLY = /^[0-9 +\-().,]*$/;
+
+/**
+ * The trigger, both halves required: the text's first character is one of
+ * {@link CSV_TEXT_CELL_LEADS}, AND the text holds at least one character
+ * outside {@link CSV_NUMERIC_TEXT_ONLY}'s set (the first character counts).
+ */
+export function csvTextCellNeedsMark(text: string): boolean {
+  return text.length > 0 && CSV_TEXT_CELL_LEADS.has(text[0]) && !CSV_NUMERIC_TEXT_ONLY.test(text);
+}
+
+/** Export direction: the text cell as the CSV writer writes it, before RFC-4180 quoting. */
+export function markCsvTextCell(text: string): string {
+  return csvTextCellNeedsMark(text) ? CSV_TEXT_CELL_MARK + text : text;
+}
+
+/**
+ * Import direction: removes exactly ONE leading {@link CSV_TEXT_CELL_MARK}
+ * when the remainder satisfies {@link csvTextCellNeedsMark}, and returns every
+ * other cell unchanged. Applied to every cell of a parsed CSV, header row
+ * included, so a user-authored cell of that same shape loses its leading mark
+ * too: the file cannot tell the two apart, and the rule is one rule. The same
+ * holds for a STORED text value of that shape — the writer leaves it as is
+ * (its first character is the mark, not a trigger), so it is the one value an
+ * export → import round trip does not return unchanged.
+ */
+export function unmarkCsvTextCell(cell: string): string {
+  return cell.startsWith(CSV_TEXT_CELL_MARK) && csvTextCellNeedsMark(cell.slice(CSV_TEXT_CELL_MARK.length))
+    ? cell.slice(CSV_TEXT_CELL_MARK.length)
+    : cell;
+}
+
+/**
+ * Declared types whose CSV cell is NOT a text cell: numeric, boolean, date and
+ * datetime — the spec's own value classes, composed rather than re-listed.
+ */
+const CSV_NON_TEXT_TYPES: ReadonlySet<string> = new Set([
+  ...NUMERIC_VALUE_TYPES,
+  ...BOOLEAN_VALUE_TYPES,
+  ...CALENDAR_DATE_TYPES,
+  ...INSTANT_TYPES,
+]);
+
+/**
+ * Whether a column's string cells are TEXT cells under the CSV text-cell rule:
+ * every column whose field is not declared numeric, boolean, date or datetime,
+ * reference display titles included. A column with no metadata (the raw path,
+ * an empty meta map, or a field the map does not hold) is a text column.
+ */
+export function isCsvTextColumn(meta: ExportFieldMeta | undefined): boolean {
+  return !meta?.type || !CSV_NON_TEXT_TYPES.has(meta.type);
 }
 
 function pad2(n: number): string {

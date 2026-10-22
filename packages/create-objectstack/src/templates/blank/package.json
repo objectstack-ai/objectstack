@@ -28,9 +28,9 @@
     "@objectstack/skills": "^18.0.0",
     "@objectstack/verify": "^18.0.0",
     "typescript": "^5.3.0",
-    "vitest": "~4.0.0"
+    "vitest": "~4.1.12"
   },
   "overrides": {
-    "vitest": "~4.0.0"
+    "vitest": "~4.1.12"
   }
 }
