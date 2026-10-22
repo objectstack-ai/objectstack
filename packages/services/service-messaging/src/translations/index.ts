@@ -7,8 +7,10 @@
  * service owns (sys_inbox_message / sys_notification_receipt /
  * sys_notification_delivery / sys_notification_preference /
  * sys_notification_template / sys_http_delivery). Loaded at runtime via the plugin's `kernel:ready`
- * hook (`i18n.loadTranslations`). Regenerate with `os i18n extract`
- * against `scripts/i18n-extract.config.ts`.
+ * hook (`i18n.loadTranslations`). Regenerate the `objects` bundles with `os i18n extract`
+ * against `scripts/i18n-extract.config.ts`; the `messages` entries — the
+ * sentences this service writes into a notification itself, today the digest
+ * heading (#25015) — are hand-authored in `./messages.ts`.
  */
 
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
@@ -20,6 +22,7 @@ import { esESObjects } from './es-ES.objects.generated.js';
 import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
+import { messagingMessages } from './messages.js';
 
 /**
  * ## The provenance companions are READ here, not merely recorded
@@ -40,7 +43,9 @@ import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
  *
  * `recorded` (3rd argument) stays `undefined` on purpose: it judges the
  * HAND-AUTHORED sections (`apps` / `dashboards` / `pages`), which this set does
- * not have — its bundles are entirely generated. The companion goes in the 4th
+ * not have — its `objects` bundles are generated, and its hand-authored
+ * `messages` face is not a section that argument judges (the approvals
+ * plugin's bundle carries its `messages` the same way). The companion goes in the 4th
  * slot, which judges the generated ones. This is the shape
  * `@objectstack/platform-objects`'s own `metadata-translations/index.ts` uses.
  *
@@ -48,11 +53,26 @@ import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
  * superseded draft is the bug; `check:i18n-stale-fill`'s UNSERVED PROVENANCE
  * verdict fails the build if a committed companion stops being consulted here.
  */
-const enSource: TranslationData = { objects: enObjects };
+const enSource: TranslationData = {
+  objects: enObjects,
+  // [#25015] The sentences this service writes into a notification itself
+  // (`./messages.ts`), read by its own renderer at delivery in each
+  // recipient's language.
+  messages: messagingMessages.en,
+};
 
 export const MessagingTranslations: TranslationBundle = {
   en: enSource,
-  'zh-CN': withSourceFallback({ objects: zhCNObjects }, enSource, undefined, zhCNGeneratedSourceHashes),
-  'ja-JP': withSourceFallback({ objects: jaJPObjects }, enSource, undefined, jaJPGeneratedSourceHashes),
-  'es-ES': withSourceFallback({ objects: esESObjects }, enSource, undefined, esESGeneratedSourceHashes),
+  'zh-CN': withSourceFallback(
+    { objects: zhCNObjects, messages: messagingMessages['zh-CN'] },
+    enSource, undefined, zhCNGeneratedSourceHashes,
+  ),
+  'ja-JP': withSourceFallback(
+    { objects: jaJPObjects, messages: messagingMessages['ja-JP'] },
+    enSource, undefined, jaJPGeneratedSourceHashes,
+  ),
+  'es-ES': withSourceFallback(
+    { objects: esESObjects, messages: messagingMessages['es-ES'] },
+    enSource, undefined, esESGeneratedSourceHashes,
+  ),
 };

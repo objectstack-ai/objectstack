@@ -93,6 +93,9 @@
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
  *   apps.<app>.navigation.<id>.label
+ *     ^ an item another package CONTRIBUTES into the app through
+ *       `manifest.navigationContributions` too, keyed under the TARGET app
+ *       (#24993; see `navigationContributionsOf`)
  *   dashboards.<dash>.label / .description
  *   dashboards.<dash>.widgets.<w>.title / .description
  *   datasets.<dataset>.label / .description
@@ -1451,6 +1454,22 @@ export function collectExpectedEntries(
     walkNavigation(nav, appName, out);
   }
 
+  // ── Contributed navigation (ADR-0029 D7, #24993) ─────────────────
+  // An item a package injects into another package's app never enters that
+  // app's authored `navigation`: the runtime folds it in on every read
+  // (`SchemaRegistry.applyNavContributions`) and `translateApp` then resolves
+  // its label from `apps.<target>.navigation.<id>.label` — the key
+  // `translation-target-unknown` already accepts for a contributed item
+  // (#18203). Walked AFTER the apps' own trees and by the same
+  // `walkNavigation`, so a contributed group's children follow the rule an own
+  // group's do, and an id an app also declares keeps its own entry
+  // (`dedupeByPath`, first emission wins).
+  for (const contribution of navigationContributionsOf(config)) {
+    const targetApp = contribution?.app;
+    if (typeof targetApp !== 'string' || targetApp.length === 0) continue;
+    if (Array.isArray(contribution.items)) walkNavigation(contribution.items, targetApp, out);
+  }
+
   // ── Dashboards + widgets ─────────────────────────────────────────
   const dashboards: any[] = Array.isArray(config?.dashboards) ? config.dashboards : [];
   for (const dash of dashboards) {
@@ -2144,6 +2163,45 @@ function walkNavigation(nav: any[], appName: string, out: ExpectedEntry[]): void
     if (Array.isArray(item.items)) walkNavigation(item.items, appName, out);
     if (Array.isArray(item.children)) walkNavigation(item.children, appName, out);
   }
+}
+
+/**
+ * Every `navigationContributions[]` entry the stack carries, from the two
+ * carriers `translation-target-unknown` reads (`contributedNavItemsByApp` in
+ * `@objectstack/lint`'s `validate-translation-references.ts`), so the keys
+ * coverage expects are the keys that rule accepts:
+ *
+ *   1. `manifest.navigationContributions` — where a single-`defineStack`
+ *      project's contributions live;
+ *   2. `packages[].manifest.navigationContributions` — the ADR-0130 D4 artifact
+ *      entry, whose `manifest` is the assembled package body. On a
+ *      `composeStacks(…, { manifest: 'preserve' })` stack this is the only
+ *      place a module's contributions sit: the singular top-level `manifest`
+ *      is one package's copy (the `'last'` pick), usually the app's.
+ *
+ * Both are read unconditionally, as the rule reads them. Where the top-level
+ * manifest IS a copy of a contributing package's, the two carriers yield the
+ * same items and `dedupeByPath` keeps one entry per key.
+ *
+ * ⛔ The rule's reader is not imported: it is module-private to
+ * `@objectstack/lint`. This copy is held to it by
+ * `test/i18n-contributed-nav-coverage.test.ts`, which runs the rule over a
+ * bundle carrying every contributed key this walk expects.
+ *
+ * Not seen, here as there: a contribution registered imperatively from a
+ * plugin's `init` (`engine.registerAppNavContribution`) is not metadata;
+ * `packages/cli/scripts/check-app-nav-i18n.mjs` boots a composition to judge
+ * that population.
+ */
+function navigationContributionsOf(config: any): any[] {
+  const out: any[] = [];
+  const add = (list: unknown): void => {
+    if (Array.isArray(list)) out.push(...list);
+  };
+  add(config?.manifest?.navigationContributions);
+  const packages: unknown[] = Array.isArray(config?.packages) ? config.packages : [];
+  for (const entry of packages) add((entry as any)?.manifest?.navigationContributions);
+  return out;
 }
 
 // ─── Filter + bundle assembly ──────────────────────────────────────────
