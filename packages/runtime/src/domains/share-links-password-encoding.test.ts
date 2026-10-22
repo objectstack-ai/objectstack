@@ -29,6 +29,7 @@ import { HttpDispatcher } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import { handleShareLinksRequest } from './share-links.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const CJK = '分享密码二二零四九';
 const EMOJI = 'open 🔐🦊 sesame';
@@ -100,6 +101,9 @@ async function harness(password: string) {
   await engine.init();
   for (const o of [SysShareLink, CONVERSATIONS, MESSAGES]) engine.registry.registerObject(o as any, '@objectstack/runtime-test');
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   const sys = { context: { isSystem: true } } as any;
   await engine.insert('ai_conversations', { id: 'conv_1', title: 'Chat' }, sys);
   await engine.insert(

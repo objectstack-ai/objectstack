@@ -34,6 +34,14 @@
  *    `mode: 'local'` beside a `syncUrl`, refused on `mode` too — the fourth
  *    copy. That row used to be accepted everywhere as well, as a "local"
  *    database the driver synced with the remote anyway.
+ *  - [#25050] `encryptionKey` is REMOVED: a tombstone in both schemas and a
+ *    refusal in the constructor, in every mode and for every value, ahead of
+ *    every other refusal, in ONE text at all three places. Its own table
+ *    (`RETIRED_KEY_ROWS`, below) holds the three to that text byte for byte.
+ *    It is kept apart from `ROWS` because a tombstone's issue is not a
+ *    `custom` one and the mirror judges it too, forced `mode` or not (the key
+ *    is refused before any mode is read). #25020 refused the key beside a
+ *    local url in one text per mode; those rows moved there.
  *
  * ⚠️ The mirror declares no `mode`, so zod strips an authored one before its
  * refinement runs: rows that FORCE a mode are judged by the constructor and the
@@ -65,6 +73,8 @@ afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 
 const FILE = `file:${DIR}/app.db`;
 const REMOTE = 'libsql://db.example.turso.io';
+/** A test value only — never a real key. */
+const KEY = 'test-key-25050';
 
 type Authored = {
   url: string;
@@ -111,6 +121,7 @@ const ROWS: Row[] = [
   { name: "libsql:// under a forced mode: 'remote'", config: { url: REMOTE, mode: 'remote' }, ctor: 'accept' },
   { name: "file: under a forced mode: 'remote'", config: { url: FILE, mode: 'remote' }, ctor: 'accept' },
   { name: "a bare path under a forced mode: 'remote' (the client refuses it at connect)", config: { url: './data/app.db', mode: 'remote' }, ctor: 'accept' },
+  { name: ":memory: under a forced mode: 'remote'", config: { url: ':memory:', mode: 'remote' }, ctor: 'accept' },
 
   // ── a remote url in a local or replica mode ─────────────────────────────
   { name: 'libsql:// beside syncUrl', config: { url: REMOTE, syncUrl: REMOTE }, ctor: 'refuse', refusedOn: 'url' },
@@ -193,11 +204,39 @@ const SYNC_KEY_REFUSALS = ROWS.filter(
 );
 
 /**
+ * [#25050] The REMOVED `encryptionKey`: every mode, every value, and beside
+ * every other defect — refused by all three places on `encryptionKey`, in one
+ * text. `withoutKey` is the same config with no key, which the constructor
+ * judges as `ROWS` does; it is what makes "refused FIRST" a reading.
+ */
+const RETIRED_KEY_ROWS: Array<{ name: string; config: Authored; value?: unknown }> = [
+  { name: 'beside a libsql:// url (remote: parsed and dropped until #25050)', config: { url: REMOTE } },
+  { name: 'beside an https:// url', config: { url: 'https://db.example.turso.io' } },
+  { name: 'beside a wss:// url', config: { url: 'wss://db.example.turso.io' } },
+  { name: "beside libsql:// under a forced mode: 'remote'", config: { url: REMOTE, mode: 'remote' } },
+  { name: 'beside a file: url', config: { url: FILE } },
+  { name: 'beside :memory:', config: { url: ':memory:' } },
+  { name: 'on a replica: file: + syncUrl', config: { url: FILE, syncUrl: REMOTE, sync: { onConnect: false } } },
+  { name: "beside file: under a forced mode: 'local'", config: { url: FILE, mode: 'local' } },
+  { name: "beside file: under a forced mode: 'remote'", config: { url: FILE, mode: 'remote' } },
+  { name: 'an EMPTY key beside a file: url (no longer "unset")', config: { url: FILE }, value: '' },
+  { name: 'an EMPTY key beside a libsql:// url', config: { url: REMOTE }, value: '' },
+  // FIRST: each of these is refused on its own, and with the key it meets the retirement.
+  { name: 'beside a bare path: the retirement first', config: { url: './data/app.db' } },
+  { name: 'on a remote url beside syncUrl: the retirement first', config: { url: REMOTE, syncUrl: REMOTE } },
+  { name: 'beside sync with no syncUrl: the retirement first', config: { url: FILE, sync: { intervalSeconds: 60 } } },
+  { name: 'beside timeoutMs on wss://: the retirement first', config: { url: 'wss://db.example.turso.io', timeoutMs: 5000 } },
+  { name: "under a forced mode: 'replica' with no syncUrl: the retirement first", config: { url: FILE, mode: 'replica' } },
+];
+
+/**
  * The driver config a datasource loader builds from an authored one — the
  * reading `buildTursoDriverConfig` / `resolveTursoUrl` in
  * `@objectstack/service-datasource` perform (not a dependency of this package,
  * hence spelled here): the url TRIMMED, an empty `syncUrl` unset, and the
- * authored `timeoutMs` landing on the driver's `timeout`.
+ * authored `timeoutMs` landing on the driver's `timeout`. [#25050] A stored
+ * `encryptionKey` is forwarded as it is, whatever it holds, so the
+ * constructor refuses it (`withKey`).
  */
 function driverConfigOf(authored: Authored): TursoDriverConfig {
   const { url, syncUrl, sync, mode, timeoutMs } = authored;
@@ -210,9 +249,17 @@ function driverConfigOf(authored: Authored): TursoDriverConfig {
   };
 }
 
-function constructorVerdict(authored: Authored): { verdict: 'accept' | 'refuse'; message?: string } {
+/** The loader's config plus a stored `encryptionKey` — untyped, as a stored row is. */
+function withKey(authored: Authored, value: unknown): TursoDriverConfig {
+  return { ...driverConfigOf(authored), encryptionKey: value } as unknown as TursoDriverConfig;
+}
+
+function constructorVerdict(
+  authored: Authored,
+  build: (a: Authored) => TursoDriverConfig = driverConfigOf,
+): { verdict: 'accept' | 'refuse'; message?: string } {
   try {
-    new TursoDriver(driverConfigOf(authored));
+    new TursoDriver(build(authored));
     return { verdict: 'accept' };
   } catch (error) {
     // A refusal is the ADR-0112 envelope, never some other throw.
@@ -249,7 +296,11 @@ describe('turso config: the constructor, the spec contract and this mirror agree
     // [#20586] The forced-local half of the `mode` rows, floored on its own so
     // it cannot shrink behind the forced-replica half.
     expect(ROWS.filter((r) => r.refusedOn === 'mode' && r.config.mode === 'local').length).toBeGreaterThanOrEqual(8);
+    // 20 measured at #25050, after the `encryptionKey` rows moved to RETIRED_KEY_ROWS.
     expect(SYNC_KEY_REFUSALS.length).toBeGreaterThanOrEqual(20);
+    // [#25050] The removed key, across every mode and beside other defects.
+    expect(RETIRED_KEY_ROWS.length).toBeGreaterThanOrEqual(15);
+    expect(RETIRED_KEY_ROWS.filter((r) => /^(libsql|https|wss):/i.test(r.config.url)).length).toBeGreaterThanOrEqual(5);
     // [#20200] Exactly zero, not a floor: every key the constructor used to
     // build and ignore is refused at construction now (see the header).
     expect(ROWS.filter((r) => r.inert).length).toBe(0);
@@ -278,6 +329,28 @@ describe('turso config: the constructor, the spec contract and this mirror agree
       const spec = schemaVerdict(SpecTursoConfigSchema, row.config);
       const mirror = schemaVerdict(MirrorTursoConfigSchema, row.config);
       expect(mirror).toEqual(spec);
+    });
+  });
+
+  // [#25050] The removed key: refused by the constructor, the spec contract
+  // and this mirror, on `encryptionKey`, alone, in ONE text — whatever else the
+  // config gets wrong, and whatever mode it names (the mirror strips `mode`,
+  // but the key is refused before any mode is read).
+  describe.each(RETIRED_KEY_ROWS)('encryptionKey $name', (row) => {
+    const value = 'value' in row ? row.value : KEY;
+    const authored = { ...row.config, encryptionKey: value };
+
+    it('all three refuse it on `encryptionKey`, alone, in one text', () => {
+      const spec = schemaVerdict(SpecTursoConfigSchema, authored);
+      expect(spec.refusedOn, spec.message).toBe('encryptionKey');
+      expect(spec.count).toBe(1);
+      expect(spec.message).toMatch(/^`turso config\.encryptionKey` was removed in @objectstack\/spec 18/);
+
+      expect(schemaVerdict(MirrorTursoConfigSchema, authored)).toEqual(spec);
+
+      const ctor = constructorVerdict(row.config, (a) => withKey(a, value));
+      expect(ctor.verdict).toBe('refuse');
+      expect(ctor.message).toBe(spec.message);
     });
   });
 

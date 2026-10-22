@@ -37,6 +37,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const LEDGER = 'sys_audit_log';
 /** A parent object whose records each caller reads only when it owns them. */
@@ -117,6 +118,9 @@ describe('[#21175] sys_audit_log read visibility — the plugin read path', () =
     engine.registry.registerObject(ownedObject as any, HARNESS_PACKAGE);
     engine.registry.registerObject(openObject as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     // Parent readability: a non-admin caller reads the vault records it owns.
     engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {

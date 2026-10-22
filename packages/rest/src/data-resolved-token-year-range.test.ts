@@ -33,6 +33,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // Wed 2026-09-30 12:00 UTC: every resolved day below is read off this instant.
 const PINNED_NOW = new Date('2026-09-30T12:00:00.000Z');
@@ -117,6 +118,9 @@ describe('[#20844] a relative-date placeholder resolved outside its field\'s yea
     await engine.init();
     engine.registry.registerObject(LEDGER as any);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     for (const row of ROWS) await engine.insert(OBJECT, { ...row } as any);
 
     // Reads of THIS object — the protocol's own metadata traffic is not the question.

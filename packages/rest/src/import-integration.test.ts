@@ -30,6 +30,7 @@ import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObje
 import { MetadataManager } from '@objectstack/metadata';
 import { RestServer } from './rest-server';
 import { loadExcelJs } from './xlsx-module.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // ---------------------------------------------------------------------------
 // The real backend: better-sqlite3 `:memory:`, constructed the canonical way
@@ -158,6 +159,9 @@ async function boot(services?: Map<string, any>) {
   // Real DDL — the NOT NULL / column types the importer's dry run claims to
   // predict are now physically there to be violated.
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   await engine.insert('user', { id: 'u1', name: '张三', email: 'zhang@x.com' });
   await engine.insert('user', { id: 'u2', name: '李四', email: 'li@x.com' });
 
@@ -651,6 +655,9 @@ describe('import route — a mapping target that names no field (#20150)', () =>
     ({ route, engine } = await boot());
     engine.registry.registerObject(NOTE as any);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     // A dotted path whose head names no field of the object is no target
     // (`task` declares no `mailing_address`; #20149 made a declared PART of a
     // compound field a target, pinned in the describe block below).
@@ -776,6 +783,9 @@ describe('import route — a declared part of a compound field (#20149)', () => 
     ({ route, engine } = await boot());
     engine.registry.registerObject(CONTACT as any);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     // The customer template's five columns, unchanged (hotcrm#1836).
     register('contact_address_feed', [
       { source: 'ID', target: 'id' },

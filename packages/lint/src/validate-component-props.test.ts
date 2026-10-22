@@ -12,7 +12,7 @@
 // something.
 import { describe, expect, it } from 'vitest';
 import { normalizeStackInput } from '@objectstack/spec';
-import { ComponentPropsMap } from '@objectstack/spec/ui';
+import { ComponentPropsMap, PageSchema } from '@objectstack/spec/ui';
 import {
   validateComponentProps as validateComponentPropsUnrecorded,
   COMPONENT_PROPS_UNKNOWN_KEY,
@@ -325,16 +325,108 @@ describe('validateComponentProps — value verdicts', () => {
       expect(required(validateComponentProps(stackWith([node])))).toContain(path);
     });
 
-    it('a present bag that is not an object is still left to the parse that owns its shape', () => {
-      expect(validateComponentProps(
-        stackWith([{ type: 'page:section', properties: { children: [{ type: 'record:related_list', properties: 'x' }] } }]),
-      )).toEqual([]);
-    });
-
     it('a nested node whose required props are all optional stays silent with no bag', () => {
       expect(validateComponentProps(
         stackWith([{ type: 'page:section', properties: { children: [{ type: 'page:header' }] } }]),
       )).toEqual([]);
+    });
+  });
+
+  /**
+   * [#24991] A NESTED component whose `properties` is PRESENT but not a record.
+   * `PageComponentSchema` refuses that bag on a top-level node ("expected
+   * record"), but a nested node sits in a `z.array(z.unknown())` slot that no
+   * parse reaches, and this rule used to skip it — `null` and `[]` were measured
+   * passing `lint --strict` on nested `record:related_list` and `object-metric`
+   * in the reporting app. The bag is refused at the node's `properties` path,
+   * once, with no per-prop verdicts beside it.
+   */
+  describe('a nested component whose `properties` is present but not a record (#24991)', () => {
+    const shape = (f: ReturnType<typeof validateComponentProps>) => f.map((x) => [x.rule, x.severity, x.path]);
+    const RELATED = (properties: unknown) => ({ type: 'record:related_list', properties });
+
+    /** The walks #22212 covers, plus a `page:card` footer and a slot's sub-tree. */
+    const WALKS: Array<[string, (child: unknown) => AnyRec, string]> = [
+      ['a container\'s `children`', (child) => stackWith([{ type: 'page:section', properties: { children: [child] } }]),
+        'pages[0].regions[0].components[0].properties.children[0].properties'],
+      ['a tab panel\'s `items[].children`',
+        (child) => stackWith([{ type: 'page:tabs', properties: { items: [{ label: 'T', value: 't', children: [child] }] } }]),
+        'pages[0].regions[0].components[0].properties.items[0].children[0].properties'],
+      ['an accordion panel\'s `items[].children`',
+        (child) => stackWith([{ type: 'page:accordion', properties: { items: [{ label: 'A', children: [child] }] } }]),
+        'pages[0].regions[0].components[0].properties.items[0].children[0].properties'],
+      ['a card\'s `footer`', (child) => stackWith([{ type: 'page:card', properties: { footer: [child] } }]),
+        'pages[0].regions[0].components[0].properties.footer[0].properties'],
+      ['a slot component\'s `children`',
+        (child) => ({ pages: [{ name: 'probe_page', label: 'Probe', type: 'record', object: 'task', kind: 'slotted',
+          slots: { details: [{ type: 'page:section', properties: { children: [child] } }] } }] }),
+        'pages[0].slots.details[0].properties.children[0].properties'],
+    ];
+    const BAGS: Array<[string, unknown, string]> = [
+      ['null', null, '`null`'],
+      ['an array', [], 'an array'],
+      ['a scalar', 'x', 'a string'],
+    ];
+
+    describe.each(WALKS)('in %s', (_walk, wrap, path) => {
+      it.each(BAGS)('a %s bag draws one `component-props-invalid` error at the node\'s `properties`', (_l, bag, received) => {
+        const findings = validateComponentProps(wrap(RELATED(bag)));
+        expect(shape(findings)).toEqual([[COMPONENT_PROPS_INVALID, 'error', path]]);
+        expect(findings[0]!.message).toContain(`received ${received}`);
+      });
+
+      it('control: the same node with a valid bag stays silent', () => {
+        expect(validateComponentProps(wrap(RELATED({ objectName: 'task', relationshipField: 'project' })))).toEqual([]);
+      });
+
+      it('control: the same node with NO bag keeps its #22212 verdict (judged as `{}`)', () => {
+        const paths = invalid(validateComponentProps(wrap({ type: 'record:related_list' }))).map((f) => f.path);
+        expect(paths).toContain(`${path}.relationshipField`);
+        expect(paths).not.toContain(path);
+      });
+    });
+
+    it('`object-metric` nested with `properties: []` — the third measured probe', () => {
+      const findings = validateComponentProps(stackWith([{ type: 'page:section', properties: { children: [{ type: 'object-metric', properties: [] }] } }]));
+      expect(shape(findings)).toEqual([[COMPONENT_PROPS_INVALID, 'error', 'pages[0].regions[0].components[0].properties.children[0].properties']]);
+    });
+
+    it('an unregistered type is refused too: the bag\'s shape is the node\'s contract, not a props schema\'s', () => {
+      const findings = validateComponentProps(stackWith([{ type: 'page:section', properties: { children: [{ type: 'flex', properties: null }] } }]));
+      expect(shape(findings)).toEqual([[COMPONENT_PROPS_INVALID, 'error', 'pages[0].regions[0].components[0].properties.children[0].properties']]);
+      // Control: the same unregistered node with an object bag is still skipped.
+      expect(validateComponentProps(stackWith([{ type: 'page:section', properties: { children: [{ type: 'flex', properties: { anything: 1 } }] } }]))).toEqual([]);
+    });
+
+    it('a data-source-bound element with a malformed bag and no binding draws both node verdicts, nothing more', () => {
+      const findings = validateComponentProps(stackWith([{ type: 'page:section', properties: { children: [{ type: 'element:repeater', properties: null }] } }]));
+      expect(shape(findings).sort()).toEqual([
+        [COMPONENT_PROPS_INVALID, 'error', 'pages[0].regions[0].components[0].properties.children[0].dataSource.object'],
+        [COMPONENT_PROPS_INVALID, 'error', 'pages[0].regions[0].components[0].properties.children[0].properties'],
+      ]);
+    });
+
+    it('top level: the page parse refuses the bag first, and the rule given the raw node answers the same verdict', () => {
+      // The page parse owns the top-level shape — and only that one: the
+      // nested node's bag passes it untouched, which is the whole gap.
+      const top = PageSchema.safeParse((stackWith([RELATED(null)]).pages as AnyRec[])[0]);
+      expect(top.success).toBe(false);
+      expect(top.error!.issues.map((i) => i.path.join('.'))).toContain('regions.0.components.0.properties');
+      const nested = PageSchema.safeParse((stackWith([{ type: 'page:section', properties: { children: [RELATED(null)] } }]).pages as AnyRec[])[0]);
+      expect(nested.success).toBe(true);
+      // An unparsed caller gets one finding, not one per required prop.
+      expect(shape(validateComponentProps(stackWith([RELATED(null)])))).toEqual([
+        [COMPONENT_PROPS_INVALID, 'error', 'pages[0].regions[0].components[0].properties'],
+      ]);
+    });
+
+    it('gates through the shared pipeline at `error`, the rule\'s existing class (#23147)', () => {
+      for (const command of ['validate', 'lint', 'build'] as const) {
+        const mine = runAuthoringRules(command, {
+          normalized: stackWith([{ type: 'page:section', properties: { children: [RELATED(null)] } }]) as never,
+        }).filter((f) => f.rule.startsWith('component-props'));
+        expect(mine.map((f) => [f.rule, f.severity]), command).toEqual([[COMPONENT_PROPS_INVALID, 'error']]);
+      }
     });
   });
 

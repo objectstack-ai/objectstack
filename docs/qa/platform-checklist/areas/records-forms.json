@@ -12,7 +12,7 @@
       "app": "showcase",
       "requires": [
         "an admin session that holds the `manage_metadata` capability — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough (packages/rest/src/rest-route-ledger.ts, the `PUT /api/v1/meta/:type/:name` row)",
-        "an isolated boot (own port + file DB, dogfood skill §0) — this recipe authors metadata into the running app",
+        "a boot on its own port and file DB (dogfood skill §0) — this recipe authors metadata into the running app",
         "AuditPlugin active in the boot: it owns sys_comment AND registers the enable.feeds capability gate (packages/plugins/plugin-audit/src/audit-writers.ts). A boot without it accepts every comment and both probes go green for the wrong reason — confirm the gate is live before scoring either clause."
       ],
       "sequence": [
@@ -53,7 +53,7 @@
           "source": "`enable.feeds` is the #2707 opt-out, default true (packages/spec/src/data/object.zod.ts#Record: 'Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'). `sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts#sharingModel; ADR-0090 D4 — re-pointed #18104: query is not a key this schema declares, and sharingModel is the key this sentence is about). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts)"
         }
       ],
-      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.feeds (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or simply discard the isolated file DB, which is the cheaper path and the one an isolated boot makes free. Any throwaway qa_nofeeds record and any sys_comment row created against it go with the package.",
+      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.feeds (client `packages.uninstall`, ledgered at rest-route-ledger.ts) — or simply discard the run's own file DB, which is the cheaper path and the one a boot on its own port and DB makes free. Any throwaway qa_nofeeds record and any sys_comment row created against it go with the package.",
       "knownGaps": [
         "The recipe lands the OBJECT only. Each probe inserts its own throwaway qa_nofeeds record inline (it needs that record's id in the thread_id), exactly as attachments-storage's clause 5 does with qa_nofiles — no standing rows here.",
         "This recipe provisions the SERVER-side probe target. The `feeds:false must HIDE the panel` half of the negative is a console/objectui assertion: to score it, navigate to the qa_nofeeds record detail and confirm no discussion panel mounts and no sys_comment fetch is issued. If the console has no route for a scratch object in the running build, record that half blocked(fixture) and score the two API clauses — do not infer the UI half from the API refusal."
@@ -1919,7 +1919,7 @@
       "title": "All six validation-rule types enforce on the write path with their exact per-type error codes — and advisory severities flag without blocking",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1933,8 +1933,7 @@
           "for the UNEVALUABLE legs (negative[0], negative[1], acceptance[5]): two runtime-authored scratch objects, each carrying one script rule whose condition `int(record.title) > 1` cannot be evaluated over a non-numeric title — no seeded rule is unevaluable, so the stock doors author them. As admin: PUT /api/v1/meta/object/qa_vr_probe {name: qa_vr_probe, label: QA, sharingModel: public_read_write, fields: {title: {type: text}}, validations: [{type: script, name: qa_unevaluable_warn, severity: warning, message: x, condition: \"int(record.title) > 1\"}]} → 200, and the same body as qa_vr_probe_err with the rule named qa_unevaluable_err at severity: error → 200 (the recipe of QA run #24779 / #24782). A write with title \"abc\" then drives each rule"
         ],
         "knownGaps": [
-          "no showcase rule declares severity:'info' — it shares the identical non-error branch with 'warning' (rule-validator.ts tests `severity === 'error'` and logs everything else), so the warning leg is the driven proof; author a scratch info rule only if a distinct observation is wanted, and record which severities were actually driven",
-          "acceptance[5] stays red until #24782 lands: the unevaluable warning rule's write answers 201 and persists (correct), but the server log prints two lines naming the rule that both say \"write rejected\" — the predicate evaluator's fail-closed sentence, emitted before severity is consulted, and the advisory branch's warn, which embeds that violation message (packages/objectql/src/validation/rule-validator.ts). Measured at 580fd4ed (QA run #24779) and again at a43405d596 (#24802). When #24782's fix merges, re-run the clause and drop this line"
+          "no showcase rule declares severity:'info' — it shares the identical non-error branch with 'warning' (rule-validator.ts tests `severity === 'error'` and logs everything else), so the warning leg is the driven proof; author a scratch info rule only if a distinct observation is wanted, and record which severities were actually driven"
         ]
       },
       "variants": [
@@ -1987,7 +1986,7 @@
           "evidence": "response + re-read + the captured log line"
         },
         {
-          "clause": "an UNEVALUABLE severity:'warning' rule lets the write land, and no log line beside it reports a rejection: the write answers 2xx, the row persists, and no server-log line naming the rule says the write was rejected or that the rule failed closed — the log must not state the opposite of what the server did. Red until #24782 lands",
+          "clause": "an UNEVALUABLE severity:'warning' rule lets the write land, and no log line beside it reports a rejection: the write answers 2xx, the row persists, and no server-log line naming the rule says the write was rejected or that the rule failed closed — the log must not state the opposite of what the server did.",
           "oracle": "log",
           "verify": "step-7 qa_vr_probe write: status 201 and a re-read finding the row; then every log entry naming qa_unevaluable_warn, read to its end — the predicate evaluator's entry spans lines (it embeds the CEL source with a caret) and its verdict sits after the caret — none may contain \"write rejected\" or \"fails closed\" (the fail-closed sentence belongs to the error-severity path; rule-validator.ts header: an unevaluable warning/info rule is logged, never thrown). Score the absence of the rejection wording, not whichever replacement sentence #24782 picks; a line saying the rule could not be evaluated is expected and passes. Control: the qa_vr_probe_err write answers 400 VALIDATION_FAILED naming qa_unevaluable_err and persists nothing — there the rejection wording is true",
           "evidence": "both responses + both re-reads + every log line naming either rule, quoted"
@@ -2045,6 +2044,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-21",
+          "change": "fixtures.knownGaps[1] removed and acceptance[5].clause's closing 'Red until #24782 lands' dropped, as knownGaps[1] said to do once #24782's fix merged: PR #25051 (72518d20f5), named by the domain:engine pointer 6308955528 on seat post #6023. Verification re-run of acceptance[5] at base 688052e147, steps[6] on the canonical own-port boot (`objectstack dev --ui --seed-admin -p 41874 -d file:SCRATCH/data.db`, OS_PORT exported): the qa_vr_probe write {title: \"abc\"} answered 201 and the re-read found its one row; exactly one server-log line names qa_unevaluable_warn, \"Validation rule 'qa_unevaluable_warn' (warning): the rule could not be evaluated (runtime: int() type error: cannot convert to int) — write proceeded: the rule is advisory, so it was not applied to this write\", and it carries neither 'write rejected' nor 'fails closed'. Control: the qa_vr_probe_err write answered 400 VALIDATION_FAILED, fields[0].constraint {rule: qa_unevaluable_err, reason: unevaluable}, its re-read found no row, and its log lines say the write was rejected. No other clause changed",
+          "ref": "#25075"
         }
       ]
     },
@@ -4267,7 +4272,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4296,7 +4301,7 @@
       ],
       "acceptance": [
         {
-          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), whose developerMessage NAMES THE OBJECT ('Duplicate record refused on 'qa_unique': …') and states 'No record was written.', while the user-facing `error` stays generic ('A record with this value already exists'); NEITHER carries a driver prefix, a driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named only when the driver reports a single offending column (a tenant-scoped unique index is composite, so the sentence reads 'a unique constraint already holds these values'); the `object.field` wording is the memory driver's and stays a memory-pin assertion",
+          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), whose developerMessage NAMES THE OBJECT by its declared label ('Duplicate record refused on 'LABEL': …'), by its API name ('qa_unique') only where the object declares no label, and states 'No record was written.', while the user-facing `error` stays generic ('A record with this value already exists'); NEITHER carries a driver prefix, a driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named only when the driver reports a single offending column (a tenant-scoped unique index is composite, so the sentence reads 'a unique constraint already holds these values'); the `object.field` wording is the memory driver's and stays a memory-pin assertion",
           "oracle": "api",
           "verify": "the refusal body — status, code, and the developerMessage naming the object, read from developerMessage, not from the generic `error` — + a post-refusal count; the SQL-family envelope is single-sourced at packages/objectql/src/duplicate-record-error.ts (buildDuplicateMessage / envelopeUniqueViolation); the memory driver's `object.field` sentence (memory-unique-constraint.ts uniqueViolationError) is asserted by memory-unique-constraint.test.ts, not live",
           "evidence": "refusal response + before/after counts"
@@ -4401,6 +4406,12 @@
           "date": "2026-10-21",
           "change": "Respelled — fixtures.requires[0]: 'an isolated dev boot on the stock SQLite store' → 'a dev boot on its own port and DB, on the stock SQLite store'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed",
           "ref": "#25018"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-21",
+          "change": "acceptance[0].clause: the developerMessage now NAMES THE OBJECT by its declared label ('Duplicate record refused on 'LABEL': …'), by its API name ('qa_unique') only where the object declares no label, where it named the object by its API name ('Duplicate record refused on 'qa_unique': …'). The engine's unique-refusal sentence (packages/objectql/src/duplicate-record-error.ts) names the object and field by label since #24951; the REST data route carries that sentence on developerMessage. Status 409, code UNIQUE_VIOLATION, the generic user-facing `error` and 'No record was written.' are unchanged",
+          "ref": "#25021"
         }
       ]
     },

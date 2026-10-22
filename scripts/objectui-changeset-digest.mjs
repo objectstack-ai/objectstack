@@ -1118,12 +1118,18 @@ export function buildDigest({
   const breakingByLevel = breakingEntries.filter((r) => r.breakingSource === 'declared-major').length;
   const breakingByAnnotation = breaking - breakingByLevel;
 
-  let bump = bumpOverride || declaredLevel || 'patch';
-  let downgradedMajor = false;
-  if (!bumpOverride && bump === 'major' && !inPreMode(frameworkRoot)) {
-    bump = 'minor';
-    downgradedMajor = true;
-  }
+  // Ruling A (maintainer, 2026-10-21, objectstack#25105): the platform's version
+  // line follows the METADATA PROTOCOL alone, and the console never changes it,
+  // so the refresh changeset is `patch` whatever objectui declared over the
+  // range — in RC pre-mode too, which is why `inPreMode` no longer exempts a
+  // declared `major` here. `declaredLevel` is still derived and reported (the
+  // entry lines carry it), and `CONSOLE_BUMP` (`bumpOverride`) still wins, so an
+  // operator who knows better says so out loud. `downgradedMajor` keeps its name
+  // and its meaning — a declared `major` recorded lower — and `recordedBelow` is
+  // the wider fact: ANY declared level recorded below itself, `minor` included.
+  const bump = bumpOverride || 'patch';
+  const recordedBelow = !bumpOverride && declaredLevel !== null && LEVEL_RANK[declaredLevel] > LEVEL_RANK[bump];
+  const downgradedMajor = recordedBelow && declaredLevel === 'major';
 
   const shown = releasing.slice(0, Math.max(0, max));
   const hidden = releasing.length - shown.length;
@@ -1182,10 +1188,10 @@ export function buildDigest({
     notes.push(
       `⚠️ ${breaking} of these ${breaking === 1 ? 'carries' : 'carry'} a breaking change: ${source}. ` +
         `Each is marked ${BREAKING_MARKER} in the list above — read them before compiling the release record` +
-        (downgradedMajor
-          ? `. The declared \`major\` is recorded here as \`minor\` because the launch-window convention ` +
-            `ships breaking as minor (\`scripts/check-changeset-no-major.mjs\`) — the breaking entries are ` +
-            `listed above, unabridged.`
+        (recordedBelow
+          ? `. The declared \`${declaredLevel}\` is recorded here as \`${bump}\`: the platform's version line follows ` +
+            `the metadata protocol, which the console never changes (\`scripts/check-changeset-no-major.mjs\`) — ` +
+            `the breaking entries are listed above, unabridged, and keep their marker.`
           : '.'),
     );
   }
@@ -1271,6 +1277,7 @@ export function buildDigest({
     absentAtTo,
     totalCommits,
     downgradedMajor,
+    recordedBelow,
     adr0087Scaffold,
     body,
   };
@@ -1375,10 +1382,16 @@ function main(argv) {
 
   const short = to.slice(0, 12);
   const rangeLabel = `${from.slice(0, 12)}...${to.slice(0, 12)}`;
+  // The declaration line every changeset carries (ruling A): the console refresh
+  // changes nothing a metadata author writes, so its kind is `none` — the
+  // release-notes grouping files it under 其他修复, and the level gate reads it
+  // as the `patch` it is. Written by the generator because a generated file is
+  // regenerated: a line a human added would last exactly one pin bump.
   const file =
     `---\n"@objectstack/console": ${digest.bump}\n---\n\n` +
     `Console (objectui) refreshed to \`${short}\`. Frontend changes in this range:\n\n` +
     `${digest.body}\n\n` +
+    `Metadata-protocol: none (the console refresh changes no key, value or type a metadata author writes)\n\n` +
     `objectui range: \`${rangeLabel}\`\n`;
 
   console.error(
@@ -1386,7 +1399,9 @@ function main(argv) {
       `${digest.breaking} breaking (${digest.breakingByLevel} declared major, ` +
       `${digest.breakingByAnnotation} annotated), ` +
       `${digest.releaseNothing} release-nothing, ${digest.noChangeset} commit(s) without a changeset` +
-      (digest.downgradedMajor ? ' — declared major recorded as minor (launch window)' : ''),
+      (digest.recordedBelow
+        ? ` — objectui declared \`${digest.declaredLevel}\`, recorded as \`${digest.bump}\` (the console never changes the metadata protocol)`
+        : ''),
   );
 
   // #6175: the one sentence that replaces the screenful of git `fatal:` lines.
@@ -1586,7 +1601,11 @@ function selfTest() {
       digest.body.includes('- **major** — **BREAKING** — Remove `PageNodeRenderer`'),
       digest.body,
     );
-    check('in RC pre-mode a declared major stays major', digest.bump === 'major');
+    check(
+      'a declared major records as patch, in RC pre-mode too — the console never moves the version line (ruling A)',
+      digest.bump === 'patch' && digest.declaredLevel === 'major' && digest.downgradedMajor === true && digest.recordedBelow === true,
+      `bump=${digest.bump} declared=${digest.declaredLevel}`,
+    );
 
     const plain = buildDigest({
       objectuiRoot: ui,
@@ -1595,8 +1614,9 @@ function selfTest() {
       to: head,
     });
     check(
-      'outside pre-mode a declared major records as minor — AUDIBLY',
-      plain.bump === 'minor' && plain.downgradedMajor && plain.body.includes('launch-window'),
+      'outside pre-mode a declared major records as patch — AUDIBLY, naming the rule and the declared level',
+      plain.bump === 'patch' && plain.downgradedMajor && plain.body.includes('metadata protocol') && plain.body.includes('The declared `major` is recorded here as `patch`'),
+      plain.body,
     );
 
     const overridden = buildDigest({
@@ -1824,9 +1844,10 @@ function selfTest() {
       annotated.body,
     );
     check(
-      '#6099 nothing was downgraded — there was no major to downgrade',
-      annotated.bump === 'minor' && annotated.downgradedMajor === false,
-      `bump=${annotated.bump} downgraded=${annotated.downgradedMajor}`,
+      '#6099 no major was downgraded — there was none to downgrade — and the declared `minor` is recorded as `patch` (ruling A), said in the body',
+      annotated.bump === 'patch' && annotated.downgradedMajor === false && annotated.recordedBelow === true && annotated.declaredLevel === 'minor' &&
+        annotated.body.includes('The declared `minor` is recorded here as `patch`'),
+      `bump=${annotated.bump} downgraded=${annotated.downgradedMajor} recordedBelow=${annotated.recordedBelow}`,
     );
 
     // --- #23112: a DECORATED annotation — a pictograph before the word -------
@@ -2209,9 +2230,14 @@ function selfTest() {
     const body = existsSync(written) ? readFileSync(written, 'utf8') : '';
     check('bump-objectui.sh writes the digest-derived changeset', body.length > 0);
     check(
-      'the emitted changeset declares the derived bump',
-      body.startsWith('---\n"@objectstack/console": major\n---'),
+      'the emitted changeset declares the derived bump — `patch`, whatever objectui declared (ruling A)',
+      body.startsWith('---\n"@objectstack/console": patch\n---'),
       body.slice(0, 60),
+    );
+    check(
+      'the emitted changeset carries its `Metadata-protocol: none` line, at the start of a line, for the gate and the release notes',
+      /^Metadata-protocol: none\b/m.test(body),
+      body,
     );
     check(
       'the emitted changeset carries the breaking entry and not the ci noise',
@@ -2685,7 +2711,7 @@ function selfTest() {
       // unbuilt body would satisfy "no marker" just as well).
       allDeclared.releasing.length === 2 &&
         allDeclared.breaking === 0 &&
-        allDeclared.bump === 'minor' &&
+        allDeclared.bump === 'patch' &&
         allDeclared.adr0087Scaffold === false &&
         markersIn(allDeclared.body).length === 0,
       allDeclared.body,
@@ -3408,15 +3434,17 @@ function selfTest() {
       ? readFileSync(join(fwDeepen, '.changeset', csName), 'utf8')
       : '';
     check(
-      '#14178 S6 an absent endpoint now DEEPENS and re-asks — the shallow checkout derives the same record as a full clone, `minor` not the `patch` default',
+      '#14178 S6 an absent endpoint now DEEPENS and re-asks — the shallow checkout derives the same COMPLETE record as a full clone: the breaking entry, the ADR-0087 prompt, no degraded list',
       // The measured before/after, in one assertion. Before this card the same
-      // input wrote a one-line degraded entry declaring `patch`, exited 0, and
-      // never printed the ADR-0087 prompt (which keys on a declared-breaking
-      // changeset, and the degraded one declared none).
+      // input wrote a one-line degraded entry, exited 0, and never printed the
+      // ADR-0087 prompt (which keys on a declared-breaking changeset, and the
+      // degraded one declared none). The level is `patch` on both sides now
+      // (ruling A: the console never moves the version line), so the
+      // discriminator is the RECORD — the entries and the prompt — not the bump.
       deepenRun.status === 0 &&
         deepenRun.stdout.includes('deepening') &&
         deepenRun.stdout.includes('the range walks completely now') &&
-        deepenCs.includes('"@objectstack/console": minor') &&
+        deepenCs.includes('"@objectstack/console": patch') &&
         deepenCs.includes('**BREAKING**') &&
         deepenCs.includes('adr-0087: TODO') &&
         !deepenCs.includes('Degraded list') &&

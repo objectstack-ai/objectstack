@@ -52,6 +52,7 @@ import { SysPosition, SysPermissionSet, SysPositionPermissionSet } from '../__te
 import { SysUserPosition } from './sys-user-position.object.js';
 import { SysUserPermissionSet } from './sys-user-permission-set.object.js';
 import { bindTestSecurityCatalog } from '../__tests__/security-catalog.testkit.js';
+import { relaxEveryRegisteredTenantColumn } from '../pre-18-tenant-column.testkit.js';
 
 type Policy = {
   name: string;
@@ -404,6 +405,10 @@ async function bootBaseline(declared: boolean) {
     objects: [...declarers, objects.get('sys_member')!, SysUserPermissionSet, SysUserPosition],
   } as never);
   await engine.syncSchemas();
+  // The organization-less rows below (global sets, positions, grants) exist only
+  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
+  // NULL): this is that store.
+  await relaxEveryRegisteredTenantColumn(engine);
   for (const o of [SysPosition, SysPermissionSet, SysPositionPermissionSet]) {
     if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
   }
@@ -440,9 +445,16 @@ async function bootBaseline(declared: boolean) {
   // two administrators hold — each owned by `org_x`, the organization every
   // agent's request runs in and so the one its delegator's grants are resolved
   // in (an organization-less grant applies nowhere, ADR-0131 D10).
+  //
+  // [#25063] Every delegator is a member of `org_x`, the platform administrator
+  // included: a delegated request runs in its live organization only where the
+  // delegator's membership backs it, and is refused at the prologue otherwise
+  // (`delegated-organization-membership.test.ts`). The one door that builds an
+  // agent context vets that organization against the same membership.
   const member = objects.get('sys_member')!;
   await knex('sys_member').insert([
     ['u_x', 'org_x', 'member'], ['u_x2', 'org_x', 'member'], ['a_x', 'org_x', 'admin'], ['u_y', 'org_y', 'member'],
+    ['p_admin', 'org_x', 'member'],
   ].map(([user, org, role]) => rowOf(member, { id: `mem:${user}`, user_id: user, organization_id: org, role })));
   await knex('sys_user_permission_set').insert([
     { id: 'ups:u_x2', user_id: 'u_x2', permission_set: 'viewer_readonly', organization_id: 'org_x' },

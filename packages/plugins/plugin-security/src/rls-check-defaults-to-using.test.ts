@@ -45,6 +45,7 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OWN_ORG = 'org_a';
 const OTHER_ORG = 'org_b';
@@ -124,6 +125,9 @@ async function boot(makeDriver: () => unknown, ps: PermissionSet): Promise<Objec
     objects: OBJECTS,
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   engines.push(engine);
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },

@@ -189,8 +189,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "User Created",
-          description: "Copy the temporary password now — it is shown only once and never stored.",
-          acknowledge: "I have saved this password",
+          description: "If a temporary password was generated, copy it now — it is shown only once and never stored.",
+          acknowledge: "Done",
           fields: {
             "user.email": "Email",
             "user.phoneNumber": "Phone Number",
@@ -1389,9 +1389,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Client Type",
         options: {
           web: "web",
-          native: "native",
-          useragentbased: "user-agent-based",
-          public: "public"
+          native: "native"
         }
       },
       public: {
@@ -3247,13 +3245,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Code"
       },
       lock_state: {
-        label: "Lock State",
-        options: {
-          none: "none",
-          nooverlay: "no-overlay",
-          nodelete: "no-delete",
-          full: "full"
-        }
+        label: "Lock State"
       },
       lock_overridden: {
         label: "Lock Overridden"

@@ -34,6 +34,7 @@ import type { UploadSessionProgress, UploadSessionRecord } from './metadata-stor
 import { registerStorageRoutes, CHUNK_RECORD_ATTEMPTS } from './storage-routes.js';
 import { SystemFile } from './objects/system-file.object.js';
 import { SystemUploadSession } from './objects/system-upload-session.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const BASE = '/api/v1/storage';
 const INIT = `${BASE}/upload/chunked`;
@@ -105,6 +106,9 @@ async function realEngine(): Promise<Backend> {
   ql.registry.registerObject(SystemFile as any, 'com.objectstack.storage');
   ql.registry.registerObject(SystemUploadSession as any, 'com.objectstack.storage');
   await ql.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(ql);
   let writes = 0;
   const realUpdate = ql.update.bind(ql);
   (ql as any).update = (object: string, data: any, options: any) => {

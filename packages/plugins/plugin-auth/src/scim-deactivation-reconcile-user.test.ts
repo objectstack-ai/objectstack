@@ -166,6 +166,8 @@ const sysUserPermissionSet = {
 };
 
 const PS_ADMIN = 'ps_admin_full_access';
+/** [ADR-0131 D5] The Default Organization (`slug = 'default'`), the owner of the platform-admin grant. */
+const DEFAULT_ORG = 'org_default';
 
 // [#23184] A case that moved the wall clock with `passTime()` gets the real
 // clock back before anything else runs; a no-op for every other case.
@@ -181,7 +183,7 @@ afterEach(() => {
  * every case. The manager and the SCIM credential stay per case, built fresh
  * by {@link boot} on the emptied database.
  */
-const enginePool = sqliteEnginePool(bootEngine);
+const enginePool = sqliteEnginePool(bootEngine, { keepBootOrganizations: true });
 afterEach(enginePool.release);
 afterAll(enginePool.destroy);
 
@@ -210,9 +212,8 @@ async function boot(): Promise<Harness> {
     plugins: { scim: true, organization: true },
   } as never);
 
-  // [C8 stage 8b] It carries an organization: under `single` an organization-less
-
-  // system insert is refused while the install holds none, and this rig holds none.
+  // [C8 stage 8b] It carries an organization of its own: a system insert names
+  // its owner (ADR-0131 D9) rather than leaning on the Default Organization.
 
   // The verifier reads the digest alone, so the organization changes nothing it answers.
 
@@ -241,6 +242,9 @@ async function bootEngine(): Promise<BootedSqliteEngine> {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
   await engine.syncSchemas();
+  // [ADR-0131 D5] The Default Organization the platform-admin anchor is owned by,
+  // as the `single` boot invariant creates it before any user exists.
+  await engine.insert('sys_organization', { id: DEFAULT_ORG, name: 'Default Organization', slug: 'default' }, SYSTEM);
   // [ADR-0131 D3/D4] `admin_full_access` is a catalog definition — what the
   // break-glass guard, like the resolver, resolves a grant's set name to.
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
@@ -400,25 +404,34 @@ async function expectSignInBanned(h: Harness, email: string): Promise<void> {
   expect(body.code).toBe('BANNED_USER');
 }
 
-/** Give `userId` unscoped `admin_full_access` — a platform administrator. */
+/**
+ * Give `userId` the Default Organization's `admin_full_access` grant — a
+ * platform administrator, the row the `single` first-user promotion writes
+ * (ADR-0131 D5).
+ */
 async function makePlatformAdmin(h: Harness, userId: string): Promise<void> {
   const existing = await h.engine.findOne(
     'sys_permission_set',
     { where: { id: PS_ADMIN }, fields: ['id'] },
     SYSTEM,
   );
-  // [C8 stage 8b] The legacy organization-less catalogue row and the unscoped
-  // platform-admin grant go in beneath the engine: under `single` the engine
-  // refuses an organization-less platform insert while the install holds no
-  // organization (ADR-0131 D9), and the engine pool keeps none.
-  const residue = (object: string, row: Record<string, unknown>) =>
-    (h.engine as any).getDriver(object).create(object, row);
   if (!existing) {
-    await residue('sys_permission_set', { id: PS_ADMIN, name: ADMIN_FULL_ACCESS });
+    await h.engine.insert(
+      'sys_permission_set',
+      { id: PS_ADMIN, name: ADMIN_FULL_ACCESS, organization_id: DEFAULT_ORG },
+      SYSTEM,
+    );
   }
-  await residue(
+  await h.engine.insert(
     'sys_user_permission_set',
-    { id: `ups_${userId}`, user_id: userId, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS },
+    {
+      id: `ups_${userId}`,
+      user_id: userId,
+      permission_set_id: PS_ADMIN,
+      permission_set: ADMIN_FULL_ACCESS,
+      organization_id: DEFAULT_ORG,
+    },
+    SYSTEM,
   );
 }
 

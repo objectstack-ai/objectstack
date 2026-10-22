@@ -44,9 +44,33 @@
  * (`data/datasource-credential-redaction.ts`), so the honest, non-opt-in
  * wiring is a built-in entry: present the moment this module loads, on every
  * composition that can serve a datasource row, with nothing to forget.
+ *
+ * ## The third resolution: a redactor DERIVED from the type's schema
+ *
+ * Ruling B+ on #24966 (recorded 6304303975): where the redaction is a function
+ * of the declared shape, the fact is declared on the schema and the behaviour
+ * is derived once, here. A field marked `.meta({ credential: 'value' })` or
+ * `.meta({ credential: 'map' })` on a type's registered schema
+ * ({@link getMetadataTypeSchema}) is dropped from every served item and named
+ * in `redactedKeys` — `metadata-credential-fields.ts` holds the marker, the
+ * walk, the cleared forms and the guard that keeps a forgotten marker from
+ * passing silently. `webhook` is the first type served this way: its items
+ * reach the meta read doors with or without plugin-webhooks mounted, so a
+ * registration from that plugin would be the fail-open shape described above,
+ * and the derivation is present from module load on every composition.
+ *
+ * Precedence: an explicit registration wins, then a built-in, then the
+ * derivation. `datasource` (schema-reading plus URL scrubbing) and `flow`
+ * (nested regions, write-path strip) keep their explicit redactors.
  */
 
 import { redactDatasourceConfig } from '../data/datasource-credential-redaction';
+import { derivedCredentialRedactorFor } from './metadata-credential-fields';
+import {
+  getMetadataTypeSchema,
+  listMetadataTypeSchemaTypes,
+  listUnregisteredKindSchemaTypes,
+} from './metadata-type-schemas';
 import { PLURAL_TO_SINGULAR } from '../shared/metadata-collection.zod';
 // [#21565] The family set and its predicate: declared in a leaf, re-exported below.
 // [#21654] So is the one prescription a refusal of the family's reach ends on.
@@ -82,7 +106,8 @@ export type MetadataTypeRedactor = (item: Record<string, unknown>) => MetadataRe
  * The built-in `datasource` redactor: redacts the driver `config` through the
  * one credential-key definition in `data/datasource-credential-redaction.ts`
  * (derived from each driver's `z.never()` contract + the pre-#8078 alias list
- * + turso's `encryptionKey`), and leaves every other key of the item —
+ * + turso's retired `encryptionKey`, which a legacy stored row may still
+ * carry), and leaves every other key of the item —
  * `_diagnostics` included — byte-for-byte.
  */
 function redactDatasourceItem(item: Record<string, unknown>): MetadataRedactionResult {
@@ -118,12 +143,16 @@ const EXTRA_METADATA_TYPE_REDACTORS = new Map<string, MetadataTypeRedactor>();
  * Look up the read-path redactor for a metadata type.
  *
  * Returns the user-registered override if any, otherwise the built-in
- * redactor. Returns `undefined` for a type with no redactor — which the
- * consumer must treat as "serve as-is", never as an error: absence of a
- * registration is a fact about the type, not a failure.
+ * redactor, otherwise the redactor DERIVED from the credential markers on the
+ * type's registered schema (see the module note). Returns `undefined` for a
+ * type with none of the three — which the consumer must treat as "serve
+ * as-is", never as an error: absence of a redactor is a fact about the type,
+ * not a failure.
  */
 export function getMetadataTypeRedactor(type: string): MetadataTypeRedactor | undefined {
-  return EXTRA_METADATA_TYPE_REDACTORS.get(type) ?? BUILTIN_METADATA_TYPE_REDACTORS[type];
+  return EXTRA_METADATA_TYPE_REDACTORS.get(type)
+    ?? BUILTIN_METADATA_TYPE_REDACTORS[type]
+    ?? derivedCredentialRedactorFor(getMetadataTypeSchema(type));
 }
 
 /**
@@ -141,16 +170,24 @@ export function getMetadataTypeRedactor(type: string): MetadataTypeRedactor | un
  * plugin (the #8300 datasource measurement), the redactor belongs in
  * `BUILTIN_METADATA_TYPE_REDACTORS` in this package instead — a redaction
  * that looks installed but isn't loaded is the worst available outcome,
- * because it reads as protected.
+ * because it reads as protected. When the credentials are declared fields of
+ * the type's schema, mark them there (`.meta({ credential: … })`) and write
+ * no redactor at all: the derivation covers every composition.
  */
 export function registerMetadataTypeRedactor(type: string, redactor: MetadataTypeRedactor): void {
   EXTRA_METADATA_TYPE_REDACTORS.set(type, redactor);
 }
 
-/** Snapshot of every type that currently has a redactor (built-in + extras), sorted. */
+/**
+ * Snapshot of every type that currently has a redactor (built-in, extras, and
+ * the types whose schema derives one), sorted.
+ */
 export function listMetadataTypeRedactorTypes(): string[] {
   const types = new Set<string>(Object.keys(BUILTIN_METADATA_TYPE_REDACTORS));
   for (const t of EXTRA_METADATA_TYPE_REDACTORS.keys()) types.add(t);
+  for (const t of [...listMetadataTypeSchemaTypes(), ...listUnregisteredKindSchemaTypes()]) {
+    if (derivedCredentialRedactorFor(getMetadataTypeSchema(t))) types.add(t);
+  }
   return Array.from(types).sort();
 }
 

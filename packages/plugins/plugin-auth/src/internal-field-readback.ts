@@ -194,7 +194,9 @@ const READBACK_FIELDS: Readonly<Record<string, readonly ReadbackColumn[]>> = {
   // that no generic exit — the data path, and the compliance ledger's CRUD
   // mirror that honours the same flag — carries it, and each is here because a
   // better-auth route reads it back OFF a row its storage adapter returned
-  // (traced in the installed better-auth / @better-auth/* dist, 1.7.3):
+  // (traced in the then-installed better-auth / @better-auth/* dist, 1.7.3;
+  // ⚠️ [#25096] NOT re-stamped for 1.7.12 as a whole — only the
+  // `sys_verification` row below was re-traced there, by #25111):
   //
   //  - `sys_jwks.private_key` — the jwt plugin's key read (`findMany`, no
   //    projection) feeds signing. MEASURED before this row existed: the flag
@@ -204,8 +206,24 @@ const READBACK_FIELDS: Readonly<Record<string, readonly ReadbackColumn[]>> = {
   //  - `sys_verification.value` — reset-password, email/phone OTP, magic link
   //    and OIDC code redemption read it off the found or CONSUMED row (the
   //    adapter's `consumeOne` re-attaches through this table too).
-  //    `required: true`. `identifier` is deliberately absent: no flow reads it
-  //    back off a row — it is only ever the lookup key.
+  //    `required: true`.
+  //  - `sys_verification.identifier` [#25111] — `@better-auth/sso`'s
+  //    `/sso/verify-domain` (traced on 1.7.12, the same code on 1.7.3) builds
+  //    the TXT record it accepts as `${activeVerification.identifier}=${value}`
+  //    from the row `findVerificationValue` read back, beside the bare value.
+  //    Stripped, that row made it expect `undefined=TOKEN`: the record
+  //    `request-domain-verification` tells the operator to publish
+  //    (`_better-auth-token-PROVIDER=TOKEN`, `register-sso-provider.ts`)
+  //    answered 502 DOMAIN_VERIFICATION_FAILED, and a record spelling
+  //    `undefined=TOKEN` verified. It is the ONLY reader of the column off a
+  //    row in better-auth, @better-auth/sso, /oauth-provider and /scim 1.7.12;
+  //    every other flow uses it as the lookup key alone. It hands the vendor
+  //    nothing it does not already hold: every verification read better-auth
+  //    issues is keyed on `identifier` (`findVerificationValue`,
+  //    `consumeVerificationValue`), a `findOne` keyed on it is answered from
+  //    the lookup with no privileged read (#24061), and no vendor route echoes
+  //    a verification row to its caller. The generic exits still strip it.
+  //    `required: true` ⇒ absence can only be the strip.
   //  - `sys_two_factor.secret` (`required: true`) and `.backup_codes` (empty
   //    until generated) — TOTP and backup-code verification read both off the
   //    enrolment row.
@@ -216,7 +234,10 @@ const READBACK_FIELDS: Readonly<Record<string, readonly ReadbackColumn[]>> = {
   //    digest off the client row to verify a presented secret; empty on a
   //    public client.
   [SystemObjectName.JWKS]: [{ field: 'private_key', absenceProvesStrip: true }],
-  [SystemObjectName.VERIFICATION]: [{ field: 'value', absenceProvesStrip: true }],
+  [SystemObjectName.VERIFICATION]: [
+    { field: 'value', absenceProvesStrip: true },
+    { field: 'identifier', absenceProvesStrip: true },
+  ],
   [SystemObjectName.TWO_FACTOR]: [
     { field: 'secret', absenceProvesStrip: true },
     { field: 'backup_codes', absenceProvesStrip: false },
@@ -246,7 +267,8 @@ const FAIL_CLOSED_CONSEQUENCE: Readonly<Record<string, string>> = {
     + '(no set-auth-jwt header, no OIDC id_token)',
   [SystemObjectName.VERIFICATION]:
     'better-auth one-time verification flows (password reset, OTP, magic link, OIDC code redemption) '
-    + 'would find no stored value on such rows and refuse every outstanding code',
+    + 'would find no stored value on such rows and refuse every outstanding code, and SSO domain '
+    + 'verification would refuse the DNS record request-domain-verification names',
   [SystemObjectName.TWO_FACTOR]:
     'better-auth two-factor verification would find no TOTP secret on such rows and refuse every code',
 };

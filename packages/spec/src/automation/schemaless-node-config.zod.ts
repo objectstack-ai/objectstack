@@ -353,9 +353,12 @@ export const ScriptConfigSchema = lazySchema(() => strictObject({
   template: retiredKey(
     '`script.config.template` was removed in @objectstack/spec 17 — it fed only the '
     + 'logger-backed `email`/`slack` stubs, which never rendered or sent a message, so no template '
-    + 'id was ever resolved. Delete the key. A `notify` node carries its own `title`/`message`, and '
-    + 'stored templates live in the messaging service (`sys_notification_template`), not on the '
-    + 'node. '
+    + 'id was ever resolved. Delete the key. For templated content use a `notify` node and name an '
+    + 'email template (`email_template`) in its own `template` key, with `templateData` filling its '
+    + 'placeholders: the email and in-app inbox channels render that template in each recipient\'s '
+    + 'locale. Otherwise the node carries inline `title`/`message`. The messaging service\'s '
+    + '`sys_notification_template` rows are read only by the `email` and `sms` channels, `email` '
+    + 'only when the node names no template. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   recipients: retiredKey(

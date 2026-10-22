@@ -59,11 +59,14 @@ describe('TursoConfigSchema', () => {
   // local `file:` url. The fixture used to put `syncUrl` beside a remote
   // `libsql://` url, a configuration the driver refuses at construction and
   // this schema now refuses too.
+  // [#25020] `encryptionKey` left this fixture: the driver never encrypted the
+  // replica file with it (its local engine has no encryption codec). [#25050]
+  // It is a tombstone now, refused in every mode — pinned in
+  // `turso-config-constructor-parity.test.ts`.
   it('should accept config with all fields', () => {
     const config = TursoConfigSchema.parse({
       url: 'file:./local-replica.db',
       authToken: 'eyJhbGciOi...',
-      encryptionKey: 'my-secret-key-256',
       concurrency: 50,
       syncUrl: 'libsql://my-db-orgname.turso.io',
       sync: {
@@ -73,7 +76,6 @@ describe('TursoConfigSchema', () => {
       timeoutMs: 30000,
     });
 
-    expect(config.encryptionKey).toBe('my-secret-key-256');
     expect(config.concurrency).toBe(50);
     expect(config.timeoutMs).toBe(30000);
   });

@@ -44,6 +44,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
 import { VALUE_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 function makeSqliteDriver() {
     return new SqlDriver({
@@ -114,6 +115,9 @@ describe('flow-computed money lands within its declared scale (#11060, oracle fo
         ql.registerDriver(driver, true);
         ql.registry.registerObject(quote as any, 'scale-test', 'scale-test');
         await ql.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(ql);
     }
 
     const quoteByTitle = (title: string) =>

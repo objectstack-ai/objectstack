@@ -209,8 +209,11 @@ import { expandViewContainer } from '@objectstack/spec';
 import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import {
   FLOW_TERMINAL_MESSAGE_KEYS,
+  PAGE_TABS_COMPONENT_TYPE,
   hasPlatformObjectPrefix,
   isPlatformProvidedObjectName,
+  pageTabItemKey,
+  walkAddressedPageComponents,
 } from '@objectstack/spec/system';
 import { walkFlowNodes } from './flow-walk.js';
 import { packagesOf, recordsOf, suggestName } from './object-graph.js';
@@ -236,6 +239,15 @@ const SCREEN_NODE_TYPE = 'screen';
  * `'refused'` a member of the schema's `outcome` enum, neither exported by name.
  */
 const END_NODE_TYPE = 'end';
+
+/**
+ * The component a misplaced `components.<id>.items` key most often sits on: a
+ * `page:accordion` declares `items[].label` too, but its panels carry no
+ * author-settable identity (the renderer derives `panel-<index>`), so the
+ * verdict points at the inline locale map rather than at a key. A local
+ * const for {@link SCREEN_NODE_TYPE}'s reason.
+ */
+const PAGE_ACCORDION_COMPONENT_TYPE = 'page:accordion';
 const REFUSED_OUTCOME = 'refused';
 
 export const TRANSLATION_TARGET_UNKNOWN = 'translation-target-unknown';
@@ -345,6 +357,16 @@ const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
 interface ObjectFacts {
   fields: Map<string, AnyRec>;
   views: Set<string>;
+  /**
+   * The `_views` keys of the FORM views this object's containers serve — each
+   * `formViews.<key>` entry, the default `form`, and a `viewKind: 'form'`
+   * item — the views a `_views.<view>.title` key addresses (`translateView`
+   * overlays it onto the form's `config.title`). A list view carries no
+   * title, so a `title` key over one resolves nothing. The default form's key
+   * is legal for `title` alone: its other `_views` tails stay non-keys (see
+   * {@link collectViewRecord}).
+   */
+  forms: Set<string>;
   actions: Map<string, AnyRec>;
   sections: Set<string>;
   /**
@@ -461,12 +483,29 @@ interface Universe {
    * rung 2b of the object ladder applied to a list (#23566).
    */
   extendedPicklists: Set<string>;
+  /**
+   * Page name (`Page.name`) → every component id the page ADDRESSES
+   * (`pages.<page>.components.<id>`), with that component's type and, for a
+   * `page:tabs`, the item `value`s a `components.<id>.items.<value>` key may
+   * name. Built on spec's `walkAddressedPageComponents`, the walk
+   * `translatePage` itself runs, so an id here is the component the resolver
+   * reads the entry for.
+   */
+  pages: Map<string, Map<string, PageComponentFacts>>;
+}
+
+/** What the `items` check knows about one addressed page component. */
+interface PageComponentFacts {
+  type: string | undefined;
+  /** The `page:tabs` item `value`s (`pageTabItemKey`); empty for any other type. */
+  tabValues: Set<string>;
 }
 
 function emptyFacts(): ObjectFacts {
   return {
     fields: new Map(),
     views: new Set(),
+    forms: new Set(),
     actions: new Map(),
     sections: new Set(),
     validations: new Set(),
@@ -525,6 +564,9 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   const addView = (objectName: string | undefined, name: string | undefined) => {
     if (objectName && name) factsFor(objectName).views.add(name);
   };
+  const addForm = (objectName: string | undefined, name: string | undefined) => {
+    if (objectName && name) factsFor(objectName).forms.add(name);
+  };
 
   /**
    * Register the `_sections` names one form-ish container declares.
@@ -545,6 +587,7 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   const listBinding = isRec(view.list) ? bindingOf(view.list) : undefined;
   if (isRec(view.list)) addView(listBinding, defaultListViewKey(listBinding, view));
   addView(recordObject ?? listBinding, strName(view.name));
+  if (view.viewKind === 'form') addForm(recordObject ?? listBinding, strName(view.name));
 
   const named = namedViewKeys(view);
   for (const family of ['listViews', 'formViews'] as const) {
@@ -560,6 +603,7 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
       if (!isRec(sub)) continue;
       const binding = bindingOf(sub) ?? listBinding;
       addView(binding, registryKey);
+      if (family === 'formViews') addForm(binding, registryKey);
       addSections(sub, binding);
     }
   }
@@ -578,7 +622,16 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   // A `_views` name registered here for the default form would make a key
   // legal that no consumer ever reads. Its SECTIONS are a different matter —
   // `ObjectForm` resolves those, which is exactly what #5415 established.
-  if (isRec(view.form)) addSections(view.form, bindingOf(view.form) ?? listBinding);
+  //
+  // One `_views` tail of the default form IS read: its `title`, which
+  // `translateView` overlays onto the served `<object>.form` item's
+  // `config.title`. So its runtime key is registered as a FORM key only
+  // (`forms`), legal for `title` and nothing else.
+  if (isRec(view.form)) {
+    const formBinding = bindingOf(view.form) ?? listBinding;
+    addSections(view.form, formBinding);
+    addForm(formBinding, defaultFormViewKey(formBinding, view));
+  }
 
   addSections(view, recordObject ?? listBinding);
 }
@@ -674,6 +727,22 @@ function defaultListViewKey(object: string | undefined, container: AnyRec): stri
   if (!object || !isRec(container.list)) return undefined;
   const item = expandViewContainer(object, container).find(
     (i) => i.viewKind === 'list' && i.isDefault,
+  );
+  if (!item) return undefined;
+  const prefix = `${object}.`;
+  return item.name.startsWith(prefix) ? item.name.slice(prefix.length) : item.name;
+}
+
+/**
+ * The bare `_views` key the RUNTIME assigns to a container's default `form` —
+ * `form`, or the author's `form.name`, renamed on a collision. Asked of the
+ * composer, like {@link defaultListViewKey}: the default form is the one form
+ * item the composer marks `isDefault`.
+ */
+function defaultFormViewKey(object: string | undefined, container: AnyRec): string | undefined {
+  if (!object || !isRec(container.form)) return undefined;
+  const item = expandViewContainer(object, container).find(
+    (i) => i.viewKind === 'form' && i.isDefault,
   );
   if (!item) return undefined;
   const prefix = `${object}.`;
@@ -1239,6 +1308,38 @@ function buildUniverse(stack: AnyRec): Universe {
   for (const page of recordsOf(stack.pages)) collectPageRecord(page);
   for (const page of artifactProvidedRecords(stack, 'pages')) collectPageRecord(page);
 
+  // ── Pages: the components `pages.<page>.components.<id>` addresses, for the
+  //    `page:tabs` item key (`components.<id>.items.<value>.label`) ──
+  //
+  // Walked with spec's `walkAddressedPageComponents`, NOT lint's
+  // `walkPageComponents`: the key is read by `translatePage`, which runs that
+  // walk (roots, descent, collision arbitration), so the component an id
+  // names here is the one the resolver applies the entry to. Where both this
+  // stack and a sibling package declare a page name, the declaration in hand
+  // keeps the slot — the dashboards rung's `ownDeclaration` decision.
+  const pages = new Map<string, Map<string, PageComponentFacts>>();
+  const collectPageComponents = (page: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
+    const pageName = strName(page.name);
+    if (!pageName) return;
+    if (!ownDeclaration && pages.has(pageName)) return;
+    const components = new Map<string, PageComponentFacts>();
+    walkAddressedPageComponents(page as Parameters<typeof walkAddressedPageComponents>[0], (component, { id, addressed }) => {
+      if (!addressed || id === undefined) return component;
+      const tabValues = new Set<string>();
+      if (component.type === PAGE_TABS_COMPONENT_TYPE && isRec(component.properties)) {
+        for (const item of Array.isArray(component.properties.items) ? component.properties.items : []) {
+          const value = pageTabItemKey(item);
+          if (value !== undefined) tabValues.add(value);
+        }
+      }
+      components.set(id, { type: strName(component.type), tabValues });
+      return component;
+    });
+    pages.set(pageName, components);
+  };
+  for (const page of recordsOf(stack.pages)) collectPageComponents(page, { ownDeclaration: true });
+  for (const page of artifactProvidedRecords(stack, 'pages')) collectPageComponents(page, { ownDeclaration: false });
+
   // ── Actions: object-bound ones join their object; the rest are global ──
   //
   // …from the stack in hand and from the artifact's other entries (#19349).
@@ -1539,6 +1640,7 @@ function buildUniverse(stack: AnyRec): Universe {
     actionOwners,
     picklists,
     extendedPicklists,
+    pages,
   };
 }
 
@@ -1656,8 +1758,24 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         }
 
         // _views.<name>
-        for (const viewName of Object.keys(asRecord(rawNode._views))) {
+        for (const [viewName, rawView] of Object.entries(asRecord(rawNode._views))) {
+          const hasTitle = isRec(rawView) && 'title' in rawView;
+          const isForm = facts.forms.has(viewName);
+          // A `title` key translates a FORM view's heading only: over a list
+          // view it resolves nothing (a list view has no title), where the
+          // author most likely meant the tab's `label`.
+          if (hasTitle && !isForm && facts.views.has(viewName)) {
+            orphan(
+              `${inLocale} · object "${objectName}" · view "${viewName}"`,
+              `${objPath}._views.${viewName}.title`,
+              `View "${viewName}" of object "${objectName}" is not a form view, so no title resolves this key.`,
+              `A view's tab label is keyed \`_views.${viewName}.label\`; only a form view has a \`title\`.`,
+            );
+            continue;
+          }
           if (facts.views.has(viewName)) continue;
+          // The default form's key is legal for its `title` alone.
+          if (isForm && isRec(rawView) && Object.keys(rawView).every((k) => k === 'title')) continue;
           orphan(
             `${inLocale} · object "${objectName}" · view "${viewName}"`,
             `${objPath}._views.${viewName}`,
@@ -1870,6 +1988,62 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               suggest(actionKey, dash.actions),
             `Header-action translations are keyed by the action's \`actionUrl\`, not its label.`,
           );
+        }
+      }
+
+      // ── pages.<name>.components.<id>.items.<value> ────────────────────
+      //
+      // Only the `items` member is judged here: it is the one page key whose
+      // target this check can see whole — a declared tabs component's item
+      // `value`s. A page this stack does not declare is skipped (no rung
+      // judges `pages.<name>` itself yet), and so is every other member.
+      for (const [pageName, rawPage] of Object.entries(asRecord(rawData.pages))) {
+        const page = universe.pages.get(pageName);
+        if (!page || !isRec(rawPage)) continue;
+        const pagePath = `${base}.pages.${pageName}`;
+        for (const [componentId, rawComponent] of Object.entries(asRecord(rawPage.components))) {
+          if (!isRec(rawComponent) || rawComponent.items === undefined) continue;
+          const itemsPath = `${pagePath}.components.${componentId}.items`;
+          const where = `${inLocale} · page "${pageName}" · component "${componentId}"`;
+          const tabsHint = 'Tab-item translations go under the `id` of a `page:tabs` component.';
+          const component = page.get(componentId);
+          if (!component) {
+            orphan(
+              where,
+              itemsPath,
+              `Translations carry tab items for "${componentId}", a component id page "${pageName}" does not ` +
+                `declare, so nothing resolves them.` +
+                suggest(componentId, [...page].filter(([, c]) => c.type === PAGE_TABS_COMPONENT_TYPE).map(([id]) => id)),
+              tabsHint,
+            );
+            continue;
+          }
+          if (component.type !== PAGE_TABS_COMPONENT_TYPE) {
+            orphan(
+              where,
+              itemsPath,
+              component.type === PAGE_ACCORDION_COMPONENT_TYPE
+                ? `Translations carry tab items for "${componentId}", which page "${pageName}" declares as a ` +
+                  `\`page:accordion\`, whose panels have no stable key, so nothing resolves them.`
+                : `Translations carry tab items for "${componentId}", which page "${pageName}" declares as a ` +
+                  `\`${component.type ?? 'component'}\`, not a \`page:tabs\`, so nothing resolves them.`,
+              component.type === PAGE_ACCORDION_COMPONENT_TYPE
+                ? 'Localize an accordion panel label in place, as an inline locale map on `items[].label`.'
+                : tabsHint,
+            );
+            continue;
+          }
+          for (const value of Object.keys(asRecord(rawComponent.items))) {
+            if (component.tabValues.has(value)) continue;
+            orphan(
+              `${where} · tab "${value}"`,
+              `${itemsPath}.${value}`,
+              `Translations are keyed to tab "${value}", which \`page:tabs\` "${componentId}" on page ` +
+                `"${pageName}" gives no item as its \`value\`, so the tab keeps its source-locale label.` +
+                suggest(value, component.tabValues),
+              "Tab-item translations are keyed by the item's `value`; give the item a `value` if it has none.",
+            );
+          }
         }
       }
 

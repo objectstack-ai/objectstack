@@ -89,6 +89,7 @@ import { ScriptConfigSchema, SubflowConfigSchema } from '../automation/schemales
 import { AdminScopeSchema, PermissionSetSchema } from '../security/permission.zod';
 import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
+import { TursoConfigSchema } from '../data/driver/turso.zod';
 import { PageComponentSchema, PageSchema } from '../ui/page.zod';
 import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, ListViewSchema, ObjectListViewSchema } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
@@ -355,6 +356,10 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'add-record-enabled-defaulted': [
     refusal('an addRecord block without `enabled`', () => AddRecordConfigSchema.safeParse({}), 'enabled'),
   ],
+  // #25050: retired after 18.0.0, so the v18 train's major. Partial (unset
+  // values and remote urls only), so the prescription's migrate sentence is
+  // the two-clause form; the release it names is judged the same way.
+  'turso-config-encryption-key-removed': [tombstone(TursoConfigSchema, 'turso config', 'encryptionKey')],
   'view-list-filterable-fields-removed': [
     tombstone(ListViewSchema, 'view.list', 'filterableFields'),
     tombstone(ObjectListViewSchema, 'object.listViews.*', 'filterableFields'),

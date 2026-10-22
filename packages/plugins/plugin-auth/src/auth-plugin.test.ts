@@ -8,6 +8,30 @@ import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objec
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 import { SettingsService, brandingSettingsManifest } from '@objectstack/service-settings';
 
+/**
+ * [ADR-0131 D3/D5] The `single` first-user promotion's grant, owned by the
+ * Default Organization the boot invariant creates before any user: its owner is
+ * read off `tables` as the Default Organization stands (`slug = 'default'`, else
+ * the only one) the first time one exists, and kept from then on — so the
+ * fixture holds the owner `start()` gives it rather than an organization-less
+ * row no reader anchors on, and a Default Organization deleted later leaves the
+ * grant naming the organization that is gone, as a stored row would.
+ */
+function promotionGrant(tables: Record<string, any[]>, userId: string): Record<string, unknown> {
+  let owner: string | undefined;
+  return {
+    id: 'ups1',
+    user_id: userId,
+    permission_set_id: 'ps_admin',
+    permission_set: 'admin_full_access',
+    get organization_id() {
+      const orgs = tables.sys_organization ?? [];
+      owner ??= (orgs.find((o) => o.slug === 'default') ?? (orgs.length === 1 ? orgs[0] : undefined))?.id;
+      return owner;
+    },
+  };
+}
+
 describe('AuthPlugin', () => {
   let mockContext: PluginContext;
   let authPlugin: AuthPlugin;
@@ -1438,12 +1462,11 @@ describe('AuthPlugin', () => {
     const makeQl = () => {
       const tables: Record<string, any[]> = {
         sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access' }],
-        sys_user_permission_set: [
-          { id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
-        ],
+        sys_user_permission_set: [],
         sys_member: [],
         sys_organization: [],
       };
+      tables.sys_user_permission_set.push(promotionGrant(tables, 'u1'));
       const matches = (row: any, where: any) =>
         Object.entries(where ?? {}).every(([k, v]) => {
           if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
@@ -1693,9 +1716,7 @@ describe('AuthPlugin', () => {
     const makeQl = () => {
       const tables: Record<string, any[]> = {
         sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access' }],
-        sys_user_permission_set: [
-          { id: 'ups1', user_id: 'admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
-        ],
+        sys_user_permission_set: [],
         // The platform admin already exists; the default-org bootstrap binds it
         // as `owner` on kernel:ready. A member-less seeded user is added later.
         sys_user: [{ id: 'admin' }],
@@ -1704,6 +1725,7 @@ describe('AuthPlugin', () => {
         // The deployment ledger the one-time pass records itself in.
         sys_migration: [],
       };
+      tables.sys_user_permission_set.push(promotionGrant(tables, 'admin'));
       const matches = (row: any, where: any) =>
         Object.entries(where ?? {}).every(([k, v]) => {
           if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
@@ -1836,17 +1858,30 @@ describe('AuthPlugin', () => {
       expect(ql.tables.sys_organization).toHaveLength(0);
       expect(ql.tables.sys_migration).toHaveLength(0);
 
-      // The admin's grant lands: the bootstrap creates the organization, and
-      // that moment runs the pass — no restart, no app:seeded.
-      ql.tables.sys_user_permission_set.push({ id: 'ups1', user_id: 'admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null });
-      await fireBootstrapWrite({ object: 'sys_user_permission_set', operation: 'insert' });
-      await vi.waitFor(() => {
-        expect(ql.tables.sys_member.find((m: any) => m.user_id === 'early_u5')).toMatchObject({ role: 'member' });
-      });
-      expect(ql.tables.sys_migration.map((r: any) => r.id).sort()).toEqual([
-        'adr-0093-default-org-owner-bind',
-        'adr-0093-membership-backfill',
-      ]);
+      // The declared owner's verified account lands: the bootstrap creates the
+      // organization, and that moment runs the pass — no restart, no
+      // app:seeded. [ADR-0131 D5] The config anchor is the population that
+      // needs no organization first; a grant anchors only once the Default
+      // Organization owns it.
+      const oldOwner = process.env.OS_PLATFORM_OWNER_EMAIL;
+      process.env.OS_PLATFORM_OWNER_EMAIL = 'operator@corp.example';
+      try {
+        Object.assign(ql.tables.sys_user.find((u: any) => u.id === 'admin'), {
+          email: 'operator@corp.example',
+          email_verified: true,
+        });
+        await fireBootstrapWrite({ object: 'sys_user', operation: 'update', data: { email_verified: true } });
+        await vi.waitFor(() => {
+          expect(ql.tables.sys_member.find((m: any) => m.user_id === 'early_u5')).toMatchObject({ role: 'member' });
+        });
+        expect(ql.tables.sys_migration.map((r: any) => r.id).sort()).toEqual([
+          'adr-0093-default-org-owner-bind',
+          'adr-0093-membership-backfill',
+        ]);
+      } finally {
+        if (oldOwner === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+        else process.env.OS_PLATFORM_OWNER_EMAIL = oldOwner;
+      }
     });
 
     it('unreadable ledger + an existing default organization + an unbound admin: the admin is NOT bound', async () => {
@@ -1927,9 +1962,23 @@ describe('AuthPlugin', () => {
       expect(ql.tables.sys_migration.map((r: any) => r.id)).toContain('adr-0093-default-org-owner-bind');
       ql.tables.sys_organization.length = 0;
       ql.tables.sys_member.length = 0;
-      await fireBootstrapWrite({ object: 'sys_user', operation: 'insert' });
-      expect(ql.tables.sys_organization).toHaveLength(1);
-      expect(ql.tables.sys_member).toHaveLength(0);
+      // [ADR-0131 D5] The grant still names the organization that is gone, so
+      // it anchors nobody now; the declared, verified owner is who the
+      // bootstrap recreates the organization for.
+      const oldOwner = process.env.OS_PLATFORM_OWNER_EMAIL;
+      process.env.OS_PLATFORM_OWNER_EMAIL = 'operator@corp.example';
+      try {
+        Object.assign(ql.tables.sys_user.find((u: any) => u.id === 'admin'), {
+          email: 'operator@corp.example',
+          email_verified: true,
+        });
+        await fireBootstrapWrite({ object: 'sys_user', operation: 'insert' });
+        expect(ql.tables.sys_organization).toHaveLength(1);
+        expect(ql.tables.sys_member).toHaveLength(0);
+      } finally {
+        if (oldOwner === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+        else process.env.OS_PLATFORM_OWNER_EMAIL = oldOwner;
+      }
     });
 
     it('once the pass is recorded, a later trigger binds nobody', async () => {

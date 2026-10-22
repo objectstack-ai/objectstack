@@ -73,6 +73,7 @@ import MigrateOrganizationOwnership from '../commands/migrate/organization-owner
 import '@objectstack/runtime';
 import '@objectstack/objectql';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
+import { relaxTenantColumnsOnFile } from './pre-18-store.testkit.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..');
@@ -368,6 +369,9 @@ beforeAll(async () => {
 
   templateDb = join(dir, 'template.db');
   await bootV17(templateDb);
+  // A v17 database's tenant columns are nullable, which a table this release
+  // creates never is (ADR-0131 D1): the template is relaxed to that shape first.
+  await relaxTenantColumnsOnFile(templateDb);
   const db = new Database(templateDb);
   try {
     for (const table of HOST_OBJECTS) {

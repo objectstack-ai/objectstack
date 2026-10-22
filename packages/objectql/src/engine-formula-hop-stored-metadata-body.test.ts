@@ -108,7 +108,7 @@ function makeDriver() {
 
 /** A synthetic stored datasource body with placeholder credential material. */
 const SECRET = 'PLACEHOLDER-SECRET';
-const STORED_BODY = JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://x.invalid', encryptionKey: SECRET } });
+const STORED_BODY = JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://x.invalid', authToken: SECRET } });
 const STORED_HASH = 'sha256:PLACEHOLDER-HASH';
 const MEMBER = { userId: 'u1', tenantId: 'org_1', positions: ['member'] } as any;
 const SYSTEM = { isSystem: true } as any;

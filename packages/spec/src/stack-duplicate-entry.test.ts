@@ -133,7 +133,8 @@ const BATCH: readonly Row[] = [
   byName('permissions', 'Permission set', { name: 'dupe_perm', label: 'Perm', objects: {} }),
   byName('capabilities', 'Capability', { name: 'dupe.export', label: 'Export' }),
   byName('sharingRules', 'Sharing rule', { name: 'dupe_share', label: 'Share', object: 'dupe_thing', type: 'criteria', condition: 'true', sharedWith: { type: 'team', value: 'team_ops' } }),
-  byName('webhooks', 'Webhook', { name: 'dupe_webhook', label: 'Webhook', object: 'dupe_thing', triggers: ['create'], url: 'https://example.com/hook' }),
+  // A declared webhook owes the pair that dispatches it (ruling A on #24910).
+  byName('webhooks', 'Webhook', { name: 'dupe_webhook', label: 'Webhook', object: 'dupe_thing', triggers: ['create'], url: 'https://example.com/hook' }, { requires: ['webhooks', 'realtime'] }),
   byName('hooks', 'Hook', { name: 'dupe_hook', label: 'Hook', object: 'dupe_thing', events: ['beforeInsert'], handler: () => {} }),
   byName('mappings', 'Mapping', { name: 'dupe_map', label: 'Map', targetObject: 'dupe_thing', fieldMapping: [{ source: 'a', target: 'title' }] }),
   byName('analyticsCubes', 'Analytics cube', { name: 'dupe_cube', title: 'Cube', description: 'first', sql: 'dupe_thing', measures: {}, dimensions: {} }),

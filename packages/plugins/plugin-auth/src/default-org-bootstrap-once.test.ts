@@ -66,12 +66,14 @@ type Row = Record<string, any>;
 function rig(seed: Partial<Record<string, Row[]>> = {}) {
   const tables: Record<string, Row[]> = {
     sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access' }],
-    // The platform admin `u1`, through the legacy grant anchor `single` reads
-    // — by the set's name, which every platform grant writer stores (ADR-0131 D4).
+    // The platform admin `u1`, through the grant anchor `single` reads — by the
+    // set's name, which every platform grant writer stores (ADR-0131 D4), and
+    // owned by the Default Organization the boot invariant created before any
+    // user (ADR-0131 D3/D5).
     sys_user_permission_set: [
-      { id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
+      { id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_d' },
     ],
-    sys_organization: [],
+    sys_organization: [{ id: 'org_d', slug: 'default' }],
     sys_member: [],
     sys_migration: [],
     ...seed,

@@ -3,18 +3,23 @@
 /**
  * [#23050 slice 7] The API-description routes of `RestServer` — the discovery
  * document (`GET {basePath}` and `GET {basePath}/discovery`) and the OpenAPI
- * pair (`GET {basePath}/openapi.json` and its `GET {basePath}/docs` viewer) —
- * moved out of `rest-server.ts` whole. Both registrars run once per mounted
- * base, so an environment-scoped deployment mounts each family twice.
+ * document (`GET {basePath}/openapi.json`) — moved out of `rest-server.ts`
+ * whole. Both registrars run once per mounted base, so an environment-scoped
+ * deployment mounts each family twice.
+ *
+ * [#25104] The OpenAPI document's HTML viewer page, `GET {basePath}/docs`,
+ * moved here with it and has since been RETIRED on both route shapes: nothing
+ * read it, and the API origin serves no HTML viewer. A request to that path
+ * meets the host's ordinary not-found answer; the machine-readable document
+ * stays. `rest-docs-viewer-retired.pin.test.ts` pins both halves.
  *
  * A MOVE, not a redesign. The two functions below are the bodies of
  * `RestServer#registerDiscoveryEndpoints` and
  * `RestServer#registerOpenApiEndpoints` as they stood, each re-indented one
- * level — except the viewer page's HTML, a template literal whose lines are
- * runtime text and sit at column 0, kept byte for byte — the same routes,
- * registered in the same order, by the same handlers, answering the same
- * bodies. Every path expression (`basePath`, `realBase`, `unscopedBase`) is
- * as written. The imports only these bodies read moved with them; the two
+ * level — the same routes, registered in the same order, by the same
+ * handlers, answering the same bodies. Every path expression (`basePath`,
+ * `realBase`, `unscopedBase`) is as written. The imports only these bodies
+ * read moved with them; the two
  * registrars share ONE module because they are the one API-description family
  * (`/discovery` advertises the surfaces `/openapi.json` describes), and they
  * still share no code, exactly as before.
@@ -445,26 +450,23 @@ export function registerDiscoveryEndpoints(this: DiscoveryRouteHost, basePath: s
 }
 
 /**
- * Register the OpenAPI document and its viewer — `RestServer#registerOpenApiEndpoints`'
+ * Register the OpenAPI document — `RestServer#registerOpenApiEndpoints`'
  * body, called by that method with the server as `this`. The method's own
- * docblock, which the published declaration carries, names the two routes and
+ * docblock, which the published declaration carries, names the route and
  * the request-time enrichment of the document.
  */
 export function registerOpenApiEndpoints(this: OpenApiRouteHost, basePath: string): void {
     const isScoped = basePath.includes('/environments/:environmentId');
 
-    // [#22430] Both API-description endpoints — the document and its
-    // viewer — refuse an anonymous caller with the shared anonymous-deny
-    // 401, the same body the `/data` and `/meta` routes answer (ADR-0056 D2
-    // is default-deny, and no ADR-0138 D2 door class names these two). The
-    // refusal is each handler's FIRST act: before the bundled artifact is
-    // loaded and before any protocol is resolved, so a refused request
-    // costs no work and its answer does not even say whether a document is
-    // bundled here. A signed-in caller is served exactly as before, under
-    // the same ADR-0069 auth-policy gate every other protected route
-    // applies. The viewer page fetches the document from the browser, and
-    // that request carries the browser's session, so a signed-in browser is
-    // served on both endpoints.
+    // [#22430] The API-description document refuses an anonymous caller
+    // with the shared anonymous-deny 401, the same body the `/data` and
+    // `/meta` routes answer (ADR-0056 D2 is default-deny, and no ADR-0138
+    // D2 door class names it). The refusal is the handler's FIRST act:
+    // before the bundled artifact is loaded and before any protocol is
+    // resolved, so a refused request costs no work and its answer does not
+    // even say whether a document is bundled here. A signed-in caller is
+    // served exactly as before, under the same ADR-0069 auth-policy gate
+    // every other protected route applies.
 
     const openApiHandler = async (req: any, res: any) => {
         try {
@@ -485,8 +487,9 @@ export function registerOpenApiEndpoints(this: OpenApiRouteHost, basePath: strin
             // expanded paths) don't bleed into the cached base spec.
             let enriched: any = { ...spec, servers: [...(spec.servers ?? [])] };
 
-            // 1) Override servers[0] with the actual request origin so
-            //    "Try it" works straight from the docs viewer.
+            // 1) Override servers[0] with the actual request origin so a
+            //    client built from this document calls the server that
+            //    served it.
             const host = req.headers?.host ?? req.headers?.['host'];
             const proto = (req.headers?.['x-forwarded-proto'] as string)
                 || (req.protocol as string)
@@ -667,54 +670,6 @@ export function registerOpenApiEndpoints(this: OpenApiRouteHost, basePath: strin
         handler: openApiHandler,
         metadata: {
             summary: 'OpenAPI 3.1 specification (machine-readable)',
-            tags: ['openapi'],
-        },
-    });
-
-    // Scalar HTML viewer — single inline page that loads the spec from
-    // the sibling /openapi.json endpoint. No build-time bundling, no
-    // server-side render cost.
-    this.routeManager.register({
-        method: 'GET',
-        path: `${basePath}/docs`,
-        handler: async (req: any, res: any) => {
-            try {
-                const environmentId = isScoped ? req.params?.environmentId : undefined;
-                const context = await this.resolveExecCtx(environmentId, req);
-                if (this.enforceAuth(req, res, context)) return;
-
-                // Resolve the openapi.json URL relative to the current
-                // request so the docs page works for any host / scoped
-                // base path (e.g. /api/v1 vs /api/v1/environments/abc).
-                const reqPath: string = req.path || req.url || `${basePath}/docs`;
-                // Strip the trailing /docs to get the API base.
-                const apiBase = reqPath.replace(/\/docs\/?$/, '');
-                const specUrl = `${apiBase}/openapi.json`;
-                const html = `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ObjectStack API Docs</title>
-</head>
-<body>
-<script id="api-reference" data-url="${specUrl}"></script>
-<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
-</body>
-</html>`;
-                if (res.setHeader) res.setHeader('content-type', 'text/html; charset=utf-8');
-                if (res.send) res.send(html);
-                else if (res.body) res.body = html;
-                else res.json?.(html);
-            } catch (error: any) {
-                // Only the identity read above can throw here (a
-                // permission-store outage), which keeps its declared answer.
-                logError('[REST] docs viewer error:', error);
-                sendThrownError(res, error);
-            }
-        },
-        metadata: {
-            summary: 'Interactive API docs (Scalar viewer)',
             tags: ['openapi'],
         },
     });

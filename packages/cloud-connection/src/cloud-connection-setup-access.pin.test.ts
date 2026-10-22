@@ -1,23 +1,35 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#24148] The Cloud Connection page's permission, enforced at the routes
- * behind it.
+ * [#24148, ruling 乙 #25119] One rule for the Cloud Connection capability,
+ * enforced at the routes behind its page — and `setup.access` alone no longer
+ * passes it.
  *
- * The Console's Cloud Connection panel sits on the Setup app, which declares
- * `requiredPermissions: ['setup.access']`. These pins hold the routes to the
- * same rule, driven through the routes `CloudConnectionPlugin` really mounts
- * (`start()` + `kernel:ready`), under both resolution modes:
+ * The Console's Cloud Connection entry sits in Setup's Integrations group, whose
+ * `requiredPermissions` is `['manage_platform_settings']`, and the entry declares
+ * the same capability on itself (`CLOUD_CONNECTION_CAPABILITY`,
+ * `cloud-connection-ui.ts`). These pins hold the routes to that rule, driven
+ * through the routes `CloudConnectionPlugin` really mounts (`start()` +
+ * `kernel:ready`), under both resolution modes and both connection shapes
+ * (self-hosted, and platform-managed by the service key):
  *
  *  - `bind/start`, `bind/poll` and `unbind` refuse a signed-in caller who does
- *    not hold `setup.access` with `403 PERMISSION_DENIED` naming it, in the
- *    declared envelope, before any control-plane call and before the stored
- *    credential is touched — one case per door, so each door's check is held
- *    on its own;
- *  - a caller who holds it is served exactly as before (the control);
+ *    not hold `manage_platform_settings` with `403 PERMISSION_DENIED` naming
+ *    it, in the declared envelope, before any control-plane call and before the
+ *    stored credential is touched — one case per door and per caller, so each
+ *    door's check is held on its own. The callers refused are a member, and an
+ *    ORGANIZATION ADMINISTRATOR holding the default `organization_admin`
+ *    capabilities (`setup.access` among them, `manage_platform_settings` not):
+ *    the caller #24148 admitted and ruling 乙 does not;
+ *  - a caller who holds it is served exactly as before (the control), and on a
+ *    platform-managed runtime passes the capability check to meet the managed
+ *    `409` at every door instead (#25113; its own pins are
+ *    `cloud-connection-platform-managed.pin.test.ts`);
  *  - `GET /status` answers every caller, and serves `bound`, `runtimeId` and
- *    `provider` alone unless the caller holds `setup.access`; a holder is
- *    served the connection record too (the control).
+ *    `provider` alone unless the caller holds `manage_platform_settings` — the
+ *    organization administrator included; a holder is served the connection
+ *    record too (the control);
+ *  - the capability the doors refuse on is the one the nav entry declares.
  *
  * What a caller holds is read through `resolveAuthzContext`, so the grants
  * below are real permission-set rows served through the engine's `find`, and
@@ -32,19 +44,31 @@ import { tmpdir } from 'node:os';
 import { hashApiKey, isAuthzStoreUnavailableError } from '@objectstack/core';
 import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
+import { CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 const CC = '/api/v1/cloud-connection';
 const ORIGIN = 'https://env.example.test';
 
-/** Holds `setup.access` through the Default Organization's `admin_full_access` grant (the platform-admin shape: it applies with no active organization). */
-const ADMIN = 'u_setup_admin';
-/** Holds `setup.access` through a grant scoped to the organization its session is active in (the organization-admin shape). */
+/** The capability, spelled here rather than imported: a pin that read the constant it pins could not fail on its value. */
+const CAPABILITY = 'manage_platform_settings';
+
+/** Holds `manage_platform_settings` through the Default Organization's `admin_full_access` grant (the platform-admin shape: it applies with no active organization). */
+const ADMIN = 'u_platform_admin';
+/**
+ * [#25119] The ORGANIZATION ADMINISTRATOR: a grant scoped to the organization its
+ * session is active in, of a set carrying the default `organization_admin`
+ * capabilities (`plugin-security`'s `default-permission-sets.ts`) — `setup.access`
+ * among them, `manage_platform_settings` deliberately not. #24148 served it;
+ * ruling 乙 refuses it.
+ */
 const ORG_ADMIN = 'u_org_admin';
-/** Signed in, holds a permission set in the organization its session is active in, and the set carries no `setup.access`. */
+/** Holds `manage_platform_settings` through a grant scoped to the organization its session is active in (the delegated-operator shape). */
+const ORG_OPERATOR = 'u_org_operator';
+/** Signed in, holds a permission set in the organization its session is active in, and the set carries neither capability. */
 const MEMBER = 'u_member';
-/** Holds `setup.access` (the platform-admin shape, as {@link ADMIN}), but the ADR-0069 policy holds the session. */
+/** Holds `manage_platform_settings` (the platform-admin shape, as {@link ADMIN}), but the ADR-0069 policy holds the session. */
 const HELD_ADMIN = 'u_held_admin';
 
 const ORG = 'org_a';
@@ -53,31 +77,43 @@ const DEFAULT_ORG = 'org_default';
 const SESSIONS: Record<string, { activeOrganizationId?: string; authGate?: { code: string; message: string } }> = {
     [ADMIN]: {},
     [ORG_ADMIN]: { activeOrganizationId: ORG },
+    [ORG_OPERATOR]: { activeOrganizationId: ORG },
     [MEMBER]: { activeOrganizationId: ORG },
     [HELD_ADMIN]: { authGate: { code: 'PASSWORD_EXPIRED', message: 'You must change your password before continuing.' } },
 };
 
-/** A key whose OWNER holds `setup.access`, presented beside someone else's session. */
-const ADMIN_KEY = 'osk_setup_admin_key_24148';
+/** A key whose OWNER holds `manage_platform_settings`, presented beside someone else's session. */
+const ADMIN_KEY = 'osk_platform_admin_key_25119';
+
+/** The callers the doors refuse for want of the capability: a member, and the organization administrator. */
+const UNPERMITTED = [
+    { user: MEMBER, label: 'a member' },
+    { user: ORG_ADMIN, label: 'an organization administrator (setup.access without manage_platform_settings)' },
+] as const;
 
 function grantRows(): Record<string, any[]> {
     return {
         sys_user: Object.keys(SESSIONS).map((id) => ({ id, email: `${id}@example.test` })),
         sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }, { id: ORG, slug: 'org-a' }],
-        sys_member: [{ id: 'mem_1', user_id: ORG_ADMIN, organization_id: ORG, role: 'admin' }],
+        sys_member: [
+            { id: 'mem_1', user_id: ORG_ADMIN, organization_id: ORG, role: 'admin' },
+            { id: 'mem_2', user_id: ORG_OPERATOR, organization_id: ORG, role: 'member' },
+        ],
         sys_user_position: [],
         sys_position: [],
         sys_metadata_activation: [],
         sys_position_permission_set: [],
         sys_user_permission_set: [
             { id: 'ups_admin', user_id: ADMIN, permission_set_id: 'ps_full', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG },
-            { id: 'ups_org_admin', user_id: ORG_ADMIN, permission_set_id: 'ps_setup', permission_set: 'setup_admin', organization_id: ORG },
+            { id: 'ups_org_admin', user_id: ORG_ADMIN, permission_set_id: 'ps_org_admin', permission_set: 'organization_admin', organization_id: ORG },
+            { id: 'ups_org_operator', user_id: ORG_OPERATOR, permission_set_id: 'ps_operator', permission_set: 'platform_operator', organization_id: ORG },
             { id: 'ups_held', user_id: HELD_ADMIN, permission_set_id: 'ps_full', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG },
             { id: 'ups_member', user_id: MEMBER, permission_set_id: 'ps_member', permission_set: 'member_basic', organization_id: ORG },
         ],
         sys_permission_set: [
-            { id: 'ps_full', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] },
-            { id: 'ps_setup', name: 'setup_admin', system_permissions: ['setup.access'] },
+            { id: 'ps_full', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access', CAPABILITY] },
+            { id: 'ps_org_admin', name: 'organization_admin', system_permissions: ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes'] },
+            { id: 'ps_operator', name: 'platform_operator', system_permissions: [CAPABILITY] },
             { id: 'ps_member', name: 'member_basic', system_permissions: ['export_data'] },
         ],
         sys_api_key: [{ id: 'key_1', key: hashApiKey(ADMIN_KEY), user_id: ADMIN }],
@@ -170,7 +206,14 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
-async function mount(mode: 'single' | 'multi', opts: { outage?: boolean } = {}) {
+/**
+ * `serviceKey` is the plugin's `controlPlaneApiKey`. The default, a key, is the
+ * cloud-hosted (platform-managed) shape every case here has always run in;
+ * `''` (no key, and `OS_CLOUD_API_KEY` not consulted) is the self-hosted shape,
+ * whose credential is the stored device token — the one shape in which
+ * `unbind` still disconnects (ruling 甲, #25097).
+ */
+async function mount(mode: 'single' | 'multi', opts: { outage?: boolean; serviceKey?: string } = {}) {
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
     const auth = sessionAuth();
@@ -210,7 +253,7 @@ async function mount(mode: 'single' | 'multi', opts: { outage?: boolean } = {}) 
     }));
     await new CloudConnectionPlugin({
         controlPlaneUrl: 'http://cloud.test',
-        controlPlaneApiKey: 'svc-key',
+        controlPlaneApiKey: 'serviceKey' in opts ? opts.serviceKey : 'svc-key',
         credentialPath,
         ...(mode === 'single' ? { singleEnvironment: true, environmentId: 'env-1' } : {}),
     }).start(ctx as any);
@@ -219,15 +262,27 @@ async function mount(mode: 'single' | 'multi', opts: { outage?: boolean } = {}) 
     return { drive, rawApp, fetchCalls, credentialPath };
 }
 
-/** The refusal: status and code first (the case's identity), then the declared ADR-0112 envelope. */
-function expectSetupAccessRefusal(res: { status: number; payload: any }, label: string) {
+/**
+ * The refusal: status and code first (the case's identity), then the declared
+ * ADR-0112 envelope, then the capability it names — `manage_platform_settings`,
+ * and ⛔ not `setup.access`, which the refused organization administrator holds.
+ */
+function expectCapabilityRefusal(res: { status: number; payload: any }, label: string) {
     const shown = `${label}: ${JSON.stringify(res.payload)}`;
     expect(res.status, shown).toBe(403);
     expect(res.payload?.error?.code, shown).toBe('PERMISSION_DENIED');
-    expect(res.payload?.error?.message, shown).toContain('`setup.access`');
     expect(BaseResponseSchema.safeParse(res.payload).success, shown).toBe(true);
     expect(envelopeViolations(res.payload), shown).toEqual([]);
     expect(ApiErrorSchema.safeParse(res.payload.error).success, shown).toBe(true);
+    expect(res.payload?.error?.message, shown).toContain(`\`${CAPABILITY}\``);
+    expect(res.payload?.error?.message, shown).not.toContain('`setup.access`');
+}
+
+/** The managed runtime's refusal, met by a caller who PASSED the capability check (#25113). */
+function expectManagedRefusal(res: { status: number; payload: any }, label: string) {
+    const shown = `${label}: ${JSON.stringify(res.payload)}`;
+    expect(res.status, shown).toBe(409);
+    expect(res.payload?.error?.code, shown).toBe('RESOURCE_CONFLICT');
 }
 
 const DOORS = {
@@ -238,19 +293,32 @@ const DOORS = {
 
 const NARROWED_KEYS = ['bound', 'provider', 'runtimeId'];
 
+describe('[#25119] one rule: the doors refuse on the capability the nav entry declares', () => {
+    it('the nav entry declares manage_platform_settings, and nothing else, as its own requirement', () => {
+        const items = CLOUD_CONNECTION_UI_BUNDLE.navigationContributions.flatMap((contribution) => contribution.items);
+        const entry = items.find((item) => item.id === 'nav_cloud_connection');
+        expect(entry, 'the bundle carries the entry').toBeDefined();
+        expect(entry?.requiredPermissions).toEqual([CAPABILITY]);
+    });
+});
+
 for (const mode of ['single', 'multi'] as const) {
-    describe(`[#24148] the connection-changing doors refuse a caller without setup.access (${mode}-environment)`, () => {
-        for (const [name, door] of Object.entries(DOORS)) {
-            it(`${door.route} refuses a signed-in caller without setup.access, before any control-plane call`, async () => {
-                const { drive, fetchCalls, credentialPath } = await mount(mode);
-                expectSetupAccessRefusal(await drive(door.route, door.path, { user: MEMBER, body: door.body }), name);
-                expect(fetchCalls, `${name} reached the control plane`).toEqual([]);
-                expect(new ConnectionCredentialStore(credentialPath).read()?.runtimeToken, `${name} touched the stored credential`).toBe('oscc_pin');
-            });
+    describe(`[#24148, #25119] the connection-changing doors refuse a caller without manage_platform_settings (${mode}-environment)`, () => {
+        for (const shape of ['self-hosted', 'platform-managed'] as const) {
+            for (const { user, label } of UNPERMITTED) {
+                for (const [name, door] of Object.entries(DOORS)) {
+                    it(`${door.route} refuses ${label}, before any control-plane call (${shape})`, async () => {
+                        const { drive, fetchCalls, credentialPath } = await mount(mode, shape === 'self-hosted' ? { serviceKey: '' } : {});
+                        expectCapabilityRefusal(await drive(door.route, door.path, { user, body: door.body }), `${name} as ${user}`);
+                        expect(fetchCalls, `${name} reached the control plane`).toEqual([]);
+                        expect(new ConnectionCredentialStore(credentialPath).read()?.runtimeToken, `${name} touched the stored credential`).toBe('oscc_pin');
+                    });
+                }
+            }
         }
 
-        it('CONTROL — a caller holding setup.access is served by all three doors as before', async () => {
-            const { drive, fetchCalls, credentialPath } = await mount(mode);
+        it('CONTROL — a caller holding manage_platform_settings is served by all three doors as before (self-hosted)', async () => {
+            const { drive, fetchCalls, credentialPath } = await mount(mode, { serviceKey: '' });
             const start = await drive(DOORS.bindStart.route, DOORS.bindStart.path, { user: ADMIN });
             expect(start.status, JSON.stringify(start.payload)).toBe(200);
             expect(start.payload.data.device_code).toBe('dc_1');
@@ -261,27 +329,42 @@ for (const mode of ['single', 'multi'] as const) {
             expect(poll.payload.data.runtime_token, 'the runtime bearer reached the browser').toBeUndefined();
             expect(new ConnectionCredentialStore(credentialPath).read()?.runtimeToken).toBe('oscc_new');
 
+            const beforeUnbind = fetchCalls.length;
             const unbind = await drive(DOORS.unbind.route, DOORS.unbind.path, { user: ADMIN });
             expect(unbind.status, JSON.stringify(unbind.payload)).toBe(200);
             expect(unbind.payload.data).toMatchObject({ revoked: true, cleared: true });
             expect(new ConnectionCredentialStore(credentialPath).read()?.runtimeToken).toBe('');
-            expect(fetchCalls.length).toBeGreaterThan(0);
+            expect(fetchCalls.length, 'unbind did not reach the control plane').toBeGreaterThan(beforeUnbind);
+        });
+
+        it('CONTROL — on a platform-managed runtime the holder passes the capability check and meets the managed 409 at every door', async () => {
+            // #25113: past this file's 403 (the capability check passed), then
+            // refused as the platform's connection, before any control-plane call.
+            const { drive, fetchCalls, credentialPath } = await mount(mode);
+            for (const [name, door] of Object.entries(DOORS)) {
+                expectManagedRefusal(await drive(door.route, door.path, { user: ADMIN, body: door.body }), name);
+            }
+            expect(fetchCalls, 'a refused door reached the control plane').toEqual([]);
+            expect(new ConnectionCredentialStore(credentialPath).read()?.runtimeToken).toBe('oscc_pin');
         });
 
         it('CONTROL — a grant scoped to the organization the session is active in counts', async () => {
-            const { drive } = await mount(mode);
-            const res = await drive(DOORS.bindStart.route, DOORS.bindStart.path, { user: ORG_ADMIN });
+            const { drive } = await mount(mode, { serviceKey: '' });
+            const res = await drive(DOORS.bindStart.route, DOORS.bindStart.path, { user: ORG_OPERATOR });
             expect(res.status, JSON.stringify(res.payload)).toBe(200);
+            expect(res.payload.data.device_code).toBe('dc_1');
         });
 
-        it('refuses a session without setup.access even when the request also carries a key whose owner holds it', async () => {
-            const { drive, fetchCalls } = await mount(mode);
-            expectSetupAccessRefusal(
-                await drive(DOORS.bindStart.route, DOORS.bindStart.path, { user: MEMBER, apiKey: ADMIN_KEY }),
-                'bind/start with a key beside the session',
-            );
-            expect(fetchCalls).toEqual([]);
-        });
+        for (const { user, label } of UNPERMITTED) {
+            it(`refuses ${label} even when the request also carries a key whose owner holds the capability`, async () => {
+                const { drive, fetchCalls } = await mount(mode, { serviceKey: '' });
+                expectCapabilityRefusal(
+                    await drive(DOORS.bindStart.route, DOORS.bindStart.path, { user, apiKey: ADMIN_KEY }),
+                    `bind/start as ${user} with a key beside the session`,
+                );
+                expect(fetchCalls).toEqual([]);
+            });
+        }
 
         it('a permission store that cannot be read is an outage, not a 403', async () => {
             const { rawApp, fetchCalls } = await mount(mode, { outage: true });
@@ -295,7 +378,7 @@ for (const mode of ['single', 'multi'] as const) {
         });
     });
 
-    describe(`[#24148] GET /status narrows what it serves to a caller without setup.access (${mode}-environment)`, () => {
+    describe(`[#24148, #25119] GET /status narrows what it serves to a caller without manage_platform_settings (${mode}-environment)`, () => {
         it('anonymous: answers 200 with exactly bound, runtimeId and provider — no connection', async () => {
             const { drive } = await mount(mode);
             const res = await drive(`GET ${CC}/status`, `${CC}/status`);
@@ -305,12 +388,15 @@ for (const mode of ['single', 'multi'] as const) {
             expect(res.payload.data).toEqual({ bound: true, runtimeId: 'rt_1', provider: 'objectstack-cloud' });
         });
 
-        it('signed in without setup.access: the same narrowed answer', async () => {
-            const { drive } = await mount(mode);
-            const res = await drive(`GET ${CC}/status`, `${CC}/status`, { user: MEMBER });
-            expect(res.status).toBe(200);
-            expect(Object.keys(res.payload.data).sort()).toEqual(NARROWED_KEYS);
-        });
+        for (const { user, label } of UNPERMITTED) {
+            it(`signed in as ${label}: the same narrowed answer`, async () => {
+                const { drive } = await mount(mode);
+                const res = await drive(`GET ${CC}/status`, `${CC}/status`, { user });
+                expect(res.status).toBe(200);
+                expect(res.payload.success).toBe(true);
+                expect(res.payload.data).toEqual({ bound: true, runtimeId: 'rt_1', provider: 'objectstack-cloud' });
+            });
+        }
 
         it('a session the ADR-0069 policy holds is answered, narrowed, never refused', async () => {
             const { drive } = await mount(mode);
@@ -319,11 +405,14 @@ for (const mode of ['single', 'multi'] as const) {
             expect(Object.keys(res.payload.data).sort()).toEqual(NARROWED_KEYS);
         });
 
-        it('a key whose owner holds setup.access lends nothing to a session without it', async () => {
-            const { drive } = await mount(mode);
-            const res = await drive(`GET ${CC}/status`, `${CC}/status`, { user: MEMBER, apiKey: ADMIN_KEY });
-            expect(Object.keys(res.payload.data).sort()).toEqual(NARROWED_KEYS);
-        });
+        for (const { user, label } of UNPERMITTED) {
+            it(`a key whose owner holds the capability lends nothing to ${label}`, async () => {
+                const { drive } = await mount(mode);
+                const res = await drive(`GET ${CC}/status`, `${CC}/status`, { user, apiKey: ADMIN_KEY });
+                expect(res.status).toBe(200);
+                expect(Object.keys(res.payload.data).sort()).toEqual(NARROWED_KEYS);
+            });
+        }
 
         it('a permission store that cannot be read withholds the details and still answers 200', async () => {
             const { drive } = await mount(mode, { outage: true });
@@ -332,17 +421,19 @@ for (const mode of ['single', 'multi'] as const) {
             expect(Object.keys(res.payload.data).sort()).toEqual(NARROWED_KEYS);
         });
 
-        it('CONTROL — a caller holding setup.access is served the connection record and the environment', async () => {
-            const { drive } = await mount(mode);
-            const res = await drive(`GET ${CC}/status`, `${CC}/status`, { user: ADMIN });
-            expect(res.status).toBe(200);
-            expect(res.payload.data).toEqual({
-                environmentId: 'env-1',
-                runtimeId: 'rt_1',
-                bound: true,
-                provider: 'objectstack-cloud',
-                connection: CONNECTION,
+        for (const user of [ADMIN, ORG_OPERATOR]) {
+            it(`CONTROL — a caller holding manage_platform_settings is served the connection record and the environment (${user})`, async () => {
+                const { drive } = await mount(mode);
+                const res = await drive(`GET ${CC}/status`, `${CC}/status`, { user });
+                expect(res.status).toBe(200);
+                expect(res.payload.data).toEqual({
+                    environmentId: 'env-1',
+                    runtimeId: 'rt_1',
+                    bound: true,
+                    provider: 'objectstack-cloud',
+                    connection: CONNECTION,
+                });
             });
-        });
+        }
     });
 }

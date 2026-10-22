@@ -74,6 +74,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { installReadAuditWriter, READ_AUDIT_ACTION } from './read-audit.js';
 import { SysAuditLog } from './objects/index.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** The ledger under test — the REAL shipped object definition, not a stand-in. */
 const LEDGER = 'sys_audit_log';
@@ -147,6 +148,9 @@ describe('[#16829] the record-view ledger keeps the VIEW instant through the rea
     engine.registry.registerObject(SysAuditLog as any, HARNESS_PACKAGE);
     // Real DDL for both tables, including the builtin audit timestamp columns.
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     await engine.insert(
       AUDITED_OBJECT,

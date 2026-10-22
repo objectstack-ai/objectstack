@@ -3,13 +3,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { isUniqueViolationError } from '@objectstack/types';
 import { SqlDriver, classifyIndexKeyPart, parseIndexDdl } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * #23603 row 7 — the OLD hand-written table composite
  * `indexes: [{ fields: ['organization_id', X], unique }]` constrains NOTHING on
- * untenanted rows, because SQL UNIQUE is NULL-distinct; field-level
- * `unique: true` does, because its organization key part is NULL-safe
- * (ADR-0120 D3: `COALESCE(organization_id, '__global__')`).
+ * untenanted rows, because SQL UNIQUE is NULL-distinct. Field-level
+ * `unique: true` once differed — its organization key part was NULL-safe
+ * (ADR-0120 D3: `COALESCE(organization_id, '__global__')`). Since ADR-0131 D1
+ * it is the SAME plain composite: the untenanted hole is closed at the column
+ * instead (a fresh tenant column is NOT NULL, so no untenanted row can be
+ * written), and on a database built before 18.x — whose column is still
+ * nullable — both spellings admit untenanted duplicates alike.
  *
  * Replaces the driver half of objectstack-ai/hotcrm
  * `test/case-number-tenant-scope.test.ts` (the R residue in #15953's
@@ -26,14 +31,14 @@ import { SqlDriver, classifyIndexKeyPart, parseIndexDdl } from '../src/index.js'
  * were prevented only by the accident of a single sequence, never by the
  * database. The old index still refuses a duplicate WITHIN one organization,
  * which is exactly what hid the hole; both halves are pinned, against the
- * field-level spelling on the same driver.
+ * field-level spelling on the same driver — which now measures the same.
  *
  * A declared index's `unique: true` is the positional spelling of `'global'`
  * (verbatim columns; ADR-0120 D2 converts stored rows to `'global'` and the
  * spec refuses bare `true` since protocol 18). Both spellings are measured,
  * because stored metadata older than the conversion reaches the driver bare.
  */
-describe('row 7 — the old table composite is NULL-distinct, field-level unique is NULL-safe (hotcrm case-number-tenant-scope)', () => {
+describe('row 7 — the old table composite and field-level unique are one plain composite; the untenanted hole closes at the column (hotcrm case-number-tenant-scope)', () => {
   let driver: SqlDriver;
 
   beforeEach(() => {
@@ -43,7 +48,7 @@ describe('row 7 — the old table composite is NULL-distinct, field-level unique
     await driver.disconnect();
   });
 
-  /** Unique index name → key parts; the NULL-safe part reads `COALESCE(col)`. */
+  /** Unique index name → key parts; a legacy NULL-safe part would read `COALESCE(col)`. */
   async function uniqueKeyParts(table: string): Promise<Record<string, string[]>> {
     const k = (driver as any).knex;
     const master: any = await k.raw(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`, [table]);
@@ -62,16 +67,16 @@ describe('row 7 — the old table composite is NULL-distinct, field-level unique
 
   const refusal = (p: Promise<unknown>) => p.then(() => undefined, (e: unknown) => e);
 
-  describe('field-level unique: true (the fix)', () => {
+  describe('field-level unique: true', () => {
     beforeEach(async () => {
       await driver.initObjects([
         { name: 'kase', fields: { organization_id: { type: 'string' }, case_number: { type: 'string', unique: true } } },
       ] as any);
     });
 
-    it('materializes the per-organization unique with a NULL-safe organization key part', async () => {
+    it('materializes the per-organization unique with a PLAIN organization key part — the old composite, byte for byte (ADR-0131 D1)', async () => {
       expect(await uniqueKeyParts('kase')).toEqual({
-        uniq_kase_organization_id_case_number: ['COALESCE(organization_id)', 'case_number'],
+        uniq_kase_organization_id_case_number: ['organization_id', 'case_number'],
       });
     });
 
@@ -82,10 +87,20 @@ describe('row 7 — the old table composite is NULL-distinct, field-level unique
       expect(isUniqueViolationError(err)).toBe(true);
     });
 
-    it('refuses a duplicate on an UNTENANTED install too', async () => {
-      await driver.create('kase', { case_number: 'CASE-2' });
+    it('closes the UNTENANTED hole at the column: a fresh install refuses the row, a pre-18 one is NULL-distinct', async () => {
+      // A fresh tenant column is NOT NULL (ADR-0131 D1): the untenanted row the
+      // hole needed cannot be written at all — the refusal is the column's,
+      // not the unique index's.
       const err = await refusal(driver.create('kase', { case_number: 'CASE-2' }));
-      expect(isUniqueViolationError(err)).toBe(true);
+      expect(isUniqueViolationError(err)).toBe(false);
+      expect(String((err as Error)?.message)).toMatch(/NOT NULL constraint failed|null value in column/);
+
+      // Rows with no organization exist only on a database built before 18.x;
+      // there the plain key part is NULL-distinct, like the old composite.
+      await asPre18TenantColumn(driver, 'kase');
+      const first = await driver.create('kase', { case_number: 'CASE-2' });
+      const second = await driver.create('kase', { case_number: 'CASE-2' });
+      expect(second.id).not.toBe(first.id);
     });
   });
 
@@ -116,6 +131,9 @@ describe('row 7 — the old table composite is NULL-distinct, field-level unique
     });
 
     it('ACCEPTS a duplicate untenanted number — SQL UNIQUE is NULL-distinct', async () => {
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(driver, 'kase');
       const first = await driver.create('kase', { case_number: 'CASE-11' });
       const second = await driver.create('kase', { case_number: 'CASE-11' });
       expect(second.id).not.toBe(first.id);

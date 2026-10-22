@@ -18,14 +18,15 @@
  * It is faked at the seam where `better-sqlite3` loads its addon: the knex
  * better-sqlite3 client's `acquireRawConnection` (`new Database(file)`).
  * The fake throws a REAL load error: Node's own `ERR_DLOPEN_FAILED`, or the
- * `bindings` package's own "not built" error.
+ * `MODULE_NOT_FOUND` better-sqlite3's own loader meets when its addon was
+ * never built.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { SqlDriver } from '@objectstack/driver-sql';
 import {
   NATIVE_SQLITE_WASM_FALLBACK_WARNING,
@@ -87,21 +88,24 @@ function realDlopenFailure(): Error {
 }
 
 /**
- * The real error `better-sqlite3` throws when its addon was never built: the
- * `bindings` package it loads the addon through, asked for an addon that is
- * not there. It carries no code.
+ * The real error `better-sqlite3` throws when its addon was never built. Its
+ * 13.x loader (`lib/binding.js`) takes no helper package: with no prebuilt
+ * binary for the platform it `require()`s `build/Release/better_sqlite3.node`
+ * under its own module root, and Node answers `MODULE_NOT_FOUND`. Produced
+ * here by that same require, made from the installed package, against a
+ * module root that was never built.
  */
 function realNotBuiltFailure(): Error {
   const fromHere = createRequire(import.meta.url);
   const fromDriver = createRequire(fromHere.resolve('@objectstack/driver-sql'));
   const betterSqlite3 = fromDriver.resolve('better-sqlite3/package.json');
-  const bindings = createRequire(betterSqlite3)('bindings');
+  const neverBuilt = join(dir, 'never-built', 'build', 'Release', 'better_sqlite3.node');
   try {
-    bindings({ bindings: 'os_24950_never_built.node', module_root: dirname(betterSqlite3) });
+    createRequire(betterSqlite3)(neverBuilt);
   } catch (error) {
     return error as Error;
   }
-  throw new Error('bindings located an addon that was never built');
+  throw new Error('required an addon that was never built');
 }
 
 /**
@@ -170,9 +174,9 @@ describe('resolveSqliteDriver in development: a native addon that cannot load st
     expect(await resolved.driver.execute('SELECT 1 AS one')).toEqual([{ one: 1 }]);
   });
 
-  it('an addon that was never built (no code) steps down to wasm SQLite', async () => {
+  it('an addon that was never built (MODULE_NOT_FOUND) steps down to wasm SQLite', async () => {
     const loadError = realNotBuiltFailure();
-    expect((loadError as any).code).toBeUndefined();
+    expect((loadError as any).code).toBe('MODULE_NOT_FOUND');
     await failNativeAddonLoad(loadError);
 
     const resolved = await resolveDev(join(dir, 'dev.db'));

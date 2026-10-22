@@ -23,8 +23,10 @@
  *   - in bulk (`deleteManyData` and `batchData`'s delete case, a per-id loop in
  *     the caller's order, its `atomic` arm one transaction): leaf to root
  *     completes, root first refuses the root alone;
- *   - an organization's delete: `organization_id` is a plain lookup, so the
- *     units stay and keep their tree.
+ *   - an organization's delete: [#24948] a business unit is a record the
+ *     organization owns, so the organization is refused while its units remain
+ *     (`DELETE_RESTRICTED`, every unit counted) and the tree is left whole;
+ *     once the units are deleted, leaf to root, the organization deletes.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -158,11 +160,23 @@ describe('#24939 a business unit with child units refuses its delete (real engin
     expect(await tree(engine)).toEqual({ bu_emea: null, bu_office: 'bu_emea', bu_desk: 'bu_office' });
   });
 
-  it("an organization's delete completes on a tree: its units stay, and keep their parents", async () => {
+  it("[#24948] an organization's delete is refused while it owns units, and the tree is left whole", async () => {
     const engine = await boot();
     await seedTree(engine);
 
-    await expect(engine.delete('sys_organization', { where: { id: ORG }, context: SYS })).resolves.toBe(true);
+    const err: any = await engine.delete('sys_organization', { where: { id: ORG }, context: SYS }).catch((e) => e);
+    expect(err.code).toBe('DELETE_RESTRICTED');
+    expect(err.status).toBe(409);
+    expect(err.dependents).toEqual([{ object: 'sys_business_unit', count: 3 }]);
     expect(await tree(engine)).toEqual({ bu_emea: null, bu_office: 'bu_emea', bu_desk: 'bu_office' });
+  });
+
+  it('[#24948] CONTROL: once its units are deleted, leaf to root, the organization deletes', async () => {
+    const engine = await boot();
+    await seedTree(engine);
+
+    for (const id of ['bu_desk', 'bu_office', 'bu_emea']) await expect(del(engine, id)).resolves.toBe(true);
+    await expect(engine.delete('sys_organization', { where: { id: ORG }, context: SYS })).resolves.toBe(true);
+    expect(await tree(engine)).toEqual({});
   });
 });

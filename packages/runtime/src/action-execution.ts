@@ -42,6 +42,8 @@ import { relationConditionSites } from '@objectstack/core';
 // result, and a second definition of the rule is what let the doors diverge.
 import {
     classifyFlowRefusal,
+    flowFailureDetails,
+    flowFailureEnvelope,
     flowIsUnknown,
     flowNotFoundMessage,
     FLOW_NOT_FOUND_STATUS,
@@ -50,7 +52,7 @@ import {
 // Who may START a flow by name — the one rule the trigger door, this door and
 // the declared endpoint share (the maintainer's ruling, letters B and A).
 import { ELEVATED_START_REFUSAL, refusesElevatedSelfTriggeredStart } from './flow-start-admission.js';
-import type { FlowRunSummary } from '@objectstack/spec/automation';
+import type { FlowFailureDetails } from '@objectstack/spec/api';
 // [#5138] The ONE 404 envelope a single-record path answers. Imported rather
 // than re-spelled so `callData`'s ObjectQL fallback and the protocol service it
 // falls back FROM cannot disagree about what "this id names no row" looks like.
@@ -1044,17 +1046,17 @@ const FLOW_ACTION_REFUSAL_BRAND = Symbol.for('objectstack.runtime.flowActionRefu
 
 /**
  * The run artefacts a failed flow dispatch carries beside its status and code
- * — EXACTLY the two fields the trigger door ships in `error.details` on its
- * own `400 FLOW_FAILED` arm (`domains/automation.ts`), same names, same
- * source (`AutomationResult.errorMessage` / `.summary`). A third key here is
- * a contract widening the #9585 ruling does not cover.
+ * — EXACTLY the fields the trigger door ships in `error.details` on its own
+ * `400 FLOW_FAILED` arm (`domains/automation.ts`), same names, same source,
+ * built by the same `flowFailureDetails` (`./flow-dispatch-status.ts`). The
+ * #9585 ruling capped this at two keys (`errorMessage`, `summary`); ruling B′
+ * on #24914 (decision batch #379 item 5) relaxes the cap by exactly one,
+ * `innerRefusal`, and the spec declares the three-key set once for every flow
+ * door as `FlowFailureDetailsSchema` (`@objectstack/spec/api`). This type IS
+ * that declaration, so a key beyond the three — a contract widening neither
+ * ruling covers — fails the build rather than reaching the wire.
  */
-export interface FlowActionRunDetails {
-    /** The flow AUTHOR's own failure text (`flow.errorMessage`). */
-    errorMessage?: string;
-    /** The run's per-node accounting — WHICH node failed (#4354). */
-    summary?: FlowRunSummary;
-}
+export type FlowActionRunDetails = FlowFailureDetails;
 
 /**
  * [#9585] The typed refusal carrier for a flow ACTION that ran and failed.
@@ -1085,19 +1087,31 @@ export class FlowActionRefusal extends Error {
     readonly status: number;
     /** ADR-0112 `error.code` — registered, never minted here. */
     readonly code: FlowRefusalCode;
-    /** The two run artefacts the door carries into `error.details`. */
+    /** The run artefacts the door carries into `error.details`. */
     readonly runDetails: FlowActionRunDetails;
+    /**
+     * [#24914, ruling B′] The producer-marked END-USER text of the refusal the
+     * run's node met (`AutomationResult.userMessage`), absent when the run
+     * carries none. A FIELD of the thrown error on purpose: it is the channel
+     * `declaredUserMessage` (`@objectstack/types`) reads on every boundary, so
+     * the `/actions` handler relays it to the envelope's top level and a door
+     * that does not recognise this carrier still reads it off the throw,
+     * exactly as it reads an app hook's own marking.
+     */
+    readonly userMessage?: string;
 
     constructor(
         message: string,
         refusal: { status: number; code: FlowRefusalCode },
         runDetails: FlowActionRunDetails,
+        userMessage?: string,
     ) {
         super(message);
         this.name = 'FlowActionRefusal';
         this.status = refusal.status;
         this.code = refusal.code;
         this.runDetails = runDetails;
+        if (userMessage !== undefined) this.userMessage = userMessage;
         (this as Record<PropertyKey, unknown>)[FLOW_ACTION_REFUSAL_BRAND] = true;
     }
 }
@@ -1285,13 +1299,17 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
             // there would be this door inventing run evidence for a run that
             // never started, which is why the two rows below stay plain
             // throws.
+            //
+            // [#24914, ruling B′] Built by the trigger door's own builder
+            // (`flowFailureDetails`), so the `innerRefusal` a node's data call
+            // met rides here too, and the producer-marked `userMessage` rides
+            // the carrier for the handler to put at the envelope's top level.
+            // The message keeps this door's wording byte for byte.
             throw new FlowActionRefusal(
                 `Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`,
                 refusal,
-                {
-                    ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
-                    ...(result.summary !== undefined ? { summary: result.summary } : {}),
-                },
+                flowFailureDetails(result),
+                flowFailureEnvelope(result)?.userMessage,
             );
         }
         const err: any = new Error(refusal.message);

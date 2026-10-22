@@ -73,14 +73,39 @@ function requestPosture(value: 'single' | 'group' | 'isolated' | undefined): voi
 
 type Row = Record<string, any>;
 
+/** [ADR-0131 D5] The Default Organization (`slug = 'default'`). */
+const DEFAULT_ORG = 'org_default';
+
+/**
+ * A rig whose only administrator is CONFIG-anchored and which holds no
+ * organization yet: the one population the helper creates the Default
+ * Organization for (a walled bootstrap through `@objectstack/organizations`, or
+ * a `single` rig whose boot invariant has not run). A grant-anchored admin
+ * needs the Default Organization to exist already (ADR-0131 D5), so it never
+ * reaches the create branch.
+ */
+const CONFIG_OWNER = 'owner@corp.example';
+function makeConfigOnlyQl(seed: Partial<Record<string, Row[]>> = {}) {
+  declare(CONFIG_OWNER);
+  return makeQl({
+    sys_organization: [],
+    sys_user_permission_set: [],
+    sys_user: [{ id: 'u1', email: CONFIG_OWNER, email_verified: true }],
+    ...seed,
+  });
+}
+
 function makeQl(seed: Partial<Record<string, Row[]>> = {}) {
   const tables: Record<string, Row[]> = {
     sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access' }],
+    // [ADR-0131 D3/D5] The `single` shape: the Default Organization exists
+    // before any user (the boot invariant), and the first-user promotion's
+    // grant is owned by it.
     sys_user_permission_set: [
-      { id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
+      { id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG },
     ],
     sys_member: [],
-    sys_organization: [],
+    sys_organization: [{ id: DEFAULT_ORG, slug: 'default', name: 'Default Organization' }],
     sys_user: [],
     ...seed,
   };
@@ -104,7 +129,7 @@ function makeQl(seed: Partial<Record<string, Row[]>> = {}) {
 
 describe('ensureDefaultOrganization (plugin-auth home)', () => {
   it('creates the default org and binds the admin as owner', async () => {
-    const ql = makeQl();
+    const ql = makeConfigOnlyQl();
     const res = await ensureDefaultOrganization(ql);
     expect(res.defaultOrgCreated).toBe(true);
     expect(res.memberCreated).toBe(true);
@@ -188,11 +213,45 @@ describe('ensureDefaultOrganization (plugin-auth home)', () => {
     expect(ql.tables.sys_organization).toHaveLength(1);
   });
 
+  it('[ADR-0131 D1] an organization-less admin grant binds nobody — even beside a Default Organization', async () => {
+    // The pre-18 row a store built before the ownership ceremony may still
+    // hold. The derivation reads it as no standing (`grantAnchorsPlatformStanding`),
+    // and this reader CONFERS — so binding its holder as the Default
+    // Organization's owner would make an owner nobody else calls an admin.
+    const ql = makeQl({
+      sys_user_permission_set: [
+        { id: 'ups_legacy', user_id: 'u_legacy', permission_set: 'admin_full_access', organization_id: null },
+      ],
+    });
+    const res = await ensureDefaultOrganization(ql);
+    expect(res).toMatchObject({ defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' });
+    expect(ql.insert).not.toHaveBeenCalled();
+    // ⛔ The read itself names the Default Organization; no organization-less arm is asked.
+    const grantReads = ql.find.mock.calls.filter((c: any[]) => c[0] === 'sys_user_permission_set');
+    expect(grantReads.map((c: any[]) => c[1]?.where?.organization_id)).toEqual([DEFAULT_ORG]);
+  });
+
+  it('[ADR-0131 D5] with no nameable Default Organization no grant is read, and nobody is bound', async () => {
+    // Several organizations, none `default`: nothing is the Default
+    // Organization, so no grant anchors (the resolver's rule) and the grant
+    // table is not asked at all.
+    const ql = makeQl({
+      sys_organization: [{ id: 'org_a', slug: 'a' }, { id: 'org_b', slug: 'b' }],
+      sys_user_permission_set: [
+        { id: 'ups_a', user_id: 'u1', permission_set: 'admin_full_access', organization_id: 'org_a' },
+        { id: 'ups_legacy', user_id: 'u_legacy', permission_set: 'admin_full_access', organization_id: null },
+      ],
+    });
+    expect(await ensureDefaultOrganization(ql)).toMatchObject({ memberCreated: false, reason: 'no_admin' });
+    expect(ql.find).not.toHaveBeenCalledWith('sys_user_permission_set', expect.anything(), expect.anything());
+    expect(ql.insert).not.toHaveBeenCalled();
+  });
+
   it('picks the OLDEST cross-tenant admin grant', async () => {
     const ql = makeQl({
       sys_user_permission_set: [
-        { id: 'b', user_id: 'u_newer', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null, created_at: '2026-01-02T00:00:00Z' },
-        { id: 'a', user_id: 'u_older', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null, created_at: '2026-01-01T00:00:00Z' },
+        { id: 'b', user_id: 'u_newer', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG, created_at: '2026-01-02T00:00:00Z' },
+        { id: 'a', user_id: 'u_older', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG, created_at: '2026-01-01T00:00:00Z' },
       ],
     });
     await ensureDefaultOrganization(ql);
@@ -227,7 +286,7 @@ describe('ensureDefaultOrganization (plugin-auth home)', () => {
   // levels" puts that at `error`, and the two lines below used to be `warn`.
   describe('refused bootstrap writes report at `error` (#12981)', () => {
     function refusingQl(object: string) {
-      const ql = makeQl();
+      const ql = makeConfigOnlyQl();
       const realInsert = ql.insert;
       ql.insert = vi.fn(async (obj: string, data: Row) => {
         if (obj === object) throw new Error(`write refused: ${obj}`);
@@ -434,8 +493,8 @@ describe('isDefaultOrganizationBootstrapTrigger', () => {
  * [#11663 L5] The legacy grant anchor is POSTURE-KEYED here too — the third
  * reader of the one anchor, keyed with the other two.
  *
- * `resolve-authz-context.ts` §6b stopped deriving `PLATFORM_ADMIN` from an
- * unscoped `admin_full_access` grant under a walled posture, and the break-glass
+ * `resolve-authz-context.ts` §6b stopped deriving `PLATFORM_ADMIN` from any
+ * `admin_full_access` grant under a walled posture, and the break-glass
  * guard's enumeration was keyed with it. This helper is the reader that does not
  * merely COUNT that population but CONFERS on it: whoever it picks is written a
  * `sys_member { role: 'owner' }` row on the Default Organization and handed the
@@ -468,7 +527,7 @@ describe('[#11663 L5] under a WALLED posture the legacy grant anchors nothing', 
       expect(res, walled).toMatchObject({ defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' });
       expect(ql.insert, walled).not.toHaveBeenCalled();
       expect(ql.tables.sys_member, walled).toHaveLength(0);
-      expect(ql.tables.sys_organization, walled).toHaveLength(0);
+      expect(ql.tables.sys_organization, walled).toEqual([expect.objectContaining({ id: DEFAULT_ORG })]);
     }
   });
 
@@ -561,7 +620,7 @@ describe('[#11663 L5] under a WALLED posture the legacy grant anchors nothing', 
 
 describe('[ADR-0131 D3] ensureDefaultOrganizationExists — the boot invariant needs no admin', () => {
   it('creates the Default Organization on an empty install, with nobody to bind', async () => {
-    const ql = makeQl({ sys_user_permission_set: [] });
+    const ql = makeQl({ sys_user_permission_set: [], sys_organization: [] });
     const res = await ensureDefaultOrganizationExists(ql);
     expect(res.created).toBe(true);
     expect(ql.tables.sys_organization).toEqual([
@@ -586,7 +645,7 @@ describe('[ADR-0131 D3] ensureDefaultOrganizationExists — the boot invariant n
   });
 
   it('a refused insert THROWS (the caller fails the boot) — it is not best-effort', async () => {
-    const ql = makeQl();
+    const ql = makeQl({ sys_organization: [] });
     ql.insert.mockImplementation(async () => { throw new Error('UNIQUE constraint failed: sys_organization.slug'); });
     await expect(ensureDefaultOrganizationExists(ql)).rejects.toThrow(
       /BOOT REFUSED: the Default Organization could not be created[\s\S]*UNIQUE constraint failed/,
@@ -622,18 +681,18 @@ describe('[ADR-0131 D3 / ADR-0093 D7] the first admin is the owner even when the
     ({ id: 'mem_reconciled', organization_id: organizationId, user_id: 'u1', role: 'member' });
 
   it('promotes the reconciler-written `member` row in place and records the decision as `promoted`', async () => {
-    const ql = ledgerQl({ sys_organization: [{ id: 'org_d', slug: 'default' }], sys_member: [reconciled('org_d')] });
+    const ql = ledgerQl({ sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }], sys_member: [reconciled(DEFAULT_ORG)] });
     const res = await createEnsureDefaultOrganizationOnce()(ql);
-    expect(res).toMatchObject({ ownerPromoted: true, memberCreated: false, defaultOrgId: 'org_d' });
-    expect(ql.tables.sys_member).toEqual([{ ...reconciled('org_d'), role: 'owner' }]);
+    expect(res).toMatchObject({ ownerPromoted: true, memberCreated: false, defaultOrgId: DEFAULT_ORG });
+    expect(ql.tables.sys_member).toEqual([{ ...reconciled(DEFAULT_ORG), role: 'owner' }]);
     const decision = ql.tables.sys_migration.find((r: Row) => r.id === 'adr-0093-default-org-owner-bind');
-    expect(JSON.parse(String(decision?.details))).toMatchObject({ outcome: 'promoted', organizationId: 'org_d' });
+    expect(JSON.parse(String(decision?.details))).toMatchObject({ outcome: 'promoted', organizationId: DEFAULT_ORG });
   });
 
   it('never promotes once the owner bind is DECIDED (ADR-0093 D7: a removed owner stays removed)', async () => {
     const ql = ledgerQl({
-      sys_organization: [{ id: 'org_d', slug: 'default' }],
-      sys_member: [reconciled('org_d')],
+      sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }],
+      sys_member: [reconciled(DEFAULT_ORG)],
       sys_migration: [{ id: 'adr-0093-default-org-owner-bind', details: '{"outcome":"bound"}' }],
     });
     const res = await createEnsureDefaultOrganizationOnce()(ql);
@@ -644,21 +703,21 @@ describe('[ADR-0131 D3 / ADR-0093 D7] the first admin is the owner even when the
 
   it('never promotes over an existing owner, nor a role other than `member`', async () => {
     const withOwner = ledgerQl({
-      sys_organization: [{ id: 'org_d', slug: 'default' }],
-      sys_member: [{ id: 'mem_o', organization_id: 'org_d', user_id: 'u9', role: 'owner' }, reconciled('org_d')],
+      sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }],
+      sys_member: [{ id: 'mem_o', organization_id: DEFAULT_ORG, user_id: 'u9', role: 'owner' }, reconciled(DEFAULT_ORG)],
     });
     await ensureDefaultOrganization(withOwner);
     expect(withOwner.update).not.toHaveBeenCalled();
     const asAdmin = ledgerQl({
-      sys_organization: [{ id: 'org_d', slug: 'default' }],
-      sys_member: [{ ...reconciled('org_d'), role: 'admin' }],
+      sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }],
+      sys_member: [{ ...reconciled(DEFAULT_ORG), role: 'admin' }],
     });
     expect(await ensureDefaultOrganization(asAdmin)).toMatchObject({ reason: 'admin_already_in_org' });
     expect(asAdmin.update).not.toHaveBeenCalled();
   });
 
   it('a refused promotion reports at `error` and leaves the bind undecided for the next trigger', async () => {
-    const ql = ledgerQl({ sys_organization: [{ id: 'org_d', slug: 'default' }], sys_member: [reconciled('org_d')] });
+    const ql = ledgerQl({ sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }], sys_member: [reconciled(DEFAULT_ORG)] });
     ql.update.mockImplementation(async () => { throw new Error('write refused'); });
     const error = vi.fn();
     const res = await createEnsureDefaultOrganizationOnce({ logger: { info: vi.fn(), warn: vi.fn(), error } as any })(ql);

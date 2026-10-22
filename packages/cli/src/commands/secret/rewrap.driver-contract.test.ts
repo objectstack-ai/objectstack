@@ -117,7 +117,8 @@ describe('os secret rewrap — the concrete driver and the command, end to end (
     for (const row of [SETTINGS_ROW, DATASOURCE_ROW, ORPHAN_ROW, PROBE_ROW]) {
       await secretDriver.create('sys_secret', { ...row });
     }
-    await settingDriver.create('sys_setting', { namespace: 'smtp', key: 'password', value_enc: SETTINGS_ROW.id });
+    // The row names an organization: a fresh tenant column is NOT NULL (ADR-0131 D1).
+    await settingDriver.create('sys_setting', { namespace: 'smtp', key: 'password', value_enc: SETTINGS_ROW.id, organization_id: 'org_fixture' });
     writeFileSync(declaredFile, JSON.stringify([
       { name: 'warehouse', external: { credentialsRef: `sys_secret:${String(DATASOURCE_ROW.id)}` } },
     ]));

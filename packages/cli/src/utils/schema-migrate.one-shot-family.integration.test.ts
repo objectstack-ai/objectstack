@@ -54,6 +54,7 @@ import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { isExitSignal } from './format.js';
 import { bootSchemaStack } from './schema-migrate.js';
 import { buildDataMigrationPlugins } from './data-migration-plugins.js';
+import DbOrphans from '../commands/db/orphans.js';
 import MigrateAccountIssuer from '../commands/migrate/account-issuer.js';
 import MigrateActivityChangedFields from '../commands/migrate/activity-changed-fields.js';
 import MigrateCommentParentPair from '../commands/migrate/comment-parent-pair.js';
@@ -86,6 +87,7 @@ import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { SettingsServicePlugin } from '@objectstack/service-settings';
 import '@objectstack/service-storage';
 import '@objectstack/plugin-audit';
+import { withDefaultOrganization } from './default-organization-plugin.testkit.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(HERE, '..');
@@ -155,6 +157,13 @@ const invoke = (command: { run: (argv: string[], opts: { root: string }) => Prom
  * modes it has. The first case below holds this table equal to the source.
  */
 const CALLERS: Record<string, Caller> = {
+  'commands/db/orphans.ts': {
+    run: invoke(DbOrphans),
+    noWrite: [{ label: 'db orphans', argv: ['--database-url', '@DB@', '--json'] }],
+    // The fixture holds no orphan, so the run deletes nothing and writes no
+    // export: the plain boot a delete takes is what this case is about.
+    write: [{ label: 'db orphans --delete', argv: ['--delete', '--export', '@DIR@/orphans-export.json', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
   'commands/migrate/account-issuer.ts': {
     run: invoke(MigrateAccountIssuer),
     noWrite: [{ label: 'migrate account-issuer', argv: ['--database-url', '@DB@', '--json'] }],
@@ -406,7 +415,9 @@ async function bootServedStack(dbFile: string): Promise<void> {
   const stack = await createStandaloneStack({ projectRoot: dir, databaseUrl: `file:${dbFile}` });
   const runtime = new Runtime({ cluster: false });
   const kernel = runtime.getKernel();
-  for (const plugin of stack.plugins) await kernel.use(plugin as any);
+  // A real served boot composes authentication, whose Default Organization
+  // stamps the seed rows (ADR-0131 D9); the fresh tenant column is NOT NULL (D1).
+  for (const plugin of withDefaultOrganization(stack.plugins)) await kernel.use(plugin as any);
   for (const plugin of await buildDataMigrationPlugins({ storage: true, automation: true, audit: true })) {
     await kernel.use(plugin as any);
   }
@@ -613,7 +624,9 @@ describe('[#21391] a one-shot boot arms no lifecycle sweep', () => {
     const stack = await createStandaloneStack({ projectRoot: dir, databaseUrl: `file:${c.dbFile}`, skipSeedData: true });
     const runtime = new Runtime({ cluster: false });
     const kernel = runtime.getKernel();
-    for (const plugin of stack.plugins) await kernel.use(plugin as any);
+    // A real served boot composes authentication, whose Default Organization
+  // stamps the seed rows (ADR-0131 D9); the fresh tenant column is NOT NULL (D1).
+  for (const plugin of withDefaultOrganization(stack.plugins)) await kernel.use(plugin as any);
     await runtime.start();
     try {
       expect(armed(kernel)).toBe(true);

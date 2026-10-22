@@ -46,6 +46,20 @@ export const wmTaskChanged = defineWebhook({
   isActive: true,
 });
 
+/**
+ * Built with `strict: false`, on purpose — DECLARED, not an oversight. This
+ * stack declares a webhook and no `requires`, so `defineStack`'s default
+ * judgement refuses it (`STACK_WEBHOOK_CAPABILITY_REQUIRED`: a declared webhook
+ * owes `requires: ['webhooks', 'realtime']`, ruling A on #24910), and every
+ * authoring door would stop it at load. What this fixture models is the one
+ * composition that judgement cannot reach: a host that wires the stack by hand,
+ * with the webhook plugin and NO realtime service, which is exactly what the
+ * proof needs — the declared-webhook reader must bind on the data engine alone.
+ * Declaring the pair instead would have `bootStack` mount realtime the way
+ * `serve` does, and a reader re-gated behind the dispatch prerequisites would
+ * then pass unseen. Everything else about the stack is an ordinary authored
+ * package.
+ */
 export const webhookFixtureStack = defineStack({
   manifest: {
     id: 'com.dogfood.webhook-fixture',
@@ -57,4 +71,4 @@ export const webhookFixtureStack = defineStack({
   },
   objects: [WmTask],
   webhooks: [wmTaskChanged],
-});
+}, { strict: false });

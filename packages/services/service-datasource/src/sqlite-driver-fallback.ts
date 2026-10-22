@@ -39,15 +39,22 @@
  *
  *   - **The addon cannot load — steps down.** An ABI mismatch (Node's
  *     `ERR_DLOPEN_FAILED`, a `NODE_MODULE_VERSION` message), an addon that was
- *     never built (`bindings`' "Could not locate the bindings file", which has
- *     no code), or a missing `better-sqlite3` package. Today's path,
- *     unchanged.
- *   - **The database FILE cannot be opened or created — re-thrown, as in
- *     production.** A path under a regular file, a parent directory the driver
- *     cannot make, a permission refusal, a directory where the file should be.
+ *     never built (better-sqlite3 13's loader `require()`s the absent
+ *     `build/Release/better_sqlite3.node`, and Node answers
+ *     `MODULE_NOT_FOUND`), or a missing `better-sqlite3` package. Today's
+ *     path, unchanged.
+ *   - **The database FILE cannot be opened or created, or is not a database —
+ *     re-thrown, as in production.** A path under a regular file, a parent
+ *     directory the driver cannot make, a permission refusal, a directory where
+ *     the file should be, a file whose bytes are not a SQLite database, a
+ *     database whose header SQLite cannot read.
  *     `SqlDriver.connect()` names these with the operating system's code
  *     (`EEXIST`, `ENOTDIR`, `ENOENT`, `EACCES`, …) or SQLite's
- *     `SQLITE_CANTOPEN`; see {@link isSqliteFileOpenFailure}. Every rung opens
+ *     `SQLITE_CANTOPEN` / `SQLITE_NOTADB` / `SQLITE_CORRUPT`; see
+ *     {@link isSqliteFileOpenFailure}.
+ *     A file that is not a database used to step down to wasm SQLite, whose
+ *     open moved the operator's file aside and wrote an empty database in its
+ *     place (#24960). Every rung opens
  *     the same file, so no rung can cure this. Before, the step-down answered
  *     in its place: the in-memory rung when wasm failed on the same path, or a
  *     wasm driver whose connect resolved over a file it could not read. So a
@@ -134,23 +141,33 @@ function isEphemeralFilename(filename: string): boolean {
 }
 
 /**
- * Is this probe failure the database FILE failing to open or be created, as
- * opposed to the native addon failing to load (#24950)? Judged on the thrown
- * value's own `code` alone, never on its message. `SqlDriver.connect()` is what
- * refuses such a file, with a `SqliteDatabaseFileError` whose `code` is the
- * answer it got:
+ * Is this probe failure the database FILE failing to open or be created, not
+ * being a database at all, or being one SQLite cannot read, as opposed to the
+ * native addon failing to load (#24950, #24960, #25019)? Judged on the thrown
+ * value's own `code` alone, never on its
+ * message. `SqlDriver.connect()` is what refuses such a file, with a
+ * `SqliteDatabaseFileError` whose `code` is the answer it got:
  *
  *   - an operating-system error code (`EEXIST`, `ENOTDIR`, `ENOENT`, `EACCES`,
  *     `EPERM`, `EROFS`, …), from making the file's directory. These codes are
  *     `E` plus capital letters and digits, with no underscore;
  *   - SQLite's `SQLITE_CANTOPEN`: the directory is there, and SQLite still
- *     cannot open the file. Only a LOADED addon can answer with a SQLite code.
+ *     cannot open the file. Only a LOADED addon can answer with a SQLite code;
+ *   - SQLite's `SQLITE_NOTADB`: the file opens, and its bytes are not a SQLite
+ *     database. wasm SQLite reads the same bytes, and its open moves a file it
+ *     cannot read aside and starts an empty database in its place, so stepping
+ *     down would replace the operator's file rather than read it;
+ *   - SQLite's `SQLITE_CORRUPT` (#25019): the file is a SQLite database whose
+ *     header or schema SQLite cannot read, such as one truncated inside its
+ *     header. The connection's first statement answers it only for damage of
+ *     that kind, and wasm SQLite would move it aside the same way.
  *
- * An addon that cannot load never carries either. It surfaces at the probe's
- * `SELECT 1`, whose failure `SqlDriver.execute()` hands back as
+ * An addon that cannot load never carries any of these. It surfaces at the
+ * probe's `SELECT 1`, whose failure `SqlDriver.execute()` hands back as
  * `DATABASE_ERROR`, with the load error as its `cause`: Node's
- * `ERR_DLOPEN_FAILED`, `MODULE_NOT_FOUND`, or no code at all (`bindings`'
- * "Could not locate the bindings file"). A missing `better-sqlite3` package
+ * `ERR_DLOPEN_FAILED`, or `MODULE_NOT_FOUND` (an addon that was never built:
+ * better-sqlite3 13's loader `require()`s the absent
+ * `build/Release/better_sqlite3.node`). A missing `better-sqlite3` package
  * fails at construction with knex's install hint, which has no code. None of
  * these matches.
  *
@@ -159,7 +176,7 @@ function isEphemeralFilename(filename: string): boolean {
 function isSqliteFileOpenFailure(err: unknown): boolean {
   const code = (err as { code?: unknown } | null | undefined)?.code;
   if (typeof code !== 'string') return false;
-  return /^E[A-Z0-9]+$/.test(code) || code === 'SQLITE_CANTOPEN';
+  return /^E[A-Z0-9]+$/.test(code) || code === 'SQLITE_CANTOPEN' || code === 'SQLITE_NOTADB' || code === 'SQLITE_CORRUPT';
 }
 
 /** Best-effort close of a probe driver that failed; its own error is not the answer. */

@@ -92,11 +92,14 @@ export const SysSharingRule = ObjectSchema.create({
   fields: {
     id: Field.text({ label: 'Rule ID', required: true, readonly: true, group: 'System' }),
 
+    // A stored rule always carries its organization. A rule that reaches every
+    // organization is a DECLARED rule, marked by the typed `deploymentWide`
+    // projection (sharing-rule-service.ts) — never by an empty column here.
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',
       required: false,
       group: 'System',
-      description: 'Tenant that owns this rule; null = global',
+      description: 'The organization this rule belongs to.',
     }),
 
     name: Field.text({

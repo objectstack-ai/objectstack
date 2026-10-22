@@ -49,6 +49,7 @@ import { AuditPlugin } from './audit-plugin.js';
 import { computeWithheldUpdateFilter, keptRowsOfParent } from './activity-field-redaction.js';
 import { planActivityStamp } from './activity-changed-fields.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const ACTIVITY = 'sys_activity';
 /** A record the member reads with two fields withheld. */
@@ -171,6 +172,9 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     engine.registry.registerObject(sealedObject as any, HARNESS_PACKAGE);
     engine.registry.registerObject(prefixObject as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     // Every row below is written by the real audit writer's CRUD mirror.
     const update = (object: string, id: string, patch: Row) =>

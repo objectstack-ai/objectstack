@@ -458,7 +458,7 @@ function lookupViewText(
   bundle: TranslationBundle | undefined,
   objectName: string,
   viewKey: string,
-  attr: 'label' | 'description',
+  attr: 'label' | 'description' | 'title',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -1106,6 +1106,39 @@ function translateFormSections(
 }
 
 /**
+ * A served form view's translated `title` (`FormViewSchema.title`, at
+ * `config.title`), read from `objects.<object>._views.<viewKey>.title` —
+ * the SAME `_views` node, object and view key the view's own `label` is read
+ * from ({@link lookupViewText}), so the two strings of one view share one
+ * address and never a second key convention.
+ *
+ * Returns `title` itself (the same value) when nothing applies, so the caller
+ * can tell "unchanged" by identity:
+ *
+ *  - only an AUTHORED title is translated — a non-empty string, which is all
+ *    `FormViewSchema.title` admits. A form without one gains none, so its
+ *    heading keeps falling back to the object label (the anonymous form
+ *    page's `label ?? form.title ?? objectSchema.label`);
+ *  - an explicit override beats the catalog (ADR-0029 D9.2a): when the
+ *    packaged view's `config` is known and its `title` differs from the
+ *    served one, the served title was authored on top of the package, and the
+ *    catalog — the translation of the PACKAGED title — does not overwrite it;
+ *  - a missing key keeps the authored title.
+ */
+function translateFormTitle(
+  title: unknown,
+  bundle: TranslationBundle,
+  objectName: string,
+  viewKey: string,
+  opts: ResolveOptions | undefined,
+  packagedConfig: Record<string, unknown> | undefined,
+): unknown {
+  if (typeof title !== 'string' || title.length === 0) return title;
+  if (valueOverridesPackagedBase(packagedConfig, 'title', title)) return title;
+  return lookupViewText(bundle, objectName, viewKey, 'title', opts) ?? title;
+}
+
+/**
  * Apply the active locale to a view metadata document by overwriting `label`
  * and `description` with translated values when available, and overlaying the
  * selection-bar copy of the view's `config.bulkActionDefs[]`. The original
@@ -1174,6 +1207,19 @@ function translateFormSections(
  * locale chain and the same override rule as every other string here; a
  * container's form slot receives it through the same `config` projection its
  * bulk-action defs do.
+ *
+ * ## A form view's `title` is translated HERE too
+ *
+ * A served form view carries its heading at `config.title`
+ * (`FormViewSchema.title`), and it is addressed at
+ * `objects.<object>._views.<viewKey>.title` — the view's own `_views` node,
+ * beside its `label`, not the `label` key itself: a view item's `label` names
+ * the view and a container's form entries carry none, while `title` is what
+ * the form draws, so they are two strings with two keys. Before this the
+ * title had no key, and the anonymous public form — whose visitor cannot load
+ * the bundle — served it in the authoring language beside translated section
+ * headings and field labels. {@link translateFormTitle} applies it, on the
+ * same locale chain and the same override rule as every other string here.
  */
 export function translateView<T extends ViewLike>(
   view: T,
@@ -1209,11 +1255,20 @@ export function translateView<T extends ViewLike>(
       opts,
       packagedConfig,
     );
-    if (defs !== config.bulkActionDefs || sections !== config.sections) {
+    const title = translateFormTitle(
+      config.title,
+      bundle,
+      objectName,
+      viewTranslationKey(view, objectName),
+      opts,
+      packagedConfig,
+    );
+    if (defs !== config.bulkActionDefs || sections !== config.sections || title !== config.title) {
       config = {
         ...config,
         ...(defs !== config.bulkActionDefs ? { bulkActionDefs: defs } : {}),
         ...(sections !== config.sections ? { sections } : {}),
+        ...(title !== config.title ? { title } : {}),
       };
     }
   }
@@ -2153,6 +2208,79 @@ function lookupPageComponentCopy(
 }
 
 /**
+ * The one component type whose `items[]` labels
+ * `pages.<name>.components.<id>.items.<value>.label` addresses.
+ *
+ * Exported for {@link PAGE_COMPONENT_COPY_KEYS}' reason: `translatePage`,
+ * the CLI extractor and `objectstack validate` must agree on which component
+ * carries the key, and one constant is how they cannot drift.
+ */
+export const PAGE_TABS_COMPONENT_TYPE = 'page:tabs';
+
+/**
+ * The key a `page:tabs` item is addressed by under
+ * `pages.<name>.components.<tabsId>.items` — its authored `value`
+ * (`PageTabsProps.items[].value`, the stable `?tab=` token) — or `undefined`
+ * for an item that authors none. Such an item has NO key: the renderer's
+ * fallback token is index-derived (`tab-<i>`), and an array index is never a
+ * bundle key, because reordering two tabs would then silently swap their
+ * translations.
+ *
+ * Exported so the resolver, the CLI extractor and the lint check address an
+ * item the same way.
+ */
+export function pageTabItemKey(item: unknown): string | undefined {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+  const value = (item as Record<string, unknown>).value;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * The translated label of one `page:tabs` item, resolved across the locale
+ * chain — `pages.<name>.components.<id>.items.<value>.label`.
+ */
+function lookupPageTabItemLabel(
+  bundle: TranslationBundle | undefined,
+  name: string,
+  id: string,
+  value: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.pages?.[name]?.components?.[id]?.items?.[value]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Overlay a `page:tabs` component's item labels from the bundle. Returns the
+ * component unchanged when no item resolves, so a tab strip the bundle does
+ * not cover — an inline locale map included — is left exactly as authored.
+ */
+function translatePageTabItems(
+  component: PageComponentLike,
+  bundle: TranslationBundle | undefined,
+  name: string,
+  id: string,
+  opts?: ResolveOptions,
+): PageComponentLike {
+  const props = component.properties;
+  if (!props || typeof props !== 'object' || !Array.isArray(props.items)) return component;
+  let changed = false;
+  const items = (props.items as unknown[]).map((item) => {
+    const value = pageTabItemKey(item);
+    if (value === undefined) return item;
+    const label = lookupPageTabItemLabel(bundle, name, id, value, opts);
+    if (label === undefined) return item;
+    changed = true;
+    return { ...(item as Record<string, unknown>), label };
+  });
+  return changed ? { ...component, properties: { ...props, items } } : component;
+}
+
+/**
  * How many levels of composition nesting — every authorable slot position
  * `pageComponentSlotPositions()` names: `properties.children` (commit 901355c3b),
  * `properties.items[].children` (#16772) and `properties.footer` (#20940), each
@@ -2278,6 +2406,9 @@ export type AddressedPageRoots = Pick<PageLike, 'regions' | 'slots'>;
  * visitor runs, the walk re-attaches the node's rebuilt slot arrays (`children`,
  * `footer`, and the panel list `items` with each panel's `children` rebuilt)
  * in place of the existing keys, so the visitor never needs to recurse itself.
+ * The descent reads the AUTHORED node; a panel's own keys (`label`, `value`,
+ * …) are the visitor's, when its return keeps the panel list's authored shape,
+ * so a visitor may overlay a panel's label but never re-route the descent.
  * Enumeration-only consumers return the component unchanged and ignore the
  * walk's return value. The input document is never mutated. Entries of a slot
  * that are not component objects (bare id strings, `null` — every slot is
@@ -2344,6 +2475,27 @@ export function walkAddressedPageComponents(
       && Array.isArray((entry as Record<string, unknown>)[panelKey]);
 
   /**
+   * The visitor's version of a panel list, when it is safe to take each
+   * panel's own keys from it: an array of the authored length with a plain
+   * object at every position the authored list holds a panel. Anything else
+   * — no list, a different length, a panel replaced by a non-object — falls
+   * back to the authored list, so a visitor can overlay a panel's keys but
+   * can never drop or reorder a panel the walk descends.
+   */
+  const visitorPanelList = (
+    visited: PageComponentLike,
+    key: string,
+    authored: unknown[],
+    panelKey: string,
+  ): unknown[] => {
+    const candidate = visited?.properties?.[key];
+    if (!Array.isArray(candidate) || candidate.length !== authored.length) return authored;
+    const keepsShape = authored.every((entry, i) => !isPanel(entry, panelKey)
+      || (!!candidate[i] && typeof candidate[i] === 'object' && !Array.isArray(candidate[i])));
+    return keepsShape ? candidate : authored;
+  };
+
+  /**
    * The component's rebuilt composition slots — one entry per slot key the
    * component carries (`properties.children`, `properties.footer`, and the
    * panel list `properties.items` with each panel's `children` rebuilt) — or
@@ -2352,10 +2504,19 @@ export function walkAddressedPageComponents(
    * A panel list is descended (and rebuilt WHOLE) only when at least one of
    * its entries is a panel; anything else in it (an option row of some other
    * component, a bare string) passes through untouched.
+   *
+   * The descent always reads the AUTHORED `component`; `visited` is the
+   * visitor's return for it. A panel's OWN keys (`label`, `value`, `icon`, …)
+   * are taken from `visited` when the visitor returned the panel list in the
+   * authored shape (same length, a plain object at every panel position), so
+   * a visitor may overlay them — `translatePage` writes a `page:tabs` item's
+   * translated `label` there. Its `children` are still the authored panel's,
+   * descended: the walk owns the descent, never the visitor.
    */
   const walkComposition = (
     component: PageComponentLike,
     depth: number,
+    visited: PageComponentLike,
   ): Record<string, unknown[]> | undefined => {
     if (depth >= MAX_NESTED_COMPONENT_DEPTH) return undefined;
     const props = component.properties;
@@ -2374,15 +2535,21 @@ export function walkAddressedPageComponents(
         // Read the list already rebuilt for this key when two positions share
         // it (two panel keys on one panel list), so they compose.
         const list = rebuilt[key] ?? (bag[key] as unknown[]);
-        rebuilt[key] = panelKey === undefined
-          ? list.map((child) => visitComponent(child as PageComponentLike, depth + 1))
-          : list.map((entry) => (isPanel(entry, panelKey)
-            ? {
-                ...entry,
-                [panelKey]: (entry[panelKey] as unknown[]).map((child) =>
-                  visitComponent(child as PageComponentLike, depth + 1)),
-              }
-            : entry));
+        if (panelKey === undefined) {
+          rebuilt[key] = list.map((child) => visitComponent(child as PageComponentLike, depth + 1));
+          continue;
+        }
+        // Each panel's own keys: the visitor's, when it kept the list's shape
+        // (see the docblock); otherwise the authored entry. Once a position
+        // has rebuilt this list, the next one composes onto that rebuild.
+        const own = rebuilt[key] === undefined ? visitorPanelList(visited, key, list, panelKey) : list;
+        rebuilt[key] = list.map((entry, i) => (isPanel(entry, panelKey)
+          ? {
+              ...(own[i] as Record<string, unknown>),
+              [panelKey]: (entry[panelKey] as unknown[]).map((child) =>
+                visitComponent(child as PageComponentLike, depth + 1)),
+            }
+          : own[i]));
       }
       return rebuilt;
     } finally {
@@ -2407,19 +2574,21 @@ export function walkAddressedPageComponents(
     // Pre-order: the visitor sees the parent before its children, so a
     // consumer that emits in visit order emits in document order. The rebuilt
     // composition slots land on the RETURNED node afterwards, and they are
-    // rebuilt from the ORIGINAL component, never from `next`. The walk owns
+    // DESCENDED from the ORIGINAL component, never from `next`. The walk owns
     // the `properties` keys of its slot positions, each only when the ORIGINAL
     // node carries it: a direct slot (`children`, `footer`) rebuilt entry by
     // entry, and — on a node carrying at least one panel (an `items` entry
-    // with a `children` array) — the WHOLE panel list, panels rebuilt and
-    // every other entry carried across exactly as it was authored. So a
-    // visitor's edit to any other `items[*]` key (a panel's own `label`, say)
-    // is overwritten; on a node with no panel `items` is not rebuilt at all
-    // and such an edit stands. Everything else the visitor returns — every
-    // other `properties` key, every top-level key — is kept.
+    // with a `children` array) — the WHOLE panel list, each panel's
+    // `children` rebuilt from the authored panel. A panel's OTHER keys (its
+    // `label`, say) and every non-panel entry come from the visitor's return
+    // when it kept the list's authored shape, so a visitor's edit to them
+    // stands (`translatePage` overlays a `page:tabs` item label that way);
+    // a visitor that changed the list's shape gets the authored list back.
+    // Everything else the visitor returns — every other `properties` key,
+    // every top-level key — is kept.
     let next = visit(component, { id, nested, depth, addressed });
 
-    const rebuilt = walkComposition(component, depth);
+    const rebuilt = walkComposition(component, depth, next);
     if (rebuilt !== undefined) {
       next = { ...next, properties: { ...next.properties, ...rebuilt } };
     }
@@ -2536,6 +2705,15 @@ export function walkAddressedPageComponents(
  * walk this resolver and the CLI extractor both consume (commit c45d8e6b4); this
  * function owns only what happens AT each component it hands back.
  *
+ * A `page:tabs` component's tab strip is translated per item: each item's
+ * `label` overlays from `pages.<name>.components.<tabsId>.items.<value>.label`,
+ * addressed by the tabs component's own id and the item's `value` (the
+ * stable `?tab=` token, {@link pageTabItemKey}). A tab item is not a
+ * component and carries no id, so before this key the strip stayed in the
+ * authoring language on a translated page. An item without a `value` has no
+ * key (an index token is never one), and an item the bundle does not key —
+ * an inline locale map included — is left as authored.
+ *
  * A list page's filter-preset tab bar
  * (`interfaceConfig.userFilters.tabs[].label`) is translated too, against
  * `objects.<object>._tabs.<tab_name>.label` — see
@@ -2613,6 +2791,15 @@ export function translatePage<T extends PageLike>(
           ...(copyLabel !== undefined && !labelAtTopLevel ? { label: copyLabel } : {}),
         },
       };
+    }
+
+    // A `page:tabs` component's tab labels, keyed by each item's `value` under
+    // the tabs component's own id (`pages.<name>.components.<id>.items`). Read
+    // on the same `addressed` arbitration as the component copy above, so an
+    // entry belongs to one tabs component. The walk keeps a visitor's edit to
+    // a panel's own keys and still descends the authored panel children.
+    if (addressed && component.type === PAGE_TABS_COMPONENT_TYPE) {
+      next = translatePageTabItems(next, bundle, name, id as string, opts);
     }
 
     // The page-name header route addresses THE page's header, so it stops at

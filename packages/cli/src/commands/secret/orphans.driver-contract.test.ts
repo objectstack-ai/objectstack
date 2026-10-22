@@ -151,7 +151,8 @@ describe('os secret orphans — the concrete driver behind both reads (#14843)',
     }
 
     await secretDriver.create('sys_secret', { ...SEEDED_SECRET });
-    await settingDriver.create('sys_setting', { ...SEEDED_SETTING });
+    // The row names an organization: a fresh tenant column is NOT NULL (ADR-0131 D1).
+    await settingDriver.create('sys_setting', { ...SEEDED_SETTING, organization_id: 'org_fixture' });
   }, 180_000);
 
   afterAll(async () => {

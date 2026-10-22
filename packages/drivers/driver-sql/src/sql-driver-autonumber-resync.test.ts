@@ -40,11 +40,13 @@
  *
  *  - the filing's own message is a **composite** —
  *    `UNIQUE constraint failed: crm_case.organization_id, crm_case.case_number`
- *    — and `uniqueViolationColumn` refuses composites by contract;
- *  - what this repo builds **today** is narrower still: ADR-0120 D3 makes the
- *    tenanted unique index `(COALESCE(organization_id,'__global__'), field)`,
- *    an *expression* index, on which SQLite reports
- *    `UNIQUE constraint failed: index 'uniq_…'` and names no column at all.
+ *    — and `uniqueViolationColumn` refuses composites by contract. Since
+ *    ADR-0131 D1 that is again exactly what this repo builds **today**: the
+ *    tenanted unique index is the plain `(organization_id, field)`;
+ *  - a database still carrying the ADR-0120 D3 index is narrower still: its
+ *    `(COALESCE(organization_id,'__global__'), field)` is an *expression*
+ *    index, on which SQLite reports `UNIQUE constraint failed: index 'uniq_…'`
+ *    and names no column at all.
  *
  * So the "column not determinable" limb is not an edge case on this path — it
  * is the only limb that ever runs for a tenanted autonumber. The discriminator
@@ -210,13 +212,16 @@ describe('[#5495] autonumber sequence re-seed on a provable collision', () => {
   it('pins WHY the column-name predicate cannot carry this decision', async () => {
     await driver.initObjects([CRM_CASE]);
 
-    // 1. What this repo builds today: an expression composite, on which SQLite
-    //    reports the INDEX and no column.
+    // 1. What this repo builds today (ADR-0131 D1): the PLAIN tenant composite,
+    //    on which SQLite reports both columns — a composite, which
+    //    `uniqueViolationColumn` refuses by contract. This is the filing's own
+    //    message, byte for byte.
     const indexes: any[] = await knex().raw(
       `select name, sql from sqlite_master where type='index' and tbl_name='crm_case'`,
     );
     const declared = indexes.find((r) => r.name === 'uniq_crm_case_organization_id_case_number');
-    expect(declared?.sql).toContain(`COALESCE(\`organization_id\`, '__global__')`);
+    expect(declared?.sql).toContain('(`organization_id`, `case_number`)');
+    expect(declared?.sql).not.toContain('COALESCE');
 
     await knex()('crm_case').insert({ id: 'd1', organization_id: 'orgA', case_number: 'CASE-00001', title: 'a' });
     const caught = await knex()('crm_case')
@@ -226,14 +231,28 @@ describe('[#5495] autonumber sequence re-seed on a provable collision', () => {
         (e: unknown) => e,
       );
     expect(isUniqueViolationError(caught)).toBe(true);
-    expect((caught as Error).message).toMatch(/UNIQUE constraint failed: index '/);
+    expect((caught as Error).message).toContain(
+      'UNIQUE constraint failed: crm_case.organization_id, crm_case.case_number',
+    );
     expect(uniqueViolationColumn(caught)).toBeUndefined();
 
-    // 2. And the message the filing itself reported — the plain composite that
-    //    predates ADR-0120 D3 — is refused for the other reason.
-    expect(
-      uniqueViolationColumn('UNIQUE constraint failed: crm_case.organization_id, crm_case.case_number'),
-    ).toBeUndefined();
+    // 2. And a database still carrying the ADR-0120 D3 expression composite —
+    //    built before ADR-0131 D1, honoured as it stands — is refused for the
+    //    other reason: SQLite reports the INDEX and no column.
+    await knex().raw('create table legacy_case (id text primary key, organization_id text, case_number text)');
+    await knex().raw(
+      `create unique index uniq_legacy_case_organization_id_case_number on legacy_case (COALESCE(organization_id, '__global__'), case_number)`,
+    );
+    await knex()('legacy_case').insert({ id: 'l1', organization_id: 'orgA', case_number: 'CASE-00001' });
+    const caughtLegacy = await knex()('legacy_case')
+      .insert({ id: 'l2', organization_id: 'orgA', case_number: 'CASE-00001' })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    expect(isUniqueViolationError(caughtLegacy)).toBe(true);
+    expect((caughtLegacy as Error).message).toMatch(/UNIQUE constraint failed: index '/);
+    expect(uniqueViolationColumn(caughtLegacy)).toBeUndefined();
   });
 
   /**

@@ -553,6 +553,25 @@ describe('withValidationErrorMapping – ObjectQL ValidationError → better-aut
       expect(caught.body).not.toHaveProperty('dependentObject');
       expect(caught.body).not.toHaveProperty('dependentCount');
       expect(caught.body).not.toHaveProperty('developerMessage');
+      expect(caught.body).not.toHaveProperty('dependents');
+    });
+
+    it('[#24948] carries an organization refusal\'s dependents list to the wire, a withheld count staying absent', async () => {
+      const org: any = new Error('Cannot delete this organization: it still owns records in crm_account (2), crm_note.');
+      org.code = 'DELETE_RESTRICTED';
+      org.status = 409;
+      org.dependentObject = 'crm_account';
+      org.dependentCount = 2;
+      org.dependents = [{ object: 'crm_account', count: 2 }, { object: 'crm_note' }];
+      const adapter = withValidationErrorMapping({
+        delete: async () => {
+          throw org;
+        },
+      });
+
+      const caught: any = await adapter.delete().catch((e: unknown) => e);
+      expect(caught.statusCode).toBe(409);
+      expect(caught.body.dependents).toEqual([{ object: 'crm_account', count: 2 }, { object: 'crm_note' }]);
     });
   });
 

@@ -7,9 +7,11 @@
  * as an undeclared field; a non-system write naming a set the security
  * catalog does not hold is refused, and a grant that carries no name is
  * refused as `required`. One grant per user, set and organization: the
- * declared unique index (`unique: 'organization'`, NULL-safe on the
- * organization) refuses a second, platform-wide grants included, on every
- * write path, so a revoke leaves no grant of that set in force.
+ * declared unique index (`unique: 'organization'`) refuses a second on every
+ * write path, so a revoke leaves no grant of that set in force. Its
+ * organization key part is the plain column since ADR-0131 D1 (the tenant
+ * column is NOT NULL), so on the pre-18 nullable column this harness models a
+ * grant with no organization is exempt, like a NULL in any key part.
  *
  * Measured on a REAL `ObjectQL` engine over a real SQL driver with the REAL
  * `SecurityPlugin` started on it the way a kernel composition does, because
@@ -41,6 +43,7 @@ import {
   grantSetNotInCatalogMessage,
   registerGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
+import { relaxEveryTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -93,6 +96,9 @@ async function boot() {
     objects: [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, SysMember],
   } as any);
   await engine.syncSchemas();
+  // The organization-less holdings and rows below exist only on a store built
+  // before 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is it.
+  await relaxEveryTenantColumn(engine, [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, SysMember]);
   // The authz resolver reads these; the auth plugin registers them in a deployment.
   for (const o of [SysUser, SysMember]) {
     if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
@@ -305,42 +311,39 @@ describe('one grant per user, set and organization — the declared unique \'org
     expect(await grantsOfSet(h, 'u_d1', 'qa_alpha')).toEqual([]);
   });
 
-  it('NEGATIVE — a second platform-wide grant (organization NULL) is refused 409 by the index itself, for every writer; the revoke leaves none in force', async () => {
+  it('a second grant with no organization is NOT refused by the index on a pre-18 nullable column: the plain organization key part exempts it (ADR-0131 D1)', async () => {
     const h = await boot();
     await h.engine.insert('sys_user_permission_set', { id: 'ups_p1', user_id: 'u_p1', permission_set: 'qa_alpha', organization_id: null }, { context: ADMIN } as any);
-    for (const context of [ADMIN, SYS]) {
-      const err = await refusalOf(() => h.engine.insert(
-        'sys_user_permission_set', { user_id: 'u_p1', permission_set: 'qa_alpha' }, { context } as any,
-      ));
-      expect(duplicateShape(err)).toEqual(DUPLICATE);
-    }
-    expect((await grantsOfSet(h, 'u_p1', 'qa_alpha')).map((g) => g.id)).toEqual(['ups_p1']);
-
-    await h.engine.delete('sys_user_permission_set', { where: { id: 'ups_p1' }, context: ADMIN } as any);
-    expect(await grantsOfSet(h, 'u_p1', 'qa_alpha')).toEqual([]);
+    await knexOf(h)('sys_user_permission_set').insert({ id: 'ups_p2', user_id: 'u_p1', permission_set: 'qa_alpha', organization_id: null });
+    expect((await grantsOfSet(h, 'u_p1', 'qa_alpha')).map((g) => g.id).sort()).toEqual(['ups_p1', 'ups_p2']);
   });
 
-  it('NEGATIVE — the index refuses a platform-wide duplicate on paths no hook sees: a two-row batch insert stores nothing, and raw SQL beneath the engine is refused', async () => {
+  it('NEGATIVE — the index refuses an organization duplicate on paths no hook sees: a two-row batch insert stores nothing, and raw SQL beneath the engine is refused', async () => {
     const h = await boot();
+    await h.engine.insert('sys_member', { id: 'mem_b1', user_id: 'u_b1', organization_id: ORG, role: 'member' }, { context: SYS } as any);
     const err = await refusalOf(() => h.engine.insert(
       'sys_user_permission_set',
-      [{ user_id: 'u_b1', permission_set: 'qa_alpha' }, { user_id: 'u_b1', permission_set: 'qa_alpha' }],
+      [
+        { user_id: 'u_b1', permission_set: 'qa_alpha', organization_id: ORG },
+        { user_id: 'u_b1', permission_set: 'qa_alpha', organization_id: ORG },
+      ],
       { context: SYS } as any,
     ));
     expect(duplicateShape(err)).toEqual(DUPLICATE);
     expect(await grantsOf(h, 'u_b1')).toEqual([]);
 
-    await knexOf(h)('sys_user_permission_set').insert({ id: 'raw_1', user_id: 'u_r1', permission_set: 'qa_alpha', organization_id: null });
+    await knexOf(h)('sys_user_permission_set').insert({ id: 'raw_1', user_id: 'u_r1', permission_set: 'qa_alpha', organization_id: ORG });
     await expect(
-      knexOf(h)('sys_user_permission_set').insert({ id: 'raw_2', user_id: 'u_r1', permission_set: 'qa_alpha', organization_id: null }),
+      knexOf(h)('sys_user_permission_set').insert({ id: 'raw_2', user_id: 'u_r1', permission_set: 'qa_alpha', organization_id: ORG }),
     ).rejects.toThrow(/UNIQUE constraint failed/);
     expect((await grantsOf(h, 'u_r1')).map((g) => g.id)).toEqual(['raw_1']);
   });
 
-  it('NEGATIVE — an update that makes a platform-wide duplicate (re-naming the set) is refused 409 and the row is untouched', async () => {
+  it('NEGATIVE — an update that makes an organization duplicate (re-naming the set) is refused 409 and the row is untouched', async () => {
     const h = await boot();
-    await h.engine.insert('sys_user_permission_set', { id: 'ups_u1', user_id: 'u_u1', permission_set: 'qa_alpha' }, { context: ADMIN } as any);
-    await h.engine.insert('sys_user_permission_set', { id: 'ups_u2', user_id: 'u_u1', permission_set: 'qa_beta' }, { context: ADMIN } as any);
+    await h.engine.insert('sys_member', { id: 'mem_u1', user_id: 'u_u1', organization_id: ORG, role: 'member' }, { context: SYS } as any);
+    await h.engine.insert('sys_user_permission_set', { id: 'ups_u1', user_id: 'u_u1', permission_set: 'qa_alpha', organization_id: ORG }, { context: ADMIN } as any);
+    await h.engine.insert('sys_user_permission_set', { id: 'ups_u2', user_id: 'u_u1', permission_set: 'qa_beta', organization_id: ORG }, { context: ADMIN } as any);
     const err = await refusalOf(() => h.engine.update(
       'sys_user_permission_set', { id: 'ups_u2', permission_set: 'qa_alpha' }, { context: ADMIN } as any,
     ));

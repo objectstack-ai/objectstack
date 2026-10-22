@@ -175,7 +175,7 @@ describe.skipIf(!MYSQL_URL)('#9434 the sys_setting duplicate probe on a LIVE MyS
         const [rows] = await conn.query(buildSysSettingDuplicateProbeSqlMysql());
         expect(rows).toEqual([
             {
-                organization_id_key: 'org_jia',
+                organization_id: 'org_jia',
                 namespace: 'lifecycle',
                 key: 'retention_overrides',
                 scope: 'tenant',

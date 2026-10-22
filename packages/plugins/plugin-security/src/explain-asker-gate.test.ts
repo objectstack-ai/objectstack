@@ -66,6 +66,7 @@ import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { explainAccess, explainAccessForAsker, type ExplainEngineDeps, type ExplainInput } from './explain-engine.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -172,6 +173,10 @@ beforeAll(async () => {
     ],
   } as never);
   await engine.syncSchemas();
+  // The organization-less rows below (global sets, positions, grants) exist only
+  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
+  // NULL): this is that store.
+  await relaxEveryRegisteredTenantColumn(engine);
 
   const e = engine as unknown as { insert: (o: string, row: unknown, opts: never) => Promise<unknown> };
   for (const id of [MEMBER, ADMIN.userId, BLIND_ADMIN.userId, DELEGATE.userId, REFUSED_ADMIN.userId, REFUSED_DELEGATE.userId, EDIT_ONLY_USER]) {

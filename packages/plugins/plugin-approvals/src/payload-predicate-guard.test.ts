@@ -33,6 +33,7 @@ import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { namedSnapshotColumn, pinnedSubjectObject } from './payload-predicate-guard.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const REQUEST_OBJECT = 'sys_approval_request';
 const SUBJECT = 'ppg_subject';
@@ -138,6 +139,9 @@ describe('[#21154] a query over the approval snapshot by a reader withheld a sub
       engine.registry.registerObject(o as any, HARNESS_PACKAGE);
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     const snapshot = (subject: string, row: Record<string, unknown>) => ({
       object_name: subject, record_id: String(row.id), status: 'pending',

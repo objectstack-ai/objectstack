@@ -217,10 +217,14 @@ async function boot() {
   let n = 0;
   return {
     engine,
-    /** A stored detail under `master`, written as SYSTEM (seed replay skips the reference check). */
+    /**
+     * A stored detail under `master`, written as SYSTEM (seed replay skips the
+     * reference check). A driver write is not stamped, so it names the rig's
+     * organization itself.
+     */
     seedDetail: async (detail: string, master: string) => {
       const id = `${detail}_seed_${n++}`;
-      await e.getDriver(detail).create(detail, { id, note: 'seeded', master });
+      await e.getDriver(detail).create(detail, { id, note: 'seeded', master, organization_id: ORG });
       return id;
     },
     stored: async (object: string, id: string) =>

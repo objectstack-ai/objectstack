@@ -89,7 +89,7 @@ describe('derivation pin: the moved module derives EXACTLY what the service-data
     expect(redactableConfigKeys('sqlite-wasm')).toEqual(fallback);
     expect(redactableConfigKeys('memory')).toEqual(fallback);
     expect(redactableConfigKeys('not-a-real-driver')).toEqual(fallback);
-    // A non-string driver value cannot index the still-writable table, and
+    // A non-string driver value cannot index the retired table, and
     // must not throw — a stored row's `driver` is whatever was stored.
     expect(redactableConfigKeys(undefined)).toEqual(fallback);
   });
@@ -116,6 +116,26 @@ describe('derivation pin: the moved module derives EXACTLY what the service-data
     // The credential beside it is untouched — the narrowing must not cost a
     // single real refusal, which is the only direction that could leak.
     expect(refusedCredentialKeys('turso')).toContain('authToken');
+  });
+
+  // #25050 — the one tombstone that IS a credential's value. `encryptionKey`
+  // retired, so the derivation excludes it like `timeout`; a row stored before
+  // the retirement may still hold the key the author typed, and the retired
+  // list keeps it off the read path. Without that list this test goes red on
+  // the last two assertions: nothing else names the key for turso.
+  it('a RETIRED credential tombstone (turso encryptionKey) is excluded from the derivation, yet still redacted', () => {
+    const tursoShape: any = (getDriverConfigSchema('turso') as any).shape;
+    const shape = typeof tursoShape === 'function' ? tursoShape() : tursoShape;
+    expect(String(shape.encryptionKey.description)).toMatch(/^\[REMOVED\] /);
+    expect(refusedCredentialKeys('turso')).not.toContain('encryptionKey');
+    expect(redactableConfigKeys('turso')).toContain('encryptionKey');
+    expect(redactableConfigKeys('libsql')).toContain('encryptionKey');
+
+    const stored = { url: 'libsql://db.turso.io', encryptionKey: 'stored-retired-key-25050', concurrency: 4 };
+    const { config, redactedKeys } = redactDatasourceConfig('turso', stored);
+    expect(config).toEqual({ url: 'libsql://db.turso.io', concurrency: 4 });
+    expect(redactedKeys).toEqual(['encryptionKey']);
+    expect(JSON.stringify(config)).not.toContain('stored-retired-key-25050');
   });
 
   it('the exclusion is negative, so an UNMARKED z.never() is still a credential', () => {
@@ -350,8 +370,8 @@ describe('passthrough secret redaction — the nested spellings the key-name scr
   });
 
   it('drops the binder-slotless client secrets too — proxy, TLS key material, AWS session token', () => {
-    // Still WRITABLE (the binder has exactly one secret slot — the turso-
-    // `encryptionKey` posture), but never SERVED: each is honoured (or, for
+    // Still WRITABLE (the binder has exactly one secret slot), but never
+    // SERVED: each is honoured (or, for
     // AWS_SESSION_TOKEN, refused loudly) by mongodb@7.5.0, so serving it back
     // is a leak under any boundary.
     const { config, redactedKeys } = redactDatasourceConfig('mongodb', {
@@ -661,7 +681,7 @@ describe('driver identity: every accepted spelling of a builtin driver is redact
     }
   });
 
-  it('the still-writable credential key is withheld under each accepted spelling and named as withheld', () => {
+  it('the retired credential key is withheld under each accepted spelling and named as withheld', () => {
     let judged = 0;
     for (const [variant, id] of ACCEPTED) {
       for (const key of stillWritableOf(id)) {
@@ -672,13 +692,13 @@ describe('driver identity: every accepted spelling of a builtin driver is redact
         judged += 1;
       }
     }
-    // Population floor: the still-writable class is not empty today, so a
+    // Population floor: the retired class is not empty today, so a
     // derivation that silently found nothing would fail here instead of
     // passing over zero spellings.
     expect(judged).toBeGreaterThan(0);
   });
 
-  it('control: a canonical spelling withholds the still-writable credential key exactly as before', () => {
+  it('control: a canonical spelling withholds the retired credential key exactly as before', () => {
     let judged = 0;
     for (const id of BUILTIN_DRIVER_IDS as readonly string[]) {
       for (const key of stillWritableOf(id)) {
@@ -694,7 +714,7 @@ describe('driver identity: every accepted spelling of a builtin driver is redact
   it('a crafted driver id answers as a driver with no shipped contract: credentials withheld, never a throw', () => {
     // Every name an object literal inherits. None is a builtin spelling, so
     // each must resolve to no driver and take the contract-less fallback, not
-    // index an inherited member of the still-writable table.
+    // index an inherited member of the retired table.
     const crafted = Object.getOwnPropertyNames(Object.prototype);
     expect(crafted.length).toBeGreaterThan(0);
     const fallback = redactableConfigKeys('a-driver-with-no-contract');

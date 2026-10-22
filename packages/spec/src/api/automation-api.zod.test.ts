@@ -21,9 +21,12 @@ import {
   AutomationApiErrorCode,
   AutomationApiContracts,
   ResumeFailureDetailsSchema,
+  FlowFailureDetailsSchema,
+  FlowInnerRefusalSchema,
 } from './automation-api.zod';
+import { BaseResponseSchema } from './contract.zod';
 import * as AutomationApiModule from './automation-api.zod';
-import type { TriggerFlowResponse, ResumeFailureDetails } from './automation-api.zod';
+import type { TriggerFlowResponse, ResumeFailureDetails, FlowFailureDetails } from './automation-api.zod';
 import { ExecutionStatus } from '../automation/execution.zod';
 import type { AutomationResult } from '../contracts/automation-service';
 
@@ -49,6 +52,18 @@ type Assert< T extends true > = T;
  * `@ts-expect-error`-style pin no program compiles is no pin at all.
  */
 export type TriggerFlowDataMatchesContract = Assert< Eq< TriggerFlowResponse['data'], AutomationResult > >;
+
+/**
+ * #24996 (ruling B′ on #24914) — the inner refusal is declared ONCE: the
+ * member every door's `400 FLOW_FAILED` details carry is the very type
+ * `AutomationResult` carries, so a producer relaying one into the other
+ * cannot drift. Narrow either side alone and this alias reds by name.
+ * Exported for the same reason as the pin above (TS6196 otherwise).
+ */
+export type FlowFailureInnerRefusalIsTheContracts = Assert< Eq<
+  FlowFailureDetails['innerRefusal'],
+  AutomationResult['innerRefusal']
+> >;
 
 /**
  * #15221 — the resume door's `400 FLOW_FAILED` details forward the ENGINE's
@@ -526,6 +541,111 @@ describe('ResumeFailureDetailsSchema', () => {
       summary: { nodes: [] },
     });
     expect(result).toEqual({ runId: 'run_1', status: 'stranded', repairable: true });
+  });
+});
+
+// ==========================================
+// Flow failure details + inner refusal (#24996, ruling B′ on #24914)
+// ==========================================
+
+describe('FlowFailureDetailsSchema — one inner-refusal shape across the four FLOW_FAILED doors', () => {
+  const INNER = {
+    code: 'UNIQUE_VIOLATION',
+    message: "Duplicate record refused on 'crm_account': a record with this name already exists.",
+  } as const;
+  const USER_MESSAGE = 'An account with this name already exists.';
+  const SUMMARY = {
+    selected: 0, acted: 0, skipped: 0, unmeasured: 0,
+    nodes: [{ nodeId: 'create_account', nodeType: 'create_record', status: 'failure', runs: 1, failures: 1, skipped: 0 }],
+    gates: [],
+  };
+  // The four doors, each with its OWN message wording (unchanged by the
+  // ruling) and, on the resume door alone, the engine's verdict beside the
+  // shared keys.
+  const DOORS = [
+    { door: 'trigger', message: "Node 'create_account' failed: create_record(crm_account) failed", extra: {} },
+    {
+      door: 'resume',
+      message: "Node 'create_account' failed: create_record(crm_account) failed",
+      extra: { runId: 'run_1', status: 'failed', repairable: false },
+    },
+    { door: '/actions', message: "Flow 'convert_lead' failed: Node 'create_account' failed", extra: {} },
+    { door: 'endpoint', message: "Node 'create_account' failed: create_record(crm_account) failed", extra: {} },
+  ] as const;
+
+  const envelope = (message: string, details: Record<string, unknown>, userMessage?: string) => ({
+    success: false,
+    error: {
+      code: 'FLOW_FAILED',
+      message,
+      ...(userMessage !== undefined ? { userMessage } : {}),
+      details,
+    },
+  });
+
+  it.each(DOORS)('$door: an envelope carrying details.innerRefusal and a top-level userMessage validates', ({ door, message, extra }) => {
+    const body = envelope(message, { errorMessage: 'Could not convert the lead.', summary: SUMMARY, innerRefusal: INNER, ...extra }, USER_MESSAGE);
+
+    const parsedEnvelope = BaseResponseSchema.parse(body);
+    expect(parsedEnvelope.error?.code).toBe('FLOW_FAILED');
+    // `message` is the door's own wording, untouched; `userMessage` rides
+    // beside it at the top level, never replacing it.
+    expect(parsedEnvelope.error?.message).toBe(message);
+    expect(parsedEnvelope.error?.userMessage).toBe(USER_MESSAGE);
+
+    const details = FlowFailureDetailsSchema.parse(parsedEnvelope.error?.details);
+    expect(details.innerRefusal).toEqual(INNER);
+    expect(details.errorMessage).toBe('Could not convert the lead.');
+    expect(details.summary?.nodes[0]?.nodeId).toBe('create_account');
+
+    if (door === 'resume') {
+      // The verdict rides in the SAME details object and parses with its own
+      // schema; neither schema refuses the other's members.
+      expect(ResumeFailureDetailsSchema.parse(parsedEnvelope.error?.details))
+        .toEqual({ runId: 'run_1', status: 'failed', repairable: false });
+    }
+  });
+
+  it.each(DOORS)('$door: an envelope WITHOUT innerRefusal or userMessage still validates (optional, additive)', ({ door, message, extra }) => {
+    for (const details of [{ ...extra }, { errorMessage: 'Could not convert the lead.', summary: SUMMARY, ...extra }]) {
+      const parsedEnvelope = BaseResponseSchema.parse(envelope(message, details));
+      expect(parsedEnvelope.error?.userMessage).toBeUndefined();
+      const parsed = FlowFailureDetailsSchema.parse(parsedEnvelope.error?.details);
+      expect(parsed.innerRefusal).toBeUndefined();
+      if (door === 'resume') {
+        expect(ResumeFailureDetailsSchema.safeParse(parsedEnvelope.error?.details).success).toBe(true);
+      }
+    }
+  });
+
+  it('declares exactly the three ruled keys — the #9585 ceiling as ruling B′ relaxed it', () => {
+    expect(Object.keys(FlowFailureDetailsSchema.shape).sort()).toEqual(['errorMessage', 'innerRefusal', 'summary']);
+  });
+
+  it('the inner code takes the closed WIRE vocabulary — an unregistered spelling is refused', () => {
+    expect(FlowInnerRefusalSchema.safeParse(INNER).success).toBe(true);
+    const refused = FlowInnerRefusalSchema.safeParse({ code: 'ER_DUP_ENTRY', message: INNER.message });
+    expect(refused.success).toBe(false);
+    expect(refused.error?.issues[0]?.path).toEqual(['code']);
+    expect(FlowFailureDetailsSchema.safeParse({ innerRefusal: { code: 'ER_DUP_ENTRY', message: 'x' } }).success).toBe(false);
+  });
+
+  it('the inner refusal is `{ code, message }` — both members required', () => {
+    expect(FlowInnerRefusalSchema.safeParse({ code: 'UNIQUE_VIOLATION' }).success).toBe(false);
+    expect(FlowInnerRefusalSchema.safeParse({ message: INNER.message }).success).toBe(false);
+  });
+
+  it('AutomationResult mirrors both members on the trigger response data (the #13078 parity)', () => {
+    const result = TriggerFlowResponseSchema.parse({
+      success: true,
+      data: { success: false, status: 'failed', error: "Node 'create_account' failed", userMessage: USER_MESSAGE, innerRefusal: INNER },
+    });
+    expect(result.data.userMessage).toBe(USER_MESSAGE);
+    expect(result.data.innerRefusal).toEqual(INNER);
+    expect(TriggerFlowResponseSchema.safeParse({
+      success: true,
+      data: { success: false, innerRefusal: { code: 'ER_DUP_ENTRY', message: 'x' } },
+    }).success).toBe(false);
   });
 });
 

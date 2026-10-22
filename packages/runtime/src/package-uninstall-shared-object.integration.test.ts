@@ -201,7 +201,8 @@ async function boot() {
     async records(name: string) {
       return ((await knex(name).select('title')) as Array<{ title: string }>).map((r) => r.title);
     },
-    insertRecord: (name: string, title: string) => engine.insert(name, { title }, { context: { isSystem: true } } as any),
+    // Written in an organization: a fresh tenant column is NOT NULL (ADR-0131 D1).
+    insertRecord: (name: string, title: string) => engine.insert(name, { title }, { context: { isSystem: true, tenantId: 'org_a' } } as any),
   };
 }
 

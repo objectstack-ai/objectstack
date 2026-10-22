@@ -84,7 +84,9 @@ beforeAll(async () => {
   await engine.init();
   for (const o of [SysShareLink, TARGET]) engine.registry.registerObject(o as any, '@objectstack/plugin-sharing-test');
   await engine.syncSchemas();
-  await engine.insert(OBJECT, { id: RECORD, title: 'Shared doc' }, { context: { isSystem: true } } as any);
+  // Seeded under one organization: a fresh tenant column is NOT NULL (ADR-0131
+  // D1), and this lean engine registers no organization object to derive one from.
+  await engine.insert(OBJECT, { id: RECORD, title: 'Shared doc' }, { context: { isSystem: true, tenantId: 'org_pin' } } as any);
 
   // Count the privileged hash read — the `password_hash` dereference the
   // internal-column strip forces through the engine's accessor.

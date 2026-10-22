@@ -76,6 +76,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 const asUser = (userId: string, positions: string[] = []) =>
@@ -213,6 +214,10 @@ describe('every approval notification carries its text in body', () => {
       engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
     }
     await engine.syncSchemas();
+    // The organization-less rows below (positions, holdings) exist only on a
+    // store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
+    // NULL): this is that store.
+    await relaxEveryRegisteredTenantColumn(engine);
     for (const u of USERS) await engine.insert('sys_user', u, { context: SYSTEM } as any);
 
     svc = new ApprovalService({

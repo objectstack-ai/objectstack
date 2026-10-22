@@ -159,6 +159,8 @@
     "api/FindDataRequest",
     "api/FindDataResponse",
     "api/FindReferencesToMetaResponse",
+    "api/FlowFailureDetails",
+    "api/FlowInnerRefusal",
     "api/FlowRegistration",
     "api/FlowRegistrationRefusal",
     "api/GeneratedApiDocumentation",

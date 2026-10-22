@@ -1,17 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { accessSync, constants, lstatSync, statSync } from 'node:fs';
+import { accessSync, constants, lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs';
 import { mkdir, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
 /**
- * A SQLite database file this driver cannot open or create (#23696).
+ * A SQLite database file this driver cannot open or create (#23696), or one
+ * whose bytes are not a SQLite database (#24960).
  *
  * Thrown by `SqlDriver.connect()`, so the boot's connect refusal (ADR-0062 D5,
  * `datasource '<name>': connect failed — <reason>`) carries the path and the
  * operating system's own answer instead of waiting for a plugin start timeout.
  * `code` is the underlying error's (`ENOENT`, `EACCES`, `ENOTDIR`,
- * `SQLITE_CANTOPEN`, …) and `cause` the error itself.
+ * `SQLITE_CANTOPEN`, `SQLITE_NOTADB`, …) and `cause` the error itself.
  */
 export class SqliteDatabaseFileError extends Error {
   readonly code: string | undefined;
@@ -52,6 +53,14 @@ export class SqliteDatabaseFileError extends Error {
  * the answer. When a file holds the nearest existing name, the operating
  * system answers for it too: `ENOTDIR` from the first missing level under it,
  * or `EEXIST` from asking for `dir` itself.
+ *
+ * A level whose name a dangling symbolic link holds is refused during the
+ * walk, with `stat`'s `ENOENT` as its code and the link named (#25019).
+ * `mkdir` answers such a level `EEXIST`, which the creating loop would take
+ * for a concurrent creator, and nothing can be created through it: the connect
+ * used to resolve, and the first statement then failed with a code-less
+ * "directory does not exist". {@link probeAbsentSqliteDatabaseFile}, the
+ * read-only twin, refuses the same level with the same words.
  */
 export async function makeDatabaseDirectory(dir: string): Promise<void> {
   const missing: string[] = [];
@@ -62,6 +71,7 @@ export async function makeDatabaseDirectory(dir: string): Promise<void> {
       break;
     } catch (e) {
       if ((e as { code?: unknown } | null)?.code !== 'ENOENT') throw e;
+      if (isDanglingLink(level)) throw danglingLinkRefusal(level, e);
       missing.push(level);
       const parent = dirname(level);
       if (parent === level) break;
@@ -98,6 +108,12 @@ export async function makeDatabaseDirectory(dir: string): Promise<void> {
  *     is the refusal. `existsSync` answers `false` for every one of these, which
  *     is how a read-only boot used to open an empty in-memory database over a
  *     path its writing twin refuses, and report the datasource connected.
+ *   - `ENOENT`, and the file's own name is a dangling symbolic link (#25019):
+ *     the boot that writes creates the file where the chain of links ends, in
+ *     a directory it does not make, so that directory is judged instead: it
+ *     must exist, and allow write and search (`access(W_OK | X_OK)`). Each
+ *     refusal is the answer; otherwise `'absent'`. The writing boot refuses
+ *     the same path with SQLite's `SQLITE_CANTOPEN`.
  *   - `ENOENT`: walk up to the nearest level that exists. A level whose name a
  *     dangling symbolic link holds cannot be made (`mkdir` answers `EEXIST`,
  *     and nothing can be created through it): refused. Otherwise the level is a
@@ -118,6 +134,24 @@ export function probeAbsentSqliteDatabaseFile(filename: string): 'exists' | 'abs
   } catch (e) {
     if (errorCode(e) !== 'ENOENT') throw new SqliteDatabaseFileError(filename, 'cannot be opened or created', e);
   }
+  const linkEnd = danglingLinkEnd(filename);
+  if (linkEnd !== undefined) {
+    const where = dirname(linkEnd);
+    const linked = `cannot be created: it is a symbolic link to '${linkEnd}', whose directory '${where}'`;
+    try {
+      // `stat(filename)` answered `ENOENT`, not `ENOTDIR` or `EACCES`, so
+      // `where` is a directory this process may search when it exists at all.
+      statSync(where);
+    } catch (e) {
+      throw new SqliteDatabaseFileError(filename, `${linked} does not exist`, e);
+    }
+    try {
+      accessSync(where, constants.W_OK | constants.X_OK);
+    } catch (e) {
+      throw new SqliteDatabaseFileError(filename, `${linked} does not allow it to be created`, e);
+    }
+    return 'absent';
+  }
   const dir = dirname(resolve(filename));
   const unmakeable = `cannot be created: its directory '${dirname(filename)}' cannot be made`;
   let level = dir;
@@ -127,9 +161,7 @@ export function probeAbsentSqliteDatabaseFile(filename: string): 'exists' | 'abs
       break;
     } catch (e) {
       if (errorCode(e) !== 'ENOENT') throw new SqliteDatabaseFileError(filename, unmakeable, e);
-      if (isDanglingLink(level)) {
-        throw new SqliteDatabaseFileError(filename, `${unmakeable} ('${level}' is a symbolic link to a path that does not exist)`, e);
-      }
+      if (isDanglingLink(level)) throw new SqliteDatabaseFileError(filename, `${unmakeable} (${danglingLinkWords(level)})`, e);
       const parent = dirname(level);
       if (parent === level) break;
       level = parent;
@@ -151,6 +183,43 @@ function isDanglingLink(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** How both boots name a dangling link that holds a level of the database's path. */
+function danglingLinkWords(level: string): string {
+  return `'${level}' is a symbolic link to a path that does not exist`;
+}
+
+/**
+ * The writing boot's refusal of a directory level a dangling link holds: the
+ * link named, and `stat`'s own error as its `code` and `cause`, so
+ * `SqlDriver.connect()` raises it as the read-only boot does.
+ */
+function danglingLinkRefusal(level: string, cause: unknown): Error {
+  const reason = cause instanceof Error ? cause.message : String(cause);
+  return Object.assign(new Error(`${danglingLinkWords(level)}: ${reason}`), { code: errorCode(cause), cause });
+}
+
+/**
+ * Where creating `filename` puts the file when `filename` is a dangling
+ * symbolic link, which `stat` has already answered `ENOENT` for: the name at the
+ * end of its chain of links. `undefined` when `filename` is not a link. Each
+ * relative target is read from the real directory of the link that holds it,
+ * as the kernel reads it. The chain ends within the kernel's own link limit,
+ * or `stat` would have answered `ELOOP`; the bound below only restates that.
+ */
+function danglingLinkEnd(filename: string): string | undefined {
+  let at = resolve(filename);
+  for (let hops = 0; hops <= 40; hops++) {
+    let next: string;
+    try {
+      next = resolve(realpathSync(dirname(at)), readlinkSync(at));
+    } catch {
+      return hops === 0 ? undefined : at;
+    }
+    at = next;
+  }
+  return at;
 }
 
 function errorCode(e: unknown): unknown {

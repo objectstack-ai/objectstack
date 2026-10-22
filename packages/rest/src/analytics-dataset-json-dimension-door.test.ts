@@ -44,6 +44,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AnalyticsServicePlugin, type AnalyticsService } from '@objectstack/service-analytics';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'rest_dataset_json_dim_ledger';
 /** The object the ledger's `account` lookup references — joined through the dataset's `include`. */
@@ -166,6 +167,9 @@ for (const cell of CELLS) {
         engine.registry.registerObject(ACCOUNT_OBJECT as any);
         engine.registry.registerObject(LEDGER as any);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         for (const row of ACCOUNTS) await engine.insert(ACCOUNT, { ...row } as any);
         for (const row of ROWS) await engine.insert(OBJECT, { ...row } as any);
 

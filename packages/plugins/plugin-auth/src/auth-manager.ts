@@ -209,6 +209,15 @@ import {
   retireHeldKeyrings,
   UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS,
 } from './signing-key-read-cache.js';
+import {
+  ORGANIZATION_DELETE_PATH,
+  ORGANIZATION_DELETE_REFUSAL_CODE,
+  defaultOrganizationDeleteRefusal,
+  isDefaultOrganizationTarget,
+  organizationDeleteRefusal,
+  organizationNotEmptyBody,
+  removeOrganizationAuthStructure,
+} from './organization-delete.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -1637,6 +1646,18 @@ export class AuthManager {
    * into scope — so the map is not reachable from `ctx` at that point.
    */
   private orgRolesMap: Record<string, any> | undefined;
+  /**
+   * [#24948] The last-administrator guard's question about an organization
+   * delete (`LastAdminGuardHandle.judgeOrganizationDelete`), handed over by
+   * `AuthPlugin` once the guard is registered. Absent on a composition without
+   * the guard, where the Default Organization has no such protection to move.
+   */
+  private organizationDeleteStandingJudge?: (organizationId: string) => Promise<void>;
+
+  /** [#24948] See {@link organizationDeleteStandingJudge}. */
+  setOrganizationDeleteStandingJudge(judge: (organizationId: string) => Promise<void>): void {
+    this.organizationDeleteStandingJudge = judge;
+  }
   // ADR-0069 — cached "does any org require MFA" flag (per-org tightening).
   // Refreshed lazily with a TTL so isAuthGateActive() stays synchronous + cheap.
   private _orgMfaCache: { value: boolean; at: number } = { value: false, at: 0 };
@@ -1778,8 +1799,9 @@ export class AuthManager {
       // The deployment's product name, from the one authority every auth
       // email already reads (`getAppName()`: the `branding.workspace_name`
       // override, else the configured `appName`, else 'ObjectStack').
-      // better-auth 1.7.3 reads this key once, into its context's `appName`
-      // (unset ⇒ "Better Auth"), and reads that in exactly two places: the
+      // better-auth 1.7.12 (re-read 2026-10-21 for #25096) reads this key once,
+      // into its context's `appName` (unset ⇒ "Better Auth"), and reads that
+      // in exactly two places: the
       // issuer and label prefix of the otpauth URI that `/two-factor/enable`
       // and `/two-factor/get-totp-uri` answer. No cookie name derives from it
       // (the prefix is the literal "better-auth") and nothing stores it, so an
@@ -2037,8 +2059,8 @@ export class AuthManager {
             );
           }
           // The lifetime the token in `url` really has: better-auth mints it
-          // with `resetPasswordTokenExpiresIn || 3600` seconds (installed
-          // 1.7.3 `routes/password.mjs`) — `||`, so a configured `0` is its
+          // with `resetPasswordTokenExpiresIn || 3600` seconds (better-auth
+          // 1.7.12 `routes/password.mjs`, re-measured 2026-10-21 for #25096) — `||`, so a configured `0` is its
           // default too, and the mail must not say "0 minutes" for it.
           const ttlSec = this.config.emailAndPassword?.resetPasswordTokenExpiresIn || 60 * 60;
           // [#23343] An account an administrator created (the identity
@@ -2060,7 +2082,8 @@ export class AuthManager {
           // commit 35e94c96b — the ladder's stored rung. It matters most HERE: an
           // admin-initiated send (`admin-import-users.ts` calls
           // `requestPasswordReset` server-side) reaches this callback with NO
-          // request at all (measured on 1.7.3, #23343), so without this rung
+          // request at all (measured on 1.7.3, #23343; unchanged on 1.7.12,
+          // re-read for #25096), so without this rung
           // the user's mail carries only the deployment default. Best-effort;
           // `undefined` leaves the #14319 ladder exactly as it was.
           const storedLocale = await this.storedRecipientLocale({ id: user.id });
@@ -2109,6 +2132,20 @@ export class AuthManager {
             );
           }
         }),
+        // [#25060, ruling 1B on #25040] The mail half of "a sign-up for an
+        // address that already has an account answers like a success". The
+        // vendor calls this only when the address already has a row AND its
+        // anti-enumeration shield is on, after its timing-equalizing password
+        // hash, and awaits it inline (no background-task handler is set);
+        // what it throws is caught and logged by the vendor, and the answer is
+        // its generic success either way (better-auth 1.7.12
+        // `routes/sign-up.mjs`, re-read for #25060). So the DECISION cannot
+        // live here: it is made first, in the `/sign-up/email` before-hook,
+        // which keeps the explicit refusal wherever this mail could not be
+        // promised. This hands over the existing row, which is what the
+        // recipient's stored-locale rung needs.
+        onExistingUserSignUp: async ({ user }: { user: { id: string; email: string; name?: string | null } }) =>
+          this.sendExistingAccountSignUpNotice(user),
         };
       })(),
 
@@ -2424,6 +2461,16 @@ export class AuthManager {
             // fall through — the vendor still re-decides everything it owns
           }
 
+          // ── #24948: organization delete refuses while records remain ──
+          // Before the vendor's handler, so a refused delete writes nothing:
+          // the vendor clears the caller's active organization and deletes the
+          // members before its own `beforeDeleteOrganization` hook runs.
+          // `organization-delete.ts` carries the contract.
+          if (ctx?.path === ORGANIZATION_DELETE_PATH) {
+            await this.assertOrganizationDeletable(ctx);
+            // fall through — the vendor still authorizes and deletes
+          }
+
           // ── #9714: a revoke that identifies NO record must not report ──
           // success. better-auth 1.7.1's `revoke-session` handler skips the
           // delete when the token matches zero rows (or another user's row)
@@ -2735,10 +2782,11 @@ export class AuthManager {
             // reason the audience refusal above is — and STRICTLY after it.
             //
             // Same shield, its other arm. `shouldReturnGenericDuplicateResponse`
-            // (sign-up.mjs:163) is on whenever `requireEmailVerification` is on
-            // OR `autoSignIn === false`, and it guards TWO sites: the 403 catch
-            // at :235 (what the audience block above steps around) and the
-            // duplicate pre-check at :199. On the second, the vendor finds the
+            // (better-auth 1.7.12 sign-up.mjs:155) is on whenever
+            // `requireEmailVerification` is on OR `autoSignIn === false`, and it
+            // guards TWO sites: the 403 catch at :227 (what the audience block
+            // above steps around) and the duplicate pre-check at :192–204. On
+            // the second, the vendor finds the
             // existing row, logs it, and returns `buildGenericDuplicateResponse()`
             // — a 200 carrying a freshly `generateId()`-ed user that is never
             // written — INSTEAD of throwing USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL.
@@ -2764,24 +2812,36 @@ export class AuthManager {
             // the gate, `invite_only` is untouched: a stranger still gets
             // SELF_REGISTRATION_CLOSED and learns nothing.
             //
-            // UNCONDITIONAL, not a mirror of the vendor's predicate: the platform
-            // owns this refusal at one seam, so "an address that already has a
-            // `sys_user` row is refused" is one fact under every posture and every
-            // verification setting — rather than a contract that is a function of
-            // a vendor internal, and that a widened shield would silently reopen.
-            // Nothing is lost when the shield is off and the vendor would have
-            // answered: the code and message are the vendor's OWN constant, so the
-            // two lanes are byte-identical by construction rather than by copying.
-            // (The vendor's `onExistingUserSignUp` hook is not wired anywhere in
-            // this repo, and its timing-equalizing password hash equalizes against
-            // an oracle this 422 states outright.)
+            // [#25060, ruling 1B on #25040] ONE exception, decided here and
+            // nowhere else ({@link existingAddressSignUpAnswersSuccess}): under
+            // `open` and `email_domain`, where the vendor's shield is on and a
+            // mail transport is live, the request FALLS THROUGH. The vendor then
+            // finds the row, answers its generic success — the same shape a new
+            // sign-up gets there, and no row, credential or session is written —
+            // and its `onExistingUserSignUp` hook mails the address's holder
+            // ({@link sendExistingAccountSignUpNotice}). Every other case keeps
+            // the explicit refusal: `invite_only`, a shield that is off (a new
+            // sign-up's answer there carries a session, which an existing
+            // address cannot mirror without one for someone else's account), and
+            // a transport that is not live (a success with no mail is the black
+            // hole this refusal replaced). The refusal is the platform's at this
+            // one seam, so it never depends on the vendor also refusing; where
+            // the vendor would have answered, its code and message are the
+            // vendor's OWN constant, so the two lanes are byte-identical by
+            // construction rather than by copying.
             const signUpAddress = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
             if (signUpAddress && (await this.hasExistingUserFor(signUpAddress))) {
-              const { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');
-              throw APIError.from(
-                'UNPROCESSABLE_ENTITY',
-                BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL,
-              );
+              if (!this.existingAddressSignUpAnswersSuccess(ctx?.context?.options?.emailAndPassword)) {
+                const { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');
+                throw APIError.from(
+                  'UNPROCESSABLE_ENTITY',
+                  BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL,
+                );
+              }
+              // The answer will carry a user id that no row holds: tell the
+              // after-hook, so it stamps nothing on that id (it would report a
+              // lost write for a user that was never created).
+              if (ctx?.context) ctx.context.__osExistingAddressSignUp = true;
             }
             // fall through — the vendor still decides everything it owns
           }
@@ -2995,7 +3055,11 @@ export class AuthManager {
             } catch {
               signupOk = !(ctx?.context?.returned instanceof Error);
             }
-            if (signupOk && typeof newUserId === 'string') await this.stampPasswordChangedAt(newUserId);
+            // [#25060] Not for an existing address answered as a success: that
+            // answer's user id belongs to no row, and nothing was created.
+            if (signupOk && typeof newUserId === 'string' && ctx?.context?.__osExistingAddressSignUp !== true) {
+              await this.stampPasswordChangedAt(newUserId);
+            }
           }
           const ep = ctx?.context?.options?.emailAndPassword;
           if (ep && ctx.context.__osDisableSignUpOrig !== undefined) {
@@ -3863,6 +3927,21 @@ export class AuthManager {
               });
             }
           },
+          // [#24948] The teams, their members and the organization-admin
+          // grants are the organization's own auth structure, and better-auth's
+          // delete leaves them behind. They go here, inside the request's
+          // transaction (`handleRequest`), after the `hooks.before` refusal has
+          // found no records left. The Default Organization is the
+          // last-administrator guard's to answer, so its structure is not
+          // touched: when that guard admits the delete, the engine's own
+          // refusal still holds while anything names it.
+          beforeDeleteOrganization: async ({ organization }: any) => {
+            const engine = this.getDataEngine();
+            const organizationId = organization?.id;
+            if (!engine || typeof organizationId !== 'string' || !organizationId) return;
+            if (await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()))) return;
+            await removeOrganizationAuthStructure(engine, organizationId);
+          },
         },
         // No mailer is wired in framework yet — log the accept URL so
         // operators / UI can fall back to copy-paste flows. Replace this
@@ -4323,6 +4402,47 @@ export class AuthManager {
         // an anonymous registration mints no authority by itself.
         allowDynamicClientRegistration: dcr,
         allowUnauthenticatedClientRegistration: dcr,
+        // ── Native MCP clients that omit `application_type` (#25118, ruling 6329352251, A1) ──
+        // Local MCP clients (Claude Code, Cursor, VS Code, Codex CLI) register
+        // over DCR with a loopback `http` or a custom-scheme redirect, as RFC
+        // 8252 §7.3 and the MCP authorization spec have native clients do, and
+        // send no `application_type`. The provider's default fills a missing
+        // type with `web` (OIDC Registration §2), whose redirect rule refuses
+        // both forms, so every such client was refused before its browser
+        // opened.
+        //
+        // `'infer'` is the provider's own classifier; there is no second rule
+        // here. A dynamic registration that omits the type becomes `native`
+        // when ANY redirect uses a non-http(s) scheme or `http` on exactly
+        // `localhost`, `127.0.0.1` or `[::1]`, and each redirect is then held to
+        // the native rule; otherwise it stays `web`. A type the client sends is
+        // never overridden. It acts on `/oauth2/register` only (the Setup
+        // form's managed `create-client` door is unaffected) and only while
+        // `dcr` is on: with DCR off the provider refuses every registration.
+        //
+        // The measured boundary, pinned on the real provider in
+        // auth-manager.mcp-oauth-dcr-infer.test.ts:
+        //   • a public client with a loopback or custom-scheme redirect → `native`;
+        //   • `https://evil.example/cb` alone stays `web`; `http://evil.example/cb`,
+        //     `http://localhost.evil.example`, and an explicit `web` with a
+        //     loopback redirect stay refused;
+        //   • NOT "public clients only": the classifier reads redirect URIs and
+        //     never `token_endpoint_auth_method`, so a CONFIDENTIAL registration
+        //     (`client_secret_basic`, or the method omitted, which the provider
+        //     fills as `client_secret_basic`) with a loopback or custom-scheme
+        //     redirect and no type also registers as `native` and is issued a
+        //     `client_secret`. That body was already accepted with
+        //     `application_type: 'native'` spelled out, so no registrable client
+        //     shape is added; only the meaning of an omitted field changes
+        //     (RFC 8252 §8.4 allows a per-instance secret provisioned by DCR);
+        //   • PKCE stays required at /oauth2/authorize for every one of these
+        //     clients: unconditionally for a public client, and for a
+        //     confidential DCR client because `clientRegistrationRequirePKCE`
+        //     keeps its `true` default. ⛔ Do not pass it as `false`.
+        //
+        // ⛔ No hook on `/oauth2/register` and no second classification rule
+        // beside this one: ruling A1 declined both.
+        clientRegistrationDefaultApplicationType: 'infer',
         // ── The organization an OAuth consent binds (ruling 6232069920, A) ──
         // At consent the consenting session's active organization becomes the
         // consent's `reference_id`, and the installed provider carries that
@@ -4677,8 +4797,8 @@ export class AuthManager {
     //
     // Handing better-auth no `database` makes it build its own in-memory store
     // in `getBaseAdapter`, and that store is keyed by the schema KEY while
-    // every read resolves by `modelName`. Re-measured 2026-09-11 on the
-    // installed better-auth 1.7.3, unchanged from the 1.7.2 reading it replaces
+    // every read resolves by `modelName`. Re-measured 2026-10-21 for #25096 on
+    // better-auth 1.7.12, unchanged since the 1.7.2 reading
     // (`db/adapter-base.mjs` builds the store by schema KEY;
     // `@better-auth/memory-adapter` throws on the lookup, naming the model):
     //
@@ -5512,6 +5632,136 @@ export class AuthManager {
         { error: error instanceof Error ? error.message : String(error) },
       );
       return false;
+    }
+  }
+
+  /**
+   * [#25060, ruling 1B on #25040] May a sign-up for an address that already has
+   * an account answer like a successful sign-up, instead of the explicit
+   * refusal? Asked by the `/sign-up/email` before-hook only once the audience
+   * gate admitted the caller and {@link hasExistingUserFor} found the row. All
+   * three must hold, and each one that fails keeps today's refusal:
+   *
+   * 1. **The posture permits self-registration** (`open`, `email_domain`).
+   *    `invite_only` is unchanged by the ruling, and so is every other path a
+   *    posture admits there.
+   * 2. **The vendor's anti-enumeration shield is on** — read off the options
+   *    the vendor itself reads for it (`requireEmailVerification` on, or
+   *    `autoSignIn` off). Only there is a new sign-up's answer free of a
+   *    session, so only there can an existing address get the same shape; and
+   *    only there does the vendor call `onExistingUserSignUp`, the mail half.
+   *    Under `open` with verification declared off a new sign-up is signed in
+   *    at once, and mirroring that would mean a session for someone else's
+   *    account. (Where the shield is off the vendor would refuse identically
+   *    anyway; the refusal stays ours so it never rests on that.)
+   * 3. **Mail is actually delivered** ({@link existingAddressSignUpMailable}).
+   *    The ruling's precondition: the success answer is honest only because a
+   *    mail follows it, and a success with no mail is the black hole the
+   *    refusal replaced.
+   *
+   * A pure read: nothing is cached, so a posture or transport change between
+   * two requests is honoured on the next one.
+   */
+  private existingAddressSignUpAnswersSuccess(
+    vendorEmailAndPassword: { requireEmailVerification?: boolean; autoSignIn?: boolean } | undefined,
+  ): boolean {
+    const shieldOn =
+      vendorEmailAndPassword?.requireEmailVerification === true || vendorEmailAndPassword?.autoSignIn === false;
+    return shieldOn && this.existingAddressSignUpMailable();
+  }
+
+  /**
+   * [#25060] The posture and transport half of
+   * {@link existingAddressSignUpAnswersSuccess}, which the mail send asks again
+   * on its own: the vendor's hook also fires on the one path that never reached
+   * that decision (an unanswerable {@link hasExistingUserFor} falls through to
+   * the vendor), and there it must not mail under `invite_only` either.
+   */
+  private existingAddressSignUpMailable(): boolean {
+    return audiencePermitsSelfRegistration(this.getAudience().posture) && this.isEmailDeliveryLive();
+  }
+
+  /**
+   * [#25060] Is mail sent through the wired email service actually delivered?
+   * The one reader of `IEmailService.isConfigured()` — the deliverability fact
+   * the contract gives the package that owns the transport (plugin-email
+   * answers `false` for its `log` transport in every environment, and follows a
+   * transport swapped from the mail settings at runtime). Read at call time,
+   * never cached at boot.
+   *
+   * ⛔ An implementation WITHOUT the member is NOT live: the contract says an
+   * absent member is unknown, and the flow asking — a success answer that only
+   * a mail makes honest — must fail to its refusal on unknown. Hence not
+   * {@link hasEmailTransport} / {@link isEmailServiceAvailable}, which answer
+   * "a service object is wired" — true on every default boot, whose transport
+   * logs instead of sending. A throwing member is unknown too.
+   */
+  private isEmailDeliveryLive(): boolean {
+    const email = this.getEmailService();
+    if (!email || typeof email.isConfigured !== 'function') return false;
+    try {
+      return email.isConfigured() === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * [#25060, ruling 1B on #25040] Tell the holder of an address that someone
+   * tried to sign up with it — the mail that makes the success answer
+   * {@link existingAddressSignUpAnswersSuccess} allowed honest. Wired as the
+   * vendor's `emailAndPassword.onExistingUserSignUp`, which hands over the
+   * existing row.
+   *
+   * - **Template:** `auth.existing_account_sign_up`, declared beside every
+   *   other auth mail in plugin-email's built-in templates (four locales), so a
+   *   deployment overrides it the same way.
+   * - **Locale:** the recipient's stored `sys_user.locale`, then the deployment
+   *   default — ⛔ no request rung: the requester is not the recipient, and an
+   *   anonymous caller's browser language must not choose the language of a
+   *   mail to someone else (the invitation sends' ladder).
+   * - **Links:** the Console's sign-in and forgot-password pages. No token is
+   *   minted: a reset link here would be a credential sent because a stranger
+   *   asked.
+   *
+   * ⛔ Never throws. The answer is already decided and the vendor would only
+   * log a throw; a send that fails is reported here at error level, once per
+   * request, because the caller was told success on the promise of this mail.
+   * That residual is the same one a failed verification send leaves for a new
+   * address.
+   */
+  private async sendExistingAccountSignUpNotice(user: { id: string; email: string; name?: string | null }): Promise<void> {
+    if (!this.existingAddressSignUpMailable()) return;
+    // A placeholder address (a phone-only account) has no mailbox to tell.
+    if (!user?.email || isPlaceholderEmail(user.email)) return;
+    const email = this.getEmailService();
+    if (!email) return;
+    try {
+      const storedLocale = user.id ? await this.storedRecipientLocale({ id: user.id }) : undefined;
+      const result = await email.sendTemplate({
+        template: 'auth.existing_account_sign_up',
+        to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
+        ...this.emailLocaleArg(undefined, storedLocale),
+        data: {
+          user: { name: user.name || user.email, email: user.email, ...(user.id ? { id: user.id } : {}) },
+          signInUrl: this.getConsolePageUrl('/login'),
+          resetPasswordUrl: this.getConsolePageUrl('/forgot-password'),
+          appName: this.getAppName(),
+        },
+        relatedObject: 'sys_user',
+        ...(user.id ? { relatedId: user.id } : {}),
+        // [ADR-0131 D7, Q2 A] A notice to the account holder: identity mail.
+        identityMail: true,
+      });
+      if (result?.status === 'failed') throw new Error(result.error ?? 'delivery failed');
+    } catch (error) {
+      this.audienceLogError(
+        '[auth] a sign-up for an address that already has an account was answered as a success, but '
+          + 'the mail telling that account\'s holder could NOT be sent — they will not learn of the attempt, '
+          + 'and the person signing up gets no mail pointing them to sign-in or password reset. Check the '
+          + 'mail transport (Setup › Mail, "Send test email").',
+        { userId: user.id, error: error instanceof Error ? error.message : String(error) },
+      );
     }
   }
 
@@ -6683,8 +6933,14 @@ export class AuthManager {
           return scimRequestScope.run({ scim: true }, runHandler);
         }
       : runHandler;
+    // [#24948] An organization delete is one unit of work on the same terms:
+    // better-auth clears the caller's active organization and deletes the
+    // members and invitations before the organization row, with no
+    // transaction, and the engine's refusal on that last row used to leave the
+    // organization standing with no owner.
     const vendorResponse =
-      endpointPath !== undefined && SESSION_ERASURE_PATHS.has(endpointPath)
+      endpointPath !== undefined &&
+      (SESSION_ERASURE_PATHS.has(endpointPath) || endpointPath === ORGANIZATION_DELETE_PATH)
         ? await this.runSubjectErasureAtomically(runRequest)
         : await runRequest();
 
@@ -6968,6 +7224,11 @@ export class AuthManager {
    * - side effects outside the datasource (a sent email, secondary-storage
    *   session state) are not transactional and are not undone by a rollback.
    *   `/admin/remove-user` sends nothing, so no path here relies on it.
+   *
+   * [#24948] `/organization/delete` runs here too, on the same terms and for
+   * the same reason: the vendor's member, invitation and organization deletes
+   * are separate adapter calls, and the teams and grants removed by
+   * `beforeDeleteOrganization` must roll back with them.
    */
   private async runSubjectErasureAtomically(
     run: () => Promise<Response>,
@@ -8044,6 +8305,94 @@ export class AuthManager {
    *    the same roles map we hand the org plugin, so this never becomes a second
    *    spelling of the authorization question.
    */
+  /**
+   * [#24948] `/organization/delete` admission: refuse 409 `DELETE_RESTRICTED`,
+   * naming every table and its row count, while the organization still owns
+   * records (`organization-delete.ts` carries the contract and the exclusion
+   * set).
+   *
+   * Only for a caller the vendor itself admits — a member whose role holds
+   * `organization: ['delete']`, asked of the vendor's own `hasPermission`, as
+   * {@link assertRemoveMemberPermitted} does — so a caller it refuses gets its
+   * refusal, and no count. Everything this cannot decide falls through to the
+   * vendor: no session, no organization id, no membership, a lookup that
+   * failed. The COUNT does not fall through: it is the guard, and a guard that
+   * could not be evaluated must not pass, so its failure propagates, and so
+   * does a failure deciding whether the target is the Default Organization.
+   * The Default Organization is asked the last-administrator guard's question
+   * first (a 403), then its own record count (the same 409), both here, before
+   * the first write.
+   */
+  private async assertOrganizationDeletable(ctx: any): Promise<void> {
+    const engine = this.getDataEngine();
+    if (!engine) return;
+    const organizationId = typeof ctx?.body?.organizationId === 'string' ? ctx.body.organizationId : '';
+    if (!organizationId) return;
+
+    let organization: any;
+    try {
+      const actor = await this.resolveActor(ctx);
+      if (!actor?.userId) return; // the vendor answers 401
+      const sys = withSystemReadContext(engine);
+      const callerRow: any = await sys.findOne('sys_member', {
+        where: { organization_id: organizationId, user_id: actor.userId },
+      });
+      if (!callerRow) return; // the vendor answers USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION
+      const { hasPermission } = await import('better-auth/plugins/organization');
+      const permitted = await hasPermission(
+        {
+          role: callerRow.role,
+          options: (this.orgRolesMap ? { roles: this.orgRolesMap } : {}) as any,
+          permissions: { organization: ['delete'] },
+          organizationId,
+        } as any,
+        ctx,
+      );
+      if (!permitted) return; // the vendor answers YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_ORGANIZATION
+      organization = await sys.findOne('sys_organization', { where: { id: organizationId } });
+      if (!organization) return; // the vendor answers 400
+    } catch {
+      // A lookup that did not complete hands the request back to the vendor,
+      // which re-reads everything it decides; the engine's own refusal still
+      // stands under the delete.
+      return;
+    }
+
+    // Which of the two refusals below applies is part of the guard, so it is
+    // decided outside the fall-through above: a lookup that fails here
+    // refuses, never hands the request to the vendor unasked.
+    const defaultOrganization = await isDefaultOrganizationTarget(
+      engine, organization, postureEnforcesWall(resolveTenancyPosture()),
+    );
+
+    // The Default Organization is asked the last-administrator guard's
+    // question first, HERE, before the vendor's first write, so its refusal
+    // leaves every member and invitation as it was on any driver, with or
+    // without transactions. The guard fails closed on a lookup it cannot
+    // complete, so this never passes for want of an answer. When it admits
+    // the delete, the record count below is asked before the vendor's first
+    // write too, leaving out only what the vendor removes (members and
+    // invitations): plugin-auth removes none of the Default Organization's
+    // structure, so its teams and grants count.
+    if (defaultOrganization && this.organizationDeleteStandingJudge) {
+      try {
+        await this.organizationDeleteStandingJudge(organizationId);
+      } catch (err) {
+        if ((err as { code?: unknown } | null)?.code !== 'PERMISSION_DENIED') throw err;
+        const { APIError } = await import('better-auth/api');
+        throw new APIError('FORBIDDEN', { message: (err as Error).message, code: 'PERMISSION_DENIED' });
+      }
+    }
+
+    const owned = defaultOrganization
+      ? await defaultOrganizationDeleteRefusal(engine, organizationId)
+      : await organizationDeleteRefusal(engine, organizationId);
+    if (owned && owned.length > 0) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError('CONFLICT', { code: ORGANIZATION_DELETE_REFUSAL_CODE, ...organizationNotEmptyBody(owned) });
+    }
+  }
+
   private async assertRemoveMemberPermitted(ctx: any): Promise<void> {
     const engine = this.getDataEngine();
     if (!engine) return;
@@ -9553,7 +9902,8 @@ export class AuthManager {
    * (plus `id`), or `undefined` when the identifier names no account.
    *
    * It asks exactly what better-auth's `/sign-in/email` credential check asks
-   * (1.7.3: `internalAdapter.findUserByEmail(email.toLowerCase())`, an
+   * (1.7.12, re-read 2026-10-21 for #25096:
+   * `internalAdapter.findUserByEmail(email.toLowerCase())`, an
    * equality match of the `email` column against the lower-cased address,
    * which is also the spelling `internalAdapter.createUser` stores), so the
    * gate, the counter, the ledger and the credential check name one account

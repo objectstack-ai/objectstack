@@ -255,7 +255,9 @@ describe('the ceremony\'s template-promotion save on a v17-shape database', () =
     const db = caseDb();
     const before = (await rawRows(db)).filter((r) => r.type === 'email_template');
     const error = await saveTemplateOnCeremonyBoot(db, 'Environment welcome');
-    expect(String((error as Error | null)?.message ?? error)).toMatch(/Duplicate record refused on 'sys_metadata'/);
+    // The sentence names the object by label; the API name rides on `object`.
+    expect(String((error as Error | null)?.message ?? error)).toMatch(/^Duplicate record refused on '/);
+    expect((error as { object?: unknown } | null)?.object).toBe('sys_metadata');
     expect((await rawRows(db)).filter((r) => r.type === 'email_template')).toEqual(before);
   }, CASE_TIMEOUT_MS);
 
@@ -316,7 +318,9 @@ describe('[ADR-0131 D6/D7] the ceremony boot\'s readers ignore a legacy organiza
     // organization's lock: the save reached the store, where the re-keyed
     // unique index refuses an environment row beside the organization's row of
     // the same key — the refusal the template pin above measures.
-    expect(String((error as Error | null)?.message ?? error)).toMatch(/Duplicate record refused on 'sys_metadata'/);
+    // The sentence names the object by label; the API name rides on `object`.
+    expect(String((error as Error | null)?.message ?? error)).toMatch(/^Duplicate record refused on '/);
+    expect((error as { object?: unknown } | null)?.object).toBe('sys_metadata');
     expect(String((error as Error | null)?.message ?? error)).not.toMatch(/lock/i);
     const org = (await rawRows(db)).find((r) => r.id === 'org_locked_template')!;
     expect(org.metadata).toEqual(tpl(LOCKED_TEMPLATE, 'Org A locked', { _lock: 'full' }));

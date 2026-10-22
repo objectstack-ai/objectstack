@@ -808,13 +808,21 @@ function resumeDoorError(
     message: string,
     httpStatus: number,
     details?: Record<string, unknown>,
+    extra?: { userMessage?: string },
 ): Error {
-    const response = deps.error(message, httpStatus, details);
-    const envelope = (response?.body as { error?: { code?: unknown; message?: unknown; details?: unknown } } | undefined)?.error;
+    const response = deps.error(message, httpStatus, details, extra);
+    const envelope = (response?.body as {
+        error?: { code?: unknown; message?: unknown; details?: unknown; userMessage?: unknown };
+    } | undefined)?.error;
     return Object.assign(new Error(typeof envelope?.message === 'string' ? envelope.message : message), {
         code: typeof envelope?.code === 'string' ? envelope.code : undefined,
         status: response?.status ?? httpStatus,
         ...(envelope?.details !== undefined ? { details: envelope.details } : {}),
+        // [#24914, ruling B′] The producer-marked end-user text, carried onto
+        // the thrown error as the `userMessage` field every boundary reads
+        // through `declaredUserMessage` — exactly what the REST door put at the
+        // envelope's top level, never folded into `message`.
+        ...(typeof envelope?.userMessage === 'string' ? { userMessage: envelope.userMessage } : {}),
     });
 }
 
@@ -1001,7 +1009,7 @@ export async function resumeActionRun(
     if (values !== undefined) signal.variables = values;
     const result = await automation.resume(runId, signal);
     const refusal = await classifyResumeResult(deps, automation, runId, result);
-    if (refusal) throw resumeDoorError(deps, refusal.message, refusal.status, refusal.details);
+    if (refusal) throw resumeDoorError(deps, refusal.message, refusal.status, refusal.details, refusal.extra);
     return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: result ?? null };
 }
 

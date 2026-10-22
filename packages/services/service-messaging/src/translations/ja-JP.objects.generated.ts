@@ -245,44 +245,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
-  sys_notification_subscription: {
-    label: "Notification Subscription",
-    pluralLabel: "Notification Subscriptions",
-    description: "Standing subscription of a principal (role/team/user) to a notification topic.",
-    fields: {
-      id: {
-        label: "Subscription ID"
-      },
-      display_title: {
-        label: "Title",
-        help: "Record title: the subscribing principal and the topic (computed on read)"
-      },
-      topic: {
-        label: "Topic",
-        help: "Notification topic this principal subscribes to."
-      },
-      principal: {
-        label: "Principal",
-        help: "サブスクライバーセレクター: 'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | メールアドレス | プレフィックスなしのユーザー ID。"
-      },
-      enabled: {
-        label: "Enabled",
-        help: "When false, the subscription is inactive."
-      },
-      created_at: {
-        label: "Created At"
-      }
-    },
-    _views: {
-      all: {
-        label: "すべて",
-        emptyState: {
-          title: "まだ通知の購読がありません",
-          message: "購読は、ロール、チーム、またはユーザーが通知トピックをフォローしていることを記録します。"
-        }
-      }
-    }
-  },
   sys_notification_template: {
     label: "Notification Template",
     pluralLabel: "Notification Templates",
@@ -296,7 +258,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Channel",
-        help: "このテンプレートを使用するチャネル：email または sms。アプリ内の受信トレイは使用しません。アプリ内の内容は、メールテンプレートを作成して通知ステップの template で指定してください。"
+        help: "このテンプレートを使用するチャネル：email または sms。その他の値は拒否されます。アプリ内の受信トレイは使用しません。アプリ内の内容は、メールテンプレートを作成して通知ステップの template で指定してください。"
       },
       locale: {
         label: "Locale",
@@ -344,7 +306,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       channel_renders_template: {
-        message: "このチャネルは通知テンプレートを使用しません。使用するのは email と sms だけなので、このテンプレートは送信されません。アプリ内（受信トレイ）の内容は、メールテンプレート（email_template）を作成して通知ステップの template で指定してください。メールと受信トレイの両方がそれを表示します。"
+        message: "通知テンプレートを使用するのは email と sms のチャネルだけなので、その他のチャネルのテンプレートは拒否されます。チャネルを email または sms に設定するか、テンプレートを削除してください。アプリ内（受信トレイ）の内容は、メールテンプレート（email_template）を作成して通知ステップの template で指定してください。メールと受信トレイの両方がそれを表示します。"
       }
     }
   },

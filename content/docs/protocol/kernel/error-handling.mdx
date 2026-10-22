@@ -265,7 +265,7 @@ class — keeps its own code.
 (on `DELETE_RESTRICTED`, `CONCURRENT_UPDATE` and `VALIDATION_FAILED`). The `message` is the
 thrown one and can differ from the flat door's `error`: an unregistered object reads
 `Object 'ghost' not found` here and `Object 'ghost' is not registered` there, and a repeated
-unique value reads the engine's `Duplicate record refused on 'account': …` here, the same
+unique value reads the engine's `Duplicate record refused on 'Account': …` (the object's label) here, the same
 sentence `details.developerMessage` carries, where the flat door's `error` reads
 `A record with this email already exists`.
 

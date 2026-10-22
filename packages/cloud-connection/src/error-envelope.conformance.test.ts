@@ -179,11 +179,13 @@ async function mountCloudConnection(opts: {
     userId?: string;
     resolvesEnvironment?: boolean;
     /**
-     * [#24148] Whether the signed-in caller holds `setup.access`, which the
-     * connection-changing doors demand. Default: yes, so the exits below that
-     * are about something else reach the code they are about.
+     * [#24148, #25119] Whether the signed-in caller holds
+     * `manage_platform_settings`, which the connection-changing doors demand.
+     * Default: yes, so the exits below that are about something else reach the
+     * code they are about. `false` grants `setup.access` alone — the
+     * organization administrator's shape, which the doors refuse.
      */
-    setupAccess?: boolean;
+    platformSettings?: boolean;
 } = {}) {
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
@@ -193,10 +195,14 @@ async function mountCloudConnection(opts: {
             getSession: async () => (opts.userId ? { user: { id: opts.userId }, session: { activeOrganizationId: 'o1' } } : null),
         },
     };
-    const grantRows: Record<string, any[]> = opts.userId && opts.setupAccess !== false
+    const grantRows: Record<string, any[]> = opts.userId
         ? {
             sys_user_permission_set: [{ id: 'ups_1', user_id: opts.userId, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: 'o1' }],
-            sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
+            sys_permission_set: [{
+                id: 'ps_1',
+                name: 'setup_admin',
+                system_permissions: opts.platformSettings === false ? ['setup.access'] : ['setup.access', 'manage_platform_settings'],
+            }],
         }
         : {};
     const objectql = bindCatalogFromTables({ find: async (object: string) => grantRows[object] ?? [] }, grantRows);
@@ -291,16 +297,34 @@ describe('plugin-route door — CloudConnectionPlugin error exits (#9267)', () =
     });
 
     /**
-     * [#24148] The three connection-changing doors refuse a signed-in caller
-     * without `setup.access` with the standard catalog's `PERMISSION_DENIED`,
-     * which `ApiErrorSchema` admits without a registration.
+     * [#24148, #25119] The three connection-changing doors refuse a signed-in
+     * caller without `manage_platform_settings` — `setup.access` alone, the
+     * organization administrator's shape, included — with the standard
+     * catalog's `PERMISSION_DENIED`, which `ApiErrorSchema` admits without a
+     * registration.
      */
     for (const door of ['bind/start', 'bind/poll', 'unbind'] as const) {
-        it(`POST /${door} with a session lacking setup.access → 403 in the declared envelope`, async () => {
-            const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1', setupAccess: false });
+        it(`POST /${door} with a session holding setup.access but not manage_platform_settings → 403 in the declared envelope`, async () => {
+            const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1', platformSettings: false });
             const captured = await driveCloudConnection(routes, `POST ${CC}/${door}`, { body: { device_code: 'dc_1' } });
             expectDeclaredErrorEnvelope(captured, { status: 403, code: 'PERMISSION_DENIED' });
-            expect(captured.body.error.message).toContain('`setup.access`');
+            expect(captured.body.error.message).toContain('`manage_platform_settings`');
+        });
+    }
+
+    /**
+     * Ruling 甲 (#25097), extended to the bind doors (#25113): a
+     * platform-managed runtime (the service key) refuses all three
+     * connection-changing doors with the standard catalog's 409 member, past
+     * the session and capability checks.
+     */
+    for (const door of ['bind/start', 'bind/poll', 'unbind'] as const) {
+        it(`POST /${door} on a platform-managed runtime → 409 in the declared envelope`, async () => {
+            const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1', controlPlaneApiKey: 'svc-key' });
+            expectDeclaredErrorEnvelope(
+                await driveCloudConnection(routes, `POST ${CC}/${door}`, { body: { device_code: 'dc_1' } }),
+                { status: 409, code: 'RESOURCE_CONFLICT' },
+            );
         });
     }
 

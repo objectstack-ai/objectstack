@@ -430,3 +430,40 @@ describe('mail/test action', () => {
     expect(result.message).not.toMatch(/Configuration looks valid|plugin-mail/);
   });
 });
+
+describe('registered email service — isConfigured follows the mail settings', () => {
+  it('answers false on the out-of-the-box boot (LogTransport, mail never configured)', async () => {
+    const { service } = await boot({});
+    expect(transportOf(service)).toBeInstanceOf(LogTransport);
+    expect(service.isConfigured()).toBe(false);
+  });
+
+  it('turns true when a saved SMTP config replaces the LogTransport at runtime', async () => {
+    const { service, settings } = await boot({ provider: { value: 'log', source: 'global' } });
+    expect(service.isConfigured()).toBe(false);
+
+    await settings.save({
+      provider: { value: 'smtp', source: 'global' },
+      smtp_host: { value: 'smtp.live.test', source: 'global' },
+    });
+
+    expect(transportOf(service)).toBeInstanceOf(SmtpTransport);
+    expect(service.isConfigured()).toBe(true);
+  });
+
+  it('stays true across a swap from one live transport to another', async () => {
+    const { service, settings } = await boot({
+      provider: { value: 'smtp', source: 'global' },
+      smtp_host: { value: 'smtp.live.test', source: 'global' },
+    });
+    expect(service.isConfigured()).toBe(true);
+
+    await settings.save({
+      provider: { value: 'resend', source: 'global' },
+      api_key: { value: 're_test_key', source: 'global' },
+    });
+
+    expect(transportOf(service)).toBeInstanceOf(ResendTransport);
+    expect(service.isConfigured()).toBe(true);
+  });
+});

@@ -265,7 +265,9 @@ const CASES: Array<{ path: string; removes: string[] }> = [
         ],
     },
     { path: 'api.enableDiscovery', removes: ['GET /api/v1', 'GET /api/v1/discovery'] },
-    { path: 'api.enableOpenApi', removes: ['GET /api/v1/docs', 'GET /api/v1/openapi.json'] },
+    // [#25104] One route since the `/docs` viewer page was retired; the
+    // switch still gates the document.
+    { path: 'api.enableOpenApi', removes: ['GET /api/v1/openapi.json'] },
     { path: 'api.enableUi', removes: ['GET /api/v1/ui/view/:object/:type'] },
     { path: 'api.enableSearch', removes: ['GET /api/v1/search'] },
 ];

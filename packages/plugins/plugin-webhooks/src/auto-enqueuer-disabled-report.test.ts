@@ -44,6 +44,7 @@ import { MemoryHttpOutbox, MessagingService, type EnqueueHttpInput } from '@obje
 import { DeclaredWebhookSource, declaredWebhookRefId } from './declared-webhooks.js';
 import { SysWebhook } from './sys-webhook.object.js';
 import { WebhookOutboxPlugin, type WebhookOutboxPluginOptions } from './webhook-outbox-plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'my_app_note';
 const HOOK = 'my_app_note_changed';
@@ -166,6 +167,9 @@ async function boot(options: BootOptions) {
     });
     engine.registry.registerObject(SysWebhook as any, 'test');
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     const realtime = options.realtime ? new FakeRealtime() : undefined;
     if (realtime) engine.setRealtimeService(realtime);
 

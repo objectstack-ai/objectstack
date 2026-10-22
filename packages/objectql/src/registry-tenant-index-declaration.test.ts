@@ -149,7 +149,8 @@ describe('#6810 — a registry-backed object reads back valid at both /meta exit
     expect(tenantIndexes(def)).toEqual([]);
     // And the COLUMN is still provisioned either way — that decoupling is
     // older than this fix and must survive it (sudo writers stamp the column
-    // on single-tenant stacks; it just stays NULL).
+    // on single-tenant stacks; org-scoping stamps it on insert under `single`
+    // with the Default Organization, and it is never NULL, ADR-0131 D1).
     expect(def.fields.organization_id).toBeDefined();
   });
 
@@ -167,7 +168,7 @@ describe('#6810 — a registry-backed object reads back valid at both /meta exit
       readonly: true,
       system: true,
       description:
-        'Tenant scope (auto-populated by org-scoping on insert; NULL on single-tenant stacks).',
+        'Tenant scope (stamped on insert by org-scoping; never NULL — a write that names no organization is refused).',
     });
   });
 

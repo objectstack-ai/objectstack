@@ -60,6 +60,7 @@ import { isExitSignal } from '../../utils/format.js';
 import '@objectstack/objectql';
 import '@objectstack/metadata-protocol';
 import '@objectstack/plugin-auth';
+import { relaxTenantColumnsOnFile } from '../../utils/pre-18-store.testkit.js';
 
 type Command = (typeof import('./organization-ownership.js'))['default'];
 let MigrateOrganizationOwnership: Command;
@@ -168,6 +169,10 @@ describe('os migrate organization-ownership on a single-posture database that ho
 
     const stack = await bootStack(stackConfig(), { databaseFile: file });
     await stack.stop();
+    // The rows planted below are an earlier release's, organization-less: its
+    // tenant columns were nullable, which a table this release creates never is
+    // (ADR-0131 D1). The file is relaxed to that release's shape first.
+    await relaxTenantColumnsOnFile(file);
     expect(sql('SELECT COUNT(*) AS n FROM crm_event')).toEqual([{ n: SUBJECTS.length }]);
 
     // What a 17.x install whose seed ran before any organization existed left.

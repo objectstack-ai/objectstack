@@ -3,11 +3,15 @@
 /**
  * #24953 — a CEL slot inside a page component's `properties` over the
  * platform's parse bounds is reported, with `validateExpression`'s bounds
- * verdict, at every door that accepts a page; a WARNING in 18.x (「甲」).
+ * verdict, at every door that accepts a page. #25002 — the finding is an
+ * ERROR: `os validate` / `os build` / `os lint` fail and the page door refuses
+ * the write (the amended 「甲」, record 6303865025).
  *
  * The card's shape is a `page:tabs` item `visibleWhen` of ~390 AST nodes,
  * which parsed through `PageSchema` and drew no finding anywhere while the
  * console faulted on it at every evaluation and drew the tab for everyone.
+ * The door's real save path (422, nothing stored) is pinned in
+ * `@objectstack/metadata-protocol`'s `protocol.runtime-authoring-gate.test.ts`.
  */
 import { validateExpression } from '@objectstack/formula';
 import { PageSchema } from '@objectstack/spec/ui';
@@ -66,15 +70,15 @@ describe('#24953 — the card\'s shape: a `page:tabs` item `visibleWhen` over `m
     const verdict = validateExpression('predicate', OVER_AST_NODES);
     expect(verdict.errors.map((e) => e.code)).toEqual(['cel-too-large']);
     expect(verdict.errors[0]!.params).toMatchObject({ limit: 'maxAstNodes', limitValue: 256 });
-    // Parse acceptance is unchanged by this rule — it is a finding, not a refusal.
+    // Parse acceptance is unchanged by this rule — the refusal is the lint finding's, not the schema's.
     expect(PageSchema.safeParse(tabsPage(OVER_AST_NODES)).success).toBe(true);
   });
 
-  it('is a WARNING naming the field and the bound, at the slot, without echoing the source', () => {
+  it('is an ERROR naming the field and the bound, at the slot, without echoing the source', () => {
     const findings = validatePagePredicateBounds({ pages: [tabsPage(OVER_AST_NODES)] });
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({
-      severity: 'warning',
+      severity: 'error',
       rule: PAGE_PREDICATE_OVER_BUDGET,
       where: 'page "deal_home" · page:tabs',
       path: TAB_PATH,
@@ -82,22 +86,24 @@ describe('#24953 — the card\'s shape: a `page:tabs` item `visibleWhen` over `m
     expect(findings[0]!.message).toContain('`visibleWhen`');
     expect(findings[0]!.message).toContain('`maxAstNodes` budget (platform limit 256)');
     expect(findings[0]!.message).not.toContain('record.f0');
+    // The 18.x warning's forward-looking sentence is gone: the refusal is now.
+    expect(findings[0]!.message).not.toContain('future major');
   });
 
   for (const command of ['validate', 'build', 'lint'] as const) {
-    it(`\`os ${command}\` reports it as a warning, never an error`, () => {
+    it(`\`os ${command}\` fails on it: an error, the only one the page draws`, () => {
       const stack = { pages: [tabsPage(OVER_AST_NODES)] };
       const findings = runAuthoringRules(command, { normalized: stack, parsed: stack });
-      expect(ours(findings).map((f) => [f.severity, f.path])).toEqual([['warning', TAB_PATH]]);
-      expect(findings.filter((f) => f.severity === 'error')).toEqual([]);
+      expect(ours(findings).map((f) => [f.severity, f.path])).toEqual([['error', TAB_PATH]]);
+      expect(findings.filter((f) => f.severity === 'error').map((f) => f.rule)).toEqual([PAGE_PREDICATE_OVER_BUDGET]);
     });
   }
 
-  it('the page publish door carries it on the advisories channel, the build\'s finding verbatim', () => {
+  it('the page publish door refuses it on the errors channel, the build\'s finding verbatim', () => {
     const result = gatePage(tabsPage(OVER_AST_NODES));
     expect(result.rulesRun).toContain('validatePagePredicateBounds');
-    expect(ours(result.errors)).toEqual([]);
-    const atDoor = ours(result.advisories);
+    expect(ours(result.advisories)).toEqual([]);
+    const atDoor = ours(result.errors);
     expect(atDoor.map((f) => f.rule)).toEqual([PAGE_PREDICATE_OVER_BUDGET]);
     const stack = { pages: [tabsPage(OVER_AST_NODES)] };
     const atBuild = ours(runAuthoringRules('build', { normalized: stack, parsed: stack }));
@@ -186,9 +192,9 @@ describe('#24953 — no double report with the visibility family', () => {
 });
 
 describe('#24953 — wiring', () => {
-  it('runs on all three commands as an advisory rule, and at the page door only', () => {
+  it('runs on all three commands as a gating rule, and at the page door only', () => {
     const entry = authoringRulesFor('validate').find((r) => r.name === 'validatePagePredicateBounds');
-    expect(entry?.tier).toBe('advisory');
+    expect(entry?.tier).toBe('gating');
     for (const command of ['build', 'lint'] as const) {
       expect(authoringRulesFor(command).map((r) => r.name)).toContain('validatePagePredicateBounds');
     }

@@ -47,6 +47,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import type { FieldVisibilitySource } from './payload-redaction.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 const asUser = (userId: string) => ({ userId, positions: [], permissions: [] }) as any;
@@ -200,6 +201,9 @@ describe('[#23618] a lookup target\'s title is served from what its reader may r
       engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     for (const id of [RESTRICTED, MASKED, READER, SUBMITTER]) {
       await engine.insert('sys_user', { id, name: id, email: `${id}@example.com` }, { context: SYSTEM } as any);
     }

@@ -28,13 +28,17 @@
  *  - HELD: under both postures, every session door answers `403` with the
  *    gate's `code` and `message`, and no effect fires (no control-plane call,
  *    no credential cleared; no registry, schema, ledger, seed or delete write).
- *  - UN-HELD: the same caller and grants, without a posture, are served.
+ *  - UN-HELD: the same caller and grants, without a posture, are served —
+ *    except the three connection-changing doors (`bind/start`, `bind/poll`,
+ *    `unbind`) on a platform-managed runtime (the service key), which answer
+ *    their own `409` past the gate (ruling 甲, #25097; #25113); the self-hosted
+ *    shape, served by all seven, is read beside it.
  *  - Anonymous is refused `401` as before, and `/status` answers a held
  *    session `200` with its narrowed shape (#24148).
  *
- * Every test user holds `setup.access`, so a refusal below is the gate's alone
- * (#24148 makes three of the seven doors demand it; its own pins are
- * `cloud-connection-setup-access.pin.test.ts`).
+ * Every test user holds `manage_platform_settings`, so a refusal below is the
+ * gate's alone (#24148 and ruling 乙, #25119, make three of the seven doors
+ * demand it; its own pins are `cloud-connection-setup-access.pin.test.ts`).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -155,15 +159,23 @@ const CC_SESSION_DOORS = [
     { route: `GET ${CC}/org-packages`, url: `${ORIGIN}${CC}/org-packages`, body: {} },
 ] as const;
 
-async function mountCloudConnection(mode: 'single' | 'multi') {
+/**
+ * `serviceKey` is the plugin's `controlPlaneApiKey`. The default, a key, is the
+ * cloud-hosted (platform-managed) shape every case below has always run in;
+ * `''` (no key, and `OS_CLOUD_API_KEY` not consulted) is the self-hosted shape,
+ * whose credential is the stored device token — the one shape in which
+ * `unbind` still disconnects (ruling 甲, #25097).
+ */
+async function mountCloudConnection(mode: 'single' | 'multi', serviceKey = 'svc-key') {
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
     const auth = sessionAuth();
     const credentialPath = join(dir, 'cloud-connection.json');
     const store = new ConnectionCredentialStore(credentialPath);
     store.write({ runtimeToken: 'oscc_pin', runtimeId: 'rt_1', environmentId: 'env-1' });
-    // [#24148] The grants every test user holds (`setup.access` among them),
-    // read by the three connection-changing doors through the shared resolver.
+    // [#24148, #25119] The grants every test user holds
+    // (`manage_platform_settings` among them), read by the three
+    // connection-changing doors through the shared resolver.
     const rows = grantRows();
     const objectql = bindCatalogFromTables({ find: async (object: string) => rows[object] ?? [] }, rows);
     const envKernelServices: Record<string, unknown> = { auth, objectql };
@@ -194,7 +206,7 @@ async function mountCloudConnection(mode: 'single' | 'multi') {
     }));
     await new CloudConnectionPlugin({
         controlPlaneUrl: 'http://cloud.test',
-        controlPlaneApiKey: 'svc-key',
+        controlPlaneApiKey: serviceKey,
         credentialPath,
         ...(mode === 'single' ? { singleEnvironment: true, environmentId: 'env-1' } : {}),
     }).start(ctx as any);
@@ -211,7 +223,7 @@ describe('ADR-0069 at CloudConnectionPlugin', () => {
         expect(keys.filter((k) => k !== `GET ${CC}/status`).sort()).toEqual(CC_SESSION_DOORS.map((d) => d.route).sort());
         // [#24148] `/status` reads the session only to decide what it serves: a
         // held session is answered, with the shape served to a caller without
-        // `setup.access` — never refused.
+        // `manage_platform_settings` — never refused.
         const res = await rawApp.routes.get(`GET ${CC}/status`)!(makeC(`${ORIGIN}${CC}/status`, 'u_held_pw'));
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expect(Object.keys(res.payload.data).sort()).toEqual(['bound', 'provider', 'runtimeId']);
@@ -232,11 +244,39 @@ describe('ADR-0069 at CloudConnectionPlugin', () => {
         }
     }
 
-    it('UN-HELD: the same caller without a posture is served by all seven doors', async () => {
+    it('UN-HELD: the same caller without a posture is served by all seven doors (self-hosted: the stored device credential)', async () => {
+        const { rawApp, fetchCalls } = await mountCloudConnection('single', '');
+        // `unbind` really disconnects here, clearing the stored credential the
+        // install-side doors present — so it is driven last.
+        const UNBIND = `POST ${CC}/unbind`;
+        const lastUnbind = [...CC_SESSION_DOORS.filter((d) => d.route !== UNBIND), ...CC_SESSION_DOORS.filter((d) => d.route === UNBIND)];
+        expect(lastUnbind).toHaveLength(CC_SESSION_DOORS.length);
+        for (const door of lastUnbind) {
+            const before = fetchCalls.length;
+            const res = await rawApp.routes.get(door.route)!(makeC(door.url, 'u_member', door.body));
+            expect(res.status, `${door.route}: ${JSON.stringify(res.payload)}`).toBe(200);
+            expect(fetchCalls.length, `${door.route} did not reach the control plane`).toBeGreaterThan(before);
+        }
+    });
+
+    it('UN-HELD (platform-managed: the service key): four doors are served, and the three connection-changing doors are the platform-managed 409 — not the gate', async () => {
+        // The shape the HELD cases above run in. Ruling 甲 (#25097) refuses
+        // `unbind` here for every caller, and #25113 refuses `bind/start` and
+        // `bind/poll` alike, so those doors' control is that refusal rather
+        // than a 200: still past the gate (not its 403), and still before any
+        // control-plane call.
+        const MANAGED_REFUSED = [`POST ${CC}/bind/start`, `POST ${CC}/bind/poll`, `POST ${CC}/unbind`];
+        expect(CC_SESSION_DOORS.filter((d) => MANAGED_REFUSED.includes(d.route))).toHaveLength(3);
         const { rawApp, fetchCalls } = await mountCloudConnection('single');
         for (const door of CC_SESSION_DOORS) {
             const before = fetchCalls.length;
             const res = await rawApp.routes.get(door.route)!(makeC(door.url, 'u_member', door.body));
+            if (MANAGED_REFUSED.includes(door.route)) {
+                expect(res.status, `${door.route}: ${JSON.stringify(res.payload)}`).toBe(409);
+                expect(res.payload?.error?.code, door.route).toBe('RESOURCE_CONFLICT');
+                expect(fetchCalls.length, `${door.route} reached the control plane`).toBe(before);
+                continue;
+            }
             expect(res.status, `${door.route}: ${JSON.stringify(res.payload)}`).toBe(200);
             expect(fetchCalls.length, `${door.route} did not reach the control plane`).toBeGreaterThan(before);
         }
@@ -270,7 +310,8 @@ const LEDGER_FILE = 'com.acme.gated.json';
 /**
  * Every test user holds the authoring capability, so a refusal below is the gate's alone:
  * the `admin_full_access` grant owned by the Default Organization, which applies with no
- * active organization.
+ * active organization. Read by both plugins above: the install-local doors need
+ * `manage_metadata`, the Cloud Connection doors `manage_platform_settings` (#25119).
  */
 function grantRows(): Record<string, any[]> {
     return {
@@ -284,7 +325,7 @@ function grantRows(): Record<string, any[]> {
         sys_user_permission_set: Object.keys(POSTURES).map((id, i) => ({
             id: `ups${i}`, user_id: id, permission_set_id: 'ps1', permission_set: 'admin_full_access', organization_id: 'org_default',
         })),
-        sys_permission_set: [{ id: 'ps1', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] }],
+        sys_permission_set: [{ id: 'ps1', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access', 'manage_platform_settings'] }],
     };
 }
 

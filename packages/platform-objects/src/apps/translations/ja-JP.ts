@@ -90,7 +90,6 @@ export const jaJP: TranslationData = {
         nav_settings_knowledge: { label: 'ナレッジ' },
         nav_settings_feature_flags: { label: '機能フラグ' },
         nav_notification_preferences: { label: '通知設定' },
-        nav_notification_subscriptions: { label: '通知購読' },
         nav_notification_templates: { label: '通知テンプレート' },
 
         nav_sessions: { label: 'セッション' },

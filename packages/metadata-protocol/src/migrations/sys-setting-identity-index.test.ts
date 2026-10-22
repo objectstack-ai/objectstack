@@ -43,10 +43,19 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
      * declaration `{ fields: ['namespace','key','scope','user_id'], unique:
      * 'organization' }` after #8555 — captured by running the real driver over
      * the real declaration, the same way the sibling suites source their
-     * fixtures. It is the NULL-safe-on-organization, NULL-DISTINCT-on-user_id
+     * fixtures — re-measured at ADR-0131 D1, which keys the organization column
+     * PLAIN (the tenant column is NOT NULL). It is the NULL-DISTINCT-on-user_id
      * index this migration exists to replace, and what it must not destroy.
      */
     const DECLARED_INDEX_DDL =
+        'CREATE UNIQUE INDEX `uniq_sys_setting_organization_id_namespace_key_scope_user_id` ' +
+        'on `sys_setting` (`organization_id`, `namespace`, `key`, `scope`, `user_id`)';
+    /**
+     * What the driver emitted for the same declaration before ADR-0131 D1:
+     * ADR-0120 D3's NULL-safe organization key part. A store an 18.0 release
+     * built still carries it under the declared name.
+     */
+    const DECLARED_INDEX_DDL_18_0 =
         'CREATE UNIQUE INDEX `uniq_sys_setting_organization_id_namespace_key_scope_user_id` ' +
         "ON `sys_setting` (COALESCE(`organization_id`, '__global__'), `namespace`, `key`, `scope`, `user_id`)";
 
@@ -149,11 +158,24 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
         expect(dup.error).toContain(SYS_SETTING_IDENTITY_INDEX_NAME);
     });
 
-    it('AFTER: two platform defaults on the global layer are refused', async () => {
+    it('AFTER: rows with NO organization are exempt — the organization key part is plain (ADR-0131 D1)', async () => {
+        // The platform layer lives in `sys_platform_setting` since the
+        // organization-ownership ceremony (ADR-0131 D7), and the tenant column
+        // is NOT NULL, so this index keys `organization_id` plain: SQL's
+        // NULL-distinct UNIQUE leaves the NULL-organization rows a pre-18 store
+        // may still hold unconstrained, as the driver's own index does.
         await ensureSysSettingIdentityIndex(exec);
 
         expect(insert('g1', { scope: 'global', namespace: 'mail', key: 'smtp_host' }).ok).toBe(true);
-        expect(insert('g2', { scope: 'global', namespace: 'mail', key: 'smtp_host' }).ok).toBe(false);
+        expect(insert('g2', { scope: 'global', namespace: 'mail', key: 'smtp_host' }).ok).toBe(true);
+        expect(insert('n1', { namespace: 'mail', key: 'smtp_host' }).ok).toBe(true);
+        expect(insert('n2', { namespace: 'mail', key: 'smtp_host' }).ok).toBe(true);
+        // Control: the same tenant-scope pair, NULL user_id, inside ONE
+        // organization is refused — the user_id fold is what this index adds.
+        expect(insert('o1', { organization_id: 'org_jia', namespace: 'mail', key: 'smtp_host' }).ok).toBe(true);
+        const dup = insert('o2', { organization_id: 'org_jia', namespace: 'mail', key: 'smtp_host' });
+        expect(dup.ok).toBe(false);
+        expect(dup.error).toContain(SYS_SETTING_IDENTITY_INDEX_NAME);
     });
 
     it('AFTER (anti-vacuity): the key stays PER-ORGANIZATION — two organizations may hold it', async () => {
@@ -209,6 +231,21 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
         expect(indexNames()).toEqual([SYS_SETTING_IDENTITY_INDEX_NAME]);
     });
 
+    it('an 18.0 index under the declared name (COALESCE organization) is rebuilt to the plain key', async () => {
+        // ADR-0131 D1: a store an earlier release built carries the NULL-safe
+        // organization key part; the run replaces the definition, so the key
+        // converges on the driver's plain form.
+        db.exec(`DROP INDEX ${SYS_SETTING_IDENTITY_INDEX_NAME}`);
+        db.exec(DECLARED_INDEX_DDL_18_0);
+
+        expect(await ensureSysSettingIdentityIndex(exec)).toEqual({ status: 'created' });
+        expect(indexDdl(SYS_SETTING_IDENTITY_INDEX_NAME)).toBe(
+            buildSysSettingIdentityIndexSql(SYS_SETTING_IDENTITY_INDEX_NAME).replace('IF NOT EXISTS ', ''),
+        );
+        expect(indexDdl(SYS_SETTING_IDENTITY_INDEX_NAME)).not.toMatch(/__global__/);
+        expect(indexNames()).toEqual([SYS_SETTING_IDENTITY_INDEX_NAME]);
+    });
+
     it('leaves no probe index behind', async () => {
         await ensureSysSettingIdentityIndex(exec);
         expect(indexDdl(SYS_SETTING_IDENTITY_PROBE_INDEX_NAME)).toBeUndefined();
@@ -225,7 +262,7 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
         insert('a', { organization_id: 'org_jia' });
         await ensureSysSettingIdentityIndex(exec);
 
-        // ADR-0120 D3's invariant: only the INDEX folds NULL into a bucket. A
+        // ADR-0120 D3's invariant, kept for `user_id`: only the INDEX folds NULL into a bucket. A
         // sentinel that reached storage would be a silent data rewrite.
         expect(rowCount()).toBe(1);
         expect(
@@ -308,9 +345,11 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
                 Record<string, unknown>
             >;
 
+            // `organization_id` is a plain key part since ADR-0131 D1, so it is
+            // projected bare under its own name; only `user_id` is folded.
             expect(rows).toEqual([
                 {
-                    organization_id_key: 'org_jia',
+                    organization_id: 'org_jia',
                     namespace: 'lifecycle',
                     key: 'retention_overrides',
                     scope: 'tenant',
@@ -318,6 +357,17 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
                     duplicate_rows: 2,
                 },
             ]);
+        });
+
+        it('does not list organization-less twins: the plain organization key part never refuses them (ADR-0131 D1)', () => {
+            // A pre-18 table's rows with no organization share a NULL key part,
+            // so the index exempts them; listing them would send an operator
+            // after duplicates the constraint does not see.
+            expect(insert('n1', { organization_id: null, scope: 'tenant' }).ok).toBe(true);
+            expect(insert('n2', { organization_id: null, scope: 'tenant' }).ok).toBe(true);
+            const rows = db.prepare(buildSysSettingDuplicateProbeSql()).all() as Array<Record<string, unknown>>;
+            expect(rows.map((r) => r.organization_id)).toEqual(['org_jia']);
+            db.prepare("DELETE FROM sys_setting WHERE id IN ('n1', 'n2')").run();
         });
 
         it('keeps refusing until an operator resolves it — and then converges', async () => {
@@ -333,14 +383,15 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
     // ─────────────────────────────────────────────────────────────────────────
 
     describe('the statements', () => {
-        it('folds exactly the two nullable key columns, with the precedents’ sentinels', () => {
-            // Both literals are load-bearing and neither is this module's to
-            // choose: '__global__' is ADR-0120 D3 / `SqlDriver.GLOBAL_TENANT`,
-            // and '' is `ensureOverlayIndex`'s spelling for a non-tenant
-            // nullable discriminator. Editing either re-partitions the index.
-            expect(SYS_SETTING_NULL_SENTINELS).toEqual({ organization_id: '__global__', user_id: '' });
+        it('folds exactly the one nullable non-tenant key column, with the precedent’s sentinel', () => {
+            // '' is `ensureOverlayIndex`'s spelling for a non-tenant nullable
+            // discriminator, and not this module's to choose: editing it
+            // re-partitions the index. `organization_id` takes no sentinel since
+            // ADR-0131 D1 — the tenant column is NOT NULL and the driver keys it
+            // plain, so ADR-0120 D3's '__global__' fold is gone from this key.
+            expect(SYS_SETTING_NULL_SENTINELS).toEqual({ user_id: '' });
             expect(sysSettingIdentityKeyParts()).toEqual([
-                "COALESCE(organization_id, '__global__')",
+                'organization_id',
                 'namespace',
                 'key',
                 'scope',
@@ -362,7 +413,7 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
             expect(buildSysSettingIdentityIndexSql(SYS_SETTING_IDENTITY_INDEX_NAME)).toBe(
                 'CREATE UNIQUE INDEX IF NOT EXISTS ' +
                     'uniq_sys_setting_organization_id_namespace_key_scope_user_id ON sys_setting ' +
-                    "(COALESCE(organization_id, '__global__'), namespace, key, scope, COALESCE(user_id, ''))",
+                    "(organization_id, namespace, key, scope, COALESCE(user_id, ''))",
             );
             expect(buildSysSettingIdentityIndexSql(SYS_SETTING_IDENTITY_INDEX_NAME)).not.toMatch(/where/i);
         });
@@ -390,10 +441,13 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
             // Every folded column is projected through its OWN coalesce, never
             // bare: PostgreSQL rejects a bare projection of a column that appears
             // in GROUP BY only inside an expression (#6772), and this query has
-            // to be legal on both dialects that can build the index.
-            expect(sql).toContain("COALESCE(organization_id, '__global__') AS organization_id_key");
+            // to be legal on both dialects that can build the index. A PLAIN key
+            // part (`organization_id` since ADR-0131 D1) is grouped bare, so it
+            // is projected bare — and never through a coalesce it is not keyed by.
             expect(sql).toContain("COALESCE(user_id, '') AS user_id_key");
-            expect(sql).not.toMatch(/SELECT organization_id,/);
+            expect(sql).not.toMatch(/SELECT user_id,|, user_id,/);
+            expect(sql).toMatch(/^SELECT organization_id, /);
+            expect(sql).not.toContain('__global__');
         });
 
         // ─────────────────────────────────────────────────────────────────────
@@ -410,20 +464,22 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
         // ─────────────────────────────────────────────────────────────────────
         it('the MySQL spelling quotes EVERY identifier, and leaves the bare one untouched', () => {
             expect(buildSysSettingDuplicateProbeSqlMysql()).toBe(
-                'SELECT COALESCE(`organization_id`, \'__global__\') AS `organization_id_key`, ' +
+                'SELECT `organization_id`, ' +
                     '`namespace`, `key`, `scope`, COALESCE(`user_id`, \'\') AS `user_id_key`, ' +
                     'COUNT(*) AS `duplicate_rows` FROM `sys_setting` ' +
-                    'GROUP BY COALESCE(`organization_id`, \'__global__\'), `namespace`, `key`, ' +
+                    'WHERE `organization_id` IS NOT NULL AND `namespace` IS NOT NULL AND `key` IS NOT NULL AND `scope` IS NOT NULL ' +
+                    'GROUP BY `organization_id`, `namespace`, `key`, ' +
                     '`scope`, COALESCE(`user_id`, \'\') HAVING COUNT(*) > 1',
             );
             // The bare builder is the package's existing surface and several
             // callers execute it on SQLite/PostgreSQL — adding a variant must
             // not have moved it.
             expect(buildSysSettingDuplicateProbeSql()).toBe(
-                "SELECT COALESCE(organization_id, '__global__') AS organization_id_key, " +
+                'SELECT organization_id, ' +
                     "namespace, key, scope, COALESCE(user_id, '') AS user_id_key, " +
                     'COUNT(*) AS duplicate_rows FROM sys_setting ' +
-                    "GROUP BY COALESCE(organization_id, '__global__'), namespace, key, scope, " +
+                    'WHERE organization_id IS NOT NULL AND namespace IS NOT NULL AND key IS NOT NULL AND scope IS NOT NULL ' +
+                    'GROUP BY organization_id, namespace, key, scope, ' +
                     "COALESCE(user_id, '') HAVING COUNT(*) > 1",
             );
             // No identifier left bare — not a list of MySQL's reserved words,
@@ -458,7 +514,7 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
             expect(mysql).toEqual(bare);
             expect(bare).toEqual([
                 {
-                    organization_id_key: 'org_jia',
+                    organization_id: 'org_jia',
                     namespace: 'lifecycle',
                     key: 'retention_overrides',
                     scope: 'tenant',

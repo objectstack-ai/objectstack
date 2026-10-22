@@ -2291,7 +2291,7 @@ const ObjectSchemaBase = strictObject(
    *   DATA**: the RBAC link tables (`sys_user_position`,
    *   `sys_user_permission_set`, `sys_position_permission_set`, governed by
    *   the `DelegatedAdminGate`), `sys_user_preference`, the messaging config
-   *   grids (`sys_notification_subscription`, `_template`, `_preference`). Two
+   *   grids (`sys_notification_template`, `_preference`). Two
    *   boundaries define it: the SCHEMA is the platform's (versioned with the
    *   release, not tenant-modelled — that is `platform`), while the DATA is the
    *   admin's or the user's, written through a governed path (not the engine's —
@@ -2496,9 +2496,10 @@ const ObjectSchemaBase = strictObject(
    *
    *   - `organization_id` — `lookup → sys_organization`. The COLUMN is
    *     provisioned unconditionally (subject to the opt-outs below); only its
-   *     DB index is gated on multi-tenant mode. It stays NULL on single-tenant
-   *     stacks and is auto-stamped on insert by `@objectstack/organizations`
-   *     (the `org-scoping` service) in multi-tenant mode.
+   *     DB index is gated on multi-tenant mode. Org-scoping stamps it on
+   *     insert (`@objectstack/organizations`, the `org-scoping` service, in
+   *     multi-tenant mode; under `single` with the Default Organization), and
+   *     it is never NULL (ADR-0131 D1).
    *   - Audit columns — `created_at`, `created_by`, `updated_at`, `updated_by`
    *     (`readonly` + `system`). Gated by `audit` below.
    *   - `owner_id` — `lookup → sys_user`, auto-provisioned on user-authored

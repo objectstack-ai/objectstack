@@ -35,6 +35,7 @@ import { createRestApiPlugin } from '@objectstack/runtime';
 import { ObjectStackClient } from './index';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /**
  * ⚠️ [#18070] The authz objects every authenticated request in this file
@@ -210,6 +211,9 @@ describe('data.batchTransaction (live Hono, #1604)', () => {
             ql.registerObject(o.def, o.owner);
             await ql.syncObjectSchema(o.def.name);
         }
+        // A real `single` install's Default Organization: the writes below derive
+        // it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(ql);
 
         const httpServer = kernel.getService<IHttpServer>('http.server');
         baseUrl = `http://localhost:${httpServer.getPort!()}`;

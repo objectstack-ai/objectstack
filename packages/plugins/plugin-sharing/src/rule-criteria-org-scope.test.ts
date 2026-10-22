@@ -77,6 +77,22 @@ import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import type { DeclaredSharingRule } from './declared-sharing-rules.js';
 
+/**
+ * Return driver-created tables to a pre-18 store's shape, tenant column
+ * nullable, through the driver's own drift apply door (`relax_not_null`).
+ * The organization-less rows this file seeds exist only on such a store:
+ * ADR-0131 D1 makes a fresh tenant column NOT NULL.
+ */
+async function relaxTenantColumns(driver: SqlDriver, tables: readonly string[]): Promise<void> {
+  for (const table of tables) {
+    const op = { type: 'relax_not_null', table, column: 'organization_id' };
+    const { applied } = await driver.applyMigrationEntries([
+      { kind: 'nullability_mismatch', remoteName: table, table, column: 'organization_id', category: 'needs_confirm', op } as never,
+    ]);
+    if (applied.length !== 1) throw new Error(`relaxTenantColumns: ${table} was not relaxed`);
+  }
+}
+
 const OBJECT = 'os10119_deal';
 
 const DEAL_FIELDS: Record<string, Record<string, unknown>> = {
@@ -227,6 +243,7 @@ async function boot(posture?: 'single' | 'isolated' | 'group', opts: BootOptions
     { name: 'sys_record_share', fields: SHARE_FIELDS } as never,
     { name: 'sys_sharing_rule', fields: RULE_FIELDS } as never,
   ]);
+  await relaxTenantColumns(driver, [OBJECT, 'sys_record_share', 'sys_sharing_rule']);
 
   // Seeded through the driver, not the engine: the fixture is the DATA at
   // rest, and routing it through the engine's write path would drag the

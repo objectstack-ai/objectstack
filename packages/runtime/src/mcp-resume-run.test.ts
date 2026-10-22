@@ -491,3 +491,42 @@ describe('MCP resumeRun — (d) the engine\'s answers match the REST resume door
         });
     }
 });
+
+describe('MCP resumeRun — (e) the refusal a flow node met crosses the bridge as the REST door serves it (#24914)', () => {
+    // Ruling B′ on #24914: the run's `innerRefusal` rides the FLOW_FAILED
+    // details and its producer-marked `userMessage` the envelope's top level.
+    // The bridge builds its error through the same `deps.error`, so both must
+    // reach the thrown error exactly as the REST resume door answers them —
+    // `details.innerRefusal` in `details`, `userMessage` as the error's own
+    // `userMessage` field (the channel `declaredUserMessage` reads).
+    const INNER = { code: 'UNIQUE_VIOLATION', message: "Duplicate record refused on 'crm_task'" };
+    const USER_TEXT = 'A follow-up with this subject already exists.';
+
+    it('innerRefusal and userMessage: same values on both doors, the message unchanged', async () => {
+        const h = makeHarness();
+        const runId = await startPaused(h);
+        h.engine.resume.mockResolvedValue({
+            success: false, status: 'stranded', error: "Node 'mk' failed: create_record(crm_task) failed: boom",
+            innerRefusal: INNER, userMessage: USER_TEXT,
+        });
+
+        let thrown: any;
+        try {
+            await h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'x' } });
+        } catch (err) {
+            thrown = err;
+        }
+        const rest = await h.dispatcher.handleAutomation(
+            `schedule_followup/runs/${runId}/resume`, 'POST', { inputs: { subject: 'x' } }, h.ctxFor('u1'),
+        );
+
+        expect(thrown?.code).toBe('FLOW_FAILED');
+        expect(thrown?.status).toBe(400);
+        expect(rest.response?.status).toBe(400);
+        expect(thrown?.details?.innerRefusal).toEqual(INNER);
+        expect(thrown?.details?.innerRefusal).toEqual(rest.response?.body?.error?.details?.innerRefusal);
+        expect(thrown?.userMessage).toBe(USER_TEXT);
+        expect(thrown?.userMessage).toBe(rest.response?.body?.error?.userMessage);
+        expect(thrown?.message).toBe("Node 'mk' failed: create_record(crm_task) failed: boom");
+    });
+});

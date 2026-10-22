@@ -103,6 +103,7 @@
  *   pages.<page>.label / .description
  *   pages.<page>.title / .subtitle   (from the page's `page:header` component)
  *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
+ *   pages.<page>.components.<tabsId>.items.<value>.label  (a `page:tabs` item label)
  *   flows.<flow>.label
  *   flows.<flow>.screens.<node_id>.title                       (#7646 / #11287)
  *   flows.<flow>.screens.<node_id>.description                 (#22507)
@@ -112,6 +113,7 @@
  *   flows.<flow>.screens.<node_id>.fields.<field>.options.<value>   (#22507)
  *   flows.<flow>.successMessage / .errorMessage                (#22507)
  *   flows.<flow>.refusals.<node_id>.message                    (#22450)
+ *   flows.<flow>.approvals.<node_id>.label                     (#24916)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
@@ -137,12 +139,15 @@ import {
   FLOW_SCREEN_COPY_KEYS,
   FLOW_SCREEN_FIELD_COPY_KEYS,
   FLOW_TERMINAL_MESSAGE_KEYS,
+  PAGE_TABS_COMPONENT_TYPE,
   globalFilterKey,
+  pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
 import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
+import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
 import { authorWarnedProperties, walkPageComponents } from '@objectstack/lint';
 import { collectFilledFromHashes } from '@objectstack/platform-objects/apps';
@@ -419,6 +424,39 @@ function pushViewEntries(out: ExpectedEntry[], objectName: string, viewName: str
   pushOptional(out, [...root, 'description'], view?.description, 'view', { objectName });
   pushViewEmptyState(out, root, view, objectName);
   pushBulkActionDefs(out, root, view, objectName);
+}
+
+/**
+ * Emit `_views.<view>.title` for every FORM view a view container serves —
+ * each `formViews.<key>` entry and the default `form` — the key
+ * `translateView` overlays a form's `title` (`FormViewSchema.title`) from.
+ *
+ * **The key is the composer's, asked, never re-derived.** A container form is
+ * served as the item `expandViewContainer` expands it to, and `translateView`
+ * keys its title by that item's registry name with the object prefix
+ * stripped: `formViews.<key>` is `<key>` (renamed on a collision, e.g.
+ * `default_2` beside a default list), the default `form` is its `name` or
+ * `form`. Reading the expanded items is the same discipline
+ * {@link defaultListViewKey} keeps for the default list, so the key written
+ * here is the key the runtime reads.
+ *
+ * **Title only.** The other `_views` tails stay unemitted for a form: a
+ * container's form entry carries no `label`, and its `description` is not
+ * overlaid by anything a form renders. A form that authors no title still
+ * records the key (`pushOptional`), so the coverage gate notices a bundle
+ * that translates one the source never wrote.
+ */
+function pushContainerFormTitles(out: ExpectedEntry[], containerObject: string, container: any): void {
+  if (!container?.form && !container?.formViews) return;
+  const prefix = `${containerObject}.`;
+  for (const item of expandViewContainer(containerObject, container)) {
+    if (item.viewKind !== 'form') continue;
+    const key = item.name.startsWith(prefix) ? item.name.slice(prefix.length) : item.name;
+    const config = item.config as { title?: unknown } | undefined;
+    pushOptional(out, ['objects', containerObject, '_views', key, 'title'], config?.title, 'view', {
+      objectName: containerObject,
+    });
+  }
 }
 
 /**
@@ -1169,6 +1207,22 @@ function emitPageComponentCopy(out: ExpectedEntry[], page: any, name: string): v
         // records nothing (#14749).
         pushEntry(out, ['pages', name, 'components', id as string, key], value, 'page');
       }
+      // A `page:tabs` component's tab labels, keyed by each item's `value`
+      // under the tabs component's id — the key `translatePage` reads. An
+      // item without a `value` gets no slot: its renderer token is
+      // index-derived, and an array index is never a bundle key (#14749).
+      if (component.type === PAGE_TABS_COMPONENT_TYPE && Array.isArray(props.items)) {
+        for (const item of props.items as unknown[]) {
+          const value = pageTabItemKey(item);
+          if (value === undefined) continue;
+          pushEntry(
+            out,
+            ['pages', name, 'components', id as string, 'items', value, 'label'],
+            (item as Record<string, unknown>).label,
+            'page',
+          );
+        }
+      }
     }
     return component;
   });
@@ -1315,9 +1369,11 @@ export function collectExpectedEntries(
   // `i18n/missing-view` had zero producers repo-wide while the ratchet
   // reported green (#4123).
   //
-  // `formViews` stays uncovered: form views have no counterpart in the
-  // `viewLabel` / `_views.*` resolver convention, so emitting keys for them
-  // would expect translations nothing reads.
+  // A container's form views (`formViews.*`, the default `form`) emit one
+  // `_views` tail, `title` — the form heading `translateView` overlays (see
+  // `pushContainerFormTitles`). Their `label` / `description` stay
+  // unemitted: a container form entry carries no label, and nothing a form
+  // renders reads a `_views` description.
   const views: any[] = Array.isArray(config?.views) ? config.views : [];
   for (const view of views) {
     const containerObject = viewObjectName(view);
@@ -1325,8 +1381,16 @@ export function collectExpectedEntries(
 
     if (view.name) {
       pushViewEntries(out, containerObject, view.name, view);
+      // A `viewKind: 'form'` item carries its form under `config`, title included.
+      if (view.viewKind === 'form' && view.config && typeof view.config === 'object') {
+        pushOptional(out, ['objects', containerObject, '_views', view.name, 'title'], view.config.title, 'view', {
+          objectName: containerObject,
+        });
+      }
       continue;
     }
+
+    pushContainerFormTitles(out, containerObject, view);
 
     // The container's default list, keyed exactly as the runtime registry keys
     // it — see `defaultListViewKey`. `undefined` means the container declares
@@ -1848,18 +1912,28 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
     // by the schema, so this is authored text in practice; `pushOptional`
     // keeps a label-less flow from seeding an empty string anyway.
     //
-    // Demanded only for a flow with a `screen` node, at any depth of the same
-    // node universe the screens walk below reads. The predicate mirrors the one
-    // reader of the key: the console's `FlowRunner` names the flow by it, in
-    // its header and its completion toast, and the runner opens only on a run
-    // paused at a screen. A flow that can never pause there (record-triggered,
-    // scheduled, an API flow with no screen) has no surface that shows its
-    // translated label, so demanding one would ask an author for a string that
-    // is stored and never read. When a reader of a non-screen flow's label
-    // lands (a run-result toast, say), this predicate widens in the same change
-    // as that reader.
+    // Demanded for a flow with a `screen` node or an `approval` node, at any
+    // depth of the same node universe the walks below read. The predicate
+    // mirrors the two readers of the key, and nothing wider:
+    //
+    // - the console's `FlowRunner` names the flow by it, in its header and its
+    //   completion toast, and the runner opens only on a run paused at a screen;
+    // - [#24916] the approvals door names a request's flow by it in the
+    //   reader's locale (`plugin-approvals` `reader-locale-labels.ts`, the
+    //   inbox, the record's approval panel and the request page), and a request
+    //   exists only where an `approval` node opened one.
+    //
+    // A flow with neither (record-triggered, scheduled or an API flow that
+    // only does work) has no surface that shows its translated label: the
+    // console's launch hosts toast the action's copy or the flow's own
+    // `successMessage` / `errorMessage`, never its label. Demanding one would
+    // ask an author for a string that is stored and never read, so `Flow.label`
+    // being required by the schema is not the test. When a reader of such a
+    // flow's label lands, this predicate widens in the same change as that
+    // reader.
     const hasScreen = nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE);
-    if (hasScreen) {
+    const approvalNodes = nodes.filter((node) => node && typeof node === 'object' && node.type === APPROVAL_NODE_TYPE);
+    if (hasScreen || approvalNodes.length > 0) {
       pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
     }
 
@@ -1945,6 +2019,23 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
       if (!nodeId) continue;
       pushOptional(out, ['flows', flowName, 'refusals', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
+    }
+
+    // [#24916] `flows.<flow>.approvals.<node_id>.label` — an `approval` node's
+    // step label, the name its request shows the submitter and the approvers.
+    // The approvals door reads that key in the reader's locale for the
+    // request's `current_step`, which is the node's `FlowNode.id`, and its step
+    // progress names every approval step the same way; the stored
+    // `current_step_label` is the authored `FlowNode.label` the seed carries.
+    // The key's one leaf is `label` because the node config declares no
+    // person-facing heading of its own (`translation.zod.ts`, `approvals`).
+    // Same node universe as the walks above, so the walk reaches every id
+    // `os validate` accepts the key for.
+    for (const node of approvalNodes) {
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      // No id, no key: the request's `current_step` could not name the node.
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'approvals', nodeId, 'label'], node.label, 'flow', scope);
     }
   }
 }

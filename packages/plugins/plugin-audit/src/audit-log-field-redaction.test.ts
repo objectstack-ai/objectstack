@@ -48,6 +48,7 @@ import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { redactAuditLogRows } from './audit-log-field-redaction.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const LEDGER = 'sys_audit_log';
 const ITEM = 'alr_item';
@@ -155,6 +156,9 @@ describe('[#21155] sys_audit_log before/after snapshots are served through the s
     engine.registerDriver(driver, true);
     engine.registry.registerObject(itemObject as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     // Every record-write row below is written by the real audit writer's CRUD mirror.
     ids.live = (await engine.insert(

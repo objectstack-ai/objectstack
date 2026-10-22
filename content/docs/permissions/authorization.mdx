@@ -133,9 +133,10 @@ implementation detail:
    deployment's **configured administrator list** — an address declared in
    `OS_PLATFORM_OWNER_EMAIL`, matched against the caller's own stored and
    **email-verified** `sys_user` row — is sufficient under every posture. An
-   **unscoped `admin_full_access` grant** row is sufficient only under
-   `single`; under the walled postures (`group` / `isolated`) it is no longer
-   an anchor — the set it names still grants what any held set grants, but it
+   **`admin_full_access` grant owned by the Default Organization** is
+   sufficient only under `single`; a grant owned by no organization anchors
+   nothing in any posture, and under the walled postures (`group` /
+   `isolated`) no grant is an anchor — the set it names still grants what any held set grants, but it
    confers no `PLATFORM_ADMIN` standing, so there standing comes from
    configuration alone. See
    [who holds `admin_full_access`](/docs/permissions/permission-sets#built-in-permission-sets)
@@ -361,7 +362,7 @@ a row outside its window simply stops resolving — in `resolveAuthzContext`,
 the explain engine, sharing-rule position expansion, and (transitively) the
 delegated-admin gate's held-scope resolution. No background cleanup job is
 involved (ADR-0049); the clock is checked on every resolution. An expired
-unscoped `admin_full_access` grant no longer derives `platform_admin` — a
+`admin_full_access` grant no longer derives `platform_admin` — a
 statement about the *grant* anchor. The configured-administrator anchor is not
 a stored grant row at all, so it carries no validity window and nothing here
 dates it; it is revoked by changing the configuration.
@@ -450,7 +451,7 @@ high-privilege gate runs on the definition each time it is derived. See
 
 - A deactivated **permission set** contributes nothing: not its name, not its
   `system_permissions`, not its `tab_permissions`. As with an expired grant, a
-  deactivated unscoped `admin_full_access` no longer derives `platform_admin`
+  deactivated `admin_full_access` no longer derives `platform_admin`
   — the flag is applied *before* the posture is derived, not after. A
   **configured** administrator is judged elsewhere: that anchor reads the
   deployment's configuration and the caller's own `sys_user` row, never the
@@ -480,6 +481,14 @@ grant away; a permission set or position with no ledger row is in effect. The
 last-administrator guard reads the same two places the resolver does: whether
 the catalogue holds `admin_full_access`, and whether the ledger switches it
 off. It reads no catalogue row, so a row's `active` changes nothing it counts.
+It counts the same anchors the resolver derives `platform_admin` from — under
+`single`, the Default Organization's `admin_full_access` grant; under every
+posture, the configured administrator list — beside organization owners and
+admins. A grant owned by no organization counts nowhere. So a host that
+registers the guard (`registerLastAdminGuard` from `@objectstack/plugin-auth`)
+on an engine with no organization object has no grant-anchored administrator
+at all: its administrators are the accounts declared in
+`OS_PLATFORM_OWNER_EMAIL` and the organization owners and admins it holds.
 
 **Switching the break-glass set off is refused while it would leave no
 administrator.** A ledger row switching `admin_full_access` off un-makes every

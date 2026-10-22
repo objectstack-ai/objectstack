@@ -37,6 +37,7 @@ import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { AppPlugin } from './app-plugin.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const BOOT_TIMEOUT = 180_000;
 const ORIGIN = 'http://localhost:3000';
@@ -172,6 +173,10 @@ describe('[#24523] statements per warm request: an organization-owned admin gran
   });
 
   it('CONTROL — the organization-less grant anchors nothing: on either slug, no standing, and no sys_organization statement is issued for it', async () => {
+    // An organization-less grant exists only on a store built before 18.x
+    // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this table is that
+    // store's, relaxed through its driver's own drift apply door.
+    await relaxTenantColumns((engine as any).getDriver('sys_user_permission_set'), ['sys_user_permission_set']);
     const grant = await adminGrant();
     const [organization] = await find('sys_organization');
     await engine.update('sys_user_permission_set', { id: grant.id, organization_id: null }, { context: SYS });
@@ -195,12 +200,41 @@ describe('[#24523 / #21868] a sys_organization write retires the memoised Defaul
     await standing(); // the control above wrote the organization: read it once
     expect(await standing()).toEqual({ standing: true, organizationReads: 0 });
 
+    // [#24948] CONTROL: an organization rows still name is not deleted, and
+    // standing survives the refusal. (The delete drops the memo before it is
+    // judged, so the next request re-reads once; the one after is warm.)
+    const refused = await engine.delete('sys_organization', { where: { id: old.id }, context: SYS }).then(() => null, (e: any) => e);
+    expect(refused?.code).toBe('DELETE_RESTRICTED');
+    expect(refused?.status).toBe(409);
+    expect(await find('sys_organization', { id: old.id })).toHaveLength(1);
+    expect((await standing()).standing).toBe(true);
+    expect(await standing()).toEqual({ standing: true, organizationReads: 0 });
+
+    // The ruled remedy: move what the organization owns, then delete it. The
+    // rows wait in a holding organization while the Default Organization is
+    // deleted and recreated.
+    const owned: Array<{ object: string }> = await engine.organizationOwnedRowCounts(old.id);
+    expect(owned.length, 'PREMISE: rows name the Default Organization').toBeGreaterThan(0);
+    const holding = await engine.insert('sys_organization', { name: 'Holding', slug: 'holding' }, { context: SYS });
+    const moved: Array<{ object: string; id: string }> = [];
+    // Grants first: moving a membership makes plugin-security grant its
+    // organization-admin set in the target, which a later grant move would duplicate.
+    const grantsFirst = [...owned].sort((a, b) =>
+      Number(b.object === 'sys_user_permission_set') - Number(a.object === 'sys_user_permission_set'));
+    for (const { object } of grantsFirst) {
+      for (const row of await find(object, { organization_id: old.id })) {
+        await engine.update(object, { id: row.id, organization_id: holding.id }, { context: SYS });
+        moved.push({ object, id: row.id });
+      }
+    }
     await engine.delete('sys_organization', { where: { id: old.id }, context: SYS });
     const created = await engine.insert('sys_organization', { name: 'Default Organization', slug: 'default' }, { context: SYS });
     expect(created.id).not.toBe(old.id);
-    // The promotion's grant now belongs to the recreated organization.
-    const grant = await adminGrant();
-    await engine.update('sys_user_permission_set', { id: grant.id, organization_id: created.id }, { context: SYS });
+    // Everything the old one owned, the promotion's grant included, now belongs to the recreated one.
+    for (const { object, id } of moved) {
+      await engine.update(object, { id, organization_id: created.id }, { context: SYS });
+    }
+    await engine.delete('sys_organization', { where: { id: holding.id }, context: SYS });
 
     // A memo still answering the deleted id would withhold standing here.
     expect(await standing()).toEqual({ standing: true, organizationReads: 1 });
