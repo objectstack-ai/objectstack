@@ -227,7 +227,7 @@ describe('the built-in auth templates are code-declared items of the plugin\'s o
     const own = manifests.filter((m) => m.id === BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID);
     expect(own).toHaveLength(1);
     expect(own[0].emailTemplates).toEqual(BUILTIN_AUTH_TEMPLATES);
-    expect(own[0].emailTemplates).toHaveLength(28);
+    expect(own[0].emailTemplates).toHaveLength(32);
   });
 });
 
