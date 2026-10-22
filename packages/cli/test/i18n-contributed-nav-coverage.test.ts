@@ -216,7 +216,12 @@ describe('every contributed key the walker expects is one translation-target-unk
 
   it('accepts every expected key on the composed stack', () => {
     const stack = composed();
-    expect(unknownTargets(stack, bundleOf(stack))).toEqual([]);
+    const bundle = bundleOf(stack);
+    // Not vacuous: the bundle carries the contributed ids, not only the app's own.
+    expect(Object.keys(bundle['zh-CN'].apps.cnv_desk.navigation)).toEqual([
+      'grp_service', 'nav_accounts', 'nav_case', 'grp_knowledge', 'nav_article',
+    ]);
+    expect(unknownTargets(stack, bundle)).toEqual([]);
   });
 
   it('accepts the expected key under an app the stack only contributes into', () => {
@@ -224,7 +229,9 @@ describe('every contributed key the walker expects is one translation-target-unk
       manifest: { ...svcManifest, navigationContributions: [{ app: 'crm_enterprise', items: CONTRIBUTIONS[0].items }] },
       objects: [object('cnv_case', 'Case')],
     } as any) as any;
-    expect(unknownTargets(single, bundleOf(single))).toEqual([]);
+    const bundle = bundleOf(single);
+    expect(Object.keys(bundle['zh-CN'].apps)).toEqual(['crm_enterprise']);
+    expect(unknownTargets(single, bundle)).toEqual([]);
   });
 
   it('control: still refuses a navigation id nothing declares or contributes', () => {
