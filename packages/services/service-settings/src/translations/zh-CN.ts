@@ -130,7 +130,7 @@ export const zhCN: PlatformTranslationData = {
         contact: { title: '联系方式' },
       },
       keys: {
-        legal_name: { label: '法定名称', help: '注册的法定名称(可能与「品牌」中的组织名称不同)。' },
+        legal_name: { label: '法定名称', help: '组织的注册法定名称,用于合同和发票。' },
         registration_number: { label: '注册号', help: '公司注册/工商登记号(如 EIN、统一社会信用代码)。' },
         tax_id: { label: '税号 / VAT', help: '发票上显示的税务标识(如 VAT、GST、ABN)。' },
         address_line1: { label: '地址行 1' },
