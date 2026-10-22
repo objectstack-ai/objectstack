@@ -80,7 +80,7 @@ function makeEngine() {
   return {
     find: vi.fn(async () => [{ id: 'r1', name: 'row' }]),
     findOne: vi.fn(async () => ({ id: 'r1', name: 'row' })),
-    insert: vi.fn(async (_object: string, data: Record<string, unknown>) => ({ id: 'r9', ...data })),
+    insert: vi.fn(async (_object: string, data: Record<string, unknown>): Promise<Record<string, unknown>> => ({ id: 'r9', ...data })),
     update: vi.fn(async () => ({})),
     delete: vi.fn(async () => true),
     count: vi.fn(async () => 1),
@@ -93,7 +93,7 @@ function makeMetadata(copies: Array<Record<string, unknown>> = []) {
   return {
     listObjects: vi.fn(async () => copies),
     getObject: vi.fn(async (name: string) => copies.find((o) => o.name === name)),
-    listDiagnosed: vi.fn(async () => ({ data: copies, degraded: false, errors: [] })),
+    listDiagnosed: vi.fn(async () => ({ data: copies, degraded: false, errors: [] as string[] })),
   };
 }
 
