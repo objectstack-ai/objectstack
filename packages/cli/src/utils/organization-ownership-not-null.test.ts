@@ -11,7 +11,11 @@
  *    the same constraint on any other undeclared-NOT-NULL column still is;
  *  - a table the composition does not declare is `not-declared`, untouched;
  *  - a transport whose apply door declares it cannot perform the op is
- *    `unsupported`, never attempted.
+ *    `unsupported`, never attempted;
+ *  - a rotation shard is never rebuilt: one the driver created NOT NULL is
+ *    `already-not-null`, read from the database, and one created nullable
+ *    before the driver did so is `unsupported`, saying it leaves with the
+ *    base's retention.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -107,19 +111,50 @@ describe('organization_id NOT NULL through the drift apply door', () => {
     expect(attempted).toBe(0);
   });
 
-  it('a rotation shard is unsupported, never rebuilt: it has no declaration of its own', async () => {
+  it('a rotation shard created nullable is unsupported, never rebuilt: it has no declaration of its own', async () => {
     let attempted = 0;
     const outcomes = await applyNotNullThroughDrift(
       {
         isDeclared: () => true,
         shardBaseOf: (t) => (t.startsWith('sys_activity__') ? 'sys_activity' : null),
+        isNotNull: async () => false,
         driverFor: () => ({ applyMigrationEntries: async () => { attempted++; return { applied: [], skipped: [] }; } }) as never,
       },
       [{ table: 'sys_activity__r20261019', column: 'organization_id' }],
     );
     expect(outcomes).toEqual([
-      { table: 'sys_activity__r20261019', column: 'organization_id', outcome: 'unsupported', detail: expect.stringMatching(/rotation shard of sys_activity/) },
+      {
+        table: 'sys_activity__r20261019',
+        column: 'organization_id',
+        outcome: 'unsupported',
+        detail: expect.stringMatching(/rotation shard of sys_activity, rotated in before shards were created with organization_id NOT NULL/),
+      },
     ]);
+    expect(outcomes[0]!.detail).not.toMatch(/nullable column/);
+    expect(attempted).toBe(0);
+  });
+
+  it('⭐ a rotation shard the driver created NOT NULL is already-not-null, never reported unsupported or rebuilt', async () => {
+    await knex.schema.createTable('crm_deal__r20261021', (t: any) => {
+      t.string('id').primary();
+      t.string('organization_id').notNullable();
+    });
+    let attempted = 0;
+    const asked: unknown[][] = [];
+    const outcomes = await applyNotNullThroughDrift(
+      {
+        isDeclared: () => true,
+        shardBaseOf: (t) => (t.startsWith('crm_deal__') ? 'crm_deal' : null),
+        isNotNull: async (table, column, database) => {
+          asked.push([table, column, database]);
+          return !(await nullable(table, column));
+        },
+        driverFor: () => ({ applyMigrationEntries: async () => { attempted++; return { applied: [], skipped: [] }; } }) as never,
+      },
+      [{ table: 'crm_deal__r20261021', column: 'organization_id' }],
+    );
+    expect(outcomes).toEqual([{ table: 'crm_deal__r20261021', column: 'organization_id', outcome: 'already-not-null' }]);
+    expect(asked).toEqual([['crm_deal__r20261021', 'organization_id', undefined]]);
     expect(attempted).toBe(0);
   });
 

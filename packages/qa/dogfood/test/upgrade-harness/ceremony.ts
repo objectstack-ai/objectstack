@@ -54,7 +54,21 @@ export interface SchemaPlanChange {
  * no row or table. The parsed document; throws, with the run's output, when it
  * exits non-zero.
  */
-export function runSchemaPlan(file: string): { total: number; changes: SchemaPlanChange[]; pending: unknown[] } {
+/** One tenant column `os migrate plan` lists as still nullable: its advisory, never drift (ADR-0131 D1). */
+export interface NullableTenantColumn {
+  table: string;
+  column: string;
+  database?: string;
+  ceremony: 'tightens' | 'leaves';
+  reason?: string;
+}
+
+export function runSchemaPlan(file: string): {
+  total: number;
+  changes: SchemaPlanChange[];
+  pending: unknown[];
+  nullableTenantColumns: { status: 'read'; remedy: string; columns: NullableTenantColumn[] } | { status: 'unreadable'; detail: string };
+} {
   const plan = spawnSync(process.execPath, [CLI_BIN, 'migrate', 'plan', '--json', '--database-url', `file:${file}`], {
     cwd: SHOWCASE_DIR,
     encoding: 'utf8',

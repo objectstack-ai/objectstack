@@ -354,6 +354,11 @@ ceremony, under any tenancy posture. A v18 server serves a database it created
 itself or one the ceremony certified, and refuses any other at boot, naming the
 command.
 
+**A database the published 18.0.0 created** carries a birth marker and is certified
+with its tenant columns (`organization_id`) still nullable. `os migrate plan` lists
+them, and the ceremony, which such a database does not require, tightens them to
+`NOT NULL` when you run it.
+
 **The sequence:**
 
 1. Before the first 18.0 boot, run `os migrate security-catalog-overlays`. It

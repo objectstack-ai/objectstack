@@ -986,6 +986,37 @@ without `NODE_ENV=development` describes a production `os serve`, which keeps th
 objects in the primary unless `OS_TELEMETRY_DB` names a file. A `plan` against a
 sibling that does not exist yet lists its tables to create and leaves no file behind.
 
+#### Tenant columns still nullable (advisory)
+
+`os migrate plan` lists every tenant column the database still holds nullable, in a
+section of its own, and names `os migrate organization-ownership` as the remedy. A
+database the published 18.0.0 created is certified at birth with its tenant columns
+nullable, and the [organization-ownership ceremony](#os-migrate-organization-ownership)
+that tightens them is voluntary on it: the server starts either way. A database the
+ceremony upgraded keeps only the few the ceremony leaves, and each of those is listed
+with the reason it stays nullable:
+
+```text
+ℹ 2 tenant column(s) are still nullable (ADR-0131 D1). This is advisory: it is not drift, and nothing in this plan or in "os migrate apply" changes it.
+        • sys_activity__r20261020.organization_id — the ceremony leaves it nullable: a rotation shard of sys_activity, created before shards were created NOT NULL: the ceremony rebuilds no shard, and it is dropped when its period leaves sys_activity's retention
+        • sys_email_template.organization_id — the ceremony leaves it nullable: its rows are mirrors the ceremony deletes, and the table retires (ADR-0131 D10 fate 2, D13), so the ceremony does not tighten it
+      None of them is one the organization-ownership ceremony tightens; each line says why it stays nullable.
+```
+
+When the ceremony would tighten any listed column, the section's last line names its
+two commands instead. On a Turso remote database every listed column is one the
+ceremony leaves, because that transport cannot rebuild a table. A fresh install creates
+every tenant column `NOT NULL` and the section prints nothing. A column named
+`organization_id` on an object with tenancy disabled (`sys_sso_provider`) is not a
+tenant column and is not listed.
+
+The section is advisory only. It is not drift: it proposes no change, adds nothing to
+the change count, and does not change the exit code. Under `--json` it is the separate
+`nullableTenantColumns` field: `{ status: "read", adr, remedy, columns }`, where each
+column is `{ table, column, database?, ceremony: "tightens" | "leaves", reason? }`. It is
+`{ status: "unreadable", detail }` when the plan could not read it; `columns: []` means
+it read and found none.
+
 #### Nothing is applied before you confirm
 
 Both commands boot your app to read its metadata. That boot writes no row and no
