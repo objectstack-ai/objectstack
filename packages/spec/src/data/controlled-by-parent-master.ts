@@ -35,6 +35,8 @@
  * `z.boolean().default(false)`, so on the parsed map an omitted `required` is
  * `false`, and on a stored body it is `undefined`. The predicate counts a
  * master only where `required === true`, so the two give the same verdict.
+ * `readonly` (`z.boolean().default(false)`) and `system` (optional) are read
+ * the same way: only `=== true` marks the one master unwritable.
  */
 
 /**
@@ -52,18 +54,29 @@
  *   (or a non-boolean the field parse refuses on its own);
  * - `required-lookup-only` — no `master_detail`, one or more required `lookup`
  *   fields (the retired third tier);
- * - `no-master` — no `master_detail` and no required `lookup`.
+ * - `no-master` — no `master_detail` and no required `lookup`;
+ * - `master-not-writable` — exactly one required `master_detail`, declared
+ *   `readonly: true` or `system: true`. ADR-0055 §1 derives the master from a
+ *   reference every write of a detail supplies, and those two flags mark a
+ *   field record validation skips before its required check is reached (one
+ *   the platform fills, or one a write may not set), so the one master would be
+ *   required in name only. Dropping the flag is the owner's call: it changes
+ *   who may write the reference.
  */
 export type ControlledByParentMasterShape =
   | 'several-required-masters'
   | 'several-masters'
   | 'master-not-required'
   | 'required-lookup-only'
-  | 'no-master';
+  | 'no-master'
+  | 'master-not-writable';
 
 /** Why an object fails the one-required-master rule — see {@link controlledByParentMasterRefusal}. */
 export interface ControlledByParentMasterRefusal {
-  /** Where the parse reports it: `fields` (more than one candidate) or `sharingModel` (none). */
+  /**
+   * Where the parse reports it: `fields` (more than one candidate, or the one
+   * master is not writable) or `sharingModel` (none).
+   */
   readonly path: 'fields' | 'sharingModel';
   readonly shape: ControlledByParentMasterShape;
   /** The `master_detail` fields the object declares, in field order. */
@@ -79,7 +92,11 @@ export interface ControlledByParentMasterRefusal {
  * A `master_detail` field declared `required: true`, and nothing else: a
  * non-required `master_detail` and a required `lookup` are the two tiers
  * ruling B retired (#23100). An object satisfies the rule when EXACTLY ONE of
- * its fields counts — {@link controlledByParentMasterRefusal} is that count.
+ * its fields counts, and that one is writable (neither `readonly: true` nor
+ * `system: true`) — {@link controlledByParentMasterRefusal} is that judgement.
+ * The flags are judged on the one master, not here: a flagged required
+ * `master_detail` is still the field the runtime resolves as the master, so a
+ * second one beside it is still two masters.
  *
  * Reads `required === true` on either the parsed field or a stored body (see
  * the module header), and accepts any value: a non-object counts as no master.
@@ -89,6 +106,12 @@ export function isControlledByParentMasterField(field: unknown): boolean {
   const f = field as { type?: unknown; required?: unknown };
   return f.type === 'master_detail' && f.required === true;
 }
+
+/**
+ * The writability flags a `controlled_by_parent` master may not carry, in the
+ * order a refusal names them. See the `master-not-writable` shape.
+ */
+const UNWRITABLE_MASTER_FLAGS = ['readonly', 'system'] as const;
 
 /**
  * Judge one object against ADR-0055 §1's one-required-master rule. Returns
@@ -109,7 +132,27 @@ export function controlledByParentMasterRefusal(
     .filter(([, f]) => f?.type === 'lookup' && f.required === true)
     .map(([key]) => key);
   const masters = entries.filter(([, f]) => isControlledByParentMasterField(f)).map(([key]) => key);
-  if (masters.length === 1) return undefined;
+  if (masters.length === 1) {
+    const master = masters[0]!;
+    const def = (fields as Record<string, Record<string, unknown> | undefined>)[master];
+    const flags = UNWRITABLE_MASTER_FLAGS.filter((flag) => def?.[flag] === true);
+    if (flags.length === 0) return undefined;
+    return {
+      path: 'fields',
+      shape: 'master-not-writable',
+      masterDetails,
+      requiredLookups,
+      message:
+        `Object '${name}' declares sharingModel 'controlled_by_parent' with its one required \`master_detail\`, `
+        + `\`${master}\`, marked ${flags.map((f) => `\`${f}: true\``).join(' and ')}. ADR-0055 §1: since `
+        + '@objectstack/spec 18, a controlled-by-parent object derives its master from exactly one required '
+        + '`master_detail` field that every write of a detail supplies, and a `readonly` or `system` field is '
+        + 'one record validation skips before its required check, so this reference would be required in name '
+        + `only. Remove ${flags.map((f) => `\`${f}: true\``).join(' and ')} from \`${master}\` and declare the `
+        + 'master reference as an ordinary required field; if the rows must outlive their parent, this object '
+        + "is not a detail: give it its own sharingModel ('private', 'public_read' or 'public_read_write').",
+    };
+  }
   if (masters.length > 1) {
     return {
       path: 'fields',

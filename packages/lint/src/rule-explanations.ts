@@ -2779,10 +2779,11 @@ const RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION: RuleExplanation = {
       'security gate (`assertControlledByParentWrite`) is the only thing refusing such an insert.',
     'Every `master_detail` field of such an object is judged, not only the one the runtime resolves ' +
       'as the master: that is the scope `ObjectSchema.create()` enforces when it forces ' +
-      '`required: true` and refuses an explicit `required: false`. The builder never inspects ' +
-      '`readonly` or `system`, and a plain object literal or a raw `.parse()` of stored metadata ' +
-      'never runs it, so this rule is where all three shapes meet a refusal at authoring time. One ' +
-      'finding per field, located at its first defect.',
+      '`required: true` and refuses an explicit `required: false`. The spec parse also ' +
+      'refuses every shape that leaves the object without exactly one writable required master, so ' +
+      '`os validate`, `os build` and the save door stop there; a shape on a second, non-required ' +
+      '`master_detail` beside the master is this rule\'s report alone. One finding per field, located ' +
+      'at its first defect.',
     DATA_MODEL_SWEEP_REACH,
   ],
 };

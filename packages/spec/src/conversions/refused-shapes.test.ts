@@ -151,6 +151,27 @@ describe('#23270 — a stored controlled_by_parent object without exactly one re
     expect(JSON.parse(todo.from).fields.title).toBeUndefined();
   });
 
+  it.each([
+    ['readonly: true', md('crm_opportunity', { required: true, readonly: true })],
+    ['system: true', md('crm_opportunity', { required: true, system: true })],
+    // The Studio shape plus the flag: D2 gives `required: true`, and the flag is still listed.
+    ['readonly: true, `required` omitted', md('crm_opportunity', { readonly: true })],
+  ])('#25092 — a one master marked %s: one TODO under the same entry, and the TODO does not claim the runtime denies it', (_label, master) => {
+    const row = cbpRow('crm_line', { opportunity: master });
+    const { item, todos } = storedTodos('object', row);
+    expect(item.fields.opportunity.readonly ?? item.fields.opportunity.system).toBe(true);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe('cbp-master-relation-tiers-retired');
+    expect(todo.path).toBe('objects[0].fields');
+    expect(todo.reason).toMatch(/Its one required `master_detail`, `opportunity`, is marked `readonly` or `system`\. Dropping the flag changes who may write the reference/);
+    expect(todo.reason).toContain('the metadata save door refuses it with 422 INVALID_METADATA until it is corrected');
+    expect(todo.reason).not.toContain('every read of its rows is denied');
+    expect(todo.reason).toContain("Object 'crm_line' declares sharingModel 'controlled_by_parent' with its one required `master_detail`");
+    // The listing and the parse refuse ONE set: the stored row still fails the parse, at the same key.
+    expect(cbpIssue(item)?.path).toEqual(['fields']);
+  });
+
   it('the Studio shape — one master_detail, `required` omitted — converts and is NOT listed', () => {
     const row = cbpRow('crm_line', { opportunity: md('crm_opportunity') });
     const { item, todos, notices } = storedTodos('object', row);

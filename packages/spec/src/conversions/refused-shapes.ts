@@ -50,6 +50,7 @@
 import { flowNodeValueTemplateRefusals } from '../automation/flow-value-slot-template.js';
 import {
   controlledByParentMasterRefusal,
+  isControlledByParentMasterField,
   type ControlledByParentMasterRefusal,
 } from '../data/controlled-by-parent-master.js';
 import { ComponentPropsMap } from '../ui/component.zod.js';
@@ -123,7 +124,31 @@ function controlledByParentFate(refusal: ControlledByParentMasterRefusal, fields
       return 'It declares no `master_detail` and no required `lookup`, so there is no master to derive '
         + 'and nothing to convert. Add a `master_detail` field with `required: true` referencing the master '
         + `object, ${ownSharingModel}.`;
+    case 'master-not-writable': {
+      const master = refusal.masterDetails.find((n) => isControlledByParentMasterField(fields[n]))!;
+      return `Its one required \`master_detail\`, \`${master}\`, `
+        + 'is marked `readonly` or `system`. Dropping the flag changes who may write the reference, so the '
+        + 'upgrade does not write it. Remove the flag and declare the master reference as an ordinary required '
+        + `field, ${ownSharingModel}.`;
+    }
   }
+}
+
+/**
+ * What a stored row in a refused shape does once it is left as stored. Every
+ * shape but one leaves the runtime with no master to derive. A
+ * `master-not-writable` object still resolves its one required `master_detail`
+ * as the master at runtime (ADR-0055 §1 refuses it at the parse, not at the
+ * runtime), so what it loses is the save door: it is re-saved only once
+ * corrected.
+ */
+function controlledByParentLeftAsStored(refusal: ControlledByParentMasterRefusal): string {
+  if (refusal.shape === 'master-not-writable') {
+    return 'Left as stored, it registers under `[metadata_spec_invalid]` and the metadata save door refuses '
+      + 'it with 422 INVALID_METADATA until it is corrected.';
+  }
+  return 'Left as stored, it registers under `[metadata_spec_invalid]` and the platform derives no master: '
+    + 'every read of its rows is denied and every write refused with 422 INVALID_METADATA.';
 }
 
 const controlledByParentWithoutOneMaster: RefusedStoredShape = {
@@ -141,9 +166,8 @@ const controlledByParentWithoutOneMaster: RefusedStoredShape = {
         path: `${path}.${refusal.path}`,
         from: JSON.stringify({ sharingModel: obj.sharingModel, fields: relation }),
         reason: 'No lossless rewrite: protocol 18 derives a controlled-by-parent object\'s master from exactly '
-          + 'one `master_detail` declared `required: true`, and this object does not declare exactly one. Left as stored, '
-          + 'it registers under `[metadata_spec_invalid]` and the platform derives no master: every read of '
-          + 'its rows is denied and every write refused with 422 INVALID_METADATA. '
+          + 'one writable `master_detail` declared `required: true`, and this object does not declare exactly one. '
+          + `${controlledByParentLeftAsStored(refusal)} `
           + `${controlledByParentFate(refusal, fields)} ${refusal.message}`,
       });
       return obj;

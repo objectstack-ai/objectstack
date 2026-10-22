@@ -9,13 +9,17 @@ import type { SemanticMigration } from '../../types.js';
 // builder's own `true`. That is the D2 conversion `cbp-master-detail-required-defaulted`,
 // and objectui's Studio is its producer. Every other shape is this entry's
 // prescription: a `lookup` turned `master_detail` changes delete behaviour, and
-// leaving `controlled_by_parent` is an author's call.
+// leaving `controlled_by_parent` is an author's call. The one master is also
+// writable (#25092, ruling 6328204856 route A): `readonly` / `system` on it are
+// refused by the same parse rule, not converted, and the runtime is unchanged.
 export const entry: SemanticMigration = {
   id: 'cbp-master-relation-tiers-retired',
   surface: 'object.sharingModel = \'controlled_by_parent\' together with object.fields — the master '
     + 'relation the object derives its record access from',
   replacement: 'Exactly one `master_detail` field declared `required: true`, with a `reference` to the master '
-    + 'object; every other parent of the object is a `lookup`. Nothing else derives a master any more: a '
+    + 'object and neither `readonly: true` nor `system: true` on it; every other parent of the object is a '
+    + '`lookup`. A one master marked `readonly` or `system` is refused at parse too, naming the field and the '
+    + 'flag: drop the flag and declare the master reference as an ordinary required field. Nothing else derives a master any more: a '
     + '`master_detail` without `required: true` and a required `lookup` were the security runtime\'s second '
     + 'and third fallbacks and both retired, and two required `master_detail` fields are no longer resolved '
     + 'by field order. `ObjectSchema` refuses each of those shapes at parse, naming the object — so '
@@ -44,13 +48,18 @@ export const entry: SemanticMigration = {
     + 'it for data at rest. Nothing else converts. An explicit `required: false` is a contradiction the '
     + 'builder refuses. Two masters would need a pick. Turning a `lookup` into a `master_detail` changes '
     + 'what deleting the master does to every row, and whether an object should instead stop being '
-    + 'controlled by its parent is a product decision only its author can make.',
+    + 'controlled by its parent is a product decision only its author can make. The same rule refuses a one '
+    + 'master marked `readonly: true` or `system: true`: ADR-0055 §1 derives the '
+    + 'master from a reference every write of a detail supplies, record validation skips those two flags before '
+    + 'its required check, and `os lint` alone reported them, so `os validate`, `os build` and the save door '
+    + 'accepted a master that was required in name only. It is not converted: dropping the flag changes who may '
+    + 'write the reference.',
   acceptanceCriteria:
     'Every object declaring `sharingModel: \'controlled_by_parent\'` declares exactly one `master_detail` '
     + 'field with `required: true` (through `ObjectSchema.create()`, an omitted `required` on its one '
     + '`master_detail` is emitted as `true`), and `ObjectSchema.safeParse` of it succeeds: no '
-    + '"declares sharingModel \'controlled_by_parent\' but no required `master_detail` field" or '
-    + '"with N required `master_detail` fields" issue. `os lint` reports neither '
+    + '"declares sharingModel \'controlled_by_parent\' but no required `master_detail` field", '
+    + '"with N required `master_detail` fields" or "with its one required `master_detail`, … marked" issue. `os lint` reports neither '
     + '`security-controlled-by-parent-no-relation` nor `security-controlled-by-parent-ambiguous-relation`. At '
     + 'runtime the security plugin logs no `[security/controlled-by-parent]` "resolves no master relation" '
     + 'line for the object, and a member who can read its master reads its rows. A stored row whose one '
@@ -58,6 +67,7 @@ export const entry: SemanticMigration = {
     + 'a stored row in any other retired shape still registers (with its `[metadata_spec_invalid]` '
     + 'diagnostic) and is denied until it is corrected and saved. `os migrate meta --stored` lists each such '
     + 'row as a TODO under this entry\'s id, before the upgrade and after it, naming the object, its shape (two '
-    + 'masters, none, a required `lookup` only, an explicit `required: false`) and the owner\'s choice, and '
+    + 'masters, none, a required `lookup` only, an explicit `required: false`, a master marked `readonly` or '
+    + '`system`) and the owner\'s choice, and '
     + 'rewrites none of them.',
 };

@@ -2183,6 +2183,19 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
  * object this rule refuses is denied every read and refused every write by the
  * runtime too. The parse says so where an author is present to act.
  *
+ * [#25092, ruling 6328204856 route A] The one master must also be WRITABLE:
+ * a required `master_detail` declared `readonly: true` or `system: true` is
+ * refused at `['fields']` (shape `master-not-writable`). ADR-0055 §1 derives
+ * the master from a reference every write of a detail supplies, and record
+ * validation skips those two flags before its required check, so such a
+ * master is required in name only. Unlike the shapes above, the runtime still
+ * resolves this one (the flags do not change which field is the master), so
+ * this half of the rule lives at the parse alone, the authoring contract, and
+ * the runtime is not changed by it. `os lint`'s
+ * `relationship/master-detail-required` reports the same flags at `error` on
+ * every `master_detail` of the object; it is the advisory sweep, this is the
+ * refusal every door that parses meets.
+ *
  * Read on the PARSED field map: `required` is `z.boolean().default(false)`, so
  * an omitted `required` here is `false` — and is refused. That is the builder's
  * own contract seen from the other side: `ObjectSchema.create()` forces an
@@ -3544,6 +3557,12 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  * - explicit `required: false` → refused with a located error — the author
  *   wrote a contradiction, and silently flipping an explicitly authored value
  *   would hide it (ADR-0032 "no silent failure").
+ *
+ * `readonly` / `system` are not read here: the builder forces nothing about
+ * them, and the parse it ends in refuses a one master carrying either
+ * ({@link refuseControlledByParentWithoutOneMaster}, shape
+ * `master-not-writable`), so `create()` refuses them through that one rule
+ * rather than a second copy of it.
  *
  * Lives at `create()` — the authoring surface (ADR-0077) — beside
  * {@link assertSystemDataIsWritable}, and deliberately NOT in raw
