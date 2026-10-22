@@ -138,12 +138,11 @@
 - 请 coordinator 开线程附维护者原话消息:它只凭维护者明言设线程的 model 与 effort。
 - 席位留认领文本、派发令、契约复核、ACCEPT 与落地;线程实施、开 draft PR、驱动 CI。
 - 派发令落项目共享目录 `/mnt/project-files/<席位>/dispatch-<N>.md`:线程读不到席位 scratchpad。
-- 认领由线程代贴:`Branch:` 须是线程的指定分支(关单门禁读它),席位开线程后才知道。
-- 派发令带认领全文,只留 session、分支两个占位;原子对两笔都由线程执行,先认领后标签。
-- worktree 照建,分支用线程的指定推送分支;仓 `.claude/agents` 未加载(实测),照读 `os-dev.md`。
+- 线程开起后第一动作:向席位报告指定推送分支并等待;⛔ 线程不贴认领、不写 assignee。
+- 席位按 AGENTS.md 的顺序写 assignee+`pm:dispatched`,再贴带该 `Branch:` 的认领;之后线程才开工。
+- 分支约定仍是 `claude/issue-<n>-<slug>`;线程只能推指定分支是实测平台例外,认领如实写。
+- worktree 照建;仓 `.claude/agents` 类型未加载(实测),线程照读 `os-dev.md`。
 - 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);审核期线程不关,接 FAIL。
-- 卡线程报 `needs_decision` ⇒ coordinator 另开契约复审档(`CONTRACT_REVIEW_TIER`)裁决线程。
-- 裁决线程沿四轴评审:有把握的自裁、落裁决评论并交回席位;没把握的才发决策卡。
 - 容器重启杀本地后台循环:席位等服务端信号(PR 订阅事件、座位 Routine),本地 watcher 可选。
 
 ## subagent 批派发前置:先把本地检出钉到 main
