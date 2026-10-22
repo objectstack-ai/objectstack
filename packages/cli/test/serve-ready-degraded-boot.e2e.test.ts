@@ -48,11 +48,15 @@ import {
  * incidents reached by other routes: a plugin that did not load, and a core
  * service that is not there.
  *
- * [ADR-0131 D9] Both legs boot `--no-server`. A production SERVER boot with no
- * secret is now refused before the kernel starts
- * (`serve-no-auth-secret-refusal.integration.test.ts`), so it reaches no banner; the
- * kernel-only boot still skips auth with the warning and still prints the
- * ready banner, which is the property under test here.
+ * [ADR-0131 D9] A production boot with no secret is now refused before the
+ * kernel starts whether or not it serves
+ * (`serve-no-auth-secret-refusal.integration.test.ts`), so it reaches no banner.
+ * The one production composition that still skips auth with a warning and
+ * still prints the ready banner is the cloud runtime's host kernel
+ * (`isHostKernelComposition`: a plugin registered as `ObjectOSEnvironmentPlugin`,
+ * where auth is each project's), so the degraded leg boots that composition —
+ * the {@link HOST_KERNEL_CONFIG} stub — and the healthy leg the bare config
+ * with a secret. Both legs boot `--no-server`.
  *
  * ⛔ `runServe()` cannot reach it. That helper spawns `bin/run-dev.js`, which
  * sets `NODE_ENV = 'development'` before argv is parsed, so `isDev` is true,
@@ -78,11 +82,27 @@ const CLI = resolve(HERE, '../bin/run.js');
 
 const BARE_CONFIG = 'export default {};\n';
 
+/**
+ * The cloud runtime's host kernel, as `isHostKernelComposition` recognises it.
+ * With no secret, auth is skipped by the warn-only host-kernel path and `auth`
+ * — a `core` service with no in-memory fallback — is genuinely absent.
+ */
+const HOST_KERNEL_CONFIG = `export default {
+  plugins: [{
+    name: 'com.objectstack.runtime.objectos-environment',
+    version: '0.0.0',
+    init: async () => {},
+    start: async () => {},
+  }],
+};
+`;
+
 /** What `spawn(…, { stdio: ['ignore', 'pipe', 'pipe'] })` returns — no `stdin`. */
 type BootChild = ChildProcessByStdio<null, Readable, Readable>;
 
 const children: BootChild[] = [];
 let fixtureDir: string;
+let hostKernelDir: string;
 
 interface Boot {
   out: string;
@@ -94,12 +114,12 @@ interface Boot {
  * Spawn `os serve` in production posture and resolve once the COMPLETE banner
  * is on the stream. Extra `env` entries override the base; `undefined` unsets.
  */
-async function boot(env: Record<string, string | undefined> = {}): Promise<Boot> {
+async function boot(env: Record<string, string | undefined> = {}, cwd: string = fixtureDir): Promise<Boot> {
   // A kernel-assigned port (#24295): production posture refuses to auto-shift,
   // so a port drawn and released beforehand is a red whenever another process
   // takes it in the gap. Nothing here talks to the port.
   const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '--no-server', '--port', KERNEL_ASSIGNED_PORT], {
-    cwd: fixtureDir,
+    cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
     // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
     env: childEnv({
@@ -150,6 +170,8 @@ beforeAll(() => {
   requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
   fixtureDir = mkdtempSync(join(tmpdir(), 'os-ready-degraded-'));
   writeFileSync(join(fixtureDir, 'objectstack.config.ts'), BARE_CONFIG, 'utf8');
+  hostKernelDir = mkdtempSync(join(tmpdir(), 'os-ready-degraded-host-kernel-'));
+  writeFileSync(join(hostKernelDir, 'objectstack.config.ts'), HOST_KERNEL_CONFIG, 'utf8');
 });
 
 afterAll(() => {
@@ -157,13 +179,14 @@ afterAll(() => {
     try { child.kill('SIGTERM'); } catch { /* already gone */ }
   }
   if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
+  if (hostKernelDir) rmSync(hostKernelDir, { recursive: true, force: true });
 });
 
 describe('os serve — the ready line reports a degraded boot (#16630)', () => {
   it(
     'prints ready AND the missing core service in the same output, with no unconditional tick',
     async () => {
-      const { out, err, child } = await boot();
+      const { out, err, child } = await boot({}, hostKernelDir);
       const seen = `\n--- stdout ---\n${out}\n--- stderr ---\n${err}`;
       const output = out + err;
 
@@ -195,8 +218,9 @@ describe('os serve — the ready line reports a degraded boot (#16630)', () => {
   it(
     'leaves a healthy boot printing exactly the tick it always printed',
     async () => {
-      // Same fixture, same entrypoint, same posture — the ONLY difference is
-      // that auth can now register, so nothing is missing. An "always append a
+      // Same entrypoint, same posture — the bare config with a secret, so auth
+      // can register and nothing is missing (the degraded leg's host-kernel
+      // stub is the other difference; see the header). An "always append a
       // status line" implementation passes the degraded leg and fails here.
       const { out, err } = await boot({
         OS_AUTH_SECRET: 'os-16630-healthy-leg-secret-not-a-real-credential',
