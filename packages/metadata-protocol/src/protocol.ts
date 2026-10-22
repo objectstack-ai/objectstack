@@ -7284,19 +7284,115 @@ export class ObjectStackProtocolImplementation implements
      * `restoreVersion` → `put` keeps on the row it writes, so the judge and the
      * write read one binding.
      *
+     * [#25278] …and, third, the save door's refusal family that runs after its
+     * schema gate ({@link refuseRestoredBodyTheSaveDoorRefuses}), on the same
+     * body and in the same position, so a refused version writes nothing.
+     *
      * @param type The canonical (singular) type the row is restored under.
      * @param name The name the row is restored under.
      * @param binding The package binding of the active row the version is restored into (`null`: none).
+     * @param source The restoring door, as the history row and the audit row record it.
      */
-    private restoredBodyWriter(type: string, name: string, binding: string | null): (historyBody: unknown) => unknown {
+    private restoredBodyWriter(type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
         const derive = this.restoredBodyDerivation(type);
-        return (historyBody) => {
+        return async (historyBody) => {
             const nameRefusal = savedItemNameRefusal(type, historyBody, name, 'restore');
             if (nameRefusal) throw nameRefusal;
             const ownerRefusal = permissionSetOwnerBindingRefusal(type, historyBody, name, binding, 'restore');
             if (ownerRefusal) throw ownerRefusal;
+            await this.refuseRestoredBodyTheSaveDoorRefuses(type, name, historyBody, binding, source);
             return derive ? derive(historyBody) : historyBody;
         };
+    }
+
+    /**
+     * [#25278] The save door's refusal family, asked of a history body a
+     * restore is about to make the active row.
+     *
+     * `saveMetaItem` refuses these shapes after its schema gate. A restore
+     * writes a stored version back, so a version saved before a refusal
+     * existed, or one half of a pair whose other half has moved since, came
+     * back live through `rollbackMetaItem` and `revertCommit`'s restore limb
+     * with no refusal at all. Each is asked here through the save door's own
+     * judge, with its envelope, in the save door's order, ⛔ never a copy of a
+     * rule:
+     *
+     *  - a hook with no `body` ({@link runtimeHookWithoutBodyRefusal});
+     *  - a second default record page of an object
+     *    ({@link defaultRecordPageSaveRefusal});
+     *  - an `external` object binding on a datasource this environment holds as
+     *    managed, from either side of the pair
+     *    ({@link externalBindingSaveRefusal}): a datasource restored to managed
+     *    while objects bind it `external` is refused naming them, and an
+     *    object restored `external` on a datasource that is managed now is
+     *    refused at `external`;
+     *  - a `runAs: 'system'` flow an anonymous endpoint names
+     *    ({@link anonymousElevatedFlowRefusal}): a restore writes an ACTIVE
+     *    row, the case the save door asks it of;
+     *  - the shared runtime authoring rules
+     *    ({@link assertRuntimeAuthoringRules}), judged as an `active` write
+     *    bound to the row's own package, and told which credentials the
+     *    write-only channel holds — the restore keeps them (R2) — as the draft
+     *    promotion tells it;
+     *  - the authoring gate a domain plugin registers
+     *    ({@link runAuthoringGate}), on the channel the save door asks it on.
+     *
+     * Not asked, each for its reason:
+     *
+     *  - the schema gate itself. A history body is a stored row, and whether
+     *    today's parse may refuse a stored version is the ADR-0087 stored-shape
+     *    question (stored rows keep their conversion path), which this does
+     *    not decide. Every judge above reads its body defensively, and the
+     *    runtime gate reports a rule that throws instead of blocking on it.
+     *  - ADR-0070 D1's read-only-base create refusal
+     *    (`SysMetadataRepository.readOnlyBaseCreateError`). A restore names no
+     *    package: it writes into the active row's own binding, which `put`
+     *    keeps, and `put` answers the package-writability condition for every
+     *    door that carries a row's own binding. Extending D1 to them would
+     *    refuse the repair of legacy package-bound rows (see `put`'s
+     *    package-door note).
+     *  - the credential channel's `store` refusal. A restore stores no
+     *    credential: the channel keeps its current one
+     *    ({@link restoredBodyDerivation}).
+     *
+     * The runtime gate's advisories are not carried: neither restore receipt
+     * declares a key for them, and adding one is a response-shape change.
+     *
+     * Asked from {@link restoredBodyWriter} inside `restoreVersion`, before it
+     * reads the active row or puts, so a refused version writes nothing.
+     * `rollbackMetaItem` rethrows the refusal; `revertCommit` reports it per
+     * item in `failed[]`, judged against the store as each item reaches it.
+     */
+    private async refuseRestoredBodyTheSaveDoorRefuses(
+        type: string,
+        name: string,
+        body: unknown,
+        binding: string | null,
+        source: string,
+    ): Promise<void> {
+        const hookRefusal = runtimeHookWithoutBodyRefusal(type, body, name);
+        if (hookRefusal) throw hookRefusal;
+        const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(type, body, name, 'restored');
+        if (defaultPageRefusal) throw defaultPageRefusal;
+        const bindingRefusal = await this.externalBindingSaveRefusal(type, body, name);
+        if (bindingRefusal) throw bindingRefusal;
+        const elevatedRefusal = await this.anonymousElevatedFlowRefusal(type, body, name);
+        if (elevatedRefusal) throw elevatedRefusal;
+        const channel = this.credentialChannelFor(type);
+        await this.assertRuntimeAuthoringRules({
+            type,
+            name,
+            state: 'active',
+            body,
+            source,
+            packageId: binding,
+            ...(channel
+                ? { restoredCredentialPaths: () => channel.heldPaths({ name, state: 'active', item: body }) }
+                : {}),
+        });
+        if (this.authoringChannel !== 'package-author') {
+            await this.runAuthoringGate({ type, name, state: 'active', body });
+        }
     }
 
     /**
@@ -22401,10 +22497,12 @@ export class ObjectStackProtocolImplementation implements
      *    every registry slot of that name, as it does on every read
      *    (ADR-0005), so its own body decides for the name.
      *
-     * Asked twice: by `saveMetaItem` on the body it is about to store (draft or
+     * Asked by `saveMetaItem` on the body it is about to store (draft or
      * publish mode), and by the draft publish (`promoteDraftForPublish`) on the
      * draft body it is about to promote — the save judged only the pages
      * active at that moment, and another may have taken the default since.
+     * [#25278] And by the restore doors on the history body they write back
+     * (`refuseRestoredBodyTheSaveDoorRefuses`), for the same reason.
      *
      * The page saved under `saveName` is never its own holder: a save under the
      * existing default's own name is an overlay of that page (ADR-0005), not a
@@ -22430,7 +22528,7 @@ export class ObjectStackProtocolImplementation implements
         type: string,
         item: unknown,
         saveName: string,
-        verb: 'saved' | 'published' = 'saved',
+        verb: 'saved' | 'published' | 'restored' = 'saved',
     ): Promise<(Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422 }) | undefined> {
         if (type !== 'page') return undefined;
         const object = defaultRecordPageObject(item);
@@ -22532,8 +22630,10 @@ export class ObjectStackProtocolImplementation implements
      * Asked in draft and in publish mode by {@link saveMetaItem}, after the
      * schema gate, and again by {@link promoteDraftForPublish} on the draft
      * body, because the other half can change between a draft's save and its
-     * publish. An object's draft is not among the objects a datasource save
-     * meets: the draft is judged at its own publish. `force` does not reach
+     * publish; [#25278] and by the restore doors on the history body they
+     * write back ({@link refuseRestoredBodyTheSaveDoorRefuses}), because it can
+     * change after a version is saved too. An object's draft is not among the
+     * objects a datasource save meets: the draft is judged at its own publish. `force` does not reach
      * it: `force` acknowledges a destructive diff, and this is no diff.
      * Answered as the schema gate answers: `422 INVALID_METADATA`, the
      * findings in `issues`, at `external` for an object and at `schemaMode`
@@ -22626,10 +22726,12 @@ export class ObjectStackProtocolImplementation implements
      * this door cannot grow two opinions of the pair.
      *
      * Asked at every door a flow body reaches `active` through: the save in
-     * publish mode ({@link saveMetaItem}) and the draft promotion
+     * publish mode ({@link saveMetaItem}), the draft promotion
      * ({@link promoteDraftForPublish}) the per-item publish and
-     * `publishPackageDrafts` share. A draft save is let through: a draft does
-     * not execute, and its publish is judged here. `migrate-stored` re-saves
+     * `publishPackageDrafts` share, and [#25278] the restore doors
+     * ({@link refuseRestoredBodyTheSaveDoorRefuses}). A draft save is let
+     * through: a draft does not execute, and its publish is judged here.
+     * `migrate-stored` re-saves
      * (the credential move, `os migrate meta --stored`) are not judged: they
      * rewrite a row that already exists, and refusing one would leave a
      * credential the move exists to take out of the row in cleartext. Such a
@@ -30122,12 +30224,15 @@ export class ObjectStackProtocolImplementation implements
                         intent,
                         // [#21470] The divergent `name` refusal, [ADR-0086 D3]
                         // the permission set's owner judge against the binding
-                        // read above, then [#20790] R2's credential-channel
+                        // read above, [#25278] the save door's refusal family,
+                        // then [#20790] R2's credential-channel
                         // strip. A refused version lands
                         // in `failed[]` below, with nothing written. Judged under
                         // the SINGULAR type, the spelling the write-through
                         // registers under. See {@link restoredBodyWriter}.
-                        deriveRestoredBody: this.restoredBodyWriter(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name, restorePackageId),
+                        deriveRestoredBody: this.restoredBodyWriter(
+                            PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name, restorePackageId, 'protocol.revertCommit',
+                        ),
                         ...memberOption(member),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
@@ -30472,12 +30577,13 @@ export class ObjectStackProtocolImplementation implements
                 source: 'protocol.rollbackMetaItem',
                 ...(request.message ? { message: request.message } : {}),
                 intent,
-                // [#21470] The divergent `name` refusal and [ADR-0086 D3] the
-                // permission set's owner judge against the binding read above,
+                // [#21470] The divergent `name` refusal, [ADR-0086 D3] the
+                // permission set's owner judge against the binding read above
+                // and [#25278] the save door's refusal family, each
                 // rethrown below with nothing written; then [#20790] R2 — a rollback past the
                 // credential move keeps the write-only channel's current
                 // credential and stores none. See {@link restoredBodyWriter}.
-                deriveRestoredBody: this.restoredBodyWriter(singularType, request.name, rollbackPackageId),
+                deriveRestoredBody: this.restoredBodyWriter(singularType, request.name, rollbackPackageId, 'protocol.rollbackMetaItem'),
                 // [#22877] The member whose lineage `toVersion` is taken from.
                 ...memberOption(member),
             });

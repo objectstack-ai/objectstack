@@ -1606,9 +1606,14 @@ export class SysMetadataRepository implements MetadataRepository {
        * credential back at rest, nor appends a history copy of it. Return the
        * argument unchanged when there is nothing to derive.
        *
+       * [#25278] It may refuse the body by throwing, and may be async: the
+       * protocol asks the save door's refusal family here, some of whose
+       * judges read the store. Awaited before the active row is read and
+       * before the put, so a refused version writes nothing.
+       *
        * Omitted → the history body is restored byte for byte, as before.
        */
-      deriveRestoredBody?: (historyBody: unknown) => unknown;
+      deriveRestoredBody?: (historyBody: unknown) => unknown | Promise<unknown>;
       /**
        * [#22877] The bundle member whose lineage `targetVersion` is taken
        * from; omitted, the canonical one (see {@link get}). The lineage
@@ -1661,7 +1666,7 @@ export class SysMetadataRepository implements MetadataRepository {
       err.status = 404;
       throw err;
     }
-    const body = opts.deriveRestoredBody ? opts.deriveRestoredBody(historyBody) : historyBody;
+    const body = opts.deriveRestoredBody ? await opts.deriveRestoredBody(historyBody) : historyBody;
     // ADR-0048 / #6215 — read the RAW active row, not just its body, and carry
     // its `package_id` into the write. `put` upserts exactly ONE row and scopes
     // its optimistic-lock lookup by package; an unstated `packageId` resolves to
