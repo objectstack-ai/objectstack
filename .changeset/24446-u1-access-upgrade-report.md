@@ -16,12 +16,13 @@ ADR-0126 §6 wall 3 says no upgrade un-makes a customer's choice. A switch-off, 
 - **Broken references in the customer's items:** a permission set authored in this system naming an object, field or capability the registry lacks, and a `sys_sharing_rule` row naming an object or criteria field the registry lacks.
 - **Field denies a customer set lacks:** a package-shipped set that denies a field, beside a set authored in this system that grants the same object with no entry for that field. An unlisted field is visible.
 
-The findings are logged once per category, as now. They are also raised through the existing notification ingress (`messaging.emit()`, topic `security.access_upgrade`, severity `warning`), which writes a Notification Events row in Setup and the in-app inbox:
+The findings are logged once per category, as now. They are also raised to the people who can act on them:
 
-- under `single`, to the Default Organization's `admin_full_access` holders and any `OS_PLATFORM_OWNER_EMAIL` address;
-- under `group` or `isolated`, to the `OS_PLATFORM_OWNER_EMAIL` operator(s) only, because the ledger and the catalog are deployment-level.
-
-The `dedupKey` is the finding set's digest, so an unchanged set notifies once, not at every boot. With no messaging service, or nobody to tell, one log line says the findings reached no administrator and names the fix. The notification is not mandatory: the ingress has no per-emit flag, so a recipient's mute hides it. To make it mute-proof, add `security.access_upgrade` to the messaging plugin's existing `mandatoryTopics` option.
+- **Under `single`,** through the existing notification ingress (`messaging.emit()`, topic `security.access_upgrade`, severity `warning`), which writes a Notification Events row in Setup and the in-app inbox. It reaches the Default Organization's `admin_full_access` holders and any `OS_PLATFORM_OWNER_EMAIL` address.
+  - The `dedupKey` is the finding set's digest, so an unchanged set notifies once, not at every boot.
+  - With no messaging service, nobody to tell, or an emit the ingress refuses, one log line says the findings reached no administrator and names the fix for that cause.
+  - The notification is not mandatory: the ingress has no per-emit flag, so a recipient's mute hides it. To make it mute-proof, add `security.access_upgrade` to the messaging plugin's existing `mandatoryTopics` option.
+- **Under `group` or `isolated`,** to the platform operator alone, by one `error` line addressed to the operator. The ledger and the catalog are deployment-level, so only the operator can act. The notification family is organization-scoped, and a walled write with no organization is refused (ADR-0131 D9); stamping an organization would hand the finding to a tenant. So no notification is attempted, and no organization is told.
 
 Two limits follow from ADR-0126 §9, under which a clone records no base, and from the bare `(metadata_type, name)` ledger key:
 

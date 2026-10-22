@@ -10,7 +10,8 @@
  *
  * Pins the acceptance end to end: a permission set the customer switched off,
  * renamed by the vendor with its own position binding the new name, reaches
- * the administrator under `single` and the operator alone under a wall; with
+ * the administrator under `single` (a notification) and the operator alone under
+ * a wall (a log line addressed to the operator, no notification); with
  * the old name still shipped (CONTROL), nobody is told.
  */
 
@@ -135,11 +136,14 @@ describe('[ADR-0126 §6 wall 3] the access upgrade report, wired at kernel:boots
   });
 
   for (const posture of ['isolated', 'group'] as const) {
-    it(`${posture}: the same finding reaches the operator alone — no organization's administrator`, async () => {
-      const { emit } = await boot(posture, true);
-      expect(emit).toHaveBeenCalledTimes(1);
-      const input = (emit.mock.calls[0] as any[])[0];
-      expect({ audience: input.audience, organizationId: input.organizationId }).toEqual({ audience: [OPERATOR], organizationId: undefined });
+    it(`${posture}: the same finding is raised to the operator alone, in the log — no emit, no organization told`, async () => {
+      const { emit, logger } = await boot(posture, true);
+      expect(emit).not.toHaveBeenCalled();
+      const lines = logger.error.mock.calls.map(([m, , meta]: any[]) => ({ m: String(m), meta }));
+      expect(lines.some((l: any) => l.m.includes('no longer shipped under that name'))).toBe(true);
+      const operator = lines.find((l: any) => l.m.startsWith('[security] platform operator:'));
+      expect(operator?.meta?.operators).toEqual([OPERATOR]);
+      expect(lines.some((l: any) => l.m.includes('reached no administrator'))).toBe(false);
     });
   }
 

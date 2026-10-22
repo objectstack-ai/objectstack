@@ -76,17 +76,24 @@
  *
  * ## Who is told
  *
- * The log, always, once per category. And, through the existing notification
- * ingress (`messaging.emit()`, ADR-0030: a `sys_notification` event in Setup's
- * Notification Events, and the in-app inbox), the people who can act on the
- * choice: under `single` the Default Organization's `admin_full_access`
- * holders and any `OS_PLATFORM_OWNER_EMAIL` address; under a wall (`group`,
- * `isolated`) the `OS_PLATFORM_OWNER_EMAIL` operator(s) only, because the
- * ledger and the catalog are deployment-level and only the operator may switch
- * or clone there (ADR-0126 §5, ADR-0131 D3). The notification's `dedupKey` is
- * the finding set's digest, so an unchanged set notifies once, not once per
- * boot. No messaging service, or nobody to tell: one log line says so, with
- * the remedy.
+ * The log, always, once per category. And the people who can act on the
+ * choice:
+ *
+ *  - under `single`, through the existing notification ingress
+ *    (`messaging.emit()`, ADR-0030: a `sys_notification` event in Setup's
+ *    Notification Events, and the in-app inbox), to the Default
+ *    Organization's `admin_full_access` holders and any
+ *    `OS_PLATFORM_OWNER_EMAIL` address. The notification's `dedupKey` is the
+ *    finding set's digest, so an unchanged set notifies once, not once per
+ *    boot. No messaging service, nobody to tell, or a refused emit: one log
+ *    line says so, with the fix for that cause;
+ *  - under a wall (`group`, `isolated`), the operator alone, by one `error`
+ *    line addressed to the operator. The ledger and the catalog are
+ *    deployment-level and only the operator may switch or clone there
+ *    (ADR-0126 §5, ADR-0131 D3); the notification family is
+ *    organization-scoped, so a walled write with no organization is refused
+ *    (ADR-0131 D9), and stamping an organization would tell a tenant. No
+ *    notification is attempted.
  *
  * ## When it runs
  *
@@ -564,7 +571,7 @@ export interface AccessUpgradeBootDeps extends AccessUpgradeReportDeps {
   logger?: AccessUpgradeReportLogger;
   /** The `messaging` service; absent when the composition has none. */
   messaging?: AccessUpgradeNotifier;
-  /** `true` under `group` / `isolated`: the operator alone is told. */
+  /** `true` under `group` / `isolated`: the operator alone is told, in the log. */
   walled: boolean;
 }
 
@@ -575,16 +582,15 @@ export interface AccessUpgradeAudience {
 }
 
 /**
- * The people who can act on an access choice: under a wall the configured
- * platform operator(s) alone; under `single` also every holder of the Default
- * Organization's `admin_full_access` grant. A read that throws propagates.
+ * The people who can act on an access choice under `single`: any configured
+ * platform operator and every holder of the Default Organization's
+ * `admin_full_access` grant. A read that throws propagates. (Under a wall no
+ * audience is resolved: see {@link reportAccessUpgrade}.)
  */
 export async function resolveAccessUpgradeAudience(
   engine: AccessUpgradeReportEngine,
-  walled: boolean,
 ): Promise<AccessUpgradeAudience> {
   const recipients = [...resolvePlatformAdminEmails().emails];
-  if (walled) return { recipients };
   const organizationId = await readDefaultOrganizationId(engine);
   if (organizationId === undefined || !engine.getObject(GRANT_OBJECT)) return { recipients };
   const grants = await engine.find(GRANT_OBJECT, {
@@ -702,16 +708,27 @@ function logReport(report: AccessUpgradeReport, logger?: AccessUpgradeReportLogg
 
 /** What the boot report did with its findings. */
 export interface AccessUpgradeDelivery {
-  /** `notified`: handed to the ingress. `undelivered`: findings and no channel or nobody to tell. */
-  outcome: 'clean' | 'stopped' | 'notified' | 'undelivered';
+  /**
+   * `notified`: handed to the ingress (`single`). `operator-log`: walled, so
+   * the operator's line in this log is the channel. `undelivered`: `single`
+   * findings that reached no administrator, said in the log with the cause.
+   */
+  outcome: 'clean' | 'stopped' | 'notified' | 'operator-log' | 'undelivered';
   recipients: string[];
-  dedupKey?: string;
+  /** The finding set's digest — the notification's `dedupKey`. */
+  findingSet?: string;
   reason?: string;
 }
 
 /**
  * The boot entry: collect, log, and raise the findings to the people who can
  * act on them. Never throws for a read or a delivery that did not happen.
+ *
+ * Under a wall the notification is never attempted: the findings are
+ * deployment-level, the operator alone can act on them, and the notification
+ * family is organization-scoped, so a walled system write with no organization
+ * is refused (ADR-0131 D9) and stamping one would hand the finding to a tenant.
+ * One `error` line addressed to the operator is the channel there.
  */
 export async function reportAccessUpgrade(
   engine: AccessUpgradeReportEngine,
@@ -722,29 +739,54 @@ export async function reportAccessUpgrade(
   if (report.stopped) return { report, delivery: { outcome: 'stopped', recipients: [] } };
   if (!hasAccessUpgradeFindings(report)) return { report, delivery: { outcome: 'clean', recipients: [] } };
 
-  const dedupKey = accessUpgradeDedupKey(report);
-  const undelivered = (reason: string, recipients: string[] = []): { report: AccessUpgradeReport; delivery: AccessUpgradeDelivery } => {
+  const findingSet = accessUpgradeDedupKey(report);
+  if (deps.walled) {
+    const operators = [...resolvePlatformAdminEmails().emails];
+    logError(
+      deps.logger,
+      '[security] platform operator: the access upgrade findings above are deployment-level — the activation ledger ' +
+        'and the security catalog are shared by every organization — so only the operator can act on them, through ' +
+        'the activation and clone doors. This tenancy posture has no in-app channel for a deployment-level ' +
+        'notification, so this log is where they are raised; no organization is told. ' +
+        (operators.length > 0
+          ? 'The configured operator(s) are named in this line.'
+          : 'No operator is configured: set OS_PLATFORM_OWNER_EMAIL to name the platform operator.'),
+      { findingSet, operators },
+    );
+    return { report, delivery: { outcome: 'operator-log', recipients: operators, findingSet } };
+  }
+
+  const undelivered = (
+    reason: string,
+    fix: string,
+    recipients: string[] = [],
+  ): { report: AccessUpgradeReport; delivery: AccessUpgradeDelivery } => {
     logError(
       deps.logger,
       `[security] the access upgrade findings above reached no administrator: ${reason}. They are in this log only. ` +
-        (deps.walled
-          ? 'Fix: set OS_PLATFORM_OWNER_EMAIL to the platform operator, and compose the messaging service.'
-          : 'Fix: compose the messaging service, and grant admin_full_access in the Default Organization or set ' +
-            'OS_PLATFORM_OWNER_EMAIL.'),
-      { dedupKey, walled: deps.walled },
+        `Fix: ${fix}`,
+      { findingSet },
     );
-    return { report, delivery: { outcome: 'undelivered', recipients, dedupKey, reason } };
+    return { report, delivery: { outcome: 'undelivered', recipients, findingSet, reason } };
   };
-  if (!deps.messaging || typeof deps.messaging.emit !== 'function') return undelivered('this composition has no messaging service');
+  if (!deps.messaging || typeof deps.messaging.emit !== 'function') {
+    return undelivered('this composition has no messaging service', 'compose the messaging service.');
+  }
 
   let audience: AccessUpgradeAudience;
   try {
-    audience = await resolveAccessUpgradeAudience(engine, deps.walled);
+    audience = await resolveAccessUpgradeAudience(engine);
   } catch (e) {
-    return undelivered(`the administrators could not be read (${errorText(e)})`);
+    return undelivered(
+      `the administrators could not be read (${errorText(e)})`,
+      'restore the store the grants are read from; the next boot reads them again.',
+    );
   }
   if (audience.recipients.length === 0) {
-    return undelivered(deps.walled ? 'no platform operator is configured' : 'no administrator is configured or granted');
+    return undelivered(
+      'no administrator is configured or granted',
+      'grant admin_full_access in the Default Organization, or set OS_PLATFORM_OWNER_EMAIL.',
+    );
   }
   const counts = {
     reEnablements: report.reEnablements.length,
@@ -758,7 +800,7 @@ export async function reportAccessUpgrade(
       topic: ACCESS_UPGRADE_TOPIC,
       audience: audience.recipients,
       severity: 'warning',
-      dedupKey,
+      dedupKey: findingSet,
       ...(audience.organizationId !== undefined ? { organizationId: audience.organizationId } : {}),
       payload: {
         title: 'An upgrade changed what your access settings cover',
@@ -774,7 +816,11 @@ export async function reportAccessUpgrade(
       },
     });
   } catch (e) {
-    return undelivered(`the notification could not be emitted (${errorText(e)})`, audience.recipients);
+    return undelivered(
+      `the notification ingress refused it (${errorText(e)})`,
+      'repair the cause the ingress names; the next boot raises the same findings again.',
+      audience.recipients,
+    );
   }
-  return { report, delivery: { outcome: 'notified', recipients: audience.recipients, dedupKey } };
+  return { report, delivery: { outcome: 'notified', recipients: audience.recipients, findingSet } };
 }

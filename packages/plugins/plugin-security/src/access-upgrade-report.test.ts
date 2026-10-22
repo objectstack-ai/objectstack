@@ -148,7 +148,25 @@ const told = (r: Awaited<ReturnType<typeof boot>>) => {
   return call && { audience: [...call.audience], organizationId: call.organizationId, topic: call.topic, severity: call.severity };
 };
 const SINGLE_AUDIENCE = { audience: [OPERATOR, 'usr_admin'], organizationId: DEFAULT_ORG, topic: ACCESS_UPGRADE_TOPIC, severity: 'warning' };
-const WALLED_AUDIENCE = { audience: [OPERATOR], organizationId: undefined, topic: ACCESS_UPGRADE_TOPIC, severity: 'warning' };
+
+/**
+ * `single`: one notification to the administrator. Walled: no notification is
+ * attempted (the family is organization-scoped, ADR-0131 D9); one line
+ * addressed to the operator carries the finding set, and nothing reports a
+ * delivery that failed.
+ */
+function expectRaised(r: Awaited<ReturnType<typeof boot>>, posture: 'single' | 'walled'): void {
+  if (posture === 'single') {
+    expect(r.delivery.outcome).toBe('notified');
+    expect(told(r)).toEqual(SINGLE_AUDIENCE);
+    return;
+  }
+  expect(r.messaging.emit).not.toHaveBeenCalled();
+  expect(r.delivery).toMatchObject({ outcome: 'operator-log', recipients: [OPERATOR] });
+  const line = r.log.error.mock.calls.find(([m]) => String(m).startsWith('[security] platform operator:'));
+  expect(line?.[2]).toEqual({ findingSet: accessUpgradeDedupKey(r.report), operators: [OPERATOR] });
+  expect(r.log.error.mock.calls.some(([m]) => String(m).includes('reached no administrator'))).toBe(false);
+}
 
 // ── The four access types ────────────────────────────────────────────────────
 
@@ -174,8 +192,7 @@ describe('permission set: a switched-off set renamed by the vendor', () => {
         ],
       }]);
       expect(r.report.orphans).toEqual([{ type: 'permission', name: 'acme_sales_rep', packageId: VENDOR, switchedOff: true }]);
-      expect(r.delivery.outcome).toBe('notified');
-      expect(told(r)).toEqual(posture === 'single' ? SINGLE_AUDIENCE : WALLED_AUDIENCE);
+      expectRaised(r, posture);
     });
 
     it(`${posture} CONTROL: the switched-off name still ships — no finding, nobody told`, async () => {
@@ -226,7 +243,7 @@ describe('position: a switched-off position renamed by the vendor', () => {
         type: 'position', name: 'acme_field_rep', packageId: VENDOR,
         candidates: [{ name: 'acme_field_representative', positions: [] }],
       }]);
-      expect(told(r)).toEqual(posture === 'single' ? SINGLE_AUDIENCE : WALLED_AUDIENCE);
+      expectRaised(r, posture);
     });
 
     it(`${posture} CONTROL: the position still ships — nothing raised`, async () => {
@@ -271,7 +288,7 @@ describe('sharing rule: a switched-off rule renamed, a collision, and a clone na
         type: 'sharing_rule', name: 'west_custom', rowId: 'srule_1', organizationId: DEFAULT_ORG,
         missing: [{ kind: 'field', name: 'account.territory' }],
       }]);
-      expect(told(r)).toEqual(posture === 'single' ? SINGLE_AUDIENCE : WALLED_AUDIENCE);
+      expectRaised(r, posture);
     });
 
     it(`${posture} CONTROL: the rule still ships, no row takes a declared name, every criteria field exists — nothing raised`, async () => {
@@ -306,7 +323,7 @@ describe('capability: a customer set naming a capability the vendor removed', ()
       expect(r.report.brokenReferences).toEqual([{
         type: 'permission', name: 'my_analyst', missing: [{ kind: 'capability', name: 'acme_export' }],
       }]);
-      expect(told(r)).toEqual(posture === 'single' ? SINGLE_AUDIENCE : WALLED_AUDIENCE);
+      expectRaised(r, posture);
     });
 
     it(`${posture} CONTROL: a package-shipped set still carries it (ADR-0066 ⑨) — nothing raised`, async () => {
@@ -429,29 +446,46 @@ describe('delivery: once per distinct finding set, and loud when it reaches nobo
     expect(call.payload.counts).toEqual({ reEnablements: 1, orphans: 1, collisions: 0, brokenReferences: 0, uncoveredDenies: 0 });
   });
 
-  it('no messaging service: the log says the findings reached nobody, with the remedy', async () => {
+  it('single, no messaging service: the log says the findings reached nobody, with the fix for that cause', async () => {
     const d = renamedSet(true);
     const log = logger();
-    const r = await reportAccessUpgrade(d.engine, { catalog: d.catalog, walled: true, logger: log });
+    const r = await reportAccessUpgrade(d.engine, { catalog: d.catalog, walled: false, logger: log });
     expect(r.delivery).toMatchObject({ outcome: 'undelivered', reason: 'this composition has no messaging service' });
-    expect(log.error.mock.calls.some(([m]) => String(m).includes('reached no administrator') && String(m).includes('OS_PLATFORM_OWNER_EMAIL'))).toBe(true);
+    const line = log.error.mock.calls.find(([m]) => String(m).includes('reached no administrator'));
+    expect(String(line?.[0])).toContain('Fix: compose the messaging service.');
+    // The digest rides a field name the kernel logger does not redact as a secret ("key").
+    expect(line?.[2]).toEqual({ findingSet: accessUpgradeDedupKey(r.report) });
   });
 
-  it('walled with no operator configured: nobody is told, and the log says so — a tenant administrator is never the fallback', async () => {
+  it('single, nobody granted or configured: the fix names the grant and the operator variable', async () => {
+    const d = renamedSet(true);
+    d.fake.tables.sys_user_permission_set = [];
+    const log = logger();
+    const r = await reportAccessUpgrade(d.engine, { catalog: d.catalog, messaging: notifier(), walled: false, logger: log });
+    expect(r.delivery).toMatchObject({ outcome: 'undelivered', reason: 'no administrator is configured or granted' });
+    expect(log.error.mock.calls.some(([m]) => String(m).includes('Fix: grant admin_full_access in the Default Organization, or set OS_PLATFORM_OWNER_EMAIL.'))).toBe(true);
+  });
+
+  it('single, an emit the ingress refuses: reported undelivered with its cause, never thrown — and no fix about configuration', async () => {
+    const d = renamedSet(true);
+    process.env[OWNER_ENV] = OPERATOR;
+    const messaging = { emit: vi.fn(async () => { throw new Error('outbox down'); }) };
+    const log = logger();
+    const r = await reportAccessUpgrade(d.engine, { catalog: d.catalog, messaging, walled: false, logger: log });
+    expect(r.delivery).toMatchObject({ outcome: 'undelivered', recipients: [OPERATOR, 'usr_admin'] });
+    const line = String(log.error.mock.calls.find(([m]) => String(m).includes('reached no administrator'))?.[0]);
+    expect(line).toContain('the notification ingress refused it (outbox down)');
+    expect(line).not.toContain('OS_PLATFORM_OWNER_EMAIL');
+  });
+
+  it('walled with no operator configured: the operator line says to name one — no organization is ever told, and no emit is attempted', async () => {
     const d = renamedSet(true);
     const messaging = notifier();
     const log = logger();
     const r = await reportAccessUpgrade(d.engine, { catalog: d.catalog, messaging, walled: true, logger: log });
-    expect(r.delivery).toMatchObject({ outcome: 'undelivered', reason: 'no platform operator is configured' });
+    expect(r.delivery).toMatchObject({ outcome: 'operator-log', recipients: [] });
     expect(messaging.emit).not.toHaveBeenCalled();
-  });
-
-  it('an emit that throws is reported undelivered, never thrown', async () => {
-    const d = renamedSet(true);
-    process.env[OWNER_ENV] = OPERATOR;
-    const messaging = { emit: vi.fn(async () => { throw new Error('outbox down'); }) };
-    const r = await reportAccessUpgrade(d.engine, { catalog: d.catalog, messaging, walled: false, logger: logger() });
-    expect(r.delivery).toMatchObject({ outcome: 'undelivered', recipients: [OPERATOR, 'usr_admin'] });
+    expect(log.error.mock.calls.some(([m]) => String(m).includes('No operator is configured: set OS_PLATFORM_OWNER_EMAIL'))).toBe(true);
   });
 
   it('the log line is written beside the notification, once per category', async () => {
