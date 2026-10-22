@@ -68,9 +68,9 @@
     },
     "enableOpenApi": {
       "status": "live",
-      "verifiedAt": "2026-09-21",
+      "verifiedAt": "2026-10-22",
       "evidenceScope": "in-repo",
-      "evidence": "packages/rest/src/rest-server.ts#registerRoutes (`if (this.config.api.enableOpenApi)` gates registerOpenApiEndpoints, which mounts both `/openapi.json` and the `/docs` viewer)",
+      "evidence": "packages/rest/src/rest-server.ts#registerRoutes (`if (this.config.api.enableOpenApi)` gates registerOpenApiEndpoints, which mounts `/openapi.json`, the OpenAPI document)",
       "producer": "packages/rest/src/rest-server.ts#normalizeConfig (parses `config.api` through `parseDeclaredApiConfig` and lists the key into `this.config.api`, the object every consumer below reads; the parsed schema's own `.default()`s supply the value when the host omits the key)",
       "note": "One consumer, and it is the mount. Worth reading beside `documentation.*` below: this flag decides WHETHER the OpenAPI document is served at all, and it is the only key on this block that the served document's existence depends on — nothing on this block decides what the document SAYS. REACHABILITY (#15543, standing reading): embedder-only. A RestServerConfig is the ARGUMENT a host passes when it constructs the server, and the one door is programmatic — createRestApiPlugin({ api }) (packages/rest/src/rest-api-plugin.ts). No shipped boot path opens it with a config of its own: packages/cli/src/commands/serve.ts forwards exactly two keys out of the stack's own top-level `api:` block (enableProjectScoping, projectResolution) and plugin-dev calls createRestApiPlugin() with no config at all, so a CLI-started deployment always gets the schema default for every key here. `live` answers who READS the key; reachability answers who can SET it, and the two never substitute for each other."
     },

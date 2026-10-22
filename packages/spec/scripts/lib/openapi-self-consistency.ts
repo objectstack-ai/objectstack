@@ -30,11 +30,10 @@
  *
  * 1. **Every local `$ref` resolves.** Any `$ref` beginning with `#/` is a JSON
  *    Pointer into this same document; if it does not resolve, the document is
- *    broken for every consumer that parses it (Scalar's viewer at
- *    `GET /api/v1/docs`, and any client generator pointed at
- *    `GET /api/v1/openapi.json`). Resolution is by pointer rather than by a
- *    `#/components/schemas/` prefix match so that a future `#/$defs/…` ref
- *    is covered without touching this file.
+ *    broken for every consumer that parses it (any client generator or
+ *    API tool pointed at `GET /api/v1/openapi.json`). Resolution is by
+ *    pointer rather than by a `#/components/schemas/` prefix match so that a
+ *    future `#/$defs/…` ref is covered without touching this file.
  * 2. **No schema is silently degraded.** See `assertNoDegradedSchemas`.
  *
  * ## Rule 1 after #5744 — vacuous today, retained for `$defs`
@@ -153,9 +152,9 @@ export function assertRefsResolve(doc: unknown): void {
       `  defined components.schemas: [${defined.join(', ') || '<none>'}]\n` +
       `\n` +
       `  A $ref that resolves to nothing breaks every consumer of the published\n` +
-      `  document (the Scalar viewer at GET /api/v1/docs renders an empty schema\n` +
-      `  panel; client generators fail at parse time). If components.schemas is\n` +
-      `  empty, the collector in build-openapi.ts skipped its inputs — note that\n` +
+      `  document at GET /api/v1/openapi.json (client generators fail at parse\n` +
+      `  time). If components.schemas is empty, the collector in\n` +
+      `  build-openapi.ts skipped its inputs — note that\n` +
       `  lazySchema() returns a Proxy whose typeof is 'function', not 'object'\n` +
       `  (#5168).`,
   );
