@@ -2644,9 +2644,13 @@ const TITLE_FORMAT_RETIRED_EXPLANATION: RuleExplanation = {
       'alias), or one derived from the object\'s fields. `titleFormat` is a render-only template: the ' +
       'server can neither return the title it draws nor query by it, the shared title predicate ' +
       '(`objectTitleCompleteness`) never reads it, and an explicit `nameField` takes precedence over it.',
-    'For a single-field title, set `nameField` to that field. For a composite title, add a formula ' +
-      'field with `returnType: \'text\'` and point `nameField` at it: a formula whose result is text is ' +
-      'title-eligible. Then drop `titleFormat`, which this warning reports for as long as it is declared.',
+    'For a single-field title, set `nameField` to that field. A composite title that must be queried ' +
+      '(matched by an import, sorted, searched) is a stored computed field: a non-formula field, such as ' +
+      'a `text` field, that declares an `expression`, which the engine computes and stores on every ' +
+      'write; point `nameField` at it. A formula with `returnType: \'text\'` is title-eligible too and ' +
+      'stays legal for a title shown for display only: its value is computed on read and stored nowhere, ' +
+      'so a sort by it is refused, search never reaches it, and an import cannot match a lookup cell ' +
+      'against it. Then drop `titleFormat`, which this warning reports for as long as it is declared.',
     'A warning, not an error: the schema still parses the key, so existing metadata keeps loading.',
   ],
 };
