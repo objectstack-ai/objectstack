@@ -30,13 +30,14 @@
  *
  * An op is only what this table names. There is no row for a merge of a pull,
  * a review submission, a direct branch or ref write (`/git/**`, `/branches/**`,
- * `/contents/**`), a workflow-file write, a run cancel / re-run / delete, a
- * cache or artifact write, a release, or any organization / administration
- * endpoint, so a payload naming one is refused at the validator with zero
- * writes — the `--self-test` of `validate.mjs` pins that every path spelled
- * here stays clear of those families and that the table's one `PUT`
- * (`pr_update_branch`, below) reaches no whole-set replace of labels or
- * assignees.
+ * `/contents/**`), a workflow-file write, a run cancel or delete, a whole-run
+ * or single-job re-run, a cache or artifact write, a release, or any
+ * organization / administration endpoint, so a payload naming one is refused
+ * at the validator with zero writes — the `--self-test` of `validate.mjs` pins
+ * that every path spelled here stays clear of those families and that the
+ * table's one `PUT` (`pr_update_branch`, below) reaches no whole-set replace
+ * of labels or assignees. The one re-run the table has re-runs a run's FAILED
+ * jobs alone, once, on a closed list of workflows (`run_rerun_failed`, below).
  *
  * ## The one row that moves a branch — `pr_update_branch`
  *
@@ -152,8 +153,9 @@
  * the maintainer's own ruling, comment 6104822731 (「22708 A」), so this grant
  * is not a drift. The grant also reaches workflow-file writes through
  * `/contents/**` and `/git/**`; `REFUSED_PATH_FAMILIES` refuses both for every
- * row. The one workflow-run dispatch (`workflow_dispatch`, below)
- * is `actions: write`, the one row spending it; the sender gate's
+ * row. The workflow-run dispatch (`workflow_dispatch`) and the failed-jobs
+ * re-run (`run_rerun_failed`), both below, are `actions: write`, the two rows
+ * spending it; the sender gate's
  * `GET /repos/{o}/{r}/collaborators/{login}/permission` is `metadata: read`.
  * `PERMISSIONS` is that set and nothing wider. The workflow declares the five
  * grants every stroke gets as literal `permission-*` inputs on
@@ -178,10 +180,62 @@
  * value for every other stroke, and the mint action skips an empty
  * `permission-*` input, so every other stroke's token is what it was before
  * this row. `REFUSED_PATH_FAMILIES` refuses every other `actions/*` path, and
- * `validate.mjs --self-test` pins that the dispatch call is the only one the
- * table reaches. The dispatch answers 204 with no body, so the run it starts
+ * `validate.mjs --self-test` pins that the dispatch call and
+ * `run_rerun_failed`'s re-run call (below) are the only two the table reaches.
+ * The dispatch answers 204 with no body, so the run it starts
  * is read back by the SEAT (`dispatch.mjs`): the newest `workflow_dispatch`
  * run of that file created since the dispatch.
+ *
+ * ## The second row whose token carries `actions: write` — `run_rerun_failed`
+ *
+ * `POST /repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs` starts a new
+ * ATTEMPT of a completed run in which the jobs that failed, and the jobs that
+ * need them, run again, and the jobs that passed are carried over as they
+ * were. Measured on run 39713789453's attempt 2: the passed jobs were listed
+ * in it at once as `completed`, keeping attempt 1's start times; the failed
+ * shard was listed at once and started two seconds later; and the aggregate
+ * job that needs every shard was listed only when its need finished, 16
+ * minutes later. It spends the `actions: write` `workflow_dispatch` spends, so
+ * it is fenced the same way. These are the six fences:
+ *
+ *   - the WORKFLOW: the run's `path` is one of `RERUN_FAILED_WORKFLOWS`, a
+ *     closed list matched whole and joined only by a PR that adds the path
+ *     here — never a request-time input, since the payload carries no key
+ *     that names a workflow;
+ *   - the EVENT: the run's `event` is `pull_request` — a push, merge-group,
+ *     schedule, release or `workflow_dispatch` run is refused;
+ *   - ONCE: the run's `run_attempt` is 1. A second failure is real, and a
+ *     re-send after a landing meets attempt 2 here and is refused;
+ *   - FAILED: the run is `completed` with `conclusion` `failure`;
+ *   - ALONE: a stroke carrying it carries exactly that one action (`alone`),
+ *     so the wider token serves one request;
+ *   - the GRANT: `actions: write` is minted for that stroke alone, through the
+ *     `STROKE_SCOPED_PERMISSIONS` output `workflow_dispatch` already uses — the
+ *     validator writes `permission_actions=write` for either op's stroke and an
+ *     empty value for every other, so the workflow names neither op.
+ *
+ * The payload is `run_id` and nothing else: no workflow, attempt, job or
+ * debug-logging key exists for it, and the POST carries no body. The first
+ * four fences are facts about the RUN, not the request, so the EXECUTOR judges
+ * them (`RERUN_FAILED_FENCES`) on `GET /repos/{repo}/actions/runs/{run_id}`,
+ * read immediately before the POST. A run that changed between the seat's
+ * request and the relay's run, for example re-run by a person meanwhile, is
+ * refused THERE with zero writes. The seat's wrapper
+ * (`scripts/pm/rerun-failed.mjs`) reads the same four before it dispatches.
+ * That is an early refusal naming the fence that fails, and it never replaces
+ * the executor's.
+ *
+ * The 201 the POST answers is an acceptance, not a landing. The executor reads
+ * the run again until it shows `run_attempt` 2, then that attempt's job list,
+ * and the action LANDS only on what `rerunFailedReadBack` judges there. Every
+ * job that concluded `failure` in attempt 1 and is listed in attempt 2 must be
+ * `queued` or `in_progress`, and at least one must be. A failed job not yet
+ * listed is NAMED, not failed: a job is created when its needs finish
+ * (measured above). A read-back that never sees attempt 2 inside its window is
+ * a FAILED action, never a success. `REFUSED_PATH_FAMILIES` carves out exactly
+ * `runs/{digits}/rerun-failed-jobs`; the whole-run `rerun`, a job's `rerun`,
+ * cancel, delete, logs, caches, artifacts, secrets and variables all stay
+ * refused, and `validate.mjs --self-test` pins each.
  *
  * ## A workflow's inputs are CLOSED per file — `WORKFLOW_DISPATCH_INPUTS`
  *
@@ -224,7 +278,8 @@
  * endpoint) needs `issues: write` on the repository the card is in AND on the
  * one it moves to, so a transfer stroke's token is minted for both. That is
  * the only widening of the token's repository reach the relay makes (the one
- * per-stroke widening of its permissions is `workflow_dispatch`'s, above), and it is fenced four ways: the target is
+ * per-stroke widening of its permissions is the `actions` grant of
+ * `workflow_dispatch` and `run_rerun_failed`, above), and it is fenced four ways: the target is
  * a closed enum — `TRANSFER_TARGETS`, the fleet's governed-repository roster
  * reused from `check-governed-merges.mjs`, never a second roster and never
  * free text; the target is never the source; a stroke carrying a transfer
@@ -314,8 +369,137 @@ export function dispatchInputsOnTheWire(declared) {
 }
 /** The one ref a `workflow_dispatch` may start a run at. ⛔ Never a free string. */
 export const WORKFLOW_DISPATCH_REF = 'main';
-/** The shape of the one `actions/*` path the table reaches — the dispatch call, nothing beside it. */
+/** The shape of the dispatch call — one of the two `actions/*` paths the table reaches. */
 export const WORKFLOW_DISPATCH_PATH_SHAPE = /\/actions\/workflows\/[^/]+\/dispatches$/;
+
+/**
+ * The workflows a `run_rerun_failed` may re-run the failed jobs of — the run's
+ * own `path`, as `GET /actions/runs/{id}` answers it, matched WHOLE (measured
+ * on run 39713789453: `.github/workflows/ci.yml`, no ref suffix). Joined only
+ * by a PR that adds the path here; ⛔ never a key of the payload.
+ * `validate.mjs --self-test` pins every entry to a workflow on disk that runs
+ * on `pull_request`.
+ */
+export const RERUN_FAILED_WORKFLOWS = Object.freeze(['.github/workflows/ci.yml']);
+/** The one event whose run a `run_rerun_failed` may re-run: a pull request's. */
+export const RERUN_FAILED_EVENT = 'pull_request';
+/** The one attempt it may re-run — once: a second failure is real. The read-back wants the attempt after it. */
+export const RERUN_FAILED_ATTEMPT = 1;
+/** The state the run must be in: completed, and failed. */
+export const RERUN_FAILED_STATUS = 'completed';
+export const RERUN_FAILED_CONCLUSION = 'failure';
+/** The job states the read-back accepts for a job attempt 1 failed — the ruling's two, nothing beside them. */
+export const RERUN_FAILED_RERUN_STATES = Object.freeze(['queued', 'in_progress']);
+/** The shape of the re-run call — the other `actions/*` path the table reaches; the run id is digits alone. */
+export const RERUN_FAILED_PATH_SHAPE = /\/actions\/runs\/\d+\/rerun-failed-jobs$/;
+
+/**
+ * The four fences on the RUN (the header's `run_rerun_failed` section), each
+ * judged on the run's own answer: `fence` its name, `wants` what the relay
+ * re-runs, `reads` the field(s) the failure sentence quotes, `holds` the
+ * predicate. The other two fences — alone in its stroke, the stroke-scoped
+ * grant — are the validator's. The executor judges these on the read taken
+ * immediately before the POST; the seat's wrapper judges them earlier, as an
+ * advisory refusal.
+ */
+export const RERUN_FAILED_FENCES = Object.freeze([
+  Object.freeze({
+    fence: 'workflow',
+    wants: `a run whose path is one of ${RERUN_FAILED_WORKFLOWS.join(', ')} — a closed list, matched whole`,
+    reads: (run) => run?.path,
+    holds: (run) => typeof run?.path === 'string' && RERUN_FAILED_WORKFLOWS.includes(run.path),
+  }),
+  Object.freeze({
+    fence: 'event',
+    wants: `a ${RERUN_FAILED_EVENT} run — never a push, merge_group, schedule, release or workflow_dispatch one`,
+    reads: (run) => run?.event,
+    holds: (run) => run?.event === RERUN_FAILED_EVENT,
+  }),
+  Object.freeze({
+    fence: 'once',
+    wants: `run_attempt ${RERUN_FAILED_ATTEMPT} — a run is re-run at most once, and a second failure is real`,
+    reads: (run) => run?.run_attempt,
+    holds: (run) => run?.run_attempt === RERUN_FAILED_ATTEMPT,
+  }),
+  Object.freeze({
+    fence: 'failed',
+    wants: `status ${RERUN_FAILED_STATUS} with conclusion ${RERUN_FAILED_CONCLUSION}`,
+    reads: (run) => `status ${run?.status ?? null}, conclusion ${run?.conclusion ?? null}`,
+    holds: (run) => run?.status === RERUN_FAILED_STATUS && run?.conclusion === RERUN_FAILED_CONCLUSION,
+  }),
+]);
+
+/** The fences a run's answer fails: `[{ fence, wants, got }]`, in `RERUN_FAILED_FENCES` order; `[]` when all four hold. Pure. */
+export function rerunFailedFenceFailures(run) {
+  return RERUN_FAILED_FENCES.filter((f) => !f.holds(run)).map((f) => ({ fence: f.fence, wants: f.wants, got: f.reads(run) ?? null }));
+}
+
+/** The sentence a fence refusal prints — every failing fence by name, what the run read and what the relay re-runs. Pure. */
+export function rerunFailedFenceText(failures) {
+  return failures.map((f) => `fence \`${f.fence}\`: the run reads ${JSON.stringify(f.got)}, and the relay re-runs only ${f.wants}`).join('; ');
+}
+
+/** The names of the jobs that concluded `failure` in one attempt's job list — the jobs the read-back looks for. Pure. */
+export function failedJobNames(jobs) {
+  const out = [];
+  for (const j of Array.isArray(jobs) ? jobs : []) {
+    if (j?.conclusion === RERUN_FAILED_CONCLUSION && typeof j.name === 'string' && !out.includes(j.name)) out.push(j.name);
+  }
+  return out;
+}
+
+/**
+ * What LANDED means for a `run_rerun_failed` (the header's section): `failed`
+ * the job names attempt 1 failed, `run` the run read again after the POST,
+ * `jobs` its attempt-2 job list. Answers `{ ok, pending, attempt, rerun,
+ * notListed, other, why }`:
+ *
+ *   rerun      `[{ name, id, status }]` — each failed job listed in attempt 2 `queued` or `in_progress`;
+ *   notListed  the failed names attempt 2 does not list yet — NAMED, never failed: a job is created when
+ *              its needs finish (measured, header), so an aggregate job behind a re-running shard is absent;
+ *   other      `[{ name, id, status, conclusion }]` — a failed job listed in any other state;
+ *   ok         attempt 2, at least one `rerun`, and no `other`;
+ *   pending    not landed YET — attempt 2 not seen, nothing re-running listed, or a job still in a pre-queue
+ *              state (`waiting`, `requested`, `pending`) — the executor re-reads inside its window;
+ *   neither    a FAILED action: a failed job listed `completed` in attempt 2 was not re-run as asked.
+ *
+ * Pure.
+ */
+export function rerunFailedReadBack({ failed = [], run = null, jobs = [] } = {}) {
+  const want = RERUN_FAILED_ATTEMPT + 1;
+  const attempt = run?.run_attempt ?? null;
+  if (attempt !== want) {
+    return { ok: false, pending: true, attempt, rerun: [], notListed: [...failed], other: [], why: `the run reads run_attempt ${JSON.stringify(attempt)}, not ${want} — the re-run has not shown as a new attempt` };
+  }
+  const listed = (Array.isArray(jobs) ? jobs : []).filter((j) => j && typeof j.name === 'string' && (j.run_attempt === undefined || j.run_attempt === want));
+  const rerun = [];
+  const notListed = [];
+  const other = [];
+  for (const name of failed) {
+    const named = listed.filter((j) => j.name === name);
+    if (named.length === 0) {
+      notListed.push(name);
+      continue;
+    }
+    const live = named.find((j) => RERUN_FAILED_RERUN_STATES.includes(j.status));
+    if (live) rerun.push({ name, id: live.id ?? null, status: live.status });
+    else other.push({ name, id: named[0].id ?? null, status: named[0].status ?? null, conclusion: named[0].conclusion ?? null });
+  }
+  const settled = other.filter((j) => j.status === RERUN_FAILED_STATUS);
+  if (settled.length) {
+    return { ok: false, pending: false, attempt, rerun, notListed, other, why: `attempt ${want} lists ${settled.map((j) => `\`${j.name}\` (job ${j.id}) ${j.status}${j.conclusion ? ` ${j.conclusion}` : ''}`).join(', ')} — a job attempt ${RERUN_FAILED_ATTEMPT} failed, not ${RERUN_FAILED_RERUN_STATES.join(' or ')}, so it was not re-run as asked` };
+  }
+  if (other.length) return { ok: false, pending: true, attempt, rerun, notListed, other, why: `attempt ${want} lists ${other.map((j) => `\`${j.name}\` (job ${j.id}) ${j.status}`).join(', ')} — not ${RERUN_FAILED_RERUN_STATES.join(' or ')} yet` };
+  if (rerun.length === 0) return { ok: false, pending: true, attempt, rerun, notListed, other, why: `attempt ${want} lists none of the ${failed.length} job(s) attempt ${RERUN_FAILED_ATTEMPT} failed yet` };
+  return { ok: true, pending: false, attempt, rerun, notListed, other, why: '' };
+}
+
+/** The read-back line a landing prints: the new attempt and its job ids, then what is not listed yet. Pure. */
+export function rerunFailedLandedText(v) {
+  const jobs = v.rerun.map((j) => `\`${j.name}\` job ${j.id} ${j.status}`).join(', ');
+  const later = v.notListed.length ? ` · not listed yet: ${v.notListed.map((n) => `\`${n}\``).join(', ')} (a job is listed when its needs finish)` : '';
+  return `attempt ${v.attempt} · re-run: ${jobs}${later}`;
+}
 
 /** The seat-side transport selector and its three values. */
 export const TRANSPORT_ENV = 'OS_FLEET_TRANSPORT';
@@ -398,6 +582,7 @@ export const FIELDS = Object.freeze({
   state: Object.freeze({ kind: 'enum', values: Object.freeze(['open', 'closed']) }),
   state_reason: Object.freeze({ kind: 'enum', values: Object.freeze(['completed', 'not_planned', 'duplicate', 'reopened']) }),
   target_repo: Object.freeze({ kind: 'enum', values: TRANSFER_TARGETS }),
+  run_id: Object.freeze({ kind: 'int' }),
   workflow: Object.freeze({ kind: 'enum', values: WORKFLOW_DISPATCH_ALLOWLIST }),
   ref: Object.freeze({ kind: 'enum', values: Object.freeze([WORKFLOW_DISPATCH_REF]) }),
   inputs: Object.freeze({ kind: 'inputs' }),
@@ -413,14 +598,15 @@ export const FIELDS = Object.freeze({
  * alone (`alsoSpends`: a pull changing `.github/workflows/**` is enqueued only
  * by a token carrying it), a literal grant on every stroke by the
  * maintainer's ruling, comment 6104822731 (header). `actions: write` is spent
- * by the `workflow_dispatch` row alone, and minted only for a stroke carrying
- * it (`STROKE_SCOPED_PERMISSIONS`).
+ * by the `workflow_dispatch` and `run_rerun_failed` rows alone, and minted
+ * only for a stroke carrying one of them (`STROKE_SCOPED_PERMISSIONS`).
  */
 export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write' });
 
 /**
  * The permissions minted ONLY for a stroke carrying an op that spends them —
- * `actions: write`, the `workflow_dispatch` row's alone. `validate.mjs`
+ * `actions: write`, the `workflow_dispatch` and `run_rerun_failed` rows'
+ * alone, each of which travels alone in its stroke. `validate.mjs`
  * computes a stroke's permission set (`tokenPermissionsOf`) and writes each of
  * these to `$GITHUB_OUTPUT` as `permission_<name>=<level>` or empty; the
  * workflow's mint step reads that output for exactly these inputs, and
@@ -530,7 +716,8 @@ export function transferRemedy(source, target) {
  *   `secondRepo`  (optional) the key naming a SECOND repository the token
  *                 must reach — `transfer`'s alone (header above);
  *   `alone`       (optional) true for a row whose stroke carries exactly that
- *                 one action — `workflow_dispatch`'s alone (header above);
+ *                 one action — `workflow_dispatch`'s and `run_rerun_failed`'s,
+ *                 the two rows spending `actions: write` (header above);
  *   `closedInputs` (optional) the per-workflow closed inputs —
  *                 `WORKFLOW_DISPATCH_INPUTS`, `workflow_dispatch`'s alone: the
  *                 action's `inputs` must be exactly the entry its `workflow`
@@ -548,14 +735,17 @@ export function transferRemedy(source, target) {
  *                 the executor reads the pull's files and sends what
  *                 `governedReviewRequests` spells, on a Tier H hit alone;
  *   `requests`    the request descriptors the executor issues, in order:
- *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, fromAnswer?, assigned?, labelled? }`
+ *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, fromAnswer?, assigned?, labelled? }`
  *                 — a `graphql` descriptor names the mutation and the pull (or
  *                 the issue and target) whose node ids it needs; a pull's
  *                 descriptor also carries `landed`, its `PR_LANDED_STATE`
  *                 entry, which is how the executor tells a landing from a
  *                 bare 200; an `updateBranch` descriptor carries the pull and
  *                 the expected head `confirmUpdateBranch` (execute.mjs) judges
- *                 the answer against; a `fromAnswer` descriptor names the
+ *                 the answer against; a `rerunFailed` descriptor carries the
+ *                 run whose fences the executor reads before the POST and
+ *                 whose new attempt it reads back after it
+ *                 (`confirmRerunFailed`, execute.mjs); a `fromAnswer` descriptor names the
  *                 field of its action's FIRST request's answer that fills the
  *                 `answerPlaceholder` in its path (`fillFromAnswer`,
  *                 execute.mjs); an `assigned` descriptor lists the logins its
@@ -720,6 +910,17 @@ export const OPS = Object.freeze({
       return [{ verb: 'POST', path: `/repos/${repo}/actions/workflows/${enc(a.workflow)}/dispatches`, body: { ref: a.ref, ...(inputs ? { inputs } : {}) } }];
     },
   }),
+  // The second row whose token carries `actions: write`, minted for a stroke carrying this op alone — see the header.
+  // `run_id` is its one key. The four fences on the run (`RERUN_FAILED_FENCES`) are judged by the executor on the run's
+  // own answer, read immediately before this POST, and the POST carries NO body: the platform's optional
+  // debug-logging flag is never sent.
+  run_rerun_failed: Object.freeze({
+    permission: 'actions',
+    required: Object.freeze(['run_id']),
+    optional: Object.freeze([]),
+    alone: true,
+    requests: (a, repo) => [{ verb: 'POST', path: `/repos/${repo}/actions/runs/${a.run_id}/rerun-failed-jobs`, rerunFailed: { runId: a.run_id } }],
+  }),
 });
 
 export const OP_NAMES = Object.freeze(Object.keys(OPS));
@@ -754,11 +955,13 @@ export const REFUSED_PATH_FAMILIES = Object.freeze([
   /\/git\//,
   /\/branches\//,
   /\/contents\//,
-  // Every `actions/*` path but the one dispatch call (`WORKFLOW_DISPATCH_PATH_SHAPE`), then the run,
-  // job, cache, artifact, secret / variable / runner and workflow enable / disable endpoints
-  // `actions: write` would otherwise reach, each named — a loosened catch-all still reds on them.
-  /\/actions\/(?!workflows\/[^/]+\/dispatches$)/,
-  /\/actions\/runs\//,
+  // Every `actions/*` path but the dispatch call (`WORKFLOW_DISPATCH_PATH_SHAPE`) and the failed-jobs
+  // re-run (`RERUN_FAILED_PATH_SHAPE`), then the run, job, cache, artifact, secret / variable / runner
+  // and workflow enable / disable endpoints `actions: write` would otherwise reach, each named — a
+  // loosened catch-all still reds on them. The run family refuses every run path but exactly
+  // `runs/{digits}/rerun-failed-jobs`: the whole-run `rerun`, cancel, delete, logs and attempts stay refused.
+  /\/actions\/(?!workflows\/[^/]+\/dispatches$|runs\/\d+\/rerun-failed-jobs$)/,
+  /\/actions\/runs\/(?!\d+\/rerun-failed-jobs$)/,
   /\/actions\/jobs\//,
   /\/actions\/caches/,
   /\/actions\/artifacts/,

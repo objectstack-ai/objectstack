@@ -49,6 +49,14 @@
  *     and value, or no `inputs` key where the entry is `null`. A missing
  *     input, another value (`refresh_version_pr: false` on `release.yml`, the
  *     publish-repair lane) or any other input (`force`) is refused by name;
+ *   - a stroke carrying a `run_rerun_failed` carries exactly that one action
+ *     too (the row's `alone`), for the same reason: its token carries
+ *     `actions: write`. Its one key is `run_id`, a positive integer; a
+ *     workflow, an attempt, a job, an event or the platform's debug-logging
+ *     flag beside it is refused by name. The four fences on the RUN — the
+ *     workflow, the event, once, failed (`RERUN_FAILED_FENCES` in `ops.mjs`)
+ *     — are facts this file cannot see: the executor judges them on the run
+ *     read immediately before its POST;
  *   - a `pr_create` may carry `assignees` and `labels`, the typed lists
  *     `assign` and `labels_add` take — judged here as every list is — and the
  *     op table turns each into a later request of the SAME action, sent by
@@ -63,7 +71,9 @@
  * target, the only such row. It also writes one `permission_<name>=` line per
  * grant in `STROKE_SCOPED_PERMISSIONS` (`tokenPermissionsOf`): the level when
  * an action in the stroke spends it, empty otherwise — `permission_actions=write`
- * for a `workflow_dispatch` stroke, `permission_actions=` for every other. The
+ * for a `workflow_dispatch` or `run_rerun_failed` stroke, `permission_actions=`
+ * for every other. So the second row rides the workflow's existing input and
+ * the workflow names neither op. The
  * workflow reads those outputs and never the payload, and `--self-test` pins
  * the list to ONE name for every other op, two for a transfer, the grant to
  * the one row, and the workflow lines that read both.
@@ -103,6 +113,14 @@ import {
   RELAY_EVENT_TYPE,
   RELAY_FILES,
   REQUEST_ID_SHAPE,
+  RERUN_FAILED_ATTEMPT,
+  RERUN_FAILED_CONCLUSION,
+  RERUN_FAILED_EVENT,
+  RERUN_FAILED_FENCES,
+  RERUN_FAILED_PATH_SHAPE,
+  RERUN_FAILED_RERUN_STATES,
+  RERUN_FAILED_STATUS,
+  RERUN_FAILED_WORKFLOWS,
   SESSION_SHAPE,
   SHA_SHAPE,
   STROKE_SCOPED_PERMISSIONS,
@@ -116,7 +134,12 @@ import {
   GOVERNED_REVIEW_OPS,
   answerPlaceholder,
   dispatchInputsOnTheWire,
+  failedJobNames,
   governedReviewRequests,
+  rerunFailedFenceFailures,
+  rerunFailedFenceText,
+  rerunFailedLandedText,
+  rerunFailedReadBack,
 } from './ops.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -244,9 +267,10 @@ export function closedInputsErrors(action, declared, where) {
  * The rules that span actions — the two rows that widen the token. The one
  * whose token reaches a second repository (`secondRepo`, `transfer`'s alone):
  * such a stroke carries that op alone, names ONE second repository, never
- * `repo` itself, and each card once. The one whose token carries a grant no
- * other row spends (`alone`, `workflow_dispatch`'s): such a stroke carries
- * exactly that one action. Runs only over actions that passed
+ * `repo` itself, and each card once. The ones whose token carries a grant no
+ * other row spends (`alone`, `workflow_dispatch`'s and `run_rerun_failed`'s,
+ * the two that spend `actions: write`): such a stroke carries exactly that
+ * one action. Runs only over actions that passed
  * `validateAction`. Pure.
  */
 export function strokeErrors(repo, actions) {
@@ -309,7 +333,7 @@ export function tokenRepositoriesOf(payload) {
  * The grants the relay's token must carry for a JUDGED payload: every entry of
  * `PERMISSIONS` but the stroke-scoped ones, plus each stroke-scoped grant some
  * action's op spends. `{ …five grants }` for every stroke but a
- * `workflow_dispatch` one, which adds `actions: write`. Pure.
+ * `workflow_dispatch` or `run_rerun_failed` one, which adds `actions: write`. Pure.
  */
 export function tokenPermissionsOf(payload) {
   const spent = new Set(payload.actions.map((a) => OPS[a.op].permission));
@@ -750,10 +774,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CLI: a file, the environment, GitHub outputs, and the exit ladder': 10,
   'the transfer row: an issue never a pull, a target from the governed roster never the source, a stroke of its own to one target, labels never created': 12,
   'the token scope: ONE repository for every op but transfer, source + target for a transfer stroke, and the workflow mints from that list': 8,
-  'the workflow_dispatch row: a closed allowlist of files matched whole, each with its closed inputs, ref main alone, a stroke of exactly that one action, actions write minted for that stroke alone, and the dispatch call the ONLY actions path any row reaches': 18,
+  'the workflow_dispatch row: a closed allowlist of files matched whole, each with its closed inputs, ref main alone, a stroke of exactly that one action, actions write minted for that stroke alone, and the dispatch call and the failed-jobs re-run the ONLY actions paths any row reaches': 18,
   "the release.yml entry: refresh_version_pr true and nothing beside it — force, false, absent, a string or any other input refused by name; the wire spells the table's value as a string; every entry's inputs declared on disk; and the file's own guards, evaluated, start the bookkeeping lane alone": 22,
+  "the run_rerun_failed row: run_id alone, a positive integer, nothing that widens it; one bodiless POST to the run's rerun-failed-jobs; a stroke of exactly that one action; actions write minted for that stroke and EMPTY for every other, through the workflow's existing input; the four fences on the run, each accepted and refused; the read-back's judgment; and every other actions path still refused": 30,
 });
-const SELF_TEST_BATTERY_FLOOR = 11;
+// Raised 11 → 12 with the run_rerun_failed battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 12;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -887,6 +913,7 @@ export async function selfTest() {
       automerge_disable: { pull: 1 },
       transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
       workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
+      run_rerun_failed: { run_id: 1 },
     };
     t('every op in the table has a minimal shape this validator accepts', OP_NAMES.filter((op) => !validatePayload(one({ op, ...minimal[op] })).ok), []);
     t('…and the minimal-shape ledger names every op, no more and no less', Object.keys(minimal).sort(), [...OP_NAMES].sort());
@@ -911,7 +938,7 @@ export async function selfTest() {
   {
     const sample = {
       issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a b'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', expected_head_sha: SHA, target_repo: `${TARGET_OWNER}/objectui`,
-      workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF,
+      workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF, run_id: 7,
     };
     const everyRequest = OP_NAMES.flatMap((op) => {
       const spec = OPS[op];
@@ -1047,6 +1074,7 @@ export async function selfTest() {
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
       automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
+      run_rerun_failed: { run_id: 1 },
     };
     const narrow = OP_NAMES.filter((op) => !OPS[op].secondRepo);
     t('transfer is the ONLY row that reaches a second repository', OP_NAMES.filter((op) => OPS[op].secondRepo), ['transfer']);
@@ -1063,7 +1091,7 @@ export async function selfTest() {
   }
 
   // ── the workflow_dispatch row ─────────────────────────────────────────────
-  battery('the workflow_dispatch row: a closed allowlist of files matched whole, each with its closed inputs, ref main alone, a stroke of exactly that one action, actions write minted for that stroke alone, and the dispatch call the ONLY actions path any row reaches');
+  battery('the workflow_dispatch row: a closed allowlist of files matched whole, each with its closed inputs, ref main alone, a stroke of exactly that one action, actions write minted for that stroke alone, and the dispatch call and the failed-jobs re-run the ONLY actions paths any row reaches');
   {
     const REPO = `${TARGET_OWNER}/objectstack`;
     const FILE = WORKFLOW_DISPATCH_ALLOWLIST[0];
@@ -1089,24 +1117,24 @@ export async function selfTest() {
     t('an inputs key on a file whose entry is null is refused BY NAME — the relay sends none there', refuses(one(start({ inputs: { reason: true } })), `actions[0].inputs: ${FILE} declares no inputs`));
     t('⛔ a workflow_dispatch beside any other op is refused — the stroke carries that one action alone', refuses(fixturePayload({ actions: [start(), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `workflow_dispatch`'));
     t('⛔ two workflow_dispatch in one stroke are refused too', refuses(fixturePayload({ actions: [start(), start()] }), 'a stroke carries exactly ONE `workflow_dispatch` and nothing else'));
-    t('the only rows that travel alone or widen the token: workflow_dispatch (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['workflow_dispatch'], ['transfer']]);
-    t('…and actions is spent by the workflow_dispatch row and NOTHING else', OP_NAMES.filter((op) => OPS[op].permission === 'actions'), ['workflow_dispatch']);
+    t('the only rows that travel alone or widen the token: workflow_dispatch and run_rerun_failed (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['workflow_dispatch', 'run_rerun_failed'], ['transfer']]);
+    t('…and actions is spent by the workflow_dispatch and run_rerun_failed rows and NOTHING else — each of them alone in its stroke', [OP_NAMES.filter((op) => OPS[op].permission === 'actions'), OP_NAMES.filter((op) => OPS[op].permission === 'actions').every((op) => OPS[op].alone === true)], [['workflow_dispatch', 'run_rerun_failed'], true]);
     const plain = validatePayload(fixturePayload()).payload;
     const run = validatePayload(one(start())).payload;
     t('the token grants: a comment stroke carries the five literal grants and no actions; a workflow_dispatch stroke adds actions write', [tokenPermissionsOf(plain), tokenPermissionsOf(run)], [{ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read' }, { issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write' }]);
     t('…and the GitHub output spells that as permission_actions=write for the run stroke, EMPTY for every other — the mint action skips an empty input', [githubOutputLines(run).split('\n').at(-2), githubOutputLines(plain).split('\n').at(-2), [...STROKE_SCOPED_PERMISSIONS]], ['permission_actions=write', 'permission_actions=', ['actions']]);
     // The fence on the grant: every path every row can spell, against the actions families — the dispatch call is the ONE
     // actions path reached; and a POSITIVE CONTROL that the families would catch what actions: write otherwise reaches.
-    const filled = { issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', expected_head_sha: SHA, target_repo: `${TARGET_OWNER}/objectui`, workflow: FILE, ref: WORKFLOW_DISPATCH_REF };
+    const filled = { issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', expected_head_sha: SHA, target_repo: `${TARGET_OWNER}/objectui`, workflow: FILE, ref: WORKFLOW_DISPATCH_REF, run_id: 7 };
     const everyPath = OP_NAMES.flatMap((op) => {
       const a = { op };
       for (const k of [...OPS[op].required, ...OPS[op].optional]) a[k] = filled[k];
       return OPS[op].requests(a, REPO).map((r) => r.path);
     });
     const actionsPaths = everyPath.filter((p) => p.includes('/actions/'));
-    t('⛔ the ONLY actions/* path any row reaches is the dispatch call on an allowlisted file', [actionsPaths, actionsPaths.every((p) => WORKFLOW_DISPATCH_PATH_SHAPE.test(p))], [[`/repos/${REPO}/actions/workflows/${FILE}/dispatches`], true]);
-    const forbidden = ['runs/1/cancel', 'runs/1/rerun', 'runs/1/rerun-failed-jobs', 'runs/1', 'runs/1/logs', 'runs/1/approve', 'runs/1/pending_deployments', 'jobs/1/rerun', 'caches', 'caches/1', 'artifacts/1', `workflows/${FILE}/enable`, `workflows/${FILE}/disable`, `workflows/${FILE}`, 'secrets/X', 'variables/X', 'permissions', 'runners/1', `workflows/${FILE}/dispatches/x`];
-    t('positive control: every cancel / re-run / delete / log / approve / cache / artifact / enable / disable / secret / variable / runner path under actions/* is caught by a refused family', forbidden.filter((tail) => !REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/${REPO}/actions/${tail}`))), []);
+    t('⛔ the ONLY actions/* paths any row reaches are the dispatch call on an allowlisted file and the failed-jobs re-run of a run named by its id', [actionsPaths, actionsPaths.every((p) => WORKFLOW_DISPATCH_PATH_SHAPE.test(p) || RERUN_FAILED_PATH_SHAPE.test(p))], [[`/repos/${REPO}/actions/workflows/${FILE}/dispatches`, `/repos/${REPO}/actions/runs/7/rerun-failed-jobs`], true]);
+    const forbidden = ['runs/1/cancel', 'runs/1/force-cancel', 'runs/1/rerun', 'runs/1/rerun-failed-jobs/x', 'runs/x/rerun-failed-jobs', 'runs/1/attempts/1/rerun-failed-jobs', 'runs/1', 'runs/1/logs', 'runs/1/approve', 'runs/1/pending_deployments', 'jobs/1/rerun', 'caches', 'caches/1', 'artifacts/1', `workflows/${FILE}/enable`, `workflows/${FILE}/disable`, `workflows/${FILE}`, 'secrets/X', 'variables/X', 'permissions', 'runners/1', `workflows/${FILE}/dispatches/x`];
+    t('positive control: every cancel / whole-run or job re-run / delete / log / approve / cache / artifact / enable / disable / secret / variable / runner path under actions/* — and a re-run path with anything around its run id — is caught by a refused family', forbidden.filter((tail) => !REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/${REPO}/actions/${tail}`))), []);
   }
 
   // ── the release.yml entry ────────────────────────────────────────────────
@@ -1166,6 +1194,93 @@ export async function selfTest() {
     t('⛔ the pin can fail: a release-integrity guard that lost its negation, or a seventh job with no guard, is started by the relay\'s dispatch', [unguarded !== releaseText && started(unguarded, 'workflow_dispatch', REFRESH).runs.includes('release-integrity'), started(added, 'workflow_dispatch', REFRESH).runs.includes('extra-lane')], [true, true]);
   }
 
+  // ── the run_rerun_failed row ──────────────────────────────────────────────
+  battery("the run_rerun_failed row: run_id alone, a positive integer, nothing that widens it; one bodiless POST to the run's rerun-failed-jobs; a stroke of exactly that one action; actions write minted for that stroke and EMPTY for every other, through the workflow's existing input; the four fences on the run, each accepted and refused; the read-back's judgment; and every other actions path still refused");
+  {
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    const RUN = 39713789453;
+    const spec = OPS.run_rerun_failed;
+    const rerun = (extra = {}) => ({ op: 'run_rerun_failed', run_id: RUN, ...extra });
+    const one = (action) => fixturePayload({ actions: [action] });
+    // The row and its one request.
+    t('the row: run_id required and nothing optional, an integer field, spending actions, travelling alone, reaching no second repository, with no closed inputs', [spec.required, spec.optional, FIELDS.run_id, spec.permission, spec.alone, spec.secondRepo ?? null, spec.closedInputs ?? null], [['run_id'], [], { kind: 'int' }, 'actions', true, null, null]);
+    const req = spec.requests(rerun(), REPO);
+    t("its one request is POST /repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs with NO body — the platform's debug-logging flag is never sent — carrying the run the executor fences and reads back", [req.length, req[0].verb, req[0].path, 'body' in req[0], req[0].rerunFailed], [1, 'POST', `/repos/${REPO}/actions/runs/${RUN}/rerun-failed-jobs`, false, { runId: RUN }]);
+    t('…a path the re-run shape names and no refused family reaches', [RERUN_FAILED_PATH_SHAPE.test(req[0].path), REFUSED_PATH_FAMILIES.filter((re) => re.test(req[0].path)).map(String)], [true, []]);
+    // Accepted, and refused by value and by key — the validator's half of "nothing widens it".
+    const ok = validatePayload(one(rerun()));
+    t('accepted: the minimal stroke, whose normalised action is op and run_id alone', [ok.ok, ok.payload?.actions[0]], [true, { op: 'run_rerun_failed', run_id: RUN }], ok.errors.join(' | '));
+    t('⛔ refused: run_id as a numeric string, zero, a negative, a float or an object — the integer kind, judged here', [String(RUN), 0, -1, 1.5, { id: 1 }].map((run_id) => refuses(one(rerun({ run_id })), 'actions[0].run_id must be a positive integer')), [true, true, true, true, true]);
+    t('⛔ refused: a missing run_id — the run is named on every request, never defaulted', refuses(one({ op: 'run_rerun_failed' }), 'actions[0].run_id is required by `run_rerun_failed`'));
+    t('⛔ refused BY NAME: a workflow, an attempt, a job, an event, a ref or the debug-logging flag beside run_id — no request-time key widens the fences', ['workflow', 'run_attempt', 'job_id', 'event', 'ref', 'enable_debug_logging'].map((key) => refuses(one(rerun({ [key]: key === 'workflow' ? 'ci.yml' : 1 })), `actions[0].${key} is not a key \`run_rerun_failed\` takes (it takes run_id)`)), [true, true, true, true, true, true]);
+    // Fence: alone in its stroke.
+    t('⛔ fence alone, refused: beside a comment, beside a workflow_dispatch, and two of them — each stroke refused naming the action that does not belong', [
+      refuses(fixturePayload({ actions: [rerun(), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `run_rerun_failed`'),
+      refuses(fixturePayload({ actions: [rerun(), { op: 'workflow_dispatch', workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF }] }), 'actions[1] is `workflow_dispatch` in a stroke that carries a `run_rerun_failed`'),
+      refuses(fixturePayload({ actions: [rerun(), rerun({ run_id: 2 })] }), 'a stroke carries exactly ONE `run_rerun_failed` and nothing else'),
+    ], [true, true, true]);
+    t('fence alone, accepted: the stroke of that one action passes the stroke rules', strokeErrors(REPO, [rerun()]), []);
+    // Fence: the stroke-scoped grant — ruling 3, carried by the existing input with no workflow edit.
+    const stroke = ok.payload;
+    t('fence grant, accepted side: its stroke mints the five literal grants plus actions write, for ONE repository', stroke ? [tokenPermissionsOf(stroke), tokenRepositoriesOf(stroke)] : 'refused', [{ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write' }, [REPO]]);
+    t('⭐ …and the GitHub output spells permission_actions=write for its stroke, exactly as for a workflow_dispatch stroke', stroke ? [githubOutputLines(stroke).split('\n').at(-2), githubOutputLines(validatePayload(one({ op: 'workflow_dispatch', workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF })).payload).split('\n').at(-2)] : 'refused', ['permission_actions=write', 'permission_actions=write']);
+    const minimalOf = {
+      comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
+      assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
+      pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
+    };
+    const spendsNoActions = OP_NAMES.filter((op) => OPS[op].permission !== 'actions');
+    t('…the ledger of ops spending no actions grant is every op but the two that do, no more and no less', [Object.keys(minimalOf).sort(), [...spendsNoActions].sort()], [[...spendsNoActions].sort(), [...spendsNoActions].sort()]);
+    const scopedLine = (actions) => {
+      const v = validatePayload(fixturePayload({ actions }));
+      return v.ok ? githubOutputLines(v.payload).split('\n').at(-2) : `refused: ${v.errors.join(' | ')}`;
+    };
+    t('⛔ fence grant, refused side: every op spending no actions grant writes an EMPTY permission_actions — each alone in its stroke, and the stroke of them all that shares one token', [spendsNoActions.filter((op) => scopedLine([{ op, ...minimalOf[op] }]) !== 'permission_actions='), scopedLine(spendsNoActions.filter((op) => !OPS[op].secondRepo).map((op) => ({ op, ...minimalOf[op] })))], [[], 'permission_actions=']);
+    const repoRoot = resolve(SELF_PATH, '../../../..');
+    const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/fleet-write.yml'), 'utf8');
+    const mintsFromOutput = [...workflowText.matchAll(/^\s+permission-actions:\s*\$\{\{\s*steps\.validate\.outputs\.permission_actions\s*\}\}\s*$/gm)].length;
+    t('⭐ ruling 3, no workflow edit: fleet-write.yml mints permission-actions from the validator\'s permission_actions output — the one input this row rides — and names neither this op nor its path', [mintsFromOutput, workflowText.includes('run_rerun_failed'), workflowText.includes('rerun-failed-jobs')], [1, false, false]);
+    // The four fences on the run — the closed values, then each accepted and refused on the run's own answer.
+    t('the fences on the run: the closed workflow list is exactly ci.yml, frozen; the event pull_request; the attempt 1; completed with failure; and the read-back accepts queued and in_progress alone', [[...RERUN_FAILED_WORKFLOWS], Object.isFrozen(RERUN_FAILED_WORKFLOWS), RERUN_FAILED_EVENT, RERUN_FAILED_ATTEMPT, RERUN_FAILED_STATUS, RERUN_FAILED_CONCLUSION, [...RERUN_FAILED_RERUN_STATES], RERUN_FAILED_FENCES.map((f) => f.fence)], [['.github/workflows/ci.yml'], true, 'pull_request', 1, 'completed', 'failure', ['queued', 'in_progress'], ['workflow', 'event', 'once', 'failed']]);
+    t('every listed workflow is a file on disk that runs on pull_request — so the list names a run the fences can accept', RERUN_FAILED_WORKFLOWS.map((p) => [p, existsSync(resolve(repoRoot, p)) && /^ {2}pull_request:/m.test(readFileSync(resolve(repoRoot, p), 'utf8'))]), RERUN_FAILED_WORKFLOWS.map((p) => [p, true]));
+    // The measured run as its attempt 1 read before the maintainer re-ran it (run 39713789453; fields as the run endpoint answers them).
+    const MEASURED = { id: RUN, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, status: 'completed', conclusion: 'failure' };
+    const fenced = (patch) => rerunFailedFenceFailures({ ...MEASURED, ...patch }).map((f) => f.fence);
+    t('accepted: the measured run passes all four fences', rerunFailedFenceFailures(MEASURED), []);
+    t('⛔ fence workflow, refused: another workflow, the bare file name, a ref-suffixed path, a missing path — each naming the workflow fence alone', [{ path: '.github/workflows/lint.yml' }, { path: 'ci.yml' }, { path: '.github/workflows/ci.yml@refs/heads/main' }, { path: undefined }].map(fenced), [['workflow'], ['workflow'], ['workflow'], ['workflow']]);
+    t('⛔ fence event, refused: push, merge_group, schedule, release, workflow_dispatch and pull_request_target runs — each naming the event fence alone', ['push', 'merge_group', 'schedule', 'release', 'workflow_dispatch', 'pull_request_target'].map((event) => fenced({ event })), [['event'], ['event'], ['event'], ['event'], ['event'], ['event']]);
+    t('⛔ fence once, refused: attempt 2, attempt 3, the string "1" and a missing attempt — each naming the once fence alone', [{ run_attempt: 2 }, { run_attempt: 3 }, { run_attempt: '1' }, { run_attempt: undefined }].map(fenced), [['once'], ['once'], ['once'], ['once']]);
+    t('⛔ fence failed, refused: still in progress, completed with success, completed cancelled, completed with no conclusion — each naming the failed fence alone', [{ status: 'in_progress', conclusion: null }, { conclusion: 'success' }, { conclusion: 'cancelled' }, { conclusion: null }].map(fenced), [['failed'], ['failed'], ['failed'], ['failed']]);
+    const all = rerunFailedFenceFailures({ path: '.github/workflows/release.yml', event: 'push', run_attempt: 2, status: 'completed', conclusion: 'success' });
+    t('every failing fence is named in ONE pass, and the sentence quotes what the run read beside what the relay re-runs', [all.map((f) => f.fence), rerunFailedFenceText(all).includes('fence `once`: the run reads 2'), rerunFailedFenceText(all).includes('"push"'), rerunFailedFenceText(all).split('; ').length], [['workflow', 'event', 'once', 'failed'], true, true, 4]);
+    // The read-back's judgment, on the measured attempts (jobs by name and state, as the attempts endpoint lists them).
+    const attempt1 = [
+      { id: 119611140808, name: 'Test Core (3/6)', run_attempt: 1, status: 'completed', conclusion: 'failure' },
+      { id: 119611140839, name: 'Test Core (1/6)', run_attempt: 1, status: 'completed', conclusion: 'success' },
+      { id: 119611142366, name: 'Console Pin Gate', run_attempt: 1, status: 'completed', conclusion: 'skipped' },
+      { id: 119617410962, name: 'Test Core', run_attempt: 1, status: 'completed', conclusion: 'failure' },
+    ];
+    const failed = failedJobNames(attempt1);
+    t('the baseline: the jobs attempt 1 failed, by name — the shard and the aggregate that needs it; a pass or a skip is not one', failed, ['Test Core (3/6)', 'Test Core']);
+    const rerunMoment = [
+      { id: 119642047246, name: 'Test Core (3/6)', run_attempt: 2, status: 'queued', conclusion: null },
+      { id: 119642048282, name: 'Test Core (1/6)', run_attempt: 2, status: 'completed', conclusion: 'success' },
+    ];
+    const landed = rerunFailedReadBack({ failed, run: { run_attempt: 2 }, jobs: rerunMoment });
+    t('⭐ lands: attempt 2, the failed shard queued, the aggregate not listed yet — NAMED, never failed; the line names the new attempt and its job id', [landed.ok, landed.pending, landed.notListed, rerunFailedLandedText(landed)], [true, false, ['Test Core'], 'attempt 2 · re-run: `Test Core (3/6)` job 119642047246 queued · not listed yet: `Test Core` (a job is listed when its needs finish)']);
+    t('…and in_progress lands as queued does', rerunFailedReadBack({ failed, run: { run_attempt: 2 }, jobs: [{ ...rerunMoment[0], status: 'in_progress' }] }).ok, true);
+    const notYet = rerunFailedReadBack({ failed, run: { run_attempt: 1 }, jobs: rerunMoment });
+    t('⛔ a read that does not see attempt 2 is not a landing — pending inside the window, and its reason names the attempt read', [notYet.ok, notYet.pending, notYet.why.includes('run_attempt 1, not 2')], [false, true, true]);
+    const carried = rerunFailedReadBack({ failed, run: { run_attempt: 2 }, jobs: [{ ...rerunMoment[0], status: 'completed', conclusion: 'failure' }] });
+    t('⛔ a failed job listed completed in attempt 2 was not re-run as asked — not a landing and not pending: a FAILED action naming the job', [carried.ok, carried.pending, carried.why.includes('`Test Core (3/6)` (job 119642047246) completed failure')], [false, false, true]);
+    t('…a failed job still waiting, or none of them listed yet, is pending — re-read, never landed early', [rerunFailedReadBack({ failed, run: { run_attempt: 2 }, jobs: [{ ...rerunMoment[0], status: 'waiting' }] }), rerunFailedReadBack({ failed, run: { run_attempt: 2 }, jobs: [rerunMoment[1]] })].map((v) => [v.ok, v.pending]), [[false, true], [false, true]]);
+    // Every other actions path stays refused, by no row reachable, and a payload naming one as an op writes nothing.
+    const others = ['runs/7/rerun', 'jobs/7/rerun', 'runs/7/cancel', 'runs/7/force-cancel', 'runs/7', 'runs/7/logs', 'runs/7/attempts/1/logs', 'runs/7/rerun-failed-jobs/x', 'runs/x/rerun-failed-jobs', 'caches', 'caches/7', 'artifacts', 'artifacts/7', 'secrets/X', 'secrets/public-key', 'variables', 'variables/X'];
+    t('⛔ still refused: the whole-run re-run, a job re-run, cancel, force-cancel, delete, logs, caches, artifacts, secrets and variables — each caught by a refused family', others.filter((tail) => !REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/${REPO}/actions/${tail}`))), []);
+    t('⛔ …with zero writes: a payload naming any of them as an op is refused as no op the relay executes', ['run_rerun', 'job_rerun', 'run_cancel', 'run_delete', 'cache_delete', 'artifact_delete', 'secret_set', 'variable_set'].map((op) => refuses(one({ op, run_id: 7 }), 'is not an op the relay executes')), [true, true, true, true, true, true, true, true]);
+  }
+
   // ── the floor, BEFORE the verdict ─────────────────────────────────────────
   const declared = Object.keys(SELF_TEST_BATTERIES);
   const floor = [];
@@ -1198,7 +1313,8 @@ export async function selfTest() {
     `✓ fleet-write/validate self-test: ${cases.length} cases pass across ${declared.length} batteries — a closed envelope, one organization, ` +
       'closed keys per op with typed values, the platform\'s own client_payload ceilings pinned with their source, no row that can reach a refused family, ' +
       'a token list of ONE repository for every op but transfer, whose second is one governed target, and actions write reaching one dispatch call on one allowlisted file ' +
-      "with that file's closed inputs, minted for that stroke alone — release.yml's bookkeeping lane and no other, read from its own guards.",
+      "with that file's closed inputs — release.yml's bookkeeping lane and no other, read from its own guards — or one failed-jobs re-run of a run named by its id alone, " +
+      'each minted for its stroke alone, every other actions path still refused.',
   );
   selfTestReachedVerdict = true;
   return 0;
