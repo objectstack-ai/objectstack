@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 40 — spawns the real producer once per single-cause fixture: three boots of the built CLI (production --no-server --preset minimal, --dev --no-server, a default composed boot), each differing only in the input under test, held 3 s past its banner and then stopped by SIGTERM; 27.0 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
+// test-budget: 40 — spawns the real producer once per single-cause fixture: three boots of the built CLI (production --no-server on the host kernel, --dev --no-server, a default composed boot), each differing only in the input under test, held 3 s past its banner and then stopped by SIGTERM; 27.0 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -30,9 +30,18 @@ import { fileURLToPath } from 'node:url';
  * Each boot is read for its banner and `objectstack:seed-settled`, then left
  * alone for {@link HOLD_WINDOW_MS}, then sent SIGTERM:
  *
- *   1. production `--no-server --preset minimal` (the card's command): still
- *      alive after the window, and SIGTERM ends it with the kernel's code, 0,
- *      the kernel's own handler exiting the process (no signal death);
+ *   1. production `--no-server` with no store and no auth composed (the card's
+ *      shape): still alive after the window, and SIGTERM ends it with the
+ *      kernel's code, 0, the kernel's own handler exiting the process (no
+ *      signal death). [ADR-0131 D9] The card's own `--preset minimal` composes
+ *      no auth, and a production boot with no auth is now refused whether or
+ *      not `--server`; the one production composition that still boots with
+ *      no auth is the cloud runtime's host kernel (auth is each project's
+ *      there), so this leg boots that — {@link HOST_KERNEL_PLUGIN} in the
+ *      config, `tiers: ['core', 'auth']` so the `auth` tier is on and skipped
+ *      by the host-kernel path, still `--preset minimal`, no secret. It keeps
+ *      what made the defect: no storage driver, so no pool holding the event
+ *      loop;
  *   2. CONTROL: `--dev --no-server` behaves as before: the same;
  *   3. CONTROL: a default composed production boot sends
  *      `[objectstack:listening, objectstack:seed-settled]`, stays up, and stops
@@ -83,6 +92,8 @@ const OBJECT = `{ name: 'fx_task', label: 'Task', pluralLabel: 'Tasks', fields: 
 const MANIFEST = `{ id: 'com.example.fx23744', namespace: 'fx', version: '1.0.0', type: 'app', name: 'Fx' }`;
 /** An instantiated plugin, which is what makes this a HOST config. */
 const HOST_PLUGIN = `{ name: 'com.example.fx23744.host-plugin', version: '1.0.0', init: async () => {}, start: async () => {} }`;
+/** The cloud runtime's host kernel, as `isHostKernelComposition` recognises it: auth is skipped with a warning. */
+const HOST_KERNEL_PLUGIN = `{ name: 'com.objectstack.runtime.objectos-environment', version: '0.0.0', init: async () => {}, start: async () => {} }`;
 
 interface IpcMessage { type?: string }
 interface Exit { code: number | null; signal: NodeJS.Signals | null }
@@ -99,6 +110,8 @@ interface Lifetime {
 const children: ChildProcess[] = [];
 let root: string;
 let plainDir: string;
+/** The same, on the cloud runtime's host kernel — see shape 1. */
+let hostKernelDir: string;
 
 /** The root of an installed dependency of this package, found through `node_modules`. */
 function packageRoot(specifier: string): string {
@@ -249,6 +262,15 @@ beforeAll(() => {
       + `export default defineStack({ manifest: ${MANIFEST}, objects: [${OBJECT}], plugins: [${HOST_PLUGIN}] });\n`,
   );
   symlinkSync(packageRoot('@objectstack/spec'), join(plainDir, 'node_modules', '@objectstack', 'spec'), 'dir');
+  hostKernelDir = join(root, 'host-kernel');
+  mkdirSync(join(hostKernelDir, 'node_modules', '@objectstack'), { recursive: true });
+  writeFileSync(join(hostKernelDir, 'package.json'), JSON.stringify({ name: 'fx-23744-host-kernel', private: true, type: 'module' }));
+  writeFileSync(
+    join(hostKernelDir, 'objectstack.config.ts'),
+    "import { defineStack } from '@objectstack/spec';\n"
+      + `export default defineStack({ manifest: ${MANIFEST}, tiers: ['core', 'auth'], objects: [${OBJECT}], plugins: [${HOST_PLUGIN}, ${HOST_KERNEL_PLUGIN}] });\n`,
+  );
+  symlinkSync(packageRoot('@objectstack/spec'), join(hostKernelDir, 'node_modules', '@objectstack', 'spec'), 'dir');
 });
 
 afterAll(() => {
@@ -260,9 +282,9 @@ afterAll(() => {
 
 describe('os serve — a boot with no HTTP transport stays up until it is stopped (#23744)', () => {
   it(
-    'production --no-server --preset minimal (the card\'s command): alive after its banner, and SIGTERM ends it with 0',
+    'production --no-server with no store and no auth (the card\'s shape, on the host kernel): alive after its banner, and SIGTERM ends it with 0',
     async () => {
-      expectHeldThenStopped(await bootHoldStop(plainDir, {}, ['--no-server', '--preset', 'minimal']));
+      expectHeldThenStopped(await bootHoldStop(hostKernelDir, {}, ['--no-server', '--preset', 'minimal']));
     },
     240_000,
   );

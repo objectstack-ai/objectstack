@@ -354,20 +354,28 @@ os serve                   # Default: port 3000
 os serve -p 4000           # Custom port
 os serve --dev             # Development mode (pretty logs, devPlugins)
 os serve --dev --ui        # Dev mode with Console UI
-os serve --no-server       # Skip HTTP server (kernel only)
-os serve --preset minimal  # Skip auto-loaded auth/i18n/ui plugins
+os serve --no-server       # Skip HTTP server (kernel only; production still needs OS_AUTH_SECRET)
+os serve --preset minimal  # Skip auto-loaded auth/i18n/ui plugins (production: refused unless the stack mounts AuthPlugin)
 ```
 
 **Options:**
 - `-p, --port <port>` — Server port (default: env `OS_PORT` or `3000`)
 - `--dev` — Development mode (loads devPlugins, pretty logging)
 - `--ui / --no-ui` — Toggle Console UI at `/_console/` (default `on`)
-- `--server / --no-server` — Toggle HTTP server plugin
+- `--server / --no-server` — Toggle HTTP server plugin. `--no-server` serves no
+  data API but still boots the kernel and writes its seed, so a production boot
+  (no `--dev`) is held to the same auth rule as a server boot: a stack that
+  enables auth needs `OS_AUTH_SECRET`, and a stack that mounts no auth is
+  refused. Both are refused before any plugin starts, and so is a
+  `--no-server` migrate-and-exit job (`OS_MIGRATE_AND_EXIT=1`) without the
+  secret.
 - `--prebuilt` — Skip esbuild / `bundle-require` and load the config as
   native ESM (use this in production builds where the config is already
   pre-compiled)
 - `--preset minimal | default | full` — Override the auto-registration
-  tier (see below)
+  tier (see below). `minimal` composes no `auth` tier, so a production boot
+  (no `--dev`) with it is refused, with or without `--server`, unless the
+  stack mounts `AuthPlugin` in its own `plugins`.
 
 **Probes.** A served process exposes `GET /api/v1/health` (liveness — process
 only, and deliberately blind to configuration and credentials, so a
@@ -386,14 +394,18 @@ only gate the **automatic** registration of optional plugins.
 
 | Preset | Tiers | Auto-loaded optional plugins |
 |:---|:---|:---|
-| `minimal` | `core` | none |
+| `minimal` | `core` | none — in production, refused unless the stack mounts `AuthPlugin` itself (see below) |
 | `default` *(default)* | `core`, `i18n`, `ui`, `ai`, `auth` | i18n service, Console UI, AI service, Auth + Security + Audit |
 | `full` | `core`, `i18n`, `ui`, `ai`, `auth` | currently an alias of `default` — same tiers, no additional plugins |
 
-The `auth` tier requires `OS_AUTH_SECRET` to be set; otherwise `AuthPlugin`
-is skipped with a yellow warning and the `/api/v1/auth/*` endpoints will
-return 404. (In `--dev` mode the CLI falls back to an insecure local secret so
-login works out of the box.) To take full control, set `tiers` on the stack config:
+The `auth` tier requires `OS_AUTH_SECRET` in production: without it the boot
+is refused before any plugin starts, with or without `--server`, because a boot
+with no `AuthPlugin` has no organization and every row it wrote would have no
+owner. A production boot whose tiers leave `auth` out (`--preset minimal`
+included) is refused the same way unless the stack mounts `AuthPlugin` itself.
+In `--dev` mode the CLI falls back to an insecure local secret, so login works
+out of the box. (The cloud runtime's host kernel, where auth is each project's,
+only warns.) To take full control, set `tiers` on the stack config:
 
 ```typescript
 import { defineStack } from '@objectstack/spec';
