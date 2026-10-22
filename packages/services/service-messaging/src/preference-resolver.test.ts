@@ -38,8 +38,12 @@ function fakeData(rows: any[] = [], opts: { throwOnFind?: boolean } = {}) {
     };
 }
 
-function pref(over: Partial<{ user_id: string; topic: string; channel: string; enabled: boolean; organization_id: string }>) {
-    return { user_id: '*', topic: '*', channel: '*', enabled: true, ...over };
+/**
+ * One preference row. `user_id` defaults to the EMPTY reference — the
+ * admin-global default (ADR-0118 D1), as the engine stores it (`null`).
+ */
+function pref(over: Partial<{ user_id: string | null; topic: string; channel: string; enabled: boolean; organization_id: string }>) {
+    return { user_id: null, topic: '*', channel: '*', enabled: true, ...over };
 }
 
 function resolver(getData: () => any, mandatoryTopics: string[] = []) {
@@ -82,9 +86,9 @@ describe('PreferenceResolver', () => {
         expect(out).toEqual([{ recipient: 'u2', channels: ['inbox', 'email'] }]);
     });
 
-    it('lets a per-user row override the admin-global default', async () => {
+    it('lets a per-user row override the admin-global default (the empty user reference)', async () => {
         const rows = [
-            pref({ user_id: '*', topic: 'task.assigned', channel: 'email', enabled: false }), // global: email off
+            pref({ user_id: null, topic: 'task.assigned', channel: 'email', enabled: false }), // global: email off
             pref({ user_id: 'u1', topic: 'task.assigned', channel: 'email', enabled: true }),  // u1 opts back in
         ];
         const r = resolver(() => fakeData(rows).engine);
@@ -92,6 +96,35 @@ describe('PreferenceResolver', () => {
         // u1 re-enabled email; u2 inherits the global mute (email dropped).
         expect(out).toEqual([
             { recipient: 'u1', channels: ['inbox', 'email'] },
+            { recipient: 'u2', channels: ['inbox'] },
+        ]);
+    });
+
+    it("reads every engine spelling of the empty reference as the admin-global default — null, absent and ''", async () => {
+        for (const global of [{ user_id: null }, { user_id: '' }, {}]) {
+            const row = { ...pref({ topic: 'task.assigned', channel: 'email', enabled: false }), ...global };
+            if (!('user_id' in global)) delete (row as Record<string, unknown>).user_id;
+            const r = resolver(() => fakeData([row]).engine);
+            const out = await r.filter(['u1'], ['inbox', 'email'], { topic: 'task.assigned' });
+            expect(out, JSON.stringify(global)).toEqual([{ recipient: 'u1', channels: ['inbox'] }]);
+        }
+    });
+
+    it("a stored user_id '*' is NOT the admin-global default: the retired sentinel matches no recipient (ADR-0118 D1)", async () => {
+        // The text column's sentinel. The boot conversion rewrites such rows to
+        // the empty reference; a row still holding it is a row for a user id
+        // nobody has, so the resolver carries no tolerance for it.
+        const rows = [pref({ user_id: '*', topic: 'task.assigned', channel: 'email', enabled: false })];
+        const r = resolver(() => fakeData(rows).engine);
+        const out = await r.filter(['u1', 'u2'], ['inbox', 'email'], { topic: 'task.assigned' });
+        expect(out).toEqual([
+            { recipient: 'u1', channels: ['inbox', 'email'] },
+            { recipient: 'u2', channels: ['inbox', 'email'] },
+        ]);
+        // Control: the SAME row with the empty reference mutes both.
+        const control = resolver(() => fakeData([pref({ topic: 'task.assigned', channel: 'email', enabled: false })]).engine);
+        expect(await control.filter(['u1', 'u2'], ['inbox', 'email'], { topic: 'task.assigned' })).toEqual([
+            { recipient: 'u1', channels: ['inbox'] },
             { recipient: 'u2', channels: ['inbox'] },
         ]);
     });
