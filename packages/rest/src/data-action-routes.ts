@@ -1020,7 +1020,13 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // the same rows in the same order, so no value of it can widen or
                 // substitute the answer, and refusing one would turn a correct
                 // export into a `400`.
-                const chunkSize = Math.min(MAX_CHUNK, Math.max(50, q.page != null ? Number(q.page) || 500 : 500));
+                //
+                // [#25229] …which is why it is TRUNCATED where it is read: the
+                // chunk becomes each `findData`'s `limit`, and the normalizer
+                // refuses a fractional window (`?page=100.5` was a `take` of
+                // 100.5, answered 400 naming `limit`, a parameter the caller
+                // never wrote).
+                const chunkSize = Math.min(MAX_CHUNK, Math.max(50, q.page != null ? Math.trunc(Number(q.page)) || 500 : 500));
                 // Colour cells only for xlsx within the style cap; decided up
                 // front (before streaming) since we can't know the true row
                 // count until the stream drains.
