@@ -139,7 +139,7 @@ os diff <before> <after> --breaking-only
 ```
 
 <Callout type="info">
-There is no `lint --deprecations` flag — deprecation scanning lives on `os doctor --scan-deprecations`. There is no `codemod` command either: the automated upgrade across MAJOR versions is `os migrate meta` (see [Support Windows](#support-windows)), and `os doctor --scan-deprecations`, `os diff`, and the CHANGELOG migration notes (below) cover what it does not rewrite.
+There is no `lint --deprecations` flag — deprecation scanning lives on `os doctor --scan-deprecations`. There is no `codemod` command either: to upgrade your metadata across MAJOR versions, run `os migrate meta` (see [Support Windows](#support-windows)), and use `os doctor --scan-deprecations`, `os diff`, and the CHANGELOG migration notes (below) for what it does not rewrite.
 </Callout>
 
 ### Migration Guides
