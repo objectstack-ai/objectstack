@@ -9,7 +9,7 @@ Clause-②: no (narrowing)
 
 Metadata-protocol: narrowed
 
-<!-- adr-0087: already-registered cbp-master-relation-tiers-retired -->
+<!-- adr-0087: not-required (already-registered cbp-master-relation-tiers-retired) the parse's one-master entry already carries this narrowing; its text is updated in this change, and the stored-row listing reports it under that id -->
 
 **BREAKING** (a declaration the parse accepted is now refused), shipped as `minor` under the 18.x convention for breaking changes, with no retirement stage.
 
