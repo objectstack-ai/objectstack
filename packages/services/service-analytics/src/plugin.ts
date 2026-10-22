@@ -1075,7 +1075,10 @@ export class AnalyticsServicePlugin implements Plugin {
         // catches it and renders raw ids, so there the refusal only reaches the
         // log. Same envelope as the other engine-bound merges, withheld on the
         // wire; the display pass's catch is untouched.
-        if (scope) assertReadScopeComparandsRunnable(scope, targetObject);
+        // [ADR-0139 D6] The engine's `ReadableIds` leaf admitted, as at the
+        // two merges this door mirrors: the `$and` below hands the scope to
+        // `executeAggregate` — the engine — whose boundary composes it.
+        if (scope) assertReadScopeComparandsRunnable(scope, targetObject, { admitReadableIds: true });
         if (scope) assertReadScopePlaceholdersResolvable(scope, targetObject, context);
         if (scope) assertReadScopeAdmittedByEngine(scope, targetObject, context, { judgeFilter });
         // #3680 — the sort-key pass hands over the PRE-window id set (every

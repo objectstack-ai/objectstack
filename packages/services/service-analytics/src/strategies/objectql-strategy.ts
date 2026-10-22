@@ -897,7 +897,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // same scope in the withheld `READ_SCOPE_COMPILE_FAILED` / 500 (#5367).
     // Judged on the scope ALONE, for the attribution reason above; the
     // caller's own `where` keeps reaching the engine's doors and its 400.
-    assertReadScopeComparandsRunnable(scope, objectName);
+    // [ADR-0139 D6] With the engine's `ReadableIds` leaf admitted: this merge
+    // hands the scope to `engine.aggregate`, whose executor boundary composes
+    // the leaf from the security service exactly as a find does. The option
+    // is this merge's and the engine's; `compileScopedFilterToSql` keeps
+    // refusing the leaf, and the caller's own `where` never carries one.
+    assertReadScopeComparandsRunnable(scope, objectName, { admitReadableIds: true });
     // [#19995] …and the placeholder half. The engine resolves `{…}` values on
     // the COMPOSED `where`, so a placeholder in the scope it cannot resolve
     // came back as its `FILTER_TOKEN_*` / 400 with the token relayed. Judged
@@ -1419,7 +1424,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // [#19995] …and the comparand half, as at `withReadScope`: a comparand the
     // engine refuses would come back as its relayed 400, naming the referenced
     // object's policy. Before the mark, for the same reason as the line above.
-    if (scope != null) assertReadScopeComparandsRunnable(scope, refObject);
+    // [ADR-0139 D6] The engine's `ReadableIds` leaf admitted, as at
+    // `withReadScope`: this is an engine-bound merge, and the engine composes
+    // the leaf at its boundary.
+    if (scope != null) assertReadScopeComparandsRunnable(scope, refObject, { admitReadableIds: true });
     // [#19995] …and the placeholder half, as at `withReadScope`, with the
     // context forwarded to `executeAggregate` below.
     if (scope != null) assertReadScopePlaceholdersResolvable(scope, refObject, ctx.context);

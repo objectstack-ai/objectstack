@@ -54,6 +54,7 @@ import { SharingService, type SharingEngine } from '@objectstack/plugin-sharing'
 import { matchesFilterCondition } from '@objectstack/formula';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { composeReadableIdsInMemory } from './readable-ids-in-memory.testkit.js';
 
 const REP = 'usr_rep';
 const OTHER = 'usr_other';
@@ -377,8 +378,23 @@ async function boot(options: BootOptions = {}) {
 
   const repContext = () => ({ userId: REP, tenantId: 'org-1', positions: [], permissions: [] });
 
-  /** The CRUD READ face: run the middleware, then apply the filter it injected. */
-  const visible = async (object: string, context?: any): Promise<string[]> => {
+  /**
+   * [ADR-0139 D6] The derivation answers the engine's `ReadableIds` leaf over
+   * the master, which the engine composes at its executor boundary from the
+   * security service's `canReadObject` / `getReadFilter` of the master. This
+   * double is no engine, so the composition is done for it, the same way
+   * (`readable-ids-in-memory.testkit.ts`), with the real service answering
+   * the master's two halves at every level of the chain.
+   */
+  const compose = (where: unknown, context: any) =>
+    composeReadableIdsInMemory(where, context, {
+      rows: (object) => store.rows[object],
+      canReadObject: (object, c) => plugin.canReadObject(object, c),
+      getReadFilter: (object, c) => plugin.getReadFilter(object, c),
+    });
+
+  /** Run the middleware for a find of `object` and return the `where` it injected, uncomposed. */
+  const inject = async (object: string, context?: any): Promise<unknown> => {
     const opCtx: any = {
       object,
       operation: 'find',
@@ -387,20 +403,29 @@ async function boot(options: BootOptions = {}) {
       context: context ?? repContext(),
     };
     await middleware(opCtx, async () => {});
+    return opCtx.ast.where ?? null;
+  };
+
+  /** The CRUD READ face: run the middleware, compose the leaf it injected, then apply the filter. */
+  const visible = async (object: string, context?: any): Promise<string[]> => {
+    const where = await compose(await inject(object, context), context ?? repContext());
     return (store.rows[object] ?? [])
-      .filter((r) => matchesFilterCondition(r, opCtx.ast.where ?? null))
+      .filter((r) => matchesFilterCondition(r, where as any))
       .map((r) => String(r.id));
   };
 
   /**
-   * The ANALYTICS read face — the scope `getReadFilter` hands the raw-SQL path.
-   * No middleware runs here; this method IS the whole enforcement on that
-   * surface, and it is the THIRD call site of the derivation.
+   * The ANALYTICS read face — the scope `getReadFilter` hands the analytics
+   * service, which hands it to the engine (the raw-SQL strategy declines a
+   * scope carrying the leaf). No middleware runs here; this method IS the
+   * whole enforcement on that surface, and it is the THIRD call site of the
+   * derivation.
    */
   const analyticsVisible = async (object: string): Promise<string[]> => {
     const filter = await plugin.getReadFilter(object, repContext());
+    const where = await compose((filter ?? null) as unknown, repContext());
     return (store.rows[object] ?? [])
-      .filter((r) => matchesFilterCondition(r, (filter ?? null) as any))
+      .filter((r) => matchesFilterCondition(r, where as any))
       .map((r) => String(r.id));
   };
 
@@ -420,8 +445,9 @@ async function boot(options: BootOptions = {}) {
       context: { ...repContext(), onBehalfOf: { userId: delegator } },
     };
     await middleware(opCtx, async () => {});
+    const where = await compose(opCtx.ast.where ?? null, opCtx.context);
     return (store.rows[object] ?? [])
-      .filter((r) => matchesFilterCondition(r, opCtx.ast.where ?? null))
+      .filter((r) => matchesFilterCondition(r, where as any))
       .map((r) => String(r.id));
   };
 
@@ -450,7 +476,7 @@ async function boot(options: BootOptions = {}) {
     return out;
   };
 
-  return { store, ctx, plugin, repContext, visible, analyticsVisible, delegatedVisible, update, writable };
+  return { store, ctx, plugin, repContext, inject, visible, analyticsVisible, delegatedVisible, update, writable };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -632,12 +658,15 @@ describe('[#11082] the walk is bounded — both guards fail CLOSED', () => {
     });
   });
 
-  it('the bound caps WORK: resolving the two-level chain costs a bounded number of finds', async () => {
-    // Guards the cost limit ADR-0055 books, and would redden if the walk ever
-    // re-entered an ancestor without the visited set catching it.
+  it('the walk does NO store work: the derivation pre-scans no master, at any level of the chain', async () => {
+    // [ADR-0139 D6] The derivation answers the leaf and walks the chain over
+    // the registry alone; the master's rows are read by the engine, inside
+    // the one statement it composes (here, by the testkit's composition). A
+    // `find` of a master during the middleware run is the retired pre-scan.
     const h = await boot();
     h.store.findCalls.length = 0;
-    await h.visible('crm_quote_line_item');
-    expect(h.store.findCalls.length).toBeLessThanOrEqual(8);
+    const injected = await h.inject('crm_quote_line_item');
+    expect(h.store.findCalls.filter((o) => o === 'crm_quote' || o === 'crm_account' || o === 'crm_quote_line_item')).toEqual([]);
+    expect(injected).toBeTruthy();
   });
 });
