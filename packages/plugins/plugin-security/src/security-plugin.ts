@@ -45,6 +45,12 @@ import {
 } from './grant-permission-set-name.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
+  reportAccessUpgrade,
+  SHARING_RULES_SERVICE,
+  type AccessUpgradeNotifier,
+  type DeclaredSharingRuleReader,
+} from './access-upgrade-report.js';
+import {
   explainAccessForAsker,
   buildContextForUser,
   resolveDelegatorContext,
@@ -4743,6 +4749,32 @@ export class SecurityPlugin implements Plugin {
           ctx.logger.warn(
             '[security] the catalog reference report did not run — assignments and grants whose names the ' +
               'security catalog does not resolve go unreported for this boot',
+            { error: (e as Error)?.message },
+          );
+        }
+        // [ADR-0126 §6 wall 3] The access upgrade report: the customer's
+        // switch-offs, clones and sharing rule rows against the registry this
+        // boot registered, raised to the administrator (`single`) or the
+        // operator alone (walled). It writes and refuses nothing. See
+        // `access-upgrade-report.ts`.
+        try {
+          const optional = <T,>(name: string): T | undefined => {
+            try { return ctx.getService<T>(name) ?? undefined; } catch { return undefined; }
+          };
+          const sharingRules = optional<Partial<DeclaredSharingRuleReader>>(SHARING_RULES_SERVICE);
+          const messaging = optional<Partial<AccessUpgradeNotifier>>('messaging');
+          await reportAccessUpgrade(ql as any, {
+            catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
+            sharingRules: typeof sharingRules?.listDeclaredRules === 'function'
+              ? (sharingRules as DeclaredSharingRuleReader) : undefined,
+            messaging: typeof messaging?.emit === 'function' ? (messaging as AccessUpgradeNotifier) : undefined,
+            walled: postureEnforcesWall(this.tenancyPosture),
+            logger: ctx.logger,
+          });
+        } catch (e) {
+          ctx.logger.warn(
+            '[security] the access upgrade report did not run — a switch-off, clone or sharing rule an upgrade left ' +
+              'behind goes unreported for this boot',
             { error: (e as Error)?.message },
           );
         }
