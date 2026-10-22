@@ -4402,6 +4402,47 @@ export class AuthManager {
         // an anonymous registration mints no authority by itself.
         allowDynamicClientRegistration: dcr,
         allowUnauthenticatedClientRegistration: dcr,
+        // ── Native MCP clients that omit `application_type` (#25118, ruling 6329352251, A1) ──
+        // Local MCP clients (Claude Code, Cursor, VS Code, Codex CLI) register
+        // over DCR with a loopback `http` or a custom-scheme redirect, as RFC
+        // 8252 §7.3 and the MCP authorization spec have native clients do, and
+        // send no `application_type`. The provider's default fills a missing
+        // type with `web` (OIDC Registration §2), whose redirect rule refuses
+        // both forms, so every such client was refused before its browser
+        // opened.
+        //
+        // `'infer'` is the provider's own classifier; there is no second rule
+        // here. A dynamic registration that omits the type becomes `native`
+        // when ANY redirect uses a non-http(s) scheme or `http` on exactly
+        // `localhost`, `127.0.0.1` or `[::1]`, and each redirect is then held to
+        // the native rule; otherwise it stays `web`. A type the client sends is
+        // never overridden. It acts on `/oauth2/register` only (the Setup
+        // form's managed `create-client` door is unaffected) and only while
+        // `dcr` is on: with DCR off the provider refuses every registration.
+        //
+        // The measured boundary, pinned on the real provider in
+        // auth-manager.mcp-oauth-dcr-infer.test.ts:
+        //   • a public client with a loopback or custom-scheme redirect → `native`;
+        //   • `https://evil.example/cb` alone stays `web`; `http://evil.example/cb`,
+        //     `http://localhost.evil.example`, and an explicit `web` with a
+        //     loopback redirect stay refused;
+        //   • NOT "public clients only": the classifier reads redirect URIs and
+        //     never `token_endpoint_auth_method`, so a CONFIDENTIAL registration
+        //     (`client_secret_basic`, or the method omitted, which the provider
+        //     fills as `client_secret_basic`) with a loopback or custom-scheme
+        //     redirect and no type also registers as `native` and is issued a
+        //     `client_secret`. That body was already accepted with
+        //     `application_type: 'native'` spelled out, so no registrable client
+        //     shape is added; only the meaning of an omitted field changes
+        //     (RFC 8252 §8.4 allows a per-instance secret provisioned by DCR);
+        //   • PKCE stays required at /oauth2/authorize for every one of these
+        //     clients: unconditionally for a public client, and for a
+        //     confidential DCR client because `clientRegistrationRequirePKCE`
+        //     keeps its `true` default. ⛔ Do not pass it as `false`.
+        //
+        // ⛔ No hook on `/oauth2/register` and no second classification rule
+        // beside this one: ruling A1 declined both.
+        clientRegistrationDefaultApplicationType: 'infer',
         // ── The organization an OAuth consent binds (ruling 6232069920, A) ──
         // At consent the consenting session's active organization becomes the
         // consent's `reference_id`, and the installed provider carries that

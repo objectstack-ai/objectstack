@@ -608,12 +608,15 @@ describe('a screen inside an ADR-0031 region (#17511)', () => {
 
 // ── The flow's own label is demanded only for a flow the runner can open ────
 //
-// The console's `FlowRunner` is the one reader of `flows.<flow>.label`: it
-// names the flow in its header and its completion toast, and it opens only on
-// a run paused at a screen node. So the walker emits the label entry only for
-// a flow with a screen node somewhere in the node universe the screens walk
-// reads, at any depth. Both sides are pinned: a flow with no screen node owes
-// no label, and a flow whose only screen sits inside a region still owes it.
+// The console's `FlowRunner` reads `flows.<flow>.label`: it names the flow in
+// its header and its completion toast, and it opens only on a run paused at a
+// screen node. So the walker emits the label entry for a flow with a screen
+// node somewhere in the node universe the screens walk reads, at any depth.
+// Both sides are pinned: a flow with no screen node owes no label, and a flow
+// whose only screen sits inside a region still owes it. The approvals door is
+// the key's other reader, so a flow with an `approval` node owes it too
+// (#24916, pinned in `i18n-flow-approval-coverage.test.ts`); the scheduled
+// flow below has neither.
 
 /** A scheduled flow whose nodes include a region, and no screen at any depth. */
 const nightlyDigest = {
