@@ -128,120 +128,38 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  * states, keyed `<declaring package>><peer>` — pnpm's scoped `allowedVersions`
  * spelling, so each entry widens exactly one declaration and nothing else.
  *
- * Every one of them is reported by `pnpm install` on a brand-new scaffold, and
- * none is a real incompatibility. They are declared here because that report is
- * the first thing a newcomer sees, on the one screen where they are deciding
- * whether this project is solid, and there is nothing they did to cause it.
+ * An entry belongs here only while `pnpm install` on a brand-new scaffold
+ * reports that skew and the skew is measured harmless: that report is the first
+ * thing a newcomer sees, on the one screen where they are deciding whether this
+ * project is solid, and there is nothing they did to cause it. An entry whose
+ * skew is gone retires at once — a suppression with no skew behind it leaves
+ * the NEXT real skew pre-silenced.
  *
- *  - `better-auth>better-sqlite3` — better-auth peers `^12.0.0` while the tree
- *    resolves 13.x. The peer is OPTIONAL and governs one configuration only: a
- *    raw better-sqlite3 `Database` handed to better-auth's `database` option.
- *    ObjectStack never does that — `AuthManager.createDatabaseConfig()` passes
- *    an ObjectQL adapter factory (or `undefined`, better-auth's own in-memory
- *    adapter). So the upstream range is stale and 13 is right — widening is
- *    the correct remedy, not pinning our own declaration back to 12.
+ * EMPTY today, so `renderPnpmWorkspaceYaml` emits no `peerDependencyRules`
+ * block at all. Every entry this map has carried is retired, each read on the
+ * better-auth `1.7.12` pin off the lockfile's `peerDependencies` blocks and
+ * the published manifests:
  *
- *    RE-MEASURED on the pinned 1.7.2 (#16813). The original reading was taken
- *    on 1.7.1 (commit 675ab574e) and was behavioural: better-auth's own Kysely dialect —
- *    migrations, sign-up, sign-in, adapter find/update/delete — behaves
- *    identically on better-sqlite3 13.0.3 and on 12.11.1. 1.7.2 makes that
- *    structural instead of empirical: of the 464 files in the published
- *    `better-auth@1.7.2` tarball, exactly ONE names better-sqlite3 —
- *    `package.json`, i.e. the peer declaration itself. Zero code files
- *    reference it (positive control: `kysely` names 9). better-auth never
- *    imports the package; it accepts a `Database` the CALLER constructs and
- *    hands it to Kysely, and its own sqlite test path uses node's built-in
- *    `node:sqlite` `DatabaseSync`. There is therefore no better-auth call site
- *    that could touch an API moved between better-sqlite3 12 and 13 — the
- *    range is a statement about an instance we never supply. Re-read
- *    2026-09-11 on the 1.7.3 pin (the rendered file's prose carried this
- *    reading until it shrank to one line per block): the published package
- *    still names better-sqlite3 only in that peer declaration.
+ *  - RETIRED: `better-auth>better-sqlite3` (`'13'`). better-auth used to peer
+ *    an optional `better-sqlite3@^12.0.0` while the tree resolves 13.x (1.7.3
+ *    still declared it). `better-auth@1.7.12` declares no better-sqlite3 peer
+ *    at all, so there is nothing left to widen. The CLI's own 13.x declaration
+ *    is held by `test/better-sqlite3-peer-declaration.pin.test.ts`.
  *
- *    ⚠️ TWO CORRECTIONS to what this entry used to say, both measured:
- *      • the 13.x copy better-auth binds to is `@objectstack/cli`'s OWN
- *        `optionalDependencies` entry, NOT `@objectstack/driver-sql`'s. On the
- *        chain that actually reports (`cli` → `runtime` → `plugin-auth` →
- *        `better-auth`) the CLI is the ancestor, so its copy is the one pnpm
- *        resolves the peer against — pnpm names it in the warning itself
- *        ("found 13.0.3 in @objectstack/cli"). Editing driver-sql alone would
- *        not move this line.
- *      • pinning the CLI back to `^12` is not a neutral alternative. Measured
- *        on a bare project depending on `@objectstack/cli@17.3.0`, it clears
- *        the report only by installing a SECOND native better-sqlite3
- *        (12.11.1 alongside 13.0.3), and the 12 copy is dead weight — the CLI
- *        loads better-sqlite3 itself (`src/utils/sqlite-occupancy.ts`) and
- *        knex resolves 13.x through driver-sql regardless. This
- *        `allowedVersions` entry clears the same report with the resolution
- *        byte-identical (0 lines of lockfile diff).
+ *  - RETIRED: `@better-auth/core`, `/oauth-provider`, `/scim` and `/sso`, each
+ *    `>@better-auth/utils` (`'0.5.0'`). The four used to peer an EXACT
+ *    `@better-auth/utils@0.4.2` while the tree resolves 0.5.0. At 1.7.12 all
+ *    four peer `^0.4.2 || ^0.5.0`, which the resolved 0.5.0 satisfies.
  *
  *  - RETIRED (#3653): `@better-auth/scim>better-call` — the rc.1-era scim pin
- *    peered an exact `better-call@1.3.7` against the host's 1.4.0, and this
- *    map declared that skew away. Stable scim peers `better-call@1.4.0`, so
- *    the skew is genuinely gone and the entry retired WITH the pin move, as
- *    its ratchet demanded. Measured on 1.7.1 when #3653 landed; re-read
- *    2026-09-12 on `1.7.3`, the pin today, off the installed manifest —
- *    `peerDependencies['better-call']` is the exact string `1.4.0`.
+ *    peered an exact `better-call@1.3.7` against the host's 1.4.0. Stable
+ *    scim peers better-call exactly at the version the tree resolves: the
+ *    string `1.4.4` on the 1.7.12 pin today.
  *
- *  - `<four>@better-auth/utils` — `@better-auth/core`, `/oauth-provider`,
- *    `/scim` and `/sso` each peer an EXACT `@better-auth/utils@0.4.2`, while a
- *    scaffolded tree hands them 0.5.0. The 0.5.0 comes from `better-call@1.4.0`
- *    (better-auth's own HTTP layer), which DEPENDS on `^0.5.0`;
- *    `@objectstack/plugin-auth` names the four packages as direct dependencies
- *    without naming utils, so pnpm satisfies their peer from better-call's copy
- *    rather than from better-auth's own exact 0.4.2 dependency.
- *
- *    Measured compatible rather than assumed. Those four import exactly three
- *    symbols across two subpaths — `base64`/`base64Url` (`/base64`),
- *    `createHash` (`/hash`) and, in core only, `createRandomStringGenerator`
- *    (`/random`). 0.5.0 exports all three with identical signatures; `/random`
- *    is unchanged apart from formatting, `/base64` swaps `new Uint8Array(data)`
- *    for a helper that IS `new Uint8Array(data)` on non-strings, and `/hash`
- *    only widens its input coercion for views not backed by a plain
- *    ArrayBuffer. Run against the input shapes those call sites actually pass,
- *    0.4.2 and 0.5.0 agree on every value; run end to end (better-auth with the
- *    sso, oauth-provider and scim plugins), a tree where the four resolve 0.5.0
- *    and one where they resolve 0.4.2 produce the same transcript — sign-up,
- *    sign-in, session, both OAuth metadata documents, the RFC 7636 PKCE
- *    challenge, and the SCIM and SSO endpoint outcomes.
- *
- *    ⛔ A resolution change is the WRONG remedy here, and was measured too:
- *    pinning utils back to 0.4.2 clears the four lines only by dragging
- *    `better-call@1.4.0` off its own declared `^0.5.0` — manufacturing one real
- *    range violation to silence four benign ones.
- *
- *    Spelled `0.5.0` exactly, not `0.5`: 0.5.0 is the version that was
- *    measured, and a future 0.6.0 SHOULD report again rather than inherit this
- *    finding.
- *
- *    ⚠️ These four do NOT retire with the SCIM rc pin, even though one of them
- *    names scim. Stable `@better-auth/scim@1.7.3` still peers
- *    `@better-auth/utils@0.4.2` EXACTLY — re-read (2026-09-11) off the
- *    installed package manifest, unchanged from 1.7.1 and 1.7.2 — so this skew
- *    outlives that pin. They retire
- *    when the four packages accept 0.5.0 upstream, or when
- *    `SCAFFOLD_PNPM_RANGE` reaches `>=10.31` — pnpm 10.31 changed peer
- *    resolution so that all four land on 0.4.2 by themselves. Measured on the
- *    rendered scaffold, one clean resolve per pnpm version:
- *
- *      pnpm 10.15.0 – 10.30.0   all four reported as unmet peers.
- *      pnpm >= 10.31.0          resolved to 0.4.2; nothing to report.
- *
- * `allowedVersions` suppresses the report ONLY; it moves no resolution — the
- * lockfile a scaffold resolves is byte-identical with and without this block
- * (verified by digest on pnpm 10.15.0 and 10.30.0).
+ * `allowedVersions` suppresses the report ONLY; it moves no resolution, so a
+ * retirement leaves the lockfile a scaffold resolves unchanged.
  */
-export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
-  'better-auth>better-sqlite3': '13',
-  // '@better-auth/scim>better-call' retired with the scim rc pin (#3653) —
-  // stable scim peers better-call@1.4.0 exactly (re-read 2026-09-12 on the
-  // 1.7.3 pin), the copy every install already resolves. init.test.ts pins
-  // its ABSENCE now.
-  '@better-auth/core>@better-auth/utils': '0.5.0',
-  '@better-auth/oauth-provider>@better-auth/utils': '0.5.0',
-  '@better-auth/scim>@better-auth/utils': '0.5.0',
-  '@better-auth/sso>@better-auth/utils': '0.5.0',
-};
+export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {};
 
 /**
  * Lowest pnpm that can actually install this scaffold, declared as
@@ -696,8 +614,9 @@ export function renderScaffoldPackageJson(
  *   allowBuilds             and `SCAFFOLD_BUILT_DEPENDENCIES` (why each
  *                           package needs its build).
  *   peerDependencyRules     `SCAFFOLD_ALLOWED_PEER_VERSIONS`: one measured
- *                           paragraph per entry, its retirement condition,
- *                           and the retired `@better-auth/scim>better-call`.
+ *                           paragraph per entry and the retired entries.
+ *                           Emitted only while that map is non-empty; it is
+ *                           empty today, so the block is absent.
  *
  * The file carried 57 comment lines here, and 66 in the template, until the
  * maintainer asked for it to stay minimal with the rationale moved into the

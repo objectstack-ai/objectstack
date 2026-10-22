@@ -163,10 +163,11 @@ describe('explicit empty workspace declaration in the rendered file', () => {
   });
 
   it('adds no other top-level setting to the rendered file', () => {
-    // The rest of the file is what it was: the same four keys, same order. A
+    // The rest of the file is what it was: the same three keys, same order
+    // (`peerDependencyRules` is absent while no peer skew is declared). A
     // "restore the packages key" edit that also drags a setting in fails here.
     const keys = [...settings.matchAll(/^([A-Za-z][\w-]*):/gm)].map((m) => m[1]);
-    expect(keys).toEqual(['packages', 'onlyBuiltDependencies', 'allowBuilds', 'peerDependencyRules']);
+    expect(keys).toEqual(['packages', 'onlyBuiltDependencies', 'allowBuilds']);
   });
 });
 
@@ -311,118 +312,63 @@ describe('pnpm 11 build approvals in the rendered workspace file', () => {
   });
 });
 
-// A brand-new scaffold's first `pnpm install` reported two unmet peers, on the
-// one screen where a newcomer decides whether this project is solid, with
-// nothing they did to cause it (commit 675ab574e). Both ranges belong to third-party
-// packages we cannot edit, so the remedy is pnpm's scoped `allowedVersions` —
-// and it must travel INSIDE the scaffold, because a `peerDependencyRules` block
-// in this repo's own pnpm-workspace.yaml does not ship with published packages.
+// A brand-new scaffold's first `pnpm install` reported unmet peers, on the one
+// screen where a newcomer decides whether this project is solid, with nothing
+// they did to cause it (commit 675ab574e). Those ranges belonged to third-party
+// packages we cannot edit, so the remedy was pnpm's scoped `allowedVersions`,
+// carried INSIDE the scaffold because a `peerDependencyRules` block in this
+// repo's own pnpm-workspace.yaml does not ship with published packages. On the
+// better-auth 1.7.12 pin every skew it declared is gone, and an entry whose
+// skew is gone retires at once: a suppression with no skew behind it would
+// hide the NEXT real peer break from a newcomer's first screen. Re-adding any
+// entry needs a new measured skew, not a revert.
 describe('benign peer-skew declarations (#10326)', () => {
   // Comments in the rendered YAML explain these keys; they must not be what
   // satisfies an assertion about the keys themselves.
   const settings = renderPnpmWorkspaceYaml().replace(/^\s*#.*$/gm, '');
 
-  it('widens better-auth\'s stale better-sqlite3 peer rather than pinning ours back', () => {
-    // better-auth peers `^12.0.0` while the tree resolves 13.x. The peer is
-    // OPTIONAL and governs one configuration only — a raw better-sqlite3
-    // `Database` passed to better-auth's `database` option — which ObjectStack
-    // never does (AuthManager passes an ObjectQL adapter factory). Measured on
-    // the configuration it does govern, 1.7.1 behaves identically on 13.0.3 and
-    // 12.11.1; re-measured on the pinned 1.7.2 (#16813), the published package
-    // does not reference better-sqlite3 in any file, so no call site of ours
-    // can reach an API that moved 12 -> 13. 13 is right, the range is stale.
-    // The declaration this widening is ABOUT is pinned in
-    // `test/better-sqlite3-peer-declaration.pin.test.ts`.
-    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['better-auth>better-sqlite3']).toBe('13');
-    expect(settings).toMatch(/^ {4}'better-auth>better-sqlite3': '13'$/m);
-  });
-
-  it('keeps the retired @better-auth/scim>better-call suppression OUT (#3653)', () => {
-    // FLIPPED from a presence ratchet when the scim pin moved off the rc.
-    // Stable @better-auth/scim 1.7.1 peers better-call@1.4.0 exactly — the
-    // copy every install already resolves — so the skew the entry declared
-    // away no longer exists, and a suppression with no skew behind it would
-    // hide the NEXT real better-call peer break from a newcomer's first
-    // screen. Re-adding it needs a new measured skew, not a revert.
-    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>better-call']).toBeUndefined();
-    expect(settings).not.toMatch(/'@better-auth\/scim>better-call'/);
-  });
-
   it.each([
-    ['@better-auth/core'],
-    ['@better-auth/oauth-provider'],
-    ['@better-auth/scim'],
-    ['@better-auth/sso'],
-  ])('widens %s\'s exact @better-auth/utils peer to the version the tree resolves', (declaring) => {
-    // Each of the four peers an EXACT `@better-auth/utils@0.4.2`, while the
-    // tree hands them 0.5.0 — better-call (better-auth's own HTTP layer)
-    // depends on `^0.5.0`, and that is the copy plugin-auth's direct
-    // dependencies resolve their peer against. Measured on the surface the
-    // range governs: the four import three symbols in total (base64/base64Url,
-    // createHash, and createRandomStringGenerator in core), 0.5.0 declares all
-    // three unchanged, and both versions return identical values on the inputs
-    // those call sites pass — confirmed end to end through better-auth with the
-    // sso, oauth-provider and scim plugins. Pinning utils back instead would
-    // drag better-call off its own `^0.5.0`, trading four reported skews for a
-    // real one.
-    const key = `${declaring}>@better-auth/utils`;
-    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS[key]).toBe('0.5.0');
-    expect(settings).toMatch(
-      new RegExp(`^ {4}'${key.replace(/[/*+?^${}()|[\]\\]/g, '\\$&')}': '0\\.5\\.0'$`, 'm'),
-    );
+    // better-auth@1.7.12 declares no better-sqlite3 peer at all (1.7.3 peered
+    // `^12.0.0`). The CLI's own 13.x declaration is pinned in
+    // `test/better-sqlite3-peer-declaration.pin.test.ts`.
+    ['better-auth>better-sqlite3'],
+    // Retired with the scim rc pin (#3653): stable scim peers better-call
+    // exactly at the copy every install resolves.
+    ['@better-auth/scim>better-call'],
+    // At 1.7.12 the four peer `^0.4.2 || ^0.5.0`, which the resolved 0.5.0
+    // satisfies; they used to peer an EXACT 0.4.2.
+    ['@better-auth/core>@better-auth/utils'],
+    ['@better-auth/oauth-provider>@better-auth/utils'],
+    ['@better-auth/scim>@better-auth/utils'],
+    ['@better-auth/sso>@better-auth/utils'],
+  ])('keeps the retired %s suppression OUT', (key) => {
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS[key]).toBeUndefined();
+    expect(settings).not.toContain(`'${key}'`);
   });
 
-  it('covers every declaring package that peers @better-auth/utils, not some of them', () => {
-    // The defect this replaces was PARTIAL coverage: two skews were declared
-    // and four more were not, so the first screen was clean for a third of the
-    // report. A set assertion is what fails when a fifth declaration appears
-    // and nobody measures it, or when one of these four is dropped while the
-    // others stay.
-    const declaring = Object.keys(SCAFFOLD_ALLOWED_PEER_VERSIONS)
-      .filter((k) => k.endsWith('>@better-auth/utils'))
-      .map((k) => k.slice(0, -'>@better-auth/utils'.length))
-      .sort();
-    expect(declaring).toEqual([
-      '@better-auth/core',
-      '@better-auth/oauth-provider',
-      '@better-auth/scim',
-      '@better-auth/sso',
-    ]);
+  it('declares no peer skew at all on the current pin', () => {
+    // A set assertion, so an entry added without a measured skew fails here
+    // rather than riding in beside the retirements above.
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS).toEqual({});
   });
 
-  it('kept the @better-auth/utils widening when the better-call pin retired (#3653)', () => {
-    // @better-auth/scim appeared in TWO entries for two unrelated reasons, and
-    // they retire on different days — which HAPPENED in #3653: the better-call
-    // one went with the rc pin (stable 1.7.1 peers better-call 1.4.0), while
-    // the utils one outlives it (stable 1.7.1 still peers @better-auth/utils
-    // 0.4.2; its own retirement key is the pnpm 10.31 floor). Deleting both
-    // together — the obvious move when the rc pin lifted — would have silently
-    // put the utils report back on a newcomer's first screen; this pin is what
-    // stops that regression from ever landing quietly.
-    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>better-call']).toBeUndefined();
-    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>@better-auth/utils']).toBe('0.5.0');
-  });
-
-  it('renders the rules under peerDependencyRules.allowedVersions', () => {
-    expect(settings).toMatch(/^peerDependencyRules:$/m);
-    expect(settings).toMatch(/^ {2}allowedVersions:$/m);
-  });
-
-  it('scopes every rule to one declaring package, never a bare peer name', () => {
-    // A bare `better-sqlite3: '13'` would silence that peer for every package
-    // declaring it — including one whose complaint would be real.
-    const keys = Object.keys(SCAFFOLD_ALLOWED_PEER_VERSIONS);
-    expect(keys.length).toBeGreaterThan(0);
-    for (const key of keys) {
-      expect(key, `"${key}" must be spelled <declaring package>><peer>`).toContain('>');
-    }
-  });
-
-  it('emits nothing at all when the caller supplies no rules', () => {
+  it('emits no peerDependencyRules block when the map is empty', () => {
     // The block is data-driven, so an empty map must not leave a dangling
     // `allowedVersions:` header claiming a declaration that is not there.
+    expect(settings).not.toMatch(/^peerDependencyRules:/m);
+    expect(settings).not.toMatch(/allowedVersions:/);
     const bare = renderPnpmWorkspaceYaml(SCAFFOLD_BUILT_DEPENDENCIES, {});
     expect(bare).not.toMatch(/^peerDependencyRules:$/m);
+  });
+
+  it('renders supplied rules under peerDependencyRules.allowedVersions', () => {
+    // The renderer path a future measured entry would take, held with a
+    // fixture now that the shipped map is empty.
+    const rendered = renderPnpmWorkspaceYaml(SCAFFOLD_BUILT_DEPENDENCIES, { 'pkg-a>peer-b': '2' })
+      .replace(/^\s*#.*$/gm, '');
+    expect(rendered).toMatch(/^peerDependencyRules:$/m);
+    expect(rendered).toMatch(/^ {2}allowedVersions:$/m);
+    expect(rendered).toMatch(/^ {4}'pkg-a>peer-b': '2'$/m);
   });
 });
 
