@@ -171,6 +171,6 @@ describe('#25092 a one master marked readonly or system is refused at authoring,
       sharingModel: 'controlled_by_parent',
       fields: { order: { type: 'master_detail', label: 'Order', reference: 'work_order' } },
     });
-    expect(obj.fields.order.required).toBe(true);
+    expect((obj.fields.order as { required?: unknown }).required).toBe(true);
   });
 });
