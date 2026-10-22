@@ -435,12 +435,81 @@ export const SCAFFOLD_TYPESCRIPT_RANGE = '^5.3.0';
 export const SCAFFOLD_VITEST_RANGE = '~4.1.12';
 
 /**
+ * The npm `overrides` SELECTOR that routes `uuid` out of GHSA-w5hq-g745-h8pq,
+ * and the range it routes to ({@link SCAFFOLD_UUID_OVERRIDE_RANGE}).
+ *
+ * The advisory affects `uuid` below 11.1.1 (and 12.0.0 and 13.0.0, fixed in
+ * 12.0.1 and 13.0.1). A scaffold reaches it through ONE edge:
+ * `@objectstack/cli` and `@objectstack/runtime` depend on `@objectstack/rest`,
+ * which depends on `exceljs ^4.4.0`, which depends on `uuid ^8.3.0`. exceljs
+ * 4.4.0 is its newest release, and its only later one, `4.4.1-prerelease.0`,
+ * declares `uuid ^8.3.0` too, so no exceljs upgrade leaves the 8.x line.
+ *
+ * Why the scaffold and not `@objectstack/rest` itself: npm reads `overrides`
+ * only from the ROOT manifest of an install. Measured 2026-10-22, each manifest
+ * in an empty directory with a fresh `--cache`: the published
+ * `@objectstack/rest` 18.0.0 repacked with `"overrides": { "uuid": "^11.1.1" }`
+ * and installed as a dependency still resolves `uuid` 8.3.2 on npm 10.9.9 and
+ * 11.21.1, and `npm audit` reports the same 3 entries as the unmodified
+ * package. The monorepo's own `pnpm-workspace.yaml` override (the same
+ * selector and range as here) has the same limit: it never reaches an npm
+ * consumer. This block reaches the projects the scaffolders create, and no
+ * other npm consumer of `@objectstack/rest`.
+ *
+ * The selector is `uuid@<12.0.0`, not a bare `uuid`, so that it rewrites only
+ * edges that can resolve below the fix, and it stops at the major boundary so
+ * that a later advisory on the 11.x line moves the range alone. A bare `uuid`
+ * key would also refuse a project's own later `npm install uuid` (`EOVERRIDE`,
+ * see the readings below).
+ *
+ * Safe at runtime because exceljs calls exactly one `uuid` export, `v4()`, with
+ * no arguments (`lib/xlsx/xform/sheet/cf-ext/cf-rule-ext-xform.js`), and
+ * `uuid` 11 keeps it. The monorepo's own suites already run exceljs on `uuid`
+ * 11.1.1 through the workspace override.
+ */
+export const SCAFFOLD_UUID_OVERRIDE_SELECTOR = 'uuid@<12.0.0';
+
+/**
+ * The `uuid` range {@link SCAFFOLD_UUID_OVERRIDE_SELECTOR} routes to: the
+ * `legacy-11` line from its first release outside GHSA-w5hq-g745-h8pq, the
+ * same target as the workspace override, so a scaffold resolves the `uuid` the
+ * monorepo's own exceljs suites run on.
+ *
+ * Measured 2026-10-22, each manifest in an empty directory with a fresh
+ * `--cache`, the `@objectstack/*` ranges resolving to the published 18.0.0
+ * (blank template, `os init -t app`, `-t plugin` and `-t empty`):
+ *
+ *   without the entry   npm 10.9.9, 11.21.1   exit 0, `uuid` 8.3.2; `npm
+ *                                             audit` reports 9 moderate entries,
+ *                                             all GHSA-w5hq-g745-h8pq
+ *   with the entry      npm 10.9.9, 11.21.1   exit 0, `uuid` 11.1.1; `npm
+ *                                             audit` lists no `uuid` entry
+ *
+ * `os create plugin` has no `@objectstack/rest` in its closure and audits
+ * clean either way; the entry is inert there. Under the entry, exceljs's
+ * buffered write (with a rule that calls `v4()`), its streaming
+ * `WorkbookWriter`, its buffered load and `@objectstack/rest`'s own
+ * `parseXlsxToRows` ran on the installed tree, on both npm versions.
+ *
+ * The re-check that lets this go: `npm ls uuid --all` in an emitted `-t app`
+ * install WITHOUT the entry, on the newest npm 10 and on npm 11. When no path
+ * resolves a `uuid` inside the advisory's range, delete it here, in
+ * {@link SCAFFOLD_NPM_OVERRIDES}, and its `POLICY_STAMPS` row together.
+ */
+export const SCAFFOLD_UUID_OVERRIDE_RANGE = '^11.1.1';
+
+/**
  * The npm `overrides` block every STANDALONE scaffold emits: `os init`'s three
  * templates, `os create plugin` outside the monorepo, and — by generation, not
- * import — `create-objectstack`'s bundled template (the `overrides.vitest` row
- * in `scripts/sync-scaffold-emission-policy.mjs`'s `POLICY_STAMPS`).
+ * import — `create-objectstack`'s bundled template (the `overrides.vitest` and
+ * `overrides.uuid@<12.0.0` rows in `scripts/sync-scaffold-emission-policy.mjs`'s
+ * `POLICY_STAMPS`).
  *
- * Why it exists. vitest 4.1.12 (published 2026-10-15) peers
+ * It carries two entries with two reasons. `uuid` is the advisory route on
+ * {@link SCAFFOLD_UUID_OVERRIDE_SELECTOR}. The rest of this comment is about
+ * `vitest`.
+ *
+ * Why the `vitest` entry exists. vitest 4.1.12 (published 2026-10-15) peers
  * `@vitest/browser-webdriverio ^4.1.11`, and that package's only match, 4.1.11,
  * peers `vitest: 4.1.11` exactly — a peer set that contradicts itself. A
  * scaffold reaches it through its own root vitest, now that the range is
@@ -487,6 +556,7 @@ export const SCAFFOLD_VITEST_RANGE = '~4.1.12';
  */
 export const SCAFFOLD_NPM_OVERRIDES: Readonly<Record<string, string>> = Object.freeze({
   vitest: SCAFFOLD_VITEST_RANGE,
+  [SCAFFOLD_UUID_OVERRIDE_SELECTOR]: SCAFFOLD_UUID_OVERRIDE_RANGE,
 });
 
 /** The `@types/node` range a scaffolded project declares. */
@@ -570,7 +640,8 @@ export function renderScaffoldPackageJson(
     dependencies: template.dependencies,
     devDependencies: template.devDependencies,
     // Every template, whether or not it declares vitest itself — without it
-    // npm 10 cannot install any of them (see SCAFFOLD_NPM_OVERRIDES).
+    // npm 10 cannot install any of them, and `npm audit` reports the `uuid`
+    // advisory exceljs pulls in (see SCAFFOLD_NPM_OVERRIDES).
     overrides: { ...SCAFFOLD_NPM_OVERRIDES },
   };
 }
