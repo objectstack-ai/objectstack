@@ -23,7 +23,7 @@ A **master-detail detail** record today is access-controlled entirely on its own
 
 1. **Read-path RLS injection.** `packages/plugins/plugin-security/src/security-plugin.ts#rlsFilter` AND-s an RLS filter into the query AST (`opCtx.ast.where = { $and: [where, rlsFilter] }`) before the driver runs. The builder `computeRlsFilter` (`packages/plugins/plugin-security/src/security-plugin.ts#computeRlsFilter`) is **async** and shared by the engine find-path and the analytics raw-SQL path (`getReadFilter`).
 2. **Pre-resolved membership (§7.3.1) already exists.** The RLS compiler recognizes `field IN (current_user.<key>)` and resolves `<key>` against `ExecutionContext.rlsMembership` — "the runtime resolves set-membership that would otherwise need a subquery … and stages each set here under a stable key" (`packages/spec/src/kernel/execution-context.zod.ts#rlsMembership`; merge at `packages/plugins/plugin-security/src/rls-compiler.ts`). **This is the seam controlled_by_parent plugs into — no new compiler form.**
-3. **By-id write pre-image check (#1994).** `packages/plugins/plugin-security/src/security-plugin.ts#sharingModel` already re-reads the target row under the write-op RLS filter before an update/delete and denies if invisible. This is the exact hook to extend with a master-access check.
+3. **By-id write pre-image check (#1994).** `packages/plugins/plugin-security/src/security-plugin.ts` already re-reads the target row under the write-op RLS filter before an update/delete and denies if invisible. This is the exact hook to extend with a master-access check.
 4. **`sharingModel` enforcement seam.** `packages/plugins/plugin-sharing/src/sharing-service.ts#buildReadFilter` reads `object.sharingModel`; `buildReadFilter` gates on it (`effectiveSharingModel(schema) !== 'private'`). A `controlled_by_parent` baseline plugs in here / in the security middleware.
 5. **Master-detail storage.** A `master_detail` field's **key is the FK column**; its `reference` (`packages/spec/src/data/field.zod.ts#reference`) names the master object. Given a detail row, the master id is `row[masterFieldKey]`.
 6. **Spec inconsistency (to fix either way).** `OWDModel` (`sharing.zod.ts`) includes `controlled_by_parent`; the object's authorable `sharingModel` (`object.zod.ts`) is a different enum `['private','read','read_write','full']` that omits it.
@@ -55,7 +55,7 @@ This composes with the detail's own tenant/owner RLS (all AND-ed) and flows to a
 
 ### 3. Write mechanism — extend the #1994 pre-image check
 
-In the pre-image block (`packages/plugins/plugin-security/src/security-plugin.ts#controlled_by_parent`), for a `controlled_by_parent` detail `update`/`delete`/`create`:
+In the pre-image block (`packages/plugins/plugin-security/src/security-plugin.ts#assertControlledByParentWrite`), for a `controlled_by_parent` detail `update`/`delete`/`create`:
 - resolve the target's master id (`row[masterFieldKey]`; for `create`, the master id in the incoming body), and
 - re-read the master under its **edit** write-filter (`findOne(master, { where: { $and: [{id: masterId}, masterWriteFilter] } })`); a `null` result ⇒ deny.
 - **Rule:** editing/deleting/creating a detail requires **edit** access to its master (Salesforce master-detail semantics). Reading a detail requires **read** access to its master (§2).
