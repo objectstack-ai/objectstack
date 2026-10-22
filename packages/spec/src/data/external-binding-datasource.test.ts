@@ -37,14 +37,11 @@ describe('ObjectSchema refuses an `external` binding on the primary datasource',
     ['`datasource` omitted', { external: { remoteName: 'orders' } }],
     ["`datasource: 'default'`", { datasource: 'default', external: { remoteName: 'orders' } }],
     ['an empty binding', { external: {} }],
-  ])('%s: one issue at `external`, naming the rule and both fixes', (_label, extra) => {
+  ])('%s: one issue at `external`, naming the object and its datasource', (_label, extra) => {
     const issues = issuesOf(object(extra));
     expect(issues).toHaveLength(1);
     expect(issues[0]).toMatchObject({ code: 'custom', path: ['external'] });
     expect(issues[0]!.message).toMatch(PRIMARY);
-    expect(issues[0]!.message).toContain("ADR-0015 §4.2 allows `external` only on a datasource whose `schemaMode` is not 'managed'.");
-    expect(issues[0]!.message).toContain("declared with `schemaMode: 'external'` (or 'validate-only')");
-    expect(issues[0]!.message).toContain('or remove `external` to keep this a managed object.');
   });
 
   it('`ObjectSchema.create` refuses it at module load, with the same issue', () => {

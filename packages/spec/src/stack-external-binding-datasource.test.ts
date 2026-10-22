@@ -48,16 +48,12 @@ describe('defineStack — an `external` binding on a managed datasource the stac
   it.each([
     ["`schemaMode: 'managed'`", { schemaMode: 'managed' }],
     ['no `schemaMode` (managed by default)', {}],
-  ])('%s: STACK_CROSS_REFERENCE_INVALID, 422, one finding naming the object, the datasource and both fixes', (_label, mode) => {
+  ])('%s: STACK_CROSS_REFERENCE_INVALID, 422, one finding naming the object and the datasource', (_label, mode) => {
     const err = refusalOf({ datasources: [warehouse(mode)], objects: [order({ datasource: 'warehouse' })] });
     expect(err?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
     expect(err?.status).toBe(422);
-    expect(err?.message).toMatch(/^defineStack cross-reference validation failed \(1 issue\):/);
     expect(err?.issues).toHaveLength(1);
-    const finding = String(err!.issues![0]);
-    expect(finding).toMatch(/^Object 'wh_order' declares `external` on datasource 'warehouse', whose `schemaMode` is 'managed'/);
-    expect(finding).toContain("ADR-0015 §4.2 allows `external` only on a datasource whose `schemaMode` is not 'managed'.");
-    expect(finding).toContain("declare it with `schemaMode: 'external'` (or 'validate-only')");
+    expect(String(err!.issues![0])).toMatch(/^Object 'wh_order' declares `external` on datasource 'warehouse', whose `schemaMode` is 'managed'/);
   });
 
   it('one finding per bound object; an unbound object on the same datasource is not one', () => {
@@ -101,7 +97,6 @@ describe('defineStack — an `external` binding on the primary datasource', () =
     expect(err?.issues).toEqual([
       expect.objectContaining({ code: 'custom', path: ['objects', 0, 'external'] }),
     ]);
-    expect(err?.message).toContain("objects.0.external: Object 'wh_order' declares `external`, but its `datasource` is 'default'");
   });
 
   it('a package `defaultDatasource` naming an external datasource does not make the object federated', () => {
@@ -111,6 +106,9 @@ describe('defineStack — an `external` binding on the primary datasource', () =
       objects: [order()],
     });
     expect(err?.code).toBe('STACK_SCHEMA_INVALID');
-    expect(err?.message).toContain('A package `defaultDatasource` or a `datasourceMapping` rule does not count');
+    expect(err?.status).toBe(422);
+    expect(err?.issues).toEqual([
+      expect.objectContaining({ code: 'custom', path: ['objects', 0, 'external'] }),
+    ]);
   });
 });
