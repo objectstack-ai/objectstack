@@ -91,9 +91,11 @@ That's it. `GET /api/v1/data/ext_customer` now returns live rows from the remote
 
 The object's **own** `datasource` must name a datasource declared
 `schemaMode: 'external'` or `'validate-only'` (ADR-0015 §4.2). An `external` binding on
-`'default'` (also the value when `datasource` is omitted) or on a `managed` datasource is
-refused — by `ObjectSchema.create()`, `defineStack` and `composeStacks`, and at runtime by
-`PUT /api/v1/meta/object/<name>` with `422 INVALID_METADATA`. The same save door refuses
+`'default'` (also the value when `datasource` is omitted) is refused by `ObjectSchema.create()`,
+which sees only the object. A binding on either `'default'` or a `managed` datasource is refused
+by `defineStack` and `composeStacks` (for a datasource the stack, or another input of the
+composition, declares), and at runtime by `PUT /api/v1/meta/object/<name>` with
+`422 INVALID_METADATA`. The same save door refuses
 `PUT /api/v1/meta/datasource/<name>` that would make a datasource `managed` while objects
 bind it with `external`: change the datasource to `external` before binding objects, and
 remove `external` from the objects before making it managed.
