@@ -410,6 +410,25 @@ export async function refuseDisabledPackageObject(deps: ActionExecutionDeps,
 }
 
 /**
+ * [#25308] Whether a resolved action declaration belongs to a disabled
+ * package: its own `_packageId`, asked of the engine registry's
+ * `isPackageDisabled`, the predicate the protocol's by-name and list reads ask
+ * of every non-object item (and the registry's own `listItems` filters by).
+ * The owning package comes from the ACTION item, not from an object: an
+ * object-less action names none, and an object route may resolve one
+ * ({@link resolveRouteActionDeclaration} accepts an object-less owner on any
+ * route). The protocol withholds such an item, so its by-name read answers it
+ * as absent; the `/actions` door answers it as the declaration it does not
+ * have. A registry that cannot answer withholds nothing, as before; an item
+ * with no owning package (environment-authored) is never withheld.
+ */
+export function isActionOfDisabledPackage(ql: any, action: unknown): boolean {
+    const registry = ql?.registry;
+    return typeof registry?.isPackageDisabled === 'function'
+        && registry.isPackageDisabled((action as { _packageId?: unknown } | null | undefined)?._packageId) === true;
+}
+
+/**
  * ── Object-level API exposure gate (ADR-0049, #1889) ─────
  * Honour the object's `apiEnabled` / `apiMethods` declarations for external
  * traffic: throws the refusal ({@link checkApiExposure}'s `404` / `405`) when

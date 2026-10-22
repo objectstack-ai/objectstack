@@ -571,6 +571,19 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         actionSchema = declaration?.obj;
         actionDef = declaration?.action;
 
+        // [#25308] A DISABLED PACKAGE'S ACTION IS NOT DECLARED HERE. The gate
+        // above asks about the object a route names; an object-less action
+        // (`/actions/global/NAME`, `/actions//NAME`, or an object route the
+        // resolution lets it answer on) names none, so a disabled package's
+        // object-less action resolved from the registry, where its items stay,
+        // and its handler ran, while the protocol's by-name read withheld it
+        // and the MCP `run_action` tool answered "not found". Its own package
+        // decides: a withheld declaration is answered as the absent one it is
+        // everywhere else, by the "no declaration" 404 below, byte for byte the
+        // answer a name nothing declares gets, so this discloses nothing the
+        // by-name read withholds. The activation door keeps resolving it.
+        if (actionDef && actionExec.isActionOfDisabledPackage(ql, actionDef)) actionDef = undefined;
+
         // [ADR-0110 D3] Resolution is a TRICHOTOMY, and only one branch may
         // dispatch. This block used to be a `try { … } catch { /* no gate to
         // enforce */ }`, which collapsed three states with opposite meanings
