@@ -4663,13 +4663,23 @@ export default class Serve extends Command {
       // and it should say so at boot instead of quietly serving object data to
       // the internet. Auth availability = the tier auto-registers it OR the
       // stack mounts AuthPlugin explicitly.
-      if (flags.server && !(tierEnabled('auth') || hasAuthPlugin)) {
+      //
+      // [ADR-0131 D1/D9] A production boot is refused here whether or not it
+      // serves: with no AuthPlugin there is no organization object, so a
+      // `--no-server` boot (a migrate-and-exit job included) would still write
+      // every seed row with no owner. `--no-server` is therefore no remedy, and
+      // the text no longer offers it. A development boot keeps the old shape —
+      // refused only when it serves — and so does programmatic embedding, which
+      // never passes through this command.
+      const productionBoot = !isDev;
+      if ((flags.server || productionBoot) && !(tierEnabled('auth') || hasAuthPlugin)) {
         throw new Error(
           'This stack mounts no auth, so no caller can authenticate — and anonymous access to object '
-          + 'data is always denied, with no setting that turns that off, which would leave the data API unusable.\n'
-          + 'Fix it one of two ways:\n'
-          + `  • enable auth — add the 'auth' tier (or mount AuthPlugin in \`plugins\`);\n`
-          + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
+          + 'data is always denied, with no setting that turns that off, which would leave the data API unusable; '
+          + 'and with no organization every row this boot writes would have no owner.\n'
+          + `Fix it: enable auth — add the 'auth' tier (or mount AuthPlugin in \`plugins\`); a production boot `
+          + 'also needs OS_AUTH_SECRET set.\n'
+          + 'Running kernel-only (--no-server) does not avoid this: the boot still writes rows, with no owner.\n'
           + "Publishing a genuinely public surface does not need anonymous data access: use a public form "
           + "view, a share link, or `book.audience: 'public'`.",
         );
@@ -4685,15 +4695,20 @@ export default class Serve extends Command {
       // plugin has started, so nothing has been written. The `host-kernel`
       // reason (the cloud runtime, where auth is each project's) is not this
       // case and still only warns above.
-      if (flags.server && !authComposition.composes && authComposition.reason === 'no-secret') {
+      //
+      // The ownerless writes do not depend on the listener, so this is refused
+      // whether or not `--server`: a `--no-server` boot, and an
+      // `OS_MIGRATE_AND_EXIT=1` job, run the same seed. `no-secret` is only
+      // ever the reason on a production boot — a development boot resolves the
+      // fallback secret — so the condition needs no posture of its own.
+      if (!authComposition.composes && authComposition.reason === 'no-secret') {
         throw new Error(
           'This stack enables auth, but no auth secret is set, so AuthPlugin was not composed and no caller '
           + 'can authenticate — anonymous access to object data is always denied, so the data API would be '
           + 'unusable, and with no organization every row this boot writes would have no owner.\n'
-          + 'Fix it one of two ways:\n'
-          + '  • set OS_AUTH_SECRET (a long random value, identical across restarts and nodes), e.g. '
-          + 'OS_AUTH_SECRET=$(openssl rand -hex 32);\n'
-          + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
+          + 'Set OS_AUTH_SECRET (a long random value, identical across restarts and nodes), e.g. '
+          + 'OS_AUTH_SECRET=$(openssl rand -hex 32). A migrate-and-exit job (OS_MIGRATE_AND_EXIT=1) needs it too.\n'
+          + 'Running kernel-only (--no-server) does not avoid this: the boot still writes rows, with no owner.\n'
           + 'A local trial does not need the secret: `os dev` (or `os serve --dev`) uses a development fallback.',
         );
       }
