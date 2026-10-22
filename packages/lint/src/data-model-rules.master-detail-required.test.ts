@@ -161,12 +161,23 @@ describe('R2 over objects built by ObjectSchema.create()', () => {
       fields: { order: field },
     });
 
+  // [#25092] The builder no longer lets these two through: the parse it ends in
+  // refuses a one master marked `readonly` / `system` (spec shape
+  // `master-not-writable`). This rule still reports the same field on the
+  // object as the builder would have emitted it (`required` forced to `true`),
+  // which is what `os lint` reads from a stack that never went through it.
   it.each([
     ['readonly', { readonly: true }],
     ['system', { system: true }],
-  ])('a %s master reference passes the builder (forced required) and is refused here', (flag, extra) => {
-    const detail = build({ ...Field.masterDetail('work_order', { label: 'Work Order' }), ...extra });
-    const issues = r2([{ name: 'work_order', sharingModel: 'private', fields: {} }, detail]);
+  ])('a %s master reference is refused by the builder itself, and reported here on the literal', (flag, extra) => {
+    const field = { ...Field.masterDetail('work_order', { label: 'Work Order' }), ...extra };
+    expect(() => build(field)).toThrow(/with its one required `master_detail`, `order`, marked/);
+    const literal = {
+      name: 'work_order_item',
+      sharingModel: 'controlled_by_parent',
+      fields: { order: { ...field, required: true } },
+    };
+    const issues = r2([{ name: 'work_order', sharingModel: 'private', fields: {} }, literal]);
     expect(issues).toHaveLength(1);
     expect(issues[0]).toMatchObject({ severity: 'error', path: `objects[1].fields.order.${flag}` });
   });
