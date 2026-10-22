@@ -223,23 +223,23 @@ cannot read, and they are neither in nor out.
 
 | what | count |
 | :--- | ---: |
-| write call sites on the application surface | **237** |
+| write call sites on the application surface | **236** |
 | …whose object name is statically decidable | 160 |
-| …whose object name is chosen at run time | 77 |
+| …whose object name is chosen at run time | 76 |
 | …against an object with tenancy ENABLED | 159 |
 | …against an object that declares tenancy off | 1 |
-| threading a tenant context | 178 |
+| threading a tenant context | 177 |
 | PROVABLY carrying none (options read, no context key) | **8** |
 | …of those, against a decidably tenancy-enabled object | **2** |
 | options argument UNREADABLE — may or may not carry one | 51 |
 | …of those, against a decidably tenancy-enabled object | 29 |
-| threading a decidably ELEVATED (`isSystem`) context | 135 |
+| threading a decidably ELEVATED (`isSystem`) context | 134 |
 | threading a context that is decidably NOT elevated | 0 |
 | threading a context whose elevation is a run-time fact | 94 |
 
 | how the instrument reached the site | count |
 | :--- | ---: |
-| receiver carried a readable engine type | 196 |
+| receiver carried a readable engine type | 195 |
 | receiver erased, placed by the object NAME | 31 |
 | receiver erased, placed by an `object: string` PARAMETER | 5 |
 | receiver erased, placed by an `UNTYPED_RECEIVERS` row | 5 |
@@ -247,7 +247,7 @@ cannot read, and they are neither in nor out.
 | object name spelled inline | 109 |
 | object name spelled through a `const` | 51 |
 | object name is an `object: string` parameter | 7 |
-| object name is some other run-time expression | 70 |
+| object name is some other run-time expression | 69 |
 
 ### Subtractions the census could NOT defend — enforced
 
@@ -297,7 +297,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-22 at `452e9963c`.
+Measured on 2026-10-22 at `78b1ed16a`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |

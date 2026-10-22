@@ -26,7 +26,8 @@
  * `managedBy`, not `sys_`, declaring `organization_id`), the store holds no
  * organization before the insert, and the replay lands nothing in the
  * seedless case -- exactly the shape that reached the claim. Restoring it
- * turns the first two cases red.
+ * turns the seedless case red: the claim ran only when the replay landed
+ * nothing, so the replay case holds the other half of the old behaviour.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
