@@ -544,7 +544,7 @@ describe('#25279 — a stored object bound `external` to a datasource the caller
   const listed = (todos: ConversionTodoNotice[]) =>
     todos.filter((t) => t.conversionId === 'object-external-binding-managed-datasource-refused');
 
-  it.each([
+  it.each<[string, Record<string, unknown>]>([
     ["declared `schemaMode: 'managed'`", { name: 'warehouse', driver: 'sqlite', config: {}, schemaMode: 'managed' }],
     ['declaring no `schemaMode` (managed by the spec default)', { name: 'warehouse', driver: 'sqlite', config: {} }],
   ])('a stored row on a known datasource %s is listed, once, and not rewritten', (_label, datasource) => {
