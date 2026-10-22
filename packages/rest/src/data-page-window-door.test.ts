@@ -7,10 +7,21 @@
  * `400 INVALID_REQUEST` naming the parameter the caller wrote, before any read;
  * over a real `SqlDriver` (SQLite), five rows.
  *
- * Measured on the base through these two routes (the stock showcase answered
- * the same, `showcase_account`, admin bearer):
+ * Measured on the base (`345f0b154c`) over a stock showcase boot
+ * (`showcase_account`, 14 rows, admin session), and again on the fix:
  *
- * MEASURED_TABLE
+ * | request | base | fix |
+ * |:--|:--|:--|
+ * | `GET ?$skip=-5`, `?$skip=-1&$top=3` | 500 `INTERNAL_ERROR` (knex `offset` throws) | 400 naming `$skip` |
+ * | `POST {"offset":-5}` | 500 `INTERNAL_ERROR` | 400 naming `offset` |
+ * | `GET ?$top=abc`, `?$top=-1`, `?$skip=abc` | 200, all 14 rows | 400 naming the spelling |
+ * | `POST {"limit":-1}` | 200, all 14 rows | 400 naming `limit` |
+ * | `GET ?$top=` | 200, 0 rows | 400 naming `$top` |
+ * | `GET ?$skip=` | 200, all 14 rows | 400 naming `$skip` |
+ * | `POST {"offset":1.5}` / `{"limit":1.5}` | 200, 13 rows / 1 row | 400 naming the key |
+ * | `POST {"limit":"ten"}` | 400 `VALIDATION_FAILED` (the body schema) | unchanged |
+ * | `POST {"limit":0}` | 200, 0 rows | unchanged |
+ * | `GET ?$top=5&$skip=2`, `POST {"limit":5,"offset":2}` | 200, 5 rows | unchanged |
  *
  * The refusal lives once, in the shared normalizer both doors hand their
  * request to (`metadata-protocol`'s `findData`); the per-spelling pin with a
