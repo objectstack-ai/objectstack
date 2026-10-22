@@ -144,9 +144,10 @@ import {
   pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
-import { APPROVAL_NODE_TYPE, FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
+import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
+import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
 import { authorWarnedProperties, walkPageComponents } from '@objectstack/lint';
 import { collectFilledFromHashes } from '@objectstack/platform-objects/apps';
