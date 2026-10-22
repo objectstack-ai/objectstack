@@ -38,7 +38,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organización",
-        help: "Ámbito de organización opcional. NULL = se aplica en cualquier contexto de organización."
+        help: "La organización a la que pertenece esta asignación."
       },
       granted_by: {
         label: "Concedido por",
@@ -104,7 +104,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organización",
-        help: "Inquilino propietario de esta asignación; nulo = global (entre inquilinos)."
+        help: "La organización a la que pertenece esta asignación."
       },
       granted_by: {
         label: "Otorgado por",

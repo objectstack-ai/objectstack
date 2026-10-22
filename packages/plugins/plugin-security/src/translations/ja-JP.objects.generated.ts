@@ -38,7 +38,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "組織",
-        help: "オプションの組織スコープ。NULL = すべての組織コンテキストで適用。"
+        help: "この付与が属する組織。"
       },
       granted_by: {
         label: "付与者",
@@ -104,7 +104,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "組織",
-        help: "この割り当てを所有するテナント。Null = グローバル（テナント横断）。"
+        help: "この割り当てが属する組織。"
       },
       granted_by: {
         label: "付与者",

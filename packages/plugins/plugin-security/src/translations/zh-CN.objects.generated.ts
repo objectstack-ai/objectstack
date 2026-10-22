@@ -38,7 +38,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "组织",
-        help: "可选的组织范围。NULL = 在所有组织上下文中都生效。"
+        help: "此授权所属的组织。"
       },
       granted_by: {
         label: "授权人",
@@ -104,7 +104,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "组织",
-        help: "拥有此分配的租户；为空 = 全局（跨租户）。"
+        help: "此分配所属的组织。"
       },
       granted_by: {
         label: "授予人",

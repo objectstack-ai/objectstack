@@ -38,7 +38,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Optional organization scope. NULL = applies in every org context."
+        help: "The organization this grant belongs to."
       },
       granted_by: {
         label: "Granted By",
@@ -104,7 +104,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Tenant that owns this assignment; null = global (cross-tenant)."
+        help: "The organization this assignment belongs to."
       },
       granted_by: {
         label: "Granted By",

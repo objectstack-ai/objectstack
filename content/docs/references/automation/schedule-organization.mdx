@@ -76,8 +76,8 @@ multi-plant MES example is the ADR's own). It does not.
 `sys_automation_run` has ALREADY been ruled to use: `ObjectStoreSuspendedRunStore`
 resolves a run's organization as `organizationOf(<subject record>) ?? ctx.tenantId`
 — subject first, the acting context as the fallback and *never* the primary
-(`objectql/src/tenancy/platform-object-tenancy.ts`, the `sys_automation_run`
-evidence line). Before this card the two halves disagreed under `group`: the
+(`service-automation/src/suspended-run-store.ts`, where the store stamps a
+run's row). Before this card the two halves disagreed under `group`: the
 history row was stamped from the record while the inbox and delivery rows
 followed an acting context that could not exist there, so they were refused.
 Filling the acting context from the record makes one run carry ONE
