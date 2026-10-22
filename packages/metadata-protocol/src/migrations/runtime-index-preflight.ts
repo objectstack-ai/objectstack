@@ -148,8 +148,8 @@ export interface RuntimeIndexDuplicateGroup {
     /**
      * The key, exactly as the migration's query projects it: a bare column
      * name, or `<column>_key` for a column whose NULLs the index folds into a
-     * sentinel bucket. Neither sentinel can occur in real data, so
-     * `organization_id_key = '__global__'` reads as "organization_id IS NULL".
+     * sentinel bucket. No sentinel can occur in real data, so
+     * `user_id_key = ''` reads as "user_id IS NULL".
      */
     key: Record<string, string | null>;
     /** How many rows hold it. */
