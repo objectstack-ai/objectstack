@@ -440,8 +440,9 @@ export const SCAFFOLD_VITEST_RANGE = '~4.1.12';
  *
  * The advisory affects `uuid` below 11.1.1 (and 12.0.0 and 13.0.0, fixed in
  * 12.0.1 and 13.0.1). A scaffold reaches it through ONE edge:
- * `@objectstack/cli` and `@objectstack/runtime` depend on `@objectstack/rest`,
- * which depends on `exceljs ^4.4.0`, which depends on `uuid ^8.3.0`. exceljs
+ * `@objectstack/cli`, `@objectstack/runtime`, `@objectstack/plugin-auth` and
+ * `@objectstack/verify` depend on `@objectstack/rest`, which depends on
+ * `exceljs ^4.4.0`, which depends on `uuid ^8.3.0`. exceljs
  * 4.4.0 is its newest release, and its only later one, `4.4.1-prerelease.0`,
  * declares `uuid ^8.3.0` too, so no exceljs upgrade leaves the 8.x line.
  *
@@ -458,9 +459,15 @@ export const SCAFFOLD_VITEST_RANGE = '~4.1.12';
  *
  * The selector is `uuid@<12.0.0`, not a bare `uuid`, so that it rewrites only
  * edges that can resolve below the fix, and it stops at the major boundary so
- * that a later advisory on the 11.x line moves the range alone. A bare `uuid`
- * key would also refuse a project's own later `npm install uuid` (`EOVERRIDE`,
- * see the readings below).
+ * that a later advisory on the 11.x line moves the range alone. It also leaves
+ * a project free to add a newer `uuid` of its own. Measured on a consumer of
+ * the published `@objectstack/rest` 18.0.0, npm 10.9.9 and 11.21.1: with this
+ * selector, a later `npm install uuid@14` exits 0, declares `^14.0.3`, and
+ * exceljs keeps `uuid` 11.1.1; with a bare `uuid` key it exits 1 with
+ * `EOVERRIDE`. A spec-less `npm install uuid` exits 1 with `EOVERRIDE:
+ * Override for uuid@* conflicts with direct dependency` under either key,
+ * because npm reads it as `uuid@*`, which meets `<12.0.0`. Naming the major is
+ * the fix, the same cost the `vitest` entry carries.
  *
  * Safe at runtime because exceljs calls exactly one `uuid` export, `v4()`, with
  * no arguments (`lib/xlsx/xform/sheet/cf-ext/cf-rule-ext-xform.js`), and
