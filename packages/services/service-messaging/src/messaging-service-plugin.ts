@@ -357,7 +357,7 @@ export class MessagingServicePlugin implements Plugin {
         } else {
             ctx.logger.warn(
                 '[messaging] no ObjectQL engine with a hook registry — a sys_notification_template save is NOT judged '
-                + 'for where its body places a hole (#25082)',
+                + 'for where its body places a hole',
             );
         }
 
