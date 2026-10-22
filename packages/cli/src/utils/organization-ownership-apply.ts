@@ -3801,7 +3801,7 @@ export const UNATTRIBUTABLE_REMEDY =
 
 /**
  * Unattributable rows the post-check holds against certification: every one,
- * but on a fate-4 table whose column is not the tenancy anchor
+ * except on a fate-4 table whose column is not the tenancy anchor
  * (`InventoryEntry.notNullExempt`), where an organization-less row is a
  * legitimate one and is reported only.
  */

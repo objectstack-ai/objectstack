@@ -16,8 +16,9 @@ import { reservedIdentityNamesCelList, reservedIdentityNameMessage } from './res
  *
  * `position` stores the position's machine name (matches
  * `sys_position.name`), mirroring how `ctx.positions` is keyed everywhere
- * downstream. `organization_id = null` means a cross-tenant (global)
- * assignment.
+ * downstream. `organization_id` is the organization the assignment belongs
+ * to: it applies only while that organization is the active one, and an
+ * organization-less row applies nowhere (ADR-0131 D1).
  *
  * `business_unit_id` is the ASSIGNMENT-LEVEL BU anchor (ADR-0090 Addendum;
  * reserved by ADR-0057 D4). Positions never bind to a business unit at the
@@ -107,7 +108,7 @@ export const SysUserPosition = ObjectSchema.create({
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',
       required: false,
-      description: 'Tenant that owns this assignment; null = global (cross-tenant).',
+      description: 'The organization this assignment belongs to.',
     }),
 
     // Provenance, not a business link — the same contract as

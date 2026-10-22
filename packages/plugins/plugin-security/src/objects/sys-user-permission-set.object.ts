@@ -110,7 +110,7 @@ export const SysUserPermissionSet = ObjectSchema.create({
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',
       required: false,
-      description: 'Optional organization scope. NULL = applies in every org context.',
+      description: 'The organization this grant belongs to.',
     }),
 
     // Provenance, not a business link: the platform writes it, a caller does
