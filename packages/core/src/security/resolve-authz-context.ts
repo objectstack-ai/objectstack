@@ -2386,7 +2386,9 @@ function putLocalizationEntry(ql: object, key: string, entry: LocalizationCacheE
  * Resolve workspace localization defaults (reference `timezone` / `locale` /
  * `currency`). Canonical path is the `localization` SettingsManifest (cascade:
  * platform default → global → tenant); falls back to direct tenant-scoped
- * `sys_setting` rows, then the built-ins `UTC` / `en-US`. Never throws.
+ * `sys_setting` rows of the caller's organization only (ADR-0131 D8 — see
+ * {@link localizationFallbackReach}), then the built-ins `UTC` / `en-US`.
+ * Never throws.
  *
  * The DIRECT `sys_setting` read failing outright (backend fault — table
  * missing, connection refused, etc.) is memoized for
@@ -2461,6 +2463,56 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
   return value;
 }
 
+/**
+ * [ADR-0131 D8/D9] Which `sys_setting` tenant rows the direct localization
+ * fallback in {@link resolveLocalizationContextUncached} may draw on — the
+ * reach `SettingsService` reads the same rows with, so the fallback can never
+ * answer what the service it stands in for would refuse:
+ *
+ *  - `own` — one organization's rows: the caller's, under every posture; or,
+ *    for a caller that names none where no wall stands, the one organization
+ *    D9's predicate derives ({@link resolveGuestOrganization}).
+ *  - `no-organization-object` — the composition registers no organization
+ *    object (the lean embedding, kept by ADR-0131's D9 note): the rows written
+ *    with no organization, the only rows it can hold.
+ *  - `unowned` — nothing to read: a caller that names no organization behind a
+ *    wall, where D9 derives none (zero organizations, or several), or where
+ *    the derivation could not be asked (a failed organization read). The
+ *    built-in defaults answer.
+ *
+ * The posture is the REQUESTED one ({@link resolveTenancyPosture}), as the
+ * platform-standing anchor in this file reads it: a deployment that asked for
+ * a wall stays walled here even while running degraded, and the posture costs
+ * no query. This fallback is reached only when the settings service is absent
+ * or has just failed, so it takes no inputs that service would supply.
+ */
+async function localizationFallbackReach(
+  ql: any,
+  tenantId: string | undefined,
+): Promise<
+  | { kind: 'own'; organizationId: string }
+  | { kind: 'no-organization-object' }
+  | { kind: 'unowned' }
+> {
+  if (typeof tenantId === 'string' && tenantId !== '') return { kind: 'own', organizationId: tenantId };
+  try {
+    const decision = await resolveGuestOrganization(ql, resolveTenancyPosture());
+    if (decision.kind === 'derived') return { kind: 'own', organizationId: decision.organizationId };
+    if (decision.kind === 'no-organization-object') return { kind: 'no-organization-object' };
+  } catch {
+    // The organization could not be derived (`AuthzStoreUnavailableError`):
+    // no organization's row is read on a guess. Not the direct read's own
+    // backend fault, so it does not populate the failure memo (#10221).
+  }
+  return { kind: 'unowned' };
+}
+
+/** A `sys_setting` row's organization, with "no organization" spelled one way. */
+function settingRowOrganizationOf(row: any): string | null {
+  const organizationId = row?.organization_id;
+  return typeof organizationId === 'string' && organizationId !== '' ? organizationId : null;
+}
+
 async function resolveLocalizationContextUncached(
   input: ResolveLocalizationInput,
 ): Promise<{ value: LocalizationResult; backendFailed: boolean }> {
@@ -2525,6 +2577,10 @@ async function resolveLocalizationContextUncached(
     // Settings service unavailable → direct read. Still not a backend fault,
     // so it does not populate the memo either (#11877).
   }
+  // [ADR-0131 D8] The organization this read may draw on — the reach the
+  // settings service itself reads with (#25226): never another organization's
+  // row, and a row with no organization only where no organization can exist.
+  const reach = await localizationFallbackReach(ql, tenantId);
   // One read for all three keys instead of a query per key (`$in` on `key`).
   // Inlined (rather than the shared `tryFind`) so a genuine backend fault —
   // as opposed to a legitimate empty result — is visible to the caller above,
@@ -2534,15 +2590,23 @@ async function resolveLocalizationContextUncached(
   // query-options-erasure guard: that cast is a distinct, counted erasure
   // site, not implied by an already-`any` receiver).
   let rows: any[] = [];
-  if (ql && typeof ql.find === 'function') {
+  if (reach.kind !== 'unowned' && ql && typeof ql.find === 'function') {
+    const organization_id = reach.kind === 'own' ? reach.organizationId : null;
     try {
       let result = await ql.find('sys_setting', {
-        where: { namespace: 'localization', key: { $in: ['timezone', 'locale', 'currency'] }, scope: 'tenant' },
+        where: {
+          namespace: 'localization',
+          key: { $in: ['timezone', 'locale', 'currency'] },
+          scope: 'tenant',
+          organization_id,
+        },
         limit: 10,
         context: { isSystem: true },
       });
       if (result && (result as any).value) result = (result as any).value;
-      rows = Array.isArray(result) ? result : [];
+      // The organization is compared HERE too, not trusted to the filter —
+      // the settings service's own rule (`preferredRow`).
+      rows = (Array.isArray(result) ? result : []).filter((r) => settingRowOrganizationOf(r) === organization_id);
     } catch {
       // THE backend fault the failure memo exists for (#10221).
       backendFailed = true;
