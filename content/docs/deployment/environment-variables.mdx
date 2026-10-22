@@ -152,6 +152,8 @@ Branding precedence, by tenancy posture (`OS_TENANCY_POSTURE`):
 
 On every posture `productShortName`, `pwaDescription` and `pwaThemeColor` follow the name and colour actually served unless set themselves, and `OS_PRODUCT_STAGE` and `OS_FAVICON_URL` have no setting above them.
 
+Link previews read the same values. The console document served at `/_console/` carries them in tags written on the server, since a preview crawler runs no script: `<title>` and `og:title` (`productName`), `<meta name="description">` and `og:description` (`pwaDescription`), and `og:image` (`logoUrl`, resolved against the request origin). `og:url` is the request origin. A value that is not served writes no tag.
+
 ---
 
 ## Email
