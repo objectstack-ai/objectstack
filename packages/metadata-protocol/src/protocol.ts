@@ -6817,11 +6817,15 @@ export class ObjectStackProtocolImplementation implements
      * site as stored and emits NO notice for it, so "no notices" alone means
      * "nothing to persist", never "on protocol": {@link migrateStoredMetadata}
      * reads `todos` to tell the two apart. They change nothing in `item`.
+     *
+     * [#25279] `knownDatasources` is handed to the chain for the refused-shape
+     * listing ({@link storedRowKnownDatasources}); it changes nothing either.
      */
     private convertStoredItemDetailed(
         type: string,
         data: unknown,
         onNotice?: (notice: ConversionNotice) => void,
+        knownDatasources?: ReadonlyMap<string, { readonly schemaMode?: unknown }>,
     ): { item: unknown; notices: ConversionNotice[]; todos: ConversionTodoNotice[] } {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
         if (singular === 'flow') return { item: data, notices: [], todos: [] };
@@ -6835,8 +6839,35 @@ export class ObjectStackProtocolImplementation implements
             onTodo: (t) => {
                 todos.push(t);
             },
+            ...(knownDatasources ? { knownDatasources } : {}),
         });
         return { item, notices, todos };
+    }
+
+    /**
+     * [ADR-0015 §4.2 · #25279] The datasource a stored `object` row's
+     * `external` binding names, as {@link externalBindingSaveRefusal} would
+     * read it at that row's next save ({@link externalBindingDatasourceDefinition}),
+     * for {@link migrateStoredMetadata}'s refused-shape listing.
+     *
+     * A stored object row reaches the conversion chain alone, so the listing's
+     * `external` detector could answer only the primary half (`'default'`)
+     * while the save door also refuses a binding on a stored or registered
+     * managed datasource. Handed down here, the listing names the row exactly
+     * when that door refuses it. `undefined` for any other row, a row with no
+     * `external`, and a datasource no layer holds (no verdict, as at the door).
+     * A read that fails propagates, as it does at the door.
+     */
+    private async storedRowKnownDatasources(
+        singularType: string,
+        body: unknown,
+    ): Promise<ReadonlyMap<string, { readonly schemaMode?: unknown }> | undefined> {
+        if (singularType !== 'object' || !body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+        const { external, datasource } = body as { external?: unknown; datasource?: unknown };
+        if (external === undefined || external === null) return undefined;
+        if (typeof datasource !== 'string' || datasource === '') return undefined;
+        const definition = await this.externalBindingDatasourceDefinition(datasource);
+        return definition ? new Map([[datasource, definition]]) : undefined;
     }
 
     /**
@@ -22553,11 +22584,8 @@ export class ObjectStackProtocolImplementation implements
             const datasource = typeof body.datasource === 'string' && body.datasource !== '' ? body.datasource : undefined;
             const definition = datasource === undefined
                 ? undefined
-                : (await this.readMetaItem({ type: 'datasource', name: datasource }))?.item;
-            const refusal = externalBindingDatasourceRefusal(
-                name, body.external, datasource,
-                definition && typeof definition === 'object' ? definition as { schemaMode?: unknown } : undefined,
-            );
+                : await this.externalBindingDatasourceDefinition(datasource);
+            const refusal = externalBindingDatasourceRefusal(name, body.external, datasource, definition);
             if (refusal) issues.push({ path: refusal.path, message: refusal.message, code: 'custom' });
         } else if (singularType === 'datasource') {
             for (const bound of await this.objectsBoundExternallyTo(name)) {
@@ -22573,6 +22601,22 @@ export class ObjectStackProtocolImplementation implements
         err.status = 422;
         err.issues = issues;
         return err;
+    }
+
+    /**
+     * [#25211 · #25279] The definition of the datasource an `external` object
+     * names, as this environment resolves it by name ({@link readMetaItem}: the
+     * stored row, else the definition the code layer registers), or `undefined`
+     * when no layer holds one. The ONE read behind the object half of
+     * {@link externalBindingSaveRefusal} and the stored-migration pass's listing
+     * of the same refusal ({@link storedRowKnownDatasources}), so the two cannot
+     * judge a binding against different datasources.
+     */
+    private async externalBindingDatasourceDefinition(
+        datasource: string,
+    ): Promise<{ readonly schemaMode?: unknown } | undefined> {
+        const definition = (await this.readMetaItem({ type: 'datasource', name: datasource }))?.item;
+        return definition && typeof definition === 'object' ? definition as { schemaMode?: unknown } : undefined;
     }
 
     /**
@@ -25058,9 +25102,15 @@ export class ObjectStackProtocolImplementation implements
             // flow carrying a `{…}` token at a value slot — a CRUD filter
             // operand among them — parsed, rewrote nothing and was counted
             // `canonical`, while `registerFlow` refused it at boot.
+            //
+            // [#25279] A stored object's `external` binding is judged against the
+            // datasource the save door reads for it, so the listing names the
+            // row exactly when that door refuses its next save.
             const { item, notices, todos } = flowResult
                 ? { item: flowResult.storable, notices: flowResult.notices, todos: flowResult.todos ?? [] }
-                : this.convertStoredItemDetailed(singular, body);
+                : this.convertStoredItemDetailed(
+                    singular, body, undefined, await this.storedRowKnownDatasources(singular, body),
+                );
             const changed = flowResult ? item !== body : notices.length > 0;
             // [#17321] A site the chain left as stored — no lossless rewrite
             // exists for it (ADR-0087 D3: a structured TODO, never silence) —
