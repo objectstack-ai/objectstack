@@ -43,7 +43,7 @@
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
-import { isMissingTableError, isUniqueViolationError, operatorFacingErrorText } from '@objectstack/types';
+import { isMissingTableError, isUniqueViolationError } from '@objectstack/types';
 import { PREFERENCE_OBJECT } from './preference-resolver.js';
 
 /** The sentinel the text column held for the admin-global default. Read here and nowhere else. */
@@ -93,6 +93,22 @@ export interface PreferenceUserConversionResult {
     detail?: string;
 }
 
+/**
+ * The text an engine refusal reports, for the boot log and the result.
+ *
+ * Every read and write here goes through the data ENGINE, never the raw-SQL
+ * seam, so the error in hand is the engine's own (a validation finding, a
+ * `DUPLICATE_RECORD`, a driver error the SQL driver already redacts of its
+ * statement and bound values). That is why this is the package's plain
+ * `message` reading and not `operatorFacingErrorText`, the helper that digs a
+ * dialect's words out of the raw seam's composed fault: there is no such fault
+ * on this path, and each of that helper's callers is enumerated and pinned
+ * against raw statements this module never issues.
+ */
+function messageOf(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+}
+
 function textOrNull(value: unknown): string | null {
     return value === null || value === undefined ? null : String(value);
 }
@@ -136,7 +152,7 @@ export async function convertWildcardPreferenceUsers(
             // No table yet holds no '*' row — a fresh database, or a boot whose
             // schema sync is skipped. Anything else is "could not look".
             if (isMissingTableError(err, object)) return { status: 'absent', converted, missed };
-            const detail = operatorFacingErrorText(err);
+            const detail = messageOf(err);
             logger?.error(
                 `[messaging] could not read ${object} to rewrite user_id '${LEGACY_WILDCARD_USER}' to the empty ` +
                     'reference, so any admin-global notification default still stored that way is NOT applying: ' +
@@ -174,7 +190,7 @@ export async function convertWildcardPreferenceUsers(
                     topic: textOrNull(row.topic),
                     channel: textOrNull(row.channel),
                     reason: duplicate ? 'duplicate' : 'failed',
-                    detail: operatorFacingErrorText(err),
+                    detail: messageOf(err),
                 });
             }
         }
