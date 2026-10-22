@@ -54,6 +54,7 @@ import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testki
 import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const SYSTEM_CTX = { isSystem: true };
 
@@ -110,6 +111,10 @@ async function boot(): Promise<ObjectQL> {
     ],
   } as any);
   await engine.syncSchemas();
+  // The organization-less rows below (global sets, positions, grants) exist only
+  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
+  // NULL): this is that store.
+  await relaxEveryRegisteredTenantColumn(engine);
   // [ADR-0131 D3/D5] The Default Organization a `single` boot creates before any
   // `kernel:ready` hook runs; it owns the promotion's grant.
   await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, { context: { isSystem: true } });

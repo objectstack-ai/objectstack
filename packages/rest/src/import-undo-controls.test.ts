@@ -38,6 +38,7 @@ import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObje
 import { SysImportJob } from '@objectstack/platform-objects/audit';
 import { UndoImportJobResponseSchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 function makeSqliteDriver() {
   return new SqlDriver({
@@ -130,6 +131,9 @@ async function boot() {
   await engine.init();
   for (const o of [DEAL, CASE, TICKET, SysImportJob]) engine.registry.registerObject(o as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   for (const o of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
     if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as any);
   }

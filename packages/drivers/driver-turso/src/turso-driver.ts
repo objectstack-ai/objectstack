@@ -117,10 +117,18 @@ export interface TursoDriverConfig {
   authToken?: string;
 
   /**
-   * AES-256 encryption key for the local database file.
-   * Only effective in local/replica modes.
+   * REMOVED (#25050, ADR-0049 enforce-or-remove) — typed `never`, so a typed
+   * caller fails to compile, and refused at construction in every mode
+   * (`VALIDATION_ERROR` / 400) for a value that arrives untyped (a stored
+   * datasource row, through the datasource loaders). It promised to encrypt
+   * the local database file and was honoured in no mode: this driver reads
+   * and writes a local or replica file through better-sqlite3, which has no
+   * encryption codec, and never handed the key to the libSQL client it builds
+   * for a remote url. Delete it; a local file that must be encrypted at rest
+   * belongs on an encrypted disk or volume. See
+   * {@link ENCRYPTION_KEY_RETIRED_REFUSAL}.
    */
-  encryptionKey?: string;
+  encryptionKey?: never;
 
   /**
    * Maximum concurrent requests to the remote database.
@@ -1092,6 +1100,11 @@ export const REMOTE_FACE_ANSWERS = {
   // `false`, the method's own "not taken" answer: only the Knex `initObjects`
   // asks the resolver, so on this face it would never be asked.
   setFileColumnsMovedResolver: 'remote',
+  // [ADR-0131 D1] In-memory bookkeeping with no Knex: the resolver is asked by
+  // the shared index differ, which the remote drift detector runs, so the
+  // remote face reads an earlier release's COALESCE tenant key part as the
+  // plain one on a certified database exactly as the local face does.
+  setTenantKeyCertifiedResolver: 'inherited',
   // `false`: remote mode opens no in-memory database.
   sqliteOpenedEmptyInMemory: 'inherited',
   // `'sqlite'`: libSQL speaks SQLite, and `execute()` sends what a caller
@@ -1451,12 +1464,63 @@ const LOCAL_MODE_WITH_SYNC_URL_REFUSAL =
   "`url: 'file:./data/replica.db'`. For a plain local database, drop `syncUrl` (and `sync`).";
 
 /**
- * Throw one of the four sync-key refusals above as the ADR-0112 envelope.
+ * [#25050] The REMOVED `encryptionKey` — refused at construction, in every
+ * mode, for any value (an empty string included, as the spec contract and
+ * this package's mirror refuse it).
  *
- * Raised BEFORE `super()`, AFTER the three refusals above it in the
- * constructor, so no configuration those already refuse changes which message
- * it gets. ⛔ The messages carry no url and no internal issue id: they reach an
- * operator's boot log and Studio's datasource form.
+ * The key promised "AES-256 encryption key for the local database file", and
+ * nothing this driver builds ever honoured it:
+ *
+ *  - a local or replica datasource runs every read and write through Knex on
+ *    better-sqlite3, which has no encryption codec: measured on
+ *    better-sqlite3 13.0.3 (SQLite 3.53.4), no codec compile option is set and
+ *    `PRAGMA key` is a silent no-op. Before #25020 such a datasource
+ *    constructed, connected and wrote a file that starts `SQLite format 3`,
+ *    and plain better-sqlite3 read its rows back with no key. A replica's
+ *    sync client and its local engine share one file, so whichever opens it
+ *    with the key, the other cannot read it (SQLITE_NOTADB). #25020 refused
+ *    the key there, and beside a `file:` url or `:memory:` under a forced
+ *    `mode: 'remote'`, whose libSQL client was handed no key either;
+ *  - on a remote url, {@link TursoDriver.createRemoteClient} builds
+ *    `createClient({ url, authToken, concurrency, fetch })` and never read the
+ *    key, so it was parsed and dropped. `@libsql/client`'s own remote client
+ *    refuses one outright (`ENCRYPTION_KEY_NOT_SUPPORTED`): a remote
+ *    database's storage encryption is the server's.
+ *
+ * Honoured in no mode, so the key is retired (ADR-0049) rather than refused
+ * mode by mode. Raised FIRST, BEFORE `super()`: the spec contract refuses the
+ * key at the key itself, ahead of every transport refusal, so a config that
+ * carries one meets this message whatever else is wrong with it, here and at
+ * authoring alike.
+ *
+ * ⚠️ The text is `@objectstack/spec`'s `TursoConfigSchema` tombstone on
+ * `encryptionKey`, byte for byte, and this package's mirror carries the same
+ * copy; `spec/turso-config-constructor-parity.test.ts` holds the three equal.
+ * Edit it in the spec first.
+ */
+// Written with LEADING `+`, unlike this file's other messages: the house-sentence
+// pin (`retired-key-migrate-sentence.test.ts` in `@objectstack/spec`) scans this
+// package and joins string seams in that spelling.
+const ENCRYPTION_KEY_RETIRED_REFUSAL =
+  '`turso config.encryptionKey` was removed in @objectstack/spec 18 and @objectstack/driver-turso 18 '
+  + '(ADR-0049) — it never encrypted anything, in any mode: a local or embedded-replica file is read and '
+  + 'written through a SQLite engine that has no encryption codec, and the driver never handed the key to '
+  + 'a remote database, whose storage encryption the server configures. Delete the key. A local file that '
+  + 'must be encrypted at rest belongs on an encrypted disk or volume. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for the unset and remote-url cases; '
+  + '`--write` applies the ones it can prove, and you delete the key from a local or replica datasource by hand.';
+
+/**
+ * Throw one of the four sync-key refusals above, or the retired
+ * `encryptionKey` refusal ({@link ENCRYPTION_KEY_RETIRED_REFUSAL}), as the
+ * ADR-0112 envelope.
+ *
+ * The sync-key refusals are raised BEFORE `super()`, AFTER the three
+ * refusals above them in the constructor, so no configuration those already
+ * refuse changes which message it gets; the `encryptionKey` one is raised
+ * first of all (see its constant). ⛔ The messages carry no url and no
+ * internal issue id: they reach an operator's boot log and Studio's datasource
+ * form.
  */
 function refuseIgnoredSyncKey(message: string): never {
   const err = new Error(message) as Error & { code?: string; status?: number };
@@ -1901,6 +1965,13 @@ export class TursoDriver extends SqlDriver {
   private remoteSequencesTableEnsured: Promise<void> | null = null;
 
   constructor(config: TursoDriverConfig) {
+    // [#25050] The REMOVED `encryptionKey`, refused in every mode and FIRST,
+    // as the spec contract refuses it at the key ahead of every transport
+    // refusal. Typed `never`, so only an untyped value (a stored datasource row
+    // through the loaders) reaches here. See `ENCRYPTION_KEY_RETIRED_REFUSAL`.
+    if ((config as { encryptionKey?: unknown }).encryptionKey !== undefined) {
+      refuseIgnoredSyncKey(ENCRYPTION_KEY_RETIRED_REFUSAL);
+    }
     const mode = TursoDriver.detectMode(config);
     // A local or replica engine with nothing durable behind it (a remote url,
     // a url that is none of `file:` / `:memory:` / remote, or a replica on an
@@ -2265,10 +2336,13 @@ export class TursoDriver extends SqlDriver {
         // binding's BUSY timeout for local lock contention, not the remote
         // operation timeout `TursoDriverConfig.timeout` promises. That promise
         // is kept on `sync()`, the one remote operation this arm performs.
+        // [#25050] And no `encryptionKey`: the key is removed and refused at
+        // construction. This client shares the replica file with the Knex /
+        // better-sqlite3 engine, which cannot encrypt it, and a file this
+        // client encrypted is one that engine cannot open.
         this.libsqlClient = createClient({
           url: this.tursoConfig.url,
           authToken: this.tursoConfig.authToken,
-          encryptionKey: this.tursoConfig.encryptionKey,
           syncUrl: this.tursoConfig.syncUrl,
           concurrency: this.tursoConfig.concurrency,
         });
@@ -4083,8 +4157,12 @@ export class TursoDriver extends SqlDriver {
     const parts = columns.map((c) =>
       nullSafe.has(c) ? `COALESCE(${quoteRemoteIdentifier(c)}, '${GLOBAL_TENANT}')` : quoteRemoteIdentifier(c),
     );
+    // [ADR-0131 D1] A row with a NULL plain key part conflicts with nothing
+    // under the NULL-distinct UNIQUE; the local face leaves it out the same way.
+    const notNull = columns.filter((c) => !nullSafe.has(c)).map((c) => `${quoteRemoteIdentifier(c)} IS NOT NULL`);
     const sql =
-      `SELECT ${parts.map((p, i) => `${p} AS k${i}`).join(', ')}, COUNT(*) AS n FROM ${quoteRemoteIdentifier(table)} ` +
+      `SELECT ${parts.map((p, i) => `${p} AS k${i}`).join(', ')}, COUNT(*) AS n FROM ${quoteRemoteIdentifier(table)}` +
+      `${notNull.length > 0 ? ` WHERE ${notNull.join(' AND ')}` : ''} ` +
       `GROUP BY ${parts.join(', ')} HAVING COUNT(*) > 1 ORDER BY n DESC LIMIT 20`;
     return (await this.remoteCatalogRead(sql)).map((r) => ({
       key: columns.map((c, i) => `${c}=${JSON.stringify(r[`k${i}`])}`).join(', '),

@@ -221,8 +221,8 @@ export const SystemFieldName = {
   OWNING_BUSINESS_UNIT_ID: 'owning_business_unit_id',
   /**
    * THE tenant isolation key — a lookup to `sys_organization`. INJECTED unless
-   * tenancy is disabled for the object; org-scoping populates it on insert and
-   * it stays NULL on single-tenant stacks.
+   * tenancy is disabled for the object; org-scoping stamps it on insert (under
+   * `single` with the Default Organization), and it is never NULL (ADR-0131 D1).
    */
   ORGANIZATION_ID: 'organization_id',
   /**

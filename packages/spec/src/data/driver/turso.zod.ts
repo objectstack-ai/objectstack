@@ -108,7 +108,14 @@ export type TursoTransportMode = z.input<typeof TursoTransportModeSchema>;
 //    other way round: the driver used to label it local and then run it as an
 //    embedded replica, syncing with the remote on connect and on the interval
 //    while its sync-enabled check answered true. Authoring and the constructor
-//    now refuse it together, in this arm's words.
+//    now refuse it together, in this arm's words;
+//
+// `encryptionKey` is no longer judged here. #25020 refused it on a local or
+// replica datasource and beside a `file:` url or `:memory:` under a forced
+// `mode: 'remote'`, and left a remote url, where the driver dropped it; #25050
+// retired the key outright (a `retiredKey()` tombstone on the shape below),
+// so every value is refused at the key itself, in every mode, before any of
+// these arms is reached.
 //
 // The predicates MIRROR the constructor's on `main` (`localEngineDefect`,
 // `refuseWebSocketTimeout` and `detectMode` in
@@ -315,6 +322,25 @@ function tursoTransportIssues(cfg: TursoTransportKeys): TursoTransportIssue[] {
   return issues;
 }
 
+/**
+ * The prescription the retired `encryptionKey` raises (#25050), at the key on
+ * the shape below and through two guidance spellings. Copied byte for byte by
+ * `@objectstack/driver-turso` (its mirror and its constructor), which cannot
+ * import it: `retiredKey()` and this module are not on the spec's published
+ * entry points.
+ *
+ * ⛔ No internal issue id in the text: it reaches Studio's datasource form and
+ * an operator's boot log.
+ */
+const TURSO_ENCRYPTION_KEY_RETIRED =
+  '`turso config.encryptionKey` was removed in @objectstack/spec 18 and @objectstack/driver-turso 18 '
+  + '(ADR-0049) — it never encrypted anything, in any mode: a local or embedded-replica file is read and '
+  + 'written through a SQLite engine that has no encryption codec, and the driver never handed the key to '
+  + 'a remote database, whose storage encryption the server configures. Delete the key. A local file that '
+  + 'must be encrypted at rest belongs on an encrypted disk or volume. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for the unset and remote-url cases; '
+  + '`--write` applies the ones it can prove, and you delete the key from a local or replica datasource by hand.';
+
 export const TursoConfigSchema = lazySchema(() => strictObject(
   {
     surface: "this turso datasource's config",
@@ -329,8 +355,8 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
     // row is a PIN on an answer the fallback happens to get right, not a
     // gap-filler, and it keeps answering `url` if this shape ever gains a key
     // within 2 of `uri`. `turso.test.ts` pins the distinction.
-    // Case and underscore variants of a DECLARED key (`encryption_key`,
-    // `sync_url`) are deliberately absent: the unknown-key probe already
+    // Case and underscore variants of a DECLARED key (`sync_url`) are
+    // deliberately absent: the unknown-key probe already
     // normalizes those onto the declared name, so entries for them would be
     // alias rows that never fire, and two of them collided with each other on
     // one probe (`auth_token`/`authtoken`, `sync_interval`/`syncinterval`) —
@@ -355,6 +381,12 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
       jwt: INLINE_CREDENTIAL_REFUSED('jwt'),
       auth_token: INLINE_CREDENTIAL_REFUSED('auth_token'),
       authtoken: INLINE_CREDENTIAL_REFUSED('authtoken'),
+      // #25050 — `encryptionKey` is tombstoned, so it left the probe's
+      // candidate list exactly as `authToken` did above, and its case and
+      // underscore variants would get no suggestion at all. They carry the
+      // retirement's prescription directly instead.
+      encryption_key: TURSO_ENCRYPTION_KEY_RETIRED,
+      encryptionkey: TURSO_ENCRYPTION_KEY_RETIRED,
       pool:
         '`pool` is not driver config — libSQL sizes remote concurrency with `concurrency`, and '
         + "every driver's pooling block lives next to `driver` on the datasource itself.",
@@ -425,14 +457,31 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
     authToken: refusedInlineCredentialKey('authToken', 'Auth token'),
 
     /**
-     * AES-256 key for the local database file; local/replica modes only.
-     * Placeholder-free since #8336: an unresolved `${…}` here would encrypt
-     * the database with the literal placeholder string as its key — data
-     * unreadable under the key the author believed they set.
+     * Tombstone for the REMOVED `encryptionKey` (#25050, ADR-0049
+     * enforce-or-remove). It promised "AES-256 key for the local database
+     * file" and was honoured in no mode: the driver reads and writes a local
+     * or replica file through better-sqlite3, which has no encryption codec,
+     * so #25020 refused it there (and beside a `file:` url or `:memory:` under
+     * a forced `mode: 'remote'`); on a remote url the driver never handed it
+     * to the libSQL client, so it was parsed and dropped. A declared key the
+     * runtime honours nowhere is the removal case, so the key goes — as a
+     * tombstone, so `tsc` sees `never` at every typed authoring site and the
+     * parse refuses every value with the prescription, in every mode.
+     *
+     * The D2 conversion `turso-config-encryption-key-removed` strips it from a
+     * stored or built datasource only where removing it changes nothing: an
+     * unset value, or a remote url the driver never handed it to. A non-empty
+     * key beside a local url is left for the author (the D3 entry
+     * `turso-config-encryption-key-retired` says why). A stored row that still
+     * carries one is withheld on every read by `RETIRED_CREDENTIAL_KEYS` in
+     * `datasource-credential-redaction.ts`: a tombstone is not a credential to
+     * the schema-derived set, but the value a legacy row holds still is.
+     *
+     * `@objectstack/driver-turso` refuses the same key in its mirror and its
+     * constructor, in these words, byte for byte
+     * (`turso-config-constructor-parity.test.ts` there).
      */
-    encryptionKey: placeholderFree(z.string(), 'encryptionKey').optional()
-      .describe('AES-256 encryption key for the local database file (local/replica modes)')
-      .meta({ title: 'Encryption key', format: 'password' }),
+    encryptionKey: retiredKey(TURSO_ENCRYPTION_KEY_RETIRED),
 
     /** Max concurrent requests to the remote database (replica/remote modes). */
     concurrency: z.number().int().positive().optional()

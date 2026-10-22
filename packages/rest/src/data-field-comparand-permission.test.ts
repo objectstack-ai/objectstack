@@ -30,6 +30,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'rest_comparand_perm_ledger';
 
@@ -144,6 +145,9 @@ describe('a hidden field as a cross-field comparand answers the key form\'s refu
       ],
     } as never);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     const services: Record<string, unknown> = {
       manifest: { register: vi.fn() },

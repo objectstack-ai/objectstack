@@ -14,10 +14,8 @@
  * has neither, so the route registers both as `web`. The form stops offering
  * them; the route still accepts them, so this is the form only.
  *
- * The stored `type` column is a different surface and keeps all four options:
- * its narrowing waits for the major version that refuses the two values at the
- * route, so the pin below holds it as it is on purpose (including a declared
- * value that differs from the one earlier provider lines wrote — see there).
+ * The stored `type` column is a different surface. It declares the same two
+ * values since #25053, and `sys-oauth-application.type-options.test.ts` pins it.
  *
  * The help text is not pinned word for word. What is pinned is what it names:
  * the scheme each type needs and the three native loopback hosts, in the source
@@ -103,25 +101,5 @@ describe('[#24773] create_oauth_application — the redirect-URL help states the
         expect(node?.params?.type?.helpText, `${locale} type help is the English source`).not.toBe(param('type')?.helpText);
       }
     }
-  });
-});
-
-describe('[#24773] the stored columns are not narrowed in this major', () => {
-  it('the stored `type` select still declares all four options, exactly as it is served today', () => {
-    const stored = (SysOauthApplication.fields as Record<string, { type?: string; options?: unknown[] }>).type;
-    expect(stored?.type).toBe('select');
-    const options = (stored?.options ?? []) as { label?: unknown }[];
-    expect(options.map((o) => o?.label)).toEqual(['web', 'native', 'user-agent-based', 'public']);
-    // Measured, not intended: the column is declared through `Field.select`'s
-    // string-array shorthand, which snake-cases each value and drops the
-    // hyphens, so the third option's VALUE is `useragentbased`, not the
-    // `user-agent-based` an earlier provider line wrote. Recorded for the
-    // major version that narrows this column; this PR changes neither.
-    expect(optionValues(stored?.options)).toEqual(['web', 'native', 'useragentbased', 'public']);
-  });
-
-  it('the stored `public` column is still declared', () => {
-    const column = (SysOauthApplication.fields as Record<string, { type?: string }>).public;
-    expect(column?.type).toBe('boolean');
   });
 });

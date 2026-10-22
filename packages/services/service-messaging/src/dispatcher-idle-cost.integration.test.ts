@@ -41,6 +41,7 @@ import { NotificationDelivery } from './objects/notification-delivery.object.js'
 import { NotificationDispatcher } from './dispatcher.js';
 import type { MessagingChannel } from './channel.js';
 import type { INotificationOutbox } from './outbox.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** The production default. */
 const PARTITIONS = 8;
@@ -85,6 +86,9 @@ beforeEach(async () => {
     await engine.init();
     engine.registry.registerObject(NotificationDelivery as any, '@objectstack/service-messaging');
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     calls = { update: 0, find: 0, other: 0 };
     sent = [];

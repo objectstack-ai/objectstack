@@ -82,6 +82,7 @@ import { registerStorageRoutes } from './storage-routes.js';
 // here rather than exploding at module load, which is what keeps the pre-fix
 // run a MEASUREMENT of the divergence instead of an import crash.
 import * as lifecycle from './attachment-lifecycle.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const URL_ROUTE = '/api/v1/storage/files/:fileId/url';
 const RAW_ROUTE = '/api/v1/storage/files/:fileId';
@@ -185,6 +186,9 @@ describe('#11427 — file-field hydration and the download path agree about one 
     } as any, 'test-11427');
     // Real DDL for all three tables before the first row is written.
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     // ── The shared fixture: four sys_file rows in the residual state ──────
     const files = [

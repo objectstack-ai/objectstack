@@ -28,6 +28,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { mapDataError } from '@objectstack/types';
 
 import { AuditPlugin } from './audit-plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const COMMENT = 'sys_comment';
 /** A parent object every caller reads. */
@@ -74,6 +75,9 @@ describe('sys_comment — a write naming the retired reactions column is refused
     engine.registerDriver(driver, true);
     engine.registry.registerObject(openObject as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     const board = await engine.insert(OPEN, { name: 'board' }, { context: SYS });
     threadId = `${OPEN}:${board.id}`;

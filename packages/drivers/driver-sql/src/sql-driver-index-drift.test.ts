@@ -74,9 +74,10 @@ describe('SqlDriver index drift (#3728)', () => {
   /**
    * Unique index name → canonical key parts, read from the index DDL so
    * expression keys are visible (`PRAGMA index_info` reports a NULL name for
-   * them). A plain column reads as its name; the NULL-safe organization key
-   * part (ADR-0120 D3) reads as `COALESCE(<column>)` — literal elided, the
-   * same literal-agnostic identity the drift differ compares on.
+   * them). A plain column reads as its name; a legacy NULL-safe organization
+   * key part (ADR-0120 D3) reads as `COALESCE(<column>)` — literal elided, the
+   * same literal-agnostic identity the drift differ compares on. New DDL keys
+   * the plain organization column (ADR-0131 D1), so the pins below expect none.
    */
   const uniqueIndexColumns = async (table: string): Promise<Record<string, string[]>> => {
     const list: any = await knexInstance.raw(`PRAGMA index_list(${table})`);
@@ -212,10 +213,11 @@ describe('SqlDriver index drift (#3728)', () => {
       const driver = makeDriver();
       await driver.initObjects(contactMeta);
 
-      // Both are current intent: the tenant composite from the field-level
-      // `unique: true`, and the verbatim declared global unique.
+      // Both are current intent: the plain tenant composite from the
+      // field-level `unique: true` (ADR-0131 D1), and the verbatim declared
+      // global unique.
       const uniques = await uniqueIndexColumns('hp_contact');
-      expect(uniques['uniq_hp_contact_organization_id_email']).toEqual(['COALESCE(organization_id)', 'email']);
+      expect(uniques['uniq_hp_contact_organization_id_email']).toEqual(['organization_id', 'email']);
       expect(uniques['uniq_hp_contact_email']).toEqual(['email']);
 
       // Before the fix this reported `replace_unique_index` — proposing to drop
@@ -290,7 +292,8 @@ describe('SqlDriver index drift (#3728)', () => {
 
       const uniques = await uniqueIndexColumns('product');
       expect(uniques['product_code_unique']).toBeUndefined();
-      expect(Object.values(uniques)).toContainEqual(['COALESCE(organization_id)', 'code']);
+      // The replacement is the plain composite (ADR-0131 D1).
+      expect(Object.values(uniques)).toContainEqual(['organization_id', 'code']);
 
       // Existing rows survived, and the cross-tenant insert the issue is about works.
       expect(await driver.count('product', {})).toBe(2);
@@ -310,10 +313,7 @@ describe('SqlDriver index drift (#3728)', () => {
       await driver.applyMigrationEntries(drift, { allowDestructive: false });
       const again = await driver.applyMigrationEntries(drift, { allowDestructive: false });
       expect(again.skipped).toHaveLength(0);
-      expect(Object.values(await uniqueIndexColumns('product'))).toContainEqual([
-        'COALESCE(organization_id)',
-        'code',
-      ]);
+      expect(Object.values(await uniqueIndexColumns('product'))).toContainEqual(['organization_id', 'code']);
     });
   });
 
@@ -328,7 +328,7 @@ describe('SqlDriver index drift (#3728)', () => {
 
       const uniques = await uniqueIndexColumns('product');
       expect(uniques['product_code_unique']).toBeUndefined();
-      expect(Object.values(uniques)).toContainEqual(['COALESCE(organization_id)', 'code']);
+      expect(Object.values(uniques)).toContainEqual(['organization_id', 'code']);
       expect(await driver.detectManagedDrift()).toHaveLength(0);
 
       const b = await driver.create('product', { organization_id: 'org_b', code: 'PROD-00001' });

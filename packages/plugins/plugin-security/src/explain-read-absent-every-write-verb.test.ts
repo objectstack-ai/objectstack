@@ -46,6 +46,7 @@ import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/securi
 import { SecurityPlugin } from './security-plugin.js';
 import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -161,6 +162,9 @@ beforeAll(async () => {
     ],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   // One unreadable and one readable row per (axis, verb), so a delete or a
   // transfer that lands never changes another cell's row.
   for (const { set } of AXES) {

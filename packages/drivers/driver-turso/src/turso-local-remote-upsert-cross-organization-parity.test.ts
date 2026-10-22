@@ -247,9 +247,13 @@ describe("an upsert whose conflict lands on another organization's row, on BOTH 
       const refused = await captureError(() =>
         driver.upsert(ACCOUNT.name, { email: OTHER_EMAIL, title: 'overwritten?' }, ['email'], { tenantId: CALLER_ORG }),
       );
+      // No tenant context, as before; the payload names an organization because
+      // a fresh tenant column is NOT NULL (ADR-0131 D1) and the database checks
+      // the proposed row before it resolves the conflict. It names the CALLER's,
+      // so the merge keeping OTHER_ORG below still proves it was not overwritten.
       const merged = await driver.upsert(
         ACCOUNT.name,
-        { email: OTHER_EMAIL, title: 'merged without context' },
+        { email: OTHER_EMAIL, organization_id: CALLER_ORG, title: 'merged without context' },
         ['email'],
         { bypassTenantAudit: true },
       );

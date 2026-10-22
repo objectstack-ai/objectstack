@@ -3,6 +3,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { isUniqueViolationError } from '@objectstack/types';
 import { SqlDriver, classifyIndexKeyPart, parseIndexDdl, legacyUniqueReplacements } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * #8555 — `sys_setting`, the SIXTH instance of the #8323 class, and the first
@@ -234,12 +235,15 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
   // 1. Materialized shape — both spellings, kept side by side
   // ─────────────────────────────────────────────────────────────────────────
 
-  it('the fixed declaration keys on the NULL-safe organization part', async () => {
+  it('the fixed declaration keys on the PLAIN organization column (ADR-0131 D1)', async () => {
+    // ADR-0131 D1: new DDL keys the plain tenant column — no COALESCE. A fresh
+    // table's tenant column is NOT NULL, so ADR-0120 D3's NULL-safe spelling
+    // would guard a value that can no longer occur.
     const d = makeDriver();
     await d.initObjects(app('fixed') as any);
 
     expect(await uniqueKeyParts()).toEqual({
-      [REPLACEMENT_NAME]: ['COALESCE(organization_id)', ...KEY_COLUMNS],
+      [REPLACEMENT_NAME]: ['organization_id', ...KEY_COLUMNS],
     });
   });
 
@@ -305,24 +309,31 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
     expect(await d.count(TABLE, {})).toBe(1);
   });
 
-  it('AFTER: rows with no organization stay unique among THEMSELVES (ADR-0120 D3)', async () => {
-    // This is the arm that answers the card's "argument for keeping it global".
-    // The `scope='global'` LAYER — the platform default every organization
-    // resolves against at rung 2 — is preserved by the NULL-safe key part, not
-    // by making the whole index installation-wide: platform rows carry no
-    // organization, so they share the one `__global__` bucket and remain unique
-    // within it, while an organization may still hold its own row of the same
-    // key at its own layer.
+  it('AFTER: on a pre-18 nullable column, rows with no organization are NOT constrained by the plain key (ADR-0131 D1)', async () => {
+    // This arm once answered the card's "argument for keeping it global" with
+    // ADR-0120 D3's NULL-safe key part: organization-less platform rows shared
+    // one `COALESCE` bucket and stayed unique within it. ADR-0131 D1 retires
+    // that bucket. New DDL keys the PLAIN `organization_id`, and SQL UNIQUE is
+    // NULL-distinct, so on a nullable column two organization-less rows of the
+    // same key do not conflict. A fresh table cannot hold such rows (its
+    // tenant column is NOT NULL; the ownership ceremony moves the platform
+    // layer's rows out); this pins the plain key on the shape that still can.
     const d = makeDriver();
     await d.initObjects(app('fixed') as any);
+    // Rows with no organization exist only on a database built before 18.x
+    // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+    await asPre18TenantColumn(d, TABLE);
 
     const platform = { scope: 'global', namespace: 'branding', key: 'logo_url' };
     expect((await createAsApi(d, row('seed1', undefined, platform))).status).toBe(201);
-    expect(await createAsApi(d, row('seed2', undefined, platform))).toMatchObject(
-      CONFLICT_ENVELOPE,
-    );
+    expect((await createAsApi(d, row('seed2', undefined, platform))).status).toBe(201);
+    expect(await d.count(TABLE, {})).toBe(2);
 
+    // An organization may still hold its own row of the same key, and the
+    // plain key still refuses that organization's second one — the exemption
+    // is the NULL, not the column.
     expect((await createAsApi(d, row('own1', 'org_jia', platform))).status).toBe(201);
+    expect(await createAsApi(d, row('own2', 'org_jia', platform))).toMatchObject(CONFLICT_ENVELOPE);
   });
 
   it('the key is the whole COMPOSITE — varying only the trailing column was always accepted', async () => {
@@ -358,6 +369,9 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
      */
     const seedDeployed = async (d: SqlDriver) => {
       await d.initObjects(app('pre') as any);
+      // Every deployment in the field was built before 18.x: its tenant column
+      // is nullable, and it holds rows with no organization.
+      await asPre18TenantColumn(d, TABLE);
       await d.create(TABLE, row('r1', 'org_jia', KEY) as any);
       await d.create(TABLE, row('r2', 'org_jia', CONTROL) as any);
       await d.create(TABLE, row('r3', undefined, { scope: 'global', key: 'platform_default' }) as any);
@@ -397,8 +411,9 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
         dropIndexNames: [LEGACY_NAME],
         createIndexName: REPLACEMENT_NAME,
         createColumns: ['organization_id', ...KEY_COLUMNS],
-        nullSafeColumns: ['organization_id'],
       });
+      // ADR-0131 D1: the replacement keys the PLAIN organization column.
+      expect(entry!.op).not.toHaveProperty('nullSafeColumns');
 
       // ⛔ The old index must NOT ALSO surface as an orphan. An orphan drop is
       // `destructive`, so an operator applying only the safe half would keep the
@@ -421,8 +436,10 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
       expect(applied.some((e) => e.op.type === 'replace_unique_index')).toBe(true);
       expect(skipped).toHaveLength(0);
 
+      // The plain composite (ADR-0131 D1) — and it converges on the pre-18
+      // nullable column too, since the expectation is plain as well.
       expect(await uniqueKeyParts()).toEqual({
-        [REPLACEMENT_NAME]: ['COALESCE(organization_id)', ...KEY_COLUMNS],
+        [REPLACEMENT_NAME]: ['organization_id', ...KEY_COLUMNS],
       });
       // Every row survives — including the two pre-existing duplicates the old
       // index allowed. A migration that silently dropped them would be data loss
@@ -446,11 +463,12 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
       // The anti-vacuity arm, on the SAME migrated index.
       expect(await createAsApi(d, row('z2', 'org_jia', KEY))).toMatchObject(CONFLICT_ENVELOPE);
 
-      // …and the organization-less bucket survived the migration intact: the
-      // seeded platform row still blocks a duplicate of ITSELF.
+      // …and the organization-less row the deployment already held is exempt
+      // from the migrated PLAIN key (ADR-0131 D1: SQL UNIQUE is NULL-distinct;
+      // the ADR-0120 D3 bucket is gone), so a second one of it is accepted.
       expect(
-        await createAsApi(d, row('z3', undefined, { scope: 'global', key: 'platform_default' })),
-      ).toMatchObject(CONFLICT_ENVELOPE);
+        (await createAsApi(d, row('z3', undefined, { scope: 'global', key: 'platform_default' }))).status,
+      ).toBe(201);
     });
 
     it('boot creates the replacement ADDITIVELY, so the defect is STILL LIVE until the plan runs', async () => {
@@ -533,9 +551,11 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
      * without weakening anything else, survives a later boot's additive sync,
      * and is not reported as drift the reconciler would undo.
      */
+    // Since ADR-0131 D1 the builder keys `organization_id` PLAIN, exactly as
+    // the driver does; only `user_id` keeps its NULL-safe `COALESCE`.
     const NULL_SAFE_IDENTITY_DDL =
       `CREATE UNIQUE INDEX IF NOT EXISTS ${REPLACEMENT_NAME} ON ${TABLE} ` +
-      "(COALESCE(organization_id, '__global__'), namespace, key, scope, COALESCE(user_id, ''))";
+      "(organization_id, namespace, key, scope, COALESCE(user_id, ''))";
 
     /** The migration's probe-first order, through the driver's raw seam. */
     const runIdentityMigration = async (d: SqlDriver): Promise<void> => {
@@ -583,13 +603,25 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
       expect(await d.count(TABLE, {})).toBe(1);
     });
 
-    it('AFTER the migration: two platform defaults on the `scope=global` layer are refused', async () => {
+    it('AFTER the migration: a `scope=global` duplicate is refused within an organization; organization-less rows are exempt (ADR-0131 D1)', async () => {
+      // The `user_id` fold closes the hole on the `global` layer exactly as on
+      // the `tenant` one. What it no longer does is fold the ORGANIZATION:
+      // ADR-0131 D1 keys `organization_id` plain, so on a pre-18 nullable
+      // column two organization-less platform defaults are NULL-distinct and
+      // both accepted. On 18.x those rows do not live here at all (the tenant
+      // column is NOT NULL; the ownership ceremony moves them out).
       const d = makeDriver();
       await d.initObjects(app('fixed') as any);
+      // Rows with no organization exist only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(d, TABLE);
       await runIdentityMigration(d);
 
-      expect((await createAsApi(d, row('a', undefined, globalRow))).status).toBe(201);
-      expect(await createAsApi(d, row('b', undefined, globalRow))).toMatchObject(CONFLICT_ENVELOPE);
+      expect((await createAsApi(d, row('a', 'org_jia', globalRow))).status).toBe(201);
+      expect(await createAsApi(d, row('b', 'org_jia', globalRow))).toMatchObject(CONFLICT_ENVELOPE);
+
+      expect((await createAsApi(d, row('c', undefined, globalRow))).status).toBe(201);
+      expect((await createAsApi(d, row('d', undefined, globalRow))).status).toBe(201);
     });
 
     it('AFTER the migration (anti-vacuity): the key is still PER-ORGANIZATION', async () => {
@@ -638,7 +670,7 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
       await d.initObjects(app('fixed') as any);
 
       expect(await uniqueKeyParts()).toEqual({
-        [REPLACEMENT_NAME]: ['COALESCE(organization_id)', 'namespace', 'key', 'scope', 'COALESCE(user_id)'],
+        [REPLACEMENT_NAME]: ['organization_id', 'namespace', 'key', 'scope', 'COALESCE(user_id)'],
       });
       expect(await createAsApi(d, row('a', 'org_jia', tenantRow))).toMatchObject({ status: 201 });
       expect(await createAsApi(d, row('b', 'org_jia', tenantRow))).toMatchObject(CONFLICT_ENVELOPE);
@@ -682,8 +714,10 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
       expect(isUniqueViolationError(refusal)).toBe(true);
       expect(await d.count(TABLE, {})).toBe(2);
       expect(Object.keys(await uniqueKeyParts())).toEqual([REPLACEMENT_NAME]);
+      // The previous index — the driver's declared one, plain-keyed since
+      // ADR-0131 D1 — is still the one on the table.
       expect(await uniqueKeyParts()).toEqual({
-        [REPLACEMENT_NAME]: ['COALESCE(organization_id)', ...KEY_COLUMNS],
+        [REPLACEMENT_NAME]: ['organization_id', ...KEY_COLUMNS],
       });
     });
   });
@@ -714,9 +748,10 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
           name: REPLACEMENT_NAME,
           columns: ['organization_id', ...KEY_COLUMNS],
           unique: true,
-          nullSafeColumns: ['organization_id'],
         },
       });
+      // ADR-0131 D1: the replacement is the PLAIN composite — no NULL-safe part.
+      expect(entry!.replacement).not.toHaveProperty('nullSafeColumns');
     });
 
     it('claims nothing for an EXPLICITLY NAMED index — that transition is a recreate', () => {
@@ -771,7 +806,7 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
         const d = makeDriver();
         await d.initObjects(app('fixed') as any);
         expect(await uniqueKeyParts(), `posture=${posture}`).toEqual({
-          [REPLACEMENT_NAME]: ['COALESCE(organization_id)', ...KEY_COLUMNS],
+          [REPLACEMENT_NAME]: ['organization_id', ...KEY_COLUMNS],
         });
         await d.disconnect();
         driver = undefined;

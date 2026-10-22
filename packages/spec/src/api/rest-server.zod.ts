@@ -134,14 +134,13 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
   enableDiscovery: z.boolean().default(true).describe('Enable API discovery endpoint'),
 
   /**
-   * Enable OpenAPI 3.1 spec endpoints — `GET <basePath>/openapi.json`
-   * for the machine-readable contract and `GET <basePath>/docs` for a
-   * zero-dep Scalar-rendered HTML viewer. The spec ships pre-generated
+   * Enable the OpenAPI 3.1 document endpoint — `GET <basePath>/openapi.json`,
+   * the machine-readable contract. The spec ships pre-generated
    * from @objectstack/spec and is enriched at request time with the
    * actual server URL + the runtime-registered objects (so `{object}`
    * placeholders expand into one path per concrete table).
    */
-  enableOpenApi: z.boolean().default(true).describe('Enable OpenAPI 3.1 spec & docs viewer endpoints'),
+  enableOpenApi: z.boolean().default(true).describe('Enable the OpenAPI 3.1 document endpoint (`GET <basePath>/openapi.json`)'),
 
   /**
    * Server-wide switch for the structured-search surface — and, like every key
@@ -232,8 +231,7 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
       '`api.documentation.enabled` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — '
       + 'nothing ever read it: whether the server publishes its OpenAPI document is decided by the sibling '
       + '`api.enableOpenApi` at the mount, so `enabled: false` turned nothing off. Delete the key; '
-      + '`api.enableOpenApi: false` is the switch that leaves the `/openapi.json` document and its `/docs` '
-      + 'viewer unmounted.',
+      + '`api.enableOpenApi: false` is the switch that leaves the `/openapi.json` document unmounted.',
     ),
     // [#20294] `.optional()`, no longer `.default('ObjectStack API')`: that
     // default was materialized into every present block and never served

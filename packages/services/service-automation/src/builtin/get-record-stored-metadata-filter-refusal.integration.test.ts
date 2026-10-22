@@ -48,16 +48,17 @@ import { hashSpec } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { AutomationServicePlugin } from '../plugin.js';
 import type { AutomationEngine, NodeExecutor } from '../engine.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const KEYED = /^hmac-sha256:[0-9a-f]{64}$/;
 const FAMILY = ['sys_metadata', 'sys_metadata_history'] as const;
 
-/** The synthetic credential, in the slot the datasource redactor withholds (turso's `encryptionKey`). */
+/** The synthetic credential, in the slot the datasource redactor withholds (turso's `authToken`). */
 const SENTINEL = 'flow-filter-refusal-sentinel-91f3';
 const DS_NAME = 'pin_filter_ds';
 const DS_URL = 'libsql://pin-filter.example.invalid';
-const DS_BODY = { name: DS_NAME, label: 'Pin filter DS', driver: 'turso', config: { url: DS_URL, encryptionKey: SENTINEL } };
+const DS_BODY = { name: DS_NAME, label: 'Pin filter DS', driver: 'turso', config: { url: DS_URL, authToken: SENTINEL } };
 const STORED_HASH = hashSpec(DS_BODY);
 /** A well-formed hash that is not the stored one. */
 const OTHER_HASH = hashSpec({ ...DS_BODY, label: 'another body' });
@@ -152,6 +153,9 @@ describe("flow get_record refuses a filter that evaluates the stored-metadata fa
     ql.registerDriver(driver, true);
     ql.registry.registerObject(COPY_OBJECT as any, 'pin-21623', 'pin-21623');
     await ql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(ql);
 
     const metadata = JSON.stringify(DS_BODY);
     await ql.insert('sys_metadata', {

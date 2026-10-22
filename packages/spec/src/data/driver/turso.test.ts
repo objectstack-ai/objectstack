@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { findClosestMatches } from '../../shared/suggestions.zod';
 import { DatasourceSchema } from '../datasource.zod';
 import { validateDriverConfig } from './config-registry.zod';
-import { TursoConfigSchema, TursoDriverSpec } from './turso.zod';
+import { TursoConfigSchema, TursoDriverSpec, type TursoConfig } from './turso.zod';
 
 describe('TursoConfigSchema', () => {
   it('accepts the shapes the driver actually connects with', () => {
@@ -500,5 +500,126 @@ describe('TursoConfigSchema refuses what the turso driver refuses', () => {
     const description = TursoConfigSchema.shape.url.description ?? '';
     expect(description).toContain('file: URL');
     expect(description).not.toContain('a file path');
+  });
+});
+
+// #25050 — `encryptionKey` is RETIRED (ADR-0049 enforce-or-remove). It was
+// honoured in no mode: #25020 refused it beside a `file:` url or `:memory:`,
+// where the local engine has no encryption codec, and on a remote url the
+// driver parsed it and never handed it on. The tombstone refuses every value,
+// in every mode, at the key itself — ahead of every transport refusal — with
+// one prescription that `@objectstack/driver-turso`'s mirror and constructor
+// repeat byte for byte (`turso-config-constructor-parity.test.ts` there).
+describe('TursoConfig.encryptionKey is retired', () => {
+  /** A test value only — never a real key. */
+  const KEY = 'test-key-25050';
+  const PRESCRIPTION = /`turso config\.encryptionKey` was removed in @objectstack\/spec 18.*Delete the key\./s;
+
+  /** The one issue a config earns, asserted to be the only one there is. */
+  const onlyIssue = (config: Record<string, unknown>) => {
+    const result = TursoConfigSchema.safeParse(config);
+    expect(result.success, JSON.stringify(config)).toBe(false);
+    const issues = result.error!.issues;
+    expect(issues, JSON.stringify(issues)).toHaveLength(1);
+    return issues[0];
+  };
+
+  it('refuses the key in every mode, at the key, with the prescription — remote urls included', () => {
+    for (const config of [
+      // Remote: parsed and dropped by the driver until this retirement.
+      { url: 'libsql://db.turso.io', encryptionKey: KEY },
+      { url: 'https://db.turso.io', encryptionKey: KEY },
+      { url: 'wss://db.turso.io', encryptionKey: KEY },
+      { url: 'libsql://db.turso.io', mode: 'remote', encryptionKey: KEY },
+      // Local and replica: refused since #25020, now by the tombstone.
+      { url: 'file:./data/app.db', encryptionKey: KEY },
+      { url: ':memory:', encryptionKey: KEY },
+      { url: 'file:./data/app.db', mode: 'local', encryptionKey: KEY },
+      { url: 'file:./data/replica.db', syncUrl: 'libsql://db.turso.io', encryptionKey: KEY },
+      { url: 'file:./data/app.db', mode: 'remote', encryptionKey: KEY },
+    ]) {
+      const issue = onlyIssue(config);
+      expect(issue.path.join('.'), JSON.stringify(config)).toBe('encryptionKey');
+      expect(issue.message).toMatch(PRESCRIPTION);
+    }
+  });
+
+  it('refuses every value — an empty string is no longer "unset", and a non-string is no escape', () => {
+    for (const encryptionKey of ['', KEY, 'a'.repeat(32), '${TURSO_ENCRYPTION_KEY}', 0, null, {}]) {
+      const issue = onlyIssue({ url: 'libsql://db.turso.io', encryptionKey });
+      expect(issue.path.join('.')).toBe('encryptionKey');
+      expect(issue.message).toMatch(PRESCRIPTION);
+    }
+  });
+
+  it('comes first: a config that is wrong in another way as well meets the retirement, alone', () => {
+    // The tombstone fails the shape, so no transport refusal is reached —
+    // the constructor raises the same refusal first, for the same reason.
+    for (const config of [
+      { url: './data/app.db', encryptionKey: KEY },
+      { url: 'libsql://db.turso.io', syncUrl: 'libsql://db.turso.io', encryptionKey: KEY },
+      { url: 'file:./data/app.db', sync: { intervalSeconds: 60 }, encryptionKey: KEY },
+      { url: 'file:./data/replica.db', mode: 'replica', encryptionKey: KEY },
+      { url: 'wss://db.turso.io', timeoutMs: 5000, encryptionKey: KEY },
+    ]) {
+      expect(onlyIssue(config).path.join('.'), JSON.stringify(config)).toBe('encryptionKey');
+    }
+  });
+
+  it('never echoes the key or the url', () => {
+    const { message } = onlyIssue({ url: 'libsql://private-host.turso.io', encryptionKey: 'private-key-value' });
+    expect(message).not.toContain('private-key-value');
+    expect(message).not.toContain('private-host');
+  });
+
+  it('answers its case and underscore spellings with the same prescription', () => {
+    // A tombstoned key leaves the unknown-key probe's candidates, so without
+    // the guidance entries these would get no suggestion at all.
+    for (const spelling of ['encryption_key', 'encryptionkey']) {
+      const issue = onlyIssue({ url: 'libsql://db.turso.io', [spelling]: KEY });
+      expect(issue.code).toBe('unrecognized_keys');
+      expect(issue.message, spelling).toMatch(PRESCRIPTION);
+    }
+  });
+
+  it('reaches both authoring doors: `DatasourceSchema` (re-pathed under `config`) and `validateDriverConfig`', () => {
+    const config = { url: 'libsql://db.turso.io', encryptionKey: KEY };
+    const datasource = DatasourceSchema.safeParse({ name: 'edge', driver: 'turso', config });
+    expect(datasource.success).toBe(false);
+    const issue = datasource.error!.issues.find((i) => i.path.join('.') === 'config.encryptionKey');
+    expect(issue, JSON.stringify(datasource.error!.issues)).toBeDefined();
+    expect(issue!.message).toMatch(PRESCRIPTION);
+
+    const verdict = validateDriverConfig('turso', config);
+    expect(verdict.known).toBe(true);
+    expect(verdict.known && verdict.issues.map((i) => i.path.join('.'))).toEqual(['encryptionKey']);
+  });
+
+  it('the describe is the tombstone, carrying the same prescription', () => {
+    const description = TursoConfigSchema.shape.encryptionKey.description ?? '';
+    expect(description.startsWith('[REMOVED] ')).toBe(true);
+    expect(description.slice('[REMOVED] '.length)).toMatch(PRESCRIPTION);
+  });
+
+  it('controls: every mode without the key stays accepted', () => {
+    for (const config of [
+      { url: 'libsql://db.turso.io' },
+      { url: 'file:./data/app.db' },
+      { url: ':memory:' },
+      { url: 'file:./data/replica.db', syncUrl: 'libsql://db.turso.io' },
+      { url: 'file:./data/app.db', mode: 'remote' },
+    ]) {
+      const result = TursoConfigSchema.safeParse(config);
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    }
+  });
+
+  it('is a tsc error at a typed authoring site', () => {
+    const typed: TursoConfig = {
+      url: 'libsql://db.turso.io',
+      // @ts-expect-error — `encryptionKey` is a `retiredKey()` tombstone: no value is assignable.
+      encryptionKey: KEY,
+    };
+    expect(TursoConfigSchema.safeParse(typed).success).toBe(false);
   });
 });

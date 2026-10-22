@@ -12,6 +12,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { SysUserPreference } from '@objectstack/platform-objects/identity';
 import { AuditPlugin } from './audit-plugin.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /**
  * [#23804, ruling record 6212163130] A user's own write to their own per-user
@@ -94,6 +95,9 @@ describe('audit writers — a user\'s own UI-state write leaves no ledger row, o
     engine.registry.registerObject(SysUserPreference as any, HARNESS_PACKAGE);
     engine.registry.registerObject(sharingRule as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     sql = async (statement, bindings) => {
       const result = await (driver as unknown as { execute(s: string, b: unknown[]): Promise<unknown> }).execute(

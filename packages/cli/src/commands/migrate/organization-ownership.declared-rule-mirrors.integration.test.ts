@@ -56,6 +56,7 @@ import { DECLARED_SHARING_RULE_SEEDER_RUNS } from '../../utils/organization-owne
 // through dynamic `import()`s at MODULE LOAD, not inside a clocked case.
 import '@objectstack/objectql';
 import '@objectstack/metadata-protocol';
+import { relaxTenantColumnsOnFile } from '../../utils/pre-18-store.testkit.js';
 
 type Command = (typeof import('./organization-ownership.js'))['default'];
 let MigrateOrganizationOwnership: Command;
@@ -173,6 +174,10 @@ describe('os migrate organization-ownership on a database whose packages declare
       await stack.stop();
     }
     seeded = sql('SELECT name, managed_by, customized, organization_id FROM sys_sharing_rule ORDER BY name');
+    // The rows planted below are an earlier release's, organization-less: its
+    // tenant columns were nullable, which a table this release creates never is
+    // (ADR-0131 D1). The file is relaxed to that release's shape first.
+    await relaxTenantColumnsOnFile(file);
 
     // What a 17.x runtime left beside it.
     const [{ id: organization }] = sql(`SELECT id FROM sys_organization WHERE slug = 'default'`) as Array<{ id: string }>;

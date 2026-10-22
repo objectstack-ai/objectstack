@@ -28,7 +28,9 @@
  * platform-wide, bare `true` and `'organization'` are per-organization (bare
  * `true` is the POSITIONAL spelling of `'organization'` at FIELD level, not of
  * `'global'` — the #4986 trap), and both degrade to a single-column constraint
- * when the object has no tenant column. This package cannot import `driver-sql`
+ * when the object has no tenant column. Since ADR-0131 D1 the organization key
+ * part is the PLAIN column there, so a row with no organization is exempt like a
+ * NULL in any key part. This package cannot import `driver-sql`
  * (dependency direction), so the arms are reproduced and pinned here against
  * that rule rather than shared.
  */
@@ -285,20 +287,36 @@ describe("[#13197] scoping matches driver-sql's ADR-0120 D1/D3 rule", () => {
     expect(err.message).not.toContain('organization_id');
   });
 
-  it('the NULL-organization rows form ONE bucket — the D3 fold, without needing the `__global__` token', async () => {
-    // SQL UNIQUE is NULL-distinct, so a raw `(organization_id, email)` composite
-    // enforced NOTHING on NULL-org rows — every row on a single-organization
-    // stack (#5030). ADR-0120 D3 folds them with COALESCE onto a reserved
-    // literal because an index EXPRESSION needs one; a JS key holds `null`
-    // directly, so the same bucket is reached with no token at all.
+  it('a row with NO organization is exempt — the plain organization key part (ADR-0131 D1), the D3 bucket retired', async () => {
+    // ADR-0120 D3 once folded NULL-org rows onto one bucket (COALESCE onto
+    // `__global__` in SQL). The tenant column is NOT NULL since ADR-0131 D1, so
+    // driver-sql keys `(organization_id, email)` plain and SQL's NULL-distinct
+    // UNIQUE exempts such rows (which only a pre-18 store can still hold) —
+    // this driver answers the same.
     const driver = new InMemoryDriver();
     await driver.syncSchema('contact', withOrg(true));
     await driver.create('contact', { id: '1', email: 'a@b.com' });
+    await driver.create('contact', { id: '2', email: 'a@b.com' });
+    await driver.create('contact', { id: '3', organization_id: null, email: 'a@b.com' });
+    // …while a row that DOES carry an organization is still constrained in it.
+    await driver.create('contact', { id: '4', organization_id: 'acme', email: 'a@b.com' });
+    const err = await refusalOf(() =>
+      driver.create('contact', { id: '5', organization_id: 'acme', email: 'a@b.com' }),
+    );
+    expectUniqueViolationEnvelope(err, 'email');
+    expect(await driver.count('contact')).toBe(4);
+  });
+
+  it("a platform-wide constraint's constant scope still constrains rows with no organization", async () => {
+    // The one NULL-safe part left: `scopeField: null` is a constant, not a column,
+    // so `'global'` keeps refusing a second NULL-org row (ADR-0131 D1 changes
+    // only the organization key part).
+    const driver = new InMemoryDriver();
+    await driver.syncSchema('contact', withOrg('global'));
+    await driver.create('contact', { id: '1', email: 'a@b.com' });
     const err = await refusalOf(() => driver.create('contact', { id: '2', email: 'a@b.com' }));
     expectUniqueViolationEnvelope(err, 'email');
-    // …and a row that DOES carry an organization is untouched by that bucket.
-    await driver.create('contact', { id: '3', organization_id: 'acme', email: 'a@b.com' });
-    expect(await driver.count('contact')).toBe(2);
+    expect(await driver.count('contact')).toBe(1);
   });
 
   it('with NO tenant column both per-organization spellings degrade to a single-column constraint', () => {

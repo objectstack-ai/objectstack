@@ -113,7 +113,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Tenant that owns this rule; null = global"
+        help: "The organization this rule belongs to."
       },
       name: {
         label: "Name",

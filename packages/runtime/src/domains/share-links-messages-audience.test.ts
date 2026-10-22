@@ -61,6 +61,7 @@ import { HttpDispatcher } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import { handleShareLinksRequest } from './share-links.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const CONVERSATION = 'conv_23371';
 const DOC = 'doc_23371';
@@ -192,6 +193,9 @@ beforeAll(async () => {
     engine.registry.registerObject(o as any, '@objectstack/runtime-test');
   }
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   const sys = { context: { isSystem: true } } as any;
   await engine.insert('ai_conversations', { id: CONVERSATION, title: 'Shared chat' }, sys);
   await engine.insert(

@@ -38,12 +38,14 @@ import { SqlDriver } from '../src/index.js';
  *
  * ## What this suite pins
  *
- * Parity, in both halves, plus path A as the CONTROL. A change that quietly
- * moved path A while making path B loud would otherwise read as success, so the
- * last block asserts path A's message and classification are still their own —
- * the `#5030` framing, which is precisely what the plain path must NOT claim
- * (nothing ever admitted these rows; the constraint is simply newly declared
- * over data that does not satisfy it).
+ * Parity, in both halves, plus the tenanted composite as the CONTROL. Path A
+ * as measured no longer exists: since ADR-0131 D1 the organization key part is
+ * PLAIN (no COALESCE), so a tenanted `unique: true` is path B's shape with the
+ * organization column in front. The last block pins that it reaches path B's
+ * disposition — loud, `destructive`, the conflicting groups named — and that
+ * it does NOT carry path A's retired `#5030` framing: no NULL-safe story, no
+ * `'__global__'` bucket, and NULL-organization rows (which never conflict under
+ * a plain UNIQUE) are not reported as duplicates.
  *
  * ⛔ Nothing here pins the DATABASE's raw error text: the `catch` shape is
  * dialect-independent, that text is not. Assertions are on our own messages and
@@ -272,8 +274,8 @@ describe('#14902 plain unique index over duplicate rows', () => {
     });
   });
 
-  describe('CONTROL — path A is untouched', () => {
-    it('still logs its own NULL-safe #5030 message and still reports destructive with the key groups', async () => {
+  describe('CONTROL — the tenanted composite, plain since ADR-0131 D1', () => {
+    it('reaches the plain disposition with the organization key part, and never reports NULL-organization rows', async () => {
       await seed(true, [
         { id: 'r1', organization_id: null, quote_number: 'QUO-00009' },
         { id: 'r2', organization_id: null, quote_number: 'QUO-00009' },
@@ -282,7 +284,7 @@ describe('#14902 plain unique index over duplicate rows', () => {
       ]);
 
       // `unique: true` on a tenanted object == `unique: 'organization'` — the
-      // #13894 default, and the shape this card must not have disturbed.
+      // #13894 default. Its key is `(organization_id, quote_number)`, plain.
       await expect(
         driver.initObjects([
           {
@@ -297,20 +299,28 @@ describe('#14902 plain unique index over duplicate rows', () => {
 
       const durability = logs.filter((l) => l.level === 'error');
       expect(durability).toHaveLength(1);
-      expect(durability[0].msg).toContain('NULL-safe unique index');
-      expect(durability[0].msg).toContain('NULL-distinct');
-      expect(durability[0].msg).toContain('ADR-0120 D4');
-      expect(durability[0].msg).toContain("'organization_id, quote_number'");
+      const msg = durability[0].msg;
+      expect(msg).toContain("'uniq_crm_quote_organization_id_quote_number'");
+      expect(msg).toContain("'organization_id, quote_number'");
+      expect(msg).toMatch(/Conflicting group\(s\)/);
+      expect(msg).toContain('(organization_id="org_x", quote_number="QUO-00010") × 2 rows');
+      expect(msg).toMatch(/NOT enforced/);
+      expect(msg).toContain('os migrate plan');
+      // The two NULL-organization rows never conflict under a plain UNIQUE
+      // (NULL-distinct), so the pre-flight does not report them — and the
+      // retired ADR-0120 D3/D4 framing is gone with the COALESCE key.
+      expect(msg).not.toContain('QUO-00009');
+      expect(msg).not.toContain('NULL-safe');
+      expect(msg).not.toContain('__global__');
 
       const entry = (await driver.detectManagedDrift()).find((d) => d.op.type === 'create_index')!;
       expect(entry.category).toBe('destructive');
       expect(entry.severity).toBe('error');
-      expect(entry.message).toContain('NULL-distinct');
-      expect(entry.message).toContain('__global__');
-      // Both key groups, with counts — the NULL-organization bucket and a real
-      // organization, which is what makes the COALESCE key self-describing.
-      expect(entry.message).toContain('(organization_id="__global__", quote_number="QUO-00009")');
+      expect(entry.message).toMatch(/BLOCKED/);
       expect(entry.message).toContain('(organization_id="org_x", quote_number="QUO-00010")');
+      expect(entry.message).not.toContain('QUO-00009');
+      expect(entry.message).not.toContain('__global__');
+      expect(entry.message).not.toContain('NULL-safe');
     });
   });
 });

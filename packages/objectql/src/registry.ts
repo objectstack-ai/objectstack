@@ -597,10 +597,11 @@ export interface SchemaRegistryOptions {
  * Currently injects:
  *   - `organization_id` — always provisioned (unless the object opts out via
  *     `systemFields`/`tenancy.enabled:false` or is `better-auth` managed) so
- *     the column never depends on the global multi-tenant flag. Required-false;
- *     org-scoping populates it on insert in multi-tenant mode, and it stays
- *     NULL on single-tenant stacks. Only the column's INDEX is gated on
- *     `multiTenant` (no per-tenant filtering exists single-tenant).
+ *     the column never depends on the global multi-tenant flag. Required-false
+ *     in the declaration; org-scoping stamps it on insert (under `single` with
+ *     the Default Organization), and it is never NULL (ADR-0131 D1). Only the
+ *     column's INDEX is gated on `multiTenant` (no per-tenant filtering exists
+ *     single-tenant).
  *   - `created_at` / `created_by` / `updated_at` / `updated_by` — audit
  *     fields. Marked `system: true, readonly: true` so detail views can
  *     surface them in a dedicated "System Information" section while
@@ -773,8 +774,9 @@ export function applySystemFields(
   // global multi-tenant flag. Decoupling "does the column exist" from "is
   // tenancy enabled" is what stops sudo writers (audit / messaging / inbox /
   // outbox …) from failing with "no column named organization_id" on
-  // single-tenant stacks: they can always stamp the column, it just stays NULL
-  // when no tenant context exists. The multi-tenant flag now governs only
+  // single-tenant stacks: they can always stamp the column, and org-scoping
+  // stamps it on insert (under `single` with the Default Organization), so it
+  // is never NULL (ADR-0131 D1). The multi-tenant flag now governs only
   // whether the column is INDEXED — on a single-tenant DB nothing ever filters
   // by organization, so the index would be dead weight. That is also why the
   // plan takes no `multiTenant` input: the flag cannot change what EXISTS, only

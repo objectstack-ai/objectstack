@@ -1554,6 +1554,13 @@ export const ERROR_CODE_LEDGER = {
     // of another package's items. Its install-time counterpart is
     // `UNMANAGED_INSTALL_UNCOPYABLE` under `@objectstack/metadata-protocol`.
     'STACK_UNMANAGED_INSTALL_UNCOPYABLE',
+    // [ruling A on #24910] The third declared-capability refusal of the same
+    // family and reading (`door: 'none'`, `status: 422`), beside
+    // `STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED` and
+    // `STACK_TRIGGER_CAPABILITY_REQUIRED`: a declared webhook while `requires`
+    // omits `webhooks` or `realtime`, the pair that dispatches it. One code for
+    // every arm; which token is missing is in the finding.
+    'STACK_WEBHOOK_CAPABILITY_REQUIRED',
     // [#16348] The COMPOSITION half of the same family, and `door: 'none'` on
     // the same reading: the six `composeStacks` refusals, one code per raise
     // site, every one `status: 422` (`StackRefusalError`, `stack.zod.ts`), the

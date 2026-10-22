@@ -39,7 +39,10 @@
  *   is loud on its own, passthrough stays silent because the key survives) and
  *   the rename suggestions are single-source, never re-derived here.
  * - **`component-props-invalid`** — a value the props schema rejects: a wrong
- *   type, a missing required key, a value outside a declared enum.
+ *   type, a missing required key, a value outside a declared enum; and a
+ *   `properties` bag that is present but not an object (`null`, an array, a
+ *   scalar), on any walked node (#24991 — a nested node's bag is parsed by
+ *   nothing else).
  *
  * A schema that is STRIP today reports its unknown keys through the walker; one
  * that a later `strictObject` batch closes reports them through `safeParse` as
@@ -180,6 +183,13 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
+/** What a non-record `properties` bag is, for the refusal's message. */
+function describeBag(v: unknown): string {
+  if (v === null) return '`null`';
+  if (Array.isArray(v)) return 'an array';
+  return `a ${typeof v}`;
+}
+
 /** A zod schema, as much of one as this file reads. */
 interface PropsSchema {
   safeParse(value: unknown): { success: boolean; error?: { issues: ReadonlyArray<LintZodIssue> } };
@@ -312,26 +322,44 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
     for (const { component, path } of walkPageComponents(page, `pages[${pi}]`)) {
       const type = strName(component.type);
       if (!type) continue;
-      // Unregistered type — skipped silently. See the module header: `type` is
-      // an open union and the majority of authored nodes are SDUI blocks this
-      // map does not carry.
+      const where = `page "${pageName}" · ${type}`;
+
+      // ── The bag's own shape ──────────────────────────────────────────
+      // [#24991] A PRESENT bag that is not an object (`null`, an array, a
+      // scalar) is refused at the node's `properties` path, on every walked
+      // node and whatever its `type`. `PageComponentSchema` declares
+      // `properties` a record for every component, but that parse only ever
+      // reaches the top-level ones (`regions[].components[]`, `slots.*`): a
+      // NESTED component sits in a `z.array(z.unknown())` slot that no parse
+      // judges, so until this check its `null` or `[]` bag was skipped here
+      // and published a component stripped of every prop it was authored
+      // with. A top-level non-record bag is the parse's refusal first: both
+      // doors run that parse before any authoring rule and stop on it, so this
+      // finding never sits beside it — on a top-level node it only answers a
+      // caller that hands this rule an unparsed stack, with the same verdict.
+      const bag = component.properties;
+      const malformedBag = bag !== undefined && !isRec(bag);
+      if (malformedBag) {
+        findings.push({
+          severity: 'error',
+          rule: COMPONENT_PROPS_INVALID,
+          where,
+          path: `${path}.properties`,
+          message:
+            `properties: expected an object of props, received ${describeBag(bag)} — a component's ` +
+            '`properties` is a record on every node, nested ones included, and this node carries none ' +
+            'of its props, so it is refused and this stack does not pass until the bag is an object',
+          hint:
+            'Write `properties` as an object of the props this component reads (`properties: { … }`), ' +
+            'or omit the key when it needs none.',
+        });
+      }
+
+      // Unregistered type — no props schema to judge the bag against, so the
+      // rest is skipped. See the module header: `type` is an open union and
+      // the majority of authored nodes are SDUI blocks this map does not carry.
       const schema = PROPS_SCHEMAS[type];
       if (!schema) continue;
-      // [#22212] An ABSENT bag is judged as `{}` — what `PageComponentSchema`'s
-      // `properties` default makes it. That default only ever reaches the
-      // components the schema parses, which are the top-level ones: a NESTED
-      // component (in another's `children` / `items[].children` / `footer`) sits
-      // in a `z.array(z.unknown())` slot and keeps its `undefined`. Skipping
-      // that hid every required prop such a component omits, while the same
-      // node one level up drew `component-props-invalid`. A PRESENT bag that is
-      // not an object is still left to the parse that owns its shape.
-      const props =
-        component.properties === undefined
-          ? {}
-          : isRec(component.properties)
-            ? component.properties
-            : undefined;
-      const where = `page "${pageName}" · ${type}`;
 
       // ── The binding an element reads ─────────────────────────────────
       // Judged before the props bag, and whatever the bag holds: the binding
@@ -354,7 +382,17 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
         });
       }
 
-      if (!props) continue;
+      // A malformed bag drew its one finding above; judging its props would
+      // only repeat it as a missing-prop verdict per required key.
+      if (malformedBag) continue;
+      // [#22212] An ABSENT bag is judged as `{}` — what `PageComponentSchema`'s
+      // `properties` default makes it. That default only ever reaches the
+      // components the schema parses, which are the top-level ones: a NESTED
+      // component (in another's `children` / `items[].children` / `footer`) sits
+      // in a `z.array(z.unknown())` slot and keeps its `undefined`. Skipping
+      // that hid every required prop such a component omits, while the same
+      // node one level up drew `component-props-invalid`.
+      const props: AnyRec = isRec(bag) ? bag : {};
 
       const base = `${path}.properties`;
 

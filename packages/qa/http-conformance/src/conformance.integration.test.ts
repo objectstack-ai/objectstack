@@ -23,6 +23,7 @@ import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createDispatcherPlugin, createRestApiPlugin } from '@objectstack/runtime';
 import { NodeServerPlugin } from './node-plugin.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 type AdapterCase = {
     label: 'node' | 'hono';
@@ -174,6 +175,9 @@ async function bootStack(makePlugin: () => any, opts: { withAnalytics?: boolean 
     // a 404 OBJECT_NOT_FOUND — a routing-shaped symptom for a DDL-shaped cause.
     await ql.syncObjectSchema('task');
     for (const o of authzResolverObjects) ql.registry.registerObject(o.def as never, o.owner);
+    // A real `single` install's Default Organization: the writes below derive
+    // it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(ql);
 
     const httpServer = kernel.getService<IHttpServer>('http.server');
     return { kernel, base: `http://127.0.0.1:${httpServer.getPort!()}` };

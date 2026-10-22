@@ -65,6 +65,7 @@ import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { StorageServicePlugin } from './storage-service-plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const URL_ROUTE = '/api/v1/storage/files/:fileId/url';
 const SYS = { isSystem: true };
@@ -249,6 +250,9 @@ describe('#22637 — a file field\'s metadata and the download door agree, for a
       ],
     } as never);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     // Seeded BEFORE kernel:ready, so the field-reference hooks (which would
     // copy an already-owned id into a fresh row) do not rewrite the fixture.

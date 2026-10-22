@@ -35,6 +35,15 @@
  *    synthetic 200 — which is what makes "before the uniqueness refusal" a
  *    measurement rather than a reading of vendor source.
  *
+ * ## Where the refusal stopped being the whole rule
+ *
+ * Ruling 1B on #25040 (#25060) answers an existing address like a success —
+ * plus a mail to it — under `open` and `email_domain` WHILE the mail transport
+ * is live (`IEmailService.isConfigured()`). Every case here wires no email
+ * service at all, which is exactly the deployment that ruling keeps on this
+ * refusal, so they stand unchanged; the live-transport side, and the
+ * not-live variants, are `signup-existing-address-success-shape.test.ts`.
+ *
  * ## Why a real engine
  *
  * The population predicate and the uniqueness check both live below the fake
@@ -69,6 +78,7 @@ import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -155,6 +165,10 @@ async function bootEngine(): Promise<ObjectQL> {
   engine.registry.registerObject(sysPermissionSet as never, '@objectstack/plugin-security');
   engine.registry.registerObject(sysUserPermissionSet as never, '@objectstack/plugin-security');
   await engine.syncSchemas();
+  // The organization-less rows below (global sets, grants, identities) exist
+  // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
+  // NOT NULL): this is that store.
+  await relaxEveryRegisteredTenantColumn(engine);
   // [ADR-0131 D3/D4] The declared self-registration set is a catalog definition
   // — what the admission asks before it admits.
   return bindTestSecurityCatalog(engine, { permissions: [{ name: 'member_default' }] });

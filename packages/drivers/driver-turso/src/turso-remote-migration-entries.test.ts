@@ -27,8 +27,11 @@
  *    and the indexes the same batch had dropped first are back: the batch is
  *    one transaction.
  * 3. `drop_index`, `create_index` and `recreate_index` reach their target
- *    state; the NULL-safe tightening re-probes for duplicates and refuses over
- *    them, leaving the old index exactly as it was.
+ *    state: an 18.0 `COALESCE` organization key on an uncertified nullable
+ *    table is rebuilt to the plain key new DDL emits (ADR-0131 D1), and on a
+ *    certified database is no entry at all; the NULL-safe tightening (reached
+ *    now only through a pre-normalized declaration) re-probes for duplicates
+ *    and refuses over them, leaving the old index exactly as it was.
  * 4. A column entry this transport cannot perform (it needs the SQLite table
  *    rebuild) is skipped, not reported applied.
  * 5. Once the report is applied, the remote face reports no drift, and the
@@ -41,6 +44,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
 import { TursoDriver } from './turso-driver.js';
+import { initObjectsPre18 } from './pre-18-tenant-column.testkit.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'turso-remote-migrate-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -164,6 +168,17 @@ const TENANT = {
   fields: { code: { type: 'text', unique: true }, organization_id: { type: 'text' } },
 };
 const TENANT_UNIQUE = 'uniq_tenant_t_organization_id_code';
+/**
+ * `tenant_t` with its unique declared ALREADY NORMALIZED, carrying the NULL-safe
+ * key part itself. ADR-0131 D1: the generators key the plain organization column
+ * now, so only an input carrying `nullSafeColumns` (honoured verbatim) still
+ * yields the ADR-0120 D4 tightening and its duplicate re-probe.
+ */
+const TENANT_NULL_SAFE = {
+  name: 'tenant_t',
+  fields: { code: { type: 'text' }, organization_id: { type: 'text' } },
+  indexes: [{ name: TENANT_UNIQUE, fields: ['organization_id', 'code'], unique: true, nullSafeColumns: ['organization_id'] }],
+};
 
 describe('the index entries', () => {
   it('drop_index: an undeclared index is dropped, and a second run finds the step done', async () => {
@@ -192,12 +207,57 @@ describe('the index entries', () => {
     expect(await indexesOf(file, 'indexed_t')).toEqual(synced);
   });
 
-  /** A tenant table whose NULL-safe unique was left as the bare composite, optionally over duplicates. */
+  /**
+   * A tenant table as 18.0 left it: a nullable tenant column (built before
+   * 18.x, ADR-0131 D1) and the ADR-0120 D3 `COALESCE` key under the declared
+   * name, where HEAD's sync keys the plain column.
+   */
+  async function coalescedTenantKey() {
+    const file = nextFile();
+    const remote = await remoteOver(file);
+    await initObjectsPre18(remote, TENANT);
+    await remote.syncSchemasBatch([{ object: 'tenant_t', schema: TENANT }]);
+    const synced = await indexesOf(file, 'tenant_t');
+    expect(synced[TENANT_UNIQUE]).not.toMatch(/COALESCE/i);
+    await onDisk(
+      file,
+      `DROP INDEX "${TENANT_UNIQUE}"`,
+      `CREATE UNIQUE INDEX "${TENANT_UNIQUE}" ON "tenant_t" (COALESCE("organization_id", '__global__'), "code")`,
+    );
+    return { file, remote, synced };
+  }
+
+  it('recreate_index: an 18.0 COALESCE key on an uncertified nullable table is rebuilt to the plain key', async () => {
+    const { file, remote, synced } = await coalescedTenantKey();
+    const recreate = (await remote.detectManagedDrift()).find((d) => d.op.type === 'recreate_index')!;
+    // Uncertified, the two forms are different constraints: a destructive rebuild, not the D4 tightening.
+    expect(recreate).toEqual(expect.objectContaining({ category: 'destructive' }));
+    expect(recreate.op).not.toHaveProperty('tightenNullSafeOnly');
+    expect(await remote.applyMigrationEntries([recreate])).toEqual({ applied: [], skipped: [recreate] });
+    expect(await remote.applyMigrationEntries([recreate], { allowDestructive: true })).toEqual({ applied: [recreate], skipped: [] });
+    expect(await indexesOf(file, 'tenant_t')).toEqual(synced);
+    expect(await remote.detectManagedDrift()).toEqual([]);
+  });
+
+  it('a certified database reads the same 18.0 COALESCE key as the plain one: no entry, and nothing moves', async () => {
+    const { file, remote } = await coalescedTenantKey();
+    const coalesced = await indexesOf(file, 'tenant_t');
+    remote.setTenantKeyCertifiedResolver(() => true);
+    expect(await remote.detectManagedDrift()).toEqual([]);
+    expect(await indexesOf(file, 'tenant_t')).toEqual(coalesced);
+  });
+
+  /** A pre-18 tenant table whose pre-normalized NULL-safe unique was left as the bare composite, optionally over duplicates. */
   async function bareTenantKey(duplicates: boolean) {
     const file = nextFile();
     const remote = await remoteOver(file);
-    await remote.syncSchemasBatch([{ object: 'tenant_t', schema: TENANT }]);
+    // A nullable tenant column (a store built before 18.x, ADR-0131 D1): the
+    // duplicates the bare key admitted carry no organization, and a NOT NULL
+    // column would read the two key forms as one, proposing nothing.
+    await initObjectsPre18(remote, TENANT_NULL_SAFE);
+    await remote.syncSchemasBatch([{ object: 'tenant_t', schema: TENANT_NULL_SAFE }]);
     const synced = await indexesOf(file, 'tenant_t');
+    expect(synced[TENANT_UNIQUE]).toMatch(/COALESCE/i);
     await onDisk(
       file,
       `DROP INDEX "${TENANT_UNIQUE}"`,
@@ -207,10 +267,11 @@ describe('the index entries', () => {
     const bare = await indexesOf(file, 'tenant_t');
     const recreate = (await remote.detectManagedDrift()).find((d) => d.op.type === 'recreate_index')!;
     expect(recreate).toBeDefined();
+    expect(recreate.op).toEqual(expect.objectContaining({ tightenNullSafeOnly: true, nullSafeColumns: ['organization_id'] }));
     return { file, remote, synced, bare, recreate };
   }
 
-  it('recreate_index: the bare key tightens to the NULL-safe one over clean rows', async () => {
+  it('recreate_index: a pre-normalized NULL-safe declaration tightens the bare key over clean rows', async () => {
     const { file, remote, synced, recreate } = await bareTenantKey(false);
     expect(await remote.applyMigrationEntries([recreate], { allowDestructive: true })).toEqual({ applied: [recreate], skipped: [] });
     expect(await indexesOf(file, 'tenant_t')).toEqual(synced);

@@ -53,6 +53,7 @@ import type { RunRecord, SuspendedRun, SuspendedRunStore, SuspensionClaimOutcome
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import { AutomationServicePlugin } from './plugin.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const silent = { info() {}, warn() {}, error() {}, debug() {}, child() { return silent; } } as never;
 const SYSTEM = { isSystem: true } as never;
@@ -125,6 +126,9 @@ describe('a gone-for-good resume settles the run row (full stack, sqlite file)',
         await driver.connect();
         ql.registerDriver(driver, true);
         await ql.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(ql);
 
         const automation = kernel.getService<AutomationEngine>('automation');
         return { kernel, ql, automation };
@@ -435,7 +439,11 @@ describe('the boot re-arm runs before a late-bound flow arrives (plugin boot ord
         } as never);
         await kernel.use(new AutomationServicePlugin());
         await kernel.bootstrap();
-        return { kernel, ql: kernel.getService<ObjectQL>('objectql'), automation: kernel.getService<AutomationEngine>('automation') };
+        const ql = kernel.getService<ObjectQL>('objectql');
+        // A real `single` install's Default Organization: the run rows below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(ql);
+        return { kernel, ql, automation: kernel.getService<AutomationEngine>('automation') };
     }
 
     it('the re-armed resume finds the flow not bound yet, and the run stays parked and resumes once the boot completes', async () => {

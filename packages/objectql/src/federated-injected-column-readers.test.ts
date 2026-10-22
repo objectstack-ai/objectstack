@@ -144,6 +144,25 @@ const READERS: Record<string, Row> = {
     disposition: 'skips',
     why: 'finds the participants the scan would probe; the same skip follows the reference match',
   },
+  // [#24948] The organization-delete refusal reads the tenant column of every
+  // relation the cascade follows into `sys_organization`.
+  'engine.ts#organizationOwnedRowCounts :: resolveTenantFieldName()': {
+    disposition: 'skips',
+    via: 'cascadeRelationBehavior',
+    why: "counts a tenant column only once the cascade's own relation reading admits it, so a federated object's unprovisioned injected column is never counted",
+  },
+  'engine.ts#keepsOrganizationReference :: organization_id': {
+    disposition: 'not-a-read',
+    why: "names the attribution column a tenancy-disabled object keeps through an organization delete; the walk reads its relation through cascadeRelationBehavior; it reads no row",
+  },
+  'engine.ts#keepsOrganizationReference :: resolveTenantFieldName()': {
+    disposition: 'not-a-read',
+    why: 'asks whether the object has a tenant column at all, on a relation the walk already read; it reads no row',
+  },
+  'engine.ts#isTenantColumnSetNull :: resolveTenantFieldName()': {
+    disposition: 'not-a-read',
+    why: "compares a field name with the object's tenant column, on a relation its callers already read through cascadeRelationBehavior; it reads no row",
+  },
   'lifecycle/lifecycle-service.ts#tenantWindowsFor :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
     why: 'a federated object whose organization_id is the injection has no tenant partition',
@@ -347,6 +366,32 @@ const READERS: Record<string, Row> = {
     why:
       'tells an authored organization_id from the injection while re-planning registered schemas ' +
       '(ADR-0131 D7); it reads definitions, never a row',
+  },
+  // [#24822] Whether a write's static-`readonly` passes spare the tenant column
+  // where the Layer 0 wall's seam declares it judges the write's organization,
+  // and the insert's and the update's subjects built from that one answer.
+  'engine.ts#staticReadonlySparesOrganization :: resolveInjectedColumnProvenance()': {
+    disposition: 'not-a-read',
+    why:
+      "asks whether the write's organization_id is the platform's injected column or the author's; " +
+      'it reads a registered definition, never storage',
+  },
+  'engine.ts#staticReadonlySparesOrganization :: organization_id': {
+    disposition: 'not-a-read',
+    why:
+      "asks whether the insert strip's subject holds the column; it reads a schema view, never storage",
+  },
+  'engine.ts#insertStaticReadonlySubject :: organization_id': {
+    disposition: 'not-a-read',
+    why:
+      "leaves the column out of an insert's static-readonly subject where the wall's seam judges it; " +
+      'it reads a schema view and the caller row in hand, never storage',
+  },
+  'engine.ts#updateStaticReadonlySubject :: organization_id': {
+    disposition: 'not-a-read',
+    why:
+      "leaves the column out of an update's static-readonly schema view where the wall's seam judges it; " +
+      'it reads a registered definition and the payload in hand, never storage',
   },
   'tenancy/system-write-organization.ts#<module> :: organization_id': {
     disposition: 'not-a-read',
@@ -563,7 +608,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     }
   }, SCAN_BUDGET_MS);
 
-  it('the sites that skip are exactly the cascade scan, its plan, and the lifecycle tenant partition', () => {
+  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, and the lifecycle tenant partition', () => {
     const skipping = new Set(
       Object.entries(READERS)
         .filter(([, row]) => row.disposition === 'skips')
@@ -571,6 +616,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     );
     expect([...skipping].sort()).toEqual([
       'engine.ts#cascadeRelationBehavior',
+      'engine.ts#organizationOwnedRowCounts',
       'engine.ts#planCascadeAtomicity',
       'lifecycle/lifecycle-service.ts#tenantWindowsFor',
     ]);

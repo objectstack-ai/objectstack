@@ -260,6 +260,17 @@ interface WriteImageCheckSeam {
   evaluate(rows: readonly Record<string, unknown>[]): void;
   /** Set by the engine immediately before `evaluate` runs. */
   honoured?: boolean;
+  /**
+   * [#24822] Set by step 3.7, and only by it: `evaluate` holds every stored
+   * row's `organization_id` to the Layer 0 tenant wall's own parts, on an
+   * insert and on a single-payload update (the by-id image, and every row the
+   * predicate path matched). The engine then leaves a caller's explicit value,
+   * or an update's re-point, on the row for that verdict instead of stripping
+   * it as `readonly`. Never set on a seam that carries the business `check`
+   * alone, on a crossing platform operator's seam, or on an update whose
+   * payload is an array: none of them judges the organization.
+   */
+  judgesOrganization?: boolean;
 }
 
 /**
@@ -485,8 +496,11 @@ interface RlsFilterOptions {
    *     the walk covers that master's write is stated once, at that call site's
    *     `masterGateCoversThisWrite` bullet — not restated here;
    *   • the BULK write path does NOT, and must not: with no single id,
-   *     `assertControlledByParentWrite` returns early and nothing replaces the
-   *     floor. Reading the posture alone here would have widened bulk writes on
+   *     `assertControlledByParentWrite` judges every master the write reaches
+   *     and refuses on the first the caller may not edit, but that is a
+   *     verdict, not a row scope, so the floor stays — dropping it here would
+   *     widen the rows a member writes, a separate decision. Reading the
+   *     posture alone here would have widened bulk writes on
    *     every `controlled_by_parent` detail to "any row under a READABLE
    *     master", which no gate had authorized;
    *   • `getReadFilter` and `checkAuthoredRowWrite` do not, and need not: the
@@ -3071,7 +3085,8 @@ export class SecurityPlugin implements Plugin {
           // master gate (step 2.8, immediately below) run on the same middleware
           // pass, and 2.8's condition is a strict SUPERSET of this one: the same
           // `permissionSets.length > 0 && userId && this.ql` triple, the same
-          // single target id (`extractSingleId`, or it returns early), and one
+          // single target id (`extractSingleId`; with none, 2.8 judges every
+          // master the write reaches instead), and one
           // additional operation (`insert`, which has no pre-image and so no
           // floor to drop). Reaching this line therefore PROVES the master gate
           // will answer the same write — the maintainer's precondition, held
@@ -3230,7 +3245,9 @@ export class SecurityPlugin implements Plugin {
       // path by checking the master instead — and the master's own write
       // filter, since #7665, derives from its SELECT narrowing when no
       // write-class policy applies, so a select-only master gates its details
-      // by visibility too.
+      // by visibility too. [#25012] The same gate answers a write that
+      // addresses no single row: the masters of the rows it selects are each
+      // judged, and one the caller may not edit refuses the whole write.
       if (
         ['insert', 'update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation) &&
         permissionSets.length > 0 &&
@@ -3920,13 +3937,22 @@ export class SecurityPlugin implements Plugin {
       // Both close identically here: a SUPPLIED (non-empty) `organization_id` in
       // the write payload must satisfy the SAME Layer 0 filter the read side uses
       // (isolation active, tenant object, platform-admin posture exemption,
-      // fail-closed on a missing active org). For UPDATE this makes
-      // `organization_id` effectively immutable in non-platform user contexts: the
-      // only value that passes is the caller's active org (which — since the
-      // pre-image already scoped the target to that org — equals the row's current
-      // org), so a re-point to any OTHER tenant is denied. A bulk update carrying a
-      // cross-tenant `organization_id` change-set is caught too (the check inspects
-      // the change-set value here, and [#20013] every stored row in the engine).
+      // fail-closed on a missing active org). For UPDATE that bounds a re-point
+      // by the caller's organization scope, and [#24822] a re-point the wall
+      // admits is STORED as sent. Under `isolated` the only value that passes is
+      // the caller's active org (which, since the pre-image already scoped the
+      // target to that org, equals the row's current org), so a re-point to any
+      // OTHER tenant is denied. Under `group` a re-point to another organization
+      // of the membership set is admitted and stored there, and one outside the
+      // set is denied. On an app object's platform-injected column, the seam
+      // below declares `judgesOrganization`, so the engine's static-`readonly`
+      // strip leaves the admitted value on the row for this wall's verdict
+      // instead of taking it and keeping the row's own organization in silence.
+      // A `sys_` or platform-internal object, and an AUTHORED read-only
+      // `organization_id`, keep that strip. A bulk update carrying a
+      // cross-tenant `organization_id` change-set is caught too (the check
+      // inspects the change-set value here, and [#20013] every stored row in the
+      // engine).
       //
       // [#22278] The invariant, stated whole: wherever the wall applies to a
       // non-system UPDATE, the row's organization after the write is one the
@@ -4311,6 +4337,39 @@ export class SecurityPlugin implements Plugin {
                 if (emptiesOrganization(row)) denyOrganizationRemoval("the stored row's");
               }
             },
+            // ── [#24822 · ADR-0105 D5] The write's organization is JUDGED here ──
+            //
+            // The loop above holds a stored row's `organization_id` to the wall
+            // whenever the wall has parts, and the payload half above already
+            // refused every supplied value outside them (and, on an update,
+            // every emptied one). So the engine may leave a caller's explicit
+            // value on the row for this verdict instead of stripping it as
+            // `readonly`: on an insert, rather than storing the active
+            // organization in its place; on an update, rather than keeping the
+            // row's own organization against a re-point the wall admitted.
+            // Both replacements were silent: a 2xx, with the row in another
+            // organization than the one the wall admitted. The member says so,
+            // and the engine reads nothing else.
+            //
+            // Set ONLY where the wall's own parts are composed in (`tenantParts`
+            // non-empty). The crossing operator's seam
+            // (`operatorInsertLacksActiveOrganization` with no parts) judges no
+            // organization: its loop admits every row. The business `check`
+            // seam of step 3.6 never reaches this composition. Neither sets it,
+            // so the strip there runs as before.
+            //
+            // And only on the two operations whose stored rows this loop is
+            // handed: an insert (its rows), and an update whose payload is ONE
+            // row (the by-id image, and every row the predicate path matched,
+            // each merged with that payload). An ARRAY update payload never
+            // reaches this composition (the condition above), so it is stated
+            // again here rather than inferred: the member is the seam's own
+            // claim about what it judges, and it must stay true if that
+            // condition ever moves.
+            ...(tenantParts.length > 0 &&
+            (opCtx.operation === 'insert' || (opCtx.operation === 'update' && !Array.isArray(opCtx.data)))
+              ? { judgesOrganization: true }
+              : {}),
           };
           opCtx.postHookWriteImageCheck = writeImageCheckSeam;
           tenantWallSeamInstalled = true;
@@ -6022,7 +6081,10 @@ export class SecurityPlugin implements Plugin {
    * Fails CLOSED where the chain refuses, with the deny sentinel by identity:
    * a principal that resolves no set (ADR-0056 D2); a delegator the link names
    * who does not exist (the chain's `PERMISSION_DENIED`; `canReadObject`'s
-   * `false`); a delegator who resolves no set (object admission refuses them);
+   * `false`); [#25106] on a walled posture, a live active organization the
+   * delegator's own membership does not back (the prologue's
+   * `PERMISSION_DENIED`, asked of `vetOrganizationClaim` with the prologue's
+   * inputs); a delegator who resolves no set (object admission refuses them);
    * a sharing scope that cannot be resolved. A throw anywhere propagates to the
    * caller's catch, which denies.
    *
@@ -6047,6 +6109,27 @@ export class SecurityPlugin implements Plugin {
       return RLS_DENY_FILTER;
     }
     const delegatorContext = del.context;
+    // [#25106 · ADR-0090 D10] The prologue's organization-membership refusal
+    // (`resolveOperationPrincipals`), mirrored at the same point: after the
+    // dangling-delegator refusal, before the delegator's sets resolve. On a
+    // walled posture the find path refuses every operation of a delegated
+    // context whose live active organization the delegator's own membership
+    // does not back, so the scope that agrees with it is zero rows, on every
+    // object. One ask of the one spelling of the rule, with the inputs the
+    // prologue passes; under `single` the claim stands, and a context with no
+    // active organization is not this rule's (ADR-0123 D2).
+    const liveOrganization =
+      context.tenantId != null && context.tenantId !== '' ? String(context.tenantId) : undefined;
+    if (
+      liveOrganization !== undefined &&
+      vetOrganizationClaim(liveOrganization, delegatorContext?.accessible_org_ids ?? [], this.tenancyPosture) === undefined
+    ) {
+      this.logger.warn?.(
+        `[security] getReadFilter received an on-behalf-of context for object '${object}' whose delegator is not a ` +
+          `member of the organization it runs in — denying, as the operation prologue refuses it (ADR-0090 D10, fail-closed)`,
+      );
+      return RLS_DENY_FILTER;
+    }
     const delegatorSets = await this.resolvePermissionSetsForContext(delegatorContext);
     if (delegatorSets.length === 0) return RLS_DENY_FILTER;
 
@@ -8900,6 +8983,19 @@ export class SecurityPlugin implements Plugin {
    *   link (delegator deleted) fails CLOSED — see resolveDelegatorContext for
    *   why "empty sets" would be wrong (the additive baseline would resurrect
    *   access for a non-existent user).
+   * - [#25063 · ADR-0090 D10] A delegated operation runs in the LIVE principal's
+   *   active organization, and the delegator context inherits that organization
+   *   (`resolveDelegatorContext`: the agent and its delegator are in the same
+   *   organization). On a walled posture that is a precondition, never an
+   *   assumption: when the delegator's own membership does not back the live
+   *   organization, the operation is REFUSED here, for every verb. Left to run,
+   *   the delegator's leg could not bound it: the inherited organization feeds
+   *   the delegator's own wall, and a new row is placed in the live one, so an
+   *   on-behalf-of write could land outside every organization the delegator
+   *   belongs to. The test is `vetOrganizationClaim`, the one spelling of "a
+   *   membership backs this organization", which answers the claim unchanged
+   *   under `single`. A context with no active organization is not this
+   *   rule's: its answers stay with ADR-0123 D2.
    */
   private async resolveOperationPrincipals(
     operation: string,
@@ -8939,6 +9035,26 @@ export class SecurityPlugin implements Plugin {
         );
       }
       if (del.kind === 'resolved') {
+        const liveOrganization =
+          context.tenantId != null && context.tenantId !== '' ? String(context.tenantId) : undefined;
+        if (
+          liveOrganization !== undefined &&
+          vetOrganizationClaim(liveOrganization, del.context?.accessible_org_ids ?? [], this.tenancyPosture) === undefined
+        ) {
+          this.logger.warn?.(
+            `[Security] on-behalf-of ${operation} '${object}' REFUSED — the delegator is not a member of the ` +
+              `organization the request runs in (ADR-0090 D10, fail-closed)`,
+          );
+          throw new PermissionDeniedError(
+            `[Security] Access denied: on-behalf-of principal acts in organization '${liveOrganization}', which ` +
+              `delegator '${String(context.onBehalfOf.userId)}' is not a member of — refusing to act (ADR-0090 D10 fail-closed)`,
+            { operation, object },
+            `[ADR-0090 D10] tenancy posture '${this.tenancyPosture}' walls organizations, and a delegated operation is ` +
+              `bounded by the delegator's scope: it runs in the live principal's active organization, which the ` +
+              `delegator's own membership must back. Build the on-behalf-of context in an organization the delegator ` +
+              `is a member of. System contexts and the single posture are unaffected.`,
+          );
+        }
         delegatorContext = del.context;
         delegatorSets = await this.resolvePermissionSetsForContext(delegatorContext);
       }
@@ -9112,9 +9228,49 @@ export class SecurityPlugin implements Plugin {
    * ⛔ Not a blanket refusal for chained declarations: the single-level case is
    * the loop's first iteration and its answer is byte-for-byte the old one.
    *
-   * v1 scope: single-id writes. Bulk writes flow through the AST and are already
-   * scoped by the controlled-by-parent READ filter (to readable masters) — which
-   * since the ADR-0055 amendment is itself chain-composed, so the two faces still agree.
+   * [#25012] EVERY write shape asks it. A write that addresses no single row —
+   * the engine's predicate path, which `extractSingleId` cannot name a target
+   * for — is judged per MASTER: the gate collects the masters of the detail
+   * rows the caller's own predicate selects and the caller can read
+   * ({@link controlledByParentPredicateWriteMasters}), and runs the same chain
+   * walk on each ({@link assertControlledByParentChainEditable}). The first
+   * refusal is the answer, in the by-id leg's own envelope, and nothing is
+   * written. It is a VERDICT, never a scope: no master set is composed into the
+   * write's predicate (ADR-0055 §2's master id set is the READ scope, and its
+   * mechanism is decided on its own record), so a write that selects one such
+   * row writes none of them. A write whose rows all sit under masters the caller
+   * may edit lands exactly as before: the read scope, the platform ownership
+   * floor and the detail's own write policy still decide which of them it
+   * writes, and nothing here vouches the floor away.
+   *
+   * [#25044] …and on every shape it asks EVERY master the write involves, not
+   * one of them. §3 reads a create's master from "the master id in the
+   * incoming body"; on every other shape that id, when the body carries one,
+   * is a master the write involves beside the one (on the predicate path, the
+   * ones) its rows are stored under, so the same walk is asked of it too,
+   * after the stored master's question, which is unchanged. The refusal is
+   * the by-id leg's own envelope and nothing is written. An insert's master
+   * already IS its body's and is asked once; a body naming a master already
+   * asked is not asked again; and a predicate write that selects no row the
+   * caller can read involves no master at all.
+   *
+   * [#25049] …a BATCH create's included. Its body is one record per row and
+   * each row names its own master, so the same walk is asked of every master
+   * the rows name — once per master, in row order — before anything is
+   * written. The first refusal is the answer, in the by-id leg's own envelope,
+   * and nothing is written. The empty-master branch then answers the batch
+   * exactly as it did before, since it reads no master off an array: it
+   * stands down where required-field validation judges each row that names
+   * none, and refuses the batch whole otherwise.
+   *
+   * [#25049] And a write never EMPTIES the master reference. §1 derives a
+   * detail's access from exactly one required master, so a row whose
+   * reference an update sets to null has no master to derive it from, and no
+   * principal's read can match it. That is the empty-master condition below,
+   * met on an update's body, and it is answered the same way: handed to
+   * required-field validation where validation judges the same field, and
+   * refused `422` otherwise — after the stored masters' question, so a master
+   * the caller may not edit is still the answer there.
    *
    * [#7474] SIX conditions refuse a write here, and they are NOT one verdict.
    * Three are genuine authorization answers (no object-level `update` on the
@@ -9129,8 +9285,8 @@ export class SecurityPlugin implements Plugin {
    *     INVALID_METADATA` ({@link MasterDetailRelationMissingError})
    *   - the target row does not exist → `404 RECORD_NOT_FOUND`
    *     ({@link DetailRecordNotFoundError})
-   *   - the detail's master reference is empty → `422 MISSING_REQUIRED_FIELD`
-   *     ({@link MasterReferenceMissingError})
+   *   - the detail's master reference is empty, or an update's body empties
+   *     it → `422 MISSING_REQUIRED_FIELD` ({@link MasterReferenceMissingError})
    *
    * [#8688] The last of those three has since NARROWED, by the maintainer
    * ruling of 2026-08-15: on an `insert` whose master FK is absent, this gate
@@ -9140,6 +9296,8 @@ export class SecurityPlugin implements Plugin {
    * platform's ordinary `400 VALIDATION_FAILED` with `fields[]` instead. It
    * keeps answering `422` for the three shapes validation does not cover, and
    * for the stored-row shape on any other by-id write. See the branch itself.
+   * An update whose body empties the reference is the insert shape's twin and
+   * is answered by the same rule (#25049).
    *
    * [#7505] A seventh outcome is not a leg of this gate at all: if the store
    * cannot be read, the engine's own error propagates (typically
@@ -9198,16 +9356,93 @@ export class SecurityPlugin implements Plugin {
     // (`rel!.fk`) were the load-bearing half of the same defect.
     if (!rel) throw new MasterDetailRelationMissingError(object, operation);
 
+    // [ADR-0055 §3 · #25044] Every master the write involves is asked, not one
+    // of them. A body that names a master reference involves that master too,
+    // so once the masters `judged` (the stored ones) have been asked, the SAME
+    // walk is asked of the body's — unless it is one of them, which would ask
+    // one master twice. Read as an OWN property, never through the prototype
+    // chain. A body without the key names no master and leaves this question
+    // nothing to ask about.
+    //
+    // [ADR-0055 §1 · #25049] A body WITH the key and a null value names no
+    // master either, but it is not silent: on an update it empties the
+    // reference the row's access derives from. That is the empty-master
+    // condition the branch below answers for an insert, answered by the same
+    // rule — handed to required-field validation where it provably judges the
+    // same field ({@link CbpRelation.omissionRefusedByValidation}: its update
+    // pass refuses a required field the body sets to null), and refused here
+    // otherwise, before anything is written. An insert never reaches here
+    // with an empty master: the branch below has answered it.
+    const askBodyNamedMaster = async (judged: readonly unknown[]): Promise<void> => {
+      const data = opCtx.data;
+      if (data == null || typeof data !== 'object' || Array.isArray(data)) return;
+      if (!Object.prototype.hasOwnProperty.call(data, rel.fk)) return;
+      const named = (data as Record<string, unknown>)[rel.fk];
+      if (named == null) {
+        if (operation !== 'update' || rel.omissionRefusedByValidation) return;
+        throw new MasterReferenceMissingError(object, operation, rel.fk);
+      }
+      if (judged.includes(named)) return;
+      await this.assertControlledByParentChainEditable(
+        permissionSets, object, rel, named, context, opCtx, masterEditDenied, denyMasterEdit,
+      );
+    };
+
     // Resolve the master id: from the incoming body on insert, else from the
     // target row (read as system — we only need its FK value).
     let masterId: unknown;
     let detailRecordId: unknown;
     if (operation === 'insert') {
       const data = opCtx.data;
+      if (Array.isArray(data)) {
+        // [ADR-0055 §3 · #25049] A BATCH create: one body per row, and the
+        // middleware chain runs once for all of them, so every master the rows
+        // name is asked here — the same walk a single create runs, once per
+        // master, in row order — before anything is written. A row is read
+        // exactly as a single create's body is read below. A row that names no
+        // master is left to the empty-master branch, which this batch then
+        // meets exactly as it did before (`masterId` stays undefined for an
+        // array): it stands down where required-field validation judges each
+        // such row, and refuses the batch whole otherwise.
+        const asked: unknown[] = [];
+        for (const row of data as unknown[]) {
+          const rowMasterId = row && typeof row === 'object' && !Array.isArray(row) ? (row as any)[rel.fk] : undefined;
+          if (rowMasterId == null || asked.includes(rowMasterId)) continue;
+          asked.push(rowMasterId);
+          await this.assertControlledByParentChainEditable(
+            permissionSets, object, rel, rowMasterId, context, opCtx, masterEditDenied, denyMasterEdit,
+          );
+        }
+      }
       masterId = data && typeof data === 'object' && !Array.isArray(data) ? (data as any)[rel.fk] : undefined;
     } else {
       const targetId = this.extractSingleId(opCtx);
-      if (targetId == null) return; // bulk write — scoped by the read filter on the AST
+      if (targetId == null) {
+        // [#25012] No single target row. Either the engine refuses this shape
+        // itself before anything is written (its `reject` verdict — nothing to
+        // judge here), or it is the engine's predicate path, read from the
+        // engine's own dispatch predicates exactly as the write doors read them
+        // ({@link addressedPredicateWrite}), and every master the write would
+        // write details under is judged by the same walk a by-id write runs.
+        const predicatePath =
+          operation === 'update'
+            ? opCtx.data != null &&
+              typeof opCtx.data === 'object' &&
+              resolveEngineUpdateDispatch(opCtx.data as EngineUpdateDispatchData, opCtx.options).kind === 'multi'
+            : operation === 'delete' &&
+              resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
+        if (!predicatePath) return;
+        const predicateMasters = await this.controlledByParentPredicateWriteMasters(object, operation, rel, opCtx);
+        for (const predicateMasterId of predicateMasters) {
+          await this.assertControlledByParentChainEditable(
+            permissionSets, object, rel, predicateMasterId, context, opCtx, masterEditDenied, denyMasterEdit,
+          );
+        }
+        // [#25044] A write that selects no row the caller can read writes
+        // nothing, so it involves no master — the body's included.
+        if (predicateMasters.length > 0) await askBodyNamedMaster(predicateMasters);
+        return;
+      }
       detailRecordId = targetId;
       const row = await this.readRowById(object, targetId, { isSystem: true });
       if (!row) throw new DetailRecordNotFoundError(object, operation, targetId);
@@ -9327,10 +9562,53 @@ export class SecurityPlugin implements Plugin {
       // whose persisted FK is null) keeps its 422: the caller sent no such
       // field, so a `fields[]` naming it would name a field that was never in
       // the request, and there is no payload the caller could send to fix it.
+      // [#25049] An update whose BODY empties the reference is the insert
+      // shape's twin — the caller did send the field — and is answered by the
+      // same rule, in `askBodyNamedMaster` above.
       if (operation === 'insert' && rel.omissionRefusedByValidation) return;
       throw new MasterReferenceMissingError(object, operation, rel.fk, detailRecordId);
     }
 
+    await this.assertControlledByParentChainEditable(
+      permissionSets, object, rel, masterId, context, opCtx, masterEditDenied, denyMasterEdit,
+    );
+    // [#25044] An insert's master was read from its body, so it is the one
+    // just asked and is not asked again.
+    await askBodyNamedMaster([masterId]);
+  }
+
+  /**
+   * [ADR-0055 amendment / #25012] The chain walk of
+   * {@link assertControlledByParentWrite}: the three master-edit legs
+   * ({@link assertMasterRowEditable}) run on ONE master row, then on that
+   * master's own master, hop by hop, until a master that governs its own rows
+   * is reached — with the cycle guard and the depth bound
+   * ({@link CBP_MAX_CHAIN_DEPTH}), each failing closed.
+   *
+   * ⚠️ Extraction, not a rewrite — the body is the walk the gate ran inline,
+   * moved verbatim so that the gate can run it once per master: once for an
+   * insert or a by-id write, once for each master a predicate write selects
+   * rows under ({@link controlledByParentPredicateWriteMasters}), once more
+   * for a master the write's body names that is not among those (#25044), and
+   * once for each master a batch create's rows name (#25049).
+   * There must stay exactly one walk, for the reason
+   * {@link assertMasterRowEditable} gives for its legs.
+   *
+   * `masterEditDenied` / `denyMasterEdit` are the gate's own refusal builders,
+   * passed in rather than rebuilt so every refusal, at every hop and for every
+   * write shape, names the CALLER's object and operation (#7474's envelope)
+   * and records its leg ({@link MASTER_EDIT_DENIAL_LEG}).
+   */
+  private async assertControlledByParentChainEditable(
+    permissionSets: PermissionSet[],
+    object: string,
+    rel: CbpRelation,
+    masterId: unknown,
+    context: any,
+    opCtx: any,
+    masterEditDenied: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => PermissionDeniedError,
+    denyMasterEdit: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => never,
+  ): Promise<void> {
     // [ADR-0055 amendment] Walk the `controlled_by_parent` chain, one hop at a time, and run
     // the SAME three master-edit legs on every hop.
     //
@@ -9394,7 +9672,7 @@ export class SecurityPlugin implements Plugin {
         );
       }
       // Read as SYSTEM — we only need this row's master FK, exactly as the
-      // detail's own FK was read above. A throw here is a store fault and
+      // gate reads the detail's own. A throw here is a store fault and
       // propagates (#7505): an outage must not be reported as an access verdict.
       const masterRow = await this.readRowById(masterObject, hopMasterId, { isSystem: true });
       if (!masterRow) {
@@ -9416,6 +9694,93 @@ export class SecurityPlugin implements Plugin {
       hopRel = nextRel;
       hopMasterId = nextMasterId;
     }
+  }
+
+  /**
+   * [#25012 / ADR-0055 §3] The masters a write that addresses no single row
+   * would write details under — what {@link assertControlledByParentWrite}
+   * judges on the engine's predicate path, one chain walk per master.
+   *
+   * WHICH ROWS. The detail rows the caller's own predicate selects AND the
+   * caller can read, asked through the read door under the request's context —
+   * the read question the write doors narrow a predicate write's matched set to
+   * ({@link readableRowsScopeForPredicateWrite}), so every row that write can
+   * reach is among them. They can be MORE than it writes: the write-class
+   * scopes (the platform ownership floor, the detail's own write policy) still
+   * leave some of them unwritten, and a row among them under a master the
+   * caller may not edit refuses the write all the same. The caller named that
+   * row and can read it, and its master too (the detail's read scope is the
+   * readable-master set), so the refusal discloses nothing the read door does
+   * not. A row the caller cannot read is never judged: it is not matched.
+   *
+   * Three outcomes:
+   *
+   *  - the distinct master ids of those rows — an empty list when the predicate
+   *    selects no row the caller can read, and nothing is refused;
+   *  - ABOVE {@link PREDICATE_WRITE_READABLE_ID_CAP} rows, the refusal the read
+   *    narrowing answers for the same count ({@link predicateWriteReadableCapError}):
+   *    masters of rows that were never enumerated cannot be judged;
+   *  - the read door's own refusal, PROPAGATED as raised — a declared 4xx (the
+   *    detail's read grant withheld, a predicate the read guard or the driver
+   *    refuses) or a store fault. ⛔ Never read as "no rows": a write whose rows
+   *    cannot be enumerated cannot have their masters judged, and admitting it
+   *    would be the unjudged write this leg exists to close.
+   *
+   * Each row's master reference is then read as SYSTEM, as the by-id leg reads
+   * its one target row's: only the reference's value is needed, and a field
+   * rule hiding it from the caller must not hide the master from this gate. A
+   * row whose reference is empty answers the by-id leg's stored-row refusal
+   * ({@link MasterReferenceMissingError}, `422`).
+   */
+  private async controlledByParentPredicateWriteMasters(
+    object: string,
+    operation: string,
+    rel: CbpRelation,
+    opCtx: any,
+  ): Promise<unknown[]> {
+    if (typeof this.ql?.find !== 'function') {
+      // Unreachable in a real deployment — `start()` registers no security
+      // middleware at all without a query engine — but a non-conforming engine
+      // double fails closed rather than admitting an unjudged write.
+      throw new Error(
+        `[Security] Cannot judge the ${operation} on '${object}' against the masters of the records it ` +
+          `selects: no query engine is available to read them.`,
+      );
+    }
+    const callerWhere = (opCtx.options as { where?: unknown } | undefined)?.where;
+    const readable = await this.ql.find(object, {
+      ...(callerWhere != null ? { where: copyOfCallerPredicate(callerWhere) } : {}),
+      fields: ['id'],
+      limit: PREDICATE_WRITE_READABLE_ID_CAP + 1,
+      // The request's envelope minus the operation-private keys, as the read
+      // narrowing asks it: on a delegated write that is the agent's context with
+      // the delegation link on it, so the rows are the ones both may read.
+      context: withoutOperationPrivateKeys((opCtx.context ?? {}) as Record<string, unknown>),
+    });
+    const rows: unknown[] = Array.isArray(readable) ? readable : [];
+    if (rows.length > PREDICATE_WRITE_READABLE_ID_CAP) {
+      throw predicateWriteReadableCapError(object, operation);
+    }
+    const ids = rows
+      .map((r) => (r && typeof r === 'object' ? (r as { id?: unknown }).id : undefined))
+      .filter((id) => id !== undefined && id !== null);
+    if (ids.length === 0) return [];
+    const stored = await this.ql.find(object, {
+      where: { id: { $in: ids } },
+      fields: ['id', rel.fk],
+      limit: ids.length,
+      context: { isSystem: true },
+    });
+    const masterIds = new Set<unknown>();
+    for (const row of Array.isArray(stored) ? stored : []) {
+      if (!row || typeof row !== 'object') continue;
+      const masterId = (row as Record<string, unknown>)[rel.fk];
+      if (masterId == null) {
+        throw new MasterReferenceMissingError(object, operation, rel.fk, (row as { id?: unknown }).id);
+      }
+      masterIds.add(masterId);
+    }
+    return [...masterIds];
   }
 
   /**

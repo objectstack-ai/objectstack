@@ -1081,24 +1081,24 @@ Both non-handshake shapes, and how to classify and probe your own:
    surface** (Prime Directive #14 names them — more than ADRs): push it, open the PR, and stop
    there; landing waits for its tier's record — the maintainer's word, or a seat's contract-tier
    review. For that class, a finished task = a PR left visibly awaiting that record.
-3. **Add a changeset for anything that publishes.** Feature, functional improvement or fix — run `pnpm changeset`
-   (or add a `.changeset/*.md` entry) describing it before committing. A bug fix in a released package takes a
-   **`patch`** changeset — never none, and ⛔ never `skip-changeset`: that label is for a diff that publishes
-   nothing from any released package. The declaration is `Clause-②: yes|no` plus at most one arm from the closed pair
-   `(widening)`/`(narrowing)`: `yes` takes at least **`minor`**, `(narrowing)` is BREAKING, `no (widening)` malformed.
-   **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a
-   spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix —
-   this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the
-   tombstone error. Removing an authorable spec key also requires a tombstone so the rejection itself carries the
-   prescription — `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) on the schema whether or not it is
-   `.strict()`, and an entry in the shape's `*_RETIRED_KEY_GUIDANCE` map (see `data/mapping.zod.ts`) only for a
-   spelling the shape never declared, such as the retired key's old alias, where a tombstone has no property to
-   replace. The changeset is one of fourteen surfaces a retirement touches — follow the
-   `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note that a tombstone
-   keeps its liveness-ledger row while a key deleted without one loses it.
-   **A breaking changeset must also state its ADR-0087 disposition, in writing** — exactly one marker in the changeset
-   body, which also carries the PR's `Clause-②` line: `pnpm check:adr-0087-registration` reads the arm there. ⛔ The
-   categories are NOT copied here — the gate prints the full set when it fails.
+3. **Add a changeset for anything that publishes** (`pnpm changeset` before committing). A bug fix in a released
+   package takes a **`patch`** changeset — never none, and ⛔ never `skip-changeset`: that label is for a diff that
+   publishes nothing from any released package. Two line-initial declarations, in the PR body and the changeset body:
+   `Clause-②: yes|no` plus at most one arm from the closed pair `(widening)`/`(narrowing)` (`(narrowing)` is
+   BREAKING, `no (widening)` malformed), and `Metadata-protocol: added|narrowed|semantic|none`, the change to what a
+   metadata author can write — a new key, accepted value or metadata type is `added`; a key removed or tombstoned, a
+   value refused or a requirement tightened is `narrowed`; a changed meaning or default is `semantic`; all else is
+   `none`; several ⇒ `narrowed` over `semantic` over `added`. The level follows the kind alone: a kind takes at least
+   **`minor`** on a package the diff moves, `none` takes **`patch`**; a non-protocol change, widening or breaking,
+   ships `patch` and keeps its BREAKING banner and ADR-0087 disposition. **Breaking changesets must carry their
+   migration**: removing or renaming anything an author can write (a spec key, an export, a config field) puts the FROM
+   → TO mapping and the one-line fix in the body, which ships as `CHANGELOG.md` in the npm package. Removing an
+   authorable spec key also needs a tombstone (`retiredKey()`, `packages/spec/src/shared/retired-key.ts`) so the
+   rejection carries the prescription — one of fourteen retirement surfaces; follow the `spec-property-retirement`
+   skill (`.claude/skills/`), never reconstruct the kit. **A breaking changeset must also state its ADR-0087
+   disposition, in writing** — exactly one marker in the changeset body, which also carries both declaration lines
+   (`pnpm check:adr-0087-registration` reads the arm and the kind there). ⛔ The categories are NOT copied here —
+   the gate prints the full set when it fails.
 4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
    does not ship.** The full battery's `Console Pin Gate` builds objectui at the pinned `.objectui-sha` against
    **current** `main`, so such a removal is a main-red the moment it merges; its ruling therefore authorizes the

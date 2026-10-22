@@ -51,6 +51,7 @@ import { AuditPlugin } from './audit-plugin.js';
 import { LEDGER_AUDIT_CAPABILITY } from './audit-log-read-visibility.js';
 import { PARENT_GATE_SCAN_LIMIT } from './parent-record-read-gate.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const ACTIVITY = 'sys_activity';
 const LEDGER = 'sys_audit_log';
@@ -207,6 +208,9 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
     engine.registry.registerObject(objectOf(GATED) as any, HARNESS_PACKAGE);
     engine.registry.registerObject(objectOf(FAR, { datasource: 'warehouse' }) as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     installSecurityMiddleware(engine);
     // D5's second class: an object-scoped read middleware narrows the gated parent.
     engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
@@ -438,6 +442,9 @@ describe('[ADR-0139 D3] on a driver that refuses the leaf, the read fails and sa
     ({ kernel, engine } = await bootKernel(new RefusingDriver({ filename: ':memory:' })));
     engine.registry.registerObject(objectOf(DOC) as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     await engine.insert(DOC, { name: 'one', owner: MEMBER_A.userId }, { context: SYS });
   }, 120_000);
 

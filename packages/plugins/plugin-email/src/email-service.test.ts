@@ -65,6 +65,29 @@ describe('LogTransport', () => {
   });
 });
 
+describe('EmailService.isConfigured — does mail sent through it get delivered', () => {
+  const live = () => ({ send: vi.fn(async () => ({ messageId: '<m@x>' })) });
+
+  it('answers false while the transport is the LogTransport', () => {
+    const svc = new EmailService({ transport: new LogTransport(), defaultFrom: 'no@reply.com' });
+    expect(svc.isConfigured()).toBe(false);
+  });
+
+  it('answers true for a live (non-log) transport', () => {
+    const svc = new EmailService({ transport: live(), defaultFrom: 'no@reply.com' });
+    expect(svc.isConfigured()).toBe(true);
+  });
+
+  it('follows a runtime transport swap in both directions', () => {
+    const svc = new EmailService({ transport: new LogTransport(), defaultFrom: 'no@reply.com' });
+    expect(svc.isConfigured()).toBe(false);
+    svc.setTransport(live());
+    expect(svc.isConfigured()).toBe(true);
+    svc.setTransport(new LogTransport());
+    expect(svc.isConfigured()).toBe(false);
+  });
+});
+
 describe('EmailService', () => {
   function makePersistence() {
     const rows = new Map<string, Record<string, any>>();

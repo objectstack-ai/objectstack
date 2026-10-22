@@ -42,6 +42,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
 import { hashSpec } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** `registry.registerObject` requires a package id (see the sibling real-stack tests). */
 const TEST_PACKAGE_ID = 'objectstack-test';
@@ -97,6 +98,9 @@ async function boot(environmentId?: string) {
     engine.registry.registerObject(SysMetadataHistoryObject as any, TEST_PACKAGE_ID);
     engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     const protocol = new ObjectStackProtocolImplementation(engine as any, undefined, environmentId);
     const config = { api: { requireAuth: false }, metadata: { enableCache: false } };

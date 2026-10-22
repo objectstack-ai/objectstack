@@ -22,6 +22,7 @@ import { ObjectQL, resolveRecordTitle } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveDisplayField } from '@objectstack/spec/data';
 import { HttpDelivery } from './http-delivery.object.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as any;
 
@@ -75,6 +76,9 @@ describe('[#20015] sys_http_delivery resolves a real record title under ADR-0079
     await engine.init();
     engine.registry.registerObject(HttpDelivery as any, 'com.objectstack.test.20015');
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
   });
 
   afterAll(async () => {

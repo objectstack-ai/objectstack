@@ -23,7 +23,9 @@ import { SqlDriver } from '@objectstack/driver-sql';
 
 import { SysRecordShare } from './objects/sys-record-share.object.js';
 
-const SYS = { context: { isSystem: true } } as never;
+// The write names its organization: a fresh tenant column is NOT NULL (ADR-0131
+// D1), and this lean engine registers no organization object to derive one from.
+const SYS = { context: { isSystem: true, tenantId: 'org_os_qa' } } as never;
 
 /** The four values a row may carry, in the select's declared order. */
 const ROW_RECIPIENTS = ['user', 'group', 'position', 'unit_and_subordinates'];

@@ -1485,6 +1485,49 @@ describe('Field Factory Helpers', () => {
       expect(selectField.options[1]).toEqual({ label: 'Inactive', value: 'inactive' });
       expect(selectField.options[2]).toEqual({ label: 'Pending', value: 'pending' });
     });
+
+    // #25013 — the shorthand's only transforms are lower-casing and
+    // whitespace → `_`. It used to also DELETE every other character, so
+    // `'no-overlay'` was declared as `nooverlay`: a value nobody wrote.
+    describe('a shorthand string is kept as written beyond the documented transform', () => {
+      const issuesOf = (field: unknown) => {
+        const result = FieldSchema.safeParse({ name: 'status', ...(field as object) });
+        expect(result.success).toBe(false);
+        return (result as { error: z.ZodError }).error.issues;
+      };
+
+      it('keeps a hyphen, so the value is the one written', () => {
+        expect(Field.select(['no-overlay']).options).toEqual([{ label: 'no-overlay', value: 'no-overlay' }]);
+        expect(Field.select({ options: ['user-agent-based'] }).options)
+          .toEqual([{ label: 'user-agent-based', value: 'user-agent-based' }]);
+      });
+
+      it('meets the refusal an explicit `{ value: \'no-overlay\' }` meets — the same issue, the same path', () => {
+        const shorthand = issuesOf(Field.select(['open', 'no-overlay']));
+        const explicit = issuesOf(Field.select({ options: ['open', { label: 'no-overlay', value: 'no-overlay' }] }));
+        expect(shorthand).toEqual(explicit);
+        expect(shorthand).toHaveLength(1);
+        expect(shorthand[0]).toMatchObject({ code: 'invalid_format', path: ['options', 1, 'value'] });
+      });
+
+      it('refuses at module load when an object declares it through `ObjectSchema.create`', () => {
+        let thrown: unknown;
+        try {
+          ObjectSchema.create({ name: 'probe_lock', label: 'Probe', fields: { lock_state: Field.select(['none', 'no-overlay']) } });
+        } catch (e) {
+          thrown = e;
+        }
+        expect(thrown).toBeInstanceOf(z.ZodError);
+        expect((thrown as z.ZodError).issues.map((i) => [i.code, i.path.join('.')]))
+          .toEqual([['invalid_format', 'fields.lock_state.options.1.value']]);
+      });
+
+      it('still lower-cases and joins whitespace with `_`, and those values parse', () => {
+        const field = Field.select(['In Progress', 'Closed  Won', 'v1.2']);
+        expect(field.options.map((o) => o.value)).toEqual(['in_progress', 'closed_won', 'v1.2']);
+        expect(FieldSchema.safeParse({ name: 'stage', ...field }).success).toBe(true);
+      });
+    });
   });
 
   describe('Lookup and Master-Detail Fields', () => {

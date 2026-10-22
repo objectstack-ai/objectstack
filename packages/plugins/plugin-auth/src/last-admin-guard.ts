@@ -131,8 +131,11 @@
  *  1. **platform admin, grant-anchored** — an in-window (ADR-0091)
  *     `sys_user_permission_set` grant of `admin_full_access` owned by the
  *     Default Organization (ADR-0131 D5, the row the `single` promotion
- *     writes) or by none (the row it wrote before), **under a non-walled
- *     posture only**. This is the same evidence
+ *     writes), **under a non-walled posture only**. A grant owned by no
+ *     organization anchors nothing (ADR-0131 D1), and a composition that
+ *     registers no organization object has no Default Organization, so no
+ *     grant anchors there: its administrators are the two grades below. This
+ *     is the same evidence
  *     `resolveAuthzContext` derives `platform_admin` from
  *     (ADR-0068 D2 / ADR-0095 D3) — never a stored `sys_user.role` string —
  *     and since #11663 L5 that derivation is posture-keyed, so this grade is
@@ -194,13 +197,14 @@
  *
  *  - **a genuinely fresh environment** — no evidence anybody was ever a platform
  *    admin here. Permitted, exactly as before.
- *  - **an environment that was EMPTIED** — an unscoped, in-window
- *    `sys_user_permission_set` grant still names a permission set the security
+ *  - **an environment that was EMPTIED** — an in-window
+ *    `sys_user_permission_set` grant the anchor reads (the Default
+ *    Organization's) still names a permission set the security
  *    catalog no longer holds (ADR-0131 D4). Refused, loudly, naming the
  *    dangling grants.
  *  - **an environment whose break-glass set was switched OFF** (ADR-0049,
- *    ADR-0131 D3) — the `admin_full_access` definition is there, and unscoped,
- *    in-window grants still name it, but the activation ledger says it is off
+ *    ADR-0131 D3) — the `admin_full_access` definition is there, and the
+ *    Default Organization's in-window grants still name it, but the activation ledger says it is off
  *    so it confers nothing. Refused too, with its own remedy: switch it back
  *    on. It produces the identical emptiness while leaving no dangling grant
  *    to read. A write that RESTORES standing — switching it back on — is
@@ -218,9 +222,9 @@
  * instead (`guardPermissionSetUpdate`), which narrows the residual to one state
  * — an environment renamed away from `admin_full_access` by a write that landed
  * while this guard was not registered. Widening the predicate to cover it ("no
- * `admin_full_access` row exists AND some unscoped grant does") was considered
+ * `admin_full_access` row exists AND some anchoring grant does") was considered
  * and rejected: it changes the answer for a fresh environment that writes an
- * unscoped grant before the admin set exists, and not changing the fresh-install
+ * anchoring grant before the admin set exists, and not changing the fresh-install
  * answer is the one thing this predicate may not do.
  *
  * ## Relationship to the `auth-manager.ts` break-glass HTTP guard
@@ -319,7 +323,7 @@ import {
 } from '@objectstack/spec/identity';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { SystemObjectName, SystemUserId } from '@objectstack/spec/system';
-import { PLATFORM_OWNER_EMAIL_ENV, isMissingTableError, resolveTenancyPosture } from '@objectstack/types';
+import { isMissingTableError, resolveTenancyPosture } from '@objectstack/types';
 import {
   isGrantActive,
   matchesConfiguredPlatformAdmin,
@@ -626,6 +630,24 @@ interface PendingStandingWrite {
    * standing write that addresses no existing row (`ids` is then empty).
    */
   inserted?: Record<string, unknown>;
+  /**
+   * [#24948] Writes to OTHER tables that land with this one, as one change:
+   * better-auth's organization delete removes the organization's members in
+   * the same request that removes the organization row, and the guard asked
+   * before that request writes anything must judge both. At most one write per
+   * table; {@link pendingFor} reads the one for a table.
+   */
+  with?: readonly PendingStandingWrite[];
+}
+
+/** [#24948] The part of `pending` that addresses `table`, if any. */
+function pendingFor(
+  pending: PendingStandingWrite | undefined,
+  table: string,
+): PendingStandingWrite | undefined {
+  if (!pending) return undefined;
+  if (pending.table === table) return pending;
+  return pending.with?.find((w) => w.table === table);
 }
 
 /**
@@ -647,11 +669,12 @@ function applyPending(
   pending: PendingStandingWrite | undefined,
   table: string,
 ): Record<string, unknown> | undefined {
-  if (!pending || pending.table !== table) return row;
+  const write = pendingFor(pending, table);
+  if (!write) return row;
   const id = toId(row.id);
-  if (!id || !pending.ids.has(id)) return row;
-  if (!pending.patch) return undefined; // deleted
-  return { ...row, ...pending.patch };
+  if (!id || !write.ids.has(id)) return row;
+  if (!write.patch) return undefined; // deleted
+  return { ...row, ...write.patch };
 }
 
 
@@ -694,7 +717,7 @@ export const GRANT_STANDING_KEYS = [
  * that does not revoke anything stored.
  *
  * The platform-admin re-anchor gave `resolveAuthzContext` a second anchor
- * beside the unscoped `admin_full_access` grant: a `sys_user` row whose
+ * beside the Default Organization's `admin_full_access` grant: a `sys_user` row whose
  * `email` is on the deployment's declared administrator list AND whose
  * `email_verified` reads verified. Both columns are therefore derivation
  * columns now (`ADMIN_STANDING_SURFACE.sys_user`, reclassified from
@@ -848,7 +871,7 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
       + 'key, so a key rewrite is not expressible through this write path at all.',
     ai_access:
       'cloud ADR-0024 `ai_seat` synthesis (§7). It grants an AI seat, never administrator standing: the '
-      + 'posture rung is derived from the unscoped `admin_full_access` grant and, now that deployment '
+      + 'posture rung is derived from the Default Organization\'s `admin_full_access` grant and, now that deployment '
       + 'config names the platform-admin holder, '
       + 'from the configured-and-verified email pair — never from this flag. Emptying it costs the '
       + 'holder their AI seat, which is an ADR-0086 capability question with an in-product remedy, '
@@ -869,10 +892,23 @@ function touchesAny(data: Record<string, unknown>, keys: readonly string[]): boo
  * re-binding after a hot reload runs `engine.unregisterHooksByPackage(packageId)`
  * first.
  */
+/**
+ * [#24948] The guard's question about a `sys_organization` delete, askable
+ * BEFORE the delete starts. better-auth's organization delete removes the
+ * members and invitations before it deletes the organization row, so the
+ * `beforeDelete` hook's answer arrives after those writes; plugin-auth asks
+ * this first, from the request's `hooks.before`, so a refused Default
+ * Organization delete writes nothing on any driver. The same judgement as the
+ * hook, `enforceStanding('organization-delete', …)`, never a second spelling.
+ */
+export interface LastAdminGuardHandle {
+  judgeOrganizationDelete(organizationId: string): Promise<void>;
+}
+
 export function registerLastAdminGuard(
   engine: LastAdminGuardEngine,
   opts: LastAdminGuardOptions,
-): void {
+): LastAdminGuardHandle {
   const { packageId, logger } = opts;
   const maxScan = opts.maxScan ?? DEFAULT_MAX_SCAN;
 
@@ -945,7 +981,7 @@ export function registerLastAdminGuard(
   const readAdminSetSwitchedOff = async (op: GuardedOp, pending?: PendingStandingWrite): Promise<boolean> => {
     const fields = ['id', 'metadata_type', 'name', 'active'];
     const rows = await scanLedger(op, { where: { metadata_type: 'permission', name: ADMIN_FULL_ACCESS }, fields });
-    const ledgerWrite = pending?.table === METADATA_ACTIVATION ? pending : undefined;
+    const ledgerWrite = pendingFor(pending, METADATA_ACTIVATION);
     if (ledgerWrite && ledgerWrite.ids.size > 0) {
       const seen = new Set(rows.map((row) => toId(row.id)));
       const missing = [...ledgerWrite.ids].filter((id) => !seen.has(id));
@@ -979,7 +1015,7 @@ export function registerLastAdminGuard(
       return undefined;
     }
     const fields = ['id', 'slug'];
-    const orgWrite = pending?.table === SystemObjectName.ORGANIZATION ? pending : undefined;
+    const orgWrite = pendingFor(pending, SystemObjectName.ORGANIZATION);
     const addressed = async (rows: Array<Record<string, unknown>>) => {
       if (!orgWrite || orgWrite.ids.size === 0) return rows;
       const seen = new Set(rows.map((row) => toId(row.id)));
@@ -1007,12 +1043,13 @@ export function registerLastAdminGuard(
   /**
    * [ADR-0131 D5] Which `admin_full_access` grants among `links` the anchor
    * reads — the resolver's predicate (`grantAnchorsPlatformStanding`,
-   * `resolve-authz-context.ts`): one owned by no organization, or, under
-   * `single`, by the Default Organization ({@link readDefaultOrganizationId},
-   * read only when some grant names an organization). Every other
-   * organization's grant is an organization administrator's. Under a wall only
-   * the organization-less row is asked about, and only as evidence — it
-   * anchors nothing there.
+   * `resolve-authz-context.ts`): under `single`, one owned by the Default
+   * Organization ({@link readDefaultOrganizationId}, read only when some grant
+   * names an organization). Every other organization's grant is an
+   * organization administrator's. An organization-less grant anchors nothing
+   * (ADR-0131 D1), and neither does any grant under a wall or where no Default
+   * Organization is nameable — a composition that registers no organization
+   * object among them — exactly as the resolver reads it.
    */
   const anchorOwnerTest = async (
     op: GuardedOp,
@@ -1025,7 +1062,7 @@ export function registerLastAdminGuard(
       : undefined;
     return (link) => {
       const owner = ownerOf(link);
-      return owner === undefined || owner === defaultOrganizationId;
+      return owner !== undefined && owner === defaultOrganizationId;
     };
   };
 
@@ -1045,8 +1082,7 @@ export function registerLastAdminGuard(
     const now = Date.now();
 
     // 1) Platform admins — in-window `admin_full_access` grants owned by the
-    //    Default Organization or by none (ADR-0131 D5), on a NON-WALLED
-    //    posture only.
+    //    Default Organization (ADR-0131 D5), on a NON-WALLED posture only.
     //
     // [#11663 L5] The posture key is read from the environment with the same
     // expression the derivation site uses — `postureEnforcesWall(
@@ -1113,9 +1149,10 @@ export function registerLastAdminGuard(
         // Any other organization's grant makes a tenant admin, not the
         // environment's break-glass admin — the same distinction
         // `resolveAuthzContext` draws (`grantAnchorsPlatformStanding`): the
-        // anchor is the Default Organization's grant, or an organization-less
-        // one. This is also the "scope it to another org" revocation shape: a
-        // pending write that re-points `organization_id` lands here, and so
+        // anchor is the Default Organization's grant, and an
+        // organization-less one is nobody's. This is also the "scope it to
+        // another org" revocation shape: a pending write that re-points
+        // `organization_id` lands here, and so
         // does a pending organization write that stops naming the owner the
         // Default Organization.
         if (!anchors(link)) continue;
@@ -1236,8 +1273,9 @@ export function registerLastAdminGuard(
    * decide whether that emptiness is the bootstrap window or an environment
    * that has just been emptied, and refuse in the second case.
    *
-   * The evidence is a DANGLING platform-admin-shaped grant: an unscoped,
-   * in-window `sys_user_permission_set` row naming a permission set the
+   * The evidence is a DANGLING platform-admin-shaped grant: an in-window
+   * `sys_user_permission_set` row the anchor reads (the Default
+   * Organization's, {@link anchorOwnerTest}) naming a permission set the
    * security catalog does not hold, or naming none (ADR-0131 D4: a grant holds
    * its set BY NAME, and the set is its catalog definition). On a fresh
    * install every grant names a set the platform ships, so the fresh answer is
@@ -1246,7 +1284,7 @@ export function registerLastAdminGuard(
    * legacy grant the v18 ceremony's rewrite has not named (ADR-0131 D10).
    *
    * Deliberately an OVER-approximation of "the `admin_full_access` definition
-   * went away": a dangling unscoped grant to some other set trips it too. The
+   * went away": a dangling anchoring grant to some other set trips it too. The
    * guard cannot tell the two apart (the name it would compare went away with
    * the definition), and refusing in an environment that has zero
    * administrators AND a grant pointing into nowhere is the fail-closed
@@ -1259,26 +1297,14 @@ export function registerLastAdminGuard(
    * amplifier the paragraph above exists to prevent — one switch-off empties
    * the administrator population and every later ban, delete and downgrade
    * sails through unguarded. So a switched-off `admin_full_access` with
-   * unscoped, in-window grants still naming it is read as the SAME evidence,
+   * anchoring, in-window grants still naming it is read as the SAME evidence,
    * with its own remedy: switch it back on.
+   *
+   * Under a WALLED posture no grant anchors, so neither shape is evidence
+   * there: standing is configuration only (`OS_PLATFORM_OWNER_EMAIL`, ADR-0131
+   * D5), and restoring a grant row could not end the emptiness anyway.
    */
   const refuseIfEmptiedRatherThanFresh = async (op: GuardedOp): Promise<void> => {
-    // [#11663 L5] Both refusals below name ONE remedy — put the
-    // `admin_full_access` row back — and on a WALLED rig that remedy stopped
-    // working when the walled half of the legacy anchor retired: restoring or
-    // re-activating the row confers nothing there any more. ⛔ The refusals
-    // themselves are unchanged in every direction (this decides no verdict and
-    // no row is judged differently); what changes is that a walled operator is
-    // told the remedy that actually ends the emptiness. Saying only "restore the
-    // row" would send them round a loop that cannot terminate — the silent half
-    // of a loud migration, in the one message they get.
-    const walledRemedy = postureEnforcesWall(resolveTenancyPosture())
-      ? ` ⚠️ This deployment runs a WALLED tenancy posture, where an unscoped '${ADMIN_FULL_ACCESS}' `
-        + 'grant row is no longer an anchor for platform admin standing at all — restoring or '
-        + 're-activating that row will NOT give this system an administrator. Declare one in '
-        + `${PLATFORM_OWNER_EMAIL_ENV} (a verified account's address, comma-separated for several) `
-        + 'instead; that is the only channel to platform admin standing under a wall.'
-      : '';
     const known = await catalogSetNames();
     const adminSetDeactivated = known.has(ADMIN_FULL_ACCESS) && (await readAdminSetSwitchedOff(op));
 
@@ -1291,25 +1317,25 @@ export function registerLastAdminGuard(
       });
       const nowMs = Date.now();
       // [ADR-0131 D5] The grants the anchor reads — the Default Organization's
-      // under `single`, beside the organization-less row.
+      // under `single`, and none under a wall.
       const anchors = await anchorOwnerTest(op, held);
       const stranded = held.filter((link) => anchors(link) && isGrantActive(link, nowMs));
       if (stranded.length > 0) {
         const words = OP_WORDS[op];
         logger?.warn(
           `[LastAdminGuard] refused a ${words.noun} in an environment whose '${ADMIN_FULL_ACCESS}' ` +
-            `permission set is switched OFF — ${stranded.length} unscoped grant(s) confer nothing`,
+            `permission set is switched OFF — ${stranded.length} Default Organization grant(s) confer nothing`,
         );
         throw refuse(
           `Refusing this ${words.noun}: this system recognises NO administrator because its ` +
             `'${ADMIN_FULL_ACCESS}' permission set is switched OFF in '${METADATA_ACTIVATION}' — ` +
-            `${stranded.length} unscoped, in-window '${USER_PERMISSION_SET}' grant(s) still point ` +
+            `${stranded.length} in-window Default Organization '${USER_PERMISSION_SET}' grant(s) still point ` +
             'at it and confer nothing while it is off. That is not the bootstrap window, and ' +
             'reading the resulting emptiness as "no administrator to protect" would switch this ' +
             `guard off for every other write too (${BREAK_GLASS_CITATION}). Switch the ` +
             `'${ADMIN_FULL_ACCESS}' permission set back on (its '${METADATA_ACTIVATION}' row's ` +
             "'active' back to true) — the grants naming it are still there — before writing the " +
-            'identity tables again.' + walledRemedy,
+            'identity tables again.',
           words.table,
         );
       }
@@ -1334,7 +1360,7 @@ export function registerLastAdminGuard(
       if (name !== undefined && known.has(name)) continue;
       // Another organization's grant never conferred the environment's
       // break-glass standing (ADR-0131 D5: the anchor is the Default
-      // Organization's grant, or an organization-less one), and an
+      // Organization's grant; an organization-less one is nobody's), and an
       // out-of-window one never conferred it either, so neither is evidence
       // that this environment once had a platform admin.
       if (!anchors(link)) continue;
@@ -1348,18 +1374,18 @@ export function registerLastAdminGuard(
     const words = OP_WORDS[op];
     logger?.warn(
       `[LastAdminGuard] refused a ${words.noun} in an environment with no administrator that is ` +
-        `NOT a fresh install — ${dangling.length} dangling unscoped grant(s): ${dangling.join(', ')}`,
+        `NOT a fresh install — ${dangling.length} dangling Default Organization grant(s): ${dangling.join(', ')}`,
     );
     throw refuse(
       `Refusing this ${words.noun}: this system recognises NO administrator, and this is not ` +
-        `the bootstrap window — ${dangling.length} unscoped, in-window '${USER_PERMISSION_SET}' ` +
+        `the bootstrap window — ${dangling.length} in-window Default Organization '${USER_PERMISSION_SET}' ` +
         'grant(s) still name a permission set the security catalog does not hold, ' +
         `or name none yet (${dangling.join(', ')}). That is the state a REMOVED '${ADMIN_FULL_ACCESS}' ` +
         'permission-set definition leaves behind: it un-makes every platform admin at once, and ' +
         'reading the resulting emptiness as "no administrator to protect" would switch this guard ' +
         `off for every other write too (${BREAK_GLASS_CITATION}). Restore the ` +
         `'${ADMIN_FULL_ACCESS}' permission set — the grants naming it are still there — before ` +
-        'writing the identity tables again.' + walledRemedy,
+        'writing the identity tables again.',
       words.table,
     );
   };
@@ -1544,6 +1570,7 @@ export function registerLastAdminGuard(
       | undefined,
     patch?: Record<string, unknown>,
     inserted?: Record<string, unknown>,
+    companions?: readonly PendingStandingWrite[],
   ): Promise<void> => {
     const words = OP_WORDS[op];
     // [ADR-0131 D3] An insert addresses no existing row: its pending write is
@@ -1556,6 +1583,7 @@ export function registerLastAdminGuard(
       ids,
       ...(patch ? { patch } : {}),
       ...(inserted ? { inserted } : {}),
+      ...(companions && companions.length > 0 ? { with: companions } : {}),
     });
     await failClosed(op, async () => {
       const before = await resolveAdminUserIds(op);
@@ -1848,4 +1876,23 @@ export function registerLastAdminGuard(
       'Organization the grant anchor reads) and sys_metadata_activation ' +
       '(switching admin_full_access off) — ADR-0135 D5.2',
   );
+
+  return {
+    // Judged as the request performs it: the organization's members leave with
+    // the row. Asked before either write, the membership half must be in the
+    // simulation too, or an owner's membership of the very organization being
+    // deleted would still read as standing. A read that fails refuses, like
+    // every other lookup the guard makes.
+    judgeOrganizationDelete: (organizationId: string) =>
+      failClosed('organization-delete', async () => {
+        const members = await scan('organization-delete', SystemObjectName.MEMBER, {
+          where: { organization_id: organizationId },
+          fields: ['id'],
+        });
+        const memberIds = new Set(members.map((row) => toId(row.id)).filter((id): id is string => !!id));
+        await enforceStanding('organization-delete', SystemObjectName.ORGANIZATION, { id: organizationId }, undefined, undefined, [
+          { table: SystemObjectName.MEMBER, ids: memberIds },
+        ]);
+      }),
+  };
 }

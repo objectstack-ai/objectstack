@@ -81,6 +81,24 @@ const WASM_RETIRED =
   + 'the remote arm (`libsql://` / `https://`), which needs none. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
+/**
+ * The prescription the REMOVED `encryptionKey` raises (#25050, ADR-0049
+ * enforce-or-remove). Unlike the three above, it is not this package's own
+ * wording: it is `@objectstack/spec`'s `TursoConfigSchema` tombstone text, byte
+ * for byte, and the constructor in `../turso-driver.ts` refuses the key in it
+ * too, because the one key is judged at three places and an author must meet
+ * one prescription at all of them. `turso-config-constructor-parity.test.ts`
+ * holds the three copies equal.
+ */
+const ENCRYPTION_KEY_RETIRED =
+  '`turso config.encryptionKey` was removed in @objectstack/spec 18 and @objectstack/driver-turso 18 '
+  + '(ADR-0049) — it never encrypted anything, in any mode: a local or embedded-replica file is read and '
+  + 'written through a SQLite engine that has no encryption codec, and the driver never handed the key to '
+  + 'a remote database, whose storage encryption the server configures. Delete the key. A local file that '
+  + 'must be encrypted at rest belongs on an encrypted disk or volume. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for the unset and remote-url cases; '
+  + '`--write` applies the ones it can prove, and you delete the key from a local or replica datasource by hand.';
+
 // ==========================================================================
 // 2a. Transport coherence — what `new TursoDriver` refuses
 // ==========================================================================
@@ -325,11 +343,23 @@ export const TursoConfigSchema = lazySchema(() => z.object({
   authToken: z.string().optional().describe('Authentication token for remote database'),
 
   /**
-   * Encryption Key.
-   * When provided, encrypts the local database file at rest using AES-256.
-   * Applies to both local-only and embedded replica modes.
+   * Tombstone for the REMOVED `encryptionKey` (#25050, ADR-0049
+   * enforce-or-remove).
+   *
+   * It promised to encrypt the local database file at rest with AES-256 and
+   * was honoured in no mode: the driver reads and writes that file through
+   * better-sqlite3, which has no encryption codec (so #25020 refused it
+   * there), and it never handed the key to the libSQL client it builds for a
+   * remote url, where the key was parsed and dropped. `z.never()` rather than
+   * a bare deletion for the reason `timeout` below spells out: this shape is a
+   * plain `z.object`, and a deletion would strip the key in silence.
+   *
+   * The text is `@objectstack/spec`'s `TursoConfigSchema` tombstone on the
+   * same key, byte for byte, and the constructor's refusal in
+   * `../turso-driver.ts`; `turso-config-constructor-parity.test.ts` holds the
+   * three equal.
    */
-  encryptionKey: z.string().optional().describe('Encryption key for local database file (AES-256)'),
+  encryptionKey: z.never({ error: () => ENCRYPTION_KEY_RETIRED }).optional().describe(`[REMOVED] ${ENCRYPTION_KEY_RETIRED}`),
 
   /**
    * Concurrency Limit.

@@ -13,6 +13,7 @@ import { DriverPlugin } from './driver-plugin.js';
 import { captureExpectedReadRefusals } from './expected-read-refusal-noise.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /**
  * End-to-end regression for framework #3362 (`#3354 not effective on hono`).
@@ -242,6 +243,9 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
       authzEngine.registerObject(o.def, o.owner);
       await authzEngine.syncObjectSchema(o.def.name);
     }
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(authzEngine);
 
     const httpServer = kernel.getService<IHttpServer>('http.server');
     baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;

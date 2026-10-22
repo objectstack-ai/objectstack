@@ -48,6 +48,7 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** The organization the caller holds. */
 const OWN_ORG = 'org_a';
@@ -187,6 +188,9 @@ async function boot(makeDriver: () => unknown): Promise<Booted> {
     objects: OBJECTS,
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   engines.push(engine);
 
   // The organization shape's stamp: it reads the parent OUTSIDE RLS and

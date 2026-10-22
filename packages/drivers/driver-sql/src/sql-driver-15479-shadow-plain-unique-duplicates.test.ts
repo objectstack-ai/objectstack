@@ -45,6 +45,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 import { isHashShadowColumn } from './schema-drift.js';
 import { MYSQL_CELL, declareDialectCell } from './live-dialect-matrix.testkit.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /** 900 chars — comfortably over the 768-char keyable ceiling, so `v` is TEXT. */
 const LONG = 'p'.repeat(900);
@@ -73,14 +74,27 @@ const globalUniqueOn = (name: string) => ({
   indexes: [{ fields: ['v'], unique: 'global' as const, name: `uniq_${name}_v` }],
 });
 
-/** The CONTROL shape: an organization-scoped unique, i.e. the NULL-safe arm. */
+/**
+ * The CONTROL shape: an organization-scoped unique in its NULL-safe (18.0)
+ * form, i.e. the NULL-safe arm. ADR-0131 D1: a `unique: 'organization'`
+ * declaration now keys the plain tenant column, so only an input that already
+ * carries `nullSafeColumns` (honoured verbatim) still reaches this arm — the
+ * shape a database built before 18.x holds, nullable tenant column included.
+ */
 const orgUniqueOn = (name: string) => ({
   name,
   fields: {
     organization_id: { type: 'string' },
     v: { type: 'text', maxLength: 1024 },
   },
-  indexes: [{ fields: ['v'], unique: 'organization' as const, name: `uniq_${name}_v` }],
+  indexes: [
+    {
+      fields: ['organization_id', 'v'],
+      unique: true as const,
+      nullSafeColumns: ['organization_id'],
+      name: `uniq_${name}_v`,
+    },
+  ],
 });
 
 declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479)', (cell) => {
@@ -130,6 +144,9 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479
       // declares it now, so the cast is gone and these two calls are checked
       // like any other.
       await driver.initObjects([{ ...meta, indexes: [] }]);
+      // A NULL-organization row exists only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      if (row.organization_id === null) await asPre18TenantColumn(driver, meta.name);
       const knex = (driver as any).knex;
       await knex(meta.name).insert([
         { id: 'a', ...row },

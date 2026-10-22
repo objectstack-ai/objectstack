@@ -50,6 +50,7 @@ import type { ServiceObject } from '@objectstack/spec/data';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
 import { captureExpectedReadRefusals } from './expected-read-refusal-noise.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // One inbox per concern. The mark-read routes MUTATE read-state, so a shared
 // user would make these suites order-dependent — the unread fixture the gap
@@ -311,6 +312,9 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
       authzEngine.registerObject(o.def, o.owner);
       await authzEngine.syncObjectSchema(o.def.name);
     }
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(authzEngine);
 
     const httpServer = kernel.getService<IHttpServer>('http.server');
     baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;

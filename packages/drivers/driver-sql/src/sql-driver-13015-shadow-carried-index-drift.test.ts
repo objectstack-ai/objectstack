@@ -56,6 +56,7 @@ import {
   type PhysicalIndex,
 } from './schema-drift.js';
 import { MYSQL_CELL, declareDialectCell } from './live-dialect-matrix.testkit.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Fixtures — the shapes `introspectIndexes` produces on MySQL
@@ -230,6 +231,26 @@ const orgUniqueOn = (name: string) => ({
   indexes: [{ fields: ['v'], unique: 'organization' as const, name: `uniq_${name}_org_v` }],
 });
 
+/**
+ * The same unique in its NULL-safe (18.0) form. ADR-0131 D1: a
+ * `unique: 'organization'` declaration now keys the PLAIN tenant column, so a
+ * COALESCE shadow — and a raw one reported against it — exists only where an
+ * input already carries `nullSafeColumns` (honoured verbatim): a database
+ * built before 18.x, whose tenant column is also nullable
+ * (`asPre18TenantColumn`).
+ */
+const pre18OrgUniqueOn = (name: string) => ({
+  ...orgUniqueOn(name),
+  indexes: [
+    {
+      fields: ['organization_id', 'v'],
+      unique: true as const,
+      nullSafeColumns: ['organization_id'],
+      name: `uniq_${name}_org_v`,
+    },
+  ],
+});
+
 declareDialectCell(MYSQL_CELL, 'shadow-carried index drift (#13015)', (cell) => {
   describe('shadow-carried UNIQUE against the live MySQL catalog (#13015)', () => {
     let driver: SqlDriver;
@@ -304,8 +325,9 @@ declareDialectCell(MYSQL_CELL, 'shadow-carried index drift (#13015)', (cell) => 
      */
     it('survives "os migrate apply --allow-destructive" over every reported entry', async () => {
       driver = new SqlDriver(cell.config());
-      const obj = orgUniqueOn('os13015_apply');
+      const obj = pre18OrgUniqueOn('os13015_apply');
       await driver.initObjects([obj]);
+      await asPre18TenantColumn(driver, 'os13015_apply');
       await driver.disconnect();
 
       // A SECOND driver: `runtimeCreatedIndexes` starts empty, so the ledger
@@ -355,8 +377,9 @@ declareDialectCell(MYSQL_CELL, 'shadow-carried index drift (#13015)', (cell) => 
      */
     it('reports and repairs a shadow that hashes the raw columns', async () => {
       driver = new SqlDriver(cell.config());
-      const obj = orgUniqueOn('os13015_stale');
+      const obj = pre18OrgUniqueOn('os13015_stale');
       await driver.initObjects([obj]);
+      await asPre18TenantColumn(driver, 'os13015_stale');
       const knex = (driver as any).knex;
       const indexName = 'uniq_os13015_stale_org_v';
       const shadow = hashShadowColumnFor(indexName);

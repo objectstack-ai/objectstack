@@ -57,6 +57,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJ = 'qa_ticket';
 const SYS_CTX = { isSystem: true, userId: 'usr_system' };
@@ -109,6 +110,9 @@ async function boot(makeDriver: () => unknown, clause: 'using' | 'check', predic
     ],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   engines.push(engine);
   await engine.insert('qa_person', [{ id: 'p1', name: 'P1' }, { id: 'p2', name: 'P2' }], { context: SYS_CTX } as never);
 

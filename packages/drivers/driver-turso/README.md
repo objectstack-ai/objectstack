@@ -250,6 +250,14 @@ that nothing would honour, each with the message `@objectstack/spec`'s
   would be ignored. Drop `mode` for an embedded replica, or drop `syncUrl` (and
   `sync`) for a plain local database.
 
+It refuses (`VALIDATION_ERROR` / 400) any `encryptionKey`, in every mode, in
+the same message the spec contract gives at authoring: the key was removed in
+18 because it never encrypted anything. A local or replica file is read and
+written through better-sqlite3, which has no encryption codec, and the driver
+never handed the key to a remote database. Delete the key; put a local file on
+an encrypted disk or volume if it must be encrypted at rest, or use a remote
+Turso database, whose storage encryption the server configures.
+
 You can also force a specific mode:
 
 ```typescript
@@ -325,12 +333,6 @@ interface TursoDriverConfig {
 
   /** JWT auth token for the remote Turso database */
   authToken?: string;
-
-  /**
-   * AES-256 encryption key for local database file.
-   * Only effective in local/replica modes.
-   */
-  encryptionKey?: string;
 
   /**
    * Maximum concurrent requests to the remote database.

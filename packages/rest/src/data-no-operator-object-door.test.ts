@@ -45,6 +45,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'rest_no_op_object_20546';
 const OWNER = 'rest_no_op_owner_20546';
@@ -157,6 +158,9 @@ for (const cell of CELLS) {
         engine.registry.registerObject(OWNER_OBJECT as any);
         engine.registry.registerObject(LEDGER as any);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         for (const row of OWNERS) await engine.insert(OWNER, { ...row } as any);
         for (const row of ROWS) await engine.insert(OBJECT, { ...row } as any);
 

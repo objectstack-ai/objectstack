@@ -42,21 +42,48 @@
  * the host kernel's own `auth` service. Routes degrade gracefully when the
  * id is not (yet) configured: status reports `bound:false`; the others 404.
  *
- * ## Who may manage the connection — `setup.access` (#24148)
+ * ## Who may manage the connection — `manage_platform_settings` (ruling 乙, #25119)
  *
- * The Console's Cloud Connection panel sits on the Setup app, which declares
- * `requiredPermissions: ['setup.access']` (`@objectstack/platform-objects`,
- * `apps/setup.app.ts`). The three doors that change the connection —
- * `bind/start`, `bind/poll` and `unbind` — refuse exactly who that page
- * refuses: a signed-in caller who does not hold `setup.access` gets `403
- * PERMISSION_DENIED` naming the capability, before any control-plane call.
- * `status` stays session-less (it answers every caller, so a probe can tell
- * the plugin is mounted) but narrows what it SERVES: the connection's details
- * — who approved it, for which organization, in which environment — go only
- * to a caller who passes the same check; everyone else is told `bound`,
- * `runtimeId` and `provider`. What a caller holds is read through the
- * platform's one authorization resolver (`resolveAuthzContext`), against the
- * session this surface already read — see `holdsSetupAccess`.
+ * One rule for the capability: the entry, the page and the doors refuse the
+ * same callers. The rule is `manage_platform_settings`
+ * ({@link CLOUD_CONNECTION_CAPABILITY}), the Integrations group's own gate
+ * (`requiredPermissions` on `group_integrations` in
+ * `@objectstack/platform-objects`, `apps/setup.app.ts`), which this plugin's nav
+ * entry also declares on itself (`cloud-connection-ui.ts`). The three doors
+ * that change the connection — `bind/start`, `bind/poll` and `unbind` — refuse
+ * exactly who that entry refuses: a signed-in caller who does not hold it gets
+ * `403 PERMISSION_DENIED` naming the capability, before any control-plane
+ * call. `status` stays session-less (it answers every caller, so a probe can
+ * tell the plugin is mounted) but narrows what it SERVES: the connection's
+ * details — who approved it, for which organization, in which environment —
+ * go only to a caller who passes the same check; everyone else is told
+ * `bound`, `runtimeId` and `provider`.
+ *
+ * The page (`cloud_connection_settings`) has no gate of its own to declare: a
+ * page is not permission-gated by a field (`PageSchema` declares none, and
+ * says to gate the data a page shows). What it shows is this surface — the
+ * panel reads `status` and drives the three doors — so the page is held at
+ * the same line where its data is served. `setup.access` alone (the
+ * organization administrator's default set) no longer manages the
+ * connection.
+ *
+ * What a caller holds is read through the platform's one authorization
+ * resolver (`resolveAuthzContext`), against the session this surface already
+ * read — the shape `service-datasource`'s admin routes take for the same
+ * capability — see `holdsPlatformSettings`.
+ *
+ * ## A platform-managed connection is not this runtime's to manage (ruling 甲, #25097; #25113)
+ *
+ * A runtime holding the env→cloud service key (`controlPlaneApiKey` /
+ * `OS_CLOUD_API_KEY`, injected by the cloud into the runtimes it hosts) is
+ * connected by the platform, and that key — not a device-bound credential —
+ * is what it presents. Such a runtime registers no Cloud Connection Setup page
+ * or nav entry, and all three connection-changing doors — `bind/start`,
+ * `bind/poll` and `unbind` — answer `409 RESOURCE_CONFLICT`
+ * (`PLATFORM_MANAGED_REFUSAL`), after the identity and capability checks and
+ * before any control-plane call or store write. Everywhere else — self-hosted
+ * or local, bound through the device-code flow — the page registers under
+ * Setup → Integrations and every door behaves as described above.
  *
  * ## Why a same-origin proxy at all
  *
@@ -106,9 +133,9 @@ import { hostname } from 'node:os';
 import {
     evaluateAuthGate,
     type AuthGate,
-    // [#24148] The platform's ONE authorization resolver, and its loud outage
-    // brand — the same pair `marketplace-install-local-plugin.ts` reads in this
-    // package, so the capability a caller holds is never re-derived here.
+    // [#24148, #25119] The platform's ONE authorization resolver, and its loud
+    // outage brand — the same pair `marketplace-install-local-plugin.ts` reads in
+    // this package, so the capability a caller holds is never re-derived here.
     resolveAuthzContext,
     isAuthzStoreUnavailableError,
     userAuthGateSourceOf,
@@ -119,43 +146,62 @@ import {
 import type { AuthSessionApi, IAuthService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
-import { CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
+import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 import { readJsonRequestBody } from './request-json-body.js';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
 
 /**
- * [#24148] The capability the connection-changing doors demand, and the one the
- * connection's details are served behind on `status`.
- *
- * It is the permission that gates the page this surface serves: the Cloud
- * Connection panel lives on the Setup app, whose `requiredPermissions` is
- * `['setup.access']` (`@objectstack/platform-objects`, `apps/setup.app.ts`). So
- * the API refuses exactly who the page refuses, and no new role concept is
- * introduced. ⛔ Not a new cloud-specific capability: inventing one would lock
- * every existing administrator out of a page they can already open.
- */
-const SETUP_ACCESS_CAPABILITY = 'setup.access';
-
-/**
- * [#24148] The refusal the three connection-changing doors give a signed-in
- * caller who does not hold {@link SETUP_ACCESS_CAPABILITY}.
+ * [#24148, ruling 乙 #25119] The refusal the three connection-changing doors
+ * give a signed-in caller who does not hold {@link CLOUD_CONNECTION_CAPABILITY}
+ * (`manage_platform_settings`).
  *
  * `PERMISSION_DENIED` is the standard catalog's member for the condition: the
  * ADR-0112 ledger sends a generic permission condition to the standard catalog
  * rather than to a registered synonym (`error-code-ledger.zod.ts`, "Registering
  * a new code"), so nothing is registered for it — and ⛔ not `FORBIDDEN`, which
  * the install-local doors next door answer with: that spelling is a waived
- * pre-gate synonym, kept on the wire and never endorsed for new code. The
- * message names the capability, so the operator learns
+ * pre-gate synonym, kept on the wire and never endorsed for new code. It is
+ * also the answer `service-datasource`'s admin routes give a caller without the
+ * same capability. The message names the capability, so the operator learns
  * which grant they need rather than merely that they were refused. One literal
  * for the three doors: they are one class (each changes this runtime's cloud
  * connection), and a door added later cannot copy a weaker answer.
  */
-const SETUP_ACCESS_REFUSAL = {
+const CAPABILITY_REFUSAL = {
     code: 'PERMISSION_DENIED',
     status: 403,
-    message: `Managing this runtime's cloud connection requires the \`${SETUP_ACCESS_CAPABILITY}\` capability.`,
+    message: `Managing this runtime's cloud connection requires the \`${CLOUD_CONNECTION_CAPABILITY}\` capability.`,
+} as const;
+
+/**
+ * Ruling 甲 (#25097), extended to the bind doors (#25113): the refusal the
+ * three connection-changing doors — `bind/start`, `bind/poll` and `unbind` —
+ * give on a platform-managed runtime, one whose control-plane credential is the
+ * env→cloud service key (`platformManaged` in `start()`). Each gives it after
+ * its identity and capability checks and before any control-plane call or
+ * write to the local credential store: a device bind there would persist a
+ * credential the service key shadows (`credential()` never presents it) while
+ * presenting that key to the control plane, and could move the environment's
+ * cloud-side connection row through a door this runtime cannot act on.
+ *
+ * `RESOURCE_CONFLICT` / 409, no code minted, on the same rule
+ * {@link CAPABILITY_REFUSAL} follows: the ADR-0112 ledger sends a generic
+ * condition to the standard catalog rather than to a registered synonym, and
+ * the catalog's 409 member is the one for a refusal that comes from the
+ * runtime's state rather than from the request — the same answer this
+ * package's install-local door gives when a writable base holds a package's
+ * namespace (`marketplace-install-local-plugin.ts`). The message carries the
+ * meaning: the platform manages the connection, so nothing here can make or
+ * end it. It names no remedy, because this runtime has none to offer. One
+ * literal for the three doors, for the reason {@link CAPABILITY_REFUSAL} gives.
+ */
+const PLATFORM_MANAGED_REFUSAL = {
+    code: 'RESOURCE_CONFLICT',
+    status: 409,
+    message: 'This runtime\'s cloud connection is managed by the platform, so it cannot be connected or disconnected here: '
+        + 'its control-plane credential is the environment service key the platform provides. Nothing was sent to the cloud, '
+        + 'and nothing was stored or cleared.',
 } as const;
 
 /**
@@ -271,12 +317,29 @@ export class CloudConnectionPlugin implements Plugin {
             const deviceClientId = (this.cfg.deviceClientId ?? process.env.OS_CLI_CLIENT_ID ?? 'objectstack-cli').trim();
             const deviceScope = 'openid profile email';
 
+            /**
+             * Ruling 甲 (#25097): is this runtime's cloud connection
+             * PLATFORM-MANAGED? It is exactly when the effective control-plane
+             * credential is the env→cloud service key
+             * (`controlPlaneApiKey` / `OS_CLOUD_API_KEY`, which the cloud
+             * injects into the runtimes it hosts) — the one fact `credential()`
+             * below is written in terms of, so the two can never disagree.
+             *
+             * A managed connection belongs to the platform, so this runtime
+             * offers no way to manage it: the Setup page and its nav entry are
+             * not registered, and `POST /bind/start`, `POST /bind/poll` and
+             * `POST /unbind` are refused ({@link PLATFORM_MANAGED_REFUSAL}).
+             * Read once, here: the key is resolved at `kernel:ready` and does
+             * not change while the runtime is up.
+             */
+            const platformManaged = cloudApiKey !== '';
+
             // Effective control-plane credential, resolved PER REQUEST:
             // cloud-hosted runtimes carry the env→cloud service key; a
             // self-hosted runtime presents the `oscc_…` bearer the bind flow
             // persisted. Lazy so a bind that completes while the runtime is
             // up takes effect without a restart.
-            const credential = (): string => cloudApiKey || this.store.read()?.runtimeToken || '';
+            const credential = (): string => (platformManaged ? cloudApiKey : this.store.read()?.runtimeToken || '');
             const authHeaders = (): Record<string, string> => {
                 const cred = credential();
                 return cred ? { Authorization: `Bearer ${cred}` } : {};
@@ -341,10 +404,23 @@ export class CloudConnectionPlugin implements Plugin {
             // plugin as metadata (ADR-0029 K2); the console only provides the
             // registered `cloud-connection:panel` widget. Best-effort — a
             // kernel without a manifest service simply has no Setup entry.
-            try {
-                const manifest = ctx.getService<{ register(m: any): void }>('manifest');
-                manifest?.register?.(CLOUD_CONNECTION_UI_BUNDLE);
-            } catch { /* no manifest service — headless kernel */ }
+            //
+            // Ruling 甲 (#25097): a platform-managed runtime registers neither.
+            // Its connection is the platform's, so a page offering to connect
+            // or disconnect it would offer what this runtime cannot do. The
+            // absence is said once, here, rather than left to be diagnosed.
+            if (platformManaged) {
+                ctx.logger?.info?.(
+                    '[CloudConnectionPlugin] the cloud connection is platform-managed (the control-plane credential is the '
+                    + 'environment service key): the Cloud Connection Setup page and its navigation entry are not registered, '
+                    + 'and connecting or disconnecting here is refused',
+                );
+            } else {
+                try {
+                    const manifest = ctx.getService<{ register(m: any): void }>('manifest');
+                    manifest?.register?.(CLOUD_CONNECTION_UI_BUNDLE);
+                } catch { /* no manifest service — headless kernel */ }
+            }
 
             const sessionFromAuthService = async (
                 authSvc: any,
@@ -408,7 +484,11 @@ export class CloudConnectionPlugin implements Plugin {
             };
 
             /**
-             * [#24148] Does the caller this surface admitted hold `setup.access`?
+             * [#24148, ruling 乙 #25119] Does the caller this surface admitted
+             * hold {@link CLOUD_CONNECTION_CAPABILITY}
+             * (`manage_platform_settings`)? The ONE reading of the grant on this
+             * surface: the three connection-changing doors and `status`'s
+             * full-record branch all ask it, so no second reading can disagree.
              *
              * ## Asked of the platform's one resolver, never re-derived
              *
@@ -417,9 +497,9 @@ export class CloudConnectionPlugin implements Plugin {
              * aggregated — `sys_member` → `sys_user_position` → permission sets,
              * position-bound and user-bound alike, with a stale organization
              * claim dropped under a walled posture. The install-local doors in
-             * this package and the datasource admin family gate on its
-             * `systemPermissions` the same way; this reads that field and nothing
-             * else.
+             * this package and the datasource admin family (whose routes gate on
+             * this same capability, #9593) read its `systemPermissions` the same
+             * way; this reads that field and nothing else.
              *
              * ## Judged on the session this surface already admitted
              *
@@ -449,7 +529,7 @@ export class CloudConnectionPlugin implements Plugin {
              * (`503 SERVICE_UNAVAILABLE`) rather than answered as "does not
              * hold". Any other fault fails closed.
              */
-            const holdsSetupAccess = async (rawReq: Request, caller: ResolvedSession): Promise<boolean> => {
+            const holdsPlatformSettings = async (rawReq: Request, caller: ResolvedSession): Promise<boolean> => {
                 const { sessionData, authService, kernel } = caller.readFrom;
                 let ql: IObjectQLEngine | undefined;
                 if (kernel) {
@@ -476,25 +556,35 @@ export class CloudConnectionPlugin implements Plugin {
                         apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
                     });
                     if (authz.credential !== 'session' || authz.userId !== caller.userId) return false;
-                    return Array.isArray(authz.systemPermissions) && authz.systemPermissions.includes(SETUP_ACCESS_CAPABILITY);
+                    return Array.isArray(authz.systemPermissions) && authz.systemPermissions.includes(CLOUD_CONNECTION_CAPABILITY);
                 } catch (err) {
                     if (isAuthzStoreUnavailableError(err)) throw err;
                     return false;
                 }
             };
 
-            /** [#24148] The one `403` the three connection-changing doors give a caller without `setup.access`. */
-            const refuseWithoutSetupAccess = (c: any) =>
-                c.json({ success: false, error: { code: SETUP_ACCESS_REFUSAL.code, message: SETUP_ACCESS_REFUSAL.message } }, SETUP_ACCESS_REFUSAL.status);
+            /** [#24148, #25119] The one `403` the three connection-changing doors give a caller without the capability. */
+            const refuseWithoutPlatformSettings = (c: any) =>
+                c.json({ success: false, error: { code: CAPABILITY_REFUSAL.code, message: CAPABILITY_REFUSAL.message } }, CAPABILITY_REFUSAL.status);
 
             /**
-             * [#24148] What `status` serves this caller. Everyone is told whether
-             * the runtime is bound, its runtime id and the provider — enough for
-             * a probe, and for the Console to pick its panel. The rest (the
-             * environment id and the control plane's `connection` record: who
-             * approved the bind, for which organization) is served only to a
-             * caller who holds `setup.access`, the permission the panel that
-             * shows it sits behind.
+             * [#25097, #25113] The one `409` the three connection-changing doors
+             * give on a platform-managed runtime. Each door asks it in the same
+             * position: after its identity and capability checks, so a caller
+             * who may not manage the connection learns nothing about how it is
+             * held, and before any control-plane call or store write.
+             */
+            const refusePlatformManaged = (c: any) =>
+                c.json({ success: false, error: { code: PLATFORM_MANAGED_REFUSAL.code, message: PLATFORM_MANAGED_REFUSAL.message } }, PLATFORM_MANAGED_REFUSAL.status);
+
+            /**
+             * [#24148, #25119] What `status` serves this caller. Everyone is told
+             * whether the runtime is bound, its runtime id and the provider —
+             * enough for a probe, and for the Console to pick its panel. The rest
+             * (the environment id and the control plane's `connection` record:
+             * who approved the bind, for which organization) is served only to a
+             * caller who holds {@link CLOUD_CONNECTION_CAPABILITY}, the rule the
+             * entry to the panel that shows it and the doors beside it follow.
              *
              * `status` never refuses: no session, a session the ADR-0069 policy
              * holds, and a session without the capability all get the narrowed
@@ -512,7 +602,7 @@ export class CloudConnectionPlugin implements Plugin {
             ) => {
                 const caller = await resolveSession(environmentId ?? '', rawReq);
                 try {
-                    if (caller && !caller.authGate && await holdsSetupAccess(rawReq, caller)) return full;
+                    if (caller && !caller.authGate && await holdsPlatformSettings(rawReq, caller)) return full;
                 } catch (err) {
                     if (!isAuthzStoreUnavailableError(err)) throw err;
                     ctx.logger?.warn?.(`[CloudConnectionPlugin] status served without the connection details — ${err.message}`);
@@ -522,8 +612,8 @@ export class CloudConnectionPlugin implements Plugin {
 
             // GET /status — is this runtime bound to a cloud account? Answers
             // every caller; what it SERVES narrows to `bound` / `runtimeId` /
-            // `provider` unless the caller holds `setup.access` (#24148,
-            // `servedStatus`).
+            // `provider` unless the caller holds `manage_platform_settings`
+            // (#24148, #25119, `servedStatus`).
             rawApp.get(`${CLOUD_CONNECTION_PREFIX}/status`, async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 const stored = this.store.read();
@@ -595,9 +685,12 @@ export class CloudConnectionPlugin implements Plugin {
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to connect a cloud account.' } }, 401);
-                // [#24148] Refused before any work, so a caller without the
-                // capability cannot learn whether a control plane is configured.
-                if (!(await holdsSetupAccess(c.req.raw, session))) return refuseWithoutSetupAccess(c);
+                // [#24148, #25119] Refused before any work, so a caller without
+                // the capability cannot learn whether a control plane is configured.
+                if (!(await holdsPlatformSettings(c.req.raw, session))) return refuseWithoutPlatformSettings(c);
+                // [#25113] The connection is the platform's — refused before the
+                // device-code request, as `unbind` is refused before its revoke.
+                if (platformManaged) return refusePlatformManaged(c);
                 if (!cloudUrl) return c.json({ success: false, error: { code: 'CLOUD_UNCONFIGURED', message: 'No cloud control plane configured.' } }, 503);
                 try {
                     const resp = await fetch(`${cloudUrl}/api/v1/auth/device/code`, {
@@ -657,8 +750,13 @@ export class CloudConnectionPlugin implements Plugin {
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in.' } }, 401);
-                // [#24148] This is the door that persists the binding.
-                if (!(await holdsSetupAccess(c.req.raw, session))) return refuseWithoutSetupAccess(c);
+                // [#24148, #25119] This is the door that persists the binding.
+                if (!(await holdsPlatformSettings(c.req.raw, session))) return refuseWithoutPlatformSettings(c);
+                // [#25113] The connection is the platform's — refused before the
+                // device-token poll, the control plane's `/bind` and the local
+                // write: a bind completed here would persist a credential the
+                // service key shadows, and move the cloud-side connection row.
+                if (platformManaged) return refusePlatformManaged(c);
                 if (!cloudUrl) return c.json({ success: false, error: { code: 'CLOUD_UNCONFIGURED', message: 'No cloud control plane configured.' } }, 503);
 
                 const deviceCode = String(body?.device_code ?? body?.deviceCode ?? '').trim();
@@ -750,7 +848,8 @@ export class CloudConnectionPlugin implements Plugin {
             // POST /unbind — disconnect this runtime from the control plane.
             // Revokes the connection server-side (best-effort) and clears the
             // local credential. Requires an environment session holding
-            // `setup.access`, mirroring bind/start.
+            // `manage_platform_settings`, mirroring bind/start. Refused on a
+            // platform-managed runtime (ruling 甲, #25097), as both bind doors are.
             rawApp.post(`${CLOUD_CONNECTION_PREFIX}/unbind`, async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 if (!environmentId && !this.cfg.singleEnvironment) {
@@ -759,11 +858,15 @@ export class CloudConnectionPlugin implements Plugin {
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in.' } }, 401);
-                // [#24148] Refused before the revoke and before the local clear.
-                if (!(await holdsSetupAccess(c.req.raw, session))) return refuseWithoutSetupAccess(c);
+                // [#24148, #25119] Refused before the revoke and before the local clear.
+                if (!(await holdsPlatformSettings(c.req.raw, session))) return refuseWithoutPlatformSettings(c);
+                // Ruling 甲 (#25097): the connection is the platform's — refused
+                // before the revoke and before the local clear, so nothing
+                // changes on either side.
+                if (platformManaged) return refusePlatformManaged(c);
 
                 // Revoke cloud-side FIRST (the oscc_ bearer self-identifies;
-                // env-keyed bindings name the environment), then clear the
+                // a known environment id rides along), then clear the
                 // local credential regardless — a device signing out must not
                 // leave a live token behind when the control plane is up.
                 let revoked = false;

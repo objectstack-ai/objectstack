@@ -198,10 +198,10 @@ describe('[#20295] CONTROL: without the retired keys, the server is what it was'
     it('`api.enableOpenApi` is the OpenAPI switch the prescription names — it really unmounts the document', () => {
         const on = mounted({});
         const off = mounted({ enableOpenApi: false });
-        // Positive control: the default mounts both routes the switch owns.
+        // Positive control: the default mounts the route the switch owns — one
+        // route since the `/docs` viewer page was retired (#25104).
         expect(on).toContain('GET /api/v1/openapi.json');
-        expect(on).toContain('GET /api/v1/docs');
-        expect(on.filter((r) => !off.includes(r)).sort()).toEqual(['GET /api/v1/docs', 'GET /api/v1/openapi.json']);
+        expect(on.filter((r) => !off.includes(r)).sort()).toEqual(['GET /api/v1/openapi.json']);
     });
 
     it('a `documentation` block without `enabled` mounts exactly the default surface — the key never reached it', () => {

@@ -92,7 +92,6 @@ describe("a forced `mode: 'replica'` with no `syncUrl` — refused at constructi
     ['an uppercase FILE: url', () => ({ url: upperFile(files.next()), mode: 'replica' })],
     ['an empty syncUrl, which is unset', () => ({ url: files.next(), mode: 'replica', syncUrl: '' })],
     ['beside a timeout', () => ({ url: files.next(), mode: 'replica', timeout: 5000 })],
-    ['beside an encryptionKey', () => ({ url: files.next(), mode: 'replica', encryptionKey: 'aes-256-key' })],
   ])("%s: VALIDATION_ERROR / 400, in the spec contract's words", (_name, config) => {
     const refusal = refusalOf(() => new TursoDriver(config()));
 

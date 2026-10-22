@@ -35,6 +35,7 @@ import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.tes
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJ = 'qa_ticket';
 const GUARD_SET = 'qa_ticket_guard';
@@ -84,6 +85,9 @@ async function boot(policies: Policy[]) {
     ],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   // [#21516] The authz resolver reads these on every grant resolution; in a
   // deployment the auth and security plugins register them. This harness
   // composes neither, so the ones its app does not declare are registered

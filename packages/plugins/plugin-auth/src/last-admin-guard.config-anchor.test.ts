@@ -6,7 +6,7 @@
  * declared administrator list.
  *
  * The platform-admin re-anchor gave `resolveAuthzContext` a second anchor
- * beside the unscoped `admin_full_access` grant — a `sys_user` row whose own
+ * beside the Default Organization's `admin_full_access` grant — a `sys_user` row whose own
  * `email` is on `OS_PLATFORM_OWNER_EMAIL` AND whose `email_verified` reads
  * verified. Two consequences this file pins, because they are the two halves of
  * one invariant and each is silently wrong without the other:
@@ -35,7 +35,7 @@
  *
  * ⚠️ [#11663 L5] A THIRD consequence joined those two, and the suite at the end
  * of this file is it: the grant anchor is now POSTURE-KEYED. Under a walled
- * posture the unscoped `admin_full_access` grant confers nothing, so the
+ * posture no `admin_full_access` grant confers anything, so the
  * enumeration must not count it — an enumeration that does would permit exactly
  * the write that ends the last CONFIG-anchored administrator's standing. Every
  * arm in this file therefore declares its posture rather than inheriting the
@@ -52,6 +52,7 @@ import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 
 import { registerLastAdminGuard, USER_STANDING_KEYS, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const ENV = 'OS_PLATFORM_OWNER_EMAIL';
 /**
@@ -66,6 +67,8 @@ const MULTI_ORG_ENV = 'OS_MULTI_ORG_ENABLED';
 const SYSTEM = { context: { isSystem: true } } as const;
 const OWNER = 'owner@corp.example';
 const SECOND = 'second@corp.example';
+/** [ADR-0131 D5] The Default Organization (`slug = 'default'`), the owner of a grant that anchors under `single`. */
+const DEFAULT_ORG = 'org_default';
 
 const sysUser = {
   name: 'sys_user',
@@ -92,6 +95,18 @@ const sysMember = {
     user_id: { name: 'user_id', type: 'text' as const },
     organization_id: { name: 'organization_id', type: 'text' as const },
     role: { name: 'role', type: 'text' as const },
+  },
+};
+
+/** [ADR-0131 D5] The organization object, so the Default Organization the anchor reads exists. */
+const sysOrganization = {
+  name: 'sys_organization',
+  label: 'Organization',
+  managedBy: 'better-auth',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    name: { name: 'name', type: 'text' as const },
+    slug: { name: 'slug', type: 'text' as const },
   },
 };
 
@@ -194,17 +209,22 @@ function requestPosture(value: 'single' | 'group' | 'isolated' | undefined): voi
   else process.env[POSTURE_ENV] = value;
 }
 
-async function boot(opts: { unguarded?: boolean } = {}): Promise<ObjectQL> {
+async function boot(opts: { unguarded?: boolean; legacyStore?: boolean } = {}): Promise<ObjectQL> {
   const engine = new ObjectQL();
   engines.push(engine);
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   driverOf.set(engine, driver);
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const o of [sysUser, sysMember, sysPermissionSet, sysUserPermissionSet, sysMetadataActivation]) {
+  for (const o of [sysUser, sysMember, sysOrganization, sysPermissionSet, sysUserPermissionSet, sysMetadataActivation]) {
     engine.registry.registerObject(o as never);
   }
   await engine.syncSchemas();
+  await engine.insert('sys_organization', { id: DEFAULT_ORG, name: 'Default Organization', slug: 'default' }, SYSTEM);
+  // An organization-less row ({@link seedLegacyRow}) exists only on a store
+  // built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): the
+  // cases that seed one ask for that store.
+  if (opts.legacyStore) await relaxEveryRegisteredTenantColumn(engine);
   // [ADR-0131 D3/D4] The set a grant names is the catalog's definition.
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
   if (!opts.unguarded) {
@@ -217,13 +237,12 @@ async function boot(opts: { unguarded?: boolean } = {}): Promise<ObjectQL> {
 const driverOf = new WeakMap<ObjectQL, SqlDriver>();
 
 /**
- * [#11663 L5] Seed an organization-less legacy row — the unscoped
- * `admin_full_access` grant and its catalog row — as a database written before
- * the walled half of ADR-0131 C8 stage 8b holds it. Since that lift a system
- * write can no longer create such a row under a wall (the engine refuses the
- * organization-less insert), so it goes straight through the driver. Under
- * `single` with no organization object the engine left the same row NULL, so
- * the rig is unchanged there.
+ * [#11663 L5] Seed an organization-less legacy row — an `admin_full_access`
+ * grant owned by no organization, and its catalog row — as a database written
+ * before 18.x holds it (boot with `legacyStore`). No system write can create
+ * such a row any more: the engine derives the Default Organization under
+ * `single` and refuses the insert under a wall (ADR-0131 D9), so it goes
+ * straight through the driver.
  */
 async function seedLegacyRow(engine: ObjectQL, object: string, row: Record<string, unknown>): Promise<void> {
   await driverOf.get(engine)!.create(object, row as never);
@@ -280,7 +299,13 @@ describe('[#11663 L2] the enumeration counts CONFIG-derived administrators', () 
     await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
     await engine.insert(
       'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_grant', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
+      {
+        id: 'ups_1',
+        user_id: 'usr_grant',
+        permission_set_id: 'ps_a',
+        permission_set: ADMIN_FULL_ACCESS,
+        organization_id: DEFAULT_ORG,
+      },
       SYSTEM,
     );
 
@@ -339,7 +364,7 @@ describe('[#11663 L2] the FIFTH write shape is judged', () => {
     expect((await readUser(engine, 'usr_owner'))?.email).toBe('personal@example.com');
   });
 
-  it('ALLOWS it when the same user also holds the legacy grant — under `single`', async () => {
+  it('ALLOWS it when the same user also holds the Default Organization\'s grant — under `single`', async () => {
     // Standing that survives the write through the OTHER anchor is standing
     // that survives — the enumeration is one function over both.
     //
@@ -355,7 +380,13 @@ describe('[#11663 L2] the FIFTH write shape is judged', () => {
     await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
     await engine.insert(
       'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_owner', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
+      {
+        id: 'ups_1',
+        user_id: 'usr_owner',
+        permission_set_id: 'ps_a',
+        permission_set: ADMIN_FULL_ACCESS,
+        organization_id: DEFAULT_ORG,
+      },
       SYSTEM,
     );
 
@@ -414,71 +445,110 @@ describe('[#11663 L2] reverse verification — the same writes on an UNGUARDED e
 
 // ───────────────────────────────────────────────────────────────────────────
 /**
- * [#11663 L5] The grant anchor is POSTURE-KEYED, and this enumeration is keyed
- * with it — one anchor, two readers, ONE answer.
+ * [#11663 L5, ADR-0131 D1/D5] The grant anchor is POSTURE-KEYED and
+ * OWNER-KEYED, and this enumeration is keyed with it — one anchor, two
+ * readers, ONE answer.
  *
- * `resolveAuthzContext` §6b stopped deriving `PLATFORM_ADMIN` from an unscoped
- * `admin_full_access` grant under a walled posture. This guard reads the SAME
- * anchor to answer "who administers this environment", and its header binds it
- * to that derivation: 「the enumeration must answer the SAME question
- * `resolveAuthzContext` does」. Keyed on one side only, the two disagree on a
- * walled rig that still holds a legacy row — and the guard then believes an
- * administrator remains when none does.
+ * `resolveAuthzContext` §6b derives `PLATFORM_ADMIN` from an `admin_full_access`
+ * grant only under `single`, and only from the grant the Default Organization
+ * owns (`grantAnchorsPlatformStanding`): under a walled posture no grant
+ * anchors, and an organization-less grant — the legacy row a store built
+ * before 18.x may still hold — anchors nothing in any posture. This guard reads
+ * the SAME anchor to answer "who administers this environment", and its header
+ * binds it to that derivation: 「the enumeration answers the SAME question the
+ * derivation does」. Keyed on one side only, the two disagree on a rig that
+ * holds such a row — and the guard then believes an administrator remains when
+ * none does.
  *
- * ⛔ BOTH directions are pinned, deliberately, and the `single` control is not
- * decoration: keying the enumeration is only correct if `single` keeps counting
- * that row. Under `single` the row is still that rig's anchor (Choice 4A), its
- * zero-config first-user promotion still mints it, and #11979 is the card that
- * disposes of it. A one-sided pin would let a later edit key `single` too and
- * stay green, which is the zero-config lockout this card exists NOT to ship.
+ * ⛔ BOTH keys are pinned in BOTH directions, and the controls are not
+ * decoration: the Default Organization's grant must keep counting under
+ * `single` (it is that rig's anchor, the row its zero-config first-user
+ * promotion writes — Choice 4A), and it must stop counting under a wall. A
+ * one-sided pin would let a later edit stop counting the Default Organization's
+ * grant everywhere and stay green, which is the zero-config lockout Choice 4A
+ * forbids; or count the organization-less row again, which is the fail-open
+ * this file now refuses.
  *
- * ⚠️ Direction of the change, stated because it is easy to read backwards: under
- * a wall the guard now refuses MORE (it protects the config-anchored
- * administrator it used to let a write take away) and refuses WRONGLY less (it
- * stops claiming that revoking an inert row removes the last administrator).
- * Both are narrowings toward the already-declared model.
+ * ⚠️ Direction of the change, stated because it is easy to read backwards: the
+ * guard now refuses MORE (it protects the config-anchored administrator it used
+ * to let a write take away while counting a holder nobody else recognises) and
+ * refuses WRONGLY less (it stops claiming that revoking an inert row removes the
+ * last administrator). Both are narrowings toward the declared model.
  */
-describe('[#11663 L5] under a WALLED posture the legacy grant is not an administrator', () => {
-  /** A rig with one CONFIG-anchored admin and one LEGACY grant holder. */
-  async function bootTwoAnchors(): Promise<ObjectQL> {
-    const engine = await boot();
-    await seedUser(engine, 'usr_owner', OWNER, true);
+describe('[#11663 L5, ADR-0131 D5] a grant anchors only when the Default Organization owns it, and only under `single`', () => {
+  type Owner = 'default-organization' | 'none';
+
+  /**
+   * One CONFIG-anchored admin and one GRANT holder. `none` is the legacy
+   * organization-less row, seeded beneath the engine on a pre-18 store; the
+   * Default Organization's grant goes through the engine as the promotion
+   * writes it.
+   */
+  async function bootGrantHolder(owner: Owner, withConfigOwner: boolean): Promise<ObjectQL> {
+    const engine = await boot({ legacyStore: owner === 'none' });
+    if (withConfigOwner) await seedUser(engine, 'usr_owner', OWNER, true);
     await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
-    await seedLegacyRow(engine, 'sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true });
-    await seedLegacyRow(
-      engine,
-      'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
-    );
+    await seedGrant(engine, owner);
     return engine;
   }
 
-  it('⭐ REFUSES the write that ends the last config-anchored standing — the legacy holder is no longer a survivor', async () => {
-    // The blocking half. Before the enumeration was keyed, the guard counted
-    // `usr_legacy` and waved this write through, leaving a walled deployment
-    // with NO platform administrator at all: §6b no longer recognises that
-    // holder, so nobody was left. Refusing it is the guard's entire job.
-    for (const walled of ['group', 'isolated'] as const) {
-      requestPosture(walled);
-      declare(OWNER);
-      const engine = await bootTwoAnchors();
+  async function seedGrant(engine: ObjectQL, owner: Owner): Promise<void> {
+    const grant = { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS };
+    if (owner === 'none') {
+      await seedLegacyRow(engine, 'sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true });
+      await seedLegacyRow(engine, 'sys_user_permission_set', grant);
+    } else {
+      await engine.insert(
+        'sys_permission_set',
+        { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true, organization_id: DEFAULT_ORG },
+        SYSTEM,
+      );
+      await engine.insert('sys_user_permission_set', { ...grant, organization_id: DEFAULT_ORG }, SYSTEM);
+    }
+  }
 
-      await expect(
-        engine.update('sys_user', { id: 'usr_owner', email_verified: false }, SYSTEM),
-        walled,
-      ).rejects.toThrow(/OS_PLATFORM_OWNER_EMAIL/);
-      expect((await readUser(engine, 'usr_owner'))?.email_verified, walled).toBeTruthy();
+  it('⭐ REFUSES the write that ends the last config-anchored standing under a wall — neither grant holder is a survivor', async () => {
+    // The blocking half. Counting `usr_legacy` would wave this write through,
+    // leaving a walled deployment with NO platform administrator at all: §6b
+    // recognises no grant holder there, so nobody would be left.
+    for (const walled of ['group', 'isolated'] as const) {
+      for (const owner of ['default-organization', 'none'] as const) {
+        requestPosture(walled);
+        declare(OWNER);
+        const engine = await bootGrantHolder(owner, true);
+
+        await expect(
+          engine.update('sys_user', { id: 'usr_owner', email_verified: false }, SYSTEM),
+          `${walled} / ${owner}`,
+        ).rejects.toThrow(/OS_PLATFORM_OWNER_EMAIL/);
+        expect((await readUser(engine, 'usr_owner'))?.email_verified, `${walled} / ${owner}`).toBeTruthy();
+      }
     }
   });
 
-  it('…and `single` ALLOWS the identical write on the identical fixture — the control that keeps the arm above honest', async () => {
-    // Same fixture, same write, opposite answer, and the ONLY difference is the
-    // posture. Without this the arm above would pass just as well on a guard
-    // that had stopped counting the grant anchor everywhere — which is the
+  it('⭐ REFUSES it under `single` too when the surviving grant is organization-less — that row anchors nothing (ADR-0131 D1)', async () => {
+    // The fail-open this card closed. Since the resolver stopped reading the
+    // organization-less row (18.x step 7a-2), its holder is no administrator
+    // anywhere; a guard that still counted it let this write take the
+    // deployment's only platform administrator.
+    requestPosture('single');
+    declare(OWNER);
+    const engine = await bootGrantHolder('none', true);
+
+    await expect(
+      engine.update('sys_user', { id: 'usr_owner', email_verified: false }, SYSTEM),
+    ).rejects.toThrow(/OS_PLATFORM_OWNER_EMAIL/);
+    expect((await readUser(engine, 'usr_owner'))?.email_verified).toBeTruthy();
+  });
+
+  it('…and `single` ALLOWS the identical write when the Default Organization owns the grant — the control that keeps both arms above honest', async () => {
+    // Same write, opposite answer; the only differences are the posture and
+    // the owner. Without this the arms above would pass just as well on a
+    // guard that had stopped counting the grant anchor everywhere — the
     // zero-config lockout Choice 4A forbids.
     requestPosture('single');
     declare(OWNER);
-    const engine = await bootTwoAnchors();
+    const engine = await bootGrantHolder('default-organization', true);
 
     await expect(
       engine.update('sys_user', { id: 'usr_owner', email_verified: false }, SYSTEM),
@@ -486,43 +556,35 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     expect((await readUser(engine, 'usr_owner'))?.email_verified).toBeFalsy();
   });
 
-  it('⛔ stops refusing WRONGLY: revoking the now-inert grant is not "removing the last administrator"', async () => {
-    // The inverse. On a walled rig whose only grant-anchored holder is the
-    // legacy row, that row confers nothing — so a write that revokes it takes
-    // no standing away and must not be refused as though it did. Before the
-    // key, this same delete was refused with a message naming the last
-    // administrator.
-    requestPosture('isolated');
-    declare(undefined);
-    const engine = await boot();
-    await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
-    await seedLegacyRow(engine, 'sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true });
-    await seedLegacyRow(
-      engine,
-      'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
-    );
+  it('⛔ stops refusing WRONGLY: revoking an inert grant is not "removing the last administrator"', async () => {
+    // The inverse. Where the grant confers nothing — any grant under a wall,
+    // the organization-less row under `single` — revoking it takes no standing
+    // away and must not be refused as though it did.
+    const inert: Array<['single' | 'isolated', Owner]> = [
+      ['isolated', 'default-organization'],
+      ['isolated', 'none'],
+      ['single', 'none'],
+    ];
+    for (const [posture, owner] of inert) {
+      requestPosture(posture);
+      declare(undefined);
+      const engine = await bootGrantHolder(owner, false);
 
-    await expect(
-      engine.delete('sys_user_permission_set', { where: { id: 'ups_1' }, ...SYSTEM }),
-    ).resolves.toBeDefined();
+      await expect(
+        engine.delete('sys_user_permission_set', { where: { id: 'ups_1' }, ...SYSTEM }),
+        `${posture} / ${owner}`,
+      ).resolves.toBeDefined();
+    }
   });
 
-  it('…and `single` still REFUSES that same revocation — the row is that rig\'s anchor', async () => {
-    // The other side of the same control. Under `single` the legacy holder IS
-    // the administrator, so revoking the grant empties the environment and the
-    // guard refuses. ⛔ If this ever goes green-by-allowing, the key has leaked
-    // onto the default posture.
+  it('…and `single` still REFUSES that revocation when the Default Organization owns the grant — the row is that rig\'s anchor', async () => {
+    // The other side of the same control. Under `single` the Default
+    // Organization's grant holder IS the administrator, so revoking the grant
+    // empties the environment and the guard refuses. ⛔ If this ever goes
+    // green-by-allowing, the key has leaked onto the anchor itself.
     requestPosture('single');
     declare(undefined);
-    const engine = await boot();
-    await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
-    await seedLegacyRow(engine, 'sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true });
-    await seedLegacyRow(
-      engine,
-      'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
-    );
+    const engine = await bootGrantHolder('default-organization', false);
 
     await expect(
       engine.delete('sys_user_permission_set', { where: { id: 'ups_1' }, ...SYSTEM }),
@@ -549,51 +611,45 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     ).resolves.toBeDefined();
   });
 
-  it('the emptied-not-fresh refusal names the remedy that WORKS under a wall', async () => {
-    // [#11663 L5] The refusal itself is unchanged — a switched-off
-    // `admin_full_access` with stranded unscoped grants is still the
-    // evidence, and the write is still refused. What changed is that 「restore
-    // the row」 stopped ending the emptiness on a walled rig, so the message
-    // names the channel that does.
-    requestPosture('isolated');
-    declare(undefined);
-    const engine = await boot();
-    await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
-    await switchAdminSetOff(engine);
-    await seedLegacyRow(
-      engine,
-      'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
-    );
+  it('a switched-off set is emptied-not-fresh evidence only through a grant that anchors', async () => {
+    // [#6084, ADR-0131 D5] The evidence is a stranded grant the anchor reads.
+    // Under a wall no grant anchors (standing is configuration only, and
+    // restoring a row could not end the emptiness), and an organization-less
+    // grant anchors nothing anywhere — so neither is evidence, and the write is
+    // read as the bootstrap window it is: nobody holds standing to lose.
+    const notEvidence: Array<['single' | 'isolated', Owner]> = [
+      ['isolated', 'default-organization'],
+      ['isolated', 'none'],
+      ['single', 'none'],
+    ];
+    for (const [posture, owner] of notEvidence) {
+      requestPosture(posture);
+      declare(undefined);
+      const engine = await boot({ legacyStore: owner === 'none' });
+      await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
+      await switchAdminSetOff(engine);
+      await seedGrant(engine, owner);
 
-    await expect(
-      engine.delete('sys_user', { where: { id: 'usr_legacy' }, ...SYSTEM }),
-    ).rejects.toThrow(/OS_PLATFORM_OWNER_EMAIL/);
+      await expect(
+        engine.delete('sys_user', { where: { id: 'usr_legacy' }, ...SYSTEM }),
+        `${posture} / ${owner}`,
+      ).resolves.toBeDefined();
+    }
   });
 
-  it('…and under `single` that same refusal does NOT — the clause is conditional, not unconditional prose', async () => {
-    // The control for the clause above: it must come from the posture, not
-    // from the message having grown a sentence for everybody.
+  it('…and under `single` the Default Organization\'s stranded grant IS the evidence — refused, naming the switch', async () => {
+    // The control for the arm above: the refusal still fires where the grant
+    // anchors, so the permits above come from the key and not from a guard
+    // that stopped reading the ledger.
     requestPosture('single');
     declare(undefined);
     const engine = await boot();
     await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
     await switchAdminSetOff(engine);
-    await seedLegacyRow(
-      engine,
-      'sys_user_permission_set',
-      { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
-    );
+    await seedGrant(engine, 'default-organization');
 
-    let message = '';
-    try {
-      await engine.delete('sys_user', { where: { id: 'usr_legacy' }, ...SYSTEM });
-    } catch (err) {
-      message = String((err as Error)?.message ?? err);
-    }
-    // The refusal really fired — without this the absence below would be the
-    // absence of any message at all.
-    expect(message).toMatch(/switched OFF/);
-    expect(message).not.toMatch(/OS_PLATFORM_OWNER_EMAIL/);
+    await expect(
+      engine.delete('sys_user', { where: { id: 'usr_legacy' }, ...SYSTEM }),
+    ).rejects.toThrow(/switched OFF/);
   });
 });

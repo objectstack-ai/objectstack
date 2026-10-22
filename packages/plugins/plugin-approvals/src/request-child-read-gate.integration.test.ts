@@ -56,6 +56,7 @@ import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const ACTION = 'sys_approval_action';
 const APPROVER_INDEX = 'sys_approval_approver';
@@ -121,6 +122,9 @@ async function boot(
     engine.registry.registerObject(def as any, 'approvals-child-read-gate-test', 'approvals-child-read-gate-test');
   }
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
 
   const recordA = 'sheet_a';
   const recordB = 'sheet_b';

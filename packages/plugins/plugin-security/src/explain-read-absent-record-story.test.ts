@@ -48,6 +48,7 @@ import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { explainAccess, type ExplainEngineDeps } from './explain-engine.js';
 import { PermissionEvaluator } from './permission-evaluator.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -128,6 +129,9 @@ beforeAll(async () => {
     ],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   // Both masters belong to another user; only the second is shared to the
   // caller, at `read`, which lets the caller read it and edit neither.
   await engine.insert(MASTER, [

@@ -87,6 +87,7 @@ import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { SettingsServicePlugin } from '@objectstack/service-settings';
 import '@objectstack/service-storage';
 import '@objectstack/plugin-audit';
+import { withDefaultOrganization } from './default-organization-plugin.testkit.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(HERE, '..');
@@ -414,7 +415,9 @@ async function bootServedStack(dbFile: string): Promise<void> {
   const stack = await createStandaloneStack({ projectRoot: dir, databaseUrl: `file:${dbFile}` });
   const runtime = new Runtime({ cluster: false });
   const kernel = runtime.getKernel();
-  for (const plugin of stack.plugins) await kernel.use(plugin as any);
+  // A real served boot composes authentication, whose Default Organization
+  // stamps the seed rows (ADR-0131 D9); the fresh tenant column is NOT NULL (D1).
+  for (const plugin of withDefaultOrganization(stack.plugins)) await kernel.use(plugin as any);
   for (const plugin of await buildDataMigrationPlugins({ storage: true, automation: true, audit: true })) {
     await kernel.use(plugin as any);
   }
@@ -621,7 +624,9 @@ describe('[#21391] a one-shot boot arms no lifecycle sweep', () => {
     const stack = await createStandaloneStack({ projectRoot: dir, databaseUrl: `file:${c.dbFile}`, skipSeedData: true });
     const runtime = new Runtime({ cluster: false });
     const kernel = runtime.getKernel();
-    for (const plugin of stack.plugins) await kernel.use(plugin as any);
+    // A real served boot composes authentication, whose Default Organization
+  // stamps the seed rows (ADR-0131 D9); the fresh tenant column is NOT NULL (D1).
+  for (const plugin of withDefaultOrganization(stack.plugins)) await kernel.use(plugin as any);
     await runtime.start();
     try {
       expect(armed(kernel)).toBe(true);

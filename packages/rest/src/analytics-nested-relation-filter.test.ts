@@ -51,6 +51,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { AnalyticsServicePlugin, type AnalyticsService } from '@objectstack/service-analytics';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'rest_an_nested_ledger';
 const OWNER = 'rest_an_nested_owner';
@@ -194,6 +195,9 @@ async function boot(opts: { caps?: 'objectql'; getReadScope?: (object: string) =
     ],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
 
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },

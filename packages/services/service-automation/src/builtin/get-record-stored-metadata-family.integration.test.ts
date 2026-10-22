@@ -48,16 +48,17 @@ import { hashSpec } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { AutomationServicePlugin } from '../plugin.js';
 import type { AutomationEngine } from '../engine.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const KEYED = /^hmac-sha256:[0-9a-f]{64}$/;
 
-/** The synthetic credential, in the slot the datasource redactor withholds (turso's `encryptionKey`). */
+/** The synthetic credential, in the slot the datasource redactor withholds (turso's `authToken`). */
 const SENTINEL = 'flow-read-family-sentinel-4d2b';
 const DS_NAME = 'pin_flow_ds';
 /** Non-credential configuration of the same body: present in a projection of THIS row. */
 const DS_URL = 'libsql://pin-flow.example.invalid';
-const DS_BODY = { name: DS_NAME, label: 'Pin flow DS', driver: 'turso', config: { url: DS_URL, encryptionKey: SENTINEL } };
+const DS_BODY = { name: DS_NAME, label: 'Pin flow DS', driver: 'turso', config: { url: DS_URL, authToken: SENTINEL } };
 const STORED_HASH = hashSpec(DS_BODY);
 
 /** An ordinary object a flow copies what it read into. */
@@ -148,6 +149,9 @@ describe('flow get_record serves the stored-metadata family the way the data doo
     ql.registerDriver(driver, true);
     ql.registry.registerObject(COPY_OBJECT as any, 'pin-21519', 'pin-21519');
     await ql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(ql);
 
     const metadata = JSON.stringify(DS_BODY);
     await ql.insert('sys_metadata', {

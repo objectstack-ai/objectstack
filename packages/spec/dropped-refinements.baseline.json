@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 240,
-    "droppedRefinementSites": 812,
+    "droppedRefinementSites": 811,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -998,7 +998,6 @@
     "data/TursoConfig": {
       "sites": [
         "",
-        "encryptionKey",
         "syncUrl",
         "url"
       ]

@@ -68,7 +68,7 @@ Turso / libSQL Connection Configuration
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | libSQL endpoint or local file: a remote libsql/https Turso URL, a local file written as a file: URL (never a bare path), or :memory: |
 | **authToken** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config` |
-| **encryptionKey** | `string` | optional | AES-256 encryption key for the local database file (local/replica modes) |
+| **encryptionKey** | `never` | optional | [REMOVED] `turso config.encryptionKey` was removed in @objectstack/spec 18 and @objectstack/driver-turso 18 (ADR-0049) — it never encrypted anything, in any mode: a local or embedded-replica file is read and written through a SQLite engine that has no encryption codec, and the driver never handed the key to a remote database, whose storage encryption the server configures. Delete the key. A local file that must be encrypted at rest belongs on an encrypted disk or volume. Run `os migrate meta --from 17` to list the mechanical edits for the unset and remote-url cases; `--write` applies the ones it can prove, and you delete the key from a local or replica datasource by hand. |
 | **concurrency** | `integer` | optional | Maximum concurrent requests to the remote database |
 | **syncUrl** | `string` | optional | Remote sync URL for embedded-replica mode: a libsql or https Turso endpoint |
 | **sync** | `{ intervalSeconds?: integer; onConnect?: boolean }` | optional | Embedded-replica sync configuration (requires `syncUrl`) |

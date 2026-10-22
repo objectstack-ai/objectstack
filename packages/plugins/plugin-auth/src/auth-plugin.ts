@@ -1692,10 +1692,13 @@ export class AuthPlugin implements Plugin {
         // then switch the guard off for all of the above. Every hook registers
         // at priority 20 so the ADR-0092 checks above (10) still answer first
         // for user-context callers. See last-admin-guard.ts.
-        registerLastAdminGuard(engine, {
+        const lastAdminGuard = registerLastAdminGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.last-admin-guard',
           logger: ctx.logger,
         });
+        // [#24948] The same question, asked before an organization delete's
+        // first write (`AuthManager.assertOrganizationDeletable`).
+        this.authManager?.setOrganizationDeleteStandingJudge(lastAdminGuard.judgeOrganizationDelete);
         // [#15784] The COURTESY half of #15409's ruling: when a membership
         // ends, the session's claim on THAT organization ends with it —
         // re-pointed if the user still belongs somewhere, revoked if not.
@@ -3647,26 +3650,35 @@ export class AuthPlugin implements Plugin {
         // non-loopback host, `native` may use http only on exactly `localhost`,
         // `127.0.0.1` or `[::1]` — and nothing here re-judges a URI.
         //
-        // Any other value (the form's `user-agent-based` and `public`, which
-        // have no `application_type`, or anything else) keeps the outcome it
-        // always had: registered and judged as `web`. Refusing it would narrow
-        // what this door accepts, and such a narrowing ships its loud half
-        // first (the standing post-GA rule, #6015 `6292005854`): one warning
-        // per registration, naming the value. No type at all is the
-        // provider's own default, `web`, and says nothing.
+        // The door accepts exactly those two types. Any other value present in
+        // the body — the form's former `user-agent-based` and `public`, which
+        // have no `application_type`, an empty string, a non-string, anything
+        // else — is refused here with the route's own 400 `INVALID_REQUEST`,
+        // before the provider is called, so nothing is stored. It is never
+        // registered as `web` and never mapped to another type: that silent
+        // substitution issued a confidential web client, with a secret, for a
+        // request that asked for something else. The refusal ships in 18.x as
+        // a breaking minor (the standing post-GA rule as amended, #6015
+        // `6303865025`). No type at all — absent, or JSON `null` — is the
+        // provider's own default, `web`, and is unchanged.
         let applicationType: 'web' | 'native' = 'web';
         if (type === 'web' || type === 'native') {
           applicationType = type;
         } else if (type !== undefined && type !== null) {
-          const requestedType = typeof type === 'string' ? type.slice(0, 64) : `(${typeof type})`;
-          ctx.logger.warn(
-            `[AuthPlugin] sys-oauth-application/register: application type ${JSON.stringify(requestedType)} is not ` +
-              "one the OAuth provider judges (it knows 'web' and 'native'), so this client is registered and judged " +
-              "as 'web': https redirect URIs on non-loopback hosts only, and a client secret is issued. Register it " +
-              "as 'web', or as 'native' to use an http://localhost, http://127.0.0.1 or http://[::1] redirect URI. " +
-              'A future major version refuses this value.',
-            { requestedType, registeredAs: 'web' },
-          );
+          const shown =
+            typeof type === 'string'
+              ? JSON.stringify(type.length > 64 ? `${type.slice(0, 64)}…` : type)
+              : `(${typeof type})`;
+          return c.json({
+            success: false,
+            error: {
+              code: 'INVALID_REQUEST',
+              message:
+                `type ${shown} is not an application type the OAuth provider judges: send 'web' or 'native', ` +
+                "or no type for 'web'. Choose 'native' for an http://localhost, http://127.0.0.1 or http://[::1] " +
+                "redirect URI; 'web' needs https on a host that is not a loopback address.",
+            },
+          }, 400);
         }
 
         const authApi: any = await this.authManager!.getApi();

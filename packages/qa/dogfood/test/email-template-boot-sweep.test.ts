@@ -32,6 +32,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { EmailServicePlugin } from '@objectstack/plugin-email';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { isSystem: true, positions: [], permissions: [] };
 const TABLE = 'sys_email_template';
@@ -100,6 +101,10 @@ const onTable = (statements: string[]) => statements.filter((s) => s.includes(`\
  * every row carrying stale wording a send must never render.
  */
 async function seedSharedSlot(engine: ObjectQL): Promise<void> {
+  // `etpl_z` belongs to no organization, which only a store built before 18.x
+  // can hold (ADR-0131 D1 makes a fresh tenant column NOT NULL): the table is
+  // that store's.
+  await relaxTenantColumns(engine as any, [TABLE]);
   const rows: Array<[string, string | null, string]> = [
     ['etpl_m', 'org_b', 'en-US'],
     ['etpl_z', null, 'en-US'],

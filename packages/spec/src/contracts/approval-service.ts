@@ -217,15 +217,36 @@ export interface ApprovalRequestRow {
    */
   submitted_at?: string;
   // ── Display enrichment (inbox-facing; resolved by the service) ─────
-  /** Human label of the originating flow (e.g. "Project Budget Approval"). */
+  /**
+   * Human label of the originating flow (e.g. "Project Budget Approval"), in
+   * the READER's locale: the translation `flows.<flow>.label` picked through
+   * the deployment's i18n service in the read's `ExecutionContext.locale`,
+   * falling back to the stored snapshot, the flow's authored label as it stood
+   * when the request opened (`sys_approval_request.process_label`, else the
+   * humanized flow name when no label was authored). A read with no
+   * locale, with no i18n service, or whose pack holds no entry is served the
+   * snapshot. Picked on the rows this service returns (`listRequests`,
+   * `getRequest`, and the request a decision or other write echoes); the
+   * stored column is never rewritten, so the generic data door and the list
+   * views over `sys_approval_request` serve the snapshot.
+   */
   process_label?: string;
-  /** Human label of the approval step / node (e.g. "Manager Review"). */
+  /**
+   * Human label of the approval step / node (e.g. "Manager Review"), in the
+   * READER's locale: the translation `flows.<flow>.approvals.<node_id>.label`
+   * picked the way {@link ApprovalRequestRow.process_label} is, falling back
+   * to the stored snapshot, the Approval node's authored label as it stood
+   * when the request reached the step (`sys_approval_request.current_step_label`).
+   * Always the same value as {@link ApprovalRequestRow.current_step_label}.
+   */
   step_label?: string;
   /**
-   * The step's label under the declared column's own name:
-   * `sys_approval_request.current_step_label`, the Approval node's authored
-   * label as it stood when the request reached the step (the value
-   * {@link ApprovalRequestRow.step_label} carries). Served so a page bound to
+   * The step's label under the declared column's own name,
+   * `sys_approval_request.current_step_label`: the value
+   * {@link ApprovalRequestRow.step_label} carries, in the reader's locale and
+   * falling back to the column's stored snapshot (the Approval node's
+   * authored label as it stood when the request reached the step). The column
+   * itself is never rewritten by a read. Served so a page bound to
    * `sys_approval_request` can list the step by its label. Such a page names
    * the object's declared fields, and `step_label` is not one, so without this
    * member it can list only `current_step`, the node's machine id.
@@ -239,7 +260,12 @@ export interface ApprovalRequestRow {
   record_title?: string;
   /** Display name of the submitter (`sys_user.name`), when resolvable. */
   submitter_name?: string;
-  /** Schema label of the target object (e.g. "Project" for `showcase_project`). */
+  /**
+   * Label of the target object (e.g. "Project" for `showcase_project`), in the
+   * READER's locale: the translation `objects.<object>.label` picked the way
+   * {@link ApprovalRequestRow.process_label} is, falling back to the object's
+   * schema label.
+   */
   object_label?: string;
   /**
    * Display names for user-id entries in `pending_approvers`

@@ -84,8 +84,9 @@ const FAMILY = [
     valid: {}, literal: 'libsql://x.turso.io', placeholder: 'libsql://${TURSO_HOST}' },
   { name: 'turso syncUrl', schema: TursoConfigSchema, key: 'syncUrl',
     valid: { url: 'file:./data/replica.db' }, literal: 'libsql://x.turso.io', placeholder: 'libsql://${TURSO_SYNC_HOST}' },
-  { name: 'turso encryptionKey', schema: TursoConfigSchema, key: 'encryptionKey',
-    valid: { url: 'file:./data/local.db' }, literal: 'a'.repeat(32), placeholder: '${TURSO_ENCRYPTION_KEY}' },
+  // No `turso encryptionKey` row since #25050: the key is a `retiredKey()`
+  // tombstone, refused in every mode for every value (`turso.test.ts`), so
+  // there is no literal left for the placeholder judgement to accept.
   { name: 'sqlite filename', schema: SqliteConfigSchema, key: 'filename',
     valid: {}, literal: './data/objectstack.db', placeholder: '${DATA_DIR}/objectstack.db' },
   { name: 'sqlite-wasm filename', schema: SqliteWasmConfigSchema, key: 'filename',

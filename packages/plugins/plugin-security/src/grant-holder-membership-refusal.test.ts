@@ -39,6 +39,7 @@ import {
   GRANT_HOLDER_MEMBERSHIP_HOOK_PACKAGE,
   registerGrantHolderMembershipRefusal,
 } from './grant-holder-membership-refusal.js';
+import { relaxEveryTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -139,6 +140,9 @@ async function boot(opts: BootOptions = {}) {
     ],
   } as any);
   await engine.syncSchemas();
+  // The organization-less holdings and rows below exist only on a store built
+  // before 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is it.
+  await relaxEveryTenantColumn(engine, [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet]);
   // `sys_user` stays registered and unprovisioned, as in the sibling suites:
   // the engine's own `user_id` existence probe then cannot run and stands
   // down, so what is measured here is the membership predicate alone.

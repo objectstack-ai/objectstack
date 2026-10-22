@@ -39,6 +39,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SqlHttpOutbox } from './sql-http-outbox.js';
 import { MemoryHttpOutbox } from './memory-http-outbox.js';
 import { HttpDelivery, SYS_HTTP_DELIVERY } from './objects/http-delivery.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 let engine: ObjectQL;
 let driver: SqlDriver;
@@ -54,6 +55,9 @@ beforeEach(async () => {
     await engine.init();
     engine.registry.registerObject(HttpDelivery as any, '@objectstack/service-messaging');
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 });
 
 afterEach(async () => {

@@ -146,7 +146,9 @@ for (const plugin of stack.plugins) await kernel.use(plugin);
 await kernel.use(new PlatformObjectsPlugin());
 await runtime.start();
 const ql = kernel.getService('objectql');
-const SYSTEM = { context: { isSystem: true } };
+// The fixture's rows name an organization: a fresh tenant column is NOT NULL
+// (ADR-0131 D1), and this stack composes no authentication to derive one.
+const SYSTEM = { context: { isSystem: true, tenantId: 'org_fixture' } };
 await ql.insert('sys_metadata_history', {
   id: 'h_21529', event_seq: 1, name: 'os21529_note', type: 'object', version: 1,
   operation_type: 'create', recorded_by: 'system', recorded_at: new Date().toISOString(),
@@ -405,7 +407,9 @@ await kernel.use(new SettingsServicePlugin({
 await kernel.use(new StorageServicePlugin({ registerRoutes: false }));
 await runtime.start();
 const ql = kernel.getService('objectql');
-const SYSTEM = { context: { isSystem: true } };
+// The fixture's rows name an organization: a fresh tenant column is NOT NULL
+// (ADR-0131 D1), and this stack composes no authentication to derive one.
+const SYSTEM = { context: { isSystem: true, tenantId: 'org_fixture' } };
 await ql.insert('sys_metadata', {
   type: 'object', name: 'os21552_note', state: 'active',
   metadata: JSON.stringify({ name: 'os21552_note', fields: { title: { type: 'text' } } }),
@@ -414,6 +418,8 @@ await kernel.shutdown();
 
 const raw = new SqlDriver({ client: 'better-sqlite3', connection: { filename: process.env.FIXTURE_DB }, useNullAsDefault: true });
 const k = raw.knex;
+// Rows planted below the writer name the fixture's organization: every table
+// this release created has a NOT NULL tenant column (ADR-0131 D1).
 await k.raw('CREATE TABLE sys_account (id text primary key, provider_id text, account_id text, issuer text, user_id text)');
 await k('sys_account').insert([
   { id: 'acc_1', provider_id: 'github', account_id: 'g-1', issuer: 'github', user_id: 'u1' },
@@ -423,18 +429,18 @@ await k('sys_audit_log').insert({
   id: 'aud_21552', object_name: 'sys_metadata', record_id: 'm_21552', action: 'create',
   new_value: JSON.stringify({
     id: 'm_21552', name: 'ds', type: 'datasource', scope: 'platform',
-    metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: 'cleartext-21552' } }),
+    metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', authToken: 'cleartext-21552' } }),
   }),
 });
 const shard = (await k.raw("select name from sqlite_master where type = 'table' and name glob 'sys_activity__r*'"))[0];
 if (!shard) throw new Error('the control has no sys_activity shard: the rotation did not run');
 await k(shard.name).insert({
-  id: 'act_21552', timestamp: new Date().toISOString(), type: 'create', summary: 'created', object_name: 'sys_metadata', record_id: 'm_21552',
+  organization_id: 'org_fixture', id: 'act_21552', timestamp: new Date().toISOString(), type: 'create', summary: 'created', object_name: 'sys_metadata', record_id: 'm_21552',
   metadata: JSON.stringify({
     old: null,
     new: {
       id: 'm_21552', name: 'ds', type: 'datasource', scope: 'platform',
-      metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: 'cleartext-21552-activity' } }),
+      metadata: JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', authToken: 'cleartext-21552-activity' } }),
     },
   }),
 });
@@ -446,23 +452,23 @@ await k('sys_audit_log').insert({
   new_value: JSON.stringify({ id: 'em_24693', subject: 's', body_text: 'mail-body-sentinel-24693', body_html: null }),
 });
 await k(shard.name).insert({
-  id: 'act_24693', timestamp: new Date().toISOString(), type: 'create', summary: 'created', object_name: 'sys_email', record_id: 'em_24693',
+  organization_id: 'org_fixture', id: 'act_24693', timestamp: new Date().toISOString(), type: 'create', summary: 'created', object_name: 'sys_email', record_id: 'em_24693',
   changed_fields: '[]',
   metadata: JSON.stringify({ old: null, new: { id: 'em_24693', subject: 's', body_text: 'mail-body-sentinel-24693', body_html: null } }),
 });
 await k('sys_comment').insert({
-  id: 'cmt_23857', thread_id: 'sys_metadata:m_21552', body: 'planted below the writer', author_id: 'u1',
+  organization_id: 'org_fixture', id: 'cmt_23857', thread_id: 'sys_metadata:m_21552', body: 'planted below the writer', author_id: 'u1',
   created_at: new Date().toISOString(),
 });
 await k('sys_secret').insert({
   id: 'sec_21552', namespace: 'os21552', key: 'orphan', kms_key_id: 'local', alg: 'aes-256-gcm', version: 1, ciphertext: 'not-a-real-ciphertext',
 });
 await k('sys_file').insert({
-  id: 'file_21552', key: 'attachments/os21552.txt', name: 'os21552.txt', size: 12, scope: 'attachments', status: 'committed',
+  organization_id: 'org_fixture', id: 'file_21552', key: 'attachments/os21552.txt', name: 'os21552.txt', size: 12, scope: 'attachments', status: 'committed',
 });
 // A retired field's column: in the table, in no metadata, holding a value.
 await k.raw('ALTER TABLE os21529_contact ADD COLUMN legacy_note text');
-await k('os21529_contact').insert({ id: 'con_21573', name: 'Ann', legacy_note: 'kept-21573' });
+await k('os21529_contact').insert({ id: 'con_21573', name: 'Ann', legacy_note: 'kept-21573', organization_id: 'org_fixture' });
 await raw.disconnect();
 process.stderr.write('[fixture] seeded\\n');
 process.exit(0);

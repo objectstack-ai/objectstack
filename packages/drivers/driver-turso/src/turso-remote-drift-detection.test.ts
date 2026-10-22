@@ -27,9 +27,12 @@
  *    nowhere, on either face. This is what the `os serve` boot gate reads: a
  *    false finding here would refuse a healthy boot.
  * 2. Each drifted shape (an extra physical column, a declared index the table
- *    lacks, a bare organization key a NULL-safe unique must tighten, over
- *    clean and over duplicate rows) reads alike on both faces, with or without
- *    explicit objects.
+ *    lacks, an 18.0 `COALESCE` organization key against the plain expectation
+ *    on an uncertified nullable table, and a pre-normalized NULL-safe
+ *    declaration over a bare key, over clean and over duplicate rows) reads
+ *    alike on both faces, with or without explicit objects. On a certified
+ *    database the 18.0 key reads as the plain one: no drift on either face
+ *    (ADR-0131 D1).
  * 3. The DDL-free `registerObjectMetadata` (a `skipSchemaSync` boot) fills the
  *    registry the no-argument call walks, and sends nothing to the database.
  * 4. A declared table the database does not hold is skipped, as locally.
@@ -51,6 +54,7 @@ import { createClient, type Client } from '@libsql/client';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 import { replicaFiles } from './replica-file.testkit.js';
+import { initObjectsPre18 } from './pre-18-tenant-column.testkit.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'turso-remote-drift-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -119,6 +123,21 @@ const TENANT = {
 };
 const INDEXED = { name: 'indexed_t', fields: { name: { type: 'text' } }, indexes: [{ fields: ['name'] }] };
 const ALL: Objects = [T, TENANT, INDEXED];
+const TENANT_UNIQUE = 'uniq_tenant_t_organization_id_code';
+/** What 18.0 built under the declared name: the ADR-0120 D3 NULL-safe key part. */
+const COALESCE_18_0 = `CREATE UNIQUE INDEX "${TENANT_UNIQUE}" ON "tenant_t" (COALESCE("organization_id", '__global__'), "code")`;
+/**
+ * `tenant_t` with its unique declared ALREADY NORMALIZED, carrying the NULL-safe
+ * key part itself. ADR-0131 D1: the generators key the plain organization column
+ * now, so this is the one declaration that still yields the ADR-0120 D4
+ * tightening (an input carrying `nullSafeColumns` is honoured verbatim).
+ */
+const TENANT_NULL_SAFE = {
+  name: 'tenant_t',
+  fields: { code: { type: 'text' }, label: { type: 'text' }, organization_id: { type: 'text' } },
+  indexes: [{ name: TENANT_UNIQUE, fields: ['organization_id', 'code'], unique: true, nullSafeColumns: ['organization_id'] }],
+};
+const ALL_NULL_SAFE: Objects = [T, TENANT_NULL_SAFE, INDEXED];
 
 type Door = 'syncSchemasBatch' | 'syncSchema' | 'initObjects';
 const SYNC: Record<Door, (d: TursoDriver, objects: Objects) => Promise<void>> = {
@@ -147,7 +166,12 @@ type Drift = Awaited<ReturnType<TursoDriver['detectManagedDrift']>>;
 
 describe('each drifted shape reads alike on the remote and the local face', () => {
   /** The physical drift each case puts on disk after a clean remote sync, and the finding it must produce. */
-  const CASES: Array<[string, string[], (drift: Drift) => void]> = [
+  // The fourth element: the case needs a nullable tenant column — rows that
+  // carry no organization, or an uncertified table whose column could hold
+  // them — which only a store built before 18.x has (ADR-0131 D1), so
+  // `tenant_t` is built in that shape first (`initObjectsPre18`). The fifth:
+  // the declarations, when not `ALL`.
+  const CASES: Array<[string, string[], (drift: Drift) => void, boolean?, Objects?]> = [
     [
       'an extra physical column the declaration omits',
       ['ALTER TABLE "t" ADD COLUMN "legacy" TEXT', 'CREATE INDEX "idx_t_legacy" ON "t" ("legacy")'],
@@ -163,40 +187,79 @@ describe('each drifted shape reads alike on the remote and the local face', () =
       })),
     ],
     [
-      'a bare organization key a NULL-safe unique tightens, over clean rows',
-      [
-        'DROP INDEX "uniq_tenant_t_organization_id_code"',
-        'CREATE UNIQUE INDEX "uniq_tenant_t_organization_id_code" ON "tenant_t" ("organization_id", "code")',
-      ],
+      // ADR-0131 D1: new DDL keys the plain column; on a nullable tenant column
+      // with no certification the 18.0 COALESCE key is a different constraint,
+      // so the rebuild is destructive (it is NOT the D4 tightening — the
+      // expectation carries no NULL-safe part).
+      'an 18.0 COALESCE organization key against the plain expectation, on an uncertified nullable table',
+      [`DROP INDEX "${TENANT_UNIQUE}"`, COALESCE_18_0],
+      (drift) => {
+        const entry = drift.find((d) => d.table === 'tenant_t' && d.op.type === 'recreate_index');
+        expect(entry).toEqual(expect.objectContaining({
+          category: 'destructive', op: expect.objectContaining({ type: 'recreate_index', indexName: TENANT_UNIQUE }),
+        }));
+        expect(entry!.op).not.toHaveProperty('nullSafeColumns');
+        expect(entry!.op).not.toHaveProperty('tightenNullSafeOnly');
+      },
+      true,
+    ],
+    [
+      'a pre-normalized NULL-safe declaration tightens a bare organization key, over clean rows',
+      [`DROP INDEX "${TENANT_UNIQUE}"`, `CREATE UNIQUE INDEX "${TENANT_UNIQUE}" ON "tenant_t" ("organization_id", "code")`],
       (drift) => expect(drift).toContainEqual(expect.objectContaining({
         table: 'tenant_t', category: 'safe', op: expect.objectContaining({ type: 'recreate_index', tightenNullSafeOnly: true }),
       })),
+      true,
+      ALL_NULL_SAFE,
     ],
     [
       'the same tightening over duplicate rows the bare key admitted',
       [
-        'DROP INDEX "uniq_tenant_t_organization_id_code"',
-        'CREATE UNIQUE INDEX "uniq_tenant_t_organization_id_code" ON "tenant_t" ("organization_id", "code")',
+        `DROP INDEX "${TENANT_UNIQUE}"`,
+        `CREATE UNIQUE INDEX "${TENANT_UNIQUE}" ON "tenant_t" ("organization_id", "code")`,
         `INSERT INTO "tenant_t" ("id", "code", "organization_id") VALUES ('a', 'X', NULL), ('b', 'X', NULL)`,
       ],
       (drift) => expect(drift).toContainEqual(expect.objectContaining({
-        table: 'tenant_t', category: 'destructive', op: expect.objectContaining({ type: 'recreate_index' }),
+        table: 'tenant_t', category: 'destructive', op: expect.objectContaining({ type: 'recreate_index', tightenNullSafeOnly: true }),
       })),
+      true,
+      ALL_NULL_SAFE,
     ],
   ];
 
-  it.each(CASES)('%s', async (_label, statements, finding) => {
+  it.each(CASES)('%s', async (_label, statements, finding, pre18Tenant, objects = ALL) => {
     const file = nextFile();
     const { driver: remote } = await remoteOver(file);
-    await SYNC.syncSchemasBatch(remote, ALL);
+    if (pre18Tenant) await initObjectsPre18(remote, objects.find((o) => o.name === 'tenant_t')!);
+    await SYNC.syncSchemasBatch(remote, objects);
     for (const sql of statements) await onDisk(file, sql);
-    const local = await localOver(file, ALL);
+    const local = await localOver(file, objects);
 
-    const expected = await local.detectManagedDrift(ALL);
+    const expected = await local.detectManagedDrift(objects);
     // Non-vacuous: the local face sees the drift the case put on disk.
     finding(expected);
-    expect(await remote.detectManagedDrift(ALL)).toEqual(expected);
+    expect(await remote.detectManagedDrift(objects)).toEqual(expected);
     expect(await remote.detectManagedDrift()).toEqual(expected);
+  });
+
+  it('the same 18.0 COALESCE key on a certified database reads as the plain one: no drift on either face', async () => {
+    // ADR-0131 D1 — the equivalence leg of the uncertified case above: same
+    // bytes on disk, the certification resolver answering yes on both faces.
+    const file = nextFile();
+    const { driver: remote } = await remoteOver(file);
+    await initObjectsPre18(remote, TENANT);
+    await SYNC.syncSchemasBatch(remote, ALL);
+    for (const sql of [`DROP INDEX "${TENANT_UNIQUE}"`, COALESCE_18_0]) await onDisk(file, sql);
+    const local = await localOver(file, ALL);
+    // Non-vacuous: uncertified, both faces see the destructive rebuild.
+    expect((await local.detectManagedDrift(ALL)).map((d) => d.op.type)).toEqual(['recreate_index']);
+    expect((await remote.detectManagedDrift(ALL)).map((d) => d.op.type)).toEqual(['recreate_index']);
+
+    local.setTenantKeyCertifiedResolver(() => true);
+    remote.setTenantKeyCertifiedResolver(() => true);
+    expect(await local.detectManagedDrift(ALL)).toEqual([]);
+    expect(await remote.detectManagedDrift(ALL)).toEqual([]);
+    expect(await remote.detectManagedDrift()).toEqual([]);
   });
 });
 

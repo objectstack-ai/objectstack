@@ -133,7 +133,10 @@
  * a raw fragment (`whereRaw`, `orWhereRaw`, `andWhereRaw`, `havingRaw`, `raw`)
  * whose own literal text says `IS NULL` and that names the column — as a
  * template substitution, as a binding in its bindings array, or literally.
- * `IS NOT NULL` is not an arm and is never refused.
+ * `IS NOT NULL` is not an arm and is never refused, in any spelling:
+ * `whereNotNull`, a raw `IS NOT NULL`, and `where(field, 'is not', null)`,
+ * which Knex compiles to `IS NOT NULL` (its operator is matched as Knex
+ * matches it: lower-cased and trimmed).
  *
  * Exemptions: none (`NULL_ARM_EXEMPT` is empty), and the rule needs none on
  * `main`. One NULL disjunct survives in the platform BY DESIGN and is outside
@@ -312,6 +315,15 @@ const TENANT_PREDICATE_CALLS = new Set(['where', 'whereIn']);
 const IS_NULL_TEXT = /\bis\s+null\b/i;
 
 /**
+ * Is `node` the literal operator `'is not'`? Knex lower-cases and trims the
+ * operator, and compiles `where(col, 'is not', null)` to `IS NOT NULL` — not
+ * an arm. Only a literal is read: an operator the gate cannot see is refused.
+ */
+function isNotNullOperator(node) {
+  return !!node && ts.isStringLiteralLike(node) && node.text.toLowerCase().trim() === 'is not';
+}
+
+/**
  * `'<file>::<method>'` -> reason a reader can check. Empty by design: the rule
  * needs no exemption on `main`, and an entry is a decision against ADR-0131
  * D8 that a superseding ADR has to make first.
@@ -394,7 +406,12 @@ function nullArmOf(call, bindings) {
   const args = call.arguments;
   if (NULL_CALLS.has(verb) && isTenantRef(args[0], bindings)) return `${verb}(<tenant column>)`;
   if (WHERE_CALLS.has(verb)) {
-    if (args.length >= 2 && isTenantRef(args[0], bindings) && isNullLiteral(args[args.length - 1])) {
+    if (
+      args.length >= 2 &&
+      isTenantRef(args[0], bindings) &&
+      isNullLiteral(args[args.length - 1]) &&
+      !(args.length === 3 && isNotNullOperator(args[1]))
+    ) {
       return `${verb}(<tenant column>, …null)`;
     }
     const obj = args[0];
@@ -629,7 +646,7 @@ const SELF_TEST_VERDICT = 'check-tenant-chokepoint self-test reached its verdict
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'check-tenant-chokepoint self-test': 17,
-  'D8 null-arm rule': 22,
+  'D8 null-arm rule': 24,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -866,6 +883,13 @@ function selfTest() {
       `census(table) { return this.knex.raw('select * from ?? where organization_id is null', [table]); }`,
     ],
     [
+      'an operator the gate cannot read stays refused — only the literal is not is exempt',
+      `scope(builder, object, op) {
+         const f = this.resolveTenantField(object);
+         return builder.orWhere(f, op, null);
+       }`,
+    ],
+    [
       'a module-level helper outside the class is no hiding place',
       `x() {}
        }
@@ -909,6 +933,13 @@ function selfTest() {
     [
       'a null comparand on an ordinary column',
       `clear(qb) { return qb.where('deleted_at', null); }`,
+    ],
+    [
+      "the three-argument IS NOT NULL form, where(col, 'is not', null), in Knex's own casing tolerance",
+      `scope(builder, object) {
+         const field = this.resolveTenantField(object);
+         return builder.where(field, 'is not', null).andWhere('organization_id', ' IS NOT ', null);
+       }`,
     ],
   ];
   for (const [name, src] of nullArmSilent) {

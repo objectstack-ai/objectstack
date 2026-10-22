@@ -39,6 +39,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { AnalyticsServicePlugin, type AnalyticsService } from '@objectstack/service-analytics';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const LEDGER = 'rest_an_hop_ledger';
 /** The target of lookup `owner`: readable by the member. */
@@ -138,6 +139,9 @@ async function boot(strategy: 'native' | 'objectql'): Promise<Harness> {
     ],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
 
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },

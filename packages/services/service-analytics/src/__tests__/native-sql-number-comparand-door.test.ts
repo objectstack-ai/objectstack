@@ -73,6 +73,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'os21426_amount_ledger';
 const ACCOUNT = 'os21426_amount_account';
@@ -337,6 +338,9 @@ for (const cell of DRIVER_CELLS) {
         engine.registry.registerObject(ACCOUNT_DEF as any);
         engine.registry.registerObject(LEDGER as any);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         for (const row of ACCOUNTS) await engine.insert(ACCOUNT, { ...row } as any);
         for (const row of ROWS) await engine.insert(OBJECT, { ...row } as any);
 

@@ -113,7 +113,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organización",
-        help: "Tenant que posee esta regla; null = global."
+        help: "La organización a la que pertenece esta regla."
       },
       name: {
         label: "Nombre",

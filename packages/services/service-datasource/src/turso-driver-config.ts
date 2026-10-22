@@ -19,7 +19,7 @@
  *
  * Each read the spec's `config` with its own hand-written list, and the lists
  * had drifted: the open-core arm read nine keys, the host loader read `url` and
- * `authToken`. So an encrypted or embedded-replica `default` silently lost
+ * `authToken`. So an embedded-replica `default` silently lost
  * `encryptionKey` / `syncUrl` / `sync` / `concurrency` / `timeout` / `mode` —
  * `TursoConfigSchema` accepts all of them, so this was declared-but-not-enforced
  * in one of the two positions, with no diagnostic anywhere. The same
@@ -63,8 +63,13 @@ export interface TursoDriverConfigInput {
   url: string;
   /** JWT auth token for a remote Turso database. */
   authToken?: string;
-  /** AES-256 key for the local database file (local/replica modes). */
-  encryptionKey?: string;
+  /**
+   * REMOVED (#25050) — typed `never` exactly as the driver's own slot is, so
+   * nothing typed can set it. The builder still forwards a value a stored row
+   * carries, so that `new TursoDriver()` refuses it loudly in every mode
+   * instead of this table dropping it in silence; see the reader.
+   */
+  encryptionKey?: never;
   /** Max concurrent requests to the remote database (replica/remote modes). */
   concurrency?: number;
   /** Remote sync url for embedded-replica mode. */
@@ -111,8 +116,8 @@ interface TursoConfigSource {
  * this was lifted from had always spread-omitted.
  *
  * The type-tests are the open-core arm's — including the truthiness check on the
- * string keys (an empty `authToken` / `syncUrl` / `encryptionKey` is an unset one,
- * never a credential of length zero) and its absence on the number keys
+ * string keys (an empty `authToken` / `syncUrl` is an unset one, never a
+ * credential of length zero) and its absence on the number keys
  * (`concurrency: 0` and `timeoutMs: 0` are meaningful values the driver reads).
  *
  * A reader is not obliged to read only `config`: `schemaMode` and `authToken`
@@ -163,8 +168,25 @@ const TURSO_CONFIG_READERS: {
       : typeof config.authToken === 'string' && config.authToken
         ? config.authToken
         : undefined,
+  /**
+   * The REMOVED key (#25050), forwarded as stored — never honoured, only
+   * refused.
+   *
+   * No door accepts it any more (`retiredKey()` on the spec contract), and a
+   * stored row replays the D2 conversion `turso-config-encryption-key-removed`
+   * at `loadDatasourceRows` / `loadDatasourceRow` before it reaches this
+   * table, which strips the key wherever removing it changes nothing (an
+   * unset value; a remote url, where the driver never handed it on). What can
+   * still arrive is a non-empty key beside a local url, which the conversion
+   * leaves for the author on purpose: that operator believed the file
+   * encrypted. Dropping it here would boot that datasource in plaintext in
+   * silence; forwarding it makes `new TursoDriver()` refuse it with the
+   * retirement's prescription, as it has refused it since #25020. Not a
+   * consumer-side dialect (Prime Directive #12): it reads nothing, it hands
+   * the value to the one door that refuses it.
+   */
   encryptionKey: ({ config }) =>
-    typeof config.encryptionKey === 'string' && config.encryptionKey ? config.encryptionKey : undefined,
+    config.encryptionKey !== undefined ? (config.encryptionKey as never) : undefined,
   concurrency: ({ config }) => (typeof config.concurrency === 'number' ? config.concurrency : undefined),
   syncUrl: ({ config }) =>
     typeof config.syncUrl === 'string' && config.syncUrl ? config.syncUrl : undefined,

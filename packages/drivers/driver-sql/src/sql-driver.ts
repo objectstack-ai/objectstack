@@ -120,6 +120,7 @@ import {
   fieldHasColumn,
   GLOBAL_TENANT,
   canonicalIndexKey,
+  carriesNullSafeTenantKeyPart,
   hashShadowColumnFor,
   isHashShadowCarrier,
   parseHashShadowKeyParts,
@@ -191,8 +192,9 @@ import { isComposedReadableIds, type ComposedReadableIds } from '@objectstack/sp
  * no columns. So the refusal is the ordinary state of a new database, and not
  * a `DATABASE_ERROR` to put in front of an operator.
  *
- * Only one question reads through this scope, and only
- * {@link SqlDriver.backendStatementFault} consults it. ⛔ It demotes one class,
+ * Two questions read through this scope — that one, and the ADR-0131 D1
+ * certification {@link SqlDriver.isTenantKeyCertified} asks of the same
+ * ledger — and only {@link SqlDriver.backendStatementFault} consults it. ⛔ It demotes one class,
  * a missing table, recognised by the shared `isMissingTableError`. Any other
  * refusal inside the scope still warns, and so does a missing table outside it.
  *
@@ -201,6 +203,21 @@ import { isComposedReadableIds, type ComposedReadableIds } from '@objectstack/sp
  * can be another instance of this class, and it is in the same async chain.
  */
 const PRE_DDL_QUESTION_SCOPE = new AsyncLocalStorage<true>();
+
+/**
+ * [ADR-0131 D1] The `WHERE` of a unique key's duplicate probe: every plain key
+ * part NOT NULL, so the probe groups only the rows the index constrains (SQL
+ * UNIQUE is NULL-distinct). Empty when every part is NULL-safe. The Turso
+ * remote face spells the same clause with its own identifier quoting.
+ */
+function uniqueProbeNotNullClause(
+  columns: readonly string[],
+  nullSafe: ReadonlySet<string>,
+  quote: (identifier: string) => string,
+): string {
+  const plain = columns.filter((c) => !nullSafe.has(c));
+  return plain.length === 0 ? '' : ` WHERE ${plain.map((c) => `${quote(c)} IS NOT NULL`).join(' AND ')}`;
+}
 
 /**
  * Default ID length for auto-generated IDs.
@@ -7004,22 +7021,64 @@ export class SqlDriver implements IDataDriver {
   // ===================================
 
   async connect(): Promise<void> {
-    // Ensure the database directory exists before any query can trigger
-    // better-sqlite3 to open the file (e.g. loadMetaFromDb on startup).
-    await this.ensureDatabaseExists();
+    try {
+      // Ensure the database directory exists before any query can trigger
+      // better-sqlite3 to open the file (e.g. loadMetaFromDb on startup).
+      await this.ensureDatabaseExists();
 
-    if (this.isSqlite) {
-      // Both pragmas below are persistent properties of the FILE, so one
-      // connection setting them is enough for every process that follows.
-      // Each is READ first and set only when the file answers differently, so
-      // a connect to a file an earlier boot already configured writes nothing
-      // to it (#21734) — one rule for every connect, read-only boots included.
-      // A `false` means the very first statement on this connection failed —
-      // in practice a native addon that cannot load — so asking it for another
-      // pragma would only repeat the same warning.
-      if (await this.applyAutoVacuumIncremental()) {
-        await this.applySqliteJournalMode();
+      if (this.isSqlite) {
+        // Both pragmas below are persistent properties of the FILE, so one
+        // connection setting them is enough for every process that follows.
+        // Each is READ first and set only when the file answers differently, so
+        // a connect to a file an earlier boot already configured writes nothing
+        // to it (#21734) — one rule for every connect, read-only boots included.
+        // A `false` means the very first statement on this connection failed —
+        // in practice a native addon that cannot load — so asking it for another
+        // pragma would only repeat the same warning.
+        if (await this.applyAutoVacuumIncremental()) {
+          await this.applySqliteJournalMode();
+        }
       }
+    } catch (error) {
+      if (this.isSqlite) await this.releaseRefusedSqliteConnection();
+      throw error;
+    }
+  }
+
+  /**
+   * Close what a refused SQLite `connect()` opened, before the refusal leaves
+   * it (#25084).
+   *
+   * A file refused by its first statement ({@link SQLITE_FILE_REFUSALS}) was
+   * opened to answer it: the pool keeps that better-sqlite3 connection, and for
+   * a file whose header says WAL, SQLite keeps its `-shm` and an empty `-wal`
+   * beside it for as long as the connection is open. No caller is owed that
+   * handle — the connect failed — and a caller that does not `disconnect()` a
+   * handle whose `connect()` rejected (the datasource connection service's
+   * degraded path) used to keep it for the life of the process.
+   *
+   * The pool is destroyed and a fresh, empty one put in its place, so the
+   * instance is left as it was constructed: nothing open, and a later
+   * `connect()` opens the file again and gives its own answer. Destroying
+   * alone would not: every later statement would answer "Unable to acquire a
+   * connection", which carries no code, so a second `connect()` would log it
+   * and resolve over a datasource that cannot run one query. A host-adopted
+   * instance is connected again on the same object (`createPrebuiltDriverFactory`
+   * in `@objectstack/service-datasource`), so that second `connect()` is real.
+   *
+   * SQLite only: it is the one dialect whose `connect()` can reject holding a
+   * connection. A server dialect rejects there only when the connection itself
+   * could not be made, so its pool holds nothing to release.
+   *
+   * Never throws: the refusal the caller is owed is the error `connect()`
+   * raised, so a release that fails is logged and that error goes on unchanged.
+   */
+  private async releaseRefusedSqliteConnection(): Promise<void> {
+    try {
+      await this.knex.destroy();
+      this.knex.initialize();
+    } catch (e) {
+      this.logger.warn('Failed to close the SQLite connection a refused connect() opened', e);
     }
   }
 
@@ -7061,7 +7120,7 @@ export class SqlDriver implements IDataDriver {
    * not merely that space hygiene is unavailable.
    * @throws {SqliteDatabaseFileError} when that first statement's answer is a
    * verdict on the file itself ({@link SQLITE_FILE_REFUSALS}): it cannot be
-   * opened, or it is not a SQLite database.
+   * opened, it is not a SQLite database, or its header or schema is damaged.
    */
   private async applyAutoVacuumIncremental(): Promise<boolean> {
     try {
@@ -7097,7 +7156,17 @@ export class SqlDriver implements IDataDriver {
       //     used to answer it with wasm SQLite, whose open moved the
       //     operator's file aside and wrote an empty database in its place.
       //     The refusal is issued before anything is written: the file is left
-      //     exactly as it was found.
+      //     exactly as it was found;
+      //   • SQLITE_CORRUPT (#25019) — the file is a SQLite database SQLite
+      //     cannot read: its header or its schema is damaged (a file truncated
+      //     inside its 100-byte header, or short of the pages its schema
+      //     names). At the FIRST statement this is a verdict on the whole
+      //     file, measured: `SELECT 1` answers the same code. A database
+      //     damaged deeper inside answers this read and connects; its damage
+      //     surfaces on the read that reaches it, as before. A development
+      //     boot used to take the same step-down to wasm SQLite as for
+      //     SQLITE_NOTADB, and the same rename; it is refused the same way,
+      //     before anything is written.
       const refusal = code === undefined ? undefined : SqlDriver.SQLITE_FILE_REFUSALS.get(code);
       if (refusal !== undefined) {
         const declared = (this.config as any).connection;
@@ -7132,6 +7201,7 @@ export class SqlDriver implements IDataDriver {
   private static readonly SQLITE_FILE_REFUSALS: ReadonlyMap<string, string> = new Map([
     ['SQLITE_CANTOPEN', 'cannot be opened or created'],
     ['SQLITE_NOTADB', 'is not a SQLite database, and was left as it is'],
+    ['SQLITE_CORRUPT', 'is damaged (SQLite cannot read its header or its schema), and was left as it is'],
   ]);
 
   /** What `PRAGMA auto_vacuum` answers for INCREMENTAL (0 is NONE, 1 is FULL). */
@@ -12130,6 +12200,13 @@ export class SqlDriver implements IDataDriver {
     // ahead of either.
     this.warnBuiltinColumnCollisions(shardName, obj.fields, builtinColumns, 'shard');
     const exists = await this.knex.schema.hasTable(shardName);
+    // ADR-0131 D1: a shard is created from the BASE's declaration, so it takes
+    // the base's tenant column NOT NULL — asked of the base through the
+    // recording resolver, the same answer the declared-index sync below uses
+    // (the shard has no bookkeeping of its own until `aliasShardBookkeeping`).
+    // A shard that already exists keeps the nullability it has: the
+    // organization-ownership ceremony reports such a shard, it never rebuilds it.
+    const baseTenantField = this.computeAndRecordTenantField(baseTable, obj);
     // Commit d0e3a885b: a shard carries the base table's declared indexes (below), so its
     // columns need the same keyable-text decision the managed path makes.
     const keyedColumns = indexedKeyColumns({
@@ -12145,7 +12222,7 @@ export class SqlDriver implements IDataDriver {
         this.createAuditTimestampColumn(table, 'updated_at');
         for (const [name, field] of Object.entries(obj.fields ?? {})) {
           if (builtinColumns.has(name)) continue;
-          this.createColumn(table, name, field, keyedColumns.get(name));
+          this.createColumn(table, name, field, keyedColumns.get(name), name === baseTenantField);
         }
       });
     } else {
@@ -12188,7 +12265,7 @@ export class SqlDriver implements IDataDriver {
         shardName,
         perShard,
         new Set(Object.keys(colInfo)),
-        this.computeAndRecordTenantField(baseTable, obj),
+        baseTenantField,
         obj.fields ?? {},
       );
     }
@@ -12731,7 +12808,8 @@ export class SqlDriver implements IDataDriver {
             if (obj.fields) {
               for (const [name, field] of Object.entries(obj.fields)) {
                 if (builtinColumns.has(name)) continue;
-                this.createColumn(table, name, field, keyedColumns.get(name));
+                // ADR-0131 D1: a fresh table's tenant column is NOT NULL.
+                this.createColumn(table, name, field, keyedColumns.get(name), name === tenantField);
               }
             }
           });
@@ -13955,7 +14033,19 @@ export class SqlDriver implements IDataDriver {
       // NOT NULL is the organization-ownership ceremony's, not drift.
       ceremonyOwnedNullability: this.resolveTenantField(tableName),
     });
-    out.push(...(await this.detectTableIndexDrift(tableName, fields, declaredIndexes, new Set(cols.map((c) => c.name)))));
+    // [ADR-0131 D1] A physically NOT NULL tenant column is its own proof that
+    // the NULL-safe and the plain tenant key part are one constraint here.
+    const tenantField = this.resolveTenantField(tableName);
+    const tenantColumnNotNull = !!tenantField && cols.some((c) => c.name === tenantField && c.nullable === false);
+    out.push(
+      ...(await this.detectTableIndexDrift(
+        tableName,
+        fields,
+        declaredIndexes,
+        new Set(cols.map((c) => c.name)),
+        tenantColumnNotNull,
+      )),
+    );
     return out;
   }
 
@@ -13966,27 +14056,39 @@ export class SqlDriver implements IDataDriver {
    * introspection round-trip (indexes, not columns) and two inputs the column
    * differ has no use for: the object's declared `indexes[]` and its tenant
    * column.
+   *
+   * [ADR-0131 D1] `tenantColumnNotNull` and {@link isTenantKeyCertified} are
+   * the two witnesses that the tenant column holds no NULL here, which is what
+   * lets the differ read an earlier release's `COALESCE(<tenant>, …)` key part
+   * as the plain column new DDL keys. The certification is asked only when a
+   * physical index carries that form and the column is not NOT NULL already.
    */
   protected async detectTableIndexDrift(
     tableName: string,
     fields: Record<string, any>,
     declaredIndexes: any[] | undefined,
     physicalColumns: Set<string>,
+    tenantColumnNotNull = false,
   ): Promise<ManagedDriftEntry[]> {
     const tenantField = this.resolveTenantField(tableName);
+    const physical = await this.introspectIndexes(tableName);
+    const tenantKeyCertified =
+      tenantColumnNotNull ||
+      (carriesNullSafeTenantKeyPart(physical, tenantField) && (await this.isTenantKeyCertified()));
     const entries = diffManagedIndexes({
       table: tableName,
       expected: expectedIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }),
       // `declaredIndexes` goes to BOTH: it is what the table should have, and
       // therefore also what must never be mistaken for legacy debt (#3955).
       legacy: legacyUniqueReplacements({ table: tableName, fields, tenantField, physicalColumns, declaredIndexes }),
-      physical: await this.introspectIndexes(tableName),
+      physical,
       // Indexes the framework built through raw DDL on this boot are its own to
       // manage — never this differ's to propose dropping (#4884).
       runtimeCreated: this.runtimeCreatedIndexes.get(tableName),
       // Lets the differ recognise the NULL-safe organization key part as the
       // sync's own vocabulary (ADR-0120 D3).
       tenantField,
+      tenantKeyCertified,
     });
     // ADR-0120 D4: the duplicate pre-flight probe decides each NULL-safe
     // unique op's fate — clean data upgrades the pure tightening to `safe`
@@ -14105,10 +14207,17 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Find duplicate groups under a NULL-safe organization unique key: GROUP BY
-   * the exact key the index will enforce — `COALESCE(<org>, '__global__')` for
-   * the NULL-safe parts, the bare column otherwise — HAVING COUNT(*) > 1.
-   * Returns one entry per conflicting group, `key` naming columns and values.
+   * Find duplicate groups under a unique key: GROUP BY the exact key the index
+   * will enforce — `COALESCE(<org>, '__global__')` for the NULL-safe parts,
+   * the bare column otherwise — HAVING COUNT(*) > 1. Returns one entry per
+   * conflicting group, `key` naming columns and values.
+   *
+   * [ADR-0131 D1] A row with a NULL in a plain key part conflicts with nothing
+   * under SQL's NULL-distinct UNIQUE, while GROUP BY puts NULLs together, so
+   * such rows are left out ({@link uniqueProbeNotNullClause}). Since new DDL
+   * keys the plain tenant column, that is every organization-less row a
+   * nullable tenant column still holds — a group of them is no duplicate the
+   * index will refuse.
    */
   protected async probeNullSafeUniqueDuplicates(
     table: string,
@@ -14123,7 +14232,8 @@ export class SqlDriver implements IDataDriver {
     const selectList = parts.map((p, i) => `${p} AS k${i}`).join(', ');
     const groupList = parts.join(', ');
     const sql =
-      `SELECT ${selectList}, COUNT(*) AS n FROM ${q(table)} ` +
+      `SELECT ${selectList}, COUNT(*) AS n FROM ${q(table)}` +
+      `${uniqueProbeNotNullClause(columns, ns, q)} ` +
       `GROUP BY ${groupList} HAVING COUNT(*) > 1 ORDER BY n DESC LIMIT 20`;
     const res: any = await this.knex.raw(sql);
     const rows: any[] = Array.isArray(res) ? (Array.isArray(res[0]) ? res[0] : res) : (res?.rows ?? []);
@@ -18884,6 +18994,14 @@ export class SqlDriver implements IDataDriver {
    * the CONCAT-NULL semantics above: an any-NULL tuple still conflicts with
    * nothing, matching MySQL's own composite-UNIQUE behaviour.
    *
+   * Since ADR-0131 D1 no generator marks the tenant key part NULL-safe, so a
+   * NEW shadow hashes the plain tenant column, which is what a direct index
+   * would key. An existing shadow is never rebuilt for it: the additive sync
+   * skips its index by name, and the differ reads its resolved COALESCE key
+   * as the plain one on a certified table. Only a shadow whose index is
+   * already gone (a `recreate_index`, a manual drop) meets the new key here,
+   * as `stale`, and its column is derived, so regenerating it moves no data.
+   *
    * Returns `true` when the shadow index now exists.
    */
   protected async createHashShadowUniqueIndex(
@@ -19732,6 +19850,7 @@ export class SqlDriver implements IDataDriver {
     name: string,
     field: any,
     keyed?: { unique: boolean },
+    tenantColumn: boolean = false,
   ) {
     // [#11567] Stated BEFORE the `multiple` short-circuit and before the type
     // switch, because the spec's refusal is gated on neither: `FieldSchema`
@@ -19782,7 +19901,7 @@ export class SqlDriver implements IDataDriver {
     // producers already agree.
     if (isMultiValuedColumn(String(field.type ?? ''), field)) {
       const jsonCol = this.jsonColumn(table, name);
-      if (declaresColumnNotNull(field)) jsonCol.notNullable();
+      if (declaresColumnNotNull(field) || tenantColumn) jsonCol.notNullable();
       return;
     }
 
@@ -20193,7 +20312,18 @@ export class SqlDriver implements IDataDriver {
       // [#17231] Asked through {@link declaresColumnNotNull} — the same
       // question the multi-value short-circuit above now asks, stated once so
       // this method's two exits cannot answer it differently again.
-      if (declaresColumnNotNull(field)) col.notNullable();
+      //
+      // ADR-0131 D1 (execution record 6285122667 on the v18 step 7 card): the
+      // table's tenant column is the one column NOT NULL WITHOUT a declaration
+      // — "there is no nullable tenant column anywhere". `tenantColumn` is
+      // passed only by the two CREATE TABLE sites ({@link initObjects}' create
+      // branch, {@link ensureShardTable}'s), never by an ADD COLUMN: a column
+      // added to a table that already holds rows is the organization-ownership
+      // ceremony's to tighten (ruling ② A, 6269955919), and no metadata says
+      // it — the injected tenant field stays `required: false` with no
+      // `storage`, and the differ's `ceremonyOwnedNullability` reads the
+      // difference as no drift.
+      if (declaresColumnNotNull(field) || tenantColumn) col.notNullable();
       this.applyDeclaredColumnDefault(col, field, type);
     }
   }
@@ -20449,6 +20579,70 @@ export class SqlDriver implements IDataDriver {
 
   /** Has {@link resolveFileColumnsMoved} already run to completion? */
   private fileColumnsMovedAsked = false;
+
+  /**
+   * [ADR-0131 D1] The kernel→driver supply seam for "is this database
+   * certified": a birth marker, or an organization-ownership ceremony marker
+   * of the current shape generation. `ObjectQL.registerDriver` hands over a
+   * closure over the engine's `isOrganizationOwnershipCertified()`, which reads
+   * the ceremony's `sys_migration` row — a row in a table this driver serves,
+   * read through the registry and the pipeline the engine owns, so the driver
+   * receives the question, never the ledger's vocabulary.
+   *
+   * The answer decides one thing only: whether the differ reads an earlier
+   * release's `COALESCE(<tenant>, …)` key part as the plain tenant column new
+   * DDL keys ({@link detectTableIndexDrift}). Without a resolver, or when it
+   * throws, the answer is "not certified": the two forms then stay distinct
+   * constraints, and the differ REPORTS the 18.0 index as a destructive
+   * `recreate_index`. That report is never applied unattended — the boot
+   * reconcile applies `safe` entries only, the artifact gate refuses it, and
+   * `os migrate apply` needs `--allow-destructive` — and its message names the
+   * ownership ceremony as the remedy.
+   */
+  setTenantKeyCertifiedResolver(resolve: () => boolean | Promise<boolean>): void {
+    this.tenantKeyCertifiedResolver = resolve;
+    this.tenantKeyCertified = undefined;
+  }
+
+  private tenantKeyCertifiedResolver?: () => boolean | Promise<boolean>;
+  /** Set once the resolver has answered yes — a certificate is never withdrawn. */
+  private tenantKeyCertified?: true;
+  /** The resolver's failure is reported once per driver. */
+  private tenantKeyCertifiedReadFailureReported = false;
+
+  /**
+   * Asked lazily — only a table carrying the NULL-safe tenant key part needs
+   * it. A yes is kept; a no is asked again next time, so an answer taken
+   * before the ledger could be read never outlives that moment.
+   */
+  protected async isTenantKeyCertified(): Promise<boolean> {
+    if (this.tenantKeyCertified) return true;
+    const resolver = this.tenantKeyCertifiedResolver;
+    if (!resolver) return false;
+    try {
+      // Asked inside the pre-DDL scope: a store whose ledger does not exist
+      // yet answers with a refused read, which is not a fault (see
+      // {@link PRE_DDL_QUESTION_SCOPE}).
+      if ((await PRE_DDL_QUESTION_SCOPE.run(true, resolver)) !== true) return false;
+    } catch (e: any) {
+      // Not knowing reads as "not certified": the forms stay distinct and an
+      // 18.0 index is reported as a destructive recreate_index, which nothing
+      // applies unattended (safe-only boot reconcile, the artifact gate,
+      // `--allow-destructive`). Said once, so that report is not taken for a
+      // verdict on a certified store.
+      if (!this.tenantKeyCertifiedReadFailureReported) {
+        this.tenantKeyCertifiedReadFailureReported = true;
+        this.logger.warn(
+          `[schema-drift] could not read whether this database is certified for the organization-ownership shape ` +
+            `(${e?.message ?? e}); an index keyed COALESCE(<tenant>, …) on a nullable tenant column is compared ` +
+            `as a different constraint from the plain key until it can be read.`,
+        );
+      }
+      return false;
+    }
+    this.tenantKeyCertified = true;
+    return true;
+  }
 
   protected async resolveFileColumnsMoved(): Promise<void> {
     const resolver = this.fileColumnsMovedResolver;

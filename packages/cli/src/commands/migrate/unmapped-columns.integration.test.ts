@@ -122,7 +122,9 @@ const kernel = runtime.getKernel();
 for (const plugin of stack.plugins) await kernel.use(plugin);
 await runtime.start();
 const ql = kernel.getService('objectql');
-const SYSTEM = { context: { isSystem: true } };
+// The fixture's rows name an organization: a fresh tenant column is NOT NULL
+// (ADR-0131 D1), and this stack composes no authentication to derive one.
+const SYSTEM = { context: { isSystem: true, tenantId: 'org_fixture' } };
 await ql.insert('um_contact', { id: 'c1', name: 'Ann', mailing_street: '1 Retired Way', mailing_city: 'Oldtown' }, SYSTEM);
 await ql.insert('um_contact', { id: 'c2', name: 'Bob', mailing_street: '2 Retired Way', mailing_city: 'Newtown' }, SYSTEM);
 await ql.insert('um_contact', { id: 'c3', name: 'Cy' }, SYSTEM);

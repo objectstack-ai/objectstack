@@ -26,7 +26,7 @@ const CRED = 'at-rest-cred-51be';
 
 /** The serialized metadata body as the audit copy holds it (a datasource body). */
 const body = (cred = CRED) =>
-  JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: cred } });
+  JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', authToken: cred } });
 
 /** A create-snapshot ledger view: the whole sys_metadata row, type + metadata present. */
 const createSnapshot = () => ({ id: 'm1', name: 'ds', type: 'datasource', scope: 'platform', metadata: body() });
