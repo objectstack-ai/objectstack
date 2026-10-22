@@ -241,6 +241,15 @@
  *     422 as a no-op, before it calls the action landed — so a `success` run
  *     IS that confirmation; the seat reads the new head with one
  *     `GET /repos/{repo}/pulls/{n}` after, and this file reads nothing back;
+ *   - `run_rerun_failed` carries no body, names no workflow and is
+ *     confirmed INSIDE the run too: the executor judges the four fences on
+ *     the run before its POST and lands the action only when the run reads
+ *     back as attempt 2 with its failed jobs queued or in progress
+ *     (`execute.mjs`, `confirmRerunFailed`). So a `success` run IS that
+ *     confirmation and this file reads nothing back; the seat's wrapper
+ *     (`scripts/pm/rerun-failed.mjs`) reads the new attempt's job ids after,
+ *     as a reading for its note. A run that failed (a fence refused it, or
+ *     the re-run did not read back) is exit 5 like any failed run;
  *   - a `pr_create` carrying `assignees` is read back at its body's locator
  *     as before, and its row ALSO carries the pull's `assignees` as the
  *     platform lists them (`assigneesReading`; `--json` carries them too) —
@@ -301,7 +310,13 @@
  *     (any request but a GET), printing the shared `unconfirmedText` sentence;
  *   - the control drives each under `direct`: at least one direct write and no
  *     dispatch — so the empty list above is a measurement, never a recorder
- *     that sees nothing;
+ *     that sees nothing. A RELAY-ONLY sender — one exporting
+ *     `relayOnly = true` because its op has no direct path at all
+ *     (`rerun-failed.mjs`: the relay's executor is where its fences are
+ *     authoritative) — answers the control the other way round: under
+ *     `direct` it refuses with a PREREQUISITE exit, ZERO direct writes and
+ *     no dispatch, and the recorder holds the reads it made first, so its
+ *     empty write list is a measurement too;
  *   - a sender without the probe fails the pin until it carries one and gives
  *     the same answer. ⛔ There is no third, quieter answer to an accepted
  *     dispatch with no run. This file's own CLI (`with-fleet.sh --actions`
@@ -412,6 +427,8 @@ export const RELAY_JOB_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** The export every sender carries for the no-run conformance (the header's section of that name). */
 const RELAY_MISS_PROBE = 'relayMissProbe';
+/** The export a RELAY-ONLY sender sets to `true`: its op has no direct path, so its control refuses instead of writing (header). */
+const RELAY_ONLY = 'relayOnly';
 
 // ---------------------------------------------------------------------------
 // Pure core
@@ -1443,8 +1460,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the started run: an action naming a workflow is read back as the newest workflow_dispatch run of that file created since the dispatch — the target repo's run list, read after the relay run completed and re-read within a bounded window; found is success naming id, url and actor; none in the window or an unreadable list is UNCONFIRMED (6) after ONE dispatch; a stroke naming no workflow reads none": 11,
   "the release.yml refresh at the seat: the stroke packs with inputs refresh_version_pr true and travels in ONE dispatch; its started run is read back from release.yml's own run list; force, false, absent or any other input is refused before anything is sent, exit 2": 6,
   "the batch gap at the seat: content creation read off the op table; a stroke at or above write-pace's threshold is batched through its last content-creating write and waited for exactly that much longer; a stroke whose pacing the relay job cannot hold is refused before anything is sent, naming the per-op doors; the job's timeout mirrors the workflow's": 13,
+  "the run_rerun_failed stroke at the seat: it packs as ONE action carrying run_id alone and travels in ONE dispatch; beside any other action, or with a key that widens it, it is refused before anything is sent; it creates no content, carries no body and names no workflow, so nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 21;
+// Raised 21 → 22 with the run_rerun_failed seat battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 22;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2201,6 +2220,30 @@ export async function selfTest() {
       t('--dry-run prints the relay request carrying the refresh with its inputs and sends nothing, exit 0', [dry.code, dry.seen.length, dry.json?.event_type, dry.json?.client_payload?.actions], [EXIT_OK, 0, RELAY_EVENT_TYPE, [REFRESH]]);
     }
 
+    // ── the failed-jobs re-run at the seat ──────────────────────────────────
+    battery("the run_rerun_failed stroke at the seat: it packs as ONE action carrying run_id alone and travels in ONE dispatch; beside any other action, or with a key that widens it, it is refused before anything is sent; it creates no content, carries no body and names no workflow, so nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const RERUN = { op: 'run_rerun_failed', run_id: 39713789453 };
+      const pack = (actions) => packRequest({ repo: REPO, session: SESSION, actions, requestId: 'fw-test-1' });
+      const packed = pack([RERUN]);
+      t('the stroke packs: one action, op and run_id alone — no workflow, event or attempt travels, those are the run\'s to answer', [packed.ok, packed.payload?.actions, Object.keys(packed.payload?.actions?.[0] ?? {})], [true, [RERUN], ['op', 'run_id']], packed.errors.join(' | '));
+      const refusedFor = (actions, needle) => {
+        const p = pack(actions);
+        return !p.ok && p.payload === null && p.errors.some((e) => e.includes(needle));
+      };
+      t('⛔ alone, at the packer: beside a comment or a workflow_dispatch it is refused before anything is sent, naming the action that does not belong', [refusedFor([RERUN, { op: 'comment', issue: 1, body: 'x' }], 'actions[1] is `comment` in a stroke that carries a `run_rerun_failed`'), refusedFor([RERUN, { op: 'workflow_dispatch', workflow: 'shard-timings-refresh.yml', ref: 'main' }], 'actions[1] is `workflow_dispatch` in a stroke that carries a `run_rerun_failed`')], [true, true]);
+      t('⛔ nothing widens it, at the packer: a workflow or an attempt beside run_id is refused by name before anything is sent', [refusedFor([{ ...RERUN, workflow: '.github/workflows/ci.yml' }], 'actions[0].workflow is not a key `run_rerun_failed` takes'), refusedFor([{ ...RERUN, run_attempt: 1 }], 'actions[0].run_attempt is not a key `run_rerun_failed` takes')], [true, true]);
+      const pacing = strokePacing(packed.payload);
+      t('derived from the table: it is no body op, no run op, no content-creating op and no annotated op, and its stroke is ONE write, never batched', [BODY_OPS.includes(RERUN.op), RUN_OPS.includes(RERUN.op), CONTENT_CREATING_OPS.includes(RERUN.op), Object.hasOwn(ANNOTATED_OPS, RERUN.op), pacing.writes, pacing.batched], [false, false, false, false, 1, false]);
+      const landed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: packed.payload });
+      const sent = landed.seen.filter((s) => s.call === DISPATCH);
+      const beyondTheRelayRun = landed.seen.filter((s) => s.call !== DISPATCH && s.call !== RUNS && s.call !== `GET /repos/${RELAY_REPO}/actions/runs/42`);
+      t('a success run: ONE dispatch carrying the action as judged, and no read beyond the relay run\'s own — nothing read back at the target, the executor\'s read-back landed it — exit 0', [sent.length, sent[0]?.body?.client_payload?.actions, landed.state, landed.readBack?.state, landed.runs?.state, beyondTheRelayRun.map((s) => s.call), exitForResult(landed)], [1, [RERUN], 'success', 'none', 'none', [], EXIT_OK], landed.logs.join(' | '));
+      const fenced = await drive({ runs: () => [RUN('completed', 'failure')] }, { stroke: packed.payload });
+      t('⛔ a run that failed — the relay refused at a fence, or the re-run did not read back — is exit 5 after ONE dispatch, never re-sent and never a direct write', [fenced.state, exitForResult(fenced), fenced.seen.filter((s) => s.call === DISPATCH).length, fenced.seen.filter((s) => s.call !== DISPATCH && !s.call.startsWith('GET ')).length], ['failure', EXIT_PLATFORM_REFUSAL, 1, 0]);
+    }
+
     // ── the issue_create re-list ────────────────────────────────────────────
     battery('the issue_create re-list: a list that lags the create reads back IDENTICAL on a bounded re-list; a real miss is still unfound (exit 6) after exactly the declared window; an unreadable re-list is unread; the create is never re-sent');
     {
@@ -2410,8 +2453,13 @@ export async function selfTest() {
         .filter((f) => /\bsendFleetWrite\b/u.test(readReal(join(REPO_ROOT, f), 'utf8')))
         .sort();
       // The discovery's floor, BY NAME: a scan gone blind — a moved root, a renamed import — finds fewer and reds here.
-      const KNOWN = ['scripts/pm/close-cards.mjs', 'scripts/pm/issue-create.mjs', 'scripts/pm/issue-transfer.mjs', 'scripts/pm/label-write.mjs', 'scripts/pm/post-stamped.mjs'];
+      const KNOWN = ['scripts/pm/close-cards.mjs', 'scripts/pm/issue-create.mjs', 'scripts/pm/issue-transfer.mjs', 'scripts/pm/label-write.mjs', 'scripts/pm/post-stamped.mjs', 'scripts/pm/rerun-failed.mjs'];
       t('the discovery finds every sender known today — the scan is not blind', KNOWN.filter((k) => !senders.includes(k)), []);
+      // Declaring `relayOnly` swaps a sender's control from "it writes directly" to "it refuses": named here, so no sender takes that swap unreviewed.
+      const RELAY_ONLY_KNOWN = ['scripts/pm/rerun-failed.mjs'];
+      const declaredRelayOnly = [];
+      for (const sender of senders) if ((await import(pathToFileURL(join(REPO_ROOT, sender)).href))[RELAY_ONLY] === true) declaredRelayOnly.push(sender);
+      t('the relay-only senders are exactly the ones named here — a sender declaring itself relay-only to skip the write control reds until it is named', declaredRelayOnly, RELAY_ONLY_KNOWN);
 
       const relayRoute = (requested) => ({ requested, transport: 'dispatch', reason: `conformance: ${requested} → dispatch`, error: null, session: SESSION });
       const DIRECT_ROUTE = { requested: 'direct', transport: 'direct', reason: 'conformance: direct', error: null, session: null };
@@ -2448,7 +2496,8 @@ export async function selfTest() {
         }
       };
       for (const sender of senders) {
-        const probe = (await import(pathToFileURL(join(REPO_ROOT, sender)).href))[RELAY_MISS_PROBE];
+        const mod = await import(pathToFileURL(join(REPO_ROOT, sender)).href);
+        const probe = mod[RELAY_MISS_PROBE];
         t(`${sender} sends a relay dispatch and exports ${RELAY_MISS_PROBE} — a sender without it fails here until it answers like the rest`, typeof probe, 'function');
         if (typeof probe !== 'function') continue;
         for (const [requested, state] of [['auto', 'no-run'], ['dispatch', 'no-run'], ['auto', 'timeout']]) {
@@ -2463,6 +2512,7 @@ export async function selfTest() {
           );
         }
         // The control: the same probe under direct WRITES, and the recorder sees it — so the empty lists above are a measurement.
+        // A relay-only sender (`relayOnly`, header) has no direct write to see: under direct it REFUSES, and the recorder holds its reads.
         const control = { dispatches: 0 };
         const c = await drive(probe, {
           route: DIRECT_ROUTE,
@@ -2472,7 +2522,11 @@ export async function selfTest() {
           },
           pace: freshPace(),
         });
-        t(`…the control: ${sender} under direct issues its write directly — the recorder sees it — and never dispatches`, [control.dispatches, c.calls.filter(isDirectWrite).length > 0], [0, true], `${c.exit} · ${c.calls.join(' | ')}`);
+        if (mod[RELAY_ONLY] === true) {
+          t(`…the control: ${sender} is relay-only — under direct it refuses (exit ${EXIT_PREREQUISITE}) with ZERO direct writes and no dispatch, and the recorder holds the reads it made first`, [control.dispatches, c.exit, c.calls.filter(isDirectWrite), c.calls.length > 0], [0, EXIT_PREREQUISITE, [], true], `${c.exit} · ${c.calls.join(' | ')}`);
+        } else {
+          t(`…the control: ${sender} under direct issues its write directly — the recorder sees it — and never dispatches`, [control.dispatches, c.calls.filter(isDirectWrite).length > 0], [0, true], `${c.exit} · ${c.calls.join(' | ')}`);
+        }
       }
 
       // This file's own CLI, the route `with-fleet.sh --actions` execs: it has no direct path, and it answers the same.
