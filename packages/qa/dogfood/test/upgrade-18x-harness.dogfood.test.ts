@@ -55,7 +55,7 @@ import type { VerifyStack } from '@objectstack/verify';
 import { columnsOf, type FixtureManifest } from './upgrade-harness/fixture-manifest.js';
 import { FIXTURE_NAMES, FIXTURE_PEOPLE, bootFixture } from './upgrade-harness/populate-fixture.js';
 import { loadSqlIntoSqlite } from './upgrade-harness/sqlite-text-dump.js';
-import { OWNERSHIP_MARKER, runOwnershipCeremony, runSchemaPlan } from './upgrade-harness/ceremony.js';
+import { OWNERSHIP_MARKER, SERVED_ENV, runOwnershipCeremony, runSchemaPlan } from './upgrade-harness/ceremony.js';
 
 const FIXTURE = new URL('./upgrade-harness/fixture-18.0/', import.meta.url);
 const MARKER = OWNERSHIP_MARKER;
@@ -368,7 +368,7 @@ describe(`[#24884] an 18.0.0 database (fixture from ${gaManifest.ref} @ ${gaMani
   }, 320_000);
 
   it('[ADR-0131 D1] HEAD\'s schema plan lists its nullable tenant columns as an advisory naming the ceremony, and as no drift', () => {
-    const plan = runSchemaPlan(file);
+    const plan = runSchemaPlan(file, SERVED_ENV);
     const advisory = plan.nullableTenantColumns;
     if (advisory.status !== 'read') throw new Error(`the advisory did not read: ${advisory.detail}`);
     expect(advisory.remedy).toBe('os migrate organization-ownership');
@@ -424,7 +424,7 @@ describe(`[#24884] an 18.0.0 database (fixture from ${gaManifest.ref} @ ${gaMani
     expect(stack, 'HEAD has stopped before the ceremony reads the file').toBeUndefined();
     const ceremonied = join(dir, 'ga.ceremonied.db');
     copyFileSync(file, ceremonied);
-    const report = runOwnershipCeremony(dir, ceremonied, 'ga-voluntary') as {
+    const report = runOwnershipCeremony(dir, ceremonied, 'ga-voluntary', SERVED_ENV) as {
       complete?: boolean;
       steps?: Array<{ step: string; summary: Record<string, number>; notes: string[] }>;
     };
@@ -434,7 +434,7 @@ describe(`[#24884] an 18.0.0 database (fixture from ${gaManifest.ref} @ ${gaMani
     expect(notNull.summary.alreadyNotNull, JSON.stringify(notNull)).toBeGreaterThanOrEqual(1);
     expect(notNull.notes.filter((n) => /created with \S+ nullable column/.test(n))).toEqual([]);
 
-    const plan = runSchemaPlan(ceremonied);
+    const plan = runSchemaPlan(ceremonied, SERVED_ENV);
     const advisory = plan.nullableTenantColumns;
     if (advisory.status !== 'read') throw new Error(`the advisory did not read: ${advisory.detail}`);
     expect(advisory.columns.filter((c) => c.ceremony === 'tightens'), 'a column the ceremony would still tighten').toEqual([]);
@@ -448,7 +448,7 @@ describe(`[#24884] an 18.0.0 database (fixture from ${gaManifest.ref} @ ${gaMani
     const fresh = join(dir, 'fresh.db');
     const booted = await bootFixture(fresh);
     await booted.stop();
-    const plan = runSchemaPlan(fresh);
+    const plan = runSchemaPlan(fresh, SERVED_ENV);
     expect(plan.nullableTenantColumns).toEqual({ status: 'read', adr: 'ADR-0131 D1', remedy: 'os migrate organization-ownership', columns: [] });
     // Its only nullable `organization_id` is the opt-out, which is no tenant column.
     expect(nullableOrganizationTables(fresh)).toEqual(['sys_sso_provider']);
