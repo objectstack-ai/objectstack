@@ -68,6 +68,9 @@ const HOST_KERNEL_CONFIG = `export default {
     init: async () => {},
     start: async () => {},
   }],
+  // One object of the app's own, so \`serve\` composes the query engine: a
+  // config that mounts plugins and declares no object composes none.
+  objects: [{ name: 'host_kernel_probe', label: 'Probe', fields: { title: { type: 'text', label: 'Title' } } }],
 };
 `;
 
