@@ -523,7 +523,7 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
   // unconfigured tenant must be visible on the very next call, same as the
   // value-change case above. (#11966: same seam-absent arm as that case.)
   it('without a seam, a legitimate empty result is not cached either: the first write for a previously-unconfigured tenant is visible immediately', async () => {
-    const rows: Array<{ namespace: string; key: string; scope: string; value: string }> = [];
+    const rows: Array<{ namespace: string; key: string; scope: string; organization_id: string; value: string }> = [];
     const ql = makeCountingQl({ sys_setting: rows });
     const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
     expect(first).toEqual({ timezone: 'UTC', locale: 'en-US', currency: undefined });
