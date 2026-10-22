@@ -317,8 +317,6 @@ describe('plugin-rest-api.zod', () => {
       expect(config.title).toBe('ObjectStack API');
       expect(config.apiVersion).toBe('1.0.0');
       expect(config.outputPath).toBe('/api/docs/openapi.json');
-      expect(config.uiPath).toBe('/api/docs');
-      expect(config.uiFramework).toBe('swagger-ui');
       expect(config.includeInternal).toBe(false);
       expect(config.generateSchemas).toBe(true);
       expect(config.includeExamples).toBe(true);
@@ -337,19 +335,6 @@ describe('plugin-rest-api.zod', () => {
       ).toThrow();
     });
 
-    it('should validate UI frameworks', () => {
-      const frameworks = ['swagger-ui', 'redoc', 'rapidoc', 'elements'];
-      
-      frameworks.forEach(framework => {
-        const config = OpenApiGenerationConfigSchema.parse({ uiFramework: framework });
-        expect(config.uiFramework).toBe(framework);
-      });
-
-      expect(() =>
-        OpenApiGenerationConfigSchema.parse({ uiFramework: 'invalid' })
-      ).toThrow();
-    });
-
     it('should validate complete config', () => {
       const config = OpenApiGenerationConfigSchema.parse({
         enabled: true,
@@ -358,8 +343,6 @@ describe('plugin-rest-api.zod', () => {
         description: 'API for my application',
         apiVersion: '2.0.0',
         outputPath: '/docs/api.json',
-        uiPath: '/docs',
-        uiFramework: 'redoc',
         includeInternal: true,
         generateSchemas: true,
         includeExamples: true,

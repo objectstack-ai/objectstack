@@ -209,6 +209,14 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
     rationale:
       'Which files under a storage prefix get indexed into a knowledge source. Ingestion scope, not read authorization — retrieval is gated separately. NOTE the shape though: it is a vacuous-allow-list ("allow-list" whose empty value admits everything), the same shape as #3896. `storage.zod.ts` models the identical concept the better way — an explicit `mode: "whitelist"` discriminator plus `.min(1)`, so an empty whitelist cannot be expressed at all. Prefer that form for new allow-lists; changing this one is a breaking change to an authorable field and is not in scope here.',
   },
+  {
+    file: 'packages/services/service-messaging/src/objects/notification-preference.object.ts',
+    property: 'user_id',
+    semantics: 'scope',
+    rationale:
+      "Which users a notification delivery toggle covers. An empty User makes the row the admin-wide default for every user of the organization — ADR-0118 D1's empty reference in a user column rather than a sentinel, as maintainer ruling A decided (ruling record 6304380498). It selects the range a mute or allow applies to and grants no data access: a user's own row overrides it, and mandatory topics bypass the matrix entirely. The one way the empty state could widen by accident — the lookup default `set_null` turning a deleted person's own row into the default for everyone — is closed by `deleteBehavior: 'cascade'` on the field.",
+    evidence: 'packages/services/service-messaging/src/preference-resolver.ts (resolveRow — the user-specific row is consulted before the empty-User default)',
+  },
 
   // ---- Engine output, not authorable -------------------------------------
 

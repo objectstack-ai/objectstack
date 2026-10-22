@@ -162,10 +162,14 @@ Automatically generates OpenAPI documentation from route definitions and Zod sch
 
 **Features:**
 - OpenAPI 3.0.x and 3.1.0 support
-- Multiple UI frameworks (Swagger UI, Redoc, RapiDoc, Elements)
 - Auto-generated schemas from Zod definitions
 - Request/response examples
 - Server URLs, contact info, license info
+
+The platform serves no HTML documentation viewer: the API origin publishes the OpenAPI
+document only (`GET /api/v1/openapi.json` under the REST server's default `api.basePath`
+and `api.version`). The former viewer keys `uiPath` and `uiFramework` are retired and
+refused at parse with that prescription.
 
 **Example:**
 ```typescript
@@ -176,8 +180,6 @@ const openApi: OpenApiGenerationConfig = {
   description: 'Comprehensive API for ObjectStack',
   apiVersion: '1.0.0',
   outputPath: '/api/docs/openapi.json',
-  uiPath: '/api/docs',
-  uiFramework: 'swagger-ui',
   generateSchemas: true,
   includeExamples: true,
   servers: [

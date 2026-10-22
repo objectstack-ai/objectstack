@@ -10,6 +10,7 @@
 
 import {
     buildFieldMetaMap,
+    unmarkCsvTextCell,
     type ExportFieldMeta,
 } from './export-format.js';
 import {
@@ -26,6 +27,18 @@ import { asXlsxLoadInput, loadExcelJs } from './xlsx-module.js';
  * can be re-mapped to canonical field names via the optional `mapping`
  * argument (e.g. `{ "First Name": "first_name" }`); unmapped headers
  * pass through unchanged. Empty cells become empty strings.
+ *
+ * [#25078] Every parsed cell, header row included, is read through
+ * `unmarkCsvTextCell` (`./export-format.ts`), the import half of the CSV
+ * text-cell rule the CSV export writes with: it removes exactly one leading
+ * mark from a cell whose remainder the rule would have marked, and leaves every
+ * other cell as parsed. It runs HERE, before any mapping, because it reads the
+ * cell's text alone — a named mapping's rows keep their source headers until
+ * core's `applyMappingToRows`, so no target field type is known yet. Header
+ * cells are reversed before they are trimmed and looked up in `mapping`, so a
+ * mapping names the header as the export labelled it. Serves every CSV door
+ * that parses through `prepareImportRequest`: the sync import, the async import
+ * job and plugin-auth's admin user import.
  *
  * Kept dependency-free so REST stays runtime-portable (Hono / Express
  * adapters both consume this without pulling a CSV lib transitively).
@@ -64,7 +77,7 @@ export function parseCsvToRows(csv: string, mapping: Record<string, string> = {}
     while (cells.length > 0 && cells[cells.length - 1].every(c => c === '')) cells.pop();
     if (cells.length < 2) return [];
 
-    const header = cells[0].map(h => h.trim());
+    const header = cells[0].map(h => unmarkCsvTextCell(h).trim());
     const fields = header.map(h => mapping[h] ?? h);
     const out: Array<Record<string, any>> = [];
     for (let r = 1; r < cells.length; r++) {
@@ -74,7 +87,7 @@ export function parseCsvToRows(csv: string, mapping: Record<string, string> = {}
             const key = fields[c];
             if (!key) continue;
             const raw = row[c] ?? '';
-            obj[key] = raw;
+            obj[key] = unmarkCsvTextCell(raw);
         }
         out.push(obj);
     }

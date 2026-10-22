@@ -104,8 +104,8 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **description** | `string` | optional | API description |
 | **apiVersion** | `string` | optional (default: `"1.0.0"`) | API version |
 | **outputPath** | `string` | optional (default: `"/api/docs/openapi.json"`) | URL path to serve OpenAPI JSON |
-| **uiPath** | `string` | optional (default: `"/api/docs"`) | URL path to serve documentation UI |
-| **uiFramework** | `Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'elements'>` | optional (default: `"swagger-ui"`) | Documentation UI framework |
+| **uiPath** | `never` | optional | [REMOVED] `RestApiPluginConfig.openApi.uiPath` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — nothing ever read it: no documentation viewer was ever served at its path, the `/api/docs` default included, and the platform serves no HTML API documentation viewer at all, only the machine-readable OpenAPI document. Delete the key. The OpenAPI document is served at `GET /api/v1/openapi.json` under the REST server's default `api.basePath` and `api.version` (the path follows both) while `api.enableOpenApi` is on; point any viewer or client generator you run yourself at that document. |
+| **uiFramework** | `never` | optional | [REMOVED] `RestApiPluginConfig.openApi.uiFramework` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — nothing ever read it: no `swagger-ui`, `redoc`, `rapidoc` or `elements` viewer was ever rendered from it, and the platform serves no HTML API documentation viewer at all, only the machine-readable OpenAPI document. Delete the key. The OpenAPI document is served at `GET /api/v1/openapi.json` under the REST server's default `api.basePath` and `api.version` (the path follows both) while `api.enableOpenApi` is on; point any viewer or client generator you run yourself at that document. |
 | **includeInternal** | `boolean` | optional (default: `false`) | Include internal endpoints in documentation |
 | **generateSchemas** | `boolean` | optional (default: `true`) | Auto-generate schemas from Zod definitions |
 | **includeExamples** | `boolean` | optional (default: `true`) | Include request/response examples |
@@ -279,8 +279,8 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **description** | `string` | optional | API description |
 | **apiVersion** | `string` | optional (default: `"1.0.0"`) | API version |
 | **outputPath** | `string` | optional (default: `"/api/docs/openapi.json"`) | URL path to serve OpenAPI JSON |
-| **uiPath** | `string` | optional (default: `"/api/docs"`) | URL path to serve documentation UI |
-| **uiFramework** | `Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'elements'>` | optional (default: `"swagger-ui"`) | Documentation UI framework |
+| **uiPath** | `never` | optional | [REMOVED] `RestApiPluginConfig.openApi.uiPath` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — nothing ever read it: no documentation viewer was ever served at its path, the `/api/docs` default included, and the platform serves no HTML API documentation viewer at all, only the machine-readable OpenAPI document. Delete the key. The OpenAPI document is served at `GET /api/v1/openapi.json` under the REST server's default `api.basePath` and `api.version` (the path follows both) while `api.enableOpenApi` is on; point any viewer or client generator you run yourself at that document. |
+| **uiFramework** | `never` | optional | [REMOVED] `RestApiPluginConfig.openApi.uiFramework` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — nothing ever read it: no `swagger-ui`, `redoc`, `rapidoc` or `elements` viewer was ever rendered from it, and the platform serves no HTML API documentation viewer at all, only the machine-readable OpenAPI document. Delete the key. The OpenAPI document is served at `GET /api/v1/openapi.json` under the REST server's default `api.basePath` and `api.version` (the path follows both) while `api.enableOpenApi` is on; point any viewer or client generator you run yourself at that document. |
 | **includeInternal** | `boolean` | optional (default: `false`) | Include internal endpoints in documentation |
 | **generateSchemas** | `boolean` | optional (default: `true`) | Auto-generate schemas from Zod definitions |
 | **includeExamples** | `boolean` | optional (default: `true`) | Include request/response examples |

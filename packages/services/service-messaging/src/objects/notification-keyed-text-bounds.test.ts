@@ -40,7 +40,17 @@ describe('sys_notification_* keyed-text bounds carry their producers’ widths (
     expect(bound(NotificationDelivery, 'recipient_id')).toBe(PHYSICAL_ID_WIDTH);
     expect(bound(NotificationReceipt, 'notification_id')).toBe(PHYSICAL_ID_WIDTH);
     expect(bound(NotificationReceipt, 'user_id')).toBe(PHYSICAL_ID_WIDTH);
-    expect(bound(NotificationPreference, 'user_id')).toBe(PHYSICAL_ID_WIDTH);
+  });
+
+  it('a REFERENCE column carries no width of its own: sys_notification_preference.user_id (ADR-0118 D1)', () => {
+    // It was a text column bounded to the id width; it is now a `sys_user`
+    // lookup, which holds the referenced row's id — a width the parent's id
+    // column decides, not this field (driver-sql sizes every reference the
+    // same and ignores a declared `maxLength` on it).
+    const field = (NotificationPreference as any).fields.user_id;
+    expect(field.type).toBe('lookup');
+    expect(field.reference).toBe('sys_user');
+    expect(bound(NotificationPreference, 'user_id')).toBeUndefined();
   });
 
   it('topic columns equal sys_notification.topic’s own declared bound -- the event topic they are matched against', () => {

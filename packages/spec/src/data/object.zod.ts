@@ -30,6 +30,9 @@ import { isMaskedOnReadFieldType } from './masked-field-types';
 // refuse one set. Public: re-exported from `@objectstack/spec/data`, with the
 // field predicate `isControlledByParentMasterField` it counts.
 import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
+// The ADR-0015 §4.2 binding predicate, shared with `defineStack`'s
+// cross-reference pass and the v18 stored-row listing. Internal to the spec.
+import { externalBindingDatasourceRefusal } from './external-binding-datasource';
 // The object's default row scope: the RLS policy shape without `object`. No
 // cycle: `security/rls.zod` imports only zod and `shared/`.
 import { DefaultRowScopeSchema } from '../security/rls.zod';
@@ -1324,8 +1327,12 @@ export type ObjectFieldGroupParsed = z.infer<typeof ObjectFieldGroupSchema>;
  * opt-in (`datasource.external.allowWrites` **and** this `writable`).
  *
  * The cross-field invariant ("`external` only when the object's datasource
- * has `schemaMode !== 'managed'`") is enforced at metadata-load time, not
- * in this schema, because the datasource may live in another artefact.
+ * has `schemaMode !== 'managed'`") is not judged by THIS schema, because the
+ * datasource may live in another artefact. It is judged where each half is
+ * visible: the object's refinement refuses a binding whose object `datasource`
+ * is the managed primary (`'default'`, also the omitted value), and
+ * `defineStack` refuses one on a managed datasource the same stack declares
+ * (`external-binding-datasource.ts`).
  */
 export const ObjectExternalBindingSchema = strictObject({
   surface: "this object's `external` binding (ADR-0015)",
@@ -2183,6 +2190,18 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
  * object this rule refuses is denied every read and refused every write by the
  * runtime too. The parse says so where an author is present to act.
  *
+ * [#25092, ruling 6328204856 route A] The one master must also be WRITABLE:
+ * a required `master_detail` declared `readonly: true` or `system: true` is
+ * refused at `['fields']` (shape `master-not-writable`). ADR-0055 §1 derives
+ * the master from a reference every write of a detail supplies, and a field
+ * carrying either flag is not one an author's write supplies. Unlike the shapes above, the runtime still
+ * resolves this one (the flags do not change which field is the master), so
+ * this half of the rule lives at the parse alone, the authoring contract, and
+ * the runtime is not changed by it. `os lint`'s
+ * `relationship/master-detail-required` reports the same flags at `error` on
+ * every `master_detail` of the object; it is the advisory sweep, this is the
+ * refusal every door that parses meets.
+ *
  * Read on the PARSED field map: `required` is `z.boolean().default(false)`, so
  * an omitted `required` here is `false` — and is refused. That is the builder's
  * own contract seen from the other side: `ObjectSchema.create()` forces an
@@ -2220,6 +2239,37 @@ function refuseControlledByParentWithoutOneMaster(
   ctx: z.RefinementCtx,
 ): void {
   const refusal = controlledByParentMasterRefusal(objectName, sharingModel, fields);
+  if (refusal === undefined) return;
+  ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message });
+}
+
+/**
+ * [ADR-0015 §4.2 · #25168] An `external` binding names, in the object's own
+ * `datasource`, a datasource that is not the platform's managed primary.
+ *
+ * The half of the rule that needs nothing but the object: `'default'` (also
+ * the parsed value of an omitted `datasource`) is the host's primary
+ * datasource, which is managed by construction, so an `external` binding on it
+ * is refused wherever an object is parsed — `ObjectSchema.create` at module
+ * load, `defineStack`, `os validate`, and the object save door with `422
+ * INVALID_METADATA`. The half that needs the named datasource's definition is
+ * `defineStack`'s, for a datasource the same stack declares. Predicate and
+ * message: `external-binding-datasource.ts`
+ * ({@link externalBindingDatasourceRefusal}), which the v18 stored-row listing
+ * reads too, so `os migrate meta --stored` lists each stored object this
+ * refuses.
+ *
+ * Metadata at rest still LOADS: a stored object this refuses registers under a
+ * `[metadata_spec_invalid]` diagnostic carrying this message, and its next
+ * save is refused.
+ */
+function refuseExternalBindingOnPrimaryDatasource(
+  objectName: unknown,
+  external: unknown,
+  datasource: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  const refusal = externalBindingDatasourceRefusal(objectName, external, datasource);
   if (refusal === undefined) return;
   ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message });
 }
@@ -2588,9 +2638,11 @@ const ObjectSchemaBase = strictObject(
 
   /**
    * External Binding (ADR-0015)
-   * Present only for federated objects routed to a datasource whose
-   * `schemaMode !== 'managed'`. Describes the remote table binding and
-   * per-object writability. See {@link ObjectExternalBindingSchema}.
+   * Present only for federated objects whose own `datasource` names a
+   * datasource with `schemaMode !== 'managed'`; refused on `'default'` and on a
+   * managed datasource the stack declares (ADR-0015 §4.2). Describes the
+   * remote table binding and per-object writability. See
+   * {@link ObjectExternalBindingSchema}.
    */
   external: ObjectExternalBindingSchema.optional()
     .describe('Remote table binding for federated (external) objects.'),
@@ -2841,7 +2893,7 @@ const ObjectSchemaBase = strictObject(
    * cross-repo back-compat). New metadata should set `nameField`.
    */
   displayNameField: z.string().optional().describe('[DEPRECATED → nameField] Field to use as the record display name (e.g., "name", "title"). Accepted as an alias for nameField.'),
-  titleFormat: TemplateExpressionInputSchema.optional().describe('[DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. Migrate a single-field title to nameField, a composite to a formula field designated as nameField. Placeholders may be written {{field}} or {field} — the title renderers treat the two as equivalent, normalizing {{field}} to {field} before substituting; neither spelling is judged at parse time.'),
+  titleFormat: TemplateExpressionInputSchema.optional().describe('[DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. Migrate a single-field title to nameField; a composite title that import, sort or search must match to a stored computed field (a non-formula field with an expression, computed and stored on every write) designated as nameField — a text formula designated as nameField stays legal for a title shown for display only. Placeholders may be written {{field}} or {field} — the title renderers treat the two as equivalent, normalizing {{field}} to {field} before substituting; neither spelling is judged at parse time.'),
   /**
    * [#21182 — ruling A on objectstack-ai/hotcrm#1199] The record's PICTURE:
    * names the field whose value the record page header — the record chrome
@@ -3215,6 +3267,9 @@ const ObjectSchemaBase = strictObject(
   // under `controlled_by_parent` — the one master relation the runtime derives
   // access from. See the helper's docblock.
   refuseControlledByParentWithoutOneMaster(object.name, object.sharingModel, object.fields, ctx);
+  // [ADR-0015 §4.2 · #25168] An `external` binding is not on the platform's
+  // managed primary datasource. See the helper's docblock.
+  refuseExternalBindingOnPrimaryDatasource(object.name, object.external, object.datasource, ctx);
 }).overwrite((object) => {
   // [#23065] A `tree` that names no `reference` references this object, and the
   // parse writes that down after the refinements above judged what the author
@@ -3544,6 +3599,12 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  * - explicit `required: false` → refused with a located error — the author
  *   wrote a contradiction, and silently flipping an explicitly authored value
  *   would hide it (ADR-0032 "no silent failure").
+ *
+ * `readonly` / `system` are not read here: the builder forces nothing about
+ * them, and the parse it ends in refuses a one master carrying either
+ * ({@link refuseControlledByParentWithoutOneMaster}, shape
+ * `master-not-writable`), so `create()` refuses them through that one rule
+ * rather than a second copy of it.
  *
  * Lives at `create()` — the authoring surface (ADR-0077) — beside
  * {@link assertSystemDataIsWritable}, and deliberately NOT in raw

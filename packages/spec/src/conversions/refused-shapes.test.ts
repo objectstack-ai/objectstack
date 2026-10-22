@@ -61,6 +61,7 @@ describe('the refused-shape list — registered against the migration chain', ()
       'cbp-master-relation-tiers-retired',
       'view-data-api-provider-retired',
       'flow-value-slot-template-dialect-refused',
+      'object-external-binding-managed-datasource-refused',
     ]);
   });
 
@@ -149,6 +150,27 @@ describe('#23270 — a stored controlled_by_parent object without exactly one re
     expect(cbpIssue(item)?.path).toEqual([path.split('.').pop()]);
     // The relation is shown; the unrelated field is not.
     expect(JSON.parse(todo.from).fields.title).toBeUndefined();
+  });
+
+  it.each([
+    ['readonly: true', md('crm_opportunity', { required: true, readonly: true })],
+    ['system: true', md('crm_opportunity', { required: true, system: true })],
+    // The Studio shape plus the flag: D2 gives `required: true`, and the flag is still listed.
+    ['readonly: true, `required` omitted', md('crm_opportunity', { readonly: true })],
+  ])('#25092 — a one master marked %s: one TODO under the same entry, and the TODO does not claim the runtime denies it', (_label, master) => {
+    const row = cbpRow('crm_line', { opportunity: master });
+    const { item, todos } = storedTodos('object', row);
+    expect(item.fields.opportunity.readonly ?? item.fields.opportunity.system).toBe(true);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe('cbp-master-relation-tiers-retired');
+    expect(todo.path).toBe('objects[0].fields');
+    expect(todo.reason).toMatch(/Its one required `master_detail`, `opportunity`, is marked `readonly` or `system`\. Dropping the flag changes who may write the reference/);
+    expect(todo.reason).toContain('the metadata save door refuses it with 422 INVALID_METADATA until it is corrected');
+    expect(todo.reason).not.toContain('every read of its rows is denied');
+    expect(todo.reason).toContain("Object 'crm_line' declares sharingModel 'controlled_by_parent' with its one required `master_detail`");
+    // The listing and the parse refuse ONE set: the stored row still fails the parse, at the same key.
+    expect(cbpIssue(item)?.path).toEqual(['fields']);
   });
 
   it('the Studio shape — one master_detail, `required` omitted — converts and is NOT listed', () => {
@@ -447,5 +469,68 @@ describe('#23317 — a stored page whose component binds the retired API source 
       expect(entry?.surface, type).toContain(`\`${type}\``);
       expect(detector?.surface, type).toContain(type);
     }
+  });
+});
+
+// ── #25168 ────────────────────────────────────────────────────────────────
+
+const federatedRow = (extra: Record<string, unknown>) => ({
+  name: 'wh_order',
+  label: 'Order',
+  sharingModel: 'private',
+  fields: { title: { type: 'text', label: 'Title' } },
+  external: { remoteName: 'orders' },
+  ...extra,
+});
+
+const externalIssue = (row: unknown) => {
+  const parsed = ObjectSchema.safeParse(row);
+  return parsed.success ? undefined : parsed.error.issues.find((i) => i.path.join('.') === 'external');
+};
+
+describe('#25168 — a stored object whose `external` binding is on a managed datasource is listed by object', () => {
+  it.each([
+    ['`datasource` omitted', {}],
+    ["`datasource: 'default'`", { datasource: 'default' }],
+  ])('%s: one TODO naming the object, the rule and the owner\'s choice; the row is not rewritten', (_label, extra) => {
+    const row = federatedRow(extra);
+    const { item, todos } = storedTodos('object', row);
+    expect(item).toEqual(row);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe('object-external-binding-managed-datasource-refused');
+    expect(todo.path).toBe('objects[0].external');
+    expect(todo.reason).toMatch(/^No lossless rewrite: dropping `external` turns the remote table into one ObjectStack creates/);
+    expect(todo.reason).toContain("Object 'wh_order' declares `external`, but its `datasource` is 'default'");
+    expect(JSON.parse(todo.from)).toEqual({ datasource: (extra as { datasource?: string }).datasource ?? null, external: { remoteName: 'orders' } });
+    // The listing and the parse refuse ONE set: the stored row still fails the parse, at the same key.
+    expect(externalIssue(item)).toBeDefined();
+  });
+
+  it('a stack that declares the named datasource managed is listed by the stack-level half', () => {
+    const stack = {
+      datasources: [{ name: 'warehouse', driver: 'sqlite', config: {} }],
+      objects: [federatedRow({ datasource: 'warehouse' })],
+    };
+    const { todos } = todosOf(stack);
+    const listed = todos.filter((t) => t.conversionId === 'object-external-binding-managed-datasource-refused');
+    expect(listed).toHaveLength(1);
+    expect(listed[0]!.reason).toContain("declares `external` on datasource 'warehouse', whose `schemaMode` is 'managed'");
+  });
+
+  it.each([
+    ['a named datasource the row cannot see', federatedRow({ datasource: 'warehouse' })],
+    ['an object with no `external`', { ...federatedRow({}), external: undefined }],
+  ])('%s is not listed — and the parse accepts it', (_label, row) => {
+    expect(storedTodos('object', row).todos).toEqual([]);
+    expect(externalIssue(row)).toBeUndefined();
+  });
+
+  it('a datasource the stack declares external is not listed', () => {
+    const stack = {
+      datasources: [{ name: 'warehouse', driver: 'sqlite', config: {}, schemaMode: 'external', external: {} }],
+      objects: [federatedRow({ datasource: 'warehouse' })],
+    };
+    expect(todosOf(stack).todos.filter((t) => t.conversionId === 'object-external-binding-managed-datasource-refused')).toEqual([]);
   });
 });

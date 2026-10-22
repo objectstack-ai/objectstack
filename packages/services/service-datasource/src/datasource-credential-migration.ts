@@ -42,11 +42,11 @@
  *    that authenticates without it today, which is a behaviour change on a
  *    working datasource. They are reported as `remaining` instead, so the
  *    operator can clear them by hand.
- *  - **`encryptionKey` (turso)** — credential-shaped and deliberately still
- *    writable (#8078). The binder injects exactly ONE secret slot and that slot
- *    is the `authToken`; binding an encryption key into it would hand the
- *    driver the wrong credential. Giving it a slot of its own is #8081 item 4
- *    and is NOT decided here.
+ *  - **`encryptionKey` (turso)** — credential-shaped and RETIRED (#25050): it
+ *    was honoured in no mode, and no door accepts it any more. The binder
+ *    injects exactly ONE secret slot and that slot is the `authToken`; binding
+ *    a retired key into it would hand the driver the wrong credential. The
+ *    remedy is deleting it.
  *  - **A credential embedded in a URL's userinfo** — see below.
  *
  * ## Why a URL-embedded credential is REFUSED rather than extracted
@@ -130,14 +130,14 @@ export function urlCredentialKeys(config: Record<string, unknown> | undefined): 
 
 /**
  * Credential-shaped config keys this action will not bind: the pre-#8078 alias
- * spellings and any driver key that is credential-shaped but still writable
+ * spellings and any retired driver key whose stored value is still redacted
  * (turso's `encryptionKey`).
  *
  * Derived by subtracting the driver's bindable slot from the READ path's own
  * redaction set (`redactableConfigKeys`, the one security list #8300 put in
  * spec) — never a second hand-written list. A refused key added to a driver
  * contract tomorrow therefore lands on the bindable side automatically, and a
- * new still-writable credential key lands here.
+ * newly retired credential key lands here.
  */
 function unbindableCredentialKeys(
   driver: unknown,
@@ -267,8 +267,8 @@ export function planCredentialMigration(record: StoredDatasource): CredentialMig
         reason:
           `Datasource '${record.name}' holds ${named}, which the ${String(record.driver)} driver does not `
           + 'read as its credential — an alias spelling from before inline credentials were refused at '
-          + 'publish, which no connection builder reads, or a key that is credential-shaped but '
-          + 'deliberately still writable (turso\'s `encryptionKey`, which has no secret slot of its own: '
+          + 'publish, which no connection builder reads, or a retired key that is credential-shaped '
+          + '(turso\'s `encryptionKey`, which never encrypted anything and is no longer accepted: '
           + 'the one slot carries the `authToken`). Binding one into the '
           + 'single secret slot would hand the driver a credential it does not use, or add authentication '
           + 'to a connection that works without it today.',

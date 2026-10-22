@@ -54,11 +54,11 @@ const SYS = { isSystem: true } as const;
 const KEYED = /^hmac-sha256:[0-9a-f]{64}$/;
 const FAMILY = ['sys_metadata', 'sys_metadata_history'] as const;
 
-/** The synthetic credential, in the slot the datasource redactor withholds (turso's `encryptionKey`). */
+/** The synthetic credential, in the slot the datasource redactor withholds (turso's `authToken`). */
 const SENTINEL = 'flow-filter-refusal-sentinel-91f3';
 const DS_NAME = 'pin_filter_ds';
 const DS_URL = 'libsql://pin-filter.example.invalid';
-const DS_BODY = { name: DS_NAME, label: 'Pin filter DS', driver: 'turso', config: { url: DS_URL, encryptionKey: SENTINEL } };
+const DS_BODY = { name: DS_NAME, label: 'Pin filter DS', driver: 'turso', config: { url: DS_URL, authToken: SENTINEL } };
 const STORED_HASH = hashSpec(DS_BODY);
 /** A well-formed hash that is not the stored one. */
 const OTHER_HASH = hashSpec({ ...DS_BODY, label: 'another body' });

@@ -403,9 +403,8 @@ export const PASSTHROUGH_INLINE_CREDENTIAL_REFUSED = (path: string): string =>
  *    secret binder injects exactly ONE secret and that slot is the login
  *    password, so a refusal here would name a remedy that does not exist and
  *    remove the only way to configure an authenticated proxy / passphrase-
- *    protected key. Same posture as turso's still-writable `encryptionKey`
- *    (#8078; the binder-slot question is #8081 item 4's, not this refusal's).
- *    They are redacted on read instead
+ *    protected key (the binder-slot question is #8081 item 4's, not this
+ *    refusal's). They are redacted on read instead
  *    (`data/datasource-credential-redaction.ts`).
  */
 export const MONGO_OPTIONS_CREDENTIAL_PATHS: readonly (readonly string[])[] = [

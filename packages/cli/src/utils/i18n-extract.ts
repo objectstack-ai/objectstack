@@ -93,6 +93,9 @@
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
  *   apps.<app>.navigation.<id>.label
+ *     ^ an item another package CONTRIBUTES into the app through
+ *       `manifest.navigationContributions` too, keyed under the TARGET app
+ *       (#24993; see `navigationContributionsOf`)
  *   dashboards.<dash>.label / .description
  *   dashboards.<dash>.widgets.<w>.title / .description
  *   datasets.<dataset>.label / .description
@@ -113,6 +116,7 @@
  *   flows.<flow>.screens.<node_id>.fields.<field>.options.<value>   (#22507)
  *   flows.<flow>.successMessage / .errorMessage                (#22507)
  *   flows.<flow>.refusals.<node_id>.message                    (#22450)
+ *   flows.<flow>.approvals.<node_id>.label                     (#24916)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
@@ -146,6 +150,7 @@ import {
 import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
+import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
 import { authorWarnedProperties, walkPageComponents } from '@objectstack/lint';
 import { collectFilledFromHashes } from '@objectstack/platform-objects/apps';
@@ -1449,6 +1454,22 @@ export function collectExpectedEntries(
     walkNavigation(nav, appName, out);
   }
 
+  // ── Contributed navigation (ADR-0029 D7, #24993) ─────────────────
+  // An item a package injects into another package's app never enters that
+  // app's authored `navigation`: the runtime folds it in on every read
+  // (`SchemaRegistry.applyNavContributions`) and `translateApp` then resolves
+  // its label from `apps.<target>.navigation.<id>.label` — the key
+  // `translation-target-unknown` already accepts for a contributed item
+  // (#18203). Walked AFTER the apps' own trees and by the same
+  // `walkNavigation`, so a contributed group's children follow the rule an own
+  // group's do, and an id an app also declares keeps its own entry
+  // (`dedupeByPath`, first emission wins).
+  for (const contribution of navigationContributionsOf(config)) {
+    const targetApp = contribution?.app;
+    if (typeof targetApp !== 'string' || targetApp.length === 0) continue;
+    if (Array.isArray(contribution.items)) walkNavigation(contribution.items, targetApp, out);
+  }
+
   // ── Dashboards + widgets ─────────────────────────────────────────
   const dashboards: any[] = Array.isArray(config?.dashboards) ? config.dashboards : [];
   for (const dash of dashboards) {
@@ -1910,18 +1931,28 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
     // by the schema, so this is authored text in practice; `pushOptional`
     // keeps a label-less flow from seeding an empty string anyway.
     //
-    // Demanded only for a flow with a `screen` node, at any depth of the same
-    // node universe the screens walk below reads. The predicate mirrors the one
-    // reader of the key: the console's `FlowRunner` names the flow by it, in
-    // its header and its completion toast, and the runner opens only on a run
-    // paused at a screen. A flow that can never pause there (record-triggered,
-    // scheduled, an API flow with no screen) has no surface that shows its
-    // translated label, so demanding one would ask an author for a string that
-    // is stored and never read. When a reader of a non-screen flow's label
-    // lands (a run-result toast, say), this predicate widens in the same change
-    // as that reader.
+    // Demanded for a flow with a `screen` node or an `approval` node, at any
+    // depth of the same node universe the walks below read. The predicate
+    // mirrors the two readers of the key, and nothing wider:
+    //
+    // - the console's `FlowRunner` names the flow by it, in its header and its
+    //   completion toast, and the runner opens only on a run paused at a screen;
+    // - [#24916] the approvals door names a request's flow by it in the
+    //   reader's locale (`plugin-approvals` `reader-locale-labels.ts`, the
+    //   inbox, the record's approval panel and the request page), and a request
+    //   exists only where an `approval` node opened one.
+    //
+    // A flow with neither (record-triggered, scheduled or an API flow that
+    // only does work) has no surface that shows its translated label: the
+    // console's launch hosts toast the action's copy or the flow's own
+    // `successMessage` / `errorMessage`, never its label. Demanding one would
+    // ask an author for a string that is stored and never read, so `Flow.label`
+    // being required by the schema is not the test. When a reader of such a
+    // flow's label lands, this predicate widens in the same change as that
+    // reader.
     const hasScreen = nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE);
-    if (hasScreen) {
+    const approvalNodes = nodes.filter((node) => node && typeof node === 'object' && node.type === APPROVAL_NODE_TYPE);
+    if (hasScreen || approvalNodes.length > 0) {
       pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
     }
 
@@ -2007,6 +2038,23 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
       if (!nodeId) continue;
       pushOptional(out, ['flows', flowName, 'refusals', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
+    }
+
+    // [#24916] `flows.<flow>.approvals.<node_id>.label` — an `approval` node's
+    // step label, the name its request shows the submitter and the approvers.
+    // The approvals door reads that key in the reader's locale for the
+    // request's `current_step`, which is the node's `FlowNode.id`, and its step
+    // progress names every approval step the same way; the stored
+    // `current_step_label` is the authored `FlowNode.label` the seed carries.
+    // The key's one leaf is `label` because the node config declares no
+    // person-facing heading of its own (`translation.zod.ts`, `approvals`).
+    // Same node universe as the walks above, so the walk reaches every id
+    // `os validate` accepts the key for.
+    for (const node of approvalNodes) {
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      // No id, no key: the request's `current_step` could not name the node.
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'approvals', nodeId, 'label'], node.label, 'flow', scope);
     }
   }
 }
@@ -2115,6 +2163,45 @@ function walkNavigation(nav: any[], appName: string, out: ExpectedEntry[]): void
     if (Array.isArray(item.items)) walkNavigation(item.items, appName, out);
     if (Array.isArray(item.children)) walkNavigation(item.children, appName, out);
   }
+}
+
+/**
+ * Every `navigationContributions[]` entry the stack carries, from the two
+ * carriers `translation-target-unknown` reads (`contributedNavItemsByApp` in
+ * `@objectstack/lint`'s `validate-translation-references.ts`), so the keys
+ * coverage expects are the keys that rule accepts:
+ *
+ *   1. `manifest.navigationContributions` — where a single-`defineStack`
+ *      project's contributions live;
+ *   2. `packages[].manifest.navigationContributions` — the ADR-0130 D4 artifact
+ *      entry, whose `manifest` is the assembled package body. On a
+ *      `composeStacks(…, { manifest: 'preserve' })` stack this is the only
+ *      place a module's contributions sit: the singular top-level `manifest`
+ *      is one package's copy (the `'last'` pick), usually the app's.
+ *
+ * Both are read unconditionally, as the rule reads them. Where the top-level
+ * manifest IS a copy of a contributing package's, the two carriers yield the
+ * same items and `dedupeByPath` keeps one entry per key.
+ *
+ * ⛔ The rule's reader is not imported: it is module-private to
+ * `@objectstack/lint`. This copy is held to it by
+ * `test/i18n-contributed-nav-coverage.test.ts`, which runs the rule over a
+ * bundle carrying every contributed key this walk expects.
+ *
+ * Not seen, here as there: a contribution registered imperatively from a
+ * plugin's `init` (`engine.registerAppNavContribution`) is not metadata;
+ * `packages/cli/scripts/check-app-nav-i18n.mjs` boots a composition to judge
+ * that population.
+ */
+function navigationContributionsOf(config: any): any[] {
+  const out: any[] = [];
+  const add = (list: unknown): void => {
+    if (Array.isArray(list)) out.push(...list);
+  };
+  add(config?.manifest?.navigationContributions);
+  const packages: unknown[] = Array.isArray(config?.packages) ? config.packages : [];
+  for (const entry of packages) add((entry as any)?.manifest?.navigationContributions);
+  return out;
 }
 
 // ─── Filter + bundle assembly ──────────────────────────────────────────

@@ -15,6 +15,10 @@ import {
     buildSysSettingDuplicateProbeSqlMysql,
     buildSysSettingPresenceSql,
 } from './sys-setting-identity-index.js';
+import {
+    buildNotificationPreferenceDuplicateProbeSql,
+    buildNotificationPreferencePresenceSql,
+} from './notification-preference-identity-index.js';
 import type { IndexExec } from './partial-index-probe.js';
 
 /**
@@ -98,6 +102,22 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         meta.run('m4', 'view', 'crm_case.retired', null, null, 'archived');
         meta.run('m5', 'view', 'crm_case.retired', null, null, 'archived');
 
+        // ── sys_notification_preference: two admin-global defaults for one key ──
+        // An EMPTY `user_id` is the admin-global default (ADR-0118 D1). Two of
+        // them for one (organization, topic, channel) is what the NULL-safe
+        // index refuses. Controls: the same key in ANOTHER organization, and a
+        // real user's row for the same topic and channel, are both legal.
+        db.exec(`CREATE TABLE sys_notification_preference (
+            id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT, topic TEXT, channel TEXT
+        );`);
+        const pref = db.prepare(
+            'INSERT INTO sys_notification_preference (id, organization_id, user_id, topic, channel) VALUES (?,?,?,?,?)',
+        );
+        pref.run('p1', 'org_a', null, 'deal.won', 'email');
+        pref.run('p2', 'org_a', null, 'deal.won', 'email');
+        pref.run('p3', 'org_b', null, 'deal.won', 'email');
+        pref.run('p4', 'org_a', 'usr_1', 'deal.won', 'email');
+
         // ⛔ `sys_setting` is deliberately NOT created: it is registered by the
         // OPTIONAL `service-settings`, so an ordinary kernel reaches
         // `kernel:ready` without it and the migration treats that as a silent
@@ -121,6 +141,7 @@ describe('kernel:ready index pre-flight (#8725)', () => {
             'idx_sys_metadata_overlay_active:blocked',
             'idx_sys_metadata_overlay_draft:clear',
             'uniq_sys_setting_organization_id_namespace_key_scope_user_id:table-absent',
+            'uniq_sys_notification_preference_a22d7d27:blocked',
         ]);
 
         // The overlay conflict. [ADR-0131 C7b] The organization is no part of
@@ -155,6 +176,13 @@ describe('kernel:ready index pre-flight (#8725)', () => {
 
         expect(by('idx_sys_metadata_overlay_draft', results).groups).toEqual([]);
         expect(by('uniq_sys_setting_organization_id_namespace_key_scope_user_id', results).groups).toEqual([]);
+
+        // The preference conflict: org_a's two global defaults, and nothing
+        // else — not org_b's lone default, not usr_1's own row.
+        expect(by('uniq_sys_notification_preference_a22d7d27', results).groups).toEqual([
+            { key: { organization_id: 'org_a', user_id_key: '', topic: 'deal.won', channel: 'email' }, rowCount: 2 },
+        ]);
+        expect(by('uniq_sys_notification_preference_a22d7d27', results).rowScope).toBeNull();
     });
 
     it('[ADR-0131 C7b] names the legacy organization rows the re-keyed index now refuses: two organizations, or an organization and the environment, on one key', async () => {
@@ -206,6 +234,7 @@ describe('kernel:ready index pre-flight (#8725)', () => {
                 'ensureMetadataOverlayIndexes:sys_metadata:idx_sys_metadata_overlay_active',
                 'ensureMetadataOverlayIndexes:sys_metadata:idx_sys_metadata_overlay_draft',
                 'ensureSysSettingIdentityIndex:sys_setting:uniq_sys_setting_organization_id_namespace_key_scope_user_id',
+                'ensureNotificationPreferenceIdentityIndex:sys_notification_preference:uniq_sys_notification_preference_a22d7d27',
             ]);
         }
     });
@@ -219,11 +248,15 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         expect(sql['uniq_sys_setting_organization_id_namespace_key_scope_user_id']).toBe(
             buildSysSettingDuplicateProbeSql(),
         );
+        expect(sql['uniq_sys_notification_preference_a22d7d27']).toBe(buildNotificationPreferenceDuplicateProbeSql());
         // The presence question is the migration's own too, so this cannot come
         // to a different verdict about the table than the migration does.
         expect(
             probes.find((p) => p.table === 'sys_setting')!.presenceSql,
         ).toBe(buildSysSettingPresenceSql());
+        expect(
+            probes.find((p) => p.table === 'sys_notification_preference')!.presenceSql,
+        ).toBe(buildNotificationPreferencePresenceSql());
     });
 
     it('spells the sys_setting probe for MySQL, where the bare form is a parse error', () => {

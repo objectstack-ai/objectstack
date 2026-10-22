@@ -112,6 +112,8 @@ describe('批 20, unknown keys refused — the doors these shapes are reachable 
       access: { default: 'private' },
       lifecycle: { class: 'audit', retention: { maxAge: '7y' } },
       fieldGroups: [{ key: 'contact_info', label: 'Contact' }],
+      // ADR-0015 §4.2: a binding names its non-managed datasource on the object.
+      datasource: 'remote_crm',
       external: { remoteName: 'remote_contacts', writable: true },
       userActions: { create: false, exportCsv: true },
       systemFields: { tenant: false, audit: true },
@@ -169,7 +171,7 @@ describe('批 20 — closed sites reject unknown keys where they live', () => {
 
   it('`external` — the ADR-0015 federated binding', () => {
     accept(ObjectExternalBindingSchema, { remoteName: 'remote_contacts', writable: true });
-    expect(rejectOnObject({ external: { remoteName: 'r', notABindingKey: 1 } })).toContain('notABindingKey');
+    expect(rejectOnObject({ datasource: 'remote_crm', external: { remoteName: 'r', notABindingKey: 1 } })).toContain('notABindingKey');
   });
 
   it('`userActions` — the CRUD affordance overrides', () => {
@@ -402,7 +404,7 @@ describe('批 20, unknown keys refused — curation is anchored to the sibling c
     });
 
     it('`external.allowWrites` names the DOUBLE opt-in — the datasource half and the object half', () => {
-      const msg = rejectOnObject({ external: { remoteName: 'r', allowWrites: true } });
+      const msg = rejectOnObject({ datasource: 'remote_crm', external: { remoteName: 'r', allowWrites: true } });
       expect(msg).toContain('writable');
       expect(msg).toContain('datasource');
       accept(ObjectExternalBindingSchema, { remoteName: 'r', writable: true });
@@ -510,7 +512,7 @@ describe('批 20, unknown keys refused — curation is anchored to the sibling c
       ['userActions.export → exportCsv', { userActions: { export: true } }, 'exportCsv'],
       ['publicSharing.audiences → allowedAudiences', { publicSharing: { enabled: true, audiences: [] } }, 'allowedAudiences'],
       ['publicSharing.redact → redactFields', { publicSharing: { enabled: true, redact: [] } }, 'redactFields'],
-      ['external.table → remoteName', { external: { table: 't' } }, 'remoteName'],
+      ['external.table → remoteName', { datasource: 'remote_crm', external: { table: 't' } }, 'remoteName'],
       ['fieldGroups[].title → label', { fieldGroups: [{ key: 'g', label: 'G', title: 'T' }] }, 'label'],
     ])('%s', (_name, patch, expected) => {
       expect(rejectOnObject(patch)).toContain(expected);

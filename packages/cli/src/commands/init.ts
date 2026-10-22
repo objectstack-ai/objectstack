@@ -344,9 +344,10 @@ export const SCAFFOLD_PNPM_RANGE = '>=10.15';
 // `^4.0.0` over `^4.0.18`: no recorded decision exists for either, both were
 // written in the same 2026-02-07 commit, and `^4.0.18` claims a PATCH-level
 // floor nothing justifies while being strictly the narrower of the two. (The
-// vitest range has since moved to `~4.0.0` because `^4.0.0` stopped
-// installing on npm 10. That was an install failure, not a support decision;
-// the comment on `SCAFFOLD_VITEST_RANGE` holds the reading.)
+// vitest range has since moved twice: to `~4.0.0` when `^4.0.0` stopped
+// installing on npm 10, then to `~4.1.12` for a security advisory on
+// `@vitest/mocker`. Neither was a support decision; the comment on
+// `SCAFFOLD_VITEST_RANGE` holds the reading.)
 //
 // ⚠️ Neither choice changes what a scaffolded project INSTALLS. Measured
 // against the registry: `^5.3.0` and `^5.8.0` both resolve to typescript
@@ -386,54 +387,148 @@ export const SCAFFOLD_TYPESCRIPT_RANGE = '^5.3.0';
 /**
  * The vitest range a scaffolded project declares when its template tests.
  *
- * `~4.0.0`, not `^4.0.0`, because `^4.0.0` does not INSTALL on npm 10, the npm
- * that Node 22 bundles. Measured 2026-10-12, in an empty directory with a fresh
- * `--cache` and a manifest holding only this one devDependency (the full matrix
- * is in the PR that set this value): on npm 10.9.4 and 10.9.9, `npm install`
- * exits 1 with `Cannot read properties of null (reading 'edgesOut')` from
- * arborist's `#loadPeerSet`, and npm 11.21.0 installs it. `~4.0.0` installed on
- * all three (vitest 4.0.18, vite 7.3.7), and so did both CLI-emitted plugin
- * manifests. The cost: a scaffold gets vitest 4.0.18 rather than 4.1.x.
+ * `~4.1.12`: the floor is the first 4.x release outside GHSA-qxg6-89mg-rqv8,
+ * which affects `@vitest/mocker` from 2.1.0-beta.7 up to the fix in 4.1.12.
+ * vitest depends on its own `@vitest/mocker` at the exact same version, so the
+ * vitest floor IS the mocker floor. The tilde admits patch releases only, as
+ * the previous `~4.0.0` did, because both npm 10 failures recorded below
+ * arrived with a new minor's peer graph. ⛔ Never move the floor back below
+ * 4.1.12 to get around a future npm 10 failure: no 4.0.x fix exists, and
+ * `test/scaffold-npm-overrides.test.ts` pins the floor.
  *
- * ⚠️ The range alone stopped being enough, so it is also emitted as an npm
- * OVERRIDE — see {@link SCAFFOLD_NPM_OVERRIDES}, which is built from this
- * constant, so the declared range and the override cannot disagree.
+ * The range installs on npm 10, the npm Node 22 bundles, only TOGETHER with
+ * the npm override — see {@link SCAFFOLD_NPM_OVERRIDES}, built from this
+ * constant, so the declared range and the override cannot disagree. vitest
+ * 4.1.12 itself peers `@vitest/browser-webdriverio ^4.1.11`, whose only match,
+ * 4.1.11, peers `vitest: 4.1.11` exactly, and npm 10's arborist crashes on
+ * that set. Measured 2026-10-22, each manifest in an empty directory with a
+ * fresh `--cache`, the `@objectstack/*` ranges resolving to the published
+ * 18.0.0 (blank template, `os init -t plugin`, `os create plugin`):
  *
- * The cause is upstream, in the peer graph. Every vitest 4.1.x admits vite 8.
- * vite 8 declares an optional `@vitejs/devtools` peer, which reaches
- * `@vitejs/devtools-vitest`, which peers `vitest@*`. npm 10 resolves that peer
- * to vitest's `latest` release, whose exact-version peers then contradict the
- * vitest at the root, and npm 10's arborist crashes on it. vitest 4.0.x admits
- * only vite `^6 || ^7`, and no vite 6 or 7 release declares the devtools peer,
- * so the `vitest@*` peer never enters the graph.
+ *   `~4.1.12` + override   npm 10.9.4, 10.9.9,   exit 0; one vitest and one
+ *                          11.21.1               `@vitest/mocker`, both 4.1.12;
+ *                                                `npm audit` lists no vitest or
+ *                                                `@vitest/*` entry
+ *   `~4.1.12`, no override npm 10.9.9            exit 1, `Cannot read properties
+ *                                                of null (reading 'edgesOut')`
+ *   `~4.0.0` + override    npm 10.9.9, 11.21.1   exit 0 on vitest and
+ *                                                `@vitest/mocker` 4.0.18, which
+ *                                                `npm audit` reports
  *
- * ⛔ Not `^5.0.0`, although it installs today. It installs only because it
- * resolves to exactly the version `latest` names: pinned to 5.0.0 or 5.0.2 it
- * crashes the same way. So it would break again, with no change here, the day
- * `latest` moves past 5.x. ⛔ Not a shipped `.npmrc` with `legacy-peer-deps`
- * either, which changes peer resolution for every npm user of the scaffold.
+ * The install does not depend on where vitest's `latest` tag points: `latest`
+ * is 5.0.5, outside this range, and the range installs. The override routes
+ * every `vitest` edge in the npm graph to this range, the optional peers deep
+ * in the closure included.
  *
- * The re-check that lets this move back: run `npm install` of
- * `{"devDependencies":{"vitest":"^4.0.0"}}` (or the range you want) in an empty
- * directory with a fresh `--cache`, on the newest npm 10 and on npm 11. When
- * both exit 0, widen this.
+ * ⛔ Not the 5.x line, although `^5.0.5` + override installed on the same
+ * matrix and cleared the advisory too. vitest 5 declares `engines.node`
+ * `^22.12.0 || ^24.0.0 || >=26.0.0`, narrower than the `>=22.0.0` the CLI and
+ * `create-objectstack` declare, and this repo's own suites run vitest 4.
+ * Moving a scaffold to a new major is its own change.
+ * ⛔ Not a shipped `.npmrc` with `legacy-peer-deps` either, which changes peer
+ * resolution for every npm user of the scaffold.
+ *
+ * The re-check before moving this: `npm install` of each emitted manifest in
+ * an empty directory with a fresh `--cache`, on the newest npm 10 and on npm
+ * 11, then `npm audit` of the installed tree.
  */
-export const SCAFFOLD_VITEST_RANGE = '~4.0.0';
+export const SCAFFOLD_VITEST_RANGE = '~4.1.12';
+
+/**
+ * The npm `overrides` SELECTOR that routes `uuid` out of GHSA-w5hq-g745-h8pq,
+ * and the range it routes to ({@link SCAFFOLD_UUID_OVERRIDE_RANGE}).
+ *
+ * The advisory affects `uuid` below 11.1.1 (and 12.0.0 and 13.0.0, fixed in
+ * 12.0.1 and 13.0.1). A scaffold reaches it through ONE edge:
+ * `@objectstack/cli`, `@objectstack/runtime`, `@objectstack/plugin-auth` and
+ * `@objectstack/verify` depend on `@objectstack/rest`, which depends on
+ * `exceljs ^4.4.0`, which depends on `uuid ^8.3.0`. exceljs
+ * 4.4.0 is its newest release, and its only later one, `4.4.1-prerelease.0`,
+ * declares `uuid ^8.3.0` too, so no exceljs upgrade leaves the 8.x line.
+ *
+ * Why the scaffold and not `@objectstack/rest` itself: npm reads `overrides`
+ * only from the ROOT manifest of an install. Measured 2026-10-22, each manifest
+ * in an empty directory with a fresh `--cache`: the published
+ * `@objectstack/rest` 18.0.0 repacked with `"overrides": { "uuid": "^11.1.1" }`
+ * and installed as a dependency still resolves `uuid` 8.3.2 on npm 10.9.9 and
+ * 11.21.1, and `npm audit` reports the same 3 entries as the unmodified
+ * package. The monorepo's own `pnpm-workspace.yaml` override (the same
+ * selector and range as here) has the same limit: it never reaches an npm
+ * consumer. This block reaches the projects the scaffolders create, and no
+ * other npm consumer of `@objectstack/rest`.
+ *
+ * The selector is `uuid@<12.0.0`, not a bare `uuid`, so that it rewrites only
+ * edges that can resolve below the fix, and it stops at the major boundary so
+ * that a later advisory on the 11.x line moves the range alone. It also leaves
+ * a project free to add a newer `uuid` of its own. Measured on a consumer of
+ * the published `@objectstack/rest` 18.0.0, npm 10.9.9 and 11.21.1: with this
+ * selector, a later `npm install uuid@14` exits 0, declares `^14.0.3`, and
+ * exceljs keeps `uuid` 11.1.1; with a bare `uuid` key it exits 1 with
+ * `EOVERRIDE`. A spec-less `npm install uuid` exits 1 with `EOVERRIDE:
+ * Override for uuid@* conflicts with direct dependency` under either key,
+ * because npm reads it as `uuid@*`, which meets `<12.0.0`. Naming the major is
+ * the fix, the same cost the `vitest` entry carries.
+ *
+ * Safe at runtime because exceljs calls exactly one `uuid` export, `v4()`, with
+ * no arguments (`lib/xlsx/xform/sheet/cf-ext/cf-rule-ext-xform.js`), and
+ * `uuid` 11 keeps it. The monorepo's own suites already run exceljs on `uuid`
+ * 11.1.1 through the workspace override.
+ */
+export const SCAFFOLD_UUID_OVERRIDE_SELECTOR = 'uuid@<12.0.0';
+
+/**
+ * The `uuid` range {@link SCAFFOLD_UUID_OVERRIDE_SELECTOR} routes to: the
+ * `legacy-11` line from its first release outside GHSA-w5hq-g745-h8pq, the
+ * same target as the workspace override, so a scaffold resolves the `uuid` the
+ * monorepo's own exceljs suites run on.
+ *
+ * Measured 2026-10-22, each manifest in an empty directory with a fresh
+ * `--cache`, the `@objectstack/*` ranges resolving to the published 18.0.0
+ * (blank template, `os init -t app`, `-t plugin` and `-t empty`):
+ *
+ *   without the entry   npm 10.9.9, 11.21.1   exit 0, `uuid` 8.3.2; `npm
+ *                                             audit` reports 9 moderate entries,
+ *                                             all GHSA-w5hq-g745-h8pq
+ *   with the entry      npm 10.9.9, 11.21.1   exit 0, `uuid` 11.1.1; `npm
+ *                                             audit` lists no `uuid` entry
+ *
+ * `os create plugin` has no `@objectstack/rest` in its closure and audits
+ * clean either way; the entry is inert there. Under the entry, exceljs's
+ * buffered write (with a rule that calls `v4()`), its streaming
+ * `WorkbookWriter`, its buffered load and `@objectstack/rest`'s own
+ * `parseXlsxToRows` ran on the installed tree, on both npm versions.
+ *
+ * The re-check that lets this go: `npm ls uuid --all` in an emitted `-t app`
+ * install WITHOUT the entry, on the newest npm 10 and on npm 11. When no path
+ * resolves a `uuid` inside the advisory's range, delete it here, in
+ * {@link SCAFFOLD_NPM_OVERRIDES}, and its `POLICY_STAMPS` row together.
+ */
+export const SCAFFOLD_UUID_OVERRIDE_RANGE = '^11.1.1';
 
 /**
  * The npm `overrides` block every STANDALONE scaffold emits: `os init`'s three
  * templates, `os create plugin` outside the monorepo, and — by generation, not
- * import — `create-objectstack`'s bundled template (the `overrides.vitest` row
- * in `scripts/sync-scaffold-emission-policy.mjs`'s `POLICY_STAMPS`).
+ * import — `create-objectstack`'s bundled template (the `overrides.vitest` and
+ * `overrides.uuid@<12.0.0` rows in `scripts/sync-scaffold-emission-policy.mjs`'s
+ * `POLICY_STAMPS`).
  *
- * Why it exists. vitest 4.1.12 (published 2026-10-15) peers
+ * It carries two entries with two reasons. `uuid` is the advisory route on
+ * {@link SCAFFOLD_UUID_OVERRIDE_SELECTOR}. The rest of this comment is about
+ * `vitest`.
+ *
+ * Why the `vitest` entry exists. vitest 4.1.12 (published 2026-10-15) peers
  * `@vitest/browser-webdriverio ^4.1.11`, and that package's only match, 4.1.11,
  * peers `vitest: 4.1.11` exactly — a peer set that contradicts itself. A
- * scaffold reaches it even with vitest pinned to `~4.0.0` at its root, through
- * OPTIONAL `vitest` peers deeper in the closure (`@objectstack/metadata-core`
- * peers `^4.0.0`, better-auth peers `^2 || ^3 || ^4`), which npm 10 resolves to
- * vitest's newest 4.x. Measured 2026-10-16, each manifest in an empty
- * directory with a fresh `--cache`, against the published `18.0.0-next.2`:
+ * scaffold reaches it through its own root vitest, now that the range is
+ * `~4.1.12`, and, in a template that declares no vitest, through OPTIONAL
+ * `vitest` peers deeper in the closure (better-auth peers vitest optionally),
+ * which npm 10 resolves to vitest's newest 4.x. Re-measured 2026-10-22 against
+ * the published 18.0.0 with the range at `~4.1.12`: WITHOUT this block, `os
+ * init -t app`, `-t plugin` and `os create plugin` each exit 1 on npm 10.9.9
+ * with the crash below; WITH it, those three and `-t empty` exit 0 on npm
+ * 10.9.9 and 11.21.1 (the full matrix is on `SCAFFOLD_VITEST_RANGE`). The
+ * first reading, 2026-10-16, each manifest in an empty directory with a fresh
+ * `--cache`, against the published `18.0.0-next.2`, with the range at `~4.0.0`:
  *
  *   without the override   npm 10.9.9   `os init -t app`, `-t plugin` and
  *                                       `-t empty` all exit 1 with `Cannot
@@ -450,10 +545,10 @@ export const SCAFFOLD_VITEST_RANGE = '~4.0.0';
  * vitest, the override equals that declaration — npm refuses an override that
  * differs from the direct dependency's own spec (`EOVERRIDE`).
  *
- * The cost, measured on an emitted `-t app` (npm 10.9.9): a later bare `npm
- * install -D vitest` is refused with `EOVERRIDE: Override for vitest@*
- * conflicts with direct dependency`; `npm install -D vitest@~4.0.0` (this
- * range) installs. Loud and self-describing, where the alternative was a
+ * The cost, measured on an emitted `-t app` (npm 10.9.9, re-measured with the
+ * range at `~4.1.12`): a later bare `npm install -D vitest` is refused with
+ * `EOVERRIDE: Override for vitest@* conflicts with direct dependency`; `npm
+ * install -D vitest@~4.1.12` (this range) installs. Loud and self-describing, where the alternative was a
  * project that could not install at all. pnpm ignores npm's `overrides` field,
  * so pnpm users see no change.
  *
@@ -468,6 +563,7 @@ export const SCAFFOLD_VITEST_RANGE = '~4.0.0';
  */
 export const SCAFFOLD_NPM_OVERRIDES: Readonly<Record<string, string>> = Object.freeze({
   vitest: SCAFFOLD_VITEST_RANGE,
+  [SCAFFOLD_UUID_OVERRIDE_SELECTOR]: SCAFFOLD_UUID_OVERRIDE_RANGE,
 });
 
 /** The `@types/node` range a scaffolded project declares. */
@@ -551,7 +647,8 @@ export function renderScaffoldPackageJson(
     dependencies: template.dependencies,
     devDependencies: template.devDependencies,
     // Every template, whether or not it declares vitest itself — without it
-    // npm 10 cannot install any of them (see SCAFFOLD_NPM_OVERRIDES).
+    // npm 10 cannot install any of them, and `npm audit` reports the `uuid`
+    // advisory exceljs pulls in (see SCAFFOLD_NPM_OVERRIDES).
     overrides: { ...SCAFFOLD_NPM_OVERRIDES },
   };
 }
@@ -986,6 +1083,45 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
 });
 
 export default ${toCamelCase(namespace)}Item;
+`,
+      // The starter test the `test` script above runs (#25175). Without a test
+      // file, `vitest run` exits 1 with "No test files found", so a fresh
+      // project failed its own `npm test`. It loads the package's stack —
+      // `defineStack`'s strict parse, the protocol's own refusal path — and
+      // asserts what a host receives: a `plugin` that hands every object the
+      // `src/objects` barrel exports to the stack. It deliberately boots no
+      // engine: that needs `@objectstack/verify` declared and a vitest config
+      // for the boot's timeout and logs, and the comment points the author at
+      // the documented harness for that step instead.
+      // `test/scaffold-test-script-passes.test.ts` runs it in a sandbox, and
+      // `test/scaffold-emission-typechecks.test.ts` type-checks it.
+      'package.test.ts': () => `import { describe, expect, it } from 'vitest';
+import stack from './objectstack.config';
+import * as objects from './src/objects';
+
+// This package is the stack objectstack.config.ts exports: what another stack
+// receives when it loads the package. Importing that file runs defineStack(),
+// which checks the definition against the ObjectStack protocol and throws on
+// anything the protocol refuses, so a definition another stack would refuse
+// fails this file before any test in it runs.
+//
+// The test below reads what the package declares. To test what the engine
+// does with a record, such as refusing an item saved without its required
+// name, boot the stack with @objectstack/verify:
+// https://objectstack.ai/docs/protocol/kernel/plugin-spec#plugin-testing
+describe('this package', () => {
+  it('is a plugin that hands every object in src/objects to the stack', () => {
+    expect(stack.manifest?.type).toBe('plugin');
+
+    // An object src/objects/index.ts exports is loaded only when the config
+    // hands it to the stack. One the config drops is never loaded, and
+    // \`objectstack validate\` neither counts nor checks it.
+    const loaded = (stack.objects ?? []).map((object) => object.name);
+    for (const object of Object.values(objects)) {
+      expect(loaded).toContain(object.name);
+    }
+  });
+});
 `,
     }),
   },

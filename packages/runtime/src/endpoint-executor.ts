@@ -56,6 +56,8 @@ import { validationFailure } from './validation-failure.js';
 import { buildAutomationContext } from './domains/automation.js';
 import {
     classifyFlowRefusal,
+    flowFailureDetails,
+    flowFailureEnvelope,
     flowIsUnknown,
     flowNotFoundMessage,
     FLOW_NOT_FOUND_STATUS,
@@ -585,17 +587,21 @@ async function executeFlow(
         // failure text nor a node log to point at. Byte-identical to the
         // trigger door's details (`domains/automation.ts`), because #5040 §4
         // makes that route's answer this seam's contract.
-        const runDetails = refusal.code === 'FLOW_FAILED'
-            ? {
-                ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
-                ...(result.summary !== undefined ? { summary: result.summary } : {}),
-            }
-            : {};
+        //
+        // [#24914, ruling B′] The trigger door's own builder, so the
+        // `innerRefusal` a node's data call met rides here as it does there,
+        // and the producer-marked `userMessage` takes the envelope's declared
+        // top-level slot (`extra`, `ApiErrorSchema.userMessage`) — authored
+        // end-user text, so the message's leak guard does not apply to it.
+        const failed = refusal.code === 'FLOW_FAILED';
+        const runDetails = failed ? flowFailureDetails(result) : {};
+        const extra = failed ? flowFailureEnvelope(result) : undefined;
         return apiErrorResponse({
             message: sanitizeMessage(refusal.message, refusal.status),
             httpStatus: refusal.status,
             code: refusal.code,
             ...(Object.keys(runDetails).length > 0 ? { details: runDetails } : {}),
+            ...(extra !== undefined ? { extra } : {}),
         });
     }
 

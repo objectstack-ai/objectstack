@@ -111,7 +111,7 @@ const RULES = ['share_custom', 'share_collides'];
 
 async function apply(
   l: ReturnType<typeof ledger> = ledger(),
-  opts: { posture?: string; webhooks?: boolean; rules?: boolean; notNull?: boolean } = {},
+  opts: { posture?: string; webhooks?: boolean; rules?: boolean; notNull?: boolean; notNullPort?: NotNullPort } = {},
 ): Promise<OrganizationOwnershipApplyReport> {
   const posture = opts.posture ?? 'single';
   const database = join(dir, 'fixture.db');
@@ -133,7 +133,7 @@ async function apply(
     ...(opts.rules === false
       ? {}
       : { declaredSharingRules: { async rules() { return RULES.map((name) => ({ name, refused: null, packageId: 'com.example.app' })); } } }),
-    ...(opts.notNull === false ? {} : { notNull }),
+    ...(opts.notNull === false ? {} : { notNull: opts.notNullPort ?? notNull }),
     door: {
       async save(type, name) {
         throw new Error(`no environment save is expected here (${type} ${name})`);
@@ -416,6 +416,22 @@ describe('ownership shape generation 1 — the ceremony steps an 18.0 database o
     expect(step(report, 'not-null').status).toBe('done');
     expect(tightened.map((c) => c.table)).not.toContain('crm_deal');
     expect(tightened.map((c) => c.table)).toContain('sys_email');
+  });
+
+  it('5d a table the door answers already NOT NULL (a shard the driver created so) is counted so, never as one left nullable', async () => {
+    const report = await apply(ledger(), {
+      notNullPort: {
+        async apply(columns) {
+          return columns.map((c) => ({ ...c, outcome: c.table === 'sys_activity' ? ('already-not-null' as const) : ('applied' as const) }));
+        },
+      },
+    });
+    const notNullStep = step(report, 'not-null');
+    expect(notNullStep.status).toBe('done');
+    expect(notNullStep.summary).toMatchObject({ alreadyNotNull: 1, unsupported: 0, notDeclared: 0 });
+    expect(notNullStep.summary.applied).toBe(notNullStep.summary.due! - 1);
+    expect(notNullStep.notes.filter((n) => n.includes('sys_activity'))).toEqual([]);
+    expect(notNullStep.blockers).toEqual([]);
   });
 
   it('5d a run with no schema door applies nothing and says so; it does not block', async () => {

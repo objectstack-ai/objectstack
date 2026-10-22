@@ -250,16 +250,13 @@ that nothing would honour, each with the message `@objectstack/spec`'s
   would be ignored. Drop `mode` for an embedded replica, or drop `syncUrl` (and
   `sync`) for a plain local database.
 
-It refuses (`VALIDATION_ERROR` / 400) a non-empty `encryptionKey` on a local
-database or an embedded replica too, in the same message the spec contract
-gives at authoring. The driver reads and writes that file through
-better-sqlite3, which has no encryption codec, so the key would encrypt nothing
-and the file would be written in plaintext that any SQLite reader opens without
-it. Drop `encryptionKey`, and put the file on an encrypted disk or volume if it
-must be encrypted at rest, or use a remote Turso database, whose storage
-encryption is the server's to configure. A `file:` url or `:memory:` under a
-forced `mode: 'remote'` is refused the same way: the libSQL client the driver
-builds for that url is handed no key.
+It refuses (`VALIDATION_ERROR` / 400) any `encryptionKey`, in every mode, in
+the same message the spec contract gives at authoring: the key was removed in
+18 because it never encrypted anything. A local or replica file is read and
+written through better-sqlite3, which has no encryption codec, and the driver
+never handed the key to a remote database. Delete the key; put a local file on
+an encrypted disk or volume if it must be encrypted at rest, or use a remote
+Turso database, whose storage encryption the server configures.
 
 You can also force a specific mode:
 
@@ -336,13 +333,6 @@ interface TursoDriverConfig {
 
   /** JWT auth token for the remote Turso database */
   authToken?: string;
-
-  /**
-   * Encrypts nothing, in any mode: refused in local and replica modes
-   * (VALIDATION_ERROR / 400), because the local engine cannot encrypt the file,
-   * and beside a file: url or :memory: under a forced mode: 'remote'.
-   */
-  encryptionKey?: string;
 
   /**
    * Maximum concurrent requests to the remote database.

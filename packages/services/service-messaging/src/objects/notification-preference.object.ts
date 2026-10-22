@@ -14,9 +14,17 @@ import { F } from '@objectstack/spec';
  *   (user, topic, channel) → (user, topic, *) → (user, *, channel) →
  *   (user, *, *) → ('*', topic, channel) → … → ('*', '*', '*') → default ON
  *
- * `user_id = '*'` rows are the **admin global default**; a real-user row
- * **overrides** it. `topic = '*'` / `channel = '*'` are wildcards. Mandatory
+ * A row whose `user_id` is EMPTY is the **admin global default**; a real-user
+ * row **overrides** it. `topic = '*'` / `channel = '*'` are wildcards. Mandatory
  * topics (configured on the service) bypass this object entirely.
+ *
+ * [ADR-0118 D1] `user_id` is a `sys_user` reference, so "everyone" is the
+ * empty reference, never a sentinel in a user column. It used to be a text
+ * column holding a user id or the literal `'*'`: the write door stored any
+ * string (a mistyped id matched nobody, silently), and the record title could
+ * only show the raw id, because the formula read path reads one hop only
+ * through a reference. Stored `'*'` rows are rewritten to the empty reference
+ * at boot by `convertWildcardPreferenceUsers` (`../preference-user-conversion.ts`).
  *
  * Belongs to `service-messaging` (owner of the delivery pipeline).
  */
@@ -27,7 +35,7 @@ export const NotificationPreference = ObjectSchema.create({
     icon: 'bell-ring',
     isSystem: true,
     // [ADR-0103, #3355] Admin/user-writable DATA on a platform-defined schema: a
-    // user authors their own mute/allow rows (and admins the `user_id = '*'`
+    // user authors their own mute/allow rows (and admins the empty-`user_id`
     // global defaults) from the Setup "Notification Preferences" grid. The bucket
     // default is full CRUD, so no `userActions` block is needed — RLS is the authz.
     managedBy: 'system-data',
@@ -71,25 +79,46 @@ export const NotificationPreference = ObjectSchema.create({
         id: Field.text({ label: 'Preference ID', required: true, readonly: true }),
 
         // [ADR-0079] The record title (`nameField` above). A formula is computed
-        // on read and has no stored column. `user_id`, `topic` and `channel`
-        // are all required, so the expression needs no null guard.
+        // on read and has no stored column. It names the PERSON, not the raw
+        // user id: the user's `name`, or their `email` where the name is blank
+        // (the platform's `name || email` handle rule), read ONE hop through
+        // `user_id` (ADR-0079 addendum), under the reader's own authority.
+        //
+        // The empty reference is the admin-global default (ADR-0118 D1), and
+        // the optional read (`.?field.orValue(…)`) is what answers it: an
+        // EMPTY reference reads 'All users'. A reference the read cannot
+        // resolve (a user that is gone, or one this reader may not read) is a
+        // different case and leaves the whole title null; it is never
+        // rendered as 'All users', which would name the wrong row.
+        // `user_id` is read only through the hop: a bare read beside a
+        // traversal is refused (`traversal-bare-and-traversed`). `topic` and
+        // `channel` are required and default to '*', so they need no guard.
         display_title: Field.formula({
             label: 'Title',
             returnType: 'text',
-            expression: F`record.user_id + ' · ' + record.topic + ' · ' + record.channel`,
-            description: 'Record title: the user, the topic and the channel this toggle covers (computed on read)',
+            expression: F`(isBlank(trim(record.user_id.?name.orValue(''))) ? record.user_id.?email.orValue('All users') : record.user_id.?name.orValue('')) + ' · ' + record.topic + ' · ' + record.channel`,
+            description: 'Record title: the person (or All users), the topic and the channel this toggle covers (computed on read)',
         }),
 
-        user_id: Field.text({
+        // [ADR-0118 D1] A `sys_user` reference. Empty = the admin-global
+        // default for every user; never a sentinel. The write door refuses an
+        // id no `sys_user` row holds (`reference_not_found`), so `'*'` and a
+        // mistyped id are refused instead of being stored to match nobody.
+        //
+        // `deleteBehavior: 'cascade'` is load-bearing. The lookup default is
+        // `set_null`, which empties the reference when the user is deleted,
+        // and here the empty reference MEANS everyone: that person's own mute
+        // would become the admin-global mute for every user. Their rows go
+        // with them instead.
+        //
+        // No `maxLength`: a reference holds the referenced row's id, whose
+        // width is the parent's id column, not this field's to declare.
+        user_id: Field.lookup('sys_user', {
             label: 'User',
-            required: true,
+            required: false,
             searchable: true,
-            // [commit e4902d2b9] Referenced-column bound (route A, ruling 2026-08-24): a
-            // `sys_user.id` — physical varchar(255), the id column driver-sql
-            // creates (`table.string('id').primary()`) — or the 1-char
-            // literal '*'.
-            maxLength: 255,
-            description: "Recipient user id, or '*' for the admin-global default.",
+            deleteBehavior: 'cascade',
+            description: 'The user this preference applies to. Leave empty for the default that applies to all users.',
         }),
 
         topic: Field.text({
@@ -162,6 +191,17 @@ export const NotificationPreference = ObjectSchema.create({
         // The already-ruled `sys_user_preference` is `system-data` too; the
         // ruling's phrase is ADMIN-AUTHORED CONTENT — the provenance of the
         // rows, not the management mode of the object.
+        //
+        // [ADR-0118 D1, ADR-0120 D4] `user_id` is EMPTY on every admin-global
+        // default row, and SQL UNIQUE treats NULLs as distinct, so as declared
+        // this key does not stop two global defaults for one (topic, channel)
+        // in one organization. The NULL-safe form,
+        // `(organization_id, COALESCE(user_id, ''), topic, channel)` under this
+        // same index name, is built at `kernel:ready` by `metadata-protocol`'s
+        // `ensureNotificationPreferenceIdentityIndex` on SQLite and PostgreSQL.
+        // This declaration stays the fallback shape for a driver that never
+        // runs that migration (MySQL refuses the key parts; driver-memory keys
+        // the listed columns).
         { fields: ['user_id', 'topic', 'channel'], unique: 'organization' },
         { fields: ['topic'] },
     ],

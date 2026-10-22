@@ -252,7 +252,11 @@ const SUBJECTS: Subject[] = [
     control: { user_id: 'user_only_yi', topic: 'billing.invoice', channel: 'email' },
     trailingControl: { user_id: 'user_u1', topic: 'billing.invoice', channel: 'push' },
     filler: {},
-    platformKey: { user_id: '*', topic: 'billing.invoice', channel: 'email' },
+    // A plain user id like every other subject's platform key. It spelled
+    // `'*'` once, the text column's admin-global sentinel; `user_id` is now a
+    // `sys_user` reference whose EMPTY value is that default (ADR-0118 D1), so
+    // the sentinel is no stored value any more. At this layer it is just a key.
+    platformKey: { user_id: 'user_platform', topic: 'billing.invoice', channel: 'email' },
     legacyName: 'uniq_sys_notification_preference_user_id_topic_channel',
     // ⚠️ HASH-SUFFIXED, and this is the case the PM's A1 flagged as the one
     // where a single-column assumption would hide. The base name

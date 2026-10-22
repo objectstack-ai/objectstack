@@ -26,7 +26,10 @@
  *    else to the emitter's literal — and a key no locale holds is the literal;
  *  - a literal-only emit is byte-unchanged: the same inbox row, mail, text and
  *    delivery snapshot as a service with no renderer at all, and no locale read;
- *  - each item of a digest is rendered in its recipient's language;
+ *  - each item of a digest is rendered in its recipient's language, and so
+ *    is the heading of a digest of two or more (#25015), from this service's
+ *    own bundle: the recipient's locale, then the deployment default, then the
+ *    English literal — while a one-item digest keeps its item's own title;
  *  - the snapshot reserves `keyedText`: a producer payload member of that name
  *    is never rendered, and a malformed `keyedText` is refused before anything
  *    is written.
@@ -47,6 +50,9 @@ import { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';
 import { MemoryNotificationOutbox } from './memory-outbox.js';
 import { NotificationDispatcher } from './dispatcher.js';
 import { NotificationTextRenderer } from './notification-text.js';
+import { DIGEST_HEADING_KEY } from './digest-render.js';
+import { MessagingTranslations } from './translations/index.js';
+import { enMessages as messagingEnMessages, messagingMessages } from './translations/messages.js';
 import type { PreferenceResolver } from './preference-resolver.js';
 import {
     InboxMessage,
@@ -78,6 +84,8 @@ const USERS = [
     { id: 'u_en', name: 'Ada', email: 'ada@example.com', phone_number: '+15550000001', locale: 'en' },
     { id: 'u_ja', name: 'Sato', email: 'sato@example.com', phone_number: '+81300000001', locale: 'ja-JP' },
     { id: 'u_none', name: 'Nobody', email: 'nobody@example.com', phone_number: '+15550000002' },
+    // A language no pack in this deployment holds.
+    { id: 'u_fr', name: 'Dupont', email: 'dupont@example.com', phone_number: '+33100000001', locale: 'fr-FR' },
 ];
 
 /** The catalog, as a producer's translation bundle would contribute it. */
@@ -142,10 +150,19 @@ async function boot(): Promise<ObjectQL> {
     return ql;
 }
 
-/** The kernel's in-memory i18n service with {@link CATALOG} loaded. */
-function catalog(opts: { defaultLocale?: string; fallbackLocale?: string } = {}) {
+/**
+ * The kernel's in-memory i18n service with {@link CATALOG} loaded — and, with
+ * `messagingBundle`, this service's own `MessagingTranslations` too, loaded the
+ * way the plugin's `kernel:ready` hook loads it.
+ */
+function catalog(opts: { defaultLocale?: string; fallbackLocale?: string; messagingBundle?: boolean } = {}) {
     const i18n = createMemoryI18n();
     for (const [locale, data] of Object.entries(CATALOG)) i18n.loadTranslations(locale, data);
+    if (opts.messagingBundle) {
+        for (const [locale, data] of Object.entries(MessagingTranslations)) {
+            i18n.loadTranslations(locale, data as Record<string, unknown>);
+        }
+    }
     if (opts.defaultLocale) i18n.setDefaultLocale(opts.defaultLocale);
     if (opts.fallbackLocale) i18n.setFallbackLocale(opts.fallbackLocale);
     return i18n;
@@ -404,6 +421,107 @@ describe('#24978 — keyed notification text, durable path (SQL outbox + dispatc
         const [digest] = (await ql.find(INBOX_OBJECT, { where: { user_id: 'u_zh' }, fields: ['title', 'body_md'] }, SYSTEM)) as any[];
         // The items are listed by their titles, each rendered in zh-CN.
         expect(digest.body_md).toBe(`• ${ZH.title}\n• ${ZH.title}`);
+    });
+});
+
+describe("#25015 — a digest's heading is rendered in its recipient's language", () => {
+    /** Every recipient batches every topic into one window, on the memory outbox. */
+    const digestAll = {
+        async filter(recipients: string[], channels: string[]) {
+            return recipients.map((recipient) => ({ recipient, channels, digest: { window: '2026-10-20' } }));
+        },
+    } as unknown as PreferenceResolver;
+
+    /** Emit `n` keyed notifications to `recipient` on `channels`, then run one dispatcher tick. */
+    async function digestOf(
+        ql: ObjectQL,
+        c: Composition,
+        recipient: string,
+        n: number,
+        channels: string[] = ['inbox'],
+    ): Promise<Array<{ title: string; body_md: string }>> {
+        for (let i = 0; i < n; i++) {
+            await c.messaging.emit(emitTo([recipient], { dedupKey: `d${i}`, channels }));
+        }
+        await c.dispatcher!.tick();
+        return inboxOf(ql, recipient);
+    }
+
+    it('a zh-CN recipient reads the heading in zh-CN, over items in zh-CN, on every channel', async () => {
+        const ql = await boot();
+        const c = compose(ql, { outbox: 'memory', preferenceResolver: digestAll, i18n: catalog({ messagingBundle: true }) });
+
+        const inbox = await digestOf(ql, c, 'u_zh', 3, ['inbox', 'email']);
+
+        expect(inbox).toEqual([{ title: '您有 3 条通知', body_md: `• ${ZH.title}\n• ${ZH.title}\n• ${ZH.title}` }]);
+        expect(c.mail).toEqual([expect.objectContaining({ to: 'zhang@example.com', subject: '您有 3 条通知' })]);
+    });
+
+    it('the English recipient of the same digest reads the English sentence — the control', async () => {
+        const ql = await boot();
+        const c = compose(ql, { outbox: 'memory', preferenceResolver: digestAll, i18n: catalog({ messagingBundle: true }) });
+
+        const [digest] = await digestOf(ql, c, 'u_en', 2);
+
+        expect(digest.title).toBe('You have 2 notifications');
+    });
+
+    it('a recipient with no locale reads the deployment default', async () => {
+        const ql = await boot();
+        const c = compose(ql, {
+            outbox: 'memory', preferenceResolver: digestAll, deploymentDefault: 'ja-JP',
+            i18n: catalog({ messagingBundle: true, defaultLocale: 'ja-JP' }),
+        });
+
+        const [digest] = await digestOf(ql, c, 'u_none', 2);
+
+        expect(digest.title).toBe('2 件の通知があります');
+    });
+
+    it("a recipient whose language no pack holds reads the deployment default's pack", async () => {
+        const ql = await boot();
+        const c = compose(ql, {
+            outbox: 'memory', preferenceResolver: digestAll, deploymentDefault: 'zh-CN',
+            i18n: catalog({ messagingBundle: true, defaultLocale: 'zh-CN' }),
+        });
+
+        const [digest] = await digestOf(ql, c, 'u_fr', 2);
+
+        expect(digest.title).toBe('您有 2 条通知');
+    });
+
+    it('when neither the recipient\'s language nor the deployment default has a pack, the English literal — said once', async () => {
+        const ql = await boot();
+        const c = compose(ql, {
+            outbox: 'memory', preferenceResolver: digestAll, deploymentDefault: 'fr-FR',
+            i18n: catalog({ messagingBundle: true, defaultLocale: 'fr-FR' }),
+        });
+
+        const [digest] = await digestOf(ql, c, 'u_fr', 2);
+
+        expect(digest.title).toBe('You have 2 notifications');
+        expect(c.warnings.filter((w) => w.includes(`'${DIGEST_HEADING_KEY}'`) && w.includes('fr-FR'))).toHaveLength(1);
+    });
+
+    it("a one-item digest keeps its item's own title, rendered in the recipient's language", async () => {
+        const ql = await boot();
+        const c = compose(ql, { outbox: 'memory', preferenceResolver: digestAll, i18n: catalog({ messagingBundle: true }) });
+
+        const inbox = await digestOf(ql, c, 'u_zh', 1);
+
+        expect(inbox).toEqual([{ title: ZH.title, body_md: `• ${ZH.title}` }]);
+    });
+
+    it('every shipped locale carries every messaging sentence, with the same holes, and the bundle serves them', async () => {
+        const holes = (text: string) => [...text.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort();
+        expect(Object.keys(messagingMessages).sort()).toEqual(Object.keys(MessagingTranslations).sort());
+        for (const [locale, messages] of Object.entries(messagingMessages)) {
+            expect(Object.keys(messages).sort(), locale).toEqual(Object.keys(messagingEnMessages).sort());
+            for (const [id, text] of Object.entries(messages)) {
+                expect(holes(text), `${locale} ${id}`).toEqual(holes(messagingEnMessages[id as keyof typeof messagingEnMessages]));
+            }
+            expect(MessagingTranslations[locale]?.messages, locale).toEqual(messages);
+        }
     });
 });
 

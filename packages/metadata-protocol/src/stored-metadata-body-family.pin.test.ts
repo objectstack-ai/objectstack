@@ -186,7 +186,7 @@ const storedDatasourceRow = (object = 'sys_metadata') => ({
   [STORED_METADATA_BODY_COLUMN]: JSON.stringify({
     name: 'ds',
     driver: 'turso',
-    config: { url: 'libsql://db.turso.io', encryptionKey: CREDENTIAL },
+    config: { url: 'libsql://db.turso.io', authToken: CREDENTIAL },
   }),
   __object: object,
 });

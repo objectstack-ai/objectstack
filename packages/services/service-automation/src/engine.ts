@@ -11,7 +11,7 @@ import type {
     FlowRunSummary,
 } from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult } from '@objectstack/spec/contracts';
-import type { FlowRegistration, FlowRegistrationRefusal } from '@objectstack/spec/api';
+import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { createEvalUser, type EvalUserParsed } from '@objectstack/spec/identity';
 import {
@@ -220,6 +220,7 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
 import { runIsUnscopedUserMode, flowTouchesData, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { isGuardRefusal, refuseNode } from './guard-refusal.js';
 import { readPartialSteps } from './partial-steps.js';
+import { attachCarriedRefusal, carriedRefusalOfResult, readCarriedRefusal, type CarriedRefusal } from './inner-refusal.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
 import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
 // #5660 — the degrade registration reports a FOREIGN failure (a third-party
@@ -384,6 +385,26 @@ export interface NodeExecutionResult {
      * its own must not inherit an earlier failure's leftover `code`).
      */
     code?: string;
+    /**
+     * [#24914, ruling B′] The producer-marked END-USER text of the refusal this
+     * node's data call met, verbatim (`declaredUserMessage`'s reading of the
+     * caught error) — absent when the producer marked none. Only meaningful
+     * when `success` is false. Never read by the flow itself: it is carried to
+     * the run's caller as `AutomationResult.userMessage`, through the brand
+     * {@link AutomationEngine.executeNode} puts on the failure it throws
+     * (`inner-refusal.ts`). `error` keeps its wording; this rides beside it.
+     */
+    userMessage?: string;
+    /**
+     * [#24914, ruling B′] The refusal this node's data call met, structured —
+     * `{ code, message }`, `code` in its WIRE spelling (`UNIQUE_VIOLATION`
+     * where {@link code} above says `DUPLICATE_RECORD` in-flow). Set by the
+     * CRUD executors' catch arms, and only for a thrown value that declared a
+     * 4xx answer (`refusalCarriedBy`, `inner-refusal.ts`). Carried to the
+     * run's caller as `AutomationResult.innerRefusal`, exactly like
+     * {@link userMessage}; ⛔ never synthesised from `error`'s text.
+     */
+    innerRefusal?: FlowInnerRefusal;
     /**
      * #3863 — why this failed, which decides whether a `fault` edge may route it.
      * Only meaningful when `success` is false; defaults to `runtime`.
@@ -7310,6 +7331,11 @@ export class AutomationEngine implements IAutomationService {
                 // `recordLog`'s own first statement runs, so the two spellings
                 // cannot disagree. Same shape as #15555's.
                 summary: logged?.summary ?? summarizeRun(steps),
+                // [#24914, ruling B′] The refusal the failing node's data call met,
+                // beside the unchanged `error`: `userMessage` / `innerRefusal`, read
+                // off the brand the node's throw carries (`inner-refusal.ts`) — `{}`
+                // for a throw that met none, so nothing is invented.
+                ...readCarriedRefusal(err),
             };
         } finally {
             // Release the re-entrancy guard for this (flow, record). Runs before
@@ -8769,6 +8795,10 @@ export class AutomationEngine implements IAutomationService {
                     // that `recordLog`'s own first statement runs, so the two
                     // spellings cannot disagree.
                     summary: logged?.summary ?? summarizeRun(steps),
+                    // [#24914, ruling B′] As `execute()`'s failure exit: the refusal
+                    // the node after the consumed pause met, off the throw's brand. The
+                    // screen-flow leg (a write behind a screen) reaches its caller HERE.
+                    ...readCarriedRefusal(err),
                 };
             }
         } finally {
@@ -12165,7 +12195,12 @@ export class AutomationEngine implements IAutomationService {
                         return;
                     }
                 }
-                throw new Error(`Node '${node.id}' failed: ${errMsg}`);
+                // [#24914, ruling B′] The text is unchanged — it is the run's
+                // diagnostic, read by the run log, `failAncestors`, approvals
+                // and every door's `message`. What the node's data call met is
+                // carried BESIDE it, on a brand (`inner-refusal.ts`), to the
+                // terminal exit that builds the run's result.
+                throw attachCarriedRefusal(new Error(`Node '${node.id}' failed: ${errMsg}`), result);
             }
 
             // Log successful step (#3407: advisory executor warnings ride along
@@ -13153,6 +13188,10 @@ export class AutomationEngine implements IAutomationService {
         } = errorHandling;
 
         let lastError = 'Max retries exceeded';
+        // [#24914, ruling B′] The refusal the LAST attempt met, kept paired
+        // with `lastError` so the exhausted exit never reports one attempt's
+        // text beside another attempt's refusal.
+        let lastCarried: CarriedRefusal = {};
         for (let i = 0; i < maxRetries; i++) {
             // Calculate delay with exponential backoff
             let delay = Math.min(baseDelay * Math.pow(multiplier, i), maxDelay);
@@ -13188,6 +13227,7 @@ export class AutomationEngine implements IAutomationService {
             if (result.status === 'paused') return result;
             if (result.success) return result;
             lastError = result.error ?? 'Unknown error';
+            lastCarried = carriedRefusalOfResult(result);
         }
         // [#9378] Same "ran and was rejected" class as `execute()`'s own failure
         // exit — every attempt above dispatched the flow — so it carries the
@@ -13208,6 +13248,7 @@ export class AutomationEngine implements IAutomationService {
             status: 'failed',
             errorMessage: flowErrorMessage,
             flowLabel,
+            ...lastCarried,
         };
     }
 
@@ -13685,6 +13726,9 @@ export class AutomationEngine implements IAutomationService {
                 // `recordLog`'s own first statement runs, so the two spellings
                 // cannot disagree. Same shape as #15555's.
                 summary: logged?.summary ?? summarizeRun(steps),
+                // [#24914, ruling B′] As `execute()`'s failure exit, per attempt;
+                // `retryExecution` reports the LAST attempt's members with its text.
+                ...readCarriedRefusal(err),
             };
         }
     }

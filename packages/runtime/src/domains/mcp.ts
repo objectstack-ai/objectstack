@@ -430,24 +430,44 @@ async function readMergedSkillRows(
     protocol: McpMergedMetadataRead | undefined | null,
     getMeta: () => Promise<any>,
 ): Promise<unknown[]> {
-    if (!protocol || typeof protocol.getMetaItems !== 'function') {
+    const items = await readMergedItems(protocol, 'skill');
+    if (items === undefined) {
         const meta: any = await getMeta();
         return (await meta?.list?.('skill')) ?? [];
     }
-    const answer = await protocol.getMetaItems({ type: 'skill' });
+    await warnIfSkillListIncomplete(deps, getMeta, items.length);
+    return items;
+}
+
+/**
+ * [commit e783e163d, #25120] One type's merged listing, as `GET /api/v1/meta/TYPE`
+ * reads it — or `undefined` when this host has no merged read to offer.
+ *
+ * The one place this file unwraps `getMetaItems`, shared by the skill read
+ * above and the object reads in {@link buildMcpBridge}, so the three cannot
+ * disagree about which answers they accept. Its three outcomes are the ones
+ * {@link readMergedSkillRows} documents: `undefined` is STRUCTURAL absence (no
+ * protocol in the slot, or one without the list verb), and the caller answers
+ * from the metadata service exactly as before; a throw travels to the caller,
+ * ⛔ never a fallback to the un-merged read.
+ */
+async function readMergedItems(
+    protocol: McpMergedMetadataRead | undefined | null,
+    type: 'skill' | 'object',
+): Promise<unknown[] | undefined> {
+    if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
+    const answer = await protocol.getMetaItems({ type });
     // The declared `GetMetaItemsResponse` is `{ type, items }`, and the two
     // other `getMetaItems` consumers in this package read `res.items` the same
     // way. The bare-array arm matches what `packages/mcp` accepts for the stdio
     // half of this same read: the slot is filled by name from a host-owned
     // registry, and the two surfaces answering one question must not disagree
     // about the shape they accept.
-    const items = Array.isArray(answer)
+    return Array.isArray(answer)
         ? (answer as unknown[])
         : Array.isArray(answer?.items)
             ? answer.items
             : [];
-    await warnIfSkillListIncomplete(deps, getMeta, items.length);
-    return items;
 }
 
 /**
@@ -521,7 +541,8 @@ async function warnIfSkillListIncomplete(
 /**
  * Build a principal-bound {@link McpDataBridge}: every method runs AS the
  * request's ExecutionContext through {@link callData} (RLS/permissions) and
- * the per-env metadata service. Keeps the MCP tool layer free of any direct
+ * the per-env metadata reads (the protocol's merged listing, or the metadata
+ * service on a host with none). Keeps the MCP tool layer free of any direct
  * engine access.
  *
  * Also carries the action seam (`listActions` / `runAction`) and the skill seam
@@ -536,10 +557,54 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
     // makes stays pinned to THIS request's kernel.
     const callData = actionExec.callData.bind(null, deps, context);
     const getMeta = () => deps.resolveService(context, 'metadata', envId);
+    // The protocol layer's merged read, resolved per request on the SAME
+    // per-environment seam `getMeta` uses — never captured once at boot,
+    // which would serve one environment's rows to every other one.
+    //
+    // [#15238] Typed at the RESOLVE, not just at the callee's parameter.
+    // `resolveService` answers `any` for `'protocol'` (the slot is deliberately
+    // unmapped in `ServiceSlotContracts`), so naming {@link McpMergedMetadataRead}
+    // here is what keeps any verb, spelt any way, from being reached through
+    // this handle. ⛔ Still `| undefined` and still every member optional:
+    // {@link readMergedItems} keeps its own `typeof protocol.getMetaItems !==
+    // 'function'` probe, because a host may occupy the slot with a partial
+    // object.
+    const getProtocol = async (): Promise<McpMergedMetadataRead | undefined> =>
+        await deps.resolveService(context, 'protocol', envId);
+
+    /**
+     * [#25120] The objects `list_objects` and `describe_object` answer from:
+     * the protocol's MERGED listing, the read `GET /api/v1/meta/object` serves
+     * — never `IMetadataService.listObjects()` / `getObject()`.
+     *
+     * The metadata service holds a copy of an object only where something put
+     * one there, and on a kernel with an `environmentId` nothing copies the
+     * objects a package or a plugin contributes to the `SchemaRegistry` during
+     * the boot (the full boot bridge is off on that shape). Those objects live
+     * in the registry, which the merged read reads and the metadata service
+     * does not. So this read served `list_objects` the environment-authored
+     * objects alone, as a complete `totalCount`, and `describe_object` answered
+     * "not found" for every package object, while REST listed them and the data
+     * verbs served them. Measured on that shape: REST listed both of a
+     * boot-registered package's objects, `list_objects` neither. The repair is
+     * the consumer moving up to the read REST serves — the shape commit
+     * e783e163d gave the skill read — ⛔ NOT a second copy of each package
+     * object in the metadata service, which would be one more thing to keep in
+     * sync.
+     *
+     * `undefined` = no merged read on this host (structural absence, see
+     * {@link readMergedItems}): `list_objects` and `describe_object` then read
+     * the metadata service, exactly as before.
+     */
+    const readMergedObjects = async (): Promise<any[] | undefined> =>
+        (await readMergedItems(await getProtocol(), 'object')) as any[] | undefined;
 
     const listObjectSummaries = async (): Promise<any[]> => {
-        const meta: any = await getMeta();
-        const objs: any[] = (await meta?.listObjects?.()) ?? [];
+        let objs: any[] | undefined = await readMergedObjects();
+        if (objs === undefined) {
+            const meta: any = await getMeta();
+            objs = ((await meta?.listObjects?.()) ?? []) as any[];
+        }
         return objs.map((o) => ({
             name: o.name,
             label: o.label ?? o.name,
@@ -589,9 +654,15 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 return { objects, degraded: false, errors: [] };
             }
         },
+        // [#25120] Answered from the listing `list_objects` serves
+        // ({@link readMergedObjects}), so every object an agent is listed it
+        // can describe, and a name the listing omits (a disabled package's
+        // object among them) is "not found" here too.
         describeObject: async (name: string) => {
-            const meta: any = await getMeta();
-            const def: any = await meta?.getObject?.(name);
+            const merged = await readMergedObjects();
+            const def: any = merged !== undefined
+                ? merged.find((o: any) => o?.name === name)
+                : await ((await getMeta()) as any)?.getObject?.(name);
             if (!def) return null;
             const fields = def.fields ?? {};
             return {
@@ -687,24 +758,9 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // of #8328, whose own reproduction runs through THIS endpoint. See
         // {@link readMergedSkillRows}.
         listSkills: async () => {
-            // Resolved per request on the SAME per-environment seam `getMeta`
-            // uses — never captured once at boot, which would serve one
-            // environment's overlay rows to every other one.
-            //
-            // [#15238] Typed at the RESOLVE, not just at the callee's
-            // parameter. `resolveService` answers `any` for `'protocol'` (the
-            // slot is deliberately unmapped in `ServiceSlotContracts`), and
-            // this file was half-typed: {@link McpMergedMetadataRead} was
-            // already declared for the merged-read seam below, while the handle
-            // feeding it was annotated `any` — so any verb, spelt any way,
-            // could be reached from this site. Naming the existing type here
-            // closes that half. ⛔ Still `| undefined` and still every member
-            // optional: `readMergedSkillRows` keeps its own
-            // `typeof protocol.getMetaItems !== 'function'` probe, because a
-            // host may occupy the slot with a partial object.
-            const protocol: McpMergedMetadataRead | undefined =
-                await deps.resolveService(context, 'protocol', envId);
-            return await readMergedSkillRows(deps, protocol, getMeta);
+            // Resolved per request through {@link getProtocol}, the typed
+            // per-environment handle the object reads above use too.
+            return await readMergedSkillRows(deps, await getProtocol(), getMeta);
         },
 
         create: async (object: string, data: any) =>
@@ -808,13 +864,21 @@ function resumeDoorError(
     message: string,
     httpStatus: number,
     details?: Record<string, unknown>,
+    extra?: { userMessage?: string },
 ): Error {
-    const response = deps.error(message, httpStatus, details);
-    const envelope = (response?.body as { error?: { code?: unknown; message?: unknown; details?: unknown } } | undefined)?.error;
+    const response = deps.error(message, httpStatus, details, extra);
+    const envelope = (response?.body as {
+        error?: { code?: unknown; message?: unknown; details?: unknown; userMessage?: unknown };
+    } | undefined)?.error;
     return Object.assign(new Error(typeof envelope?.message === 'string' ? envelope.message : message), {
         code: typeof envelope?.code === 'string' ? envelope.code : undefined,
         status: response?.status ?? httpStatus,
         ...(envelope?.details !== undefined ? { details: envelope.details } : {}),
+        // [#24914, ruling B′] The producer-marked end-user text, carried onto
+        // the thrown error as the `userMessage` field every boundary reads
+        // through `declaredUserMessage` — exactly what the REST door put at the
+        // envelope's top level, never folded into `message`.
+        ...(typeof envelope?.userMessage === 'string' ? { userMessage: envelope.userMessage } : {}),
     });
 }
 
@@ -1001,7 +1065,7 @@ export async function resumeActionRun(
     if (values !== undefined) signal.variables = values;
     const result = await automation.resume(runId, signal);
     const refusal = await classifyResumeResult(deps, automation, runId, result);
-    if (refusal) throw resumeDoorError(deps, refusal.message, refusal.status, refusal.details);
+    if (refusal) throw resumeDoorError(deps, refusal.message, refusal.status, refusal.details, refusal.extra);
     return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: result ?? null };
 }
 

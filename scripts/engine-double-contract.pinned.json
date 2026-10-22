@@ -467,6 +467,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.cbp-master-not-writable-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.cbp-master-not-writable-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.cbp-master-not-writable-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.cluster-mutation-fanout.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -739,6 +754,21 @@
     {
       "file": "packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.external-binding-primary-datasource-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.external-binding-primary-datasource-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.external-binding-primary-datasource-refusal.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -4385,6 +4415,21 @@
       "file": "packages/services/service-automation/src/flow-dispatch.test.ts",
       "verb": "update",
       "pinned": 4
+    },
+    {
+      "file": "packages/services/service-automation/src/flow-inner-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/flow-inner-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/flow-inner-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
     },
     {
       "file": "packages/services/service-automation/src/record-lookup-expand.integration.test.ts",

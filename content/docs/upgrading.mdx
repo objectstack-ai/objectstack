@@ -354,6 +354,11 @@ ceremony, under any tenancy posture. A v18 server serves a database it created
 itself or one the ceremony certified, and refuses any other at boot, naming the
 command.
 
+**A database the published 18.0.0 created** carries a birth marker and is certified
+with its tenant columns (`organization_id`) still nullable. `os migrate plan` lists
+them, and the ceremony, which such a database does not require, tightens them to
+`NOT NULL` when you run it.
+
 **The sequence:**
 
 1. Before the first 18.0 boot, run `os migrate security-catalog-overlays`. It
@@ -410,8 +415,20 @@ one it is refused: `✖ FATAL: tenancy posture 'group' is walled, but this deplo
 **A production `os serve` deployment needs an auth secret.** A production
 `os serve` whose stack enables auth and which resolves no `OS_AUTH_SECRET` is
 refused before any plugin starts, so set the secret before you start such a
-deployment on 18.0. `os start` is not affected: it generates an auth secret on
-its first run and persists it to `<home>/auth-secret`.
+deployment on 18.0. A production boot whose stack mounts no auth at all (the
+`auth` tier off and no `AuthPlugin` of its own) is refused the same way: enable
+auth and set the secret. Either boot has no organization, so every row it wrote
+would have no owner.
+
+`--no-server` does not avoid either refusal: a kernel-only boot runs the same
+seed and would write the same ownerless rows. Earlier 18 releases let a
+`--no-server` boot through, and their refusal text offered `--no-server` as a
+remedy; it is not one. The same holds for a migrate-and-exit job
+(`OS_MIGRATE_AND_EXIT=1`): give it `OS_AUTH_SECRET` too. A development boot
+(`os dev`, `--dev`) and an embedded kernel are not affected, and neither is the
+cloud runtime's host kernel, whose auth is each project's. `os start` is not
+affected: it generates an auth secret on its first run and persists it to
+`<home>/auth-secret`.
 
 What the plan lists, how a blocked row is resolved, and every flag are in the
 command's reference:

@@ -6,8 +6,8 @@
   ],
   "objectui": {
     "repo": "https://github.com/objectstack-ai/objectui.git",
-    "rev": "cf153eb2e5351505abf3b82fb76bfdc9a841bbde",
-    "revDate": "2026-10-20T19:13:54+00:00",
+    "rev": "cd14d8eeffe11ae03b6acf82e663c1d293dfdf5f",
+    "revDate": "2026-10-22T08:13:03+00:00",
     "source": "packages/sdui-parser/src",
     "files": [
       "packages/sdui-parser/src/body-dialect.ts",
@@ -21,7 +21,7 @@
       "packages/sdui-parser/src/validate.ts"
     ]
   },
-  "recordedAgainstPin": "cf153eb2e5351505abf3b82fb76bfdc9a841bbde",
+  "recordedAgainstPin": "cd14d8eeffe11ae03b6acf82e663c1d293dfdf5f",
   "grammarRegion": {
     "file": "packages/sdui-parser/src/parse.ts",
     "delimiter": "/* ---------------------- the JS literal subset (#6614) ---------------------- */",

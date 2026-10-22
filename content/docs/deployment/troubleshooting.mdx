@@ -12,18 +12,20 @@ Solutions to the most common issues encountered when working with ObjectStack.
 
 ### "Cannot read properties of null (reading 'edgesOut')" from npm install
 
-**Symptom:** npm exits 1 with `npm error Cannot read properties of null (reading 'edgesOut')` while installing `@objectstack/cli` or `@objectstack/plugin-auth`. This includes the install step of `npm create objectstack` and `npm install -g @objectstack/cli`.
+**Symptom:** npm exits 1 with `npm error Cannot read properties of null (reading 'edgesOut')` while installing `@objectstack/cli` or `@objectstack/plugin-auth`. This includes `npm install -g @objectstack/cli`, and `npm install` in a project whose `package.json` has no `vitest` override (fix 2).
 
-**Cause:** npm 10, the npm that Node 22 ships, crashes on an optional `vitest` peer in the auth library's dependency tree: the newest vitest 4 has no matching `@vitest/browser-webdriverio` release. npm 11 and pnpm install the same packages, and `npm ci` from a committed lockfile is not affected.
+**Cause:** npm 10, the npm that Node 22 ships, crashes on the newest vitest 4, 4.1.12. Its optional peer `@vitest/browser-webdriverio ^4.1.11` has one matching release, 4.1.11, and that release requires exactly vitest 4.1.11. npm 10 reaches vitest through an optional `vitest` peer in the auth library's dependency tree, or through your project's own `vitest`. npm 11 and pnpm install the same packages, and `npm ci` from a committed lockfile is not affected.
 
 **Fix** (either one):
 
 1. **Use npm 11** (it needs Node 22.9+): run `npm install -g npm@11`, then repeat the install. This is the only fix for `npm install -g`, because a global install reads no `overrides`. In a Dockerfile, install under a pinned npm 11, as the [self-built runtime recipe](/docs/deployment/self-hosting#docker-official-image--the-standard-path) does.
-2. **Stay on npm 10 and pin vitest** in your project's root `package.json`. Then run `npm install` again and commit the lockfile:
+2. **Stay on npm 10 and pin vitest** in your project's root `package.json`. The override puts every `vitest` in the tree, optional peers included, on one range, and npm 10 installs it. Then run `npm install` again and commit the lockfile:
 
    ```json title="package.json"
-   "overrides": { "vitest": "~4.0.0" }
+   "overrides": { "vitest": "~4.1.12" }
    ```
+
+   If `devDependencies` lists `vitest`, set it to the same `~4.1.12`: npm refuses an override that differs from a direct dependency (`EOVERRIDE`). A project created by `npm create objectstack`, `os init` or `os create plugin` already has this block. If yours reads `~4.0.0`, an earlier scaffold's value, change both to `~4.1.12`: `~4.0.0` installs vitest 4.0.18, which is affected by security advisory GHSA-qxg6-89mg-rqv8.
 
 This entry, the npm 11 steps in [Self-hosting](/docs/deployment/self-hosting), and the npm 10 notes in [Getting Started](/docs/getting-started#prerequisites) and [Your First Project](/docs/getting-started/your-first-project#prerequisites) can be removed once `@vitest/browser-webdriverio` publishes the version that `npm view vitest dist-tags` lists as `V4`, and a plain npm 10 install of `@objectstack/plugin-auth` passes.
 

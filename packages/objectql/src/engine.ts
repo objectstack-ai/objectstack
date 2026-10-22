@@ -61,7 +61,7 @@ import {
   readableIdsRefusalError,
   type ComposableReadableIdsSite,
 } from './filter-comparand-shape.js';
-import { ReadableIds, RLS_DENY_FILTER, markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { ReadableIds, RLS_DENY_FILTER, markFilterSubtreeProvenance, isControlledByParentMasterField } from '@objectstack/spec/data';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
   assertHavingResolvedTemporalTokensInRange,
@@ -4935,6 +4935,24 @@ interface ReadableIdsChain {
 const READABLE_IDS_MAX_CHAIN_DEPTH = 8;
 
 /**
+ * [ADR-0139 D5.2 / D5.3] A `controlled_by_parent` detail whose master the
+ * engine composes no `ReadableIds` leaf over —
+ * `ObjectQL#findUnservableControlledByParentMasters`, refused at boot by
+ * `ObjectQLPlugin`.
+ */
+export type UnservableControlledByParentMaster = {
+  /** The `controlled_by_parent` detail. */
+  readonly detail: string;
+  /** Its one required `master_detail` field. */
+  readonly field: string;
+  /** The object that field names. */
+  readonly master: string;
+} & (
+  | { readonly class: 'object-scoped-read-middleware' }
+  | { readonly class: 'other-datasource'; readonly objectDatasource: string | undefined; readonly parentDatasource: string | undefined }
+);
+
+/**
  * [ADR-0139 D2] The engine slot where `ObjectQLPlugin` puts the SOURCE the
  * `ReadableIds` composition reads the registered `ISecurityService` from: a
  * function that resolves the kernel's `security` service when a leaf is
@@ -6668,25 +6686,75 @@ export class ObjectQL implements IObjectQLEngine {
       `such leaf ${why}. The query was NOT run and no driver was asked. Read this class through its bounded ` +
       'probe, chosen before the leaf is written.',
     );
-    const outer = this.resolveDatasourceBinding(object)?.datasource;
     const composable: string[] = [];
     for (const [parent, site] of firstSite) {
       // A parent the registry does not hold has no record anyone may read:
       // its leaf is answered `$in: []` without asking anything, and it is in
       // none of D5's classes.
       if (!this._registry.getObject(parent)) continue;
-      if (this.hasObjectMiddleware(parent)) {
+      const uncomposable = this.uncomposableReadableIdsParent(object, parent);
+      if (uncomposable?.class === 'object-scoped-read-middleware') {
         throw refuse(site, `over '${parent}', whose rows an object-scoped read middleware narrows: that WHERE is ` +
           `built at read time and is no part of its read scope, so the composed leaf would be wider than a read of '${parent}'`);
       }
-      const bound = this.resolveDatasourceBinding(parent)?.datasource;
-      if (bound !== outer) {
-        throw refuse(site, `over '${parent}', which is bound to datasource '${String(bound)}' while '${object}' is ` +
-          `bound to '${String(outer)}': no driver evaluates a subquery across two datasources`);
+      if (uncomposable?.class === 'other-datasource') {
+        throw refuse(site, `over '${parent}', which is bound to datasource '${String(uncomposable.parentDatasource)}' while '${object}' is ` +
+          `bound to '${String(uncomposable.objectDatasource)}': no driver evaluates a subquery across two datasources`);
       }
       composable.push(parent);
     }
     return composable;
+  }
+
+  /**
+   * [ADR-0139 D5.2 / D5.3] Which of D5's two remaining classes a leaf over
+   * `parent` in a read of `object` falls in, or `undefined` when it falls in
+   * neither — the ONE predicate behind both the read-time refusal
+   * ({@link refuseUncomposableReadableIdsClasses}) and the boot-time refusal of
+   * a `controlled_by_parent` detail over such a master
+   * ({@link findUnservableControlledByParentMasters}), so the two rules cannot
+   * drift. D5.2 is judged first, as the read path always has.
+   */
+  private uncomposableReadableIdsParent(object: string, parent: string):
+    | { class: 'object-scoped-read-middleware' }
+    | { class: 'other-datasource'; objectDatasource: string | undefined; parentDatasource: string | undefined }
+    | undefined {
+    if (this.hasObjectMiddleware(parent)) return { class: 'object-scoped-read-middleware' };
+    const objectDatasource = this.resolveDatasourceBinding(object)?.datasource;
+    const parentDatasource = this.resolveDatasourceBinding(parent)?.datasource;
+    if (parentDatasource !== objectDatasource) return { class: 'other-datasource', objectDatasource, parentDatasource };
+    return undefined;
+  }
+
+  /**
+   * [ADR-0139 D5.2 / D5.3 · ADR-0049] Every registered `controlled_by_parent`
+   * detail whose master the engine composes no `ReadableIds` leaf over — a
+   * master an object-scoped read middleware narrows, or one bound to another
+   * datasource than the detail — judged by the read path's own predicate
+   * ({@link uncomposableReadableIdsParent}). A detail's access derives from its
+   * one required `master_detail` (ADR-0055 §1), so such a declaration is one
+   * the runtime cannot honour: `ObjectQLPlugin` refuses the boot on any entry.
+   *
+   * Both facts are deployment facts (the datasource mapping, a package's
+   * default datasource, lifecycle routing, the middleware registrations), so
+   * the answer is final only once every plugin has registered its middleware —
+   * which several do inside their own `kernel:ready` handler. Asked earlier, it
+   * is short. A detail with no single required master, or whose master the
+   * registry does not hold, is no entry: other rules own those.
+   */
+  findUnservableControlledByParentMasters(): UnservableControlledByParentMaster[] {
+    const found: UnservableControlledByParentMaster[] = [];
+    for (const object of this._registry.getAllObjects() as Array<{ name?: string; sharingModel?: unknown; fields?: Record<string, unknown> }>) {
+      if (object?.sharingModel !== 'controlled_by_parent' || typeof object.name !== 'string') continue;
+      const masters = Object.entries(object.fields ?? {}).filter(([, f]) => isControlledByParentMasterField(f));
+      if (masters.length !== 1) continue;
+      const [field, def] = masters[0];
+      const master = (def as { reference?: unknown }).reference;
+      if (typeof master !== 'string' || !this._registry.getObject(master)) continue;
+      const uncomposable = this.uncomposableReadableIdsParent(object.name, master);
+      if (uncomposable) found.push({ detail: object.name, field, master, ...uncomposable });
+    }
+    return found;
   }
 
   /**

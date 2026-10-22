@@ -56,8 +56,10 @@
  * `refresh_version_pr: "true"` alone for `release.yml`, its bookkeeping lane)
  * — its row reads `accepted`; the run it started is read back by the SEAT
  * (`dispatch.mjs`), never here, because the answer carries no run id, and the
- * token that request spends `actions: write` on reaches that one path and no
- * other (`ops.mjs`, `REFUSED_PATH_FAMILIES`).
+ * token that request spends `actions: write` on reaches that path and the
+ * failed-jobs re-run below, and no other (`ops.mjs`, `REFUSED_PATH_FAMILIES`).
+ * A `run_rerun_failed` is fenced on the run and read back HERE (the section
+ * of that name below).
  * The FIRST failure stops the run — later actions are NOT attempted, and the
  * summary says which — because a seat that dispatched five related writes
  * must be able to read exactly where the board was left. A 404 on a directed
@@ -120,6 +122,42 @@
  * be read — is FAILED with the platform's sentence, never a no-op by default.
  * Any other status is FAILED as every REST 4xx is. The PUT is paced like
  * every other write verb.
+ *
+ * ## The failed-jobs re-run — `run_rerun_failed`, fenced on the RUN and read back
+ *
+ * The five fences on the run and its pull (`RERUN_FAILED_FENCES` in
+ * `ops.mjs`: the workflow, the event, once, failed, the head) are facts about
+ * the run, so this file is where they are AUTHORITATIVE
+ * (`rerunFailedPreflight`). It first reads the job list of the run's attempt
+ * 1, which is the read-back's baseline: the names of the jobs that concluded
+ * `failure`. It then reads `GET /repos/{repo}/actions/runs/{run_id}` and, for
+ * the pull the run names (`pull_requests[0].number`), that pull's own
+ * `GET /repos/{repo}/pulls/{n}` — the last two requests before the POST — and
+ * judges the five fences on those answers. The head fence compares the run's
+ * `head_sha` with the pull's CURRENT head from that GET, never with the copy
+ * the run embeds, and a run naming no pull is refused by name without a pull
+ * read. A run or pull that could not be read, a fence that fails (every
+ * failing one named, with what was read), a baseline that could not be read
+ * whole, or a baseline with no failed job stops the action with the POST NOT
+ * SENT: its row says `not sent`, zero writes, exit 5. A run re-run, or a pull
+ * pushed to, by anyone between the seat's request and these reads is refused
+ * here. ⛔ The seat wrapper's earlier check is advisory and is never trusted
+ * in place of this one.
+ *
+ * The POST answers 201 with an empty body, which is an acceptance, not a
+ * landing. `confirmRerunFailed` re-reads the run every `RERUN_FAILED_POLL_MS`
+ * for up to `RERUN_FAILED_WINDOW_MS` until it shows `run_attempt` 2, then
+ * reads attempt 2's job list and lands only on `rerunFailedReadBack`
+ * (`ops.mjs`): every baseline job listed there is `queued` or
+ * `in_progress`, at least one is, and the row names the new attempt and
+ * those job ids. A baseline job not listed yet is named on the row, because
+ * a job is listed when its needs finish. A failed job listed `completed` in
+ * attempt 2 is a FAILED action. A window that never shows attempt 2, or that
+ * never settles, is a FAILED action whose sentence says UNCONFIRMED: the
+ * re-run may still start, so read the run and ⛔ never re-send. A re-send
+ * would meet attempt 2 at the `once` fence anyway, and be refused there with
+ * zero writes. Every read is an unpaced GET, and the one write is paced like
+ * every write verb.
  *
  * ## The assignees and labels legs — `pr_create` with `assignees` / `labels`, the requests that read an earlier answer
  *
@@ -212,7 +250,8 @@
  *   3   PREREQUISITE NOT MET — no token, no sender, the permission read did
  *       not answer, or the platform was unreachable; zero writes.
  *   4   the sender is not authorized on the target repo; zero writes.
- *   5   an action FAILED; the summary names it and which earlier ones landed.
+ *   5   an action FAILED; the summary names it and which earlier ones landed —
+ *       a `run_rerun_failed` refused at a fence among them, its POST not sent.
  *  10   the write throttle refused (its prescription was printed), or a stroke's
  *       rule ⑤ batch could not be recorded; zero writes in that second case.
  */
@@ -229,7 +268,24 @@ import { scrub } from '../fleet-token.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { announceBatch, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceFilePath, paceWrite, releaseWriteLease, unrecordableText } from '../write-pace.mjs';
 import { ANNOTATED_OPS, parseRelayAnnotation, RELAY_ANNOTATION_PREFIX, relayAnnotationMessage, strokeBudgetRefusal, strokePacing } from './dispatch.mjs';
-import { GOVERNED_REVIEW_FILES_PAGE_CAP, GOVERNED_REVIEW_FILES_PAGE_SIZE, GOVERNED_REVIEW_OPS, OPS, PERMISSIONS, PR_LANDED_STATE, answerPlaceholder, governedReviewRequests, transferRemedy } from './ops.mjs';
+import {
+  GOVERNED_REVIEW_FILES_PAGE_CAP,
+  GOVERNED_REVIEW_FILES_PAGE_SIZE,
+  GOVERNED_REVIEW_OPS,
+  OPS,
+  PERMISSIONS,
+  PR_LANDED_STATE,
+  RERUN_FAILED_ATTEMPT,
+  answerPlaceholder,
+  failedJobNames,
+  governedReviewRequests,
+  rerunFailedFenceFailures,
+  rerunFailedFenceText,
+  rerunFailedLandedText,
+  rerunFailedPullNumber,
+  rerunFailedReadBack,
+  transferRemedy,
+} from './ops.mjs';
 import { PAYLOAD_ENV, refusalText, tokenRepositoriesOf, validatePayload } from './validate.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -477,6 +533,94 @@ export async function confirmUpdateBranch(req, answer, payload, api, t, { sleep,
     await sleep(pollMs);
   }
   return { ok: false, why: `HTTP ${UPDATE_BRANCH_ACCEPTED} accepted, but the head ${head === null ? 'could not be read' : `is still ${shortSha(head)}`} ${windowMs} ms later — UNCONFIRMED: the merge may still land; read the pull before anything else, ⛔ do not re-send` };
+}
+
+/** The failed-jobs re-run's read-back window and poll interval (header): the run is re-read until it shows the new attempt. */
+export const RERUN_FAILED_WINDOW_MS = 60_000;
+export const RERUN_FAILED_POLL_MS = 3_000;
+/** An attempt's job list is walked at the endpoint's page maximum, to a cap — a walk past it is a truncated SUBSET. */
+export const RERUN_FAILED_JOBS_PAGE_SIZE = 100;
+export const RERUN_FAILED_JOBS_PAGE_CAP = 10;
+
+/**
+ * One attempt's job list, every page: `{ jobs }`, or `{ fail: { call, status, why } }` for a page that did not
+ * answer 200 with a `jobs` array, or a walk past `RERUN_FAILED_JOBS_PAGE_CAP` pages. Never throws.
+ */
+async function readAttemptJobs(repo, runId, attempt, api, t) {
+  const jobs = [];
+  const call = `GET /repos/${repo}/actions/runs/${runId}/attempts/${attempt}/jobs`;
+  for (let page = 1; page <= RERUN_FAILED_JOBS_PAGE_CAP; page++) {
+    const r = await rest(api, `/repos/${repo}/actions/runs/${runId}/attempts/${attempt}/jobs?per_page=${RERUN_FAILED_JOBS_PAGE_SIZE}&page=${page}`, {}, t);
+    if (r.status !== 200 || !Array.isArray(r.json?.jobs)) return { fail: { call, status: r.status, why: `${call} -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}: attempt ${attempt}'s job list could not be read` } };
+    jobs.push(...r.json.jobs);
+    const total = Number.isInteger(r.json.total_count) ? r.json.total_count : null;
+    if (r.json.jobs.length < RERUN_FAILED_JOBS_PAGE_SIZE || (total !== null && jobs.length >= total)) return { jobs };
+  }
+  return { fail: { call, status: 200, why: `attempt ${attempt}'s job list hit its ${RERUN_FAILED_JOBS_PAGE_CAP}-page cap with ${jobs.length} job(s) collected and more pending — a truncated list is a SUBSET` } };
+}
+
+/**
+ * The fences, AUTHORITATIVE (header: "The failed-jobs re-run"): attempt 1's job list (the read-back's baseline),
+ * then the run, then the pull it names — the last two reads before the POST — judged against
+ * `RERUN_FAILED_FENCES`. The pull's head is the pull's OWN answer, never the run's embedded copy. Returns
+ * `{ run, pull, failed }` to send, or `{ fail: why }` — the sentence the row prints, the POST NOT SENT. Never throws
+ * on a status.
+ */
+export async function rerunFailedPreflight(req, payload, api, t) {
+  const { runId } = req.rerunFailed;
+  const baseline = await readAttemptJobs(payload.repo, runId, RERUN_FAILED_ATTEMPT, api, t);
+  const run = await rest(api, `/repos/${payload.repo}/actions/runs/${runId}`, {}, t);
+  if (run.status !== 200 || !run.json || typeof run.json !== 'object') {
+    return { fail: `${run.call} -> HTTP ${run.status}${run.detail ? ` (${run.detail})` : ''}: the run could not be read, so its fences were not judged — nothing sent` };
+  }
+  // The head fence's read: the pull the run names, by its own GET. A run naming none is judged without it and refused by name.
+  const number = rerunFailedPullNumber(run.json);
+  let pull = null;
+  if (number !== null) {
+    const p = await rest(api, `/repos/${payload.repo}/pulls/${number}`, {}, t);
+    if (p.status !== 200 || !p.json || typeof p.json !== 'object') {
+      return { fail: `${p.call} -> HTTP ${p.status}${p.detail ? ` (${p.detail})` : ''}: pull #${number}, the run's pull request, could not be read, so the head fence was not judged — nothing sent` };
+    }
+    pull = p.json;
+  }
+  const failures = rerunFailedFenceFailures(run.json, pull);
+  if (failures.length) return { fail: `REFUSED at the relay's fence on run ${runId}, nothing sent — ${rerunFailedFenceText(failures)}` };
+  if (baseline.fail) return { fail: `${baseline.fail.why}, so the read-back has no baseline — nothing sent` };
+  const failed = failedJobNames(baseline.jobs);
+  if (!failed.length) return { fail: `attempt ${RERUN_FAILED_ATTEMPT} of run ${runId} lists ${baseline.jobs.length} job(s) and none concluded failure, so a re-run's read-back would have nothing to confirm — nothing sent` };
+  return { run: run.json, pull, failed };
+}
+
+/**
+ * Did the re-run LAND? Judged by reading the run back, never by the 201 (header): the run re-read until it shows
+ * the new attempt, then that attempt's job list judged by `rerunFailedReadBack`. Returns `{ ok, why, result }` —
+ * `result` the row's text on a landing, naming the new attempt's job ids. Never throws on a status.
+ */
+export async function confirmRerunFailed(req, answer, pre, payload, api, t, { sleep, now, windowMs = RERUN_FAILED_WINDOW_MS, pollMs = RERUN_FAILED_POLL_MS } = {}) {
+  const platform = `HTTP ${answer.status}${answer.detail ? ` — ${answer.detail}` : ''}`;
+  if (!(answer.status >= 200 && answer.status < 300)) return { ok: false, why: platform };
+  const { runId } = req.rerunFailed;
+  const want = RERUN_FAILED_ATTEMPT + 1;
+  const started = now();
+  let last = 'nothing was read back';
+  for (;;) {
+    const run = await rest(api, `/repos/${payload.repo}/actions/runs/${runId}`, {}, t);
+    if (run.status !== 200 || !run.json || typeof run.json !== 'object') last = `${run.call} -> HTTP ${run.status}${run.detail ? ` (${run.detail})` : ''}: the run could not be re-read`;
+    else if (run.json.run_attempt !== want) last = rerunFailedReadBack({ failed: pre.failed, run: run.json }).why;
+    else {
+      const listed = await readAttemptJobs(payload.repo, runId, want, api, t);
+      if (listed.fail) last = listed.fail.why;
+      else {
+        const v = rerunFailedReadBack({ failed: pre.failed, run: run.json, jobs: listed.jobs });
+        if (v.ok) return { ok: true, why: '', result: rerunFailedLandedText(v) };
+        if (!v.pending) return { ok: false, why: `${platform} accepted, but ${v.why} — read the run before anything else, ⛔ do not re-send` };
+        last = v.why;
+      }
+    }
+    if (now() - started >= windowMs) break;
+    await sleep(pollMs);
+  }
+  return { ok: false, why: `${platform} accepted, but ${last} ${windowMs} ms later — UNCONFIRMED: the re-run may still start; read the run before anything else, ⛔ do not re-send (a second send meets attempt ${want} at the once fence and is refused)` };
 }
 
 /** The one thing a seat needs from an answer: the id / number / url of what was written — or that a bodiless 204 accepted it. */
@@ -730,6 +874,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
   };
   const t = { fetch: deps.fetch, token, pace: deps.pace };
   const ub = { sleep: deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))), now: deps.now ?? (() => Date.now()), ...(deps.updateBranch ?? {}) };
+  const rr = { sleep: ub.sleep, now: ub.now, ...(deps.rerunFailed ?? {}) };
 
   const judged = validatePayload(raw);
   if (!judged.ok) {
@@ -804,6 +949,15 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         break;
       }
       const req = filled.req;
+      // The failed-jobs re-run (header): its fences on the run and its pull, judged HERE on the reads before the POST — refused, NOT SENT.
+      const pre = req.rerunFailed ? await rerunFailedPreflight(req, payload, api, t) : null;
+      if (pre?.fail) {
+        const why = scrub(pre.fail, [token]);
+        rows.push({ action: i + 1, op: action.op, call: `${req.verb} ${req.path}`, status: 'not sent', result: `FAILED: ${why}` });
+        stoppedAt = { action: i + 1, op: action.op, why };
+        log(`  ✗ action ${i + 1} ${action.op}: ${why}`);
+        break;
+      }
       let body = req.body ?? null;
       if (req.graphql) {
         const resolved = await graphqlVariables(req, payload, api, t);
@@ -820,7 +974,8 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       const r = req.graphql ? await rest(api, '/graphql', { method: 'POST', body }, t) : await rest(api, req.path, { method: req.verb, body }, t);
       if (opener === null) opener = r;
       // The base sync is confirmed by MEASURE (header): the head polled off the expected sha, or a 422 judged by the compare.
-      const landed = req.updateBranch ? await confirmUpdateBranch(req, r, payload, api, t, ub) : requestLanded(req, r);
+      // The failed-jobs re-run is confirmed by reading the run back (header): attempt 2, its failed jobs queued or in progress.
+      const landed = req.updateBranch ? await confirmUpdateBranch(req, r, payload, api, t, ub) : req.rerunFailed ? await confirmRerunFailed(req, r, pre, payload, api, t, rr) : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
       rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? 'already absent (idempotent)' : scrub(landed.result ?? resultOf(req, r.json, r.status), [token])) : `FAILED: ${scrub(landed.why, [token])}` });
       if (!landed.ok) {
@@ -889,9 +1044,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the release.yml refresh: ONE POST to its dispatch endpoint carrying { ref: main, inputs: { refresh_version_pr: "true" } } under the App token, landing as accepted; force, false, absent, a string or any other input refused with ZERO requests, exit 2': 9,
   "the batch gap on the runner: a stroke carrying DEFAULT_BATCH_THRESHOLD or more content-creating actions is announced as ONE rule ⑤ batch before its first write — on an injected clock every write through the last content-creating one leaves a full DEFAULT_BATCH_GAP_MS after the one before, and the pacing is exactly what the seat budgets; below the threshold, after the batch and on a landing stroke rule ①'s gap; a stroke the job cannot hold refused with ZERO requests; an announcement the log cannot record refused before the first write": 10,
   "the governed-review follow-up: after pr_create (at the number the create answered) and after pr_ready, the pull's file list is read in full; a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 29,
+  // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
+  "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
 });
-// Raised 17 → 18 with the governed-review follow-up battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 18;
+// Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 19;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1356,6 +1513,90 @@ export async function selfTest() {
       t('⛔ the release entry\'s inputs on the shard-timings refresh — a file whose entry is null — are refused with zero requests, exit 2', [shard.exit, shard.seen.length], [EXIT_REFUSED, 0]);
     }
 
+    // ── the failed-jobs re-run ──────────────────────────────────────────────
+    battery("the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation");
+    {
+      const RUN = 39713789453;
+      const PULL = 25155;
+      const HEAD = '25b3a6c4bff905d462d4ff44030e5465c342254a';
+      const MOVED = '9f0e1d2c3b4a59687766554433221100ffeeddcc';
+      const RUN_GET = `GET /repos/${REPO}/actions/runs/${RUN}`;
+      const PULL_GET = `GET /repos/${REPO}/pulls/${PULL}`;
+      const A1 = `GET /repos/${REPO}/actions/runs/${RUN}/attempts/1/jobs`;
+      const A2 = `GET /repos/${REPO}/actions/runs/${RUN}/attempts/2/jobs`;
+      const RERUN = `POST /repos/${REPO}/actions/runs/${RUN}/rerun-failed-jobs`;
+      // The measured run (39713789453): attempt 1 failed in one shard and the aggregate that needs it; attempt 2 listed the
+      // shard queued at once, the passed shards completed (carried over), and the aggregate only when its need finished.
+      // It ran on pull #25155's head, and the run EMBEDS a copy of that pull — which the head fence never reads.
+      const runAt = (patch = {}) => ({ status: 200, json: { id: RUN, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, status: 'completed', conclusion: 'failure', head_sha: HEAD, pull_requests: [{ number: PULL, head: { sha: HEAD } }], ...patch } });
+      const pullAt = (sha = HEAD) => ({ status: 200, json: { number: PULL, state: 'open', head: { sha } } });
+      const attempt2Run = runAt({ run_attempt: 2, status: 'queued', conclusion: null });
+      const attempt1 = { status: 200, json: { total_count: 3, jobs: [
+        { id: 119611140808, name: 'Test Core (3/6)', run_attempt: 1, status: 'completed', conclusion: 'failure' },
+        { id: 119611140839, name: 'Test Core (1/6)', run_attempt: 1, status: 'completed', conclusion: 'success' },
+        { id: 119617410962, name: 'Test Core', run_attempt: 1, status: 'completed', conclusion: 'failure' },
+      ] } };
+      const attempt2 = (status = 'queued') => ({ status: 200, json: { total_count: 2, jobs: [
+        { id: 119642047246, name: 'Test Core (3/6)', run_attempt: 2, status, conclusion: status === 'completed' ? 'failure' : null },
+        { id: 119642048282, name: 'Test Core (1/6)', run_attempt: 2, status: 'completed', conclusion: 'success' },
+      ] } });
+      let clock = 0;
+      const timing = { sleep: async (ms) => { clock += ms; }, now: () => clock };
+      const stroke = base([{ op: 'run_rerun_failed', run_id: RUN }]);
+      const happy = { ...allowed, [A1]: attempt1, [RUN_GET]: [runAt(), attempt2Run], [PULL_GET]: pullAt(), [RERUN]: { status: 201, json: {} }, [A2]: attempt2() };
+      const LANDED = 'attempt 2 · re-run: `Test Core (3/6)` job 119642047246 queued · not listed yet: `Test Core` (a job is listed when its needs finish)';
+
+      clock = 0;
+      // Its own pace log, never the shared one: the shared log's later cases spend write-pace's hourly budget for the
+      // fixture token exactly (measured: one more write there refuses the annotations battery's third write, exit 10).
+      const ok = await run(stroke, happy, timing);
+      t('⭐ the measured run passes every fence: the sender gate, attempt 1\'s jobs (the baseline), the run and then its pull — by the pull\'s own GET, the two reads immediately before the POST — then ONE POST, then the run and attempt 2\'s jobs read back; exit 0', [ok.exit, ok.seen.map((s) => s.call)], [EXIT_OK, [PERM, A1, RUN_GET, PULL_GET, RERUN, RUN_GET, A2]], ok.logs.join(' | '));
+      t('…the one write is that POST with NO body, under the App token like every request', [writes(ok.seen).map((s) => [s.call, s.body]), ok.seen.every((s) => s.auth === `Bearer ${TOKEN}`)], [[[RERUN, null]], true]);
+      t('…the 201 is confirmed by the read-back: the row names attempt 2, the failed shard\'s new job id queued, and the aggregate not listed yet', [ok.rows[0]?.status, ok.rows[0]?.result, ok.summary.includes(`| 1 | \`run_rerun_failed\` | \`${RERUN}\` | 201 | ${LANDED} |`)], [201, LANDED, true], ok.summary);
+      t('…no other actions/* write leaves, and no annotation is emitted', [ok.seen.filter((s) => s.call.includes('/actions/') && !s.call.startsWith('GET ') && s.call !== RERUN), ok.annotations, ok.logs.filter((l) => l.startsWith('::'))], [[], [], []]);
+      // Each fence, refused at execute time: the run (or its pull) changed between the seat's request and this run — the POST is NOT SENT.
+      const fenced = async (patch, answers = {}) => {
+        const r = await run(stroke, { ...happy, [RUN_GET]: runAt(patch), ...answers });
+        return [r.exit, writes(r.seen).length, r.seen.at(-1)?.call, r.rows[0]?.call, r.rows[0]?.status, /REFUSED at the relay's fence/.test(r.rows[0]?.result ?? '')];
+      };
+      const refusedRow = [EXIT_ACTION_FAILED, 0, PULL_GET, RERUN, 'not sent', true];
+      t('⛔ fence workflow, refused HERE: a run of another workflow — zero writes, the POST row not sent, the pull read the last request', [await fenced({ path: '.github/workflows/lint.yml' }), (await run(stroke, { ...happy, [RUN_GET]: runAt({ path: '.github/workflows/lint.yml' }) })).rows[0]?.result.includes('fence `workflow`: the run reads ".github/workflows/lint.yml"')], [refusedRow, true]);
+      t('⛔ fence event, refused HERE: a push run — zero writes, the POST not sent, the event fence named', [await fenced({ event: 'push' }), (await run(stroke, { ...happy, [RUN_GET]: runAt({ event: 'push' }) })).rows[0]?.result.includes('fence `event`: the run reads "push"')], [refusedRow, true]);
+      t('⛔ fence once, refused HERE: a run a person re-ran meanwhile (attempt 2) — zero writes, the POST not sent, the once fence named', [await fenced({ run_attempt: 2 }), (await run(stroke, { ...happy, [RUN_GET]: runAt({ run_attempt: 2 }) })).rows[0]?.result.includes('fence `once`: the run reads 2')], [refusedRow, true]);
+      t('⛔ fence failed, refused HERE: a run that concluded success, and one still in progress — zero writes, the POST not sent, the failed fence named', [await fenced({ conclusion: 'success' }), await fenced({ status: 'in_progress', conclusion: null })], [refusedRow, refusedRow]);
+      // The head fence: the pull's CURRENT head, by the pull's own GET — accepted on the happy path above (head_sha equal to it).
+      const stale = await run(stroke, { ...happy, [PULL_GET]: pullAt(MOVED) });
+      t('⛔ fence head, refused HERE: the pull was pushed to since the run (a stale head) — zero writes, the POST not sent, the pull read the last request, the head fence naming both heads', [await fenced({}, { [PULL_GET]: pullAt(MOVED) }), stale.rows[0]?.result.includes('fence `head`: the run reads "head_sha 25b3a6c4bf, and pull #25155\'s own GET answers #25155 at head 9f0e1d2c3b"')], [refusedRow, true], stale.rows[0]?.result);
+      t("⛔ …the run's embedded copy of the pull is never trusted: it agrees with the run's head_sha, and the pull's own answer still refuses", [stale.seen.filter((s) => s.call === PULL_GET).length, runAt().json.pull_requests[0].head.sha === HEAD, writes(stale.seen).length], [1, true, 0]);
+      const fork = [];
+      for (const r of [runAt({ pull_requests: [] }), runAt({ pull_requests: undefined })]) fork.push(await run(stroke, { ...happy, [RUN_GET]: r }));
+      t("⛔ fence head, refused HERE: a run naming no pull request — pull_requests empty (a fork pull request's run) or absent — zero writes, NO pull read, the POST not sent, the head fence named", fork.map((r) => [r.exit, writes(r.seen).length, r.seen.some((s) => s.call.startsWith(`GET /repos/${REPO}/pulls/`)), r.rows[0]?.status, r.rows[0]?.result.includes('fence `head`: the run reads "no pull_requests entry')]), [[EXIT_ACTION_FAILED, 0, false, 'not sent', true], [EXIT_ACTION_FAILED, 0, false, 'not sent', true]]);
+      const pullUnread = await run(stroke, { ...happy, [PULL_GET]: { status: 404, json: { message: 'Not Found' } } });
+      t('⛔ a pull that cannot be read leaves the head fence unjudged: zero writes, the POST not sent, the read named', [pullUnread.exit, writes(pullUnread.seen).length, pullUnread.rows[0]?.status, pullUnread.rows[0]?.result.includes('pull #25155, the run\'s pull request, could not be read, so the head fence was not judged')], [EXIT_ACTION_FAILED, 0, 'not sent', true], pullUnread.rows[0]?.result);
+      const unread = await run(stroke, { ...happy, [RUN_GET]: { status: 404, json: { message: 'Not Found' } } });
+      t('⛔ a run that cannot be read is never judged: zero writes, the POST not sent, the read named', [unread.exit, writes(unread.seen).length, unread.rows[0]?.status, unread.rows[0]?.result.includes('the run could not be read')], [EXIT_ACTION_FAILED, 0, 'not sent', true]);
+      const noBase = await run(stroke, { ...happy, [A1]: { status: 403, json: { message: 'Resource not accessible by integration' } } });
+      t('⛔ a baseline that cannot be read: zero writes — a POST whose read-back has nothing to confirm is never sent', [noBase.exit, writes(noBase.seen).length, noBase.rows[0]?.result.includes("attempt 1's job list could not be read")], [EXIT_ACTION_FAILED, 0, true]);
+      const allPassed = await run(stroke, { ...happy, [A1]: { status: 200, json: { total_count: 1, jobs: [{ id: 1, name: 'Test Core (1/6)', run_attempt: 1, status: 'completed', conclusion: 'success' }] } } });
+      t('⛔ a baseline with no failed job: zero writes, the row saying the read-back would have nothing to confirm', [allPassed.exit, writes(allPassed.seen).length, allPassed.rows[0]?.result.includes('none concluded failure')], [EXIT_ACTION_FAILED, 0, true]);
+      const denied = await run(stroke, { ...happy, [RERUN]: { status: 403, json: { message: 'Resource not accessible by integration' } } });
+      t('a 403 on the POST (the token minted without actions write) is a FAILED action with the platform\'s sentence, and nothing is read back after it', [denied.exit, denied.rows[0]?.status, denied.rows[0]?.result.includes('Resource not accessible by integration'), denied.seen.some((s) => s.call === A2)], [EXIT_ACTION_FAILED, 403, true, false]);
+      clock = 0;
+      const never = await run(stroke, { ...happy, [RUN_GET]: [runAt(), runAt()] }, timing);
+      t('⛔ a read-back that never sees attempt 2 is a FAILED action — UNCONFIRMED, naming the attempt it read and never to re-send — after the window, polled at the interval', [never.exit, never.rows[0]?.status, ['UNCONFIRMED', 'run_attempt 1, not 2', 'do not re-send', 'once fence'].every((s) => never.rows[0]?.result.includes(s)), clock, never.seen.filter((s) => s.call === RUN_GET).length], [EXIT_ACTION_FAILED, 201, true, RERUN_FAILED_WINDOW_MS, 1 + RERUN_FAILED_WINDOW_MS / RERUN_FAILED_POLL_MS + 1], never.rows[0]?.result);
+      clock = 0;
+      const late = await run(stroke, { ...happy, [RUN_GET]: [runAt(), runAt(), runAt(), attempt2Run] }, timing);
+      t('a new attempt the platform shows on a later read lands, read again at the interval until it does', [late.exit, late.rows[0]?.result, clock], [EXIT_OK, LANDED, 2 * RERUN_FAILED_POLL_MS]);
+      const completed = await run(stroke, { ...happy, [A2]: attempt2('completed') }, timing);
+      t('⛔ a failed job listed completed in attempt 2 was not re-run as asked: a FAILED action at once, naming the job', [completed.exit, completed.rows[0]?.result.includes('`Test Core (3/6)` (job 119642047246) completed failure'), completed.seen.filter((s) => s.call === A2).length], [EXIT_ACTION_FAILED, true, 1]);
+      clock = 0;
+      const blind = await run(stroke, { ...happy, [A2]: { status: 502, json: { message: 'Bad Gateway' } } }, timing);
+      t('⛔ an attempt-2 job list that never answers is a FAILED action, UNCONFIRMED, naming the read', [blind.exit, blind.rows[0]?.result.includes("attempt 2's job list could not be read"), blind.rows[0]?.result.includes('UNCONFIRMED')], [EXIT_ACTION_FAILED, true, true]);
+      const beside = await run(base([{ op: 'run_rerun_failed', run_id: RUN }, { op: 'comment', issue: 1, body: 'x' }]), happy);
+      const stringId = await run(base([{ op: 'run_rerun_failed', run_id: String(RUN) }]), happy);
+      t('⛔ the validator is the executor\'s gate too: beside another action, or with run_id a string, refused with ZERO requests, exit 2', [[beside.exit, beside.seen.length], [stringId.exit, stringId.seen.length]], [[EXIT_REFUSED, 0], [EXIT_REFUSED, 0]]);
+    }
+
     // ── the summary ─────────────────────────────────────────────────────────
     battery('the summary: request, sender and role, session, target, one row per request');
     {
@@ -1635,7 +1876,8 @@ export async function selfTest() {
     `✓ fleet-write/execute self-test: ${cases.length} cases pass across ${declared.length} batteries — the sender gate from the target repo's answer, ` +
       'every op as the request the table declares, stop at the first failure with later actions untouched, the idempotent label DELETE, the GraphQL ' +
       'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a base sync confirmed by the head leaving its expected sha or measured as a no-op, an assignees leg sent to the number the create answered and landing only when its answer lists every login sent, ' +
-      'a governed-review follow-up after pr_create and pr_ready that reads the pull\'s whole file list and, on a Tier H hit alone, requests every GOVERNED_APPROVERS account not already covered (the author assigned instead), zero writes when covered and a FAILED action when the list cannot be read whole, a transfer gated on both repositories and landing only on its target, one summary row per request, ' +
+      'a governed-review follow-up after pr_create and pr_ready that reads the pull\'s whole file list and, on a Tier H hit alone, requests every GOVERNED_APPROVERS account not already covered (the author assigned instead), zero writes when covered and a FAILED action when the list cannot be read whole, a transfer gated on both repositories and landing only on its target, ' +
+      "a failed-jobs re-run fenced on the run and its pull's own current head, read just before its one POST (zero writes on any fence), and landing only when attempt 2 reads back with its failed jobs queued or in progress, one summary row per request, " +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
       'above the batch threshold announced as ONE rule ⑤ batch and paced at the batch gap (one the job cannot hold refused with zero requests), and a known ' +
       'token that came back out of NO summary, log or error.',

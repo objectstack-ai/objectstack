@@ -164,6 +164,20 @@ export const POLICY_STAMPS = [
     // direct `devDependencies.vitest` (`EOVERRIDE`), so the two rows above and
     // here must move together, and only generation makes them.
   },
+  {
+    key: 'overrides.uuid@<12.0.0',
+    block: 'overrides',
+    field: 'uuid@<12.0.0',
+    constant: 'SCAFFOLD_UUID_OVERRIDE_RANGE',
+    // The npm override that routes exceljs's `uuid ^8.3.0` (through
+    // `@objectstack/rest`) out of GHSA-w5hq-g745-h8pq. The field is
+    // `SCAFFOLD_UUID_OVERRIDE_SELECTOR`, spelled here as the key the template
+    // declares; `os init` / `os create` emit it from that constant. This
+    // script's `--check` compares VALUES only, so the key spellings are held
+    // equal by `packages/cli/test/scaffold-emission-policy.e2e.test.ts`
+    // (nightly tier), which compares the on-ramp's whole `overrides` block
+    // with theirs.
+  },
 ];
 
 /**
@@ -332,7 +346,9 @@ export function stampPolicy(text, policy, { label = TEMPLATE_PKG_FILE } = {}) {
     }
     const span = findBlockSpan(out, stamp.block, label);
     const block = out.slice(span.start, span.end);
-    const field = new RegExp(`("${stamp.field}"\\s*:\\s*)"([^"]*)"`, 'g');
+    // Escaped: an npm override selector (`uuid@<12.0.0`) carries `.`, which
+    // unescaped would match any character.
+    const field = new RegExp(`("${escapeRe(stamp.field)}"\\s*:\\s*)"([^"]*)"`, 'g');
     const hits = [...block.matchAll(field)];
     if (hits.length !== 1) {
       throw new Error(
@@ -630,8 +646,14 @@ const SELF_TEST_POLICY = {
   SCAFFOLD_PNPM_RANGE: '>=99.1',
   SCAFFOLD_TYPESCRIPT_RANGE: '^9.9.9',
   SCAFFOLD_VITEST_RANGE: '~8.8.0',
+  SCAFFOLD_UUID_OVERRIDE_RANGE: '^7.7.7',
 };
-const STALE = { SCAFFOLD_PNPM_RANGE: '>=1.0', SCAFFOLD_TYPESCRIPT_RANGE: '^1.0.0', SCAFFOLD_VITEST_RANGE: '^1.1.0' };
+const STALE = {
+  SCAFFOLD_PNPM_RANGE: '>=1.0',
+  SCAFFOLD_TYPESCRIPT_RANGE: '^1.0.0',
+  SCAFFOLD_VITEST_RANGE: '^1.1.0',
+  SCAFFOLD_UUID_OVERRIDE_RANGE: '^1.2.3',
+};
 
 function policySource(policy = SELF_TEST_POLICY) {
   return [
@@ -641,6 +663,8 @@ function policySource(policy = SELF_TEST_POLICY) {
     `export const SCAFFOLD_TYPESCRIPT_RANGE = '${policy.SCAFFOLD_TYPESCRIPT_RANGE}';`,
     '',
     `export const SCAFFOLD_VITEST_RANGE = '${policy.SCAFFOLD_VITEST_RANGE}';`,
+    '',
+    `export const SCAFFOLD_UUID_OVERRIDE_RANGE = '${policy.SCAFFOLD_UUID_OVERRIDE_RANGE}';`,
     '',
   ].join('\n');
 }
@@ -661,7 +685,10 @@ function templatePkg(policy, { overrideVitest } = {}) {
         typescript: policy.SCAFFOLD_TYPESCRIPT_RANGE,
         vitest: policy.SCAFFOLD_VITEST_RANGE,
       },
-      overrides: { vitest: overrideVitest ?? policy.SCAFFOLD_VITEST_RANGE },
+      overrides: {
+        vitest: overrideVitest ?? policy.SCAFFOLD_VITEST_RANGE,
+        'uuid@<12.0.0': policy.SCAFFOLD_UUID_OVERRIDE_RANGE,
+      },
     },
     null,
     2,
@@ -812,6 +839,12 @@ function selfTest() {
           return pkg.devDependencies.vitest === '~8.8.0' && pkg.overrides.vitest === '~8.8.0';
         }),
         'BOTH vitest stamps — devDependencies.vitest and overrides.vitest — now read the policy',
+      );
+      // The selector key carries `@`, `<` and `.`: the rewrite must land on it
+      // exactly, never on a span a looser pattern happened to match.
+      ok(
+        after.every((t) => JSON.parse(t).overrides['uuid@<12.0.0'] === '^7.7.7'),
+        'the uuid override, keyed by its npm selector `uuid@<12.0.0`, now reads the policy',
       );
       ok(runFixture(script, ['--check']).status === 0, '--check is green after the rewrite (idempotent)');
     },

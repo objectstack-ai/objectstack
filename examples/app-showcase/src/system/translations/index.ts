@@ -1127,6 +1127,48 @@ export const ShowcaseTranslationBundle = {
           },
         },
       },
+      // The approval flows: the flow's name and each approval step's name, as
+      // the approvals inbox, the record's approval panel and the request page
+      // show them in the reader's locale.
+      showcase_budget_approval: {
+        label: '项目预算审批',
+        approvals: { manager_review: { label: '经理审核' }, exec_review: { label: '高管审核' } },
+      },
+      showcase_closure_signoff: {
+        label: '结项签批（审批子流程）',
+        approvals: { ask_signoff: { label: '经理签批' } },
+      },
+      showcase_invoice_signoff: {
+        label: '发票双重签批（并行审批）',
+        approvals: { dual_signoff: { label: '财务 + 法务签批' } },
+      },
+      showcase_one_task_signoff: {
+        label: '单个任务签批（逐项子流程）',
+        approvals: { review: { label: '任务签批' } },
+      },
+      showcase_expense_signoff: {
+        label: '费用报告签批',
+        approvals: { dual_signoff: { label: '经理 + 财务签批' } },
+      },
+      showcase_committee_quorum: {
+        label: '大额费用 — 委员会多数签批',
+        approvals: { committee: { label: '委员会签批（三分之二）' } },
+      },
+      showcase_dynamic_approval: {
+        label: '公告动态审批',
+        approvals: { lead_review: { label: '负责人审核' }, co_sign: { label: '会签' } },
+      },
+      showcase_approver_bindings: {
+        label: '审批人绑定示例（#3508）',
+        approvals: {
+          by_user: { label: '指定用户' },
+          by_team: { label: '团队成员' },
+          by_department: { label: '部门成员' },
+          by_position: { label: '岗位任职者' },
+          by_manager: { label: '提交人的经理' },
+          by_field: { label: '触发字段中的用户' },
+        },
+      },
     },
   },
 };

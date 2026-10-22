@@ -85,9 +85,9 @@ the publish door rejects it before that:
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](./rules/relationships.md)) |
 | `namespace` | — | **Not a schema key** — `ObjectSchema.create()` rejects unknown keys, so authoring it is a build error. Embed the prefix directly in `name` instead (e.g. `name: 'crm_account'`) |
 | `datasource` | `'default'` | Target datasource ID for virtualized data |
-| `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field, or a formula field (`returnType: 'text'`) for a composite title |
+| `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field; a composite title to import, sort or search by is a stored computed field (a non-`formula` field with an `expression`, computed and stored on write); a text formula is display-only |
 | `displayNameField` | — | **Deprecated** alias for `nameField` (still honored as a fallback) |
-| `titleFormat` | — | **Deprecated, not removed (ADR-0079)** — render-only: the server can't return or query it. Use `nameField` (it wins); for a composite title, designate a `returnType: 'text'` formula field as `nameField` |
+| `titleFormat` | — | **Deprecated, not removed (ADR-0079)** — render-only: the server can't return or query it. Use `nameField` (it wins); a composite title follows the `nameField` row |
 | `enable` | — | Capability flags (trackHistory, searchable, apiEnabled, etc.) |
 | `fieldGroups` | — | Ordered list of logical field groups for forms/detail pages (see [Field Groups](./references/examples-objects.md#field-groups-mvp)) |
 | `lifecycle` | `record` semantics (permanent) | Data retention/rotation/archival contract. **Required for append-only, high-write-rate objects** — a `telemetry`/`transient`/`event`/`audit` class must declare a bounding policy or parsing fails (see [Data Lifecycle & Retention](./rules/lifecycle.md)) |
@@ -155,7 +155,7 @@ formula cannot fetch the related title in the first place. The
 mistake is **refused, not silent**: a `formula` entry in any `searchableFields`
 — the object's own set included — is an `os validate` error
 (`searchable-field-unsearchable`), and a request naming one is `400
-INVALID_FIELD`. It used to clear both and then never match.
+INVALID_FIELD`.
 
 **Mirror maintenance is the trade-off** — a mirror is denormalized data, only as
 fresh as whatever writes it. Cover both write paths:
@@ -391,8 +391,6 @@ and how to build partial / gin / gist indexes at the database layer.
 
 ---
 
----
-
 ## Object Extension Model
 
 To add fields/validations/indexes to an object you do not own, author
@@ -455,9 +453,7 @@ a row-level-security/sharing predicate (`done` instead of `record.done`) that
 evaluates to `null` and never fires. `os lint` is a *separate*
 pass that additionally checks the data model against the conventions in this
 skill (relationships, master-detail, roll-ups) — run it too, but it does **not**
-replace `os validate`. (Reminder: two consecutive `os build` runs with no source
-change must be byte-identical — see the determinism gate above.) In a scaffolded
-project the gate is `npm run validate`.
+replace `os validate`. In a scaffolded project the gate is `npm run validate`.
 
 ---
 

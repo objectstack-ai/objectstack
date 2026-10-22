@@ -121,6 +121,8 @@ import {
   GLOBAL_TENANT,
   canonicalIndexKey,
   carriesNullSafeTenantKeyPart,
+  ceremonyOwnedDropFinding,
+  isCeremonyOwnedColumnDrop,
   hashShadowColumnFor,
   isHashShadowCarrier,
   parseHashShadowKeyParts,
@@ -14538,10 +14540,19 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
+    // [ADR-0131 D10 item 5] An `organization_id` drop is the ownership
+    // ceremony's until the database is certified: `--allow-destructive` is
+    // refused there, so the line names the ceremony instead. Asked once per
+    // table, and only when such a drop is about to be warned.
+    let certified: boolean | undefined;
     for (const d of drift) {
       const k = driftKey(d);
       if (this.driftWarned.has(k)) continue;
       this.driftWarned.add(k);
+      if (isCeremonyOwnedColumnDrop(d) && !(certified ??= await this.isTenantKeyCertified())) {
+        this.logger.warn(`[schema-drift] ${ceremonyOwnedDropFinding(d)}`);
+        continue;
+      }
       this.logger.warn(`[schema-drift] ${d.message}`);
     }
   }

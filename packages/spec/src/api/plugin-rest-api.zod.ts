@@ -538,9 +538,65 @@ export type ErrorHandlingConfigParsed = z.infer<typeof ErrorHandlingConfigSchema
 // OpenAPI Documentation Configuration
 // ==========================================
 
+// ─── [#25159] `openApi.uiPath` and `openApi.uiFramework` are RETIRED ────────
+//
+// ADR-0049 enforce-or-remove; triage route A (no staged window), which follows
+// the maintainer's ruling to take the docs viewer page offline. The two keys
+// declared an HTML documentation viewer for the REST API plugin — `uiPath`
+// (default `/api/docs`, "URL path to serve documentation UI") and its viewer
+// selector `uiFramework` (`swagger-ui` / `redoc` / `rapidoc` / `elements`,
+// default `swagger-ui`) — and NOTHING read either: measured at this
+// retirement's base (b93c750c7), the only `uiPath` hits outside
+// `packages/spec` are a local variable in `packages/rest/src/ui-routes.ts`
+// (the `/ui/view` route, unrelated), `uiFramework` has none, objectui at its
+// pinned sha has none of either, against lit controls on the same instrument;
+// and nothing in the tree parses `OpenApiGenerationConfigSchema` or
+// `RestApiPluginConfigSchema` outside their own unit tests. Since the viewer
+// page `GET {basePath}/docs` was retired, the API origin serves no HTML viewer
+// at all, only the OpenAPI document at `GET {basePath}/openapi.json`, so
+// neither key could be honoured.
+//
+// `uiFramework` was not named on the card; it retires in the same change
+// because it is the same viewer declaration one line below `uiPath` (a
+// framework choice for a viewer that is never served), with the same zero
+// readers — leaving it would keep the very declaration the ruling removed.
+//
+// Bookkeeping: both keys are `retiredKey()` tombstones (this shape is a
+// non-strict `z.object`, so a bare deletion would be a silent strip, ADR-0104);
+// `api/OpenApiGenerationConfig:uiPath` and `api/OpenApiGenerationConfig:uiFramework`
+// in `RETIRED_KEYS_BY_MAJOR[18]`. Both carried a Zod `.default()`, but nothing
+// parses this config into a stored or built artifact, so no emitted default
+// exists to be tolerated as residue — the old defaults are refused like any
+// other value. No D2 conversion, deliberately: a REST API plugin config is not
+// a stack collection member and never a `sys_metadata` row, so a
+// MetadataConversion would be a transform with no seam that ever runs (the
+// `kernel/Manifest:loading` disposition). The D3 semantic entry
+// `api-docs-viewer-keys-retired` carries the prescription outward, beside the
+// sibling `ApiDocumentationConfig.ui` (`documentation.zod.ts`).
+const OPENAPI_DOCUMENT_IS_SERVED =
+  'The OpenAPI document is served at `GET /api/v1/openapi.json` under the REST server\'s default '
+  + '`api.basePath` and `api.version` (the path follows both) while `api.enableOpenApi` is on; point '
+  + 'any viewer or client generator you run yourself at that document.';
+
+const OPENAPI_UI_PATH_RETIRED =
+  '`RestApiPluginConfig.openApi.uiPath` was removed in @objectstack/spec 18.1.0 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no documentation viewer was ever served at its '
+  + 'path, the `/api/docs` default included, and the platform serves no HTML API documentation '
+  + 'viewer at all, only the machine-readable OpenAPI document. Delete the key. '
+  + OPENAPI_DOCUMENT_IS_SERVED;
+
+const OPENAPI_UI_FRAMEWORK_RETIRED =
+  '`RestApiPluginConfig.openApi.uiFramework` was removed in @objectstack/spec 18.1.0 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no `swagger-ui`, `redoc`, `rapidoc` or `elements` '
+  + 'viewer was ever rendered from it, and the platform serves no HTML API documentation viewer at '
+  + 'all, only the machine-readable OpenAPI document. Delete the key. '
+  + OPENAPI_DOCUMENT_IS_SERVED;
+
 /**
  * OpenAPI Generation Configuration Schema
- * Configures automatic OpenAPI documentation generation
+ * Configures automatic OpenAPI documentation generation. It configures no
+ * viewer: the platform serves the OpenAPI document only, and the retired
+ * `uiPath` / `uiFramework` keys say so at parse.
  * 
  * @example
  * {
@@ -549,7 +605,6 @@ export type ErrorHandlingConfigParsed = z.infer<typeof ErrorHandlingConfigSchema
  *   "title": "ObjectStack API",
  *   "description": "ObjectStack REST API",
  *   "outputPath": "/api/docs/openapi.json",
- *   "uiPath": "/api/docs",
  *   "includeInternal": false,
  *   "generateSchemas": true
  * }
@@ -587,15 +642,14 @@ export const OpenApiGenerationConfigSchema = z.object({
   outputPath: z.string().default('/api/docs/openapi.json').describe('URL path to serve OpenAPI JSON'),
   
   /**
-   * UI path for Swagger/Redoc
+   * RETIRED (#25159, ADR-0049): `uiPath` and `uiFramework` declared an HTML
+   * documentation viewer nothing ever served — the retirement record sits
+   * above `OPENAPI_DOCUMENT_IS_SERVED`. Tombstoned rather than deleted: this
+   * shape is not `.strict()`, so authoring either must fail loudly (tsc
+   * `never` + the parse-time prescription), never strip in silence.
    */
-  uiPath: z.string().default('/api/docs').describe('URL path to serve documentation UI'),
-  
-  /**
-   * UI framework to use
-   */
-  uiFramework: z.enum(['swagger-ui', 'redoc', 'rapidoc', 'elements']).default('swagger-ui')
-    .describe('Documentation UI framework'),
+  uiPath: retiredKey(OPENAPI_UI_PATH_RETIRED),
+  uiFramework: retiredKey(OPENAPI_UI_FRAMEWORK_RETIRED),
   
   /**
    * Include internal/admin endpoints

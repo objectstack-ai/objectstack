@@ -38,7 +38,8 @@
  *
  * At delivery, per recipient, ahead of the channel: the inline fan-out renders
  * before each `send()`, and the dispatcher renders each claimed row (and each
- * row of a digest group) before it builds the channel's `Notification`. So
+ * row of a digest group, with that digest's heading) before it builds the
+ * channel's `Notification`. So
  * every channel — inbox, email, SMS, and any channel a third party mounts —
  * receives the rendered `title` / `body` it already reads, and no channel had
  * to learn the contract.
@@ -53,7 +54,9 @@
  *
  * One `sys_user` read per keyed delivery (one per digest group), and none at
  * all for a delivery that carries no keys or a deployment with no `i18n`
- * service. The email and SMS channels read the same row again for the address;
+ * service. A digest of two or more items always carries a key — its heading,
+ * which this service keys from its own bundle (#25015, `digest-render.ts`) —
+ * so each such group costs its one read. The email and SMS channels read the same row again for the address;
  * the two reads resolve one chain, so they cannot disagree on a language.
  */
 

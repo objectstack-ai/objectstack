@@ -3688,12 +3688,14 @@ export interface NotNullColumn {
 /** One NOT NULL, as the schema door answered it. */
 export interface NotNullOutcome extends NotNullColumn {
   /**
-   * `applied`; `not-declared` — the composition this run booted declares no
-   * object for the table, so nothing rebuilds it against a declaration;
-   * `unsupported` — the datasource's transport cannot apply it (the Turso
-   * remote face cannot rebuild a table); `failed`.
+   * `applied`; `already-not-null` — the column is NOT NULL already (a
+   * rotation shard the driver created so), nothing to do; `not-declared` — the
+   * composition this run booted declares no object for the table, so nothing
+   * rebuilds it against a declaration; `unsupported` — the datasource's
+   * transport cannot apply it (the Turso remote face cannot rebuild a table),
+   * or the table is a rotation shard created nullable; `failed`.
    */
-  outcome: 'applied' | 'not-declared' | 'unsupported' | 'failed';
+  outcome: 'applied' | 'already-not-null' | 'not-declared' | 'unsupported' | 'failed';
   detail?: string;
 }
 
@@ -3723,7 +3725,7 @@ export interface NotNullPort {
  */
 async function runNotNull(run: Run): Promise<StepReport> {
   const step: CeremonyStep = 'not-null';
-  const summary: Record<string, number> = { applied: 0, due: 0, notDeclared: 0, unsupported: 0 };
+  const summary: Record<string, number> = { applied: 0, alreadyNotNull: 0, due: 0, notDeclared: 0, unsupported: 0 };
   const blockers: string[] = [];
   const notes: string[] = [];
   const plan = await planFor(run);
@@ -3742,6 +3744,7 @@ async function runNotNull(run: Run): Promise<StepReport> {
   }
   for (const outcome of await run.opts.notNull.apply(due)) {
     if (outcome.outcome === 'applied') summary.applied++;
+    else if (outcome.outcome === 'already-not-null') summary.alreadyNotNull++;
     else if (outcome.outcome === 'not-declared') {
       summary.notDeclared++;
       notes.push(

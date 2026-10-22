@@ -2644,9 +2644,13 @@ const TITLE_FORMAT_RETIRED_EXPLANATION: RuleExplanation = {
       'alias), or one derived from the object\'s fields. `titleFormat` is a render-only template: the ' +
       'server can neither return the title it draws nor query by it, the shared title predicate ' +
       '(`objectTitleCompleteness`) never reads it, and an explicit `nameField` takes precedence over it.',
-    'For a single-field title, set `nameField` to that field. For a composite title, add a formula ' +
-      'field with `returnType: \'text\'` and point `nameField` at it: a formula whose result is text is ' +
-      'title-eligible. Then drop `titleFormat`, which this warning reports for as long as it is declared.',
+    'For a single-field title, set `nameField` to that field. A composite title that must be queried ' +
+      '(matched by an import, sorted, searched) is a stored computed field: a non-formula field, such as ' +
+      'a `text` field, that declares an `expression`, which the engine computes and stores on every ' +
+      'write; point `nameField` at it. A formula with `returnType: \'text\'` is title-eligible too and ' +
+      'stays legal for a title shown for display only: its value is computed on read and stored nowhere, ' +
+      'so a sort by it is refused, search never reaches it, and an import cannot match a lookup cell ' +
+      'against it. Then drop `titleFormat`, which this warning reports for as long as it is declared.',
     'A warning, not an error: the schema still parses the key, so existing metadata keeps loading.',
   ],
 };
@@ -2775,10 +2779,11 @@ const RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION: RuleExplanation = {
       'security gate (`assertControlledByParentWrite`) is the only thing refusing such an insert.',
     'Every `master_detail` field of such an object is judged, not only the one the runtime resolves ' +
       'as the master: that is the scope `ObjectSchema.create()` enforces when it forces ' +
-      '`required: true` and refuses an explicit `required: false`. The builder never inspects ' +
-      '`readonly` or `system`, and a plain object literal or a raw `.parse()` of stored metadata ' +
-      'never runs it, so this rule is where all three shapes meet a refusal at authoring time. One ' +
-      'finding per field, located at its first defect.',
+      '`required: true` and refuses an explicit `required: false`. The spec parse also ' +
+      'refuses every shape that leaves the object without exactly one writable required master, so ' +
+      '`os validate`, `os build` and the save door stop there; a shape on a second, non-required ' +
+      '`master_detail` beside the master is this rule\'s report alone. One finding per field, located ' +
+      'at its first defect.',
     DATA_MODEL_SWEEP_REACH,
   ],
 };
@@ -3559,28 +3564,6 @@ const OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION: RuleExplanation = {
     'So check the spelling against the object the providing package registers (the approval request ' +
       'object is `sys_approval_request`); if a third-party package genuinely provides the name, the ' +
       'warning is expected.',
-  ],
-};
-
-const USER_FIELD_FOREIGN_REFERENCE_EXPLANATION: RuleExplanation = {
-  rule: 'user-field-foreign-reference',
-  covers: 'why a user field cannot point at another object',
-  paragraphs: [
-    'A `user` field is a person picker: its target is fixed to the `sys_user` object by the type, ' +
-      'which is why `Field.user()` takes no target argument. Writing `reference` with any other ' +
-      'object name contradicts the type, and today nothing refuses it.',
-    'Such a field is half one thing and half another. Every reader that follows the target ' +
-      '(`$expand`, imports, seed loading, field paths) treats it as a link to the named object, ' +
-      'while every reader that branches on the type treats its values as users: the person picker ' +
-      'searches people, a `current_user` default stores the acting user\'s id, and a sharing rule over ' +
-      'the users a field holds shares the record with those ids.',
-    'A link to another object is a `lookup`: `{ type: \'lookup\', reference: \'<object>\' }`, or ' +
-      '`Field.lookup(\'<object>\', …)`. If a person was meant, drop `reference`.',
-    'It warns rather than refuses because no automatic rewrite keeps the field\'s behaviour: a `lookup` ' +
-      'takes part in the delete walk with `deleteBehavior: \'set_null\'` by default, so it would start ' +
-      'clearing the column when the target record is deleted, which a `user` field never does. Make ' +
-      'the change by hand and check that delete behaviour is what you want. Refusing the shape at ' +
-      'parse is planned for the next major.',
   ],
 };
 
@@ -4880,7 +4863,6 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [OBJECT_FIELD_REF_UNKNOWN_EXPLANATION.rule]: OBJECT_FIELD_REF_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
-  [USER_FIELD_FOREIGN_REFERENCE_EXPLANATION.rule]: USER_FIELD_FOREIGN_REFERENCE_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,
   [LIST_VIEW_FILTERS_IN_VIEWS_MODE_EXPLANATION.rule]: LIST_VIEW_FILTERS_IN_VIEWS_MODE_EXPLANATION,
   [LIVENESS_LEDGER_UNREADABLE_EXPLANATION.rule]: LIVENESS_LEDGER_UNREADABLE_EXPLANATION,

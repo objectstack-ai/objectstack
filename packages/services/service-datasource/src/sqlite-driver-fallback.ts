@@ -65,6 +65,13 @@
  *     `connect()` makes the directory before the addon loads, so a path the
  *     driver cannot make is refused at the native rung even when the addon
  *     could not have loaded.
+ *   - **The addon cannot load and the file is not one wasm SQLite can read —
+ *     re-thrown at the wasm rung (#25019).** A native addon that cannot load
+ *     never reads the file, so a file that is not a database, or a damaged
+ *     one, reaches the wasm rung. wasm SQLite refuses it with the same
+ *     `SQLITE_NOTADB` / `SQLITE_CORRUPT` and leaves it as it was found; it
+ *     used to move it aside and connect over an empty database. The in-memory
+ *     rung is not tried: it would answer over no file at all.
  *
  * An ABSENT file in a directory that exists, or can be made, is not an open
  * failure: the driver makes the directory and SQLite creates the file. A dev
@@ -154,13 +161,16 @@ function isEphemeralFilename(filename: string): boolean {
  *   - SQLite's `SQLITE_CANTOPEN`: the directory is there, and SQLite still
  *     cannot open the file. Only a LOADED addon can answer with a SQLite code;
  *   - SQLite's `SQLITE_NOTADB`: the file opens, and its bytes are not a SQLite
- *     database. wasm SQLite reads the same bytes, and its open moves a file it
- *     cannot read aside and starts an empty database in its place, so stepping
- *     down would replace the operator's file rather than read it;
+ *     database. wasm SQLite reads the same bytes and refuses them with the
+ *     same code, so stepping down cannot cure it;
  *   - SQLite's `SQLITE_CORRUPT` (#25019): the file is a SQLite database whose
  *     header or schema SQLite cannot read, such as one truncated inside its
  *     header. The connection's first statement answers it only for damage of
- *     that kind, and wasm SQLite would move it aside the same way.
+ *     that kind. wasm SQLite refuses the same file with the same code.
+ *
+ * The same predicate judges the wasm rung's failure (#25019): wasm SQLite's
+ * open refuses a file it cannot read with `SQLITE_NOTADB` or `SQLITE_CORRUPT`,
+ * and `SqlDriver.connect()` names it exactly as it names the native answer.
  *
  * An addon that cannot load never carries any of these. It surfaces at the
  * probe's `SELECT 1`, whose failure `SqlDriver.execute()` hands back as
@@ -282,9 +292,15 @@ export async function resolveSqliteDriver(
     } as any);
     await wasmDriver.connect();
     wasmOk = true;
-  } catch {
+  } catch (err) {
     wasmOk = false;
     await closeQuietly(wasmDriver);
+    // wasm SQLite read the file and refused it (#25019): its bytes are not a
+    // database, or not one it can read. The in-memory rung would answer in its
+    // place over no file at all, so the refusal is the datasource's answer, as
+    // at the native rung. Every other wasm failure, sql.js itself not loading
+    // first among them, goes on to the in-memory rung as before.
+    if (isSqliteFileOpenFailure(err)) throw err;
   }
   if (wasmOk) {
     warn(NATIVE_SQLITE_WASM_FALLBACK_WARNING);

@@ -66,7 +66,37 @@ export interface QuietHours {
 /** Digest cadence declared on a preference row (P3b-2). `none` ⇒ no batching. */
 export type DigestCadence = 'daily' | 'weekly';
 
+/** The topic / channel wildcard. ⛔ Not a user: see {@link GLOBAL_USER}. */
 const WILDCARD = '*';
+
+/**
+ * The index key of the admin-global default's USER part.
+ *
+ * [ADR-0118 D1] `user_id` is a `sys_user` reference, and the row that applies
+ * to every user is the one whose reference is EMPTY. This key is internal to
+ * the in-memory index below and is never compared with a stored value: a row
+ * reaches it only through {@link isGlobalDefaultUser}. It is the empty string
+ * because a recipient id never is one.
+ *
+ * ⛔ A stored `user_id = '*'` is NOT read as the global default here. That was
+ * the text column's sentinel; it is rewritten to the empty reference at boot
+ * (`convertWildcardPreferenceUsers`), and a row still holding it is a row for
+ * a user id nobody has, so it matches no recipient.
+ */
+const GLOBAL_USER = '';
+
+/**
+ * Is this stored `user_id` the empty reference — the admin-global default?
+ *
+ * `null`, `undefined` and `''` are the three spellings the engine itself reads
+ * as "no link" (its reference check skips all three), so they are one value
+ * here too. The NULL-safe unique index folds them the same way
+ * (`COALESCE(user_id, '')`), so at most one such row exists per (topic,
+ * channel) in an organization.
+ */
+function isGlobalDefaultUser(userId: unknown): boolean {
+    return userId === null || userId === undefined || userId === '';
+}
 
 /**
  * PreferenceResolver — the ADR-0030 Layer-3 preference filter (P2).
@@ -74,8 +104,8 @@ const WILDCARD = '*';
  * Given the resolved recipients and the requested channels, returns, per
  * recipient, the channels they actually accept for `topic`. Resolution is
  * most-specific-wins over `sys_notification_preference` rows with `*` wildcards
- * for user / topic / channel; a real-user row overrides the `user_id='*'`
- * admin-global default; the built-in default is **on**.
+ * for topic / channel; a real-user row overrides the admin-global default (the
+ * row whose `user_id` is empty, ADR-0118 D1); the built-in default is **on**.
  *
  * Two safety rules:
  *  - **Mandatory topics bypass** the matrix (all channels kept).
@@ -128,8 +158,8 @@ export class PreferenceResolver {
         const recipientSet = new Set(recipients);
         const index = new Map<string, PrefRowLite>();
         for (const r of rows) {
-            const user = String(r.user_id ?? '');
-            if (user !== WILDCARD && !recipientSet.has(user)) continue; // ignore unrelated users
+            const user = isGlobalDefaultUser(r.user_id) ? GLOBAL_USER : String(r.user_id);
+            if (user !== GLOBAL_USER && !recipientSet.has(user)) continue; // ignore unrelated users
             const topic = String(r.topic ?? WILDCARD);
             const channel = String(r.channel ?? WILDCARD);
             index.set(`${user}|${topic}|${channel}`, {
@@ -190,10 +220,10 @@ export class PreferenceResolver {
 
     /**
      * Most-specific-wins lookup for (user, topic, channel). User-specific beats
-     * the `*` user; topic/channel specific beats their wildcards.
+     * the admin-global default; topic/channel specific beats their wildcards.
      */
     private resolveRow(index: Map<string, PrefRowLite>, user: string, topic: string, channel: string): PrefRowLite | undefined {
-        for (const u of [user, WILDCARD]) {
+        for (const u of [user, GLOBAL_USER]) {
             for (const t of [topic, WILDCARD]) {
                 for (const c of [channel, WILDCARD]) {
                     const hit = index.get(`${u}|${t}|${c}`);
@@ -210,7 +240,7 @@ export class PreferenceResolver {
      * channel-agnostic setting. Most-specific user/topic wins.
      */
     private resolveQuietHours(index: Map<string, PrefRowLite>, user: string, topic: string): QuietHours | undefined {
-        for (const u of [user, WILDCARD]) {
+        for (const u of [user, GLOBAL_USER]) {
             for (const t of [topic, WILDCARD]) {
                 const hit = index.get(`${u}|${t}|${WILDCARD}`);
                 if (hit?.quietHours) return hit.quietHours;
@@ -225,7 +255,7 @@ export class PreferenceResolver {
      * per-person, channel-agnostic setting. Most-specific user/topic wins.
      */
     private resolveDigest(index: Map<string, PrefRowLite>, user: string, topic: string): DigestCadence | undefined {
-        for (const u of [user, WILDCARD]) {
+        for (const u of [user, GLOBAL_USER]) {
             for (const t of [topic, WILDCARD]) {
                 const hit = index.get(`${u}|${t}|${WILDCARD}`);
                 if (hit?.digest) return hit.digest;

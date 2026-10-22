@@ -5,21 +5,24 @@ import { z } from 'zod';
 /**
  * API Documentation & Testing Interface Protocol
  * 
- * Provides schemas for generating interactive API documentation and testing
- * interfaces similar to Swagger UI, Postman, etc.
- * 
+ * Provides schemas for describing API documentation and test collections.
+ *
  * Features:
  * - OpenAPI/Swagger specification generation
- * - Interactive API testing playground
+ * - API test requests and collections
  * - API versioning and changelog
  * - Code generation templates
  * - Mock server configuration
- * 
+ *
  * Architecture Alignment:
- * - Swagger UI: Interactive API documentation
+ * - OpenAPI: the machine-readable API description
  * - Postman: API testing collections
- * - Redoc: Documentation rendering
- * 
+ *
+ * The platform serves no HTML documentation viewer: the API origin publishes
+ * the OpenAPI document (`GET {basePath}/openapi.json`) and nothing else, so
+ * this module declares no viewer — the retired `ui` key is refused at parse
+ * with that prescription.
+ *
  * @example Documentation Config
  * ```typescript
  * const docConfig: ApiDocumentationConfig = {
@@ -27,11 +30,6 @@ import { z } from 'zod';
  *   title: 'ObjectStack API',
  *   version: '1.0.0',
  *   servers: [{ url: 'https://api.example.com', description: 'Production' }],
- *   ui: {
- *     type: 'swagger-ui',
- *     theme: 'light',
- *     enableTryItOut: true
- *   }
  * }
  * ```
  */
@@ -46,6 +44,7 @@ import { z } from 'zod';
  * Server configuration for OpenAPI specification.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const OpenApiServerSchema = lazySchema(() => z.object({
   /** Server URL */
   url: z.string().url().describe('Server base URL'),
@@ -194,93 +193,48 @@ export type OpenApiSpecParsed = z.infer<typeof OpenApiSpecSchema>;
 // API Testing Playground
 // ==========================================
 
-/**
- * API Testing UI Type
- */
-export const ApiTestingUiType = z.enum([
-  'swagger-ui',      // Swagger UI
-  'redoc',           // Redoc
-  'rapidoc',         // RapiDoc
-  'stoplight',       // Stoplight Elements
-  'scalar',          // Scalar API Reference
-  'graphiql',        // GraphiQL
-  'postman',         // Postman-like interface
-  'custom',          // Custom implementation
-]);
-
-export type ApiTestingUiType = z.input<typeof ApiTestingUiType>;
-
-/**
- * API Testing UI Configuration Schema
- * 
- * Configuration for interactive API testing interface.
- * 
- * @example Swagger UI Config
- * ```json
- * {
- *   "type": "swagger-ui",
- *   "path": "/api-docs",
- *   "theme": "light",
- *   "enableTryItOut": true,
- *   "enableFilter": true,
- *   "enableCors": true,
- *   "defaultModelsExpandDepth": 1
- * }
- * ```
- */
-export const ApiTestingUiConfigSchema = lazySchema(() => z.object({
-  /** UI type */
-  type: ApiTestingUiType.describe('Testing UI implementation'),
-  
-  /** UI path */
-  path: z.string().default('/api-docs').describe('URL path for documentation UI'),
-  
-  /** UI theme */
-  theme: z.enum(['light', 'dark', 'auto']).default('light').describe('UI color theme'),
-  
-  /** Enable try-it-out feature */
-  enableTryItOut: z.boolean().default(true).describe('Enable interactive API testing'),
-  
-  /** Enable filtering */
-  enableFilter: z.boolean().default(true).describe('Enable endpoint filtering'),
-  
-  /** Enable CORS for testing */
-  enableCors: z.boolean().default(true).describe('Enable CORS for browser testing'),
-  
-  /** Default expand depth for models */
-  defaultModelsExpandDepth: z.number().int().min(-1).default(1)
-    .describe('Default expand depth for schemas (-1 = fully expand)'),
-  
-  /** Display request duration */
-  displayRequestDuration: z.boolean().default(true).describe('Show request duration'),
-  
-  /** Syntax highlighting */
-  syntaxHighlighting: z.boolean().default(true).describe('Enable syntax highlighting'),
-  
-  /** Custom CSS URL */
-  customCssUrl: z.string().url().optional().describe('Custom CSS stylesheet URL'),
-  
-  /** Custom JavaScript URL */
-  customJsUrl: z.string().url().optional().describe('Custom JavaScript URL'),
-  
-  /** Layout options */
-  layout: z.object({
-    showExtensions: z.boolean().default(false).describe('Show vendor extensions'),
-    showCommonExtensions: z.boolean().default(false).describe('Show common extensions'),
-    deepLinking: z.boolean().default(true).describe('Enable deep linking'),
-    displayOperationId: z.boolean().default(false).describe('Display operation IDs'),
-    defaultModelRendering: z.enum(['example', 'model']).default('example')
-      .describe('Default model rendering mode'),
-    defaultModelsExpandDepth: z.number().int().default(1).describe('Models expand depth'),
-    defaultModelExpandDepth: z.number().int().default(1).describe('Single model expand depth'),
-    docExpansion: z.enum(['list', 'full', 'none']).default('list')
-      .describe('Documentation expansion mode'),
-  }).optional().describe('Layout configuration'),
-}));
-
-export type ApiTestingUiConfig = z.input<typeof ApiTestingUiConfigSchema>;
-/** Post-parse shape of {@link ApiTestingUiConfig} — defaults applied, transforms run (ADR-0122). */
-export type ApiTestingUiConfigParsed = z.infer<typeof ApiTestingUiConfigSchema>;
+// ─── [#25159] `ApiDocumentationConfig.ui` and its viewer defs are RETIRED ───
+//
+// ADR-0049 enforce-or-remove; triage route A (no staged window), which follows
+// the maintainer's ruling to take the docs viewer page offline. `ui` declared
+// an interactive documentation viewer — `ApiTestingUiType` (`swagger-ui`,
+// `redoc`, `rapidoc`, `stoplight`, `scalar`, `graphiql`, `postman`, `custom`)
+// at `ApiTestingUiConfigSchema.path` (default `/api-docs`), with a theme,
+// try-it-out, CORS and layout switches — and NOTHING read it: measured at this
+// retirement's base (b93c750c7), zero hits for `ApiTestingUi` outside
+// `packages/spec` in this repo and in objectui at its pinned sha, against a
+// lit control on the same instrument; nothing in the tree parses
+// `ApiDocumentationConfigSchema` outside its own unit tests. Since the viewer
+// page `GET {basePath}/docs` was retired, the API origin serves no HTML viewer
+// at all, only the OpenAPI document at `GET {basePath}/openapi.json` (mounted
+// by `packages/rest`'s `registerOpenApiEndpoints` while `api.enableOpenApi` is
+// on), so the key could not be honoured either.
+//
+// Two bookkeeping shapes, one retirement:
+//   1. `ApiDocumentationConfig.ui` — `retiredKey()` tombstone below (the shape
+//      is a non-strict `z.object`, so a bare deletion would be a silent strip,
+//      ADR-0104); `api/ApiDocumentationConfig:ui` in `RETIRED_KEYS_BY_MAJOR[18]`.
+//   2. `ApiTestingUiConfigSchema` / `ApiTestingUiType` (and the
+//      `ApiTestingUiConfig` / `ApiTestingUiConfigParsed` / `ApiTestingUiType`
+//      types) — orphan value schemas once `ui` is gone: they had no other
+//      consumer, and an exported value schema with no consumer reads as a
+//      capability. `api/ApiTestingUiConfig` + `api/ApiTestingUiType` in
+//      `RETIRED_DEFS_BY_MAJOR[18]`.
+//
+// No D2 conversion, deliberately: an `ApiDocumentationConfig` is not a stack
+// collection member and never a `sys_metadata` row, so a MetadataConversion
+// would be a transform with no seam that ever runs (the `kernel/Manifest:loading`
+// disposition). The D3 semantic entry `api-docs-viewer-keys-retired` carries
+// the prescription outward, beside its REST-plugin siblings `openApi.uiPath`
+// and `openApi.uiFramework` (`plugin-rest-api.zod.ts`).
+const API_DOCUMENTATION_UI_RETIRED =
+  '`ApiDocumentationConfig.ui` was removed in @objectstack/spec 18.1.0 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no viewer was ever mounted from it, and the '
+  + 'platform serves no HTML API documentation viewer at all, only the machine-readable OpenAPI '
+  + 'document. Delete the key. The OpenAPI document is served at `GET /api/v1/openapi.json` '
+  + 'under the REST server\'s default `api.basePath` and `api.version` (the path follows both) '
+  + 'while `api.enableOpenApi` is on; point any viewer or client generator you run yourself at '
+  + 'that document.';
 
 /**
  * API Test Request Schema
@@ -445,7 +399,9 @@ export type CodeGenerationTemplate = z.input<typeof CodeGenerationTemplateSchema
 /**
  * API Documentation Configuration Schema
  * 
- * Complete configuration for API documentation and testing interface.
+ * Complete configuration for API documentation and test collections. It
+ * configures no viewer: the platform serves the OpenAPI document only, and the
+ * retired `ui` key says so at parse (`API_DOCUMENTATION_UI_RETIRED`).
  * 
  * @example
  * ```json
@@ -457,11 +413,6 @@ export type CodeGenerationTemplate = z.input<typeof CodeGenerationTemplateSchema
  *   "servers": [
  *     { "url": "https://api.example.com", "description": "Production" }
  *   ],
- *   "ui": {
- *     "type": "swagger-ui",
- *     "theme": "light",
- *     "enableTryItOut": true
- *   },
  *   "generateOpenApi": true,
  *   "generateTestCollections": true
  * }
@@ -484,8 +435,16 @@ export const ApiDocumentationConfigSchema = lazySchema(() => z.object({
   servers: z.array(OpenApiServerSchema).optional().default([])
     .describe('API server URLs'),
   
-  /** UI configuration */
-  ui: ApiTestingUiConfigSchema.optional().describe('Testing UI configuration'),
+  /**
+   * RETIRED (#25159, ADR-0049): `ui` declared a documentation viewer nothing
+   * ever mounted, and the platform serves none — the retirement record sits
+   * above `API_DOCUMENTATION_UI_RETIRED`. Tombstoned rather than deleted: this
+   * shape is not `.strict()`, so authoring it must fail loudly (tsc `never` +
+   * the parse-time prescription), never strip in silence. The key carried no
+   * Zod `.default()`, and nothing parses this config into a stored or built
+   * artifact, so there is no emitted residue to tolerate.
+   */
+  ui: retiredKey(API_DOCUMENTATION_UI_RETIRED),
   
   /** Generate OpenAPI spec */
   generateOpenApi: z.boolean().default(true).describe('Generate OpenAPI 3.0 specification'),

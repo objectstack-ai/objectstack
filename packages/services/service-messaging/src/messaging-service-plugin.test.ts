@@ -1,7 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { ObjectQLPlugin } from '@objectstack/objectql';
+import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { SysUser } from '@objectstack/platform-objects';
+import { installDefaultOrganization, DEFAULT_ORGANIZATION_ID } from './default-organization.testkit.js';
 import { MessagingServicePlugin } from './messaging-service-plugin.js';
 import type { MessagingService } from './messaging-service.js';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
@@ -419,5 +422,64 @@ describe('MessagingServicePlugin — a failed provision is an error, once per ob
         expect(logs.error).toEqual([]);
         expect(logs.warn.filter((m) => m.includes('could not provision'))).toEqual([]);
         expect(synced).toEqual(OBJECTS);
+    });
+});
+
+/**
+ * [ADR-0118 D1] `sys_notification_preference.user_id` is a `sys_user`
+ * reference whose EMPTY value is the admin-global default. The plugin rewrites
+ * rows the text column stored as `'*'` at `kernel:ready`, on every boot, so no
+ * admin default silently stops applying across the upgrade. The conversion
+ * itself is pinned in `preference-user-reference.integration.test.ts`; this
+ * pins that the plugin ARMS it.
+ */
+describe("MessagingServicePlugin — converts stored user_id '*' to the empty reference at kernel:ready", () => {
+    async function bootWithStarRow() {
+        const silent: any = { debug() {}, info() {}, warn() {}, error() {}, child() { return silent; } };
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+        const ql = new ObjectQL({ logger: silent });
+        ql.registerDriver(driver, true);
+        await ql.init();
+        ql.registry.registerObject(SysUser as any, 'test');
+        const services = new Map<string, unknown>([
+            ['data', ql],
+            // The plugin's own objects, registered the way the manifest service would.
+            ['manifest', { register(m: { objects?: unknown[] }) { for (const o of m.objects ?? []) ql.registry.registerObject(o as any, 'test'); } }],
+        ]);
+        const readyHooks: Array<() => Promise<void> | void> = [];
+        const logs: string[] = [];
+        const logger = { info(msg: string) { logs.push(String(msg)); }, warn() {}, error() {}, debug() {}, child() { return logger; } };
+        const ctx = {
+            logger,
+            getService(name: string) { return services.get(name); },
+            registerService(name: string, svc: unknown) { services.set(name, svc); },
+            hook(event: string, fn: () => Promise<void> | void) {
+                if (event === 'kernel:ready') readyHooks.push(fn);
+            },
+        } as any;
+        await new MessagingServicePlugin({ reliableDelivery: false }).init(ctx);
+        await ql.syncSchemas();
+        await installDefaultOrganization(ql as any);
+        await driver.create('sys_notification_preference', {
+            id: 'p_star', organization_id: DEFAULT_ORGANIZATION_ID, user_id: '*', topic: 'deal.won', channel: 'email', enabled: false,
+        });
+        const userIdOf = async () =>
+            (await ql.findOne('sys_notification_preference', { where: { id: 'p_star' } }, { context: { isSystem: true } }))!.user_id ?? null;
+        return { ql, logs, userIdOf, fireReady: async () => { for (const fn of readyHooks) await fn(); } };
+    }
+
+    it('rewrites the row on kernel:ready, and a second ready changes nothing', async () => {
+        const { ql, logs, userIdOf, fireReady } = await bootWithStarRow();
+        try {
+            expect(await userIdOf()).toBe('*');
+            await fireReady();
+            expect(await userIdOf()).toBeNull();
+            expect(logs.filter((l) => l.includes("user_id '*'"))).toHaveLength(1);
+            await fireReady();
+            expect(await userIdOf()).toBeNull();
+            expect(logs.filter((l) => l.includes("user_id '*'"))).toHaveLength(1);
+        } finally {
+            await ql.destroy();
+        }
     });
 });
