@@ -56,7 +56,7 @@ function makeC(url: string, body?: any) {
     };
 }
 
-/** The organization the sessions act in, and the one {@link setupAccessEngine}'s grant is owned by. */
+/** The organization the sessions act in, and the one {@link platformSettingsEngine}'s grant is owned by. */
 const ORG = 'o1';
 
 const sessionAuth = (userId?: string) => ({
@@ -64,22 +64,22 @@ const sessionAuth = (userId?: string) => ({
 });
 
 /**
- * [#24148] A data engine under which `userId` holds `setup.access` — what
- * `/status` serves its full answer behind. Real permission-set rows, read by
- * the shared resolver through `find`. The grant is owned by {@link ORG}, the
- * organization the session acts in: a grant applies only in its own
- * organization.
+ * [#24148, #25119] A data engine under which `userId` holds
+ * `manage_platform_settings` — what `/status` serves its full answer behind.
+ * Real permission-set rows, read by the shared resolver through `find`. The
+ * grant is owned by {@link ORG}, the organization the session acts in: a grant
+ * applies only in its own organization.
  */
-const setupAccessEngine = (userId: string) => {
+const platformSettingsEngine = (userId: string) => {
     const rows: Record<string, any[]> = {
         sys_user: [{ id: userId, email: `${userId}@example.test` }],
-        sys_user_permission_set: [{ id: 'ups_1', user_id: userId, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: ORG }],
-        sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
+        sys_user_permission_set: [{ id: 'ups_1', user_id: userId, permission_set_id: 'ps_1', permission_set: 'platform_admin', organization_id: ORG }],
+        sys_permission_set: [{ id: 'ps_1', name: 'platform_admin', system_permissions: ['setup.access', 'manage_platform_settings'] }],
     };
     return bindCatalogFromTables({ find: async (object: string) => rows[object] ?? [] }, rows);
 };
 
-/** [#24148] What `/status` serves a caller without `setup.access`. */
+/** [#24148, #25119] What `/status` serves a caller without `manage_platform_settings`. */
 const narrowed = (data: { bound: boolean; runtimeId: string | null }) => ({ ...data, provider: 'objectstack-cloud' });
 
 beforeEach(() => {
@@ -246,8 +246,8 @@ describe('single-environment mode (host auth, fixed env id)', () => {
     it("ignores the CLI's local sentinel env ids (env_local / proj_local)", async () => {
         process.env.OS_ENVIRONMENT_ID = 'env_local';
         const rawApp = makeRawApp();
-        // A caller holding `setup.access`, who is served the environment id.
-        const { ctx, fireKernelReady } = makeCtx({ rawApp, services: { auth: sessionAuth('admin-1'), objectql: setupAccessEngine('admin-1') } });
+        // A caller holding `manage_platform_settings`, who is served the environment id.
+        const { ctx, fireKernelReady } = makeCtx({ rawApp, services: { auth: sessionAuth('admin-1'), objectql: platformSettingsEngine('admin-1') } });
         await new CloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: 'http://cloud.test' }).start(ctx as any);
         await fireKernelReady();
         const res = await rawApp.routes.get('GET /api/v1/cloud-connection/status')!(makeC('http://localhost:3000/x'));
@@ -260,7 +260,7 @@ describe('single-environment mode (host auth, fixed env id)', () => {
     it('falls back to OS_ENVIRONMENT_ID when no config id is given', async () => {
         process.env.OS_ENVIRONMENT_ID = 'env-from-env-var';
         const rawApp = makeRawApp();
-        const { ctx, fireKernelReady } = makeCtx({ rawApp, services: { auth: sessionAuth('admin-1'), objectql: setupAccessEngine('admin-1') } });
+        const { ctx, fireKernelReady } = makeCtx({ rawApp, services: { auth: sessionAuth('admin-1'), objectql: platformSettingsEngine('admin-1') } });
         vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ success: true, data: {} }), { status: 200 })));
         await new CloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: 'k' }).start(ctx as any);
         await fireKernelReady();

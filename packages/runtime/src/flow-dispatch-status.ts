@@ -103,6 +103,8 @@
  */
 
 import type { AutomationResult } from '@objectstack/spec/contracts';
+import type { FlowFailureDetails } from '@objectstack/spec/api';
+import { declaredUserMessage } from '@objectstack/types';
 
 /**
  * The codes this table answers with. All four are ADR-0112 registered under
@@ -237,4 +239,50 @@ export function classifyFlowRefusal(
     }
 
     return undefined;
+}
+
+/**
+ * The `error.details` of a door's `400 FLOW_FAILED` arm, built from the engine
+ * result — ONE builder for the four doors (trigger, resume, `/actions`,
+ * declared endpoint), typed as the declaration it emits:
+ * `FlowFailureDetailsSchema` (`@objectstack/spec/api`, #24996), so a key the
+ * spec does not declare cannot be added here without failing the build.
+ *
+ * Each member is the result's own, copied verbatim and present only when the
+ * producer set it — the author's `errorMessage`, the run's `summary`, and,
+ * since ruling B′ on #24914, the `innerRefusal` a node's data call met — so a
+ * run that produced none of them answers no invented empty. Before this, each
+ * door spelled the first two by hand (#9414, #9585, #9462); one builder is
+ * what makes "the four doors emit one shape" a construction rather than four
+ * copies agreeing.
+ *
+ * Read only on the ran-and-failed row: a never-dispatched refusal has no run
+ * artefacts, and the doors keep that gate where it is.
+ *
+ * ⛔ Reads only the producer's fields — never the message text (PD #12).
+ */
+export function flowFailureDetails(result: AutomationResult): FlowFailureDetails {
+    return {
+        ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
+        ...(result.summary !== undefined ? { summary: result.summary } : {}),
+        ...(result.innerRefusal !== undefined ? { innerRefusal: result.innerRefusal } : {}),
+    };
+}
+
+/**
+ * The envelope's top-level `userMessage` for a door's `400 FLOW_FAILED` arm —
+ * the `extra` argument of `DomainHandlerDeps.error`, or `undefined` when the
+ * run carries none (ruling B′ on #24914).
+ *
+ * `AutomationResult.userMessage` is the producer-marked end-user text of the
+ * refusal a node met, with `ApiErrorSchema.userMessage`'s semantics: presence
+ * IS the marking. So it is relayed at the top level of the error, the channel
+ * a record save's refusal already uses, and ⛔ never as a details key and
+ * never in place of `message`. Read through `declaredUserMessage`
+ * (`@objectstack/types`), the one read every boundary applies, so a blank
+ * value is not a marking here either.
+ */
+export function flowFailureEnvelope(result: AutomationResult): { userMessage: string } | undefined {
+    const userMessage = declaredUserMessage(result);
+    return userMessage !== undefined ? { userMessage } : undefined;
 }

@@ -35,6 +35,15 @@
  *    synthetic 200 — which is what makes "before the uniqueness refusal" a
  *    measurement rather than a reading of vendor source.
  *
+ * ## Where the refusal stopped being the whole rule
+ *
+ * Ruling 1B on #25040 (#25060) answers an existing address like a success —
+ * plus a mail to it — under `open` and `email_domain` WHILE the mail transport
+ * is live (`IEmailService.isConfigured()`). Every case here wires no email
+ * service at all, which is exactly the deployment that ruling keeps on this
+ * refusal, so they stand unchanged; the live-transport side, and the
+ * not-live variants, are `signup-existing-address-success-shape.test.ts`.
+ *
  * ## Why a real engine
  *
  * The population predicate and the uniqueness check both live below the fake
