@@ -220,9 +220,6 @@ import {
   SystemWriteOrganizationRequiredError,
   ORGANIZATION_OBJECT,
 } from './tenancy/system-write-organization.js';
-// [#13491] The per-object tenancy inventory that replaced the blanket
-// namespace exemption — the ONE reading both narrowed gates consult.
-import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object-tenancy.js';
 import { resolveTenancyPosture } from '@objectstack/types';
 import {
   normalizeTenancyPosture,
@@ -7536,15 +7533,18 @@ export class ObjectQL implements IObjectQLEngine {
     const hasTenant = tenantScope !== undefined;
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
-    // [#13491] The object's tenancy classification — the reading the mute
-    // below narrows by (ADR-0131 C8 stage 8b retired its other reader, the
-    // system-insert exemption, under every posture). An object
-    // with no tenant field is out by construction; a platform object is out
-    // unless the inventory adjudicated it tenant-scoped.
+    // [ADR-0131 D9/D13] The tenant-audit's scope is the object's SCHEMA: a
+    // tenant column (the registered schema's, as `resolveTenantFieldName`
+    // reads it) on an object that is not federated. That is the same reading
+    // the system-insert rule takes, and there is no second, per-table one —
+    // the #13491 ledger that used to narrow this by name retired with D13. An
+    // object is outside the audit only by declaring itself outside the
+    // machinery (`tenancy.enabled: false`, `systemFields.tenant: false`, no
+    // tenant field, `external`), which `scripts/platform-object-tenancy-census.json`
+    // enumerates for the platform namespaces.
     const isTenantAuditInScope =
       resolveTenantFieldName(objectSchema) !== null &&
-      !isFederated &&
-      !isPlatformObjectOutOfTenantAuditScope(object);
+      !isFederated;
     const preserveAudit = (execCtx as any)?.preserveAudit === true;
     if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit) return base;
     const opts: any = base && typeof base === 'object' ? { ...base } : {};
@@ -7563,9 +7563,9 @@ export class ObjectQL implements IObjectQLEngine {
       opts.timezone = execCtx!.timezone;
     }
     if (isSystem && opts.bypassTenantAudit === undefined && !isTenantAuditInScope) {
-      // [#13491] The isSystem mute NARROWED by the object's tenancy
-      // classification, in the same stroke as the guard above and by the same
-      // reading (2026-08-31 ruling, execution point 1).
+      // [#13491 → ADR-0131 D13] The isSystem mute, cut by the object's
+      // schema alone (2026-08-31 ruling, execution point 1: the OBJECT decides,
+      // never the caller's flag).
       //
       // It used to mute EVERY elevated write, whatever the object was. The
       // census cited in commit e49d98896's message measured what that cost: 135 of 175 write call sites
@@ -7575,10 +7575,10 @@ export class ObjectQL implements IObjectQLEngine {
       // were found by a person reading call sites.
       //
       // What still mutes: an object with no tenant field at all (nothing to be
-      // unscoped from — the driver would exit at `resolveTenantField` anyway),
-      // and a platform object the inventory classified `global` or has not
-      // adjudicated. What no longer mutes: a tenant-scoped object, platform
-      // namespace or not. A caller that means it still passes
+      // unscoped from — the driver would exit at `resolveTenantField` anyway)
+      // and a federated one. What does not: any object with a tenant column,
+      // platform namespace or not — a name prefix, or a hand-kept list of
+      // names, decides nothing here. A caller that means it still passes
       // `bypassTenantAudit: true` explicitly and is honoured above — this
       // branch only fills in a value nobody supplied.
       //

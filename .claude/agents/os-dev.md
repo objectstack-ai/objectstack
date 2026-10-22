@@ -322,7 +322,7 @@ model: opus
 - 全文 ⛔ 不出现 HTML 注释:sanitizer 落库后吃短尖括号片段,连反引号里的也吃。
 - 被吃掉标记的评论对 PM 扫描不可见;HTML 注释形不是等价写法,是坏写法。
 - 凡要上 GitHub 的文本,尖括号形状片段一律改占位词拼写(`FIELD`、`IDENT.MEMBER` 一类)。
-- 两种派发模式(`mode:subagent` 与 `mode:cloud`)下 GitHub 都是报告的权威源。
+- 各派发模式(`mode:subagent`、`mode:cloud`、`mode:thread`)下 GitHub 都是报告的权威源。
 - 写完读回那条评论到尾部:只认首行标记保不住正文,sanitizer 可从首个 tag 形片段吃到尾。
 - PR 正文同欠一次全文回读,评审读的正是它。
 

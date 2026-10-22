@@ -303,7 +303,7 @@ export const jaJP: PlatformTranslationData = {
         contact: { title: '連絡先' },
       },
       keys: {
-        legal_name: { label: '登記名', help: '組織の登記上の正式名称（「ブランディング」の組織名と異なる場合があります）。' },
+        legal_name: { label: '登記名', help: '契約書や請求書に記載される、組織の登記上の正式名称。' },
         registration_number: { label: '登記番号', help: '会社の登記 / 設立番号（例:EIN、会社番号）。' },
         tax_id: { label: '税務 / VAT ID', help: '請求書に表示される税務識別番号(例:VAT、GST、ABN)。' },
         address_line1: { label: '住所 1' },

@@ -56,9 +56,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `director` | 以项目总监席身份运行(人工召唤;三职与章程见 `references/lanes/director.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
-| `batch:<n>` | 席位同时在飞的子代理总上限,按 `Agent` 调用与 `create_session` 计:dev、复核、普查皆计,⛔ 只读不豁免 | 默认 `3`;`n` 的维护者天花板 `5` |
+| `batch:<n>` | 席位同时在飞的子代理总上限,按 `Agent` 调用、`create_session` 与卡线程计:dev、复核、普查皆计,⛔ 只读不豁免 | 默认 `3`;`n` 的维护者天花板 `5` |
 | `rounds:<n>` | 跑 N 轮后停 | 队列清空为止 |
-| `mode:subagent` \| `mode:cloud` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面 |
+| `mode:subagent` \| `mode:cloud` \| `mode:thread` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面;席位是项目线程时 M 及以上、p1、`security` 一律 `thread` |
 | `#12 #34 …` | 显式 issue 清单,整体覆盖标签查询 | — |
 
 - 无角色参数按执行姿态运行,车道由座位贴认定;角色参数令召唤词收敛为一行调用。
@@ -310,7 +310,7 @@ Worktree: `<repo>-issue-<n>`
 Domain: `domain:<x>`
 Seat: `domain:<x>#<n>` (the seat number this PM sits on; absent = seat 1)
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
-Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:;⛔ 不抄模型 id>`
+Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:;⛔ 不抄模型 id>`, `effort: <medium | high | xhigh | max,按卡难度定>`
 Clause-②: yes | no
 Responsibility: `<whose code produces the risk | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards only, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>

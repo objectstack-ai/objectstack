@@ -2834,17 +2834,23 @@ export class ApprovalService implements IApprovalService {
    *   - `sys_business_unit_member` declares no `organization_id`; the column
    *     is injected (`applySystemFields`) and the tenancy census lists it in;
    *   - REST / session writes fill it (`SqlDriver.injectTenantOnInsert`);
-   *   - seed replay does NOT (`seed-loader.ts` withholds its `fallbackOrgId`
-   *     from every `sys_` object), and elevated system-context writes do NOT
-   *     (`unclassified` in `PLATFORM_OBJECT_TENANCY`, tracked as #14570).
-   * So a NULL on a member row means UNKNOWN tenancy, not "platform-global",
-   * and unknown tenancy is not a member of this organization. This is the
+   *   - seed replay and elevated system-context inserts fill it too since
+   *     ADR-0131: the seed loader stamps every seed row with the resolved
+   *     organization (C1), and an organization-less system insert on any
+   *     object with a tenant column takes the derived organization or is
+   *     refused (D9, `Engine.resolveSystemInsertOrganization`) — judged by
+   *     the schema, with no per-table exemption left (D13);
+   *   - so a NULL on a member row is residue written before 18.0 (which the
+   *     ownership ceremony attributes) or a lean composition that registers
+   *     no organization object at all.
+   * Either way a NULL means UNKNOWN tenancy, not "platform-global", and
+   * unknown tenancy is not a member of this organization. This is the
    * ruling `plugin-sharing`'s `memberScope` already applies to the same rows
    * (#14547 / #14949), and the posture this file already takes for
    * `sys_team_member` and `sys_user_position`.
    *
    * The cost is declared, not hidden: an organization whose MEMBERSHIP rows
-   * were seeded or system-written expands to nobody even on a unit it can
+   * still carry no organization expands to nobody even on a unit it can
    * see. That is not silent — the graph-type fallback in `expandApprover`
    * warns `expanded to nobody` (#3807) and `onEmptyApprovers` governs the
    * request as for any unstaffed target — and the repair is to stamp the

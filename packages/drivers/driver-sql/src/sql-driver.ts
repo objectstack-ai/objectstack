@@ -14190,6 +14190,10 @@ export class SqlDriver implements IDataDriver {
       const report = formatDuplicateGroups(duplicates);
       d.category = 'destructive';
       d.severity = 'error';
+      // The block, declared on the entry: `os migrate plan` / `apply` read it
+      // here and never offer `--allow-destructive` for an op the apply refuses
+      // on this data however it is confirmed.
+      d.applyLimit = `existing rows already violate the unique key: ${report}`;
       d.message = nullSafeKey
         ? `${op.table}: cannot ${tighten ? 'tighten' : 'create'} '${op.indexName}' as ${signature} — existing rows ` +
           `already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted: SQL ` +
@@ -15980,6 +15984,15 @@ export class SqlDriver implements IDataDriver {
    * Throttled to one warning per `${object}:${op}` so background workers
    * don't spam the log. Set `options.bypassTenantAudit = true` (or env
    * `OS_TENANT_AUDIT=0`) to silence intentionally.
+   *
+   * The line names BOTH readings, because this driver cannot tell them apart:
+   * an unscoped write here is either one that lost its organization (fix:
+   * run it in that organization's context) or one the organization wall
+   * lifted the scope from on purpose — an exempt platform admin's
+   * cross-organization update or delete arrives exactly so, with no
+   * `tenantId` (ADR-0131 D8). Telling that second write to "pass tenantId"
+   * prescribes the one change that would break it, so ⛔ the remedy sentence
+   * never addresses the write as if it were only the first kind.
    */
   protected auditMissingTenant(
     object: string,
@@ -16008,7 +16021,11 @@ export class SqlDriver implements IDataDriver {
     if (this.tenantAuditWarned.has(key)) return;
     this.tenantAuditWarned.add(key);
     this.logger.warn(
-      `[tenant-audit] ${op} on tenant-scoped object "${object}" without options.tenantId — writes will not be tenant-isolated. Pass tenantId via ExecutionContext or set bypassTenantAudit:true to silence.`,
+      `[tenant-audit] ${op} on tenant-scoped object "${object}" without options.tenantId — the statement is not confined to one organization. `
+        + 'If the write belongs to one organization, run it in that organization\'s context (an ExecutionContext carrying its organization); '
+        + 'the row\'s own organization column does not scope an update or a delete. '
+        + 'If it crosses organizations on purpose (a platform admin the organization wall exempts, or a system job over every organization), '
+        + 'nothing needs fixing: the caller declares it with bypassTenantAudit:true, which also silences this line.',
       { object, op, tenantField: field },
     );
   }
