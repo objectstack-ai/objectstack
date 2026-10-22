@@ -115,9 +115,11 @@ async function boot({ fixtureDir, databaseFile, args = [], env = {} }: Leg): Pro
       AUTH_SECRET: undefined,
       BETTER_AUTH_SECRET: undefined,
       OS_MIGRATE_AND_EXIT: undefined,
-      // Production posture — see the header.
-      NODE_ENV: undefined,
       ...env,
+      // Production posture — see the header. Written after the leg's own
+      // entries so no leg can move it: the `--dev` legs reach development
+      // through the flag, which is the posture under test.
+      NODE_ENV: undefined,
     }),
   }) as BootChild;
   children.push(child);
