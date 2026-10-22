@@ -7437,7 +7437,8 @@ export function seatDeclaresWait(markerBody) {
  * three measured shapes (2026-08-25 census, all 12 open seat posts):
  *
  *   `domain:engine`               — a lane on THIS board
- *   `domain:devx @ objectui`      — a lane on a SIBLING board
+ *   `domain:ui @ objectui`        — a lane on a SIBLING board (the census read
+ *                                   `domain:devx`; objectui retired it 2026-10-22, keeping `domain:ui` and `domain:skills`)
  *   `repo:cloud` / `skills` / `triage (objectstack-wide)`
  *
  * plus the free-claim multi-seat shape the protocol added afterwards:
@@ -30166,8 +30167,8 @@ async function selfTest() {
   t('H38 seat: …and is not foreign', seatLane(seat38(seat2Title)).foreign, false);
   t('H38 seat: …and carries the seat number', seatLane(seat38(seat2Title)).seat, 2);
   t('H38 seat: a bare title is seat 1', seatLane(seat38()).seat, 1);
-  t('H38 seat: a numbered seat on a SIBLING board is still foreign', seatLane(seat38('[PM seat] domain:devx · seat 3 @ objectui — 🟢 os-b')).foreign, true);
-  t('H38 seat: …and still carries its number', seatLane(seat38('[PM seat] domain:devx · seat 3 @ objectui — 🟢 os-b')).seat, 3);
+  t('H38 seat: a numbered seat on a SIBLING board is still foreign', seatLane(seat38('[PM seat] domain:ui · seat 3 @ objectui — 🟢 os-b')).foreign, true);
+  t('H38 seat: …and still carries its number', seatLane(seat38('[PM seat] domain:ui · seat 3 @ objectui — 🟢 os-b')).seat, 3);
   t('H38 seat: a numbered seat still buys the H32 comment fetch', h32NeedsSeatComments(seat38(seat2Title)), true);
   t('H38 seat: an unparseable title has no seat', seatLane(seat38('not a seat title')).seat, null);
   t('H38 seat: a claim with no `Seat:` line is seat 1', claimSeatNumber('Claim: x\nBranch: `claude/issue-1-a`'), 1);

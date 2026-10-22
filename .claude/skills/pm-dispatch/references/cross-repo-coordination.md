@@ -11,9 +11,9 @@
 - 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点、写身份锁移植(deny + hooks)。
 - 新仓准入判据一句:这个仓真的需要常设席位吗。
 - hotcrm 收卡判据与宪章见 `references/lanes/hotcrm.md`。
-- objectui 卡按修复落点分流三流,`domain:ui` 是唯一新增标签。
-- `domain:devx`(工程面)与 `domain:spec`(契约面)跨仓归各自车道。
-- 其余(发布库与 apps)归 `domain:ui` 执行席;症状位置不改流向,docs 随所记录的面走。
+- objectui 卡按修复落点分两条车道:`domain:ui`(全部代码)与 `domain:skills`(仓根发布 `skills/**`)。
+- objectui 的 `domain:spec`、`domain:devx`、`domain:tooling` 已退役:⛔ 不贴、不认领、不再创建。
+- 协议恒归 objectstack `domain:spec`;跨层功能照规则 2,objectui 子单归 `domain:ui`。
 - 车道可分席(席号 `· seat N`,或域×仓):忙时一车道开多席,闲时收归一席;每席独立座位贴。
 - 认领评论带 `Seat: domain:X#N` 行申报席号(缺省席 1);同席认领互斥,他席认领不触发自退。
 - 拆分触发预登记:单轮逼近 fire 周期,或某仓在全序下持续断粮 ⇒ 按仓拆回多席。
