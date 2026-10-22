@@ -26,8 +26,13 @@ type Row = Record<string, unknown>;
 function matches(row: Row, where: Record<string, unknown> | undefined): boolean {
   if (!where) return true;
   return Object.entries(where).every(([field, cond]) => {
+    if (field.startsWith('$')) throw new Error(`this double does not implement the where combinator ${field}`);
     const value = row[field] ?? null;
-    if (cond && typeof cond === 'object' && Array.isArray((cond as any).$in)) {
+    if (cond !== null && typeof cond === 'object') {
+      const operators = Object.keys(cond);
+      if (operators.length !== 1 || operators[0] !== '$in') {
+        throw new Error(`this double does not implement the where operator(s) ${operators.join(', ')} on ${field}`);
+      }
       return (cond as any).$in.includes(value);
     }
     return value === (cond ?? null);
