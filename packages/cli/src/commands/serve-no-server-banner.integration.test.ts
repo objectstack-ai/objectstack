@@ -302,7 +302,11 @@ describe('os serve — the ready banner names an address only when an HTTP serve
   it(
     'production --no-server (the card\'s command): no address row, one line naming --no-server',
     async () => {
-      const booted = await boot(plainDir, {}, ['--no-server', '--preset', 'minimal']);
+      // [ADR-0131 D9] The card's `--preset minimal` composes no auth, and a
+      // production boot with no auth is now refused whether or not `--server`;
+      // the same kernel-only boot with auth composed (a secret and a store) is
+      // today's production `--no-server`.
+      const booted = await boot(plainDir, { OS_DATABASE_URL: 'file:./nos.db', OS_AUTH_SECRET: AUTH_SECRET }, ['--no-server']);
       expectNoServerShape(booted);
       expectDatasourceAdminDegradeLine(booted.output);
     },
@@ -345,7 +349,8 @@ describe('os serve — the ready banner names an address only when an HTTP serve
   it(
     'control: --no-server with a config-mounted HonoServerPlugin prints API:, and that port answers',
     async () => {
-      const { banner, output, stop } = await boot(honoDir, { OS_DATABASE_URL: 'file:./ctl.db' }, ['--no-server', '--preset', 'minimal']);
+      // [ADR-0131 D9] With auth composed — `--preset minimal` composes none, which a production boot now refuses.
+      const { banner, output, stop } = await boot(honoDir, { OS_DATABASE_URL: 'file:./ctl.db', OS_AUTH_SECRET: AUTH_SECRET }, ['--no-server']);
       const seen = `\n--- banner ---\n${banner}`;
       try {
         // ⭐ The read is off the kernel, not off the flag: the flag skipped serve's
