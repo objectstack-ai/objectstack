@@ -29,7 +29,10 @@
  * The service is asked again at each use, never remembered from the first
  * one. A service registered BEFORE `init()` (the `objectstack dev` ordering)
  * gets the same answers. With no `'metadata'` service at all, every reader
- * keeps its documented fallback.
+ * keeps its documented fallback. [#24837] For the Sync doors that fallback is
+ * now a refusal: with no datasource definition to read, nothing declares the
+ * datasource a federation source (ADR-0015 §4.2), which is also why validate
+ * skips it.
  *
  * [#21889] The namespace half (the draft's prefix and the import's name
  * check) moved to `external-namespace-reads-engine-registry.test.ts`: the
@@ -277,16 +280,29 @@ describe('control: a metadata service registered before init (the dev ordering) 
 });
 
 describe('with no metadata service at all, every reader keeps its fallback', () => {
-  it('validate and the sweep answer an empty report, the draft a bare name, the catalog an unpersisted snapshot', async () => {
+  // [#24837] REVERSED. This case held the draft, the catalog refresh and the
+  // remote-table list ANSWERING with no metadata service at all, so with no
+  // datasource definition to read. The Sync doors now refuse that datasource:
+  // nothing declares it a federation source, and ADR-0015 §4.2 reserves
+  // federation for a datasource whose `schemaMode` is not `managed`. It is the
+  // same reading validate already made of an unreadable definition ("not
+  // federated", the empty report below), so an import can no longer bind an
+  // object the sweep would never check. The refusal comes before any
+  // introspection.
+  it('validate and the sweep answer an empty report, and the Sync doors refuse an undeclared datasource', async () => {
     // [#21842] No engine registry either: that is where validate's objects
     // come from, so with neither service the report has nothing to list.
-    const service = await federation(harness({ registry: false }));
+    const h = harness({ registry: false });
+    const service = await federation(h);
 
     expect(await service.validateAll()).toEqual({ ok: true, results: [] });
-    expect((await service.generateObjectDraft('warehouse', 'customers')).name).toBe('customers');
-    const catalog = await service.refreshCatalog('warehouse');
-    expect(catalog.name).toBe('warehouse_catalog');
-    expect((await service.listRemoteTables('warehouse')).map((t) => t.name).sort()).toEqual(['customers', 'orders']);
+    const refusal = { status: 400, message: expect.stringContaining("Datasource 'warehouse' has no datasource definition") };
+    await expect(service.generateObjectDraft('warehouse', 'customers')).rejects.toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', ...refusal });
+    await expect(service.refreshCatalog('warehouse')).rejects.toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', ...refusal });
+    await expect(service.listRemoteTables('warehouse')).rejects.toMatchObject({ code: 'EXTERNAL_DATASOURCE_ERROR', ...refusal });
+    await expect(service.importObject('warehouse', 'customers')).rejects.toMatchObject({ code: 'EXTERNAL_IMPORT_ERROR', ...refusal });
+    const data = h.services.get('data') as { introspectDatasource: Mock };
+    expect(data.introspectDatasource).not.toHaveBeenCalled();
   });
 
   it('a metadata service with no register leaves the catalog unpersisted, without failing the refresh', async () => {
