@@ -123,14 +123,19 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the delivery channel and its recipient (computed on read)"
+        help: "Record title: the delivery channel and the person it is for, or the address when the recipient is not a user (computed on read)"
       },
       notification_id: {
         label: "Notification Event",
         help: "FK → sys_notification (L2 event)"
       },
       recipient_id: {
-        label: "Recipient User"
+        label: "Recipient",
+        help: "The address the delivery is sent to: a user id, or an email address or phone number kept as given."
+      },
+      recipient_user_id: {
+        label: "Recipient User",
+        help: "The user the delivery is for. Empty when the recipient is an email address or phone number no user holds."
       },
       channel: {
         label: "Channel"

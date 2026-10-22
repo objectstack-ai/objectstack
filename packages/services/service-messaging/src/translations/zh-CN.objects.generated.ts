@@ -123,14 +123,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the delivery channel and its recipient (computed on read)"
+        help: "记录标题:投递通道及其所针对的人员;接收方不是用户时为该地址(读取时计算)"
       },
       notification_id: {
         label: "通知事件",
         help: "外键 → sys_notification(L2 事件)"
       },
       recipient_id: {
-        label: "接收用户"
+        label: "接收方",
+        help: "投递发送到的地址:用户 ID,或按原样保留的电子邮件地址或电话号码。"
+      },
+      recipient_user_id: {
+        label: "接收用户",
+        help: "此投递所针对的用户。接收方是没有对应用户的电子邮件地址或电话号码时为空。"
       },
       channel: {
         label: "通道"
