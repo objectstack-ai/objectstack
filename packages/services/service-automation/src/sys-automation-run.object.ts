@@ -16,8 +16,8 @@ import { F } from '@objectstack/spec';
  *
  * Lifecycle: one row per *currently* suspended run (`status: 'paused'`, id =
  * raw `runId`, removed on terminal completion) plus bounded terminal history
- * (`status` = any of the four terminal members `completed` / `failed` /
- * `cancelled` / `timed_out`, id = `run_`-prefixed). History rows are
+ * (`status` = any terminal member — `completed` / `failed` / `cancelled` /
+ * `timed_out` / `refused` / `missed` — id = `run_`-prefixed). History rows are
  * subject to retention (#2585, ADR-0057 posture): a write-time per-flow cap
  * (default 100) plus a periodic age sweep (default 30 days) — see
  * `ObjectStoreSuspendedRunStore` / `AutomationServicePluginOptions`. Paused
@@ -59,17 +59,18 @@ export const SysAutomationRun = ObjectSchema.create({
   // retention posture (ADR-0057) is that history is telemetry.
   // ⛔ Widen this in the same change as the writer, always — which is what
   // [#15788] does for `refused`: the engine began producing that terminal in
-  // the same commit that added it here and to the option set below.
+  // the same commit that added it here and to the option set below, and what
+  // [#25235] does for `missed`.
   lifecycle: {
     class: 'telemetry',
     retention: {
       maxAge: '30d',
-      onlyWhen: { status: { $in: ['completed', 'failed', 'cancelled', 'timed_out', 'refused'] } },
+      onlyWhen: { status: { $in: ['completed', 'failed', 'cancelled', 'timed_out', 'refused', 'missed'] } },
     },
   },
   // [ADR-0019] Paused runs are resumable state; the terminal rows are
   // observability history (completed / failed / cancelled / timed_out /
-  // refused), aged out by the retention above.
+  // refused / missed), aged out by the retention above.
   description: 'Paused automation runs waiting to resume, and the recent history of finished runs.',
   // [ADR-0079] The record title is `display_title`, a text formula over the
   // same two columns `titleFormat` names. The pointer used to be `id`: once a
@@ -197,13 +198,19 @@ export const SysAutomationRun = ObjectSchema.create({
     // exception to it. ⛔ `refused` is not a failure: the run evaluated
     // successfully and said no, and its authored reason is in
     // `refusal_message`, never in `error`.
+    //
+    // [#25235] `missed` joins them in the same change as its producer
+    // (`AutomationEngine.recordMissedRun`): a scheduled due time that passed
+    // while the kernel was not ticking, recorded by the next kernel and NOT
+    // run. Its `started_at` is the due time and `finished_at` the instant it
+    // was detected; it ran no step. ⛔ Not a failure either.
     status: Field.select(
-      ['running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'refused'],
+      ['running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'refused', 'missed'],
       {
         label: 'Status',
         required: true,
         defaultValue: 'paused',
-        description: 'paused = a live suspended run (resumable); completed / failed / cancelled / timed_out / refused = a terminal run kept as durable history. refused = the flow reached an `end` node declaring `outcome: \'refused\'` — a successful evaluation that said no, distinct from failed, with the rendered reason in refusal_message.',
+        description: 'paused = a live suspended run (resumable); completed / failed / cancelled / timed_out / refused / missed = a terminal run kept as durable history. refused = the flow reached an `end` node declaring `outcome: \'refused\'` — a successful evaluation that said no, distinct from failed, with the rendered reason in refusal_message. missed = a scheduled due time that passed while the kernel was not ticking and was not run (started_at is the due time, finished_at when it was detected).',
         group: 'State',
       },
     ),
