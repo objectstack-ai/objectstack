@@ -64,7 +64,7 @@ function expectFileRefusal(error: any, filename: string, code: 'SQLITE_NOTADB' |
   expect(error?.filename).toBe(filename);
   expect(String(error?.message)).toContain(`SQLite database file '${filename}'`);
   expect(String(error?.message)).toContain(
-    `To start from an empty database, move the file aside yourself (mv '${filename}' '${filename}.unreadable') and start again; to keep its data, restore a copy that opens.`,
+    `To start from an empty database, move the file aside yourself (mv '${filename}' '${filename}.unreadable') and start again; to keep its data, restore a copy that opens`,
   );
 }
 

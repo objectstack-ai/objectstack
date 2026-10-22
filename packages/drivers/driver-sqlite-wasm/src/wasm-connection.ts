@@ -118,7 +118,7 @@ function unreadableDatabaseFileRefusal(
   const refusal = new Error(
     `wasm SQLite cannot read it (${reason}). To start from an empty database, move the ` +
       `file aside yourself (mv '${filename}' '${filename}.unreadable') and start again; ` +
-      `to keep its data, restore a copy that opens.`,
+      `to keep its data, restore a copy that opens`,
   ) as UnreadableDatabaseFileRefusal;
   refusal.code = reason === SQLITE_NOTADB_ERRSTR ? 'SQLITE_NOTADB' : 'SQLITE_CORRUPT';
   refusal.filename = filename;
