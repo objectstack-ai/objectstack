@@ -356,8 +356,8 @@ export class MessagingServicePlugin implements Plugin {
             this.placementEngine = engine;
         } else {
             ctx.logger.warn(
-                '[messaging] no ObjectQL engine with a hook registry — a sys_notification_template save whose html or '
-                + 'mjml body places a hole outside element text or a quoted plain-text attribute value is NOT refused',
+                '[messaging] no ObjectQL engine with a hook registry — a sys_notification_template save is NOT judged '
+                + 'for where its body places a hole (#25082)',
             );
         }
 
