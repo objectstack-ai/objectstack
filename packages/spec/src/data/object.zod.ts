@@ -30,6 +30,9 @@ import { isMaskedOnReadFieldType } from './masked-field-types';
 // refuse one set. Public: re-exported from `@objectstack/spec/data`, with the
 // field predicate `isControlledByParentMasterField` it counts.
 import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
+// The ADR-0015 §4.2 binding predicate, shared with `defineStack`'s
+// cross-reference pass and the v18 stored-row listing. Internal to the spec.
+import { externalBindingDatasourceRefusal } from './external-binding-datasource';
 // The object's default row scope: the RLS policy shape without `object`. No
 // cycle: `security/rls.zod` imports only zod and `shared/`.
 import { DefaultRowScopeSchema } from '../security/rls.zod';
@@ -1324,8 +1327,12 @@ export type ObjectFieldGroupParsed = z.infer<typeof ObjectFieldGroupSchema>;
  * opt-in (`datasource.external.allowWrites` **and** this `writable`).
  *
  * The cross-field invariant ("`external` only when the object's datasource
- * has `schemaMode !== 'managed'`") is enforced at metadata-load time, not
- * in this schema, because the datasource may live in another artefact.
+ * has `schemaMode !== 'managed'`") is not judged by THIS schema, because the
+ * datasource may live in another artefact. It is judged where each half is
+ * visible: the object's refinement refuses a binding whose object `datasource`
+ * is the managed primary (`'default'`, also the omitted value), and
+ * `defineStack` refuses one on a managed datasource the same stack declares
+ * (`external-binding-datasource.ts`).
  */
 export const ObjectExternalBindingSchema = strictObject({
   surface: "this object's `external` binding (ADR-0015)",
@@ -2224,6 +2231,37 @@ function refuseControlledByParentWithoutOneMaster(
   ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message });
 }
 
+/**
+ * [ADR-0015 §4.2 · #25168] An `external` binding names, in the object's own
+ * `datasource`, a datasource that is not the platform's managed primary.
+ *
+ * The half of the rule that needs nothing but the object: `'default'` (also
+ * the parsed value of an omitted `datasource`) is the host's primary
+ * datasource, which is managed by construction, so an `external` binding on it
+ * is refused wherever an object is parsed — `ObjectSchema.create` at module
+ * load, `defineStack`, `os validate`, and the object save door with `422
+ * INVALID_METADATA`. The half that needs the named datasource's definition is
+ * `defineStack`'s, for a datasource the same stack declares. Predicate and
+ * message: `external-binding-datasource.ts`
+ * ({@link externalBindingDatasourceRefusal}), which the v18 stored-row listing
+ * reads too, so `os migrate meta --stored` lists each stored object this
+ * refuses.
+ *
+ * Metadata at rest still LOADS: a stored object this refuses registers under a
+ * `[metadata_spec_invalid]` diagnostic carrying this message, and its next
+ * save is refused.
+ */
+function refuseExternalBindingOnPrimaryDatasource(
+  objectName: unknown,
+  external: unknown,
+  datasource: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  const refusal = externalBindingDatasourceRefusal(objectName, external, datasource);
+  if (refusal === undefined) return;
+  ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message });
+}
+
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
 // `ObjectSchemaBase`, and the error map that reads it was built lazily
 // (`objectUnknownKeyErrorImpl ??= …`) purely to step around the temporal dead
@@ -2588,9 +2626,11 @@ const ObjectSchemaBase = strictObject(
 
   /**
    * External Binding (ADR-0015)
-   * Present only for federated objects routed to a datasource whose
-   * `schemaMode !== 'managed'`. Describes the remote table binding and
-   * per-object writability. See {@link ObjectExternalBindingSchema}.
+   * Present only for federated objects whose own `datasource` names a
+   * datasource with `schemaMode !== 'managed'`; refused on `'default'` and on a
+   * managed datasource the stack declares (ADR-0015 §4.2). Describes the
+   * remote table binding and per-object writability. See
+   * {@link ObjectExternalBindingSchema}.
    */
   external: ObjectExternalBindingSchema.optional()
     .describe('Remote table binding for federated (external) objects.'),
@@ -3215,6 +3255,9 @@ const ObjectSchemaBase = strictObject(
   // under `controlled_by_parent` — the one master relation the runtime derives
   // access from. See the helper's docblock.
   refuseControlledByParentWithoutOneMaster(object.name, object.sharingModel, object.fields, ctx);
+  // [ADR-0015 §4.2 · #25168] An `external` binding is not on the platform's
+  // managed primary datasource. See the helper's docblock.
+  refuseExternalBindingOnPrimaryDatasource(object.name, object.external, object.datasource, ctx);
 }).overwrite((object) => {
   // [#23065] A `tree` that names no `reference` references this object, and the
   // parse writes that down after the refinements above judged what the author

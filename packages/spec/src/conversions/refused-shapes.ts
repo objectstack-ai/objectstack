@@ -38,7 +38,9 @@
  *   component-props gate parses at the CLI doors and at the runtime save
  *   door — and the value-slot judge
  *   `AutomationEngine.registerFlow` and `objectstack validate` run
- *   ({@link flowNodeValueTemplateRefusals}). A site is listed here exactly
+ *   ({@link flowNodeValueTemplateRefusals}), and the `external` binding judge
+ *   the object refinement and `defineStack` share
+ *   ({@link externalBindingDatasourceRefusal}). A site is listed here exactly
  *   when that door refuses it.
  * - It never prints a credential. A view-level API source could carry request
  *   `headers`. The listing names the URL and the method, and withholds the rest.
@@ -52,6 +54,7 @@ import {
   controlledByParentMasterRefusal,
   type ControlledByParentMasterRefusal,
 } from '../data/controlled-by-parent-master.js';
+import { externalBindingDatasourceRefusal } from '../data/external-binding-datasource.js';
 import { ComponentPropsMap } from '../ui/component.zod.js';
 import { ViewDataSchema } from '../ui/view.zod.js';
 import type { ConversionTodoDetail } from './types.js';
@@ -145,6 +148,43 @@ const controlledByParentWithoutOneMaster: RefusedStoredShape = {
           + 'it registers under `[metadata_spec_invalid]` and the platform derives no master: every read of '
           + 'its rows is denied and every write refused with 422 INVALID_METADATA. '
           + `${controlledByParentFate(refusal, fields)} ${refusal.message}`,
+      });
+      return obj;
+    });
+  },
+};
+
+// ── #25168: an object's `external` binding on a managed datasource ──
+
+const externalBindingOnManagedDatasource: RefusedStoredShape = {
+  id: 'object-external-binding-managed-datasource-refused',
+  toMajor: 18,
+  surface: 'object.external — a federated binding on the primary datasource or on a managed one the stack declares',
+  detect(stack, report) {
+    // The datasources this stack declares, as the stack-level half of the rule
+    // reads them. A stored object row arrives alone, so for it only the
+    // primary half (`datasource: 'default'`, written or omitted) can answer.
+    const declared = new Map<string, Dict>();
+    for (const ds of Array.isArray(stack.datasources) ? stack.datasources : []) {
+      if (isDict(ds) && typeof ds.name === 'string') declared.set(ds.name, ds);
+    }
+    mapCollection(stack, 'objects', (obj, path) => {
+      const datasource = typeof obj.datasource === 'string' ? obj.datasource : undefined;
+      const refusal = externalBindingDatasourceRefusal(
+        obj.name,
+        obj.external,
+        datasource,
+        datasource === undefined ? undefined : declared.get(datasource),
+      );
+      if (refusal === undefined) return obj;
+      report({
+        path: `${path}.${refusal.path}`,
+        from: JSON.stringify({ datasource: datasource ?? null, external: obj.external }),
+        reason: 'No lossless rewrite: dropping `external` turns the remote table into one ObjectStack creates, '
+          + 'and naming another datasource or re-declaring this one external says where the rows live, which '
+          + 'only the owner knows. Left as stored, the object registers under `[metadata_spec_invalid]` and its '
+          + 'next save is refused with 422 INVALID_METADATA. '
+          + refusal.message,
       });
       return obj;
     });
@@ -337,6 +377,7 @@ export const REFUSED_STORED_SHAPES: readonly RefusedStoredShape[] = [
   controlledByParentWithoutOneMaster,
   viewDataApiProvider,
   flowValueSlotTemplateToken,
+  externalBindingOnManagedDatasource,
 ];
 
 /**

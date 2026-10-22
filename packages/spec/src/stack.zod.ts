@@ -36,6 +36,7 @@ import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadat
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
 import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
+import { externalBindingDatasourceRefusal } from './data/external-binding-datasource';
 import { InlineGridColumnSchema } from './data/field.zod';
 import { pageComponentSlotPositions } from './ui/component.zod';
 import { SeedSchema } from './data/seed.zod';
@@ -3787,6 +3788,43 @@ function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
 }
 
 /**
+ * [ADR-0015 §4.2 · #25168] An object's `external` binding must not name a
+ * managed datasource this stack declares.
+ *
+ * The half of the rule that needs the datasource's definition. The other half
+ * — an `external` object whose `datasource` is the platform's managed primary,
+ * `'default'` — needs only the object, so `ObjectSchema`'s refinement refuses
+ * it inside the parse above and it never reaches this pass. Here the object
+ * names some other datasource, and the verdict is read off that datasource's
+ * PARSED definition, whose `schemaMode` carries the spec default (`'managed'`)
+ * when none was declared.
+ *
+ * Resolved against the stack's own `datasources` only. A name this stack does
+ * not declare — a datasource the host or another package registers, or one an
+ * administrator stores at runtime — gets no verdict here: the stack cannot see
+ * its `schemaMode`, and refusing what it cannot see would refuse a correct
+ * binding. The predicate and the message are
+ * {@link externalBindingDatasourceRefusal}'s, so this finding reads exactly as
+ * the object parse's does.
+ */
+function collectExternalBindingDatasourceErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const declared = new Map<string, { schemaMode?: unknown }>();
+  for (const ds of Array.isArray(config.datasources) ? config.datasources : []) {
+    if (isRecord(ds) && typeof ds.name === 'string') declared.set(ds.name, ds);
+  }
+  if (declared.size === 0) return errors;
+  for (const obj of Array.isArray(config.objects) ? config.objects : []) {
+    if (!isRecord(obj) || typeof obj.datasource !== 'string') continue;
+    const datasource = declared.get(obj.datasource);
+    if (datasource === undefined) continue;
+    const refusal = externalBindingDatasourceRefusal(obj.name, obj.external, obj.datasource, datasource);
+    if (refusal !== undefined) errors.push(refusal.message);
+  }
+  return errors;
+}
+
+/**
  * Perform strict cross-reference validation on a parsed stack definition.
  * Returns an array of error messages (empty if valid).
  *
@@ -3826,6 +3864,10 @@ function validateCrossReferences(
   errors.push(...collectJobPullMappingErrors(config));
 
   if (objectNames.size === 0) return errors;
+
+  // [ADR-0015 §4.2 · #25168] An object's `external` binding against the
+  // `schemaMode` of a datasource this stack declares.
+  errors.push(...collectExternalBindingDatasourceErrors(config));
 
   // The resolution scope of the two ARTIFACT-SCOPED classes. Identical to
   // `objectNames` unless the caller declared sibling packages, so a stack that
