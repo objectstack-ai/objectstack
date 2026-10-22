@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-22 at `78b1ed16a`.
+Measured on 2026-10-22 at `4ee263903`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 700 |
+| tracked non-test sources scanned | 706 |
 | engine-shaped types recognised | 86 |
 | declared objects in the registry | 117 |
-| same-named calls subtracted as non-engine | 169 |
+| same-named calls subtracted as non-engine | 170 |
 
 ## Every site
 
@@ -130,10 +130,11 @@ Measured on 2026-10-22 at `78b1ed16a`.
 | `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/adopt-membership.ts` | `update` | `SystemObjectName.MEMBER` | undecidable | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/audience-gate-test-support.ts` | `insert` | `sys_invitation` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/auth-manager-sign-in-lockout.ts` | `update` | `sys_user` | enabled | options unreadable | 3 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_account` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_session` | enabled | options unreadable | 3 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_two_factor` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_user` | enabled | options unreadable | 8 |
+| `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_user` | enabled | options unreadable | 5 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `delete` | `sys_verification` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `insert` | `sys_verification` | enabled | elevated | 1 |
