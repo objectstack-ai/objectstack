@@ -3154,6 +3154,8 @@ interface AutonumberReaders {
   readonly plan: FormulaPlanEntry[];
   readonly execCtx: ExecutionContext | undefined;
   readonly serving: StoredExpressionServing;
+  /** The {@link ObjectQL.registerInsertRecomputeListener} listeners, told per row; absent when none is registered. */
+  readonly recomputed?: (row: Record<string, unknown>, fields: string[]) => Promise<void>;
 }
 
 /**
@@ -3170,6 +3172,9 @@ async function recomputeAutonumberReaders(
   if (!readers || readers.plan.length === 0 || rows.length === 0) return;
   const computed = await computeStoredExpressions(readers.plan, rows, readers.execCtx, readers.serving);
   rows.forEach((row, k) => Object.assign(row, computed[k]));
+  if (!readers.recomputed) return;
+  const fields = readers.plan.map((entry) => entry.name);
+  for (const row of rows) await readers.recomputed(row, fields);
 }
 
 /**
@@ -6385,6 +6390,39 @@ export class ObjectQL implements IObjectQLEngine {
   registerEffectiveObjectPermissionsResolver(fn: (context: unknown) => Promise<unknown>): void {
     this._effectiveObjectPermissionsResolver = fn;
     this.logger.debug('Registered effective object-permission resolver for current_user.can()');
+  }
+
+  /** [#25073] {@link registerInsertRecomputeListener}'s listeners, by registrant id. */
+  private readonly insertRecomputeListeners = new Map<
+    string,
+    (event: { object: string; row: Record<string, unknown>; fields: string[] }) => void | Promise<void>
+  >();
+
+  /**
+   * [#25073] Be told, per row, when an insert computes stored fields again
+   * after issuing the row's record number, so a value DERIVED from those
+   * fields can be derived again before the row is written.
+   *
+   * A stored field whose `expression` reads an `autonumber` is computed once
+   * before the `beforeInsert` hooks, when the number does not exist yet, and
+   * again right after the number is issued (after validation). A
+   * `beforeInsert` hook that derived something from the field saw the first
+   * value: `plugin-pinyin-search` stamps the `__search` companion from the
+   * name field there, so a name field reading the number was searchable
+   * without it. The listener runs at the second computation, on the very
+   * row the driver is handed, with the names of the fields computed again
+   * (`fields`), and on every re-issue after a collision too. What it writes
+   * on `row` is written; a throw fails the insert, as a hook's does.
+   *
+   * Keyed by `id`, so a registrant that binds again replaces itself rather
+   * than running twice.
+   */
+  registerInsertRecomputeListener(
+    id: string,
+    fn: (event: { object: string; row: Record<string, unknown>; fields: string[] }) => void | Promise<void>,
+  ): void {
+    this.insertRecomputeListeners.set(id, fn);
+    this.logger.debug('Registered insert recompute listener', { id });
   }
 
   /**
@@ -17146,7 +17184,12 @@ export class ObjectQL implements IObjectQLEngine {
         // #6943, which the engine cannot take over: it never re-issues a batch).
         const autonumberReaders: AutonumberReaders | undefined = (() => {
           const plan = storedExpressionsReading(storedExpressionPlan, autonumberFieldNames(schemaForValidation));
-          return plan.length > 0 ? { plan, execCtx: opCtx.context, serving: storedExpressionServing } : undefined;
+          if (plan.length === 0) return undefined;
+          const listeners = [...this.insertRecomputeListeners.values()];
+          const recomputed = listeners.length === 0 ? undefined : async (row: Record<string, unknown>, fields: string[]) => {
+            for (const listener of listeners) await listener({ object, row, fields });
+          };
+          return { plan, execCtx: opCtx.context, serving: storedExpressionServing, recomputed };
         })();
         const issueThroughDriver = driverOwnsAutonumber && autonumberReaders !== undefined
           && typeof (driver as any)?.issueAutonumbers === 'function';

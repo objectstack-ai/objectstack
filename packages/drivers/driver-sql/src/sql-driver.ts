@@ -8533,7 +8533,13 @@ export class SqlDriver implements IDataDriver {
           filled.push([]);
           continue;
         }
-        const reserved = await this.fillAutoNumberFields(object, row as Record<string, any>, options);
+        // Filled as `create()` fills it: the caller's organization stamped
+        // first (numbers are issued per organization), on a view, so only
+        // the numbers land on the caller's row.
+        const view: Record<string, any> = { ...row };
+        this.injectTenantOnInsert(object, view, options);
+        const reserved = await this.fillAutoNumberFields(object, view, options);
+        for (const r of reserved) row[r.field] = view[r.field];
         // A value kept from an earlier issue on this row is still this
         // driver's, so it stays described beside the fresh ones (#6943).
         const fresh = new Set(reserved.map((r) => r.field));
