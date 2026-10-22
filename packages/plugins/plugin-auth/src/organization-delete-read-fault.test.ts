@@ -126,8 +126,9 @@ async function ownerOfTarget(role: string | null = 'owner') {
   const active = await post(manager, '/organization/set-active', { organizationId: TARGET }, cookie);
   expect(active.status, await active.clone().text()).toBe(200);
   if (role !== 'owner') {
-    // Below the engine, which would apply the field's default to a null: the
-    // row as a store can hold it.
+    // Written beneath the engine, so the row is exactly what a store can hold
+    // (`role` is not a required column), whatever the engine's write path does
+    // with a null.
     await (engine as any).getDriver('sys_member').update('sys_member', 'mem_owner', { role });
   }
   return { engine, manager, cookie };
