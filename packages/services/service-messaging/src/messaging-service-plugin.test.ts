@@ -1,7 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { ObjectQLPlugin } from '@objectstack/objectql';
+import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { SysUser } from '@objectstack/platform-objects';
+import { installDefaultOrganization, DEFAULT_ORGANIZATION_ID } from './default-organization.testkit.js';
 import { MessagingServicePlugin } from './messaging-service-plugin.js';
 import type { MessagingService } from './messaging-service.js';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
@@ -432,10 +435,6 @@ describe('MessagingServicePlugin — a failed provision is an error, once per ob
  */
 describe("MessagingServicePlugin — converts stored user_id '*' to the empty reference at kernel:ready", () => {
     async function bootWithStarRow() {
-        const { ObjectQL } = await import('@objectstack/objectql');
-        const { SqlDriver } = await import('@objectstack/driver-sql');
-        const { SysUser } = await import('@objectstack/platform-objects');
-        const { installDefaultOrganization, DEFAULT_ORGANIZATION_ID } = await import('./default-organization.testkit.js');
         const silent: any = { debug() {}, info() {}, warn() {}, error() {}, child() { return silent; } };
         const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
         const ql = new ObjectQL({ logger: silent });
