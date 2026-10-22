@@ -148,11 +148,12 @@ describe('R2 outside controlled_by_parent — the verdict is unchanged', () => {
   });
 });
 
-// What actually reaches the rule from the authoring builder. Under
+// What reaches the rule from the authoring builder. Under
 // `controlled_by_parent`, `ObjectSchema.create()` forces an omitted `required`
-// to `true` and refuses an explicit `false`, but never inspects `readonly` or
-// `system` — so the two flagged shapes leave the builder intact, and this rule
-// is the authoring-time refusal they meet.
+// to `true` and refuses an explicit `false`; the parse it ends in refuses a one
+// master marked `readonly` or `system` (spec shape `master-not-writable`), so
+// the two flagged shapes no longer leave the builder, and this rule reports
+// them on a stack that never went through it.
 describe('R2 over objects built by ObjectSchema.create()', () => {
   const build = (field: ReturnType<typeof Field.masterDetail>) =>
     ObjectSchema.create({

@@ -33,7 +33,9 @@ export const entry: SemanticMigration = {
     + 'still reaches it from any object not authored through the builder. The security gate keeps '
     + 'refusing these inserts. (The later step-18 entry `cbp-master-relation-tiers-retired` goes '
     + 'further for the first shape: a `master_detail` without `required: true` is refused at parse, '
-    + 'and the runtime no longer resolves a master from it.)',
+    + 'and the runtime no longer resolves a master from it. The same entry now refuses the other two '
+    + 'at parse on the object\'s one required master, so `ObjectSchema.create` no longer lets them '
+    + 'through either.)',
   acceptanceCriteria:
     '`os lint` reports no `relationship/master-detail-required` finding at `error`: on every '
     + 'object declaring `sharingModel: \'controlled_by_parent\'`, each `master_detail` reference '
