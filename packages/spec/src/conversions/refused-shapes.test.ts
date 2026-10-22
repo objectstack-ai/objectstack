@@ -36,12 +36,17 @@ function todosOf(stack: Record<string, unknown>): { stack: Record<string, unknow
   return { stack: out, todos };
 }
 
-function storedTodos(type: string, row: Record<string, unknown>) {
+function storedTodos(
+  type: string,
+  row: Record<string, unknown>,
+  knownDatasources?: ReadonlyMap<string, { readonly schemaMode?: unknown }>,
+) {
   const todos: ConversionTodoNotice[] = [];
   const notices: ConversionNotice[] = [];
   const item = applyConversionsToStoredItem(type, row, {
     onTodo: (t) => todos.push(t),
     onNotice: (n) => notices.push(n),
+    ...(knownDatasources ? { knownDatasources } : {}),
   }) as Record<string, any>;
   return { item, todos, notices };
 }
@@ -532,5 +537,65 @@ describe('#25168 — a stored object whose `external` binding is on a managed da
       objects: [federatedRow({ datasource: 'warehouse' })],
     };
     expect(todosOf(stack).todos.filter((t) => t.conversionId === 'object-external-binding-managed-datasource-refused')).toEqual([]);
+  });
+});
+
+describe('#25279 — a stored object bound `external` to a datasource the caller resolves is judged against it', () => {
+  const listed = (todos: ConversionTodoNotice[]) =>
+    todos.filter((t) => t.conversionId === 'object-external-binding-managed-datasource-refused');
+
+  it.each<[string, Record<string, unknown>]>([
+    ["declared `schemaMode: 'managed'`", { name: 'warehouse', driver: 'sqlite', config: {}, schemaMode: 'managed' }],
+    ['declaring no `schemaMode` (managed by the spec default)', { name: 'warehouse', driver: 'sqlite', config: {} }],
+  ])('a stored row on a known datasource %s is listed, once, and not rewritten', (_label, datasource) => {
+    const row = federatedRow({ datasource: 'warehouse' });
+    const { item, todos, notices } = storedTodos('object', row, new Map([['warehouse', datasource]]));
+    expect(item).toEqual(row);
+    expect(notices).toEqual([]);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe('object-external-binding-managed-datasource-refused');
+    expect(todo.path).toBe('objects[0].external');
+    expect(todo.reason).toContain("Object 'wh_order' declares `external` on datasource 'warehouse', whose `schemaMode` is 'managed'");
+    expect(JSON.parse(todo.from)).toEqual({ datasource: 'warehouse', external: { remoteName: 'orders' } });
+  });
+
+  it.each([
+    ["a federated datasource (`schemaMode: 'external'`)", 'external'],
+    ["a `schemaMode: 'validate-only'` datasource", 'validate-only'],
+  ])('a stored row on %s is not listed', (_label, schemaMode) => {
+    const known = new Map([['warehouse', { name: 'warehouse', schemaMode }]]);
+    expect(listed(storedTodos('object', federatedRow({ datasource: 'warehouse' }), known).todos)).toEqual([]);
+  });
+
+  it('a known datasource the row does not name gives no verdict', () => {
+    const known = new Map([['other', { name: 'other', schemaMode: 'managed' }]]);
+    expect(listed(storedTodos('object', federatedRow({ datasource: 'warehouse' }), known).todos)).toEqual([]);
+  });
+
+  it('a datasource the stack declares is read before the caller\'s', () => {
+    const stack = {
+      datasources: [{ name: 'warehouse', driver: 'sqlite', config: {}, schemaMode: 'external', external: {} }],
+      objects: [federatedRow({ datasource: 'warehouse' })],
+    };
+    const todos: ConversionTodoNotice[] = [];
+    applyConversions(stack, {
+      includeRetired: true,
+      onTodo: (t) => todos.push(t),
+      knownDatasources: new Map([['warehouse', { schemaMode: 'managed' }]]),
+    });
+    expect(listed(todos)).toEqual([]);
+  });
+
+  it('without an `onTodo` sink nothing reads the known datasources', () => {
+    const known = new Map<string, { schemaMode?: unknown }>();
+    const get = known.get.bind(known);
+    let reads = 0;
+    known.get = (name: string) => {
+      reads++;
+      return get(name);
+    };
+    applyConversionsToStoredItem('object', federatedRow({ datasource: 'warehouse' }), { knownDatasources: known });
+    expect(reads).toBe(0);
   });
 });

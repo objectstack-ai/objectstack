@@ -18,7 +18,7 @@ import { retiredKey } from '../shared/retired-key';
 // through it, so `api/UpdateAiConversationRequest.json` states it.
 import { requiredOneOf } from '../shared/refinement-projection';
 import { MetadataItemNameSchema } from '../shared/identifiers.zod';
-import { DroppedFieldsEventSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '../data/data-engine.zod';
+import { DroppedFieldsEventSchema, QueryPageWindowParamSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '../data/data-engine.zod';
 import { 
   AnalyticsQueryRequestSchema,  
   AnalyticsResultResponseSchema, 
@@ -2372,8 +2372,11 @@ export const HttpFindQueryParamsSchema = lazySchema(() => z.object({
   select: z.string().optional().describe('Comma-separated list of fields to retrieve.'),
   sort: z.string().optional().describe('Sort expression (e.g. "name asc,created_at desc" or "-created_at").'),
   orderBy: z.string().optional().describe('Alias for sort (OData compatibility).'),
-  top: z.coerce.number().optional().describe('Max records to return (limit).'),
-  skip: z.coerce.number().optional().describe('Records to skip (offset).'),
+  // [#25269] The page window the list door enforces, not `z.coerce.number()`,
+  // which admitted `-1`, `1.5` and a blank `?top=` (as `0`) that the door
+  // refuses with a 400.
+  top: QueryPageWindowParamSchema.optional().describe('Max records to return (limit) — a non-negative integer.'),
+  skip: QueryPageWindowParamSchema.optional().describe('Records to skip (offset) — a non-negative integer.'),
   expand: z.string().optional().describe(
     'Comma-separated list of lookup/master_detail field names to expand. '
     + 'Resolved to populate array and passed to the engine for batch $in expansion.'
