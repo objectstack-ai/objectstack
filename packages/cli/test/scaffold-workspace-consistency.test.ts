@@ -290,15 +290,11 @@ describe('the two scaffold paths render the same pnpm build approvals (#10499)',
     const cli = declaredPeerSkews(RENDERED[CLI]);
     const template = declaredPeerSkews(RENDERED[TEMPLATE]);
 
-    // Non-vacuity: two empty maps compare equal while declaring nothing, which
-    // is the state that puts an unmet-peer report on a newcomer's first screen.
-    for (const [producer, skews] of [[CLI, cli], [TEMPLATE, template]] as const) {
-      expect(
-        Object.keys(skews).length,
-        `${producer} declares no peer skew at all — a scaffolded project's first ` +
-          '`pnpm install` then opens with an unmet-peer report the user did not cause',
-      ).toBeGreaterThan(0);
-    }
+    // Both maps are EMPTY on the better-auth 1.7.12 pin: every skew they
+    // declared is gone, so both files retire the block (see
+    // `SCAFFOLD_ALLOWED_PEER_VERSIONS`). Two empty maps comparing equal is the
+    // intended state, not a vacuous pass; a skew that reappears in one file
+    // only is still what this limb fails on.
 
     expect(
       cli,

@@ -1052,7 +1052,19 @@ describe("#15106 — the magic link reads the recipient's own sys_user.locale", 
     expect(sent[0].to).toBe('ada@example.com');
     expect(sent[0].data.magicLinkUrl).toBe('http://x/magic');
     expect(sent[0].data.token).toBe('t');
-    expect(sent[0].data.expiresInMinutes).toBe(10);
+    expect(sent[0].data.expiresInMinutes).toBe(5);
+  });
+
+  it('the mail states the lifetime the mount gives the link, from one source', async () => {
+    // The copy reads "expires in N minutes"; the link lives the mount's
+    // `expiresIn` seconds. Both must be the same number, and the mount must
+    // state it rather than lean on the vendor default (300 s today), which a
+    // dependency bump could move under the mail.
+    const { capturedConfig } = await boot('es-ES');
+    const magic = capturedConfig.plugins.find((p: any) => p.id === 'magic-link');
+    expect(magic._opts.expiresIn).toBe(300);
+    const sent = await driveMagicLink({ deployment: 'es-ES' });
+    expect(sent[0].data.expiresInMinutes * 60).toBe(magic._opts.expiresIn);
   });
 
   it('a placeholder address is still refused BEFORE any recipient read', async () => {

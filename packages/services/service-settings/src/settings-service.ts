@@ -41,6 +41,7 @@ import { renderValidationMessage } from '@objectstack/spec/system';
 // The one predicate every layer asks "does this posture wall organizations
 // off from each other?" with (`group` / `isolated`), never a re-spelled list.
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+import type { SystemWriteOrganizationDecision } from '@objectstack/core';
 import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import {
@@ -151,30 +152,36 @@ function organizationOf(row: SettingsRow): string | null {
 /**
  * Which `sys_setting` rows a caller's `tenant` and `user` rungs may draw on.
  *
- *  - `own` — the caller names an organization: that organization's rows, plus
- *    the rows written with no organization. The cascade prefers the
- *    organization's own row ({@link SettingsService.preferredRow}); an
- *    organization-less row is only the fallback, the way the global rung is
- *    for every organization.
- *  - `organization-less` — no organization, under a posture that walls
- *    organizations off from each other (`group` / `isolated`): only the rows
- *    written with no organization. Another organization's row has no claim on
- *    a caller that is in none of them.
- *  - `unwalled` — no organization, under `single` (or with no posture source
- *    wired): every row, as before. A single-organization deployment has no
- *    boundary to keep, and its process-wide readers (an email brand name, a
- *    boot-time locale) read without naming the one organization they serve.
+ * [ADR-0131 D1/D8] A row with no organization is no organization's: no reach
+ * reads it as a fallback for an organization, and none reads another
+ * organization's row for a caller that names none.
+ *
+ *  - `own` — that organization's rows, and only those. The organization is the
+ *    caller's own, or — for a caller that names none where no wall stands —
+ *    the one organization ADR-0131 D9's predicate derives
+ *    ({@link SettingsOrganizationSource}): a process-wide reader (an email
+ *    brand name, a boot-time locale) reads, and writes, as the organization it
+ *    serves.
+ *  - `no-organization-object` — the composition registers no organization
+ *    object, so no organization can exist (the lean embedding, kept by the
+ *    ruling ADR-0131's D9 note records): the rows written with no
+ *    organization, the only rows such a composition can hold.
+ *  - `unowned` — no organization to name: a caller that names none under a
+ *    posture that walls organizations off from each other (`group` /
+ *    `isolated`), or where D9 derives none (no organization yet, or several).
+ *    No tenant or user rung at all; the global rung and the default answer.
  */
 type OrganizationReach =
   | { kind: 'own'; organizationId: string }
-  | { kind: 'organization-less' }
-  | { kind: 'unwalled' };
+  | { kind: 'no-organization-object' }
+  | { kind: 'unowned' };
 
 /**
- * The reach a read of a `global` key is made with: it has no tenant or user
- * rung, so which organization's rows the load returns cannot change its answer.
+ * The reach of a caller with no organization to name — and the reach a read of
+ * a `global` key is made with: such a key has no tenant or user rung, so no
+ * reach could change its answer, and no row below the global rung is loaded.
  */
-const ANY_ORGANIZATION: OrganizationReach = Object.freeze({ kind: 'unwalled' as const });
+const UNOWNED: OrganizationReach = Object.freeze({ kind: 'unowned' as const });
 
 /**
  * Where the service learns the tenancy posture IN FORCE — the `tenancy`
@@ -185,6 +192,18 @@ export type SettingsTenancyPostureSource = () =>
   | TenancyPosture
   | undefined
   | Promise<TenancyPosture | undefined>;
+
+/**
+ * Where the service learns which organization a caller that names none acts
+ * in, where no wall stands — ADR-0131 D9's predicate
+ * (`resolveSystemWriteOrganization`), answered from the composition's own
+ * facts. The plugin supplies it at bind time; it is asked only for such a
+ * caller, on a key below the global rung.
+ *
+ * Unset — a service constructed directly — reads as a composition that
+ * registers no organization object: nothing names an organization to it.
+ */
+export type SettingsOrganizationSource = () => Promise<SystemWriteOrganizationDecision>;
 
 /**
  * The capability a namespace's read requires when its manifest declares no
@@ -847,6 +866,12 @@ export class SettingsService {
    * deployment with no organization wall. See {@link organizationWallStands}.
    */
   private tenancyPosture?: SettingsTenancyPostureSource;
+  /**
+   * The organization a caller that names none acts in where no wall stands,
+   * bound with the engine. Unset reads as a composition with no organization
+   * object. See {@link organizationReachOf}.
+   */
+  private organizationSource?: SettingsOrganizationSource;
   /** Change subscribers, optionally scoped to a namespace. */
   private readonly subscribers = new Set<{
     ns?: string;
@@ -884,10 +909,16 @@ export class SettingsService {
       cryptoProvider?: import('@objectstack/spec/contracts').ICryptoProvider;
       /**
        * The tenancy posture IN FORCE. Read when a caller names no
-       * organization: under a walled posture such a caller reads only the
-       * organization-less rows and may not write a `tenant` key at all.
+       * organization: under a walled posture such a caller has no tenant or
+       * user rung and may not write a `tenant` key at all.
        */
       tenancyPosture?: SettingsTenancyPostureSource;
+      /**
+       * ADR-0131 D9's answer for a caller that names no organization where no
+       * wall stands: the one organization it reads and writes as, none, or a
+       * composition with no organization object.
+       */
+      organization?: SettingsOrganizationSource;
     },
   ): void {
     this.engine = engine;
@@ -899,6 +930,7 @@ export class SettingsService {
     if (extras?.auditWriter) this.auditWriter = extras.auditWriter;
     if (extras?.cryptoProvider) this.cryptoProvider = extras.cryptoProvider;
     if (extras?.tenancyPosture) this.tenancyPosture = extras.tenancyPosture;
+    if (extras?.organization) this.organizationSource = extras.organization;
 
     // Notify subscribers that the persistent store is now available so
     // late-binders (e.g. AIServicePlugin's adapter rebuild on saved
@@ -1590,7 +1622,7 @@ export class SettingsService {
     // A `global` key has no tenant or user rung, so no reach changes its
     // answer — and its readers (boot-time plugins, mostly) do not wait on the
     // posture for one.
-    const reach = scope === 'global' ? ANY_ORGANIZATION : await this.organizationReachOf(ctx);
+    const reach = scope === 'global' ? UNOWNED : await this.organizationReachOf(ctx);
     const rows = await this.loadRows(namespace, userId, reach);
     return this.resolveKeyFromRows<T>(reg, key, scope, rows, userId, reach);
   }
@@ -1697,7 +1729,7 @@ export class SettingsService {
       // when a key below the global rung needs it (see `get`).
       const reach = pending.some((p) => p.scope !== 'global')
         ? await this.organizationReachOf(ctx)
-        : ANY_ORGANIZATION;
+        : UNOWNED;
       const sets = await this.loadRowSets(namespace, groups, reach);
       const userRows = userKeys.length > 0 ? sets[0] : [];
       const otherRows = otherKeys.length > 0 ? sets[sets.length - 1] : [];
@@ -1723,9 +1755,9 @@ export class SettingsService {
    * user rung at all.
    *
    * `reach` is the caller's organization reach ({@link organizationReachOf}).
-   * The tenant and user rungs each take ONE row, the caller organization's own
-   * when it has one ({@link preferredRow}) — never whichever row a positional
-   * `find` happens to meet first.
+   * The tenant and user rungs each take ONE row, the one the reach owns
+   * ({@link preferredRow}) — never whichever row a positional `find` happens
+   * to meet first.
    */
   private async resolveKeyFromRows<T = unknown>(
     reg: RegisteredManifest,
@@ -1806,37 +1838,42 @@ export class SettingsService {
   /**
    * The ONE row a rung takes from its candidates (rows of one key on one rung,
    * already narrowed to the caller's owner for the user rung), by the caller's
-   * organization reach:
+   * organization reach ({@link OrganizationReach}):
    *
-   *  - `own` — the caller organization's row; failing that, the row written
-   *    with no organization. The organization is compared HERE, not trusted to
-   *    the load's filter, the same way the user rung compares its owner.
-   *  - `organization-less` — only a row written with no organization.
-   *  - `unwalled` — a row an organization wrote, ahead of one written with
-   *    none: on a single-organization deployment that is the one organization's
-   *    current value, while an organization-less row predates its first write.
+   *  - `own` — that organization's row, and no other: a row written with no
+   *    organization is not its fallback (ADR-0131 D8). The organization is
+   *    compared HERE, not trusted to the load's filter, the same way the user
+   *    rung compares its owner.
+   *  - `no-organization-object` — the row written with no organization.
+   *  - `unowned` — none.
    *
    * Shared by the cascade walk and the lock pre-flight in {@link setMany}, so
    * the row that answers a read is the row whose lock refuses a write.
    */
   private preferredRow(candidates: SettingsRow[], reach: OrganizationReach): SettingsRow | undefined {
-    if (reach.kind === 'own') {
-      return (
-        candidates.find((r) => organizationOf(r) === reach.organizationId) ??
-        candidates.find((r) => organizationOf(r) === null)
-      );
-    }
-    if (reach.kind === 'organization-less') {
-      return candidates.find((r) => organizationOf(r) === null);
-    }
-    return candidates.find((r) => organizationOf(r) !== null) ?? candidates[0];
+    return candidates.find((r) => SettingsService.withinReach(r, reach));
   }
 
-  /** The caller's organization reach — see {@link OrganizationReach}. */
+  /**
+   * The caller's organization reach — see {@link OrganizationReach}.
+   *
+   * A caller that names an organization is that organization's, under every
+   * posture. One that names none is `unowned` behind a wall; elsewhere it is
+   * whatever ADR-0131 D9's predicate answers ({@link SettingsOrganizationSource}):
+   * the one organization it derives, none (refused there, so `unowned` here),
+   * or a composition with no organization object. A source that THROWS is not
+   * caught, for the posture's reason (see {@link organizationWallStands}).
+   */
   private async organizationReachOf(ctx: SettingsContext): Promise<OrganizationReach> {
     const organizationId = callerOrganizationIdOf(ctx);
     if (organizationId !== null) return { kind: 'own', organizationId };
-    return (await this.organizationWallStands()) ? { kind: 'organization-less' } : { kind: 'unwalled' };
+    if (await this.organizationWallStands()) return UNOWNED;
+    const source = this.organizationSource;
+    if (!source) return { kind: 'no-organization-object' };
+    const decision = await source();
+    if (decision.kind === 'derived') return { kind: 'own', organizationId: decision.organizationId };
+    if (decision.kind === 'no-organization-object') return { kind: 'no-organization-object' };
+    return UNOWNED;
   }
 
   /**
@@ -2091,11 +2128,11 @@ export class SettingsService {
 
   /**
    * The per-key entry {@link setMany} refuses a `tenant`-scoped key with when
-   * the caller names no organization under a walled posture. Same vocabulary
-   * as {@link ownerlessUserKeyError}, for the same reason one level up: a
-   * `tenant` row is one row per organization, and under a wall a row naming
-   * none belongs to no organization's settings — it would only ever be read as
-   * every organization's fallback, which is not what any caller asked to write.
+   * no organization owns the write — the caller names none under a walled
+   * posture, or where ADR-0131 D9 derives none. Same vocabulary as
+   * {@link ownerlessUserKeyError}, for the same reason one level up: a
+   * `tenant` row is one row per organization, and a row naming none belongs to
+   * no organization's settings — no reach reads it (ADR-0131 D8).
    */
   private organizationlessTenantKeyError(reg: RegisteredManifest, key: string): FieldError {
     const spec = ((reg.manifest.specifiers ?? []) as Array<Record<string, unknown>>)
@@ -2151,12 +2188,11 @@ export class SettingsService {
     this.assertPermitted(reg.manifest, 'write', ctx);
 
     // Pre-flight: reject the whole batch if any key is locked or unknown, is
-    // user-scoped while the caller names no user, or is tenant-scoped while the
-    // caller names no organization under a walled posture (both collected,
-    // refused below).
+    // user-scoped while the caller names no user, or is tenant-scoped while no
+    // organization owns the write (both collected, refused below).
     const callerUserId = callerUserIdOf(ctx);
-    const callerOrganizationId = callerOrganizationIdOf(ctx);
-    // The reach every load below reads with — resolved once for the batch, and
+    // The reach every load below reads with, and the organization every row
+    // below the global rung is stored for — resolved once for the batch, and
     // only when a key below the global rung asks for it: a `global` key has no
     // upper rung to be locked by and no organization to be stored for.
     let reach: OrganizationReach | undefined;
@@ -2185,10 +2221,10 @@ export class SettingsService {
         continue;
       }
       reach ??= await this.organizationReachOf(ctx);
-      // Under a walled posture an organization-less caller reaches only the
-      // organization-less rows (see `organizationReachOf`), so `reach` already
-      // carries the posture answer: no second read of it per key.
-      if (scope === 'tenant' && callerOrganizationId === null && reach.kind === 'organization-less') {
+      // A caller with no organization to name — behind a wall, or where D9
+      // derives none — is `unowned` (see `organizationReachOf`), so `reach`
+      // already carries the posture answer: no second read of it per key.
+      if (scope === 'tenant' && reach.kind === 'unowned') {
         ownerless.push(this.organizationlessTenantKeyError(reg, key));
         continue;
       }
@@ -2244,12 +2280,14 @@ export class SettingsService {
       // which has no organization and no user column (ADR-0131 D7, see
       // `rowIdentity`); user rows pin to the caller's user id, which the
       // pre-flight above guarantees is present. Tenant and user rows both
-      // carry the caller's organization, HERE: this write runs under the
-      // service's system context, which names no organization, so nothing
-      // downstream would stamp one — the row would land organization-less, in
-      // the one bucket every organization reads and writes.
+      // carry the organization the reach owns, HERE — the caller's, or the one
+      // D9 derives for a caller that names none: this write runs under the
+      // service's system context, which names no organization, so the row's
+      // identity probe (`upsertRow`) must name the organization the row lands
+      // in, or a second write misses the first and inserts beside it. Only a
+      // composition with no organization object stores a row with none.
       const userId = scope === 'user' ? callerUserId : null;
-      const organizationId = scope === 'global' ? null : callerOrganizationId;
+      const organizationId = scope !== 'global' && reach?.kind === 'own' ? reach.organizationId : null;
       const isEncrypted = reg.encryptedKeys.has(key);
       const isNull = rawValue === null || typeof rawValue === 'undefined';
 
@@ -2931,12 +2969,15 @@ export class SettingsService {
     );
   }
 
-  /** Whether a `tenant` / `user` row is one the reach may draw on. */
+  /**
+   * Whether a `tenant` / `user` row is one the reach may draw on — the one
+   * predicate the engine query, the in-memory filter and the rung's pick share.
+   */
   private static withinReach(row: SettingsRow, reach: OrganizationReach): boolean {
     const organizationId = organizationOf(row);
-    if (reach.kind === 'own') return organizationId === null || organizationId === reach.organizationId;
-    if (reach.kind === 'organization-less') return organizationId === null;
-    return true;
+    if (reach.kind === 'own') return organizationId === reach.organizationId;
+    if (reach.kind === 'no-organization-object') return organizationId === null;
+    return false;
   }
 
   /**
@@ -2967,6 +3008,8 @@ export class SettingsService {
     userId: string | null,
     reach: OrganizationReach,
   ): Promise<SettingsRow[]> {
+    // No organization to name: no tenant or user rung, so nothing to read.
+    if (reach.kind === 'unowned') return [];
     // A user-keyed load must still see the tenant rows (user_id NULL):
     // resolveKey's user→tenant→global cascade and the Phase-2 upper-scope lock
     // check both search THIS one result set, so a bare user_id equality starves
@@ -2981,17 +3024,13 @@ export class SettingsService {
     // organization, so neither the driver's tenant scope nor the security
     // layer's organization wall applies to it — every organization's row came
     // back, and the cascade answered with whichever it met first. Each rung is
-    // crossed with the organizations the caller reaches (`OrganizationReach`):
-    // its own and the organization-less, or the organization-less alone.
-    const organizations: Array<string | null> | null =
-      reach.kind === 'own' ? [reach.organizationId, null]
-        : reach.kind === 'organization-less' ? [null]
-          : null;
+    // crossed with the ONE organization the reach owns (`OrganizationReach`) —
+    // none at all only in a composition with no organization object, whose
+    // rows carry none (ADR-0131's D9 note).
+    const organization_id = reach.kind === 'own' ? reach.organizationId : null;
     const where: Record<string, unknown> = {
       namespace,
-      $or: organizations === null
-        ? rungs
-        : rungs.flatMap((rung) => organizations.map((organization_id) => ({ ...rung, organization_id }))),
+      $or: rungs.map((rung) => ({ ...rung, organization_id })),
     };
     // Bypass the tenant-scoping audit warning so loads work uniformly across
     // the tenant and user rungs without log noise; the organization scope is

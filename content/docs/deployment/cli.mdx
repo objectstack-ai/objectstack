@@ -402,7 +402,9 @@ The `auth` tier requires `OS_AUTH_SECRET` in production: without it the boot
 is refused before any plugin starts, with or without `--server`, because a boot
 with no `AuthPlugin` has no organization and every row it wrote would have no
 owner. A production boot whose tiers leave `auth` out (`--preset minimal`
-included) is refused the same way unless the stack mounts `AuthPlugin` itself.
+included) is refused the same way unless the stack mounts `AuthPlugin` itself,
+and so is one whose `@objectstack/plugin-auth` fails to load (a missing or broken
+install): the refusal names the load error instead of booting without auth.
 In `--dev` mode the CLI falls back to an insecure local secret, so login works
 out of the box. (The cloud runtime's host kernel, where auth is each project's,
 only warns.) To take full control, set `tiers` on the stack config:

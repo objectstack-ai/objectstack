@@ -2,7 +2,7 @@
 
 /**
  * **The pin for `@objectstack/cli`'s own `better-sqlite3` declaration**, and
- * for its agreement with the scaffold widening that exists because of it
+ * for the retirement of the scaffold widening that once existed because of it
  * (#16813).
  *
  * ## The report this is about
@@ -49,20 +49,15 @@
  * missing was not a different range but a gate holding the range to the
  * reasoning that justifies it, which is what this file is.
  *
- * ## Why the two assertions are one pin and not two
+ * ## The scaffold widening is retired
  *
- * `SCAFFOLD_ALLOWED_PEER_VERSIONS['better-auth>better-sqlite3']` widens
- * better-auth's peer to a **major**, and the only reason that major is right
- * is the declaration below. Held apart, either can move alone and stay green:
- * a declaration lifted to `^14` leaves the scaffold suppressing a report it no
- * longer matches (so the NEXT real skew arrives pre-silenced), and a
- * declaration dropped to `^12` leaves a suppression with no skew behind it —
- * the exact shape `init.test.ts` refuses for the retired
- * `@better-auth/scim>better-call` entry. So the major is read out of the
- * manifest and compared, rather than written down twice.
- *
- * `init.test.ts` pins the widening's literal value and its rendering; this
- * file pins what the widening is ABOUT. Neither restates the other.
+ * `SCAFFOLD_ALLOWED_PEER_VERSIONS['better-auth>better-sqlite3']` used to widen
+ * better-auth's peer to this declaration's major, and this file held the two
+ * equal. `better-auth@1.7.12` declares no better-sqlite3 peer at all, so the
+ * report above no longer exists and the widening retired with it: a
+ * suppression with no skew behind it leaves the NEXT real skew pre-silenced.
+ * This file now pins its absence; the 13.x declaration below stands on the
+ * readings above on its own.
  *
  * The manifest read stays inside this package (`test/` → package root), so it
  * is not a `check:cross-package-test-inputs` escape and needs no declaration.
@@ -103,7 +98,7 @@ describe('@objectstack/cli better-sqlite3 declaration (#16813)', () => {
     expect(manifest.dependencies?.['better-sqlite3']).toBeUndefined();
   });
 
-  it('keeps the declaration on one major, so the scaffold can widen to it', () => {
+  it('keeps the declaration on one major, so the retreat check below can read it', () => {
     const declared = manifest.optionalDependencies?.['better-sqlite3'] ?? '';
     expect(
       soleMajor(declared),
@@ -111,20 +106,18 @@ describe('@objectstack/cli better-sqlite3 declaration (#16813)', () => {
     ).not.toBeNull();
   });
 
-  it('widens better-auth\'s peer to the major this package actually declares', () => {
-    // ⛔ Not "to 13" — that is `init.test.ts`'s assertion. This one says the
-    // widening and the declaration are the SAME major, so neither can move
-    // without the other.
-    const declared = manifest.optionalDependencies?.['better-sqlite3'] ?? '';
-    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS[WIDENING_KEY]).toBe(soleMajor(declared));
+  it('carries no scaffold widening for better-auth\'s retired better-sqlite3 peer', () => {
+    // better-auth@1.7.12 declares no better-sqlite3 peer, so there is nothing
+    // to widen. Re-adding the entry needs a new measured skew, not a revert.
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS[WIDENING_KEY]).toBeUndefined();
   });
 
   it('refuses a retreat to better-sqlite3 12 (the report is not the defect)', () => {
     // The failure this guards is a well-meant one: reading the unmet-peer
     // report as a defect and "fixing" it here. Measured, that clears the line
     // only by installing a second native better-sqlite3 that nothing loads —
-    // see this file's header for the three readings. If better-auth ever
-    // WIDENS its peer upstream, the right change is to retire the scaffold
+    // see this file's header for the three readings. When better-auth dropped
+    // the peer upstream (1.7.12), the right change was to retire the scaffold
     // entry, not to move this declaration.
     const declared = manifest.optionalDependencies?.['better-sqlite3'] ?? '';
     expect(soleMajor(declared)).not.toBe('12');

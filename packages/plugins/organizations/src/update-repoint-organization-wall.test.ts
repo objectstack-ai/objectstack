@@ -49,8 +49,10 @@
  *   crossing the wall, a tenancy-disabled object, and `preserveAudit`, whose
  *   update-only exemption never reaches `organization_id`. A system context
  *   never met the strip.
- * - The `update`-mode `validate()` preview runs no middleware, so it is
- *   wall-blind: it still reports the drop of an admitted re-point.
+ * - The `update`-mode `validate()` preview runs no middleware, so it was
+ *   wall-blind: it reported the drop of an admitted re-point and admitted a
+ *   refused one. It now reads the wall's own per-row verdict (#25062), and
+ *   answers a re-point as its write does.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -578,17 +580,29 @@ describe('[#24822] where no wall judges the column, the update strip takes the r
   });
 });
 
-describe('[#24822] the `update`-mode validate() preview is wall-blind (it runs no middleware)', () => {
-  it('it still reports an admitted re-point as dropped, while the write stores it; and a refused one as dropped, while the write refuses it', async () => {
+describe('[#24822][#25062] the `update`-mode validate() preview answers a re-point as its write does', () => {
+  it('an admitted re-point is reported as no drop, and the write stores it; a refused one is refused by both, with the write\'s code and message', async () => {
     const b = await boot('group');
 
     const admitted = await b.engine.validate(INJECTED, { id: 'r1', organization_id: SISTER_ORG }, { mode: 'update', context: GROUP_CTX as never });
     const refused = await b.engine.validate(INJECTED, { id: 'r1', organization_id: FOREIGN_ORG }, { mode: 'update', context: GROUP_CTX as never });
 
-    expect(admitted.results[0]?.droppedFields).toEqual(READONLY_DROP(INJECTED));
-    expect(refused.results[0]?.droppedFields).toEqual(READONLY_DROP(INJECTED));
+    expect(admitted.valid).toBe(true);
+    expect(admitted.results[0]?.droppedFields).toBeUndefined();
+    expect(refused.valid).toBe(false);
+    expect(refused.results[0]?.droppedFields).toBeUndefined();
+    const refusal = refused.results[0]?.errors[0];
+    expect(refusal?.field).toBe('organization_id');
+    expect(refusal?.code).toBe('PERMISSION_DENIED');
+
+    const refusedWrite = await repoint(b, INJECTED, FOREIGN_ORG, GROUP_CTX, 'id');
+    expectWallRefusal(refusedWrite.outcome, INJECTED);
+    expect(refusal?.message).toBe(refusedWrite.outcome.message);
+    expect(await b.table(INJECTED)).toEqual(SEEDED(INJECTED));
+
     const write = await repoint(b, INJECTED, SISTER_ORG, GROUP_CTX, 'id');
     expect(write.outcome.ok, write.outcome.message).toBe(true);
+    expect(write.dropped).toEqual([]);
     expect(await b.table(INJECTED)).toEqual(SEEDED(INJECTED, SISTER_ORG));
   });
 });

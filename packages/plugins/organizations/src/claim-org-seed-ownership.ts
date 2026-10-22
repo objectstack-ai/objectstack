@@ -7,14 +7,15 @@
  * first-admin handoff). Seeded rows land `owner_id = NULL` (the author leaves it
  * unset and `cel`os.user.id`` resolves to NULL at seed time, since the owning
  * admin does not exist yet). In multi-tenant mode those rows are scoped to an
- * org by `claimOrphanOrgRows` / per-org replay, but their `owner_id` stays NULL
+ * org by the per-org replay, but their `owner_id` stays NULL
  * — so "My" views, owner reports and owner notifications are empty for the org's
  * members until ownership is assigned.
  *
  * This runs when the org's owner is established (e.g. `ensureDefaultOrganization`
  * binds the platform admin as the default org's `owner`) and assigns
- * `owner_id = ownerUserId` to that org's NULL-owned rows — the ownership
- * companion to `claimOrphanOrgRows`'s `organization_id` back-fill.
+ * `owner_id = ownerUserId` to that org's NULL-owned rows. It never writes
+ * `organization_id`: an organization-less row is the organization-ownership
+ * ceremony's to attribute, not this plugin's (ADR-0131 D10).
  *
  * Scoped to a single org (`organization_id = organizationId`) so it never
  * touches another tenant's rows. Idempotent: only NULL-owned rows are updated.

@@ -39,10 +39,10 @@
  * This helper runs right after `bootstrapPlatformAdmin` promotes the first human
  * user to platform admin, and again whenever a seed settles (`app:seeded`) on
  * every boot — the first one and every later one — and transfers ownership of
- * those orphan rows to the platform admin. It is the ownership twin of
- * org-scoping's `claimOrphanOrgRows` (which
- * back-fills `organization_id`): walk every user-authored object that declares
- * the canonical `owner_id` column, and re-own the rows that no human owns yet.
+ * those orphan rows to the platform admin. Its multi-organization twin is
+ * org-scoping's `claimOrgSeedOwnership`, scoped to one organization's seeded
+ * rows. It walks every user-authored object that declares the canonical
+ * `owner_id` column, and re-owns the rows that no human owns yet.
  *
  * ## ⚠️ It is NOT a single pass, and cannot be
  *

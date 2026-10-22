@@ -161,9 +161,10 @@ patchedDependencies:
 #     better-sqlite3 12.11.1 to satisfy it — which is why CI never saw what a
 #     scaffolded project shows on its first screen. #10326 measured 1.7.1 as
 #     behaviourally identical on 13.0.3 and 12.11.1 and left this workspace's
-#     resolution untouched; only the scaffolds declare it (their
-#     `better-auth>better-sqlite3` and `@better-auth/utils` entries do NOT
-#     retire with #3653 — their conditions are separate and unmet).
+#     resolution untouched; only the scaffolds declared it. Their
+#     `better-auth>better-sqlite3` and `@better-auth/utils` entries outlived
+#     #3653 and retired on the 1.7.12 pin, where better-auth declares no
+#     better-sqlite3 peer and the four utils peers accept `^0.5.0`.
 #     `scripts/check-prerelease-pin-watch.mjs` now has nothing to watch and
 #     says so — the self-retiring exit its own header promised.
 #   - @better-auth/oauth-provider: GHSA-p2fr-6hmx-4528 — same better-auth

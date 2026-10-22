@@ -156,7 +156,7 @@ export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion
 
 // Export Engine
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
-export type { HookHandler, HookEntry, OperationContext, EngineMiddleware, HeldFileResolver, FieldOwnedFileReadAuthorizer } from './engine.js';
+export type { HookHandler, HookEntry, OperationContext, EngineMiddleware, HeldFileResolver, FieldOwnedFileReadAuthorizer, WriteWallVerdict, WriteWallRowVerdict } from './engine.js';
 export type { AdmittedValueShapeViolationTally } from './engine.js';
 // The declarative datasource definition the engine indexes, and the element
 // type of `ObjectQL.listDatasourceDefs()`. Exported so a consumer sweeping for

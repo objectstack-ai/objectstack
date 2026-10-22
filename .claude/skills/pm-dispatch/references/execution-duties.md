@@ -1,7 +1,5 @@
 # 执行座位职责
 
-执行席每次 fire 读本文:候选、认领、派发、收集、复核;落地窗口另读 `landing-operations.md`。
-
 - 半状态巡查按需跑(分诊席每日对账可调),H 行是读数不是前提;⛔ 不因锚行停派发。
 
 ## 候选与批次
@@ -63,10 +61,11 @@
 - 同笔 `Release:` 行点名已落项与余项去向;余项需换道/拆分加 `pm:retriage`,自队列重新认领。
 - 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
 - step ① 之后获得 assignee 的直接弃出本批。
-- ② 认领评论(英文)照抄 SKILL.md 模板:`Claim:` 首行,`Branch:`、`Clause-②:` 各占一行且行首。
+- ② 认领评论照抄 SKILL.md 模板:`Branch:`、`Clause-②:`、`Metadata-protocol:` 各占一行且行首。
 - 条款②入队闸门只读认领评论且只读行首键:句中提及与另发评论皆读不到,卡即不可读。
 - 谓词保持严格、⛔ 不放宽;session ID 不可省,`mode:subagent` 下 dev 与 PM 同 ID,身份看分支。
 - `Clause-②: yes | no` 恰这两种拼写,恒英文机器判据;判据:本卡放宽接受集或扩大公开面吗。
+- `Metadata-protocol:` 四值与定级表住 AGENTS.md「Post-Task Checklist」③:定级只随元数据协议。
 - 公开面 = 包构建后的入口声明所达,⛔ 不只数入口的再导出清单。
 - 所达 = 再导出名,加经其 props、参数与返回类型可达的每个类型。
 - 语言包键已发布:包导出语言包及其派生类型(`TranslationKeys = typeof en`)即发布每个键。

@@ -1051,6 +1051,11 @@ export const REMOTE_FACE_ANSWERS = {
   // Deprecated aliases: they call `this.commit` / `this.rollback`, which refuse.
   commitTransaction: 'inherited',
   rollbackTransaction: 'inherited',
+  // [#25073] Record numbers ahead of the write: `fillAutoNumberFields` and the
+  // collision re-seed, which already reach the remote database through this
+  // face's own `getNextSequenceValue`, `autoNumberValueExists` and
+  // `resyncSequenceToDataMax` (see "Autonumber on the remote face" above).
+  issueAutonumbers: 'inherited',
   // Knex-only reads.
   findWithWindowFunctions: 'refused',
   analyzeQuery: 'refused',

@@ -35,6 +35,10 @@ interface MinimalEngine {
     options?: { object?: string | string[]; priority?: number; packageId?: string },
   ): void;
   unregisterHooksByPackage(packageId: string): number;
+  registerInsertRecomputeListener?(
+    id: string,
+    fn: (event: { object: string; row: Record<string, unknown>; fields: string[] }) => void | Promise<void>,
+  ): void;
   find(object: string, query?: any, options?: any): Promise<any[]>;
   update(object: string, data: any, options?: any): Promise<any>;
   registry?: {
@@ -54,8 +58,16 @@ interface MinimalLogger {
  * field is part of the write. Recomputes from the NEW value; a non-CJK new
  * value clears the companion (null) so stale pinyin never recalls a renamed
  * record. Never throws — a normalization failure must not fail the write.
+ *
+ * `recomputed` narrows "part of the write" to the fields the engine computed
+ * again after issuing the record number (#25073).
  */
-async function stampCompanion(engine: MinimalEngine, ctx: any, logger?: MinimalLogger): Promise<void> {
+async function stampCompanion(
+  engine: MinimalEngine,
+  ctx: any,
+  logger?: MinimalLogger,
+  recomputed?: readonly string[],
+): Promise<void> {
   const object = ctx?.object;
   if (!object) return;
   const schema = engine.registry?.getObject?.(object);
@@ -66,7 +78,9 @@ async function stampCompanion(engine: MinimalEngine, ctx: any, logger?: MinimalL
 
   const sources = resolveSearchCompanionSources(schema);
   if (sources.length === 0) return;
-  const touched = sources.filter((s) => Object.prototype.hasOwnProperty.call(data, s));
+  const touched = sources.filter((s) =>
+    recomputed ? recomputed.includes(s) : Object.prototype.hasOwnProperty.call(data, s),
+  );
   if (touched.length === 0) return; // source unchanged → no recompute (no write amplification)
 
   try {
@@ -95,6 +109,14 @@ export function bindSearchCompanionHooks(engine: MinimalEngine, logger?: Minimal
   const handler = (ctx: any) => stampCompanion(engine, ctx, logger);
   engine.registerHook('beforeInsert', handler, opts);
   engine.registerHook('beforeUpdate', handler, opts);
+  // [#25073] A name field whose stored `expression` reads the record number is
+  // computed again once the number is issued, after `beforeInsert` ran, so
+  // the companion is stamped again from that value before the row is written.
+  if (typeof engine.registerInsertRecomputeListener === 'function') {
+    engine.registerInsertRecomputeListener(PINYIN_SEARCH_HOOK_PACKAGE, ({ object, row, fields }) =>
+      stampCompanion(engine, { object, input: { data: row } }, logger, fields),
+    );
+  }
   logger?.info?.('[pinyin-search] companion hooks bound (beforeInsert/beforeUpdate, all objects)');
 }
 
