@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-security/src/security-plugin-cbp-read.ts",
+  "adrs": [
+    "ADR-0055"
+  ],
+  "invariant": "ADR-0055 §1 — `resolveCbpRelation` derives a `controlled_by_parent` object's master from exactly one `master_detail` field declared `required: true` that names a reference, and from nothing else: zero such fields or two or more resolve `null`, which both halves treat as fail-closed (reads answer RLS_DENY_FILTER, writes throw MasterDetailRelationMissingError, 422 INVALID_METADATA), reported once per object per cache generation. Do NOT restore the retired fallback tiers (any `master_detail`, then a required `lookup`) or a first-by-field-order pick among two: they were never part of ADR-0055 §1, `ObjectSchema` refuses those shapes at parse, and a gate that derives access from a relation the parse refuses is the disagreement the step-18 semantic migration `cbp-master-relation-tiers-retired` closed. The reference-SPELLING tolerance in the same reader is a different, deliberate decision and stays."
+}
