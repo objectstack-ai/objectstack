@@ -13,6 +13,11 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
 import { NotificationTemplateStore } from './template-renderer.js';
+import {
+    bindTemplateHolePlacement,
+    unbindTemplateHolePlacement,
+    type PlacementHookEngine,
+} from './notification-template-placement.js';
 import { NotificationTextRenderer, type NotificationTextI18n } from './notification-text.js';
 import { convertWildcardPreferenceUsers } from './preference-user-conversion.js';
 import {
@@ -196,6 +201,8 @@ export class MessagingServicePlugin implements Plugin {
     private readonly options: Required<MessagingServicePluginOptions>;
     private dispatcher?: NotificationDispatcher;
     private httpDispatcher?: HttpDispatcher;
+    /** The engine the template placement hooks are bound to — unbound on teardown. */
+    private placementEngine?: PlacementHookEngine;
 
     constructor(options: MessagingServicePluginOptions = {}) {
         this.options = {
@@ -332,6 +339,27 @@ export class MessagingServicePlugin implements Plugin {
                 },
             ],
         });
+
+        // [#25082] A sys_notification_template save whose html / mjml body
+        // places a hole the renderer cannot encode for where it lands is
+        // refused (`400 VALIDATION_FAILED` at `body`), judged over the merged
+        // record — engine hooks, bound here because the engine is a declared
+        // dependency, so its absence now is a fact rather than an early read.
+        // See notification-template-placement.ts.
+        let engine: PlacementHookEngine | undefined;
+        try {
+            engine = ctx.getService<PlacementHookEngine>('objectql');
+        } catch {
+            engine = undefined;
+        }
+        if (bindTemplateHolePlacement(engine)) {
+            this.placementEngine = engine;
+        } else {
+            ctx.logger.warn(
+                '[messaging] no ObjectQL engine with a hook registry — a sys_notification_template save whose html or '
+                + 'mjml body places a hole outside element text or a quoted plain-text attribute value is NOT refused',
+            );
+        }
 
         // ADR-0029 D8 — contribute this service's object translations to the
         // i18n service on kernel:ready (the i18n plugin may register after
@@ -625,6 +653,8 @@ export class MessagingServicePlugin implements Plugin {
      * timers must release them on the hook the kernel actually calls.
      */
     async destroy(): Promise<void> {
+        unbindTemplateHolePlacement(this.placementEngine);
+        this.placementEngine = undefined;
         await this.dispatcher?.stop();
         this.dispatcher = undefined;
         await this.httpDispatcher?.stop();
