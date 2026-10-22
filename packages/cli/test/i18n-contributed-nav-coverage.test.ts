@@ -79,20 +79,26 @@ const CONTRIBUTED_NAV_ZH = { nav_case: { label: '工单' }, grp_knowledge: { lab
 const without = (labels: Record<string, unknown>, id?: string) =>
   Object.fromEntries(Object.entries(labels).filter(([key]) => key !== id));
 
-/** The app package carries the app's own labels; the module, the labels of what it contributes. */
+/**
+ * The app package's pack carries every navigation label, the contributed ones
+ * included — the layout HotCRM's packs were measured in (#18203). A pack's
+ * `apps.APP` entry requires the app's own `label`, so a module could ship the
+ * contributed labels itself only by restating it.
+ */
 function stacks(drop?: string) {
   const appStack = defineStack({
     manifest: appManifest,
     objects: [object('cnv_account', 'Account')],
     apps: [app],
     i18n: I18N,
-    translations: [{ 'zh-CN': { apps: { cnv_desk: { label: '服务台', navigation: without(OWN_NAV_ZH, drop) } } } }],
+    translations: [{
+      'zh-CN': { apps: { cnv_desk: { label: '服务台', navigation: without({ ...OWN_NAV_ZH, ...CONTRIBUTED_NAV_ZH }, drop) } } },
+    }],
   } as any);
   const svcStack = defineStack({
     manifest: svcManifest,
     objects: [object('cnv_case', 'Case'), object('cnv_article', 'Article')],
     i18n: I18N,
-    translations: [{ 'zh-CN': { apps: { cnv_desk: { navigation: without(CONTRIBUTED_NAV_ZH, drop) } } } }],
   } as any);
   return { appStack, svcStack };
 }
