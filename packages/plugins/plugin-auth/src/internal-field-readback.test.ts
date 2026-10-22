@@ -184,6 +184,44 @@ describe('[#24061] a column the read was keyed on is answered from the lookup', 
   });
 });
 
+describe('[#25111] sys_verification.identifier — @better-auth/sso verify-domain reads it off the row', () => {
+  // `findVerificationValue(identifier)` is `findMany(verification, where
+  // identifier = …)`; the vendor then builds the TXT record it accepts as
+  // `${row.identifier}=${row.value}`. The real-handler pin is
+  // `sso-domain-verification-instructed-record.test.ts`; this pins the seam.
+  const byIdentifier = (value: string) => [
+    { field: 'identifier', value, operator: 'eq', connector: 'AND', mode: 'sensitive' },
+  ];
+
+  it('a stripped row (the findMany shape, no lookup) gets BOTH columns back — one batched call per column', async () => {
+    const resolveInternalField = resolver({ v1: { value: 'TOKEN', identifier: '_better-auth-token-acme' } });
+    const rows: any[] = [{ id: 'v1', expires_at: '2099-01-01' }];
+    await reattachInternalFieldsOnRead({ resolveInternalField }, 'sys_verification', rows);
+    expect(rows[0].value).toBe('TOKEN');
+    expect(rows[0].identifier).toBe('_better-auth-token-acme');
+    expect(resolveInternalField).toHaveBeenCalledTimes(2);
+    expect(resolveInternalField).toHaveBeenCalledWith('sys_verification', ['v1'], 'identifier');
+  });
+
+  it('a read keyed on identifier answers it from the lookup — only `value` costs a privileged read', async () => {
+    const resolveInternalField = resolver({ v1: { value: 'TOKEN', identifier: 'never-read' } });
+    const row: any = { id: 'v1' };
+    await reattachInternalFieldsOnRead(
+      { resolveInternalField }, 'sys_verification', row, undefined, byIdentifier('_better-auth-token-acme'),
+    );
+    expect(row.identifier).toBe('_better-auth-token-acme');
+    expect(row.value).toBe('TOKEN');
+    expect(resolveInternalField).toHaveBeenCalledTimes(1);
+    expect(resolveInternalField).toHaveBeenCalledWith('sys_verification', ['v1'], 'value');
+  });
+
+  it('fails closed on a row the strip emptied of identifier when the engine offers no accessor', async () => {
+    // `required: true`, so absence can only be the strip — the `value` posture.
+    const row: any = { id: 'v1', value: 'TOKEN' };
+    await expect(reattachInternalFieldsOnRead({}, 'sys_verification', row)).rejects.toThrow(/'identifier'/);
+  });
+});
+
 describe('#7987 reattachInternalFieldsOnRead — sys_account OAuth columns', () => {
   const ACCOUNT_ROW = () => ({ id: 'a1', user_id: 'u1', provider_id: 'google' });
 
