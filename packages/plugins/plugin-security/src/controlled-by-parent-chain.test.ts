@@ -389,8 +389,8 @@ async function boot(options: BootOptions = {}) {
   const compose = (where: unknown, context: any) =>
     composeReadableIdsInMemory(where, context, {
       rows: (object) => store.rows[object],
-      canReadObject: (object, c) => plugin.canReadObject(object, c),
-      getReadFilter: (object, c) => plugin.getReadFilter(object, c),
+      readAdmission: (object, c) => plugin.canReadObject(object, c),
+      readScope: (object, c) => plugin.getReadFilter(object, c),
     });
 
   /** Run the middleware for a find of `object` and return the `where` it injected, uncomposed. */

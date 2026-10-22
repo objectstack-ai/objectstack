@@ -452,8 +452,8 @@ async function makeStack(opts: { orgScoping?: boolean } = {}): Promise<Stack> {
           // is done for it (`readable-ids-in-memory.testkit.ts`).
           const where = await composeReadableIdsInMemory(opCtx.ast.where, opCtx.context, {
             rows: (o) => engine._tables[o],
-            canReadObject: (o, c) => security.canReadObject(o, c),
-            getReadFilter: (o, c) => security.getReadFilter(o, c),
+            readAdmission: (o, c) => security.canReadObject(o, c),
+            readScope: (o, c) => security.getReadFilter(o, c),
           });
           result = await engine.find(object, { where });
         });

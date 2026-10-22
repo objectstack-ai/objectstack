@@ -15,8 +15,8 @@
  * same five steps `ObjectQL#composeReadableIdsAtBoundary` runs, over the
  * double's rows —
  *
- *  1. `canReadObject(P)` false or a throw ⇒ `$in: []`;
- *  2. `getReadFilter(P)`: `undefined` ⇒ every row of P; the deny sentinel, by
+ *  1. the object-level read admission of P false or a throw ⇒ `$in: []`;
+ *  2. the read scope of P: `undefined` ⇒ every row of P; the deny sentinel, by
  *     identity, or a throw ⇒ `$in: []`; any other scope ⇒ the ids of P's rows
  *     it matches, the leaves IT carries composed first (the nested master
  *     chain, ADR-0139 D6 as amended), under the same caller context;
@@ -44,11 +44,19 @@ import { matchesFilterCondition } from '@objectstack/formula';
 /** The engine's `READABLE_IDS_MAX_CHAIN_DEPTH`: scopes composed above the read's own `where`. */
 const MAX_CHAIN_DEPTH = 8;
 
+/**
+ * The two halves of a read of the parent the engine asks the security
+ * service (ADR-0139 D2 steps 1 and 5), handed in by the suite as predicates:
+ * this testkit is no door of its own and names no service member — the suite
+ * wires the real service's object admission and read scope to them.
+ */
 export interface InMemoryReadableIdsSecurity {
   /** The rows of object `P` the double holds — `undefined` for an object it does not hold. */
   readonly rows: (object: string) => readonly Record<string, unknown>[] | undefined;
-  readonly canReadObject: (object: string, context: unknown) => Promise<boolean>;
-  readonly getReadFilter: (object: string, context: unknown) => Promise<unknown>;
+  /** D2 step 1: the object-level read admission of `P` for the caller. */
+  readonly readAdmission: (object: string, context: unknown) => Promise<boolean>;
+  /** D2 step 5: the row scope of `P` for the caller — `undefined`, the deny sentinel, or a filter. */
+  readonly readScope: (object: string, context: unknown) => Promise<unknown>;
 }
 
 /**
@@ -79,14 +87,14 @@ export async function composeReadableIdsInMemory<T>(
     if (!rows) return deny();
     let admitted: boolean;
     try {
-      admitted = (await security.canReadObject(parent, context)) === true;
+      admitted = (await security.readAdmission(parent, context)) === true;
     } catch {
       return deny();
     }
     if (!admitted) return deny();
     let scope: unknown;
     try {
-      scope = await security.getReadFilter(parent, context);
+      scope = await security.readScope(parent, context);
     } catch {
       return deny();
     }
