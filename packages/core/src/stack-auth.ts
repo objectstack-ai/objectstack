@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { readEnvWithDeprecation } from '@objectstack/types';
+import { getEnv } from './utils/env.js';
 
 /**
  * The ONE rule that decides whether a boot composes the platform's auth family
@@ -116,6 +117,97 @@ export function isHostKernelComposition(plugins: readonly unknown[]): boolean {
     return plugin?.name === 'com.objectstack.runtime.objectos-environment'
       || plugin?.constructor?.name === 'ObjectOSEnvironmentPlugin';
   });
+}
+
+/**
+ * The control-plane credential this process is bound with: the configured
+ * value when one is given, else `OS_CLOUD_API_KEY` (which the cloud injects
+ * into the runtimes it hosts), trimmed; `''` when neither. The ONE derivation
+ * of "a control plane is bound" — `CloudConnectionPlugin` (`@objectstack/cloud-connection`)
+ * resolves its `platformManaged` through it with its `controlPlaneApiKey`
+ * option, and {@link isCloudManaged}'s fuse reads it with none, because a
+ * process-wide accessor sees no plugin's options. Ruling 6341690661 (#25083),
+ * Q2 → D: the fuse reads the fact cloud-connection already computes, ⛔ never
+ * a second spelling of it beside a reader.
+ */
+export function resolveControlPlaneApiKey(configured?: string): string {
+  return (configured ?? getEnv('OS_CLOUD_API_KEY') ?? '').trim();
+}
+
+/**
+ * The memoized answer of {@link isCloudManaged} — its refusal included, so a
+ * boot the fuse refused stays refused on every later read in the process.
+ */
+let cloudManagedVerdict: { readonly managed: boolean } | { readonly refusal: Error } | undefined;
+
+/**
+ * Is this process the cloud-managed runtime? `OS_CLOUD_MANAGED=1` is the
+ * switch on EVERY boot, and this is its ONE reader (ruling 6341690661 on
+ * #25083, Q2 → D): every judgement site — plugin-auth's sign-in surfaces, the
+ * admin user doors, the audience posture, invitations, the just-in-time path —
+ * calls it and nothing else, and every kernel in the process reads the same
+ * fact, the per-environment kernels the cloud builds beside its host kernel
+ * included. The name is the maintainer's: no `_ENABLED` suffix (the recorded
+ * exception to Prime Directive 9), and not `isManaged()`, which already names
+ * `idp_provisioned` identities and `managedBy` provenance in this tree.
+ *
+ * Exactly `1` turns it on; unset or empty leaves it off; any other value is
+ * refused, so a mistyped switch cannot run a hosted runtime unmanaged.
+ *
+ * **The fuse.** A production boot — not a development boot
+ * ({@link isDevelopmentBoot}, which `--dev` sets through `NODE_ENV`) and not
+ * `NODE_ENV=test` — that finds the switch on with no bound control plane
+ * ({@link resolveControlPlaneApiKey}) refuses: the cloud injects
+ * `OS_CLOUD_API_KEY` into every runtime it hosts, so a runtime without it is
+ * a self-hosted deployment carrying a copied env file, and it is refused
+ * instead of silently narrowed. It fires at the first read here, and at
+ * `ObjectKernel` / `LiteKernel` `bootstrap()`, which read it before any plugin
+ * initialises — ⛔ never in `os serve`, which the hosted process never runs.
+ * A control plane bound only through `CloudConnectionPlugin`'s
+ * `controlPlaneApiKey` option is invisible to the fuse and is refused.
+ *
+ * Synchronous and memoized for the process; tests reset it with
+ * {@link resetCloudManagedForTesting}.
+ */
+export function isCloudManaged(): boolean {
+  cloudManagedVerdict ??= decideCloudManaged();
+  if ('refusal' in cloudManagedVerdict) throw cloudManagedVerdict.refusal;
+  return cloudManagedVerdict.managed;
+}
+
+/**
+ * Forget {@link isCloudManaged}'s memoized answer, so the next read decides
+ * again from the environment. For tests that set `OS_CLOUD_MANAGED` and remove
+ * it afterwards; ⛔ never called by a boot.
+ */
+export function resetCloudManagedForTesting(): void {
+  cloudManagedVerdict = undefined;
+}
+
+function decideCloudManaged(): { readonly managed: boolean } | { readonly refusal: Error } {
+  const raw = getEnv('OS_CLOUD_MANAGED');
+  if (raw === undefined) return { managed: false };
+  if (raw !== '1') {
+    return {
+      refusal: new Error(
+        `[Kernel] OS_CLOUD_MANAGED is set to ${JSON.stringify(raw)}. The managed-mode switch takes exactly 1, `
+        + 'or is left unset: set OS_CLOUD_MANAGED=1 on a cloud-hosted runtime, and remove it everywhere else.',
+      ),
+    };
+  }
+  const production = !isDevelopmentBoot(undefined) && getEnv('NODE_ENV') !== 'test';
+  if (production && resolveControlPlaneApiKey() === '') {
+    return {
+      refusal: new Error(
+        '[Kernel] Refusing to start: OS_CLOUD_MANAGED=1 is set on a production boot with no bound control plane '
+        + '(OS_CLOUD_API_KEY is unset or empty). The cloud sets both on every runtime it hosts, so this runtime is '
+        + 'not cloud-hosted: remove OS_CLOUD_MANAGED (a self-hosted deployment never sets it), or set '
+        + "OS_CLOUD_API_KEY to the environment's control-plane service key. A key passed only as "
+        + "CloudConnectionPlugin's controlPlaneApiKey option does not count.",
+      ),
+    };
+  }
+  return { managed: true };
 }
 
 /**
