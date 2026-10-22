@@ -24,8 +24,12 @@
  *    gives the true reason: the primary datasource is the platform's managed
  *    storage, not a federation source (ADR-0015 §1). It never introspects the
  *    platform database.
- *  - Nothing else moves: a managed runtime datasource still tests and syncs
- *    as before, and a datasource with no live driver still answers `ok: false`.
+ *  - Nothing else moves on Test: a managed runtime datasource still tests as
+ *    before, and a datasource with no live driver still answers `ok: false`.
+ *    [#24837] Its SYNC no longer answers: ADR-0015 §4.2 reserves federation
+ *    for a datasource whose `schemaMode` is not `managed`, so that pin is
+ *    reversed here, and `managed-datasource-sync-refusal.test.ts` holds the
+ *    rule for every door.
  *
  * The composition is the real one, end to end: a real `ObjectQL` engine (its
  * source, through this package's vitest alias), the real connection service
@@ -59,9 +63,23 @@ type Knex = { schema: { createTable(n: string, cb: (t: never) => void): Promise<
 type Table = { string(n: string): { primary(): void } };
 
 /**
+ * The datasource records the page lists. [#24837] The federation service reads
+ * the same records (`metadata.get('datasource', name)`, as `plugin.ts` wires
+ * it), so a datasource's Sync answer and its listed `schemaMode` are one fact.
+ * `stream` is a FEDERATED datasource on a driver that cannot introspect, the
+ * subject of the engine-reason pin below.
+ */
+const RECORDS = [
+  { name: 'default', driver: 'sqlite', origin: 'code', config: {} },
+  { name: 'warehouse', driver: 'sqlite', origin: 'runtime', config: {} },
+  { name: 'scratch', driver: 'memory', origin: 'runtime', config: {} },
+  { name: 'stream', driver: 'memory', origin: 'runtime', schemaMode: 'external', external: {}, config: {} },
+];
+
+/**
  * The page's composition: the primary datasource connected `asDefault` (the
  * `DefaultDatasourcePlugin.init()` call, verbatim), a managed runtime SQLite
- * datasource like the one the tester created, and a runtime `memory` one.
+ * datasource like the one the tester created, and runtime `memory` ones.
  */
 async function boot() {
   const ql = new ObjectQL();
@@ -83,13 +101,23 @@ async function boot() {
     { name: 'scratch', driver: 'memory', config: {}, origin: 'runtime' },
     { context: { origin: 'runtime', trigger: 'runtime-admin' } },
   );
+  await connection.connect(
+    { name: 'stream', driver: 'memory', schemaMode: 'external', external: {}, config: {}, origin: 'runtime' },
+    { context: { origin: 'runtime', trigger: 'runtime-admin' } },
+  );
 
   const primary = ql.getDriverByName(ql.getDefaultDriverName()!) as IDataDriver & { getKnex(): Knex };
   await primary.getKnex().schema.createTable('acct', (t) => (t as unknown as Table).string('id').primary());
   const warehouse = ql.getDriverByName('warehouse') as IDataDriver & { getKnex(): Knex };
   await warehouse.getKnex().schema.createTable('orders', (t) => (t as unknown as Table).string('id').primary());
 
-  const services = new Map<string, unknown>([['data', ql]]);
+  const metadata = {
+    get: async (type: string, name: string) => (type === 'datasource' ? RECORDS.find((r) => r.name === name) : undefined),
+  };
+  const services = new Map<string, unknown>([
+    ['data', ql],
+    ['metadata', metadata],
+  ]);
   await new ExternalDatasourceServicePlugin().init({
     getService: (n: string) => {
       if (!services.has(n)) throw new Error(`no service: ${n}`);
@@ -100,11 +128,7 @@ async function boot() {
   const external = services.get('external-datasource') as ExternalDatasourceService;
 
   const admin = new DatasourceAdminService({
-    listDatasourceRecords: async () => [
-      { name: 'default', driver: 'sqlite', origin: 'code', config: {} },
-      { name: 'warehouse', driver: 'sqlite', origin: 'runtime', config: {} },
-      { name: 'scratch', driver: 'memory', origin: 'runtime', config: {} },
-    ],
+    listDatasourceRecords: async () => RECORDS,
     connectionStates: () => connection.listConnectionStates(),
   } as never);
 
@@ -240,8 +264,12 @@ describe('a driver with no introspectSchema', () => {
   });
 });
 
-describe('nothing else moves', () => {
-  it('a managed runtime datasource tests and syncs exactly as before', async () => {
+describe('nothing else moves on Test; Sync on a managed datasource now refuses', () => {
+  // [#24837] REVERSED. This pin read "tests and syncs exactly as before" and
+  // held remote-tables at 200 on a managed runtime datasource. ADR-0015 §4.2
+  // reserves federation for a datasource whose `schemaMode` is not `managed`,
+  // so the Sync half is now the refusal; the Test half is unchanged.
+  it('a managed runtime datasource tests exactly as before, and its Sync refuses', async () => {
     const { call } = await boot();
 
     const test = await call('POST', '/warehouse/test');
@@ -249,17 +277,28 @@ describe('nothing else moves', () => {
     expect(test.body.data).toMatchObject({ ok: true, tableCount: 1 });
 
     const tables = await call('GET', '/warehouse/remote-tables');
-    expect(tables.status).toBe(200);
-    expect(tables.body.data.tables.map((t: { name: string }) => t.name)).toEqual(['orders']);
+    expect(tables.status).toBe(400);
+    expect(tables.body.error.code).toBe('EXTERNAL_DATASOURCE_ERROR');
+    expect(tables.body.error.message).toContain("Datasource 'warehouse' is managed");
   });
 
+  // [#24837] The managed rule is judged before the engine is asked, so a
+  // managed datasource on such a driver (`scratch`) answers the managed
+  // refusal now. The engine's reason is still what a FEDERATED datasource on
+  // that driver gets, which is what this pin is about, so its subject moved to
+  // `stream`.
   it('Sync on a driver that cannot introspect still refuses with the engine reason', async () => {
     const { call } = await boot();
 
-    const tables = await call('GET', '/scratch/remote-tables');
+    const tables = await call('GET', '/stream/remote-tables');
     expect(tables.status).toBe(400);
     expect(tables.body.error.code).toBe('EXTERNAL_DATASOURCE_ERROR');
     expect(tables.body.error.message).toContain('does not support introspectSchema()');
+
+    const managed = await call('GET', '/scratch/remote-tables');
+    expect(managed.status).toBe(400);
+    expect(managed.body.error.code).toBe('EXTERNAL_DATASOURCE_ERROR');
+    expect(managed.body.error.message).toContain("Datasource 'scratch' is managed");
   });
 
   it('a datasource with no live driver still answers ok: false', async () => {

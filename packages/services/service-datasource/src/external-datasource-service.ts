@@ -454,19 +454,90 @@ function importNameRefusedError(message: string): Error {
  * the engine's write gate exempts the default datasource, so nothing would
  * stand behind it.
  *
- * `code` is the one the calling door serves (`EXTERNAL_IMPORT_ERROR` for the
- * import, `EXTERNAL_DATASOURCE_ERROR` for the rest), so the declaration and
- * the served envelope agree, as for `importNameRefusedError` above.
+ * The code is the one the calling door serves (see {@link FederationDoor}), so
+ * the declaration and the served envelope agree, as for
+ * `importNameRefusedError` above.
  */
-function primaryDatasourceNotFederatedError(
-  datasource: string,
-  code: 'EXTERNAL_DATASOURCE_ERROR' | 'EXTERNAL_IMPORT_ERROR',
-): Error {
+function primaryDatasourceNotFederatedError(datasource: string, door: FederationDoor): Error {
+  const code = door === 'import' ? 'EXTERNAL_IMPORT_ERROR' : 'EXTERNAL_DATASOURCE_ERROR';
   const err = new Error(
     `Datasource '${datasource}' is the platform's managed primary datasource, not a federation source: ` +
       `its tables are the platform's own objects, so there are no remote tables to list, draft or import ` +
       `from it. Sync objects from an external datasource instead.`,
   ) as Error & { code?: string; status?: number };
+  err.code = code;
+  err.status = 400;
+  return err;
+}
+
+/**
+ * [#24837] Which federation door is refusing, which decides the code its
+ * refusal carries: the import serves its own registered code,
+ * `EXTERNAL_IMPORT_ERROR`, and every door that only introspects (listing,
+ * draft, catalog refresh) serves `EXTERNAL_DATASOURCE_ERROR`. Those are the
+ * codes the two route families answer any refusal from these methods with.
+ *
+ * A door KIND, not a code parameter, on purpose: each refusal helper below
+ * spells both codes as literals, so `check:dispatcher-error-vocabulary` reads
+ * them at the stamp instead of reporting a helper whose codes it cannot see.
+ */
+type FederationDoor = 'import' | 'introspect';
+
+/**
+ * [#24837] Is `ds` a federation source: a datasource DEFINITION whose
+ * `schemaMode` is declared and is not `managed`?
+ *
+ * ADR-0015 §1 puts a federated object on "the datasource it points to
+ * (`schemaMode !== 'managed'`)", and §4.2 allows `object.external` only there.
+ * `managed` is the spec's default (`DatasourceSchema.schemaMode`), so a
+ * definition that declares no `schemaMode` is managed, and so is a name with no
+ * definition at all: nothing declares it a federation source, and federation
+ * has to be declared, never defaulted to.
+ *
+ * ONE spelling of the question for this service. The Sync doors refuse what it
+ * rejects ({@link ExternalDatasourceService.assertFederationSource}), and the
+ * validation skips the same population as "not federated"
+ * ({@link ExternalDatasourceService.validateObject}), so the two cannot drift
+ * into one datasource being importable and never validated.
+ */
+function isFederationSource(ds: DatasourceLike | undefined): ds is DatasourceLike {
+  return Boolean(ds?.schemaMode) && ds?.schemaMode !== 'managed';
+}
+
+/**
+ * [#24837] The refusal every federation door answers for a datasource that is
+ * not a federation source by {@link isFederationSource}: a managed one (declared
+ * or by default), or a name with no datasource definition.
+ *
+ * Until this guard, only the primary datasource was refused
+ * ({@link primaryDatasourceNotFederatedError}). Every other managed datasource,
+ * the runtime ones an administrator creates in Setup included, listed its
+ * tables and drafted and imported them as federated objects, against ADR-0015
+ * §4.2. Nothing behind these doors refuses either: the engine's write gate
+ * (ADR-0015 §5.3) gates only non-managed datasources, so writes to an object
+ * imported over a managed one would go through ungated.
+ *
+ * Same status and codes as the primary datasource's refusal, by the same
+ * reasoning: the code is the one the calling door serves.
+ */
+function notAFederationSourceError(datasource: string, ds: DatasourceLike | undefined, door: FederationDoor): Error {
+  const code = door === 'import' ? 'EXTERNAL_IMPORT_ERROR' : 'EXTERNAL_DATASOURCE_ERROR';
+  const lead = !ds
+    ? `Datasource '${datasource}' has no datasource definition, so nothing declares it a federation source`
+    : ds.schemaMode
+      ? `Datasource '${datasource}' is managed (schemaMode '${ds.schemaMode}'), not a federation source`
+      : `Datasource '${datasource}' is managed (it declares no schemaMode, and 'managed' is the default), ` +
+        `not a federation source`;
+  const rule =
+    `ADR-0015 reserves federation for a datasource whose schemaMode is not 'managed', ` +
+    `because the platform owns a managed datasource's schema and its tables are the platform's own objects.`;
+  const remedy =
+    `To list, draft or import remote tables, use a datasource the platform does not own: ` +
+    `one declared with schemaMode 'external' or 'validate-only'.`;
+  const err = new Error(`${lead}: ${rule} ${remedy}`) as Error & {
+    code?: string;
+    status?: number;
+  };
   err.code = code;
   err.status = 400;
   return err;
@@ -498,6 +569,34 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   }
 
   /**
+   * [#24837] The one guard every federation door runs first: listing remote
+   * tables, drafting one, importing one, refreshing the catalog. Each door
+   * names its {@link FederationDoor} kind, which decides the refusal's code.
+   *
+   * Two refusals, in this order, and nothing else:
+   *
+   *  - the platform's primary datasource, by name, with its own reason
+   *    ({@link primaryDatasourceNotFederatedError}, #24772). No definition is
+   *    read for it: no store configuration makes it a federation source.
+   *  - any other datasource that is not a federation source by
+   *    {@link isFederationSource}: managed, declared or by default, or with no
+   *    definition ({@link notAFederationSourceError}).
+   *
+   * Both come before any introspection, so a refused datasource is never
+   * read: its tables are the platform's, and listing them is the very thing
+   * refused.
+   *
+   * @returns the datasource's definition, which the listing reads next for
+   *          `external.allowedSchemas`, so the door reads it once.
+   */
+  private async assertFederationSource(datasource: string, door: FederationDoor): Promise<DatasourceLike> {
+    if (datasource === DEFAULT_DATASOURCE_NAME) throw primaryDatasourceNotFederatedError(datasource, door);
+    const ds = await this.config.getDatasource(datasource);
+    if (!isFederationSource(ds)) throw notAFederationSourceError(datasource, ds, door);
+    return ds;
+  }
+
+  /**
    * List the datasource's remote tables, narrowed by `opts.schema` and by the
    * datasource's `external.allowedSchemas`.
    *
@@ -505,21 +604,17 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * whose schema the driver did not name is never let through a filter it
    * cannot be judged by. With no filter, every introspected table is listed.
    * See {@link unattributedSchemaFilterError} for why the in-tree SQL driver
-   * lands on the refusal. The platform's primary datasource is refused
-   * outright: see {@link primaryDatasourceNotFederatedError}.
+   * lands on the refusal. A datasource that is not a federation source (the
+   * platform's primary one, and any other managed one) is refused outright:
+   * see {@link assertFederationSource}.
    */
   async listRemoteTables(
     datasource: string,
     opts?: { schema?: string },
   ): Promise<RemoteTable[]> {
-    if (datasource === DEFAULT_DATASOURCE_NAME) {
-      throw primaryDatasourceNotFederatedError(datasource, 'EXTERNAL_DATASOURCE_ERROR');
-    }
-    const [schema, ds] = await Promise.all([
-      this.config.introspect(datasource),
-      this.config.getDatasource(datasource),
-    ]);
-    const allowed = ds?.external?.allowedSchemas;
+    const ds = await this.assertFederationSource(datasource, 'introspect');
+    const schema = await this.config.introspect(datasource);
+    const allowed = ds.external?.allowedSchemas;
     const requested = opts?.schema ? opts.schema : undefined;
     const admitted = admittedSchemas(requested, allowed);
     if (admitted?.size === 0) return [];
@@ -608,9 +703,21 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     remoteName: string,
     opts: GenerateDraftOpts = {},
   ): Promise<ObjectDraft> {
-    if (datasource === DEFAULT_DATASOURCE_NAME) {
-      throw primaryDatasourceNotFederatedError(datasource, 'EXTERNAL_DATASOURCE_ERROR');
-    }
+    await this.assertFederationSource(datasource, 'introspect');
+    return this.draftObject(datasource, remoteName, opts);
+  }
+
+  /**
+   * The draft pipeline behind {@link generateObjectDraft} and
+   * {@link importObject}, run once the calling door's
+   * {@link assertFederationSource} has passed, so the import is judged once,
+   * under its own code.
+   */
+  private async draftObject(
+    datasource: string,
+    remoteName: string,
+    opts: GenerateDraftOpts,
+  ): Promise<ObjectDraft> {
     const schema = await this.config.introspect(datasource);
     const table = this.findTable(schema, remoteName);
     if (!table) {
@@ -700,11 +807,10 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     remoteName: string,
     opts: ImportObjectOpts = {},
   ): Promise<ImportObjectResult> {
-    // [#24772] First: no store configuration makes the primary datasource a
-    // federation source, so its refusal is the true answer whatever else holds.
-    if (datasource === DEFAULT_DATASOURCE_NAME) {
-      throw primaryDatasourceNotFederatedError(datasource, 'EXTERNAL_IMPORT_ERROR');
-    }
+    // [#24772, #24837] First: no store configuration makes the primary
+    // datasource, or any other managed one, a federation source, so that
+    // refusal is the true answer whatever else holds.
+    await this.assertFederationSource(datasource, 'import');
     if (!this.config.persistObject) {
       throw new Error(
         `importObject requires a writable metadata store, but none is wired ` +
@@ -732,7 +838,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     }
 
     // Reuse the draft pipeline (type mapping, review notes, external binding).
-    const draft = await this.generateObjectDraft(datasource, remoteName, opts);
+    const draft = await this.draftObject(datasource, remoteName, opts);
 
     // Apply the runtime-persona overrides on top of the draft definition.
     const name = opts.name ?? draft.name;
@@ -757,9 +863,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   }
 
   async refreshCatalog(datasource: string): Promise<ExternalCatalog> {
-    if (datasource === DEFAULT_DATASOURCE_NAME) {
-      throw primaryDatasourceNotFederatedError(datasource, 'EXTERNAL_DATASOURCE_ERROR');
-    }
+    await this.assertFederationSource(datasource, 'introspect');
     const schema = await this.config.introspect(datasource);
     // Parse through the Zod schema so the persisted record is canonical
     // (defaults applied, shape validated) and matches the `external_catalog`
@@ -833,8 +937,9 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     const datasource = obj.datasource ?? 'default';
     const ds = await this.config.getDatasource(datasource);
 
-    // Not a federated object → nothing to validate.
-    if (!ds || !ds.schemaMode || ds.schemaMode === 'managed') {
+    // Not a federated object → nothing to validate. [#24837] The Sync doors'
+    // predicate, so what they refuse is exactly what this skips.
+    if (!isFederationSource(ds)) {
       return { ok: true, datasource, object: objectName, diffs: [] };
     }
 
