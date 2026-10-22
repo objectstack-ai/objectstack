@@ -22,9 +22,9 @@ Architecture Alignment:
 - Postman: API testing collections
 
 The platform serves no HTML documentation viewer: the API origin publishes
-the OpenAPI document (`GET {basePath}/openapi.json`) and nothing else. The
-viewer configuration this module used to declare (`ui`, typed by
-`ApiTestingUiConfigSchema`) is retired — see `API_DOCUMENTATION_UI_RETIRED`.
+the OpenAPI document (`GET {basePath}/openapi.json`) and nothing else, so
+this module declares no viewer — the retired `ui` key is refused at parse
+with that prescription.
 
 **Documentation Config**
 ```typescript
