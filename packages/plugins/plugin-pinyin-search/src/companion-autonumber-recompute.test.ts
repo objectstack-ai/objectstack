@@ -179,7 +179,7 @@ async function boot(issuer: 'engine' | 'driver') {
 }
 
 const searchCount = async (engine: ObjectQL, object: string, term: string) =>
-  ((await engine.find(object, { search: term } as any, SYSTEM)) as unknown[]).length;
+  ((await engine.find(object, { search: term }, SYSTEM)) as unknown[]).length;
 
 describe.each(['engine', 'driver'] as const)('the __search companion of a name field reading the record number (#25073), %s-issued', (issuer) => {
   it('carries the number on the concatenation shape, and $search finds the record by pinyin and by number', async () => {
