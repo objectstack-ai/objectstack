@@ -201,7 +201,10 @@ describe('the user rung answers only its owner', () => {
 
     it('control: tenant and global keys resolve the same with or without a user id', async () => {
       const { svc } = stack([tenantRow('density', 'compact'), globalRow('banner', 'maintenance')]);
-      for (const ctx of [{}, { tenantId: 'org_1' }, { userId: USER_A }] as SettingsContext[]) {
+      // The rows carry no organization — the composition here wires no
+      // organization source, the lean shape — so no context names one: an
+      // organization's read does not fall back to them (ADR-0131 D8).
+      for (const ctx of [{}, { userId: USER_A }] as SettingsContext[]) {
         expect(await svc.get(NS, 'density', ctx)).toMatchObject({ value: 'compact', source: 'tenant' });
         expect(await svc.get(NS, 'banner', ctx)).toMatchObject({ value: 'maintenance', source: 'global' });
       }

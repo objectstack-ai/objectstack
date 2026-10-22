@@ -19,15 +19,21 @@
  *  - identity: a tenant-scope or user-scope row carries the writing caller's
  *    organization, and a write by one organization neither reads, nor
  *    replaces, nor resets another's;
- *  - the cascade: a caller's own organization row is preferred over a row
- *    written with no organization, which stays every organization's fallback,
- *    and the global rung is read by every organization;
+ *  - the cascade: a caller reads its own organization's row and no other — a
+ *    row written with no organization is no organization's fallback (ADR-0131
+ *    D8), under a wall and under `single` alike — and the global rung is read
+ *    by every organization;
  *  - the lock pre-flight reads the same row the cascade does;
  *  - the refusal: under a walled posture a tenant-scope write that names no
  *    organization is refused whole, and writes nothing; under `single` it is
  *    not;
- *  - `single`: the default organization keeps its answers, including for a
- *    process-wide reader that names no organization;
+ *  - `single`: a process-wide reader that names no organization reads and
+ *    writes as the one organization ADR-0131 D9 derives, so the default
+ *    organization keeps its answers and a second organization-less write
+ *    replaces the first instead of inserting beside it; where D9 derives none,
+ *    such a reader has no tenant rung and its tenant write is refused;
+ *  - a composition with no organization object (the lean embedding) keeps
+ *    storing and reading its rows with no organization;
  *  - the posture is asked only for a caller that names no organization, on a
  *    key below the global rung — and when it cannot be read, that read or
  *    write fails rather than guessing.
@@ -43,7 +49,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SysUser } from '@objectstack/platform-objects/identity';
 import { SysPlatformSetting, SysSetting } from '@objectstack/platform-objects/system';
 import type { TenancyPosture } from '@objectstack/spec/security';
-import { SettingsService } from './settings-service.js';
+import { SettingsService, type SettingsOrganizationSource } from './settings-service.js';
 import { wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
 import { SettingsLockedError, type SettingsContext } from './settings-service.types.js';
 
@@ -139,12 +145,30 @@ beforeEach(async () => {
   userId = String((user as any).id);
 });
 
-/** A service bound to the real engine, under the given posture. */
-function settings(posture: TenancyPosture | undefined): SettingsService {
+/**
+ * ADR-0131 D9's answers, as the plugin's source hands them to the service: the
+ * one organization derived, none derivable, or no organization object at all.
+ */
+const derived = (organizationId: string): SettingsOrganizationSource =>
+  async () => ({ kind: 'derived', organizationId });
+const NONE_DERIVABLE: SettingsOrganizationSource =
+  async () => ({ kind: 'refuse', reason: 'no-organization', organizationCount: 0 });
+const NO_ORGANIZATION_OBJECT: SettingsOrganizationSource = async () => ({ kind: 'no-organization-object' });
+
+/**
+ * A service bound to the real engine, under the given posture and with the
+ * given answer for a caller that names no organization — by default a
+ * composition with no organization object, which is what this rig registers.
+ */
+function settings(
+  posture: TenancyPosture | undefined,
+  organization: SettingsOrganizationSource = NO_ORGANIZATION_OBJECT,
+): SettingsService {
   const svc = new SettingsService({ env: {} });
   svc.registerManifest(MANIFEST);
   svc.bindEngine(wrapEngineAsSettingsEngine(engine as any), undefined, {
     tenancyPosture: () => posture,
+    organization,
   });
   return svc;
 }
@@ -221,24 +245,35 @@ describe('a tenant-scope value belongs to the organization that wrote it (walled
     }
   });
 
-  it('a row written with no organization is every organization\'s fallback, and an organization\'s own row is preferred over it', async () => {
+  it('a row written with no organization answers no organization, and an organization\'s write lands beside it', async () => {
     await seed({ key: 'motto', scope: 'tenant', value: 'Legacy', organization_id: null });
+    await seed({ key: 'theme', scope: 'user', user_id: userId, value: 'Legacy-dark', organization_id: null });
     const svc = settings('isolated');
 
     for (const org of [ORG_A, ORG_B]) {
       const got = await svc.get(NS, 'motto', inOrg(org));
-      expect(got.value).toBe('Legacy');
-      expect(got.source).toBe('tenant');
+      expect(got.value).toBe('none');
+      expect(got.source).toBe('default');
+      expect(got.cascadeChain?.some((e) => e.scope === 'tenant')).toBe(false);
+      // The user rung likewise: the same user's organization-less row is not
+      // their value in any organization.
+      expect((await svc.getMany(NS, ['theme'], inOrg(org, { userId }))).theme.value).toBe('light');
     }
 
     await svc.set(NS, 'motto', 'Alpha', inOrg(ORG_A));
-    const own = await svc.get(NS, 'motto', inOrg(ORG_A));
-    expect(own.value).toBe('Alpha');
-    // ONE tenant entry in the chain — the preferred row, not both.
-    expect(own.cascadeChain?.filter((e) => e.scope === 'tenant')).toHaveLength(1);
-    expect((await svc.get(NS, 'motto', inOrg(ORG_B))).value).toBe('Legacy');
-    // The organization-less row was not rewritten by the organization's write.
-    expect(settingRows().find((r) => r.organization_id == null)?.value).toBe('Legacy');
+    expect((await svc.get(NS, 'motto', inOrg(ORG_A))).value).toBe('Alpha');
+    expect((await svc.get(NS, 'motto', inOrg(ORG_B))).source).toBe('default');
+    // The organization's write did not find, and rewrite, the organization-less row.
+    expect(
+      settingRows().filter((r) => r.key === 'motto').map((r) => [r.organization_id ?? null, r.value]).sort(),
+    ).toEqual([[null, 'Legacy'], [ORG_A, 'Alpha']]);
+  });
+
+  it('a lock on a row written with no organization locks no organization\'s write', async () => {
+    await seed({ key: 'theme', scope: 'tenant', value: 'dark', organization_id: null, locked: true });
+    const svc = settings('isolated');
+    await expect(svc.set(NS, 'theme', 'blue', inOrg(ORG_A, { userId }))).resolves.toBeDefined();
+    expect((await svc.get(NS, 'theme', inOrg(ORG_A, { userId }))).value).toBe('blue');
   });
 
   it('a user-scope value carries the organization too: the same user reads it only in the organization it was set in', async () => {
@@ -283,23 +318,40 @@ describe('a tenant-scope write that names no organization', () => {
     });
   }
 
-  it("is not refused under the 'single' posture, nor where no posture is reported", async () => {
+  it("is not refused under the 'single' posture, nor where no posture is reported: it lands in the one organization D9 derives", async () => {
     for (const posture of ['single', undefined] as const) {
-      const svc = settings(posture);
+      const svc = settings(posture, derived(ORG_A));
       await svc.set(NS, 'motto', `free-${String(posture)}`, {});
       expect((await svc.get(NS, 'motto', {})).value).toBe(`free-${String(posture)}`);
+      expect((await svc.get(NS, 'motto', inOrg(ORG_A))).value).toBe(`free-${String(posture)}`);
     }
-    expect(settingRows().every((r) => r.organization_id == null)).toBe(true);
+    // One row, the organization's: the second write found the first.
+    expect(settingRows().map((r) => [r.organization_id, r.value])).toEqual([[ORG_A, 'free-undefined']]);
   });
 
-  it('under a walled posture, a reader that names no organization reads only the organization-less rows', async () => {
-    const svc = settings('isolated');
-    await svc.set(NS, 'motto', 'Alpha', inOrg(ORG_A));
-    expect((await svc.get(NS, 'motto', {})).source).toBe('default');
-
-    await seed({ key: 'motto', scope: 'tenant', value: 'Legacy', organization_id: null });
-    expect((await svc.get(NS, 'motto', {})).value).toBe('Legacy');
+  it("is refused under 'single' where D9 derives no organization, and nothing is written", async () => {
+    const svc = settings('single', NONE_DERIVABLE);
+    const refusal = await svc.setMany(NS, { motto: 'Nobody' }, { userId }).then(() => null, (e) => e);
+    expect(refusal?.code).toBe('SETTINGS_VALIDATION');
+    expect(settingRows()).toHaveLength(0);
   });
+
+  for (const posture of ['isolated', 'group'] as const) {
+    it(`under the '${posture}' posture, a reader that names no organization reads no tenant or user row — neither an organization's nor one written with none`, async () => {
+      const svc = settings(posture);
+      await svc.set(NS, 'motto', 'Alpha', inOrg(ORG_A));
+      await svc.set(NS, 'theme', 'dark', inOrg(ORG_A, { userId }));
+      expect((await svc.get(NS, 'motto', {})).source).toBe('default');
+
+      await seed({ key: 'motto', scope: 'tenant', value: 'Legacy', organization_id: null });
+      await seed({ key: 'theme', scope: 'user', user_id: userId, value: 'Legacy-dark', organization_id: null });
+      const got = await svc.get(NS, 'motto', {});
+      expect(got.source).toBe('default');
+      expect(got.cascadeChain?.some((e) => e.scope === 'tenant')).toBe(false);
+      expect((await svc.get(NS, 'theme', { userId })).source).toBe('default');
+      expect((await svc.getNamespace(NS, { userId })).values.motto.source).toBe('default');
+    });
+  }
 });
 
 describe('the posture is read only where it decides something', () => {
@@ -332,30 +384,60 @@ describe('the posture is read only where it decides something', () => {
 describe("posture 'single': the default organization keeps its answers", () => {
   const DEFAULT_ORG = 'org_default';
 
-  it('a value stored before rows carried an organization is still read by the default organization', async () => {
+  it('a row stored with no organization is not the default organization\'s, for either reader', async () => {
     await seed({ key: 'motto', scope: 'tenant', value: 'Acme', organization_id: null });
-    const svc = settings('single');
-    const got = await svc.get(NS, 'motto', inOrg(DEFAULT_ORG));
-    expect(got.value).toBe('Acme');
-    expect(got.source).toBe('tenant');
+    await seed({ key: 'theme', scope: 'user', user_id: userId, value: 'Acme-dark', organization_id: null });
+    const svc = settings('single', derived(DEFAULT_ORG));
+    for (const ctx of [inOrg(DEFAULT_ORG), {}]) {
+      const got = await svc.get(NS, 'motto', ctx);
+      expect(got.value).toBe('none');
+      expect(got.source).toBe('default');
+      expect((await svc.get(NS, 'theme', { ...ctx, userId })).value).toBe('light');
+    }
   });
 
   it('the default organization\'s write is read by itself and by a process-wide reader that names no organization', async () => {
     await seed({ key: 'motto', scope: 'tenant', value: 'Acme', organization_id: null });
-    const svc = settings('single');
+    const svc = settings('single', derived(DEFAULT_ORG));
     await svc.set(NS, 'motto', 'Acme Corp', inOrg(DEFAULT_ORG));
 
     expect((await svc.get(NS, 'motto', inOrg(DEFAULT_ORG))).value).toBe('Acme Corp');
     expect((await svc.get(NS, 'motto', {})).value).toBe('Acme Corp');
   });
 
+  it('a process-wide writer that names no organization writes the default organization\'s row, and its second write replaces the first', async () => {
+    const svc = settings('single', derived(DEFAULT_ORG));
+    await svc.set(NS, 'motto', 'one', {});
+    await svc.set(NS, 'motto', 'two', {});
+    await svc.set(NS, 'theme', 'dark', { userId });
+
+    expect((await svc.get(NS, 'motto', {})).value).toBe('two');
+    expect((await svc.get(NS, 'motto', inOrg(DEFAULT_ORG))).value).toBe('two');
+    expect((await svc.get(NS, 'theme', inOrg(DEFAULT_ORG, { userId }))).value).toBe('dark');
+    expect(settingRows().map((r) => [r.scope, r.organization_id, r.value]).sort()).toEqual([
+      ['tenant', DEFAULT_ORG, 'two'],
+      ['user', DEFAULT_ORG, 'dark'],
+    ]);
+  });
+
   it('the default organization\'s reset reads back the default for both readers', async () => {
-    const svc = settings('single');
+    const svc = settings('single', derived(DEFAULT_ORG));
     await svc.set(NS, 'motto', 'Acme Corp', inOrg(DEFAULT_ORG));
     await svc.runAction(NS, 'reset', null, inOrg(DEFAULT_ORG));
 
     expect((await svc.get(NS, 'motto', inOrg(DEFAULT_ORG))).source).toBe('default');
     expect((await svc.get(NS, 'motto', {})).source).toBe('default');
+  });
+});
+
+describe('a composition with no organization object (the lean embedding, ADR-0131 D9 note)', () => {
+  it('stores and reads its rows with no organization, which no organization reads', async () => {
+    const svc = settings('single', NO_ORGANIZATION_OBJECT);
+    await svc.set(NS, 'motto', 'Lean', {});
+    await svc.set(NS, 'motto', 'Lean again', {});
+    expect((await svc.get(NS, 'motto', {})).value).toBe('Lean again');
+    expect(settingRows().map((r) => [r.organization_id ?? null, r.value])).toEqual([[null, 'Lean again']]);
+    expect((await svc.get(NS, 'motto', inOrg(ORG_A))).source).toBe('default');
   });
 });
 

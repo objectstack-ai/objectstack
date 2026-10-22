@@ -224,7 +224,9 @@ describe('[#10826] SettingsService.getMany', () => {
   // codec, which is why the fixture must already hold the decoded value.
   it('[#12172] resolves the LITERAL stored value — no doubled JSON encoding', async () => {
     const { svc } = await makeService();
-    const ctx = { userId: 'u1', tenantId: 't1' };
+    // No organization: the fixture's rows carry none, and an organization's
+    // read does not fall back to them (ADR-0131 D8).
+    const ctx = { userId: 'u1' };
     const many = await svc.getMany('localization', ['timezone', 'locale', 'currency'], ctx);
 
     // Global row, user-scope key, no user/tenant override.
