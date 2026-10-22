@@ -42,6 +42,8 @@ import {
   GATED_ACTIONS,
   serveStoredMetadataHashes,
   serveStoredMetadataRow,
+  type StdioObjectReads,
+  type StdioProtocolObjectReads,
   type StoredHashDigest,
 } from './stdio-data-bridge.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
@@ -703,10 +705,24 @@ export class MCPServerPlugin implements Plugin {
         if (gate) throw stdioAuthGateRefusal(gate);
         return ec;
       };
+      // [#25138] The protocol's object reads — the merged listing behind
+      // `list_objects` / `describe_object` and the by-name read behind the
+      // exposure gate — resolved at each use, never captured here: an absence
+      // read in `start()` is a verdict the rest of the boot can still
+      // contradict. `undefined` when this host registers no protocol, and the
+      // bridge then reads the metadata service, as before.
+      const protocolReads = (): StdioProtocolObjectReads | undefined => {
+        try {
+          return ctx.getService<StdioProtocolObjectReads>('protocol') ?? undefined;
+        } catch {
+          return undefined;
+        }
+      };
       if (metadataService) {
         dataBridge = createStdioDataBridge({
           engine: scopedQl,
           metadataService,
+          protocol: protocolReads,
           resolvePrincipal,
           keyedDigest: storedHashDigest,
         });
@@ -725,7 +741,11 @@ export class MCPServerPlugin implements Plugin {
       // from, captured once rather than re-read off the outer `let` inside the
       // closure — the reader must not be able to see a different service from
       // the one `bridgeResources` was registered with.
-      const gateMetadata = metadataService;
+      // [#25138] …beside the protocol's by-name read, which the gate asks
+      // first, as `bridge.get` asks it.
+      const gateReads: StdioObjectReads | undefined = metadataService
+        ? { metadataService, protocol: protocolReads }
+        : undefined;
       getRecord = async (objectName, recordId) => {
         const ec = await resolvePrincipal();
         // [#8266] The ADR-0049 exposure gate, applied BEFORE the read: the same
@@ -740,12 +760,12 @@ export class MCPServerPlugin implements Plugin {
         // leaking is the author's exposure DECLARATION.
         //
         // No metadata service ⇒ no declaration to read ⇒ open, exactly as
-        // `enforceApiExposure` itself falls open when `getObject` throws or
-        // resolves nothing. Unreachable in practice: `bridgeResources` — the
+        // `enforceApiExposure` itself falls open when the definition cannot be
+        // read or resolves nothing. Unreachable in practice: `bridgeResources` — the
         // only consumer of this reader — is called under `if (metadataService)`
         // below, so the resource is never registered without one.
-        if (gateMetadata) {
-          await enforceApiExposure(gateMetadata, objectName, GATED_ACTIONS.get, ec);
+        if (gateReads) {
+          await enforceApiExposure(gateReads, objectName, GATED_ACTIONS.get, ec);
         }
         const res = (await scopedQl.find(objectName, {
           where: { id: recordId },

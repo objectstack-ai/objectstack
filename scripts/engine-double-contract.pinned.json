@@ -97,6 +97,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/mcp/src/stdio-data-bridge.merged-object-reads.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/stdio-data-bridge.merged-object-reads.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/stdio-data-bridge.merged-object-reads.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/mcp/src/stdio-data-bridge.not-found.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2692,9 +2707,9 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/organizations/src/claim-orphan-org-rows.test.ts",
+      "file": "packages/plugins/organizations/src/first-organization-orphan-rows.pin.test.ts",
       "verb": "update",
-      "pinned": 2
+      "pinned": 1
     },
     {
       "file": "packages/plugins/organizations/src/org-creation-no-cross-org-copy.test.ts",

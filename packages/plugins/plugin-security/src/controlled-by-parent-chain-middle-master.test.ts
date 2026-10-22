@@ -67,6 +67,7 @@ import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { wireEngineSecuritySource } from './engine-security-source.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -281,6 +282,8 @@ beforeAll(async () => {
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The engine's security source, as `ObjectQLPlugin.init` wires it on a kernel (ADR-0139 D2).
+  wireEngineSecuritySource(engine, () => plugin);
   sharing = new SharingService({ engine: engine as never, securityService: () => security as never });
   engine.registerMiddleware(buildSharingMiddleware(sharing, ctx.logger) as never, { object: '*' });
 });

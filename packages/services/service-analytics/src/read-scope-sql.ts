@@ -5,6 +5,11 @@ import type { FilterCondition } from '@objectstack/spec/data';
 // at the ObjectQL merge sites by {@link assertReadScopeComparandsRunnable}, and
 // [#20018] at the end of {@link compileScopedFilterToSql} by the same function.
 import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
+// [ADR-0139 D6] The engine's `ReadableIds` leaf, which a read scope carries for
+// a `controlled_by_parent` object since the derivation answers it: admitted at
+// the engine-bound merges ({@link assertReadScopeComparandsRunnable} with
+// `admitReadableIds`), refused at the entry of {@link compileScopedFilterToSql}.
+import { isReadableIds } from '@objectstack/spec/data';
 // [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] The shared lowering, run
 // at the entry of {@link compileScopedFilterToSql}, after the placeholders
 // resolve and before any clause is compiled.
@@ -827,6 +832,23 @@ export function compileScopedFilterToSql(
   options: ReadScopeCompileOptions = {},
 ): { sql: string; params: unknown[] } {
   const quotedAlias = quoteIdent(alias, 'alias');
+  // [ADR-0139 D6] A scope carrying the engine's `ReadableIds` leaf is refused
+  // here, first and by name: this compiler runs no composition, so it cannot
+  // render the semi-join the engine composes for the leaf, and rendering the
+  // scope without it would show a statement the platform never runs.
+  // `NativeSQLStrategy.canHandle` declines such a query before this point and
+  // the ObjectQL strategy serves it; the `/analytics/sql` dry-run echo reaches
+  // here and refuses in the module's envelope — the one consistent, loud
+  // answer, no half-rendering (the #7598 ruling's own words for this face).
+  const leaf = findReadableIdsLeaf(filter);
+  if (leaf) {
+    throw readScopeCompileError(
+      `[read-scope-sql] read scope for "${alias}" carries the engine's ReadableIds leaf over "${leaf.object}" at ` +
+        `readScope.${leaf.path}: the engine composes that leaf at its executor boundary, and this compiler runs no ` +
+        'composition, so the scope cannot be rendered here (fail-closed). The query is served by the ObjectQL ' +
+        'strategy; the dry-run echo cannot show a statement it would not run.',
+    );
+  }
   // [#20075] Resolve the scope's placeholders with the engine's own resolver
   // BEFORE the lowering, because the lowering binds values: what is bound, and
   // what the echo prints, is the value the ObjectQL face's engine resolves. A
@@ -1002,6 +1024,50 @@ export function assertReadScopeCannotVacate(scope: unknown, objectName: string):
   );
 }
 
+/** [ADR-0139 D6] What an engine-bound merge tells {@link assertReadScopeComparandsRunnable}. */
+export interface ReadScopeComparandOptions {
+  /**
+   * Admit the engine's branded `ReadableIds` leaf as a `$in` comparand: the
+   * scope is handed to `engine.aggregate`, whose boundary composes it. Passed
+   * by the engine-bound merges only; `compileScopedFilterToSql` never passes it.
+   */
+  readonly admitReadableIds?: boolean;
+}
+
+/**
+ * [ADR-0139 D6] The first `ReadableIds` leaf `scope` carries as a `$in`
+ * comparand — the object it names and the key path it sits at — or `null`.
+ * Exported for `NativeSQLStrategy.canHandle`, which declines a query whose
+ * base or joined object's scope carries one, so the scope goes to the engine
+ * and never to a compiler that cannot compose it.
+ */
+export function findReadableIdsLeaf(scope: unknown): { object: string; path: string } | null {
+  const onPath = new Set<object>();
+  const visit = (value: unknown, path: string): { object: string; path: string } | null => {
+    if (value === null || typeof value !== 'object') return null;
+    if (onPath.has(value)) return null;
+    onPath.add(value);
+    try {
+      if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+          const found = visit(value[i], `${path}[${i}]`);
+          if (found) return found;
+        }
+        return null;
+      }
+      for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+        if (key === '$in' && isReadableIds(item)) return { object: item.object, path: `${path}.${key}` };
+        const found = visit(item, path === '' ? key : `${path}.${key}`);
+        if (found) return found;
+      }
+      return null;
+    } finally {
+      onPath.delete(value);
+    }
+  };
+  return visit(scope, '');
+}
+
 /**
  * [#19995] Refuse, in this module's envelope, a read scope the ENGINE would
  * refuse for one of its comparands — judged on the scope ALONE, before it is
@@ -1068,14 +1134,39 @@ export function assertReadScopeCannotVacate(scope: unknown, objectName: string):
  * {@link compileScopedFilterToSql} the `$icontains` arm of
  * {@link compileOperator} refuses the same scope first, in its own sentence.
  *
+ * ## …and the engine's `ReadableIds` leaf (ADR-0139 D6)
+ *
+ * A `controlled_by_parent` object's read scope carries the engine's branded
+ * `ReadableIds` leaf over its master — "the ids of the master this caller may
+ * read" — since the security service's derivation answers it in place of a
+ * pre-resolved id list. The list-shape face refuses the leaf as a non-list
+ * comparand unless its caller passes `admitReadableIds: true`, the option the
+ * engine's own ingress door passes (`@objectstack/objectql`'s filter seam).
+ * The two ENGINE-bound merges and the engine-bound label pass pass it here
+ * (`options.admitReadableIds`): what they compose is handed to
+ * `engine.aggregate`, whose executor boundary composes the leaf from the
+ * security service exactly as a `find` does, so admitting it is the one
+ * verdict that agrees with the find path. {@link compileScopedFilterToSql}
+ * passes nothing and keeps refusing: it compiles the scope itself, runs no
+ * composition, and `NativeSQLStrategy.canHandle` declines such a query before
+ * it is reached. The leaf is admitted only where the scope came from
+ * `getReadScope`; a filter an author writes never reaches this door with one
+ * (the brand is a symbol key no JSON carries), and the engine's door keeps
+ * refusing it there as the non-list comparand it always was.
+ *
  * @param scope the `StrategyContext.getReadScope` output, exactly as returned
  * @param objectName the object the scope was requested for — for the operator's
  *   log only; withheld from the response by the `READ_SCOPE_COMPILE_FAILED` /
  *   500 declaration, like every message in this module.
+ * @param options `admitReadableIds` — passed by the engine-bound merges only.
  */
-export function assertReadScopeComparandsRunnable(scope: unknown, objectName: string): void {
+export function assertReadScopeComparandsRunnable(
+  scope: unknown,
+  objectName: string,
+  options?: ReadScopeComparandOptions,
+): void {
   try {
-    assertListComparandShapes(scope, undefined, 'readScope');
+    assertListComparandShapes(scope, undefined, 'readScope', options?.admitReadableIds === true ? { admitReadableIds: true } : undefined);
     normalizeFilterComparandTypes(scope, undefined, 'readScope');
   } catch (e) {
     throw readScopeCompileError(
