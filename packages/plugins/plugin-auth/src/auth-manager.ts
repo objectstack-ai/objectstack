@@ -4216,7 +4216,18 @@ export class AuthManager {
       await this.addOptionalPlugin(plugins, 'magicLink', async () => {
       const { magicLink } = await import('better-auth/plugins/magic-link');
       // magic-link reuses the `verification` table — no extra schema mapping needed.
+      //
+      // The link's lifetime, in seconds, and the ONE source for it: the mount
+      // states it and the mail's `expiresInMinutes` is derived from it, so the
+      // copy says what the link does. 300 s is the lifetime the link already
+      // had through the vendor default (`opts.expiresIn || 300`, better-auth
+      // 1.7.12 `plugins/magic-link/index.mjs`), now written down so a
+      // dependency bump cannot move it under the mail. ⛔ Lengthening it
+      // relaxes a sign-in credential's validity — a security-boundary change
+      // for the maintainer, not a copy fix.
+      const magicLinkExpiresInSec = 5 * 60;
       return magicLink({
+        expiresIn: magicLinkExpiresInSec,
         // #14319 — this one is called with the endpoint CTX, not a Request
         // (measured; magic-link/index.mjs `sendMagicLink({...}, ctx)`).
         sendMagicLink: async ({ email: recipientEmail, url, token }, ctx?: unknown) => {
@@ -4280,7 +4291,7 @@ export class AuthManager {
               data: {
                 magicLinkUrl: url,
                 token,
-                expiresInMinutes: 10,
+                expiresInMinutes: Math.round(magicLinkExpiresInSec / 60),
                 appName: this.getAppName(),
               },
               // [ADR-0131 D7, Q2 A] A sign-in link for a person: identity mail.
