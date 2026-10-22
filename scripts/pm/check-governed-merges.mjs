@@ -4538,7 +4538,7 @@ async function selfTest() {
   const HOOK = '.claude/hooks/x.sh';
   const PR_13320 = ['guard-main-checkout-bash', 'guard-shared-stash', 'guard-tree-enum'].flatMap((h) => [`.claude/hooks/${h}.selftest.sh`, `.claude/hooks/${h}.sh`]);
   const elsewhere = everyRepo.filter((r) => r !== 'objectstack');
-  assert('the-claude-tree-row-holds-Tier-S-in-objectstack-alone', claudeRow.tier === GOVERNED_TIER_S && claudeRow.tierRepos.join() === 'objectstack' && claudeRow.repos === undefined, JSON.stringify(claudeRow));
+  assert('the-claude-tree-row-holds-Tier-S-in-objectstack-alone', claudeRow.tier === GOVERNED_TIER_S && claudeRow.tierRepos?.join() === 'objectstack' && claudeRow.repos === undefined, JSON.stringify(claudeRow));
   assert('it-is-the-only-row-that-scopes-its-tier', GOVERNED_SURFACES.filter((s) => s.tierRepos !== undefined).map((s) => s.id).join() === 'claude-tree');
   assert('every-tier-scope-is-a-non-empty-duplicate-free-subset-of-the-rows-own-repositories-on-a-Tier-S-row', GOVERNED_SURFACES.every((s) => s.tierRepos === undefined || (s.tier === GOVERNED_TIER_S && Array.isArray(s.tierRepos) && s.tierRepos.length > 0 && new Set(s.tierRepos).size === s.tierRepos.length && s.tierRepos.every((id) => surfaceRepos(s).includes(id)))));
   assert('an-objectstack-claude-path-is-Tier-S-unchanged', governedTierFor([HOOK], 'objectstack') === GOVERNED_TIER_S && testVerdict([HOOK], { repo: 'objectstack' }).tier === GOVERNED_TIER_S);
