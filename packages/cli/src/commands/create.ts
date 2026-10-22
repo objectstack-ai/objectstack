@@ -392,10 +392,15 @@ export const templates: Record<string, CreateTemplate> = {
           // Not a build-script allowlist (that is pnpm-workspace.yaml) — the
           // minimum pnpm that reads that file at all.
           ...(standalone ? { engines: { pnpm: SCAFFOLD_PNPM_RANGE } } : {}),
+          // `build` and `dev` compile through `tsconfig.build.json`, which
+          // leaves the starter test out of `dist`; `typecheck` reads
+          // `tsconfig.json`, which keeps it in. See `tsconfig.build.json` below.
+          // `test` is `vitest run`, one pass that exits, as `os init` emits:
+          // bare `vitest` watches in a terminal and never returns.
           scripts: {
-            build: 'tsc',
-            dev: 'tsc --watch',
-            test: 'vitest',
+            build: 'tsc -p tsconfig.build.json',
+            dev: 'tsc -p tsconfig.build.json --watch',
+            test: 'vitest run',
             typecheck: 'tsc --noEmit',
           },
           keywords: ['objectstack', 'plugin', name],
@@ -432,6 +437,20 @@ export const templates: Record<string, CreateTemplate> = {
                 },
                 include: ['src/**/*'],
               },
+        // The config `build` and `dev` compile with (#25175). `tsconfig.json`
+        // includes all of `src/`, the starter test with it, so `typecheck`
+        // still catches a type error in a test. Built through that same config,
+        // `tsc` also emitted `dist/index.test.js`, and vitest, whose default
+        // exclude is only `node_modules` and `.git`, then collected the
+        // compiled copy beside the source: `npm run build && npm test` ran the
+        // suite twice, and the package shipped its tests. Excluding the tests
+        // HERE, never in `tsconfig.json`, keeps both halves. ⛔ `exclude` in an
+        // extending config replaces the base list rather than adding to it, so
+        // `dist` and `node_modules` are restated.
+        'tsconfig.build.json': () => ({
+          extends: './tsconfig.json',
+          exclude: ['dist', 'node_modules', 'src/**/*.test.ts'],
+        }),
         'src/index.ts': (name: string) => `import type { Plugin } from '@objectstack/spec/contracts';
 
 /**
@@ -453,6 +472,40 @@ export const ${sanitizeIdentifier(name)}Plugin: Plugin = {
 };
 
 export default ${sanitizeIdentifier(name)}Plugin;
+`,
+        // The starter test the `test` script runs (#25175). Without a test
+        // file, `vitest run` exits 1 with "No test files found", so a fresh
+        // project failed its own `npm test` — the defect `os init -t plugin`
+        // had, closed there by `package.test.ts`. This one runs the checks the
+        // kernel runs on a plugin at `use()`, before any of its code: the
+        // loader's `name` and `init` presence checks, then the protocol's
+        // `PluginSchema` (`assertPluginContract` in `@objectstack/core`),
+        // through `@objectstack/spec`, which the manifest already declares. It
+        // deliberately boots no kernel: that needs `@objectstack/verify`
+        // declared, and the comment points the author at the documented
+        // harness for that step instead. `test/scaffold-test-script-passes.test.ts`
+        // runs it in a sandbox, after a build as well as before one.
+        'src/index.test.ts': (name: string) => `import { describe, expect, it } from 'vitest';
+import { PluginSchema } from '@objectstack/spec/kernel';
+import plugin from './index';
+
+// The kernel checks a plugin when it is handed one, before it runs any of its
+// code: a plugin with no name or no init is refused outright, and every other
+// key is judged against the protocol's PluginSchema. This file runs the same
+// checks, so a plugin the kernel would refuse fails here first.
+//
+// To test what the plugin does once it runs, such as the services its init
+// registers, boot it in a real stack with @objectstack/verify:
+// https://objectstack.ai/docs/protocol/kernel/plugin-spec#a-runtime-plugin
+describe('the ${name} plugin', () => {
+  it('passes the checks the kernel runs when it loads a plugin', () => {
+    expect(plugin.name).toBeTruthy();
+    expect(typeof plugin.init).toBe('function');
+
+    const contract = PluginSchema.safeParse(plugin);
+    expect(contract.error?.issues ?? []).toEqual([]);
+  });
+});
 `,
         'README.md': (name: string) => {
           const packageName = pluginPackageName(placement, name);
