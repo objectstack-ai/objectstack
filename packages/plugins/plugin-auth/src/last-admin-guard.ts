@@ -940,14 +940,13 @@ function touchesAny(data: Record<string, unknown>, keys: readonly string[]): boo
  * a slug is just a slug, so nothing is read. A slug change to any other value
  * is not this rule's (the update half judges moving the anchor AWAY).
  *
- * One judge, two callers: the guard's `beforeUpdate` hook, which every engine
- * write reaches (better-auth's adapter, a seed, a plugin, the data API), and
- * better-auth's `beforeUpdateOrganization`, which asks it before the vendor
- * writes so the HTTP door answers 403 with the code instead of the 500 a
- * refusal from inside the adapter would become. A read that throws
- * propagates: each caller's read policy decides what an unreadable store means.
+ * Judged at the engine, on `beforeUpdate`, because every door that can change a
+ * slug is an engine update: better-auth's `organization/update` (its adapter
+ * writes through the engine, and the refusal reaches the caller as 403
+ * `PERMISSION_DENIED`), a seed, a plugin, the data API. A read that throws
+ * propagates to the hook, which fails closed.
  */
-export async function refuseDefaultOrganizationSlugCapture(
+async function refuseDefaultOrganizationSlugCapture(
   engine: Pick<LastAdminGuardEngine, 'find'>,
   organizationIds: ReadonlySet<string>,
   slug: unknown,

@@ -17,6 +17,11 @@
  * were already closed by the ADR-0092 identity write guard, which strips
  * `slug` from a user-context write.
  *
+ * The refusal is the last-administrator guard's `sys_organization`
+ * `beforeUpdate` hook, so it holds on every one of those doors: better-auth's
+ * adapter writes through the engine, and its refusal reaches the HTTP caller
+ * as 403 `PERMISSION_DENIED`.
+ *
  * Pinned here on the real stack (`ObjectQL` over `@objectstack/driver-sql` +
  * better-sqlite3, this plugin's identity objects, the real last-administrator
  * guard and a real `AuthManager` with the organization plugin), each refusal
@@ -25,7 +30,7 @@
  *  - the HTTP door: 403 `PERMISSION_DENIED`, the slug unchanged, no standing
  *    gained; the sole organization (already the Default Organization) and a
  *    slug other than `default` are admitted; a walled posture admits it, since
- *    a slug anchors nothing there; a read that fails is a 503;
+ *    a slug anchors nothing there; a read that fails refuses;
  *  - the engine door, by id and by predicate: the same refusal, for a
  *    system-context write; walled, admitted.
  */
@@ -212,7 +217,7 @@ describe('[ADR-0131 D5] better-auth organization/update: no re-slug makes anothe
     expect(await slugOf(engine, 'org_b')).toBe('default');
   });
 
-  it('a read of the Default Organization that fails is a 503, and the slug is not changed', async () => {
+  it('a read of the Default Organization that fails refuses (the guard fails closed), and the slug is not changed', async () => {
     const { engine, manager, cookie } = await ownerOfB(TWO_NONE_DEFAULT);
     const real = engine.find.bind(engine);
     vi.spyOn(engine, 'find').mockImplementation(async (object: string, query?: any, ...rest: any[]) => {
@@ -220,7 +225,7 @@ describe('[ADR-0131 D5] better-auth organization/update: no re-slug makes anothe
       return (real as any)(object, query, ...rest);
     });
 
-    expect(await answer(await reslug(manager, cookie, 'default'))).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+    expect(await answer(await reslug(manager, cookie, 'default'))).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
     expect(await slugOf(engine, 'org_b')).toBe('beta');
   });
 });

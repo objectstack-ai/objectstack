@@ -158,7 +158,6 @@ import type { TenancyService } from './tenancy-service.js';
 import { OtpSendGuard, assertOtpCooldownSeconds } from './otp-send-guard.js';
 import type { CounterStore } from './rate-limit-storage.js';
 import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
-import { refuseDefaultOrganizationSlugCapture } from './last-admin-guard.js';
 import {
   isLastLocalCredentialHolder,
   LAST_LOCAL_CREDENTIAL_CODE,
@@ -3883,35 +3882,6 @@ export class AuthManager {
             //    whenever either read faulted.
             const rawEngine = this.config.dataEngine;
             if (!rawEngine) return;
-
-            // [ADR-0131 D5] Under `single` a slug changed TO `default` makes the
-            // organization the Default Organization, whose `admin_full_access`
-            // grant confers platform administrator standing, so only the
-            // Default Organization may take it. The last-administrator guard's
-            // engine hook refuses that write on every door; asked here first,
-            // before the vendor writes, the refusal answers 403 with its code
-            // rather than the 500 better-call gives a throw from inside the
-            // adapter. Its reads run as the platform; one that throws is a 503,
-            // like this guard's own.
-            try {
-              await refuseDefaultOrganizationSlugCapture(rawEngine as never, new Set([String(orgId)]), newSlug);
-            } catch (err) {
-              const { APIError } = await import('better-auth/api');
-              if ((err as { code?: unknown } | null)?.code === 'PERMISSION_DENIED') {
-                throw new APIError('FORBIDDEN', { message: (err as Error).message, code: 'PERMISSION_DENIED' });
-              }
-              const fault = new APIError('SERVICE_UNAVAILABLE', {
-                message:
-                  "The organization slug guard could not read `sys_organization`, so whether the slug 'default' " +
-                  'would make this organization the Default Organization was never determined, and the slug was ' +
-                  'not changed. This is a server-side outage, not a refusal of the new slug: retry once the data ' +
-                  'store is reachable.',
-                code: SLUG_GUARD_READ_FAULT_CODE,
-              });
-              (fault as { cause?: unknown }).cause = err;
-              throw fault;
-            }
-
             const schemaOf = (rawEngine as { getSchema?: (object: string) => unknown }).getSchema;
             if (typeof schemaOf === 'function' && !schemaOf.call(rawEngine, 'sys_environment')) return;
 
