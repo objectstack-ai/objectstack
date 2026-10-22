@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 30 — spawns the real producer once per single-cause fixture: four boots of the built CLI (a missing and a broken `@objectstack/plugin-auth` in production, the broken one under `--dev`, and production with no stub), each differing only in the input under test; MEASURED_PLACEHOLDER
+// test-budget: 20 — spawns the real producer once per single-cause fixture: four boots of the built CLI (a missing and a broken `@objectstack/plugin-auth` in production, the broken one under `--dev`, and production with no stub), each differing only in the input under test; 13.3 s, the slowest of three local runs on a shared container, x 1.25, no CI reading yet
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
@@ -48,9 +48,14 @@ const HOOK = pathToFileURL(resolve(HERE, 'fixtures/plugin-auth-load-failure.hook
 const AUTH_TIER_CONFIG = 'export default {};\n';
 
 const LOAD_FAILURE_TEXT = '@objectstack/plugin-auth failed to load';
-/** Node's own sentences for the two stubbed installs — the hook writes neither. */
-const MISSING_CAUSE = 'Cannot find module';
-const BROKEN_CAUSE = 'does not provide an export named';
+/**
+ * The openings of node's own sentences for the two stubbed installs — the hook
+ * writes neither. Asserted right after `The load error: `, because the same
+ * sentence also appears in oclif's warning for the `verify` command (see the
+ * hook's header), which alone would pass a leg that named no load error.
+ */
+const MISSING_CAUSE = "Cannot find module '";
+const BROKEN_CAUSE = "The requested module 'node:path' does not provide an export named 'createLocalAccountIssuer'";
 const SECRET = 'os-adr-0131-d9-load-failure-leg-secret-not-a-real-credential';
 
 type BootChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -129,8 +134,7 @@ async function expectRefused(leg: Leg, cause: string): Promise<string> {
   expect(exitCode).not.toBe(0);
   expect(output).not.toMatch(READY_BANNER_TAIL);
   expect(output).toContain(LOAD_FAILURE_TEXT);
-  expect(output).toContain(`The load error: `);
-  expect(output).toContain(cause);
+  expect(output).toContain(`The load error: ${cause}`);
   // Refused instead of the old warn-and-boot line, not after it.
   expect(output).not.toContain('⚠ AuthPlugin failed to load');
   expect(existsSync(leg.databaseFile), `the refused boot opened its database\n${output}`).toBe(false);
@@ -178,7 +182,6 @@ describe('os serve — a production boot whose plugin-auth fails to load is refu
 
   it('control: --dev with the broken install keeps the warn-and-boot path', async () => {
     const output = await expectBoots({ databaseFile: db('broken-dev-no-server'), stub: 'broken', args: ['--dev', '--no-server'] });
-    expect(output).toContain('⚠ AuthPlugin failed to load');
-    expect(output).toContain(BROKEN_CAUSE);
+    expect(output).toContain(`⚠ AuthPlugin failed to load: ${BROKEN_CAUSE}`);
   }, 240_000);
 });

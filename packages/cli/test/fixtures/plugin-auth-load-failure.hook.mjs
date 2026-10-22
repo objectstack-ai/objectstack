@@ -14,7 +14,10 @@
  * `@objectstack/runtime` imports `@objectstack/plugin-auth/rate-limit-storage`
  * and `/client-address` statically, so denying them would crash the CLI before
  * the boot reaches the auth tier, which is a different failure from the one
- * under test.
+ * under test. One side effect is expected and harmless to `serve`:
+ * `@objectstack/verify` imports the root entry too, so in either mode oclif
+ * prints a `ModuleLoadError` warning for the `verify` command while it indexes
+ * the command table.
  *
  * Both modes make node produce its OWN error, so the refusal is asserted against
  * a sentence this file did not write:
