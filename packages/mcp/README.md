@@ -178,6 +178,12 @@ objectstack://metadata/types                             # List all metadata typ
 The record resource is registered only when the host supplies a record reader;
 without one, the schema and listing resources are served alone.
 
+The listing and schema resources read the same objects `list_objects` and
+`describe_object` answer: the protocol's merged listing, the one
+`GET /api/v1/meta/object` serves, so a package's objects appear on every kernel
+shape and a disabled package's objects do not. A host with no `protocol`
+service reads the metadata service instead.
+
 ## Prompts
 
 Two prompt families are bridged — there is no per-item prompt registration call:
