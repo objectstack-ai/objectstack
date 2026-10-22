@@ -47,6 +47,8 @@ import { capabilityUnavailable } from './unavailable.js';
 // [#9446] The ONE #9378 status table, now shared with the `/actions` door.
 import {
     classifyFlowRefusal,
+    flowFailureDetails,
+    flowFailureEnvelope,
     flowIsUnknown,
     flowNotFoundMessage,
     isPausedRun,
@@ -2033,15 +2035,20 @@ async function respondToFlowTrigger(
         // that happened. A never-dispatched refusal has no author failure text
         // and no node log to point at, so emitting either there would be this
         // door inventing run evidence for a run that never started.
-        const runDetails = refusal.code === 'FLOW_FAILED'
-            ? {
-                ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
-                ...(result.summary !== undefined ? { summary: result.summary } : {}),
-            }
-            : {};
+        //
+        // [#24914, ruling B′] Built by the one shared builder, typed as
+        // `FlowFailureDetailsSchema`: `errorMessage` / `summary` as before, and
+        // the `innerRefusal` a node's data call met; the producer-marked
+        // `userMessage` rides the envelope's top level, beside an unchanged
+        // `message`.
+        const failed = refusal.code === 'FLOW_FAILED';
+        const runDetails = failed ? flowFailureDetails(result) : {};
         return {
             handled: true,
-            response: deps.error(refusal.message, refusal.status, { code: refusal.code, ...runDetails }),
+            response: deps.error(
+                refusal.message, refusal.status, { code: refusal.code, ...runDetails },
+                failed ? flowFailureEnvelope(result) : undefined,
+            ),
         };
     }
     // [#9510] THE THIRD STATE, answered deliberately. A run that dispatched and
@@ -2252,6 +2259,14 @@ export interface ResumeRefusal {
     message: string;
     status: number;
     details: { code: string } & Record<string, unknown>;
+    /**
+     * [#24914, ruling B′] The envelope's declared top-level siblings — the
+     * producer-marked `userMessage` of the refusal the run's node met, set on
+     * the `FLOW_FAILED` row only and only when the engine result carries one.
+     * Passed as `DomainHandlerDeps.error`'s `extra` by both doors this table
+     * serves.
+     */
+    extra?: { userMessage: string };
 }
 
 /**
@@ -2349,15 +2364,21 @@ export async function classifyResumeResult(
     // code it matched, so the builder promotes it and never derives one.
     if (code !== undefined && row) return { message: result.error ?? row.fallback, status: row.status, details: { code } };
     const verdict = await resumeFailureDetails(deps, automationService, runId, result);
+    // [#24914, ruling B′] The run's artefacts through the shared builder
+    // (`FlowFailureDetailsSchema`: `errorMessage` / `summary` / `innerRefusal`),
+    // the verdict beside them in the same object, and the producer-marked
+    // `userMessage` at the envelope's top level. The screen-flow leg — a write
+    // behind a screen, refused after the pause was consumed — answers HERE.
+    const extra = flowFailureEnvelope(result);
     return {
         message: result.error ?? 'Flow run failed',
         status: 400,
         details: {
             code: 'FLOW_FAILED',
-            ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
-            ...(result.summary !== undefined ? { summary: result.summary } : {}),
+            ...flowFailureDetails(result),
             ...verdict,
         },
+        ...(extra !== undefined ? { extra } : {}),
     };
 }
 
@@ -3326,7 +3347,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // it answers what it answers, is documented there.
                 const refusal = await classifyResumeResult(deps, automationService, parts[2], result);
                 if (refusal) {
-                    return { handled: true, response: deps.error(refusal.message, refusal.status, refusal.details) };
+                    return { handled: true, response: deps.error(refusal.message, refusal.status, refusal.details, refusal.extra) };
                 }
                 return { handled: true, response: deps.success(result) };
             }

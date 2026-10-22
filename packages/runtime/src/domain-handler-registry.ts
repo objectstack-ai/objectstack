@@ -309,8 +309,19 @@ export interface DomainHandlerDeps {
      * `error.code`). `error.code` is the semantic string: pass yours as
      * `details.code` and it is promoted into the field, otherwise one is derived
      * from the status. See `./error-envelope.ts`.
+     *
+     * `extra` carries the declared SIBLINGS of `code` / `message` a domain may
+     * put on the envelope — today exactly one, the producer-marked
+     * `userMessage` (`ApiErrorSchema.userMessage`, `@objectstack/spec/api`):
+     * end-user text that never replaces `message`. It is the slot ruling B′ on
+     * #24914 names for the four flow doors, which relay the refusal a flow's
+     * data node met (`AutomationResult.userMessage`) the way the data door
+     * relays a record save's. Closed on purpose: a sibling the spec does not
+     * declare has no slot here, so a domain cannot put an undeclared key on
+     * the envelope through it. Omit it (or leave `userMessage` absent) and the
+     * envelope is byte-identical to the three-argument call.
      */
-    error(message: string, httpStatus?: number, details?: any): { status: number; body: any };
+    error(message: string, httpStatus?: number, details?: any, extra?: { userMessage?: string }): { status: number; body: any };
     /** Standard ROUTE_NOT_FOUND envelope (404 + discovery hint). */
     routeNotFound(route: string): { status: number; body: any };
     /**
