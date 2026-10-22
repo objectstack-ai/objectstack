@@ -39,6 +39,7 @@ import {
   type LinkingAuthContext,
   refuseImplicitAccountLink,
 } from './implicit-account-linking.js';
+import { IdpLocaleSync } from './idp-locale-claim.js';
 import type { IDataEngine } from '@objectstack/core';
 import {
   API_KEY_DEFAULT_EXPIRY_DAYS,
@@ -1885,12 +1886,18 @@ export class AuthManager {
         // implicit link is written — see `implicit-account-linking.ts`. The
         // audience gate judges only `create-user`, so the two never answer
         // the same call.
-        validateUserInfo: async (data: any, ctx: any) =>
-          (await refuseImplicitAccountLink(data, ctx, {
+        //
+        // It is also where better-auth hands over the IdP's raw profile, so
+        // the profile's `locale` claim is STAGED here, refusing nothing; the
+        // session the sign-in mints settles it (`idp-locale-claim.ts`).
+        validateUserInfo: async (data: any, ctx: any) => {
+          this.idpLocale.stage(data, ctx);
+          return (await refuseImplicitAccountLink(data, ctx, {
             requireLocalEmailVerified: this.implicitLinkRequiresLocalEmailVerified(),
             resolveContext: () => this.linkingContext(),
             logInfo: (m, meta) => this.config.logger?.info?.(m, meta),
-          })) ?? this.validateAudienceAdmission(data, ctx),
+          })) ?? this.validateAudienceAdmission(data, ctx);
+        },
       },
       account: {
         ...AUTH_ACCOUNT_CONFIG,
@@ -5049,6 +5056,25 @@ export class AuthManager {
       return undefined;
     }
   }
+
+  /**
+   * An external sign-in's `locale` claim → `sys_user.locale`, staged by the
+   * `validateUserInfo` seam and settled on the session the sign-in mints.
+   * The rule and its record: `idp-locale-claim.ts`.
+   */
+  private readonly idpLocale = new IdpLocaleSync({
+    getEngine: () => this.getDataEngine() as never,
+    getSupportedLocales: () => {
+      try {
+        const locales = this.config.getI18n?.()?.getLocales?.();
+        return Array.isArray(locales) ? locales : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    resolveAuth: () => this.linkingContext(),
+    warn: (message, meta) => this.config.logger?.warn?.(message, meta),
+  });
 
   /**
    * [ADR-0093 D7] The users created in each in-flight better-auth request,
@@ -8448,6 +8474,7 @@ export class AuthManager {
     const userDeleteAfter = async (user: any, ctx: any) => {
       const result = hostUserDeleteAfter ? await hostUserDeleteAfter(user, ctx) : undefined;
       await clearUserUnlinks(user, ctx);
+      await this.idpLocale.forget(user, ctx);
       return result;
     };
 
@@ -8589,6 +8616,9 @@ export class AuthManager {
         this.config.getAuditSink?.(),
         loginEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined),
       );
+      // An external sign-in's staged `locale` claim lands on the user the
+      // session names, new or returning (`idp-locale-claim.ts`). Never throws.
+      await this.idpLocale.settle(session, ctx);
       return result;
     };
     // [#23772] A minted principal session is NEVER renewed. better-auth's
