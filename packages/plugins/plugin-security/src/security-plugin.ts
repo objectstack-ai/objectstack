@@ -12,7 +12,7 @@ import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#21829] `MAX_BULK_PER_ROW_HOOK_ROWS`: the platform's row ceiling for one
 // predicate write, which also bounds the id list a predicate write's read
 // question composes (see PREDICATE_WRITE_READABLE_ID_CAP).
-import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, MAX_BULK_PER_ROW_HOOK_ROWS, type FieldMaskingRule } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, MAX_BULK_PER_ROW_HOOK_ROWS, ReadableIds, type FieldMaskingRule } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { NumberComparandDoorFieldMeta } from '@objectstack/spec/data';
 // [#7414] The SHARED operation-message catalog #7307 built for the data path's
@@ -108,17 +108,15 @@ import {
   writeCheckFieldOptions,
   type ObjectInputsHost,
 } from './security-plugin-object-inputs.js';
-// [#25223 cut 2] The controlled-by-parent read derivation (the master relation,
-// its two reports, the read leaf and the chain refusal); the methods of the same
-// names below hand each body the members it reads (`CbpReadHost`).
+// [#25223 cut 2] The controlled-by-parent master relation (ADR-0055 §1) and its
+// two reports; the methods of the same names below hand each body the members
+// it reads (`CbpRelationHost`).
 import {
-  computeControlledByParentFilter,
-  controlledByParentChainRefusal,
   reportCbpMasterUnresolved,
   reportRejectedReferenceAlias,
   resolveCbpRelation,
-  type CbpReadHost,
-} from './security-plugin-cbp-read.js';
+  type CbpRelationHost,
+} from './security-plugin-cbp-relation.js';
 import {
   isPlatformOwnershipFloorPolicy,
   masterGateCoversOperation,
@@ -634,7 +632,19 @@ interface RlsFilterOptions {
  * and a bound that widened on overflow would reintroduce it at depth 9
  * instead of depth 2.
  */
-export const CBP_MAX_CHAIN_DEPTH = 8;
+const CBP_MAX_CHAIN_DEPTH = 8;
+
+/**
+ * [ADR-0139 D1] The engine verbs whose `where` may carry a `ReadableIds`
+ * leaf — the engine's own `READABLE_IDS_READ_VERBS`. The read derivation
+ * answers its leaf for these and nothing for a write verb's predicate: a
+ * predicate write is narrowed to the rows the read door returns for the
+ * caller's own predicate ({@link SecurityPlugin.readableRowsScopeForPredicateWrite},
+ * where the leaf composes) and judged per master by the 2.8 gate
+ * ({@link SecurityPlugin.assertControlledByParentWrite}, a verdict, never a
+ * scope), so no master set is composed into a write's predicate.
+ */
+const CBP_LEAF_READ_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
 
 /**
  * [ADR-0055] Which leg of the master-detail write check a refusal came from,
@@ -8865,10 +8875,10 @@ export class SecurityPlugin implements Plugin {
    * never describe different fields.
    */
   private resolveCbpRelation(object: string): CbpRelation | null {
-    // [#25223 cut 2] The body moved to `security-plugin-cbp-read.ts` (see `CbpReadHost`).
+    // [#25223 cut 2] The body moved to `security-plugin-cbp-relation.ts` (see `CbpRelationHost`).
     const readCbpRelCache = () => this.cbpRelCache;
     const readQl = () => this.ql;
-    const host: Pick<CbpReadHost, 'cbpRelCache' | 'ql' | 'reportCbpMasterUnresolved' | 'reportRejectedReferenceAlias'> = {
+    const host: Pick<CbpRelationHost, 'cbpRelCache' | 'ql' | 'reportCbpMasterUnresolved' | 'reportRejectedReferenceAlias'> = {
       get cbpRelCache() { return readCbpRelCache(); },
       get ql() { return readQl(); },
       reportCbpMasterUnresolved: (...a) => this.reportCbpMasterUnresolved(...a),
@@ -8902,9 +8912,9 @@ export class SecurityPlugin implements Plugin {
     entries: ReadonlyArray<readonly [string, any]>,
     requiredMasters: readonly string[],
   ): void {
-    // [#25223 cut 2] The body moved to `security-plugin-cbp-read.ts` (see `CbpReadHost`).
+    // [#25223 cut 2] The body moved to `security-plugin-cbp-relation.ts` (see `CbpRelationHost`).
     const readLogger = () => this.logger;
-    const host: Pick<CbpReadHost, 'logger'> = {
+    const host: Pick<CbpRelationHost, 'logger'> = {
       get logger() { return readLogger(); },
     };
     reportCbpMasterUnresolved.call(host, object, entries, requiredMasters);
@@ -8966,9 +8976,9 @@ export class SecurityPlugin implements Plugin {
     alias: string,
     master: string,
   ): void {
-    // [#25223 cut 2] The body moved to `security-plugin-cbp-read.ts` (see `CbpReadHost`).
+    // [#25223 cut 2] The body moved to `security-plugin-cbp-relation.ts` (see `CbpRelationHost`).
     const readLogger = () => this.logger;
-    const host: Pick<CbpReadHost, 'logger'> = {
+    const host: Pick<CbpRelationHost, 'logger'> = {
       get logger() { return readLogger(); },
     };
     reportRejectedReferenceAlias.call(host, object, field, alias, master);
@@ -9064,16 +9074,41 @@ export class SecurityPlugin implements Plugin {
     operation: string,
     context: any,
   ): Record<string, unknown> | null {
-    // [#25223 cut 2] The body moved to `security-plugin-cbp-read.ts` (see `CbpReadHost`).
-    const readLogger = () => this.logger;
-    const readQl = () => this.ql;
-    const host: Pick<CbpReadHost, 'controlledByParentChainRefusal' | 'logger' | 'ql' | 'resolveCbpRelation'> = {
-      controlledByParentChainRefusal: (...a) => this.controlledByParentChainRefusal(...a),
-      get logger() { return readLogger(); },
-      get ql() { return readQl(); },
-      resolveCbpRelation: (...a) => this.resolveCbpRelation(...a),
-    };
-    return computeControlledByParentFilter.call(host, object, operation, context);
+    if (!this.ql || !context?.userId) return null;
+    const schema = typeof this.ql.getSchema === 'function' ? this.ql.getSchema(object) : null;
+    const sharingModel = schema?.sharingModel ?? schema?.security?.sharingModel;
+    if (sharingModel !== 'controlled_by_parent') return null;
+    if (!CBP_LEAF_READ_VERBS.has(operation)) return null;
+
+    const rel = this.resolveCbpRelation(object);
+    // No resolvable master: the deny sentinel, by reference (ADR-0139 D2 step 2).
+    if (!rel) return RLS_DENY_FILTER;
+
+    // [ADR-0055 amendment] Chain guards, over the registry, BEFORE the leaf is
+    // written. Both answer with the empty master set — the same shape the
+    // #5386 sharing-resolution failure answered with, and the same posture: a
+    // chain this derivation cannot resolve denies, because the alternative
+    // ("no restriction") is the defect being fixed, and the other alternative
+    // (the engine's refusal of the same chain) is a 500 for a declared shape.
+    const refusal = this.controlledByParentChainRefusal(object, rel);
+    if (refusal?.kind === 'cycle') {
+      this.logger.error?.(
+        `[security] controlled_by_parent derivation found a CYCLE resolving '${object}' ` +
+          `(chain: ${refusal.chain.join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
+          `cannot resolve admits no child rather than leaving it unrestricted)`,
+      );
+      return { [rel.fk]: { $in: [] } };
+    }
+    if (refusal?.kind === 'depth') {
+      this.logger.error?.(
+        `[security] controlled_by_parent derivation exceeded the chain depth bound ` +
+          `(${CBP_MAX_CHAIN_DEPTH}) resolving '${object}' ` +
+          `(chain: ${refusal.chain.join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
+          `cannot resolve admits no child rather than leaving it unrestricted)`,
+      );
+      return { [rel.fk]: { $in: [] } };
+    }
+    return { [rel.fk]: { $in: ReadableIds.of(rel.master) } };
   }
 
   /**
@@ -9102,13 +9137,19 @@ export class SecurityPlugin implements Plugin {
     object: string,
     rel: CbpRelation,
   ): { kind: 'cycle' | 'depth'; chain: string[] } | null {
-    // [#25223 cut 2] The body moved to `security-plugin-cbp-read.ts` (see `CbpReadHost`).
-    const readQl = () => this.ql;
-    const host: Pick<CbpReadHost, 'ql' | 'resolveCbpRelation'> = {
-      get ql() { return readQl(); },
-      resolveCbpRelation: (...a) => this.resolveCbpRelation(...a),
-    };
-    return controlledByParentChainRefusal.call(host, object, rel);
+    const chain: string[] = [object];
+    let master = rel.master;
+    for (;;) {
+      if (chain.includes(master)) return { kind: 'cycle', chain: [...chain, master] };
+      const schema = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(master) : null;
+      const model = schema?.sharingModel ?? schema?.security?.sharingModel;
+      if (model !== 'controlled_by_parent') return null;
+      if (chain.length >= CBP_MAX_CHAIN_DEPTH) return { kind: 'depth', chain: [...chain, master] };
+      chain.push(master);
+      const next = this.resolveCbpRelation(master);
+      if (!next) return null;
+      master = next.master;
+    }
   }
 
   /**

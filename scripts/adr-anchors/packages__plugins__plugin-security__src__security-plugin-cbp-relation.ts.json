@@ -1,5 +1,5 @@
 {
-  "file": "packages/plugins/plugin-security/src/security-plugin-cbp-read.ts",
+  "file": "packages/plugins/plugin-security/src/security-plugin-cbp-relation.ts",
   "adrs": [
     "ADR-0055"
   ],

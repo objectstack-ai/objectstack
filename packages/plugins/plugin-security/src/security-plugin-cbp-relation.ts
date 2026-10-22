@@ -1,33 +1,31 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#25223 cut 2] The controlled-by-parent read derivation of `SecurityPlugin`,
- * moved out of `security-plugin.ts` whole: the ADR-0055 §1 master relation a
- * `controlled_by_parent` object derives its access from (with its two loud
- * reports, the unresolved master and the tolerated reference alias), the read
- * leaf composed from it (ADR-0139), and the chain refusal that cuts a cycle or
- * an over-deep chain to zero rows.
+ * [#25223 cut 2] The controlled-by-parent master relation of `SecurityPlugin`,
+ * moved out of `security-plugin.ts` whole: the ADR-0055 §1 derivation of the
+ * one master a `controlled_by_parent` object takes its access from, with its
+ * two loud reports (the unresolved master and the tolerated reference alias).
  *
  * A MOVE, not a redesign. Each function below is the body of the
  * `SecurityPlugin` method of the same name as it stood, re-indented one level
  * and otherwise unedited: the same derivation, the same cache, the same reports,
- * failing closed exactly where they did. The module-level declarations only
- * these bodies read moved with them, also unedited: `CBP_LEAF_READ_VERBS`,
- * `masterNotWritableRefusal`, and the imports below that `security-plugin.ts`
- * no longer needs. The write half of ADR-0055 (the master-write gate) is not
- * here; it stays in `security-plugin.ts` and reads this derivation through the
- * class's `resolveCbpRelation`, as before.
+ * failing closed exactly where they did. The one module-level declaration only
+ * these bodies read moved with them, also unedited: `masterNotWritableRefusal`,
+ * with the two imports below that `security-plugin.ts` no longer needs. Both
+ * consumers of the relation stay in `security-plugin.ts` and read it through
+ * the class's `resolveCbpRelation`, as before: the read leaf
+ * (`computeControlledByParentFilter`, ADR-0139) with its chain refusal, and the
+ * master-write gate.
  *
  * ## How the moved bodies reach the class
  *
  * The shape cut 1 used (`security-plugin-object-inputs.ts`, whose header
  * carries the reasoning). The class keeps every method — the published
  * `dist/*.d.ts` lists each one's name, docblock and position — and each body is
- * one literal of exactly the {@link CbpReadHost} members that method reads,
+ * one literal of exactly the {@link CbpRelationHost} members that method reads,
  * plus a `.call`. A method is handed over as a closure that calls it on the
  * plugin at call time, so a test double or spy set on the plugin is still the
- * one the body reaches, and the bodies that call one another (the derivation's
- * two reports, the read leaf's relation and chain refusal) do so through the
+ * one the body reaches, and the derivation reaches its two reports through the
  * plugin, as before. Every function here is synchronous.
  *
  * Every field the bodies read goes as a GETTER, by the rule cut 1 set: none of
@@ -35,40 +33,18 @@
  * construction, and `cbpRelCache` is a plain field the metadata watch clears in
  * place.
  *
- * Two declarations stay in `security-plugin.ts` and are read from there:
- *
- * - `CBP_MAX_CHAIN_DEPTH`, imported from it. ADR-0055 anchors that bound by
- *   symbol in `security-plugin.ts`, and the master-write gate there walks the
- *   same bound. The import is the one value binding this module takes from
- *   `security-plugin.ts`. It is read only inside function bodies, at call time,
- *   never while either module evaluates, so the two-way import is safe under
- *   ESM, and the published bundle holds one module.
- * - `CbpRelation`, named here through the class's own signature (below), so
- *   the interface keeps its one declaration beside the cache that holds it.
- *
- * Nothing re-exports this module, so the published surface does not move.
+ * `CbpRelation` keeps its one declaration in `security-plugin.ts`, beside the
+ * cache that holds it and the consumers that read it; this module names it
+ * through the class's own signature (below). The import of `SecurityPlugin` is
+ * type-only, so there is no runtime import cycle, and nothing re-exports this
+ * module, so the published surface does not move.
  */
 
 import type { SecurityPlugin } from './security-plugin.js';
-import { CBP_MAX_CHAIN_DEPTH } from './security-plugin.js';
-import { ReadableIds } from '@objectstack/spec/data';
 // [ADR-0055 §1] The parse's own one-master judgement, asked of an object that
 // reached the registry without the parse (see `resolveCbpRelation`).
 import { controlledByParentMasterRefusal } from '@objectstack/spec/data';
-import { RLS_DENY_FILTER } from './rls-compiler.js';
 import { masterGovernsRowWrites, OWD_DELEGATING_ROW_WRITES } from './platform-ownership-policies.js';
-
-/**
- * [ADR-0139 D1] The engine verbs whose `where` may carry a `ReadableIds`
- * leaf — the engine's own `READABLE_IDS_READ_VERBS`. The read derivation
- * answers its leaf for these and nothing for a write verb's predicate: a
- * predicate write is narrowed to the rows the read door returns for the
- * caller's own predicate ({@link SecurityPlugin.readableRowsScopeForPredicateWrite},
- * where the leaf composes) and judged per master by the 2.8 gate
- * ({@link SecurityPlugin.assertControlledByParentWrite}, a verdict, never a
- * scope), so no master set is composed into a write's predicate.
- */
-const CBP_LEAF_READ_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
 
 /**
  * [ADR-0055 §1] {@link CbpRelation.masterNotWritable} for a resolved relation:
@@ -85,7 +61,7 @@ function masterNotWritableRefusal(object: string, fk: string, def: unknown): str
 /**
  * A `controlled_by_parent` object's resolved master relation, as the class
  * declares it: the `CbpRelation` interface stays in `security-plugin.ts`
- * beside `cbpRelCache` and the write gate that read it, and the moved bodies
+ * beside `cbpRelCache` and the consumers that read it, and the moved bodies
  * name it exactly as they did.
  */
 type CbpRelation = NonNullable<ReturnType<SecurityPlugin['resolveCbpRelation']>>;
@@ -98,19 +74,17 @@ type CbpRelation = NonNullable<ReturnType<SecurityPlugin['resolveCbpRelation']>>
  * a member the class does not have is a compile error. Every field here is a
  * getter on the host; see the module header.
  */
-export interface CbpReadHost {
+export interface CbpRelationHost {
   readonly cbpRelCache: SecurityPlugin['cbpRelCache'];
   readonly logger: SecurityPlugin['logger'];
   readonly ql: SecurityPlugin['ql'];
-  controlledByParentChainRefusal: SecurityPlugin['controlledByParentChainRefusal'];
   reportCbpMasterUnresolved: SecurityPlugin['reportCbpMasterUnresolved'];
   reportRejectedReferenceAlias: SecurityPlugin['reportRejectedReferenceAlias'];
-  resolveCbpRelation: SecurityPlugin['resolveCbpRelation'];
 }
 
 /** The body of `SecurityPlugin#resolveCbpRelation`; the method's docblock there is its contract. */
 export function resolveCbpRelation(
-  this: Pick<CbpReadHost, 'cbpRelCache' | 'ql' | 'reportCbpMasterUnresolved' | 'reportRejectedReferenceAlias'>,
+  this: Pick<CbpRelationHost, 'cbpRelCache' | 'ql' | 'reportCbpMasterUnresolved' | 'reportRejectedReferenceAlias'>,
   object: string,
 ): CbpRelation | null {
   if (this.cbpRelCache.has(object)) return this.cbpRelCache.get(object) ?? null;
@@ -217,7 +191,7 @@ export function resolveCbpRelation(
 
 /** The body of `SecurityPlugin#reportCbpMasterUnresolved`; the method's docblock there is its contract. */
 export function reportCbpMasterUnresolved(
-  this: Pick<CbpReadHost, 'logger'>,
+  this: Pick<CbpRelationHost, 'logger'>,
   object: string,
   entries: ReadonlyArray<readonly [string, any]>,
   requiredMasters: readonly string[],
@@ -256,7 +230,7 @@ export function reportCbpMasterUnresolved(
 
 /** The body of `SecurityPlugin#reportRejectedReferenceAlias`; the method's docblock there is its contract. */
 export function reportRejectedReferenceAlias(
-  this: Pick<CbpReadHost, 'logger'>,
+  this: Pick<CbpRelationHost, 'logger'>,
   object: string,
   field: string,
   alias: string,
@@ -276,70 +250,4 @@ export function reportRejectedReferenceAlias(
       'authoring path already refuses this shape, so the two answers disagree until you do.',
     { object, field, alias, master },
   );
-}
-
-/** The body of `SecurityPlugin#computeControlledByParentFilter`; the method's docblock there is its contract. */
-export function computeControlledByParentFilter(
-  this: Pick<CbpReadHost, 'controlledByParentChainRefusal' | 'logger' | 'ql' | 'resolveCbpRelation'>,
-  object: string,
-  /** The engine verb the answer is composed onto; a write verb answers `null` (ADR-0139 D1). */
-  operation: string,
-  context: any,
-): Record<string, unknown> | null {
-  if (!this.ql || !context?.userId) return null;
-  const schema = typeof this.ql.getSchema === 'function' ? this.ql.getSchema(object) : null;
-  const sharingModel = schema?.sharingModel ?? schema?.security?.sharingModel;
-  if (sharingModel !== 'controlled_by_parent') return null;
-  if (!CBP_LEAF_READ_VERBS.has(operation)) return null;
-
-  const rel = this.resolveCbpRelation(object);
-  // No resolvable master: the deny sentinel, by reference (ADR-0139 D2 step 2).
-  if (!rel) return RLS_DENY_FILTER;
-
-  // [ADR-0055 amendment] Chain guards, over the registry, BEFORE the leaf is
-  // written. Both answer with the empty master set — the same shape the
-  // #5386 sharing-resolution failure answered with, and the same posture: a
-  // chain this derivation cannot resolve denies, because the alternative
-  // ("no restriction") is the defect being fixed, and the other alternative
-  // (the engine's refusal of the same chain) is a 500 for a declared shape.
-  const refusal = this.controlledByParentChainRefusal(object, rel);
-  if (refusal?.kind === 'cycle') {
-    this.logger.error?.(
-      `[security] controlled_by_parent derivation found a CYCLE resolving '${object}' ` +
-        `(chain: ${refusal.chain.join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
-        `cannot resolve admits no child rather than leaving it unrestricted)`,
-    );
-    return { [rel.fk]: { $in: [] } };
-  }
-  if (refusal?.kind === 'depth') {
-    this.logger.error?.(
-      `[security] controlled_by_parent derivation exceeded the chain depth bound ` +
-        `(${CBP_MAX_CHAIN_DEPTH}) resolving '${object}' ` +
-        `(chain: ${refusal.chain.join(' -> ')}) — denying (fail-closed: a chain the derivation ` +
-        `cannot resolve admits no child rather than leaving it unrestricted)`,
-    );
-    return { [rel.fk]: { $in: [] } };
-  }
-  return { [rel.fk]: { $in: ReadableIds.of(rel.master) } };
-}
-
-/** The body of `SecurityPlugin#controlledByParentChainRefusal`; the method's docblock there is its contract. */
-export function controlledByParentChainRefusal(
-  this: Pick<CbpReadHost, 'ql' | 'resolveCbpRelation'>,
-  object: string,
-  rel: CbpRelation,
-): { kind: 'cycle' | 'depth'; chain: string[] } | null {
-  const chain: string[] = [object];
-  let master = rel.master;
-  for (;;) {
-    if (chain.includes(master)) return { kind: 'cycle', chain: [...chain, master] };
-    const schema = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(master) : null;
-    const model = schema?.sharingModel ?? schema?.security?.sharingModel;
-    if (model !== 'controlled_by_parent') return null;
-    if (chain.length >= CBP_MAX_CHAIN_DEPTH) return { kind: 'depth', chain: [...chain, master] };
-    chain.push(master);
-    const next = this.resolveCbpRelation(master);
-    if (!next) return null;
-    master = next.master;
-  }
 }
