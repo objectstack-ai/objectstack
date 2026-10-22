@@ -21,10 +21,11 @@ import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const SYSTEM = { context: { isSystem: true } } as const;
 const text = { type: 'text' as const };
+/** [ADR-0131 D5] The Default Organization (`slug = 'default'`), the owner of a grant that anchors under `single`. */
+const DEFAULT_ORG = 'org_default';
 
 const objects = [
   {
@@ -47,6 +48,17 @@ const objects = [
       user_id: { ...text, name: 'user_id' },
       organization_id: { ...text, name: 'organization_id' },
       role: { ...text, name: 'role' },
+    },
+  },
+  // [ADR-0131 D5] The organization object, so the Default Organization the anchor reads exists.
+  {
+    name: 'sys_organization',
+    label: 'Organization',
+    managedBy: 'better-auth',
+    fields: {
+      id: { ...text, name: 'id', primaryKey: true },
+      name: { ...text, name: 'name' },
+      slug: { ...text, name: 'slug' },
     },
   },
   {
@@ -117,10 +129,7 @@ async function boot(opts: Boot = { permissions: [ADMIN_FULL_ACCESS] }): Promise<
   await engine.init();
   for (const o of objects) engine.registry.registerObject(o as never);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, grants, identities) exist
-  // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
-  // NOT NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  await engine.insert('sys_organization', { id: DEFAULT_ORG, name: 'Default Organization', slug: 'default' }, SYSTEM);
   const guardEngine = opts.readThrough?.(engine) ?? (engine as unknown as LastAdminGuardEngine);
   if (opts.permissions) {
     const catalog = { permissions: opts.permissions.map((name) => ({ name })) };
@@ -135,7 +144,13 @@ async function seedGrantAdmin(engine: ObjectQL, id = 'usr_admin'): Promise<void>
   await engine.insert('sys_user', { id, name: id, email: `${id}@corp.example`, banned: false }, SYSTEM);
   await engine.insert(
     'sys_user_permission_set',
-    { id: `ups_${id}`, user_id: id, permission_set_id: 'ps_admin', permission_set: ADMIN_FULL_ACCESS },
+    {
+      id: `ups_${id}`,
+      user_id: id,
+      permission_set_id: 'ps_admin',
+      permission_set: ADMIN_FULL_ACCESS,
+      organization_id: DEFAULT_ORG,
+    },
     SYSTEM,
   );
 }

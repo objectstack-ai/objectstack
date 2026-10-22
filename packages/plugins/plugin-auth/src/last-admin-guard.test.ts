@@ -66,7 +66,6 @@ import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js
 import { sqliteEnginePool, type BootedSqliteEngine } from './__tests__/sqlite-engine-pool.testkit.js';
 import { admin } from 'better-auth/plugins/admin';
 import { organization } from 'better-auth/plugins/organization';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -153,6 +152,23 @@ const sysMetadataActivation = {
   },
 };
 
+/**
+ * [ADR-0131 D5] The organization object, so the Default Organization the anchor
+ * reads exists: a platform-admin grant anchors standing only when the Default
+ * Organization owns it, exactly as `resolveAuthzContext` reads it. Every engine
+ * this file boots holds one, {@link DEFAULT_ORG}, written at boot.
+ */
+const sysOrganization = {
+  name: 'sys_organization',
+  label: 'Organization',
+  managedBy: 'better-auth',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    name: { name: 'name', type: 'text' as const },
+    slug: { name: 'slug', type: 'text' as const },
+  },
+};
+
 const sysUserPermissionSet = {
   name: 'sys_user_permission_set',
   label: 'User Permission Set',
@@ -170,6 +186,8 @@ const sysUserPermissionSet = {
 
 const SYSTEM = { context: { isSystem: true } } as const;
 const ORG = 'org_1';
+/** [ADR-0131 D5] The Default Organization (`slug = 'default'`), the owner of every platform-admin grant. */
+const DEFAULT_ORG = 'org_default';
 const PS_ADMIN = 'ps_admin_full_access';
 
 /**
@@ -269,6 +287,7 @@ afterEach(async () => {
  */
 const defaultEngines = sqliteEnginePool(() => bootEngine({}), {
   onReset: (engine) => catalogOf(engine).clear(),
+  keepBootOrganizations: true,
 });
 afterAll(defaultEngines.destroy);
 
@@ -287,14 +306,11 @@ async function bootEngine(opts: BootOptions, track?: ObjectQL[]): Promise<Booted
   });
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const o of [sysUser, sysMember, sysPermissionSet, sysUserPermissionSet, sysAccount, sysMetadataActivation]) {
+  for (const o of [sysUser, sysMember, sysOrganization, sysPermissionSet, sysUserPermissionSet, sysAccount, sysMetadataActivation]) {
     engine.registry.registerObject(o as never);
   }
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, grants, identities) exist
-  // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
-  // NOT NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  await engine.insert('sys_organization', { id: DEFAULT_ORG, name: 'Default Organization', slug: 'default' }, SYSTEM);
   const names = new Set<string>();
   catalogs.set(engine, names);
   const catalog = () => ({ permissions: [...names].map((name) => ({ name })) });
@@ -348,7 +364,14 @@ async function seedUser(
     );
   }
   if (extra.platformAdmin || extra.grant) {
-    const grant: Record<string, unknown> = { id: `ups_${id}`, user_id: id, permission_set_id: PS_ADMIN, ...(extra.grant ?? {}) };
+    // [ADR-0131 D5] Owned by the Default Organization unless the case names another owner.
+    const grant: Record<string, unknown> = {
+      id: `ups_${id}`,
+      user_id: id,
+      permission_set_id: PS_ADMIN,
+      organization_id: DEFAULT_ORG,
+      ...(extra.grant ?? {}),
+    };
     if (!('permission_set' in grant)) grant.permission_set = SET_NAME_OF[String(grant.permission_set_id)];
     await engine.insert('sys_user_permission_set', grant, SYSTEM);
   }
@@ -417,12 +440,12 @@ describe('[#5892] break-glass: the last unbanned administrator cannot be banned'
     expect(await bannedFlag(engine, 'usr_member')).toBeTruthy();
   });
 
-  it('a platform admin (unscoped admin_full_access) counts, a SCOPED grant does not', async () => {
-    // `usr_platform` holds the org-less grant → platform admin.
+  it('a platform admin (the Default Organization\'s admin_full_access) counts, a SCOPED grant does not', async () => {
+    // `usr_platform` holds the Default Organization's grant → platform admin.
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
     // `usr_scoped` holds the SAME permission set scoped to an org → a tenant
-    // admin, not the environment's break-glass account (ADR-0068 D2 reads the
-    // unscoped grant only).
+    // admin, not the environment's break-glass account (ADR-0131 D5 reads the
+    // Default Organization's grant only).
     await seedUser(engine, 'usr_scoped', { grant: { organization_id: ORG } });
 
     await expect(ban(engine, 'usr_scoped')).resolves.toBeTruthy();
@@ -765,7 +788,7 @@ describe('[#5941] break-glass: the last unbanned administrator cannot be DELETED
     expect(await userExists(engine, 'usr_nobody')).toBe(false);
   });
 
-  it('a platform admin (unscoped admin_full_access) counts, a SCOPED grant does not', async () => {
+  it('a platform admin (the Default Organization\'s admin_full_access) counts, a SCOPED grant does not', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
     await seedUser(engine, 'usr_scoped', { grant: { organization_id: ORG } });
 
@@ -1182,8 +1205,8 @@ describe('[#5978] path 1 — downgrading the last administrator\'s sys_member ro
     await seedUser(engine, 'usr_owner', { role: 'owner' });
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
 
-    // The survivor need not be an org admin: an unscoped `admin_full_access`
-    // grant is the other half of the same enumeration.
+    // The survivor need not be an org admin: the Default Organization's
+    // `admin_full_access` grant is the other half of the same enumeration.
     await expect(setRole('mem_usr_owner', 'member')).resolves.toBeTruthy();
   });
 
@@ -1318,8 +1341,8 @@ describe('[#5978] path 3 — revoking the last administrator\'s admin_full_acces
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
 
     // The row survives and still points at `admin_full_access`; it just stops
-    // being the UNSCOPED grant `resolveAuthzContext` derives `platform_admin`
-    // from. Same end state, no delete anywhere.
+    // being the Default Organization's grant `resolveAuthzContext` derives
+    // `platform_admin` from. Same end state, no delete anywhere.
     await expect(editGrant('ups_usr_platform', { organization_id: ORG })).rejects.toThrow(
       /Refusing this grant change/,
     );
@@ -1328,7 +1351,7 @@ describe('[#5978] path 3 — revoking the last administrator\'s admin_full_acces
       { where: { id: 'ups_usr_platform' } },
       SYSTEM,
     );
-    expect(row?.organization_id).toBeFalsy();
+    expect(row?.organization_id).toBe(DEFAULT_ORG);
   });
 
   it('EXPIRING the last grant is refused (ADR-0091 window, consumed as-is)', async () => {
@@ -1943,7 +1966,7 @@ describe('[ADR-0131 D3/D4] the sys_permission_set row is no standing input', () 
 //
 // So "zero administrators" is split into the two states it was conflating: a
 // genuinely fresh environment (permitted, unchanged) and one that was emptied
-// (refused). The evidence is a DANGLING unscoped in-window grant — one naming
+// (refused). The evidence is a DANGLING in-window Default Organization grant — one naming
 // a set the catalog does not hold.
 // ---------------------------------------------------------------------------
 
@@ -2022,7 +2045,7 @@ describe('[#6084] a zero-administrator reading is no longer automatically the bo
     await expect(switchOff(engine)).resolves.toBeDefined();
   });
 
-  it('an unscoped grant whose permission set the catalog still HOLDS is not evidence of a wipe', async () => {
+  it('a Default Organization grant whose permission set the catalog still HOLDS is not evidence of a wipe', async () => {
     const engine = await boot();
     await seedAdminPermissionSet(engine);
     await seedUser(engine, 'usr_a', { grant: { permission_set_id: 'ps_member' } });
@@ -2115,7 +2138,7 @@ describe('[#8613] a SWITCHED-OFF break-glass set is an emptied environment, not 
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/last administrator/i);
   });
 
-  it('a switched-off set nobody holds an unscoped grant to is NOT evidence', async () => {
+  it('a switched-off set nobody holds a Default Organization grant to is NOT evidence', async () => {
     const engine = await boot({ unguarded: true });
     await seedAdminPermissionSet(engine);
     await seedUser(engine, 'usr_first', { role: 'member' });

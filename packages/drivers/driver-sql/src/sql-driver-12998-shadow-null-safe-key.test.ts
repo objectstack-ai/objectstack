@@ -40,13 +40,21 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 import { isHashShadowColumn } from './schema-drift.js';
 import { MYSQL_CELL, declareDialectCell } from './live-dialect-matrix.testkit.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * An object with a tenant column and one long text field carrying an
- * ORG-SCOPED unique. `maxLength: 1024` exceeds the 768-char keyable ceiling, so
- * MySQL refuses the direct (functional-key-part) index and the sync takes the
- * shadow route — the same route the live members
+ * ORG-SCOPED unique in its NULL-safe (18.0) form. `maxLength: 1024` exceeds the
+ * 768-char keyable ceiling, so MySQL refuses the direct (functional-key-part)
+ * index and the sync takes the shadow route — the same route the live members
  * (`sys_notification_preference` / `sys_notification_subscription`) take.
+ *
+ * ADR-0131 D1: a `unique: 'organization'` declaration now keys the PLAIN
+ * tenant column, so the NULL-safe key part this file pins reaches the shadow
+ * only from an input that already carries `nullSafeColumns` (honoured
+ * verbatim) — the shape a database built before 18.x holds. Every test that
+ * writes NULL-organization rows also returns the table to that store's
+ * nullable tenant column (`asPre18TenantColumn`).
  */
 const orgUniqueOn = (name: string) => ({
   name,
@@ -54,7 +62,14 @@ const orgUniqueOn = (name: string) => ({
     organization_id: { type: 'string' },
     v: { type: 'text', maxLength: 1024 },
   },
-  indexes: [{ fields: ['v'], unique: 'organization' as const, name: `uniq_${name}_org_v` }],
+  indexes: [
+    {
+      fields: ['organization_id', 'v'],
+      unique: true as const,
+      nullSafeColumns: ['organization_id'],
+      name: `uniq_${name}_org_v`,
+    },
+  ],
 });
 
 declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
@@ -100,6 +115,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
     it('collides two NULL-organization rows under an org-scoped shadow unique', async () => {
       driver = new SqlDriver(cell.config());
       await driver.initObjects([orgUniqueOn('os12998_org')]);
+      await asPre18TenantColumn(driver, 'os12998_org');
 
       const { cols, idx } = await catalog('os12998_org');
       const shadow = cols.find((c: any) => isHashShadowColumn(c.COLUMN_NAME));
@@ -184,6 +200,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
       const bare = orgUniqueOn('os12998_dirty');
       const withoutIndex = { ...bare, indexes: [] };
       await driver.initObjects([withoutIndex]);
+      await asPre18TenantColumn(driver, 'os12998_dirty');
       const knex = (driver as any).knex;
       const V = 'd'.repeat(900);
       await knex('os12998_dirty').insert([
@@ -220,6 +237,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
     it('names a NULL-organization duplicate in declared terms, never as a collision', async () => {
       driver = new SqlDriver(cell.config());
       await driver.initObjects([orgUniqueOn('os12998_msg')]);
+      await asPre18TenantColumn(driver, 'os12998_msg');
       const V = 'm'.repeat(900);
       await driver.create('os12998_msg', { v: V });
       const err: unknown = await driver.create('os12998_msg', { v: V }).then(
@@ -266,6 +284,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
       // rejected by tsc for a key the driver reads regardless (the gap commit b72226f48 closed).
       const withoutIndex = { ...bare, indexes: [] };
       await driver.initObjects([withoutIndex]);
+      await asPre18TenantColumn(driver, 'os12998_tail');
       const knex = (driver as any).knex;
       // Six DISTINCT values, each doubled under a NULL organization: six
       // conflicting groups once the declared key folds NULL into the global

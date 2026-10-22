@@ -3226,17 +3226,6 @@ function indexKeyColumns(obj: Record<string, any>): ReadonlySet<string> {
  * is what keeps the transcription honest — it recomputes every name from the
  * driver's own exported `uniqueIndexesFromFields` and compares.
  */
-/**
- * `driver-sql`'s `GLOBAL_TENANT` — the sentinel the ADR-0120 D3 NULL-safe
- * organization key part folds a NULL organization onto.
- *
- * Transcribed for the same #5726 reason as the rest of this block, and it
- * reaches only a COMMENT in the generated file: this format emits no expression
- * key part, so the sentinel is here to NAME the index that was not emitted, not
- * to build one. The pin compares it against the driver's own export.
- */
-const GLOBAL_TENANT_KEY = '__global__';
-
 const INDEX_NAME_MAX = 60;
 /** Chars kept from `<prefix>_<table>` before the `_<hash8>` suffix of a truncated name. */
 const INDEX_NAME_HEAD = INDEX_NAME_MAX - 9;
@@ -3253,15 +3242,13 @@ function buildIndexName(table: string, columns: string[], unique: boolean): stri
 interface MirroredUniqueIndex {
   /** {@link buildIndexName}'s answer — the identifier the driver would use. */
   name: string;
-  /** The key parts, in the driver's order (tenant column first when scoped). */
-  columns: string[];
   /**
-   * The tenant column whose key part materializes as the ADR-0120 D3 NULL-safe
-   * expression `COALESCE(<column>, '__global__')` rather than as a bare column,
-   * or `null` for a plain single-column unique. An expression key part is what
-   * neither format emits — see {@link uniqueIndexesForObject}.
+   * The key parts, in the driver's order (tenant column first when scoped).
+   * Every part is a plain column: since ADR-0131 D1 the driver keys the
+   * NOT NULL tenant column itself, so an organization composite is a column
+   * list both formats can emit.
    */
-  nullSafeColumn: string | null;
+  columns: string[];
 }
 
 /**
@@ -3276,10 +3263,10 @@ interface MirroredUniqueIndex {
  * {@link isUniqueScopeDeclared}, {@link isOrganizationScopedUnique} and
  * {@link tenantFieldOf} — so they cannot disagree about which fields are keyed.
  *
- * Scoping rule, transcribed from the driver (ADR-0120 D1/D3):
+ * Scoping rule, transcribed from the driver (ADR-0120 D1, ADR-0131 D1):
  *   - `unique: 'global'` → single-column `(field)`, platform-wide.
  *   - `unique: true` / `'organization'` on a tenant-scoped table → composite
- *     `(COALESCE(tenantField, '__global__'), field)`, tenant column FIRST.
+ *     `(tenantField, field)`, tenant column FIRST.
  *   - `unique: true` / `'organization'` with no tenant column → `(field)`.
  *   - a unique declaration ON the tenant column itself stays single-column —
  *     `(organization_id, organization_id)` is not a constraint.
@@ -3301,11 +3288,7 @@ function uniqueIndexesForObject(obj: Record<string, any>): MirroredUniqueIndex[]
     const scoped =
       isOrganizationScopedUnique(field.unique) && tenantField != null && tenantField !== name;
     const columns = scoped ? [tenantField as string, name] : [name];
-    out.push({
-      name: buildIndexName(table, columns, true),
-      columns,
-      nullSafeColumn: scoped ? (tenantField as string) : null,
-    });
+    out.push({ name: buildIndexName(table, columns, true), columns });
   }
   return out;
 }
@@ -3314,24 +3297,19 @@ function uniqueIndexesForObject(obj: Record<string, any>): MirroredUniqueIndex[]
  * The subset of {@link uniqueIndexesForObject} a format may actually emit, and
  * a line for every one it may not.
  *
- * Two exclusions, and BOTH are the driver's own behaviour rather than a
- * convenience here:
+ * One exclusion, and it is the driver's own behaviour rather than a
+ * convenience here: a key part with no column. `syncDeclaredIndexes` skips a
+ * declared index whose columns are not in `physicalColumns` and warns; the
+ * generator's equivalent of "not materialized" is a field this file emits no
+ * column for — a VIRTUAL `formula` (commit 08706f0e0). Emitting the index
+ * anyway produces DDL that refuses to run at all.
  *
- *   1. A key part with no column. `syncDeclaredIndexes` skips a declared index
- *      whose columns are not in `physicalColumns` and warns; the generator's
- *      equivalent of "not materialized" is a field this file emits no column
- *      for — a VIRTUAL `formula` (commit 08706f0e0). Emitting the index anyway produces
- *      DDL that refuses to run at all.
- *   2. An EXPRESSION key part. `COALESCE(<tenant>, '__global__')` is what the
- *      driver builds through raw DDL precisely because knex's schema builder
- *      cannot express it, and it is NOT interchangeable with the bare composite:
- *      under SQL's NULL-distinct UNIQUE a bare `(organization_id, field)`
- *      enforces NOTHING on rows without an organization, which on a
- *      single-tenant stack is every row (#5030). So emitting the bare composite
- *      here would ADVERTISE a constraint the table does not carry — worse than
- *      emitting nothing, and the failure mode Prime Directive #10 names.
+ * The organization composite is emitted: since ADR-0131 D1 the driver keys the
+ * plain tenant column, so the bare `(organization_id, field)` IS the platform's
+ * constraint, no longer the ADR-0120 D3 `COALESCE` expression neither format
+ * could spell.
  *
- * ⛔ Neither exclusion is silent. A skipped index is named in the generated file
+ * ⛔ The exclusion is not silent. A skipped index is named in the generated file
  * itself, with what it would have keyed, because the operator reading that file
  * is the only person who can act on it — "Absence must be loud".
  */
@@ -3345,15 +3323,6 @@ function partitionUniqueIndexes(
     const missing = index.columns.filter((c) => !emittedColumns.has(c));
     if (missing.length > 0) {
       skipped.push({ index, why: `no column is generated for ${missing.join(', ')}` });
-      continue;
-    }
-    if (index.nullSafeColumn !== null) {
-      skipped.push({
-        index,
-        why:
-          `its organization key part is COALESCE("${index.nullSafeColumn}", '${GLOBAL_TENANT_KEY}'), ` +
-          'an expression key part this format does not emit; the platform creates it at boot',
-      });
       continue;
     }
     emit.push(index);

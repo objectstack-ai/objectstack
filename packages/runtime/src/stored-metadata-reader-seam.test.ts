@@ -32,7 +32,7 @@ function storedRow(): Record<string, unknown> {
     metadata: JSON.stringify({
       name: 'unit_ds',
       driver: 'turso',
-      config: { url: 'libsql://unit.example.invalid', encryptionKey: SENTINEL },
+      config: { url: 'libsql://unit.example.invalid', authToken: SENTINEL },
     }),
     checksum: STORED_HASH,
   };

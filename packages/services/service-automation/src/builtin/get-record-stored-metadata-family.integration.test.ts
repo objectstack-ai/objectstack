@@ -53,12 +53,12 @@ import { installDefaultOrganization } from '../default-organization.testkit.js';
 const SYS = { isSystem: true } as const;
 const KEYED = /^hmac-sha256:[0-9a-f]{64}$/;
 
-/** The synthetic credential, in the slot the datasource redactor withholds (turso's `encryptionKey`). */
+/** The synthetic credential, in the slot the datasource redactor withholds (turso's `authToken`). */
 const SENTINEL = 'flow-read-family-sentinel-4d2b';
 const DS_NAME = 'pin_flow_ds';
 /** Non-credential configuration of the same body: present in a projection of THIS row. */
 const DS_URL = 'libsql://pin-flow.example.invalid';
-const DS_BODY = { name: DS_NAME, label: 'Pin flow DS', driver: 'turso', config: { url: DS_URL, encryptionKey: SENTINEL } };
+const DS_BODY = { name: DS_NAME, label: 'Pin flow DS', driver: 'turso', config: { url: DS_URL, authToken: SENTINEL } };
 const STORED_HASH = hashSpec(DS_BODY);
 
 /** An ordinary object a flow copies what it read into. */

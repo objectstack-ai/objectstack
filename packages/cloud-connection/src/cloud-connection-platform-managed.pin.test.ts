@@ -3,9 +3,9 @@
 /**
  * A runtime whose control-plane credential is the environment service key is
  * PLATFORM-MANAGED: its cloud connection belongs to the platform, so this
- * runtime registers no Cloud Connection Setup page and refuses to disconnect.
- * Everywhere else the page registers, under Setup → Integrations.
- * (Ruling 甲 on #25097.)
+ * runtime registers no Cloud Connection Setup page and refuses to connect or
+ * disconnect. Everywhere else the page registers, under Setup → Integrations.
+ * (Ruling 甲 on #25097; the bind doors, #25113.)
  *
  * ## What this file pins
  *
@@ -20,16 +20,24 @@
  *       - managed: no `cloud_connection_settings` page and no
  *         `nav_cloud_connection` entry anywhere in Setup's tree;
  *       - not managed: the page is served and the entry sits in
- *         `group_integrations`, not `group_apps`.
+ *         `group_integrations`, not `group_apps`, declaring
+ *         `manage_platform_settings` on itself (ruling 乙, #25119).
  *     Both readings carry a lit control in the same composition: a page and a
  *     contributed `group_apps` entry that ARE served, so "absent" is read off a
  *     listing that carries plugin metadata, not off an empty one.
- *   - `POST /unbind`, driven through the route the plugin mounts, under both
- *     resolution modes, by a caller who holds `setup.access`:
- *       - managed: `409 RESOURCE_CONFLICT` in the declared envelope, its
- *         message naming the platform as the connection's manager, with no
- *         control-plane call (no revoke) and the stored credential untouched;
- *       - not managed: the control plane's revoke is called and the stored
+ *   - The three connection-changing doors — `POST /bind/start`,
+ *     `POST /bind/poll` and `POST /unbind` — driven through the routes the
+ *     plugin mounts, under both resolution modes, by a caller who holds
+ *     `manage_platform_settings` (so each refusal below comes after the
+ *     identity and capability checks, never instead of them):
+ *       - managed: `409 RESOURCE_CONFLICT` in the declared envelope at each
+ *         door, its message naming the platform as the connection's manager,
+ *         with no control-plane call (no device code, no token poll, no
+ *         `/bind`, no revoke) and the stored credential neither replaced nor
+ *         cleared (#25113: a completed bind persisted a device credential the
+ *         service key shadows);
+ *       - not managed: the device code is requested, the bind completes and
+ *         persists its credential, and the revoke is called and the stored
  *         credential cleared, as before.
  */
 
@@ -54,11 +62,11 @@ const SERVICE_KEY = 'svc-key-platform';
 
 /** The organization the session acts in, and the one the grant below is owned by. */
 const ORG = 'o1';
-/** Signed in, holding `setup.access`: the caller the Setup page is for. */
-const ADMIN = 'u_setup_admin';
+/** Signed in, holding `manage_platform_settings`: the caller the Setup page is for (ruling 乙, #25119). */
+const ADMIN = 'u_platform_admin';
 const GRANTS: Record<string, any[]> = {
-    sys_user_permission_set: [{ id: 'ups_1', user_id: ADMIN, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: ORG }],
-    sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
+    sys_user_permission_set: [{ id: 'ups_1', user_id: ADMIN, permission_set_id: 'ps_1', permission_set: 'platform_admin', organization_id: ORG }],
+    sys_permission_set: [{ id: 'ps_1', name: 'platform_admin', system_permissions: ['setup.access', 'manage_platform_settings'] }],
 };
 
 /** The control page: the plugin's own page under another name, so its shape is one the registry admits. */
@@ -233,6 +241,10 @@ describe('platform-managed runtime — no Setup page, no nav entry (ruling 甲)'
 
         const navigation = await setupNavigation(protocol);
         expect(groupIds(navigation, 'group_integrations')).toEqual(['nav_cloud_connection']);
+        // Ruling 乙 (#25119): the entry carries the doors' rule on itself, as served.
+        const entry = (navigation.find((g) => g?.id === 'group_integrations')?.children as Bag[])
+            .find((i) => i?.id === 'nav_cloud_connection');
+        expect(entry?.requiredPermissions).toEqual(['manage_platform_settings']);
         const apps = groupIds(navigation, 'group_apps');
         expect(apps).toContain('nav_marketplace_browse');
         expect(apps).not.toContain('nav_cloud_connection');
@@ -241,9 +253,9 @@ describe('platform-managed runtime — no Setup page, no nav entry (ruling 甲)'
     });
 });
 
-// ── Unbind ──────────────────────────────────────────────────────────────────
+// ── The three connection-changing doors ─────────────────────────────────────
 
-function makeC(path: string, user?: string) {
+function makeC(path: string, user?: string, body: unknown = {}) {
     const url = `https://env.example.test${path}`;
     const headers = new Headers();
     if (user) headers.set('x-test-user', user);
@@ -252,19 +264,29 @@ function makeC(path: string, user?: string) {
             url,
             raw: new Request(url, { headers }),
             header: (n: string) => headers.get(n) ?? undefined,
-            json: async () => ({}),
-            text: async () => '{}',
+            json: async () => body,
+            text: async () => JSON.stringify(body),
         },
         json: (payload: any, status?: number) => ({ payload, status: status ?? 200 }),
     };
 }
 
+/** The doors, each with the body it needs to reach the control plane. */
+const DOORS = {
+    'bind/start': {},
+    'bind/poll': { device_code: 'dc_1' },
+    unbind: {},
+} as const;
+type Door = keyof typeof DOORS;
+
 /**
  * The plugin mounted in either resolution mode, holding a stored device
- * credential, with every control-plane call recorded. `serviceKey` decides
- * whether the runtime is platform-managed.
+ * credential, with every control-plane call recorded and answered as a real
+ * control plane would (a device code, a granted token, a completed `/bind`
+ * carrying a NEW runtime bearer, a revoke). `serviceKey` decides whether the
+ * runtime is platform-managed.
  */
-async function mountUnbind(mode: 'single' | 'multi', serviceKey: string | undefined) {
+async function mountDoors(mode: 'single' | 'multi', serviceKey: string | undefined) {
     const rawApp = makeRawApp();
     const hooks = new Map<string, () => Promise<void>>();
     const auth = {
@@ -298,7 +320,15 @@ async function mountUnbind(mode: 'single' | 'multi', serviceKey: string | undefi
     const fetchCalls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
         fetchCalls.push(String(url));
-        return new Response(JSON.stringify({ success: true, data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+        const path = new URL(String(url)).pathname;
+        const body = path.endsWith('/device/code')
+            ? { device_code: 'dc_1', user_code: 'ABCD-EFGH', verification_uri: 'http://cloud.test/device', interval: 5, expires_in: 600 }
+            : path.endsWith('/device/token')
+                ? { access_token: 'at_1' }
+                : path.endsWith('/cloud-connection/bind')
+                    ? { success: true, data: { runtime_token: 'oscc_new', runtime_id: 'rt_1', connection: { runtime_id: 'rt_1' } } }
+                    : { success: true, data: {} };
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
     }));
     await new CloudConnectionPlugin({
         controlPlaneUrl: 'http://cloud.test',
@@ -307,35 +337,53 @@ async function mountUnbind(mode: 'single' | 'multi', serviceKey: string | undefi
         ...(mode === 'single' ? { singleEnvironment: true, environmentId: 'env-1' } : {}),
     }).start(ctx as never);
     await hooks.get('kernel:ready')?.();
-    const unbind = () => rawApp.routes.get(`POST ${CC}/unbind`)!(makeC(`${CC}/unbind`, ADMIN));
-    return { unbind, fetchCalls, store: new ConnectionCredentialStore(credentialPath) };
+    const drive = (door: Door) => rawApp.routes.get(`POST ${CC}/${door}`)!(makeC(`${CC}/${door}`, ADMIN, DOORS[door]));
+    return { drive, fetchCalls, store: new ConnectionCredentialStore(credentialPath) };
 }
 
 for (const mode of ['single', 'multi'] as const) {
-    describe(`platform-managed runtime — unbind is refused (${mode}-environment)`, () => {
-        it('managed: 409 RESOURCE_CONFLICT naming the platform, before any revoke and before the local clear', async () => {
-            const { unbind, fetchCalls, store } = await mountUnbind(mode, SERVICE_KEY);
-            const res = await unbind();
-            const shown = JSON.stringify(res.payload);
-            // The exit's identity.
-            expect(res.status, shown).toBe(409);
-            expect(res.payload?.error?.code, shown).toBe('RESOURCE_CONFLICT');
-            // The declared ADR-0112 envelope, code vocabulary included.
-            expect(BaseResponseSchema.safeParse(res.payload).success, shown).toBe(true);
-            expect(envelopeViolations(res.payload), shown).toEqual([]);
-            expect(ApiErrorSchema.safeParse(res.payload.error).success, shown).toBe(true);
-            expect(res.payload.error.message, shown).toMatch(/^This runtime's cloud connection is managed by the platform/);
-            // Nothing happened: no control-plane call (no revoke), credential untouched.
-            expect(fetchCalls, 'a refused unbind reached the control plane').toEqual([]);
-            expect(store.read()?.runtimeToken, 'a refused unbind touched the stored credential').toBe('oscc_pin');
-        });
+    describe(`platform-managed runtime — the three connection-changing doors are refused (${mode}-environment)`, () => {
+        for (const door of Object.keys(DOORS) as Door[]) {
+            it(`managed: POST /${door} answers 409 RESOURCE_CONFLICT naming the platform, before any control-plane call and any store write`, async () => {
+                const { drive, fetchCalls, store } = await mountDoors(mode, SERVICE_KEY);
+                const res = await drive(door);
+                const shown = JSON.stringify(res.payload);
+                // The exit's identity.
+                expect(res.status, shown).toBe(409);
+                expect(res.payload?.error?.code, shown).toBe('RESOURCE_CONFLICT');
+                // The declared ADR-0112 envelope, code vocabulary included.
+                expect(BaseResponseSchema.safeParse(res.payload).success, shown).toBe(true);
+                expect(envelopeViolations(res.payload), shown).toEqual([]);
+                expect(ApiErrorSchema.safeParse(res.payload.error).success, shown).toBe(true);
+                expect(res.payload.error.message, shown).toMatch(/^This runtime's cloud connection is managed by the platform/);
+                // Nothing happened: no control-plane call (no device code, no
+                // token poll, no `/bind`, no revoke), and the stored credential
+                // neither replaced by a bind nor cleared by an unbind.
+                expect(fetchCalls, `a refused ${door} reached the control plane`).toEqual([]);
+                expect(store.read(), `a refused ${door} touched the stored credential`)
+                    .toMatchObject({ runtimeToken: 'oscc_pin', runtimeId: 'rt_1', environmentId: 'env-1' });
+            });
+        }
 
-        it('CONTROL — not managed: the revoke is called and the stored credential cleared', async () => {
-            const { unbind, fetchCalls, store } = await mountUnbind(mode, undefined);
-            const res = await unbind();
-            expect(res.status, JSON.stringify(res.payload)).toBe(200);
-            expect(res.payload.data).toMatchObject({ revoked: true, cleared: true });
-            expect(fetchCalls).toEqual(['http://cloud.test/api/v1/cloud-connection/revoke']);
+        it('CONTROL — not managed: bind/start asks for a device code, bind/poll completes and persists the bind, unbind revokes and clears', async () => {
+            const { drive, fetchCalls, store } = await mountDoors(mode, undefined);
+            const start = await drive('bind/start');
+            expect(start.status, JSON.stringify(start.payload)).toBe(200);
+            expect(start.payload.data.device_code).toBe('dc_1');
+            expect(fetchCalls).toEqual(['http://cloud.test/api/v1/auth/device/code']);
+
+            const poll = await drive('bind/poll');
+            expect(poll.status, JSON.stringify(poll.payload)).toBe(200);
+            expect(fetchCalls.slice(1)).toEqual([
+                'http://cloud.test/api/v1/auth/device/token',
+                'http://cloud.test/api/v1/cloud-connection/bind',
+            ]);
+            expect(store.read()?.runtimeToken).toBe('oscc_new');
+
+            const unbind = await drive('unbind');
+            expect(unbind.status, JSON.stringify(unbind.payload)).toBe(200);
+            expect(unbind.payload.data).toMatchObject({ revoked: true, cleared: true });
+            expect(fetchCalls.slice(3)).toEqual(['http://cloud.test/api/v1/cloud-connection/revoke']);
             expect(store.read()?.runtimeToken).toBe('');
         });
     });

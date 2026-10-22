@@ -6081,7 +6081,10 @@ export class SecurityPlugin implements Plugin {
    * Fails CLOSED where the chain refuses, with the deny sentinel by identity:
    * a principal that resolves no set (ADR-0056 D2); a delegator the link names
    * who does not exist (the chain's `PERMISSION_DENIED`; `canReadObject`'s
-   * `false`); a delegator who resolves no set (object admission refuses them);
+   * `false`); [#25106] on a walled posture, a live active organization the
+   * delegator's own membership does not back (the prologue's
+   * `PERMISSION_DENIED`, asked of `vetOrganizationClaim` with the prologue's
+   * inputs); a delegator who resolves no set (object admission refuses them);
    * a sharing scope that cannot be resolved. A throw anywhere propagates to the
    * caller's catch, which denies.
    *
@@ -6106,6 +6109,27 @@ export class SecurityPlugin implements Plugin {
       return RLS_DENY_FILTER;
     }
     const delegatorContext = del.context;
+    // [#25106 · ADR-0090 D10] The prologue's organization-membership refusal
+    // (`resolveOperationPrincipals`), mirrored at the same point: after the
+    // dangling-delegator refusal, before the delegator's sets resolve. On a
+    // walled posture the find path refuses every operation of a delegated
+    // context whose live active organization the delegator's own membership
+    // does not back, so the scope that agrees with it is zero rows, on every
+    // object. One ask of the one spelling of the rule, with the inputs the
+    // prologue passes; under `single` the claim stands, and a context with no
+    // active organization is not this rule's (ADR-0123 D2).
+    const liveOrganization =
+      context.tenantId != null && context.tenantId !== '' ? String(context.tenantId) : undefined;
+    if (
+      liveOrganization !== undefined &&
+      vetOrganizationClaim(liveOrganization, delegatorContext?.accessible_org_ids ?? [], this.tenancyPosture) === undefined
+    ) {
+      this.logger.warn?.(
+        `[security] getReadFilter received an on-behalf-of context for object '${object}' whose delegator is not a ` +
+          `member of the organization it runs in — denying, as the operation prologue refuses it (ADR-0090 D10, fail-closed)`,
+      );
+      return RLS_DENY_FILTER;
+    }
     const delegatorSets = await this.resolvePermissionSetsForContext(delegatorContext);
     if (delegatorSets.length === 0) return RLS_DENY_FILTER;
 

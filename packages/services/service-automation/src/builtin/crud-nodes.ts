@@ -36,6 +36,7 @@ import { resolveValueSlotMap } from './value-slot-map.js';
 import { refuseNode } from '../guard-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
 import { resolveRunDataContext, stampSystemInsertOwner } from '../runtime-identity.js';
+import { refusalCarriedBy } from '../inner-refusal.js';
 
 /**
  * Resolve a node's `filter` to the one the query runs (#19939, Fork R17 → A;
@@ -550,7 +551,14 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                         metrics: { selected: record ? 1 : 0 },
                     };
                 } catch (err) {
-                    return { success: false, error: `get_record(${objectName}) failed: ${(err as Error).message}` };
+                    // [#24914, ruling B′] The refusal the read met rides out
+                    // structurally beside the unchanged `error` text — see
+                    // `refusalCarriedBy` (`../inner-refusal.ts`).
+                    return {
+                        success: false,
+                        error: `get_record(${objectName}) failed: ${(err as Error).message}`,
+                        ...refusalCarriedBy(err),
+                    };
                 }
             },
         });
@@ -696,6 +704,12 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                         success: false,
                         error: `create_record(${objectName}) failed: ${(err as Error).message}`,
                         ...(code ? { code } : {}),
+                        // [#24914, ruling B′] …and the refusal itself, for the
+                        // run's CALLER: `{ code, message }` in the wire spelling
+                        // (`UNIQUE_VIOLATION` for the duplicate above, whose
+                        // in-flow `code` stays `DUPLICATE_RECORD`) plus the
+                        // producer-marked `userMessage`. See `refusalCarriedBy`.
+                        ...refusalCarriedBy(err),
                     };
                 }
             },
@@ -796,7 +810,13 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                         metrics: { acted: writtenRowCount(result) },
                     };
                 } catch (err) {
-                    return { success: false, error: `update_record(${objectName}) failed: ${(err as Error).message}` };
+                    // [#24914, ruling B′] As `create_record`'s arm: the refusal
+                    // rides out structurally beside the unchanged `error` text.
+                    return {
+                        success: false,
+                        error: `update_record(${objectName}) failed: ${(err as Error).message}`,
+                        ...refusalCarriedBy(err),
+                    };
                 }
             },
         });
@@ -863,7 +883,13 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                         metrics: { acted: writtenRowCount(result) },
                     };
                 } catch (err) {
-                    return { success: false, error: `delete_record(${objectName}) failed: ${(err as Error).message}` };
+                    // [#24914, ruling B′] As `create_record`'s arm: the refusal
+                    // rides out structurally beside the unchanged `error` text.
+                    return {
+                        success: false,
+                        error: `delete_record(${objectName}) failed: ${(err as Error).message}`,
+                        ...refusalCarriedBy(err),
+                    };
                 }
             },
         });

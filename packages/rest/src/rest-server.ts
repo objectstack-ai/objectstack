@@ -395,7 +395,7 @@ import {
     // `boundedDeclaredRefusalMessage` and `declaredHttpStatus`, read only by the
     // `/references` door's declared-refusal re-dresser, moved with it to
     // `meta-item-read-routes.ts` (#23050 slice 13b).
-    // `sendThrownError`, the OpenAPI document's and viewer's catch-all answer, moved with
+    // `sendThrownError`, the OpenAPI document's catch-all answer, moved with
     // `registerOpenApiEndpoints`' body to `discovery-routes.ts` (#23050 slice 7).
     sendDeclaredFault,
     sendFieldVisibilityFault,
@@ -4954,10 +4954,12 @@ export class RestServer {
     }
 
     /**
-     * Register OpenAPI 3.1 spec + interactive docs viewer.
+     * Register the OpenAPI 3.1 document.
      *
      *   GET <basePath>/openapi.json   → enriched OpenAPI document
-     *   GET <basePath>/docs           → Scalar-rendered HTML (CDN, no dep)
+     *
+     * [#25104] Its HTML viewer page (`GET <basePath>/docs`) is retired: nothing
+     * read it, and the API origin serves no HTML viewer.
      *
      * Enrichment at request time:
      *   - servers[0].url           — derived from the request's Host header

@@ -39,12 +39,24 @@
  *   without the delegation link; a delegated context with no active
  *   organization (it keeps ADR-0123 D2's refusal); a system context; and the
  *   `single` posture, which has no wall.
+ *
+ * ## The raw-SQL read scope answers the same rule [#25106 · ADR-0021 D-C]
+ *
+ * `getReadFilter` is the read scope a door that bypasses the engine ANDs into
+ * its query, and its contract is agreement with the find path. So where the
+ * prologue refuses a delegated context, the provider answers the deny
+ * sentinel (`RLS_DENY_FILTER` itself, by reference), on a public, a private
+ * and an organization-less object alike: the rule is about the context, not
+ * the object. Every context the prologue admits keeps the scope it had, and
+ * one parity cell reads the provider beside the engine's own find over the
+ * same contexts.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { PermissionSet } from '@objectstack/spec/security';
+import { RLS_DENY_FILTER } from '@objectstack/spec/data';
 import { SecurityPlugin } from './security-plugin.js';
 import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
 import { SysPosition, SysPermissionSet, SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
@@ -65,6 +77,9 @@ const FIELDS = {
 const OBJECTS = [
   { name: 'qa_account', label: 'Account', fields: FIELDS },
   { name: 'qa_vault', label: 'Vault', access: { default: 'private' }, fields: FIELDS },
+  // [#25106] An organization-less object: no wall applies to it, so only the
+  // context rule can answer the deny sentinel for it.
+  { name: 'qa_catalog', label: 'Catalog', tenancy: { enabled: false }, fields: FIELDS },
 ];
 
 const MEMBER: PermissionSet = {
@@ -201,7 +216,7 @@ async function boot(posture: Posture) {
     const rows = await knex(object).select('id', 'name', 'organization_id');
     return [...rows].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   };
-  return { engine, stored };
+  return { engine, plugin, stored };
 }
 
 interface Outcome { ok: boolean; value?: unknown; code?: string; status?: number; message?: string; developerMessage?: string }
@@ -304,4 +319,138 @@ describe('[#25063] what the rule leaves alone', () => {
     expect(outcome.ok, outcome.message).toBe(true);
     expect((await b.stored('qa_account')).find((r) => r.id === 'r1')).toEqual({ id: 'r1', name: 'one', organization_id: ORG_D });
   });
+});
+
+// ---------------------------------------------------------------------------
+// [#25106 · ADR-0021 D-C] The raw-SQL read scope (`getReadFilter`) answers the
+// same rule. Its contract is agreement with the find path: where the prologue
+// refuses a delegated context, the provider answers the deny sentinel.
+// ---------------------------------------------------------------------------
+
+const PROVIDER_OBJECTS = ['qa_account', 'qa_vault', 'qa_catalog'] as const;
+
+/** One row per tenant object in `org_a` and `org_c` (`org_d`'s is `boot`'s), and two catalog rows, which carry no organization. */
+async function seedForReads(engine: ObjectQL) {
+  for (const object of ['qa_account', 'qa_vault']) {
+    for (const [org, suffix] of [[ORG_A, 'a'], [ORG_C, 'c']] as const) {
+      await engine.insert(object, { id: `${object}_in_${suffix}`, name: 'seeded', organization_id: org }, { context: { ...SYS_CTX, tenantId: org } } as never);
+    }
+  }
+  for (const id of ['qa_catalog_1', 'qa_catalog_2']) {
+    await engine.insert('qa_catalog', { id, name: 'seeded' }, { context: SYS_CTX } as never);
+  }
+}
+
+const sortedIds = (rows: unknown) => (rows as Array<{ id: string }>).map((r) => r.id).sort();
+
+/** The ids a read scope admits, applied as the only predicate under a system context — as a door that bypasses the engine applies it. */
+const idsAdmittedBy = async (engine: ObjectQL, object: string, scope: Record<string, unknown> | undefined) =>
+  sortedIds(await engine.find(object, { where: scope ?? {}, context: { isSystem: true } } as never));
+
+describe('[#25106 · ADR-0021 D-C] getReadFilter answers the deny sentinel where the prologue refuses', () => {
+  for (const posture of ['group', 'isolated'] as const) {
+    for (const object of PROVIDER_OBJECTS) {
+      it(`\`${posture}\` · ${object}: a delegated context in an organization the delegator is not a member of answers RLS_DENY_FILTER itself`, async () => {
+        const b = await boot(posture);
+        await seedForReads(b.engine);
+        expect(await b.plugin.getReadFilter(object, operator(ORG_D))).toBe(RLS_DENY_FILTER);
+      });
+    }
+  }
+});
+
+describe('[#25106] what the rule leaves alone in the read scope', () => {
+  // Each answer below was read on the provider before this rule and after it,
+  // and is the same: the rule moves only the contexts the prologue refuses.
+  // A scope is pinned by the rows it admits (`idsAdmittedBy`).
+  const scopeRows = async (b: Awaited<ReturnType<typeof boot>>, object: string, context: Record<string, unknown>) => {
+    const scope = await b.plugin.getReadFilter(object, { ...context });
+    expect(scope, `${object}: a scope, not the deny sentinel`).not.toBe(RLS_DENY_FILTER);
+    return idsAdmittedBy(b.engine, object, scope);
+  };
+
+  const IN_SET: Record<'group' | 'isolated', Record<string, string[]>> = {
+    // `group` walls the delegator's leg by its own memberships (`org_a`, `org_c`);
+    // the operator crosses on the private object, so its rows come from both.
+    group: { qa_account: ['qa_account_in_a'], qa_vault: ['qa_vault_in_a', 'qa_vault_in_c'], qa_catalog: ['qa_catalog_1', 'qa_catalog_2'] },
+    isolated: { qa_account: ['qa_account_in_a'], qa_vault: ['qa_vault_in_a'], qa_catalog: ['qa_catalog_1', 'qa_catalog_2'] },
+  };
+
+  for (const posture of ['group', 'isolated'] as const) {
+    it(`\`${posture}\`: a delegated context in an organization the delegator belongs to keeps its scope`, async () => {
+      const b = await boot(posture);
+      await seedForReads(b.engine);
+      for (const object of PROVIDER_OBJECTS) {
+        expect(await scopeRows(b, object, operator(ORG_A)), object).toEqual(IN_SET[posture][object]);
+      }
+    });
+
+    it(`\`${posture}\`: the same caller in \`org_d\` WITHOUT the delegation link keeps its scope`, async () => {
+      const b = await boot(posture);
+      await seedForReads(b.engine);
+      expect(await scopeRows(b, 'qa_account', operator(ORG_D, false))).toEqual(['qa_account_in_d']);
+      expect(await scopeRows(b, 'qa_vault', operator(ORG_D, false))).toEqual(['qa_vault_in_a', 'qa_vault_in_c', 'qa_vault_in_d']);
+      expect(await scopeRows(b, 'qa_catalog', operator(ORG_D, false))).toEqual(['qa_catalog_1', 'qa_catalog_2']);
+    });
+
+    it(`\`${posture}\`: a delegated context with NO active organization is not this rule's — its scope is unchanged`, async () => {
+      // The wall decides the tenant object (no organization: no row), and the
+      // organization-less object keeps its rows. The private object is left
+      // out: the delegator holds its grant only inside an organization, so
+      // object admission refuses it (`canReadObject`'s half), not this rule.
+      const b = await boot(posture);
+      await seedForReads(b.engine);
+      expect(await scopeRows(b, 'qa_account', operator(undefined))).toEqual([]);
+      expect(await scopeRows(b, 'qa_catalog', operator(undefined))).toEqual(['qa_catalog_1', 'qa_catalog_2']);
+    });
+
+    it(`\`${posture}\`: a system context is unscoped`, async () => {
+      const b = await boot(posture);
+      for (const object of PROVIDER_OBJECTS) {
+        expect(await b.plugin.getReadFilter(object, { ...SYS_CTX, onBehalfOf: { userId: DELEGATOR } }), object).toBeUndefined();
+      }
+    });
+  }
+
+  it('`single`: there is no wall, so a delegated context in `org_d` keeps its scope', async () => {
+    const b = await boot('single');
+    await seedForReads(b.engine);
+    expect(await scopeRows(b, 'qa_account', operator(ORG_D))).toEqual(['qa_account_in_a', 'qa_account_in_c', 'qa_account_in_d']);
+    expect(await scopeRows(b, 'qa_vault', operator(ORG_D))).toEqual(['qa_vault_in_a', 'qa_vault_in_c', 'qa_vault_in_d']);
+    expect(await scopeRows(b, 'qa_catalog', operator(ORG_D))).toEqual(['qa_catalog_1', 'qa_catalog_2']);
+  });
+});
+
+describe('[#25106 · ADR-0021 D-C] parity: the read scope agrees with the engine find on the same contexts', () => {
+  for (const posture of ['group', 'isolated'] as const) {
+    it(`\`${posture}\`: refused by find ⇔ the deny sentinel; admitted ⇒ the scope admits exactly the rows find returns`, async () => {
+      const b = await boot(posture);
+      await seedForReads(b.engine);
+      const contexts: Record<string, Record<string, unknown>> = {
+        'delegated in org_d': operator(ORG_D),
+        'delegated in org_a': operator(ORG_A),
+        'undelegated in org_d': operator(ORG_D, false),
+      };
+      const refused: string[] = [];
+      for (const [label, context] of Object.entries(contexts)) {
+        for (const object of PROVIDER_OBJECTS) {
+          const cell = `${label} · ${object}`;
+          const scope = await b.plugin.getReadFilter(object, { ...context });
+          const found = await attempt(() => b.engine.find(object, { context: { ...context } } as never));
+          if (!found.ok) {
+            refused.push(cell);
+            expect(found.code, cell).toBe('PERMISSION_DENIED');
+            expect(found.status, cell).toBe(403);
+            expect(scope, cell).toBe(RLS_DENY_FILTER);
+          } else {
+            expect(scope, cell).not.toBe(RLS_DENY_FILTER);
+            expect(await idsAdmittedBy(b.engine, object, scope), cell).toEqual(sortedIds(found.value));
+          }
+        }
+      }
+      // The table is not vacuous on either side: find refuses exactly the
+      // delegated context the delegator's membership does not back.
+      expect(refused).toEqual(PROVIDER_OBJECTS.map((object) => `delegated in org_d · ${object}`));
+    });
+  }
 });

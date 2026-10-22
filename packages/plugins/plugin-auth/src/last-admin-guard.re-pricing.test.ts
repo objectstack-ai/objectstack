@@ -14,7 +14,7 @@
  *    off in the activation ledger — write shape (4), which un-makes every
  *    grant-anchored platform admin in one write (ADR-0131 D3) — no longer
  *    empties a population that contains a config-anchored administrator, so
- *    those writes are PERMITTED there. Same for deleting the legacy grant row
+ *    those writes are PERMITTED there. Same for deleting the last grant row
  *    itself.
  *  - **KEPT where the grant anchor is load-bearing.** With no declared
  *    administrators (`single` posture under Choice 4A, and P5's honoured
@@ -40,7 +40,6 @@ import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /** [ADR-0131 D3, ADR-0126 §4] The activation ledger a permission set is switched off in. */
 const sysMetadataActivation = {
@@ -58,6 +57,20 @@ const sysMetadataActivation = {
 const ENV = 'OS_PLATFORM_OWNER_EMAIL';
 const SYSTEM = { context: { isSystem: true } } as const;
 const OWNER = 'owner@corp.example';
+/** [ADR-0131 D5] The Default Organization (`slug = 'default'`), the owner of a grant that anchors under `single`. */
+const DEFAULT_ORG = 'org_default';
+
+/** [ADR-0131 D5] The organization object, so the Default Organization the anchor reads exists. */
+const sysOrganization = {
+  name: 'sys_organization',
+  label: 'Organization',
+  managedBy: 'better-auth',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    name: { name: 'name', type: 'text' as const },
+    slug: { name: 'slug', type: 'text' as const },
+  },
+};
 
 const sysUser = {
   name: 'sys_user',
@@ -169,14 +182,11 @@ async function boot(): Promise<ObjectQL> {
     true,
   );
   await engine.init();
-  for (const o of [sysUser, sysMember, sysPermissionSet, sysUserPermissionSet, sysMetadataActivation]) {
+  for (const o of [sysUser, sysMember, sysOrganization, sysPermissionSet, sysUserPermissionSet, sysMetadataActivation]) {
     engine.registry.registerObject(o as never);
   }
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, grants, identities) exist
-  // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
-  // NOT NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  await engine.insert('sys_organization', { id: DEFAULT_ORG, name: 'Default Organization', slug: 'default' }, SYSTEM);
   // [ADR-0131 D3/D4] The set a grant names is the catalog's definition.
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
   registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard-re-pricing' });
@@ -185,7 +195,7 @@ async function boot(): Promise<ObjectQL> {
 
 /**
  * A grant-anchored administrator: verified user + the catalog's
- * `admin_full_access` (bound in `boot`) + an unscoped in-window grant. The pre-re-anchor shape of "the last
+ * `admin_full_access` (bound in `boot`) + an in-window grant the Default Organization owns. The pre-re-anchor shape of "the last
  * platform admin".
  */
 async function seedGrantAdmin(engine: ObjectQL, userId = 'usr_grant'): Promise<void> {
@@ -197,7 +207,13 @@ async function seedGrantAdmin(engine: ObjectQL, userId = 'usr_grant'): Promise<v
   await engine.insert('sys_permission_set', { id: 'ps_admin', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
   await engine.insert(
     'sys_user_permission_set',
-    { id: 'ups_admin', user_id: userId, permission_set_id: 'ps_admin', permission_set: ADMIN_FULL_ACCESS },
+    {
+      id: 'ups_admin',
+      user_id: userId,
+      permission_set_id: 'ps_admin',
+      permission_set: ADMIN_FULL_ACCESS,
+      organization_id: DEFAULT_ORG,
+    },
     SYSTEM,
   );
 }
@@ -251,7 +267,7 @@ describe('[#11973] OBSOLETE refusals — shape-(4) writes are permitted while a 
     expect(((await findOne(engine, 'sys_metadata_activation', 'act_admin')) as { active?: unknown })?.active).toBeFalsy();
   });
 
-  it('deleting the LAST legacy grant row is permitted, and lands', async () => {
+  it('deleting the LAST grant row is permitted, and lands', async () => {
     declare(OWNER);
     const engine = await boot();
     await seedConfigAdmin(engine);

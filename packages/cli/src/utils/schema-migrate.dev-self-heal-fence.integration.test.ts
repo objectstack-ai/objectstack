@@ -20,14 +20,29 @@
  *
  * ## The fixture
  *
- * The card's reproduction, in-process: one org-scoped `unique` field, whose
- * index a plain boot creates NULL-safe (`COALESCE(organization_id, …)`), then
- * replaced by the bare `(organization_id, qa_code)` index an older release
- * left behind. That is a `recreate_index` drift the duplicate probe finds
- * clean, i.e. `safe`: exactly what the self-heal applies. The serving
- * declaration (`createStandaloneStack({ dev: true })`, what `os dev` hands it)
- * is the positive control — it heals the same staged file, so the fence cases
- * cannot be green because the fixture has nothing to heal.
+ * One org-scoped `unique` field, whose `(organization_id, qa_code)` composite
+ * a plain boot creates, plus the platform-wide single-column UNIQUE on
+ * `qa_code` a pre-#3696 release left behind — the state every additive boot
+ * after such an upgrade produces, since the sync creates the composite by name
+ * and never drops anything. The differ reports it as `replace_unique_index`, a
+ * pure relaxation it classes `safe`: exactly what the self-heal applies, and
+ * what a one-shot boot must leave alone. The serving declaration
+ * (`createStandaloneStack({ dev: true })`, what `os dev` hands it) is the
+ * positive control — it heals the same staged file, so the fence cases cannot
+ * be green because the fixture has nothing to heal.
+ *
+ * ⚠️ Why not the drift the card staged. #21733 reproduced with the ADR-0120 D4
+ * tightening — a bare composite against the NULL-safe expectation, a
+ * `recreate_index` the duplicate probe recategorised `safe`. ADR-0131 D1
+ * retired it: the expectation is the plain composite now, so a bare composite
+ * MATCHES and there is no drift at all. Its nearest successor (a COALESCE
+ * index against the plain expectation on an uncertified table) is a
+ * DESTRUCTIVE `recreate_index` the self-heal never applies under any
+ * declaration, so it could not tell the fence from the heal; and a fresh
+ * table's tenant column is NOT NULL, which certifies it and makes the COALESCE
+ * form match too. The fence is about the self-heal's `safe` subset reaching a
+ * one-shot boot, not about any one op, so the fixture carries the `safe` op
+ * that is still live.
  *
  * Every case runs with `NODE_ENV=development` — the input the fence is about.
  */
@@ -38,7 +53,7 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SqlDriver } from '@objectstack/driver-sql';
+import { SqlDriver, legacyUniqueIndexNames } from '@objectstack/driver-sql';
 import { isExitSignal } from './format.js';
 import { bootSchemaStack } from './schema-migrate.js';
 import MigratePlan from '../commands/migrate/plan.js';
@@ -55,7 +70,13 @@ const CLI_ROOT = resolve(HERE, '..', '..');
 
 const CASE_TIMEOUT_MS = 120_000;
 
+/** The organization composite the declaration asks for (ADR-0131 D1: plain key parts). */
 const INDEX = 'uniq_scaf_item_organization_id_qa_code';
+/**
+ * The legacy platform-wide single-column UNIQUE, spelled by the driver's own
+ * `legacyUniqueIndexNames` — its `uniq_` arm, the one this differ recognises.
+ */
+const LEGACY = legacyUniqueIndexNames('scaf_item', 'qa_code')[1];
 
 const ARTIFACT = {
   manifest: { id: 'com.example.scaf', namespace: 'scaf', name: 'scaf', version: '1.0.0', type: 'app' },
@@ -80,11 +101,11 @@ function probe(dbFile: string): SqlDriver {
   return new SqlDriver({ client: 'better-sqlite3', connection: { filename: dbFile }, useNullAsDefault: true });
 }
 
-/** The index's DDL exactly as `sqlite_master` stores it. */
-async function indexSql(dbFile: string): Promise<string | undefined> {
+/** An index's DDL exactly as `sqlite_master` stores it; `undefined` when absent. */
+async function indexSql(dbFile: string, name: string): Promise<string | undefined> {
   const driver = probe(dbFile);
   try {
-    const rows = await (driver as any).knex.raw('SELECT sql FROM sqlite_master WHERE type = ? AND name = ?', ['index', INDEX]);
+    const rows = await (driver as any).knex.raw('SELECT sql FROM sqlite_master WHERE type = ? AND name = ?', ['index', name]);
     return (rows as Array<{ sql: string }>)[0]?.sql;
   } finally {
     await driver.disconnect();
@@ -153,7 +174,9 @@ async function runPlanJson(dbFile: string): Promise<any> {
   }
 }
 
-const isNullSafe = (sql: string | undefined): boolean => /COALESCE\(`?organization_id`?/.test(sql ?? '');
+/** The composite in its ADR-0131 D1 form: both key parts plain, no COALESCE. */
+const isPlainComposite = (sql: string | undefined): boolean =>
+  /\(\s*[`"]?organization_id[`"]?\s*,\s*[`"]?qa_code[`"]?\s*\)/.test(sql ?? '') && !/COALESCE/i.test(sql ?? '');
 
 beforeAll(async () => {
   for (const key of SAVED_KEYS) savedEnv[key] = process.env[key];
@@ -168,20 +191,20 @@ beforeAll(async () => {
   process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
   writeFileSync(process.env.OS_ARTIFACT_PATH, JSON.stringify(ARTIFACT));
 
-  // A plain boot creates the table and its NULL-safe unique index…
+  // A plain boot creates the table and its plain organization composite…
   stagedDb = join(dir, 'data', 'staged.db');
   await bootServing(stagedDb, false);
-  expect(isNullSafe(await indexSql(stagedDb)), 'the fixture boot did not create the NULL-safe index').toBe(true);
-  // …which the card's step 3 replaces with the bare one an older release left.
+  const composite = await indexSql(stagedDb, INDEX);
+  expect(isPlainComposite(composite), `the fixture boot did not create the plain composite: ${composite}`).toBe(true);
+  expect(await indexSql(stagedDb, LEGACY), 'the fixture boot created the legacy index itself').toBeUndefined();
+  // …beside which the staging step plants the global UNIQUE an older release left.
   const driver = probe(stagedDb);
   try {
-    const k = (driver as any).knex;
-    await k.raw(`DROP INDEX ${INDEX}`);
-    await k.raw(`CREATE UNIQUE INDEX ${INDEX} ON scaf_item (organization_id, qa_code)`);
+    await (driver as any).knex.raw(`CREATE UNIQUE INDEX ${LEGACY} ON scaf_item (qa_code)`);
   } finally {
     await driver.disconnect();
   }
-  expect(isNullSafe(await indexSql(stagedDb)), 'the staging step did not leave the bare index').toBe(false);
+  expect(await indexSql(stagedDb, LEGACY), 'the staging step did not leave the legacy index').toBeDefined();
 }, CASE_TIMEOUT_MS);
 
 afterAll(() => {
@@ -194,11 +217,13 @@ afterAll(() => {
 });
 
 describe('#21733 — the dev self-heal on the standalone stack, and its one-shot fence (NODE_ENV=development)', () => {
-  it('the serving declaration (`dev: true`, what `os dev` passes) heals the staged index on restart', async () => {
+  it('the serving declaration (`dev: true`, what `os dev` passes) relaxes the legacy global unique on restart', async () => {
     const dbFile = stagedCopy('serving-dev');
     await bootServing(dbFile, true);
-    const sql = await indexSql(dbFile);
-    expect(isNullSafe(sql), `the dev boot left the bare index: ${sql}`).toBe(true);
+    const legacy = await indexSql(dbFile, LEGACY);
+    expect(legacy, `the dev boot left the legacy index: ${legacy}`).toBeUndefined();
+    // A relaxation, not a removal: the per-organization constraint survives.
+    expect(isPlainComposite(await indexSql(dbFile, INDEX))).toBe(true);
   }, CASE_TIMEOUT_MS);
 
   it('a non-deferred one-shot boot (`bootSchemaStack`, every write mode) leaves the safe drift in place', async () => {
@@ -212,9 +237,10 @@ describe('#21733 — the dev self-heal on the standalone stack, and its one-shot
     }
     // Still there, and still the kind the self-heal WOULD apply — so the
     // boot declined it rather than having nothing to do.
-    expect(drift.map((d) => `${d.category}:${d.op.type}`)).toContain('safe:recreate_index');
-    const sql = await indexSql(dbFile);
-    expect(isNullSafe(sql), `a one-shot boot auto-applied safe drift: ${sql}`).toBe(false);
+    expect(drift.map((d) => `${d.category}:${d.op.type}`)).toContain('safe:replace_unique_index');
+    const legacy = await indexSql(dbFile, LEGACY);
+    expect(legacy, 'a one-shot boot auto-applied safe drift').toBeDefined();
+    expect(isPlainComposite(await indexSql(dbFile, INDEX))).toBe(true);
   }, CASE_TIMEOUT_MS);
 
   it('`os migrate plan` lists the drift as safe and leaves the staged database byte-identical', async () => {
@@ -224,8 +250,8 @@ describe('#21733 — the dev self-heal on the standalone stack, and its one-shot
     expect(
       (plan.changes ?? []).map((d: { category: string; op: { type: string } }) => `${d.category}:${d.op.type}`),
       `plan output: ${JSON.stringify(plan).slice(0, 400)}`,
-    ).toContain('safe:recreate_index');
+    ).toContain('safe:replace_unique_index');
     expect(Buffer.compare(readFileSync(dbFile), before), 'os migrate plan wrote to the staged database').toBe(0);
-    expect(isNullSafe(await indexSql(dbFile))).toBe(false);
+    expect(await indexSql(dbFile, LEGACY)).toBeDefined();
   }, CASE_TIMEOUT_MS);
 });

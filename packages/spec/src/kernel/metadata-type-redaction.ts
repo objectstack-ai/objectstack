@@ -106,7 +106,8 @@ export type MetadataTypeRedactor = (item: Record<string, unknown>) => MetadataRe
  * The built-in `datasource` redactor: redacts the driver `config` through the
  * one credential-key definition in `data/datasource-credential-redaction.ts`
  * (derived from each driver's `z.never()` contract + the pre-#8078 alias list
- * + turso's `encryptionKey`), and leaves every other key of the item —
+ * + turso's retired `encryptionKey`, which a legacy stored row may still
+ * carry), and leaves every other key of the item —
  * `_diagnostics` included — byte-for-byte.
  */
 function redactDatasourceItem(item: Record<string, unknown>): MetadataRedactionResult {

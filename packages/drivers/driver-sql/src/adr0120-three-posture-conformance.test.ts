@@ -69,7 +69,8 @@ const FIXTURE_APP = [
   {
     // S1 — per-organization unique field. Two organizations may each hold
     // `a@b.com`; a duplicate WITHIN one may not. S8's mixed population rides
-    // along: NULL-organization rows form one platform bucket (D3).
+    // along: NULL-organization rows (pre-18 databases only) are exempt from
+    // the plain organization key part (ADR-0131 D1).
     name: 'crm_contact',
     fields: {
       organization_id: { type: 'string' },
@@ -152,22 +153,23 @@ const FIXTURE_APP = [
 
 /**
  * The expected unique key parts, per table — the SAME map for every posture.
- * `COALESCE(col)` is the literal-agnostic reading of the NULL-safe organization
- * key part, matching the identity the drift differ compares on.
+ * The organization key part is the PLAIN column (ADR-0131 D1): a legacy
+ * NULL-safe part would read here as `COALESCE(col)` (literal elided, the
+ * differ's identity) and fail the map, so no posture can bring one back.
  */
 const EXPECTED_UNIQUE_KEY_PARTS: Record<string, Record<string, string[]>> = {
-  crm_contact: { uniq_crm_contact_organization_id_email: ['COALESCE(organization_id)', 'email'] },
+  crm_contact: { uniq_crm_contact_organization_id_email: ['organization_id', 'email'] },
   crm_device: { uniq_crm_device_serial: ['serial'] },
   // Note the index NAME: the deterministic name is derived from the RESOLVED
   // columns, so a declared `'organization'` index carries the organization
   // column in its name even though the author never listed it. That is the
   // differ's identity too, which is why declaring and detecting cannot drift.
   crm_case: {
-    uniq_crm_case_organization_id_department_code: ['COALESCE(organization_id)', 'department', 'code'],
+    uniq_crm_case_organization_id_department_code: ['organization_id', 'department', 'code'],
   },
   crm_delivery: { uniq_crm_delivery_source_dedup_key: ['source', 'dedup_key'] },
   crm_team: { uniq_crm_team_name_organization_id: ['name', 'organization_id'] },
-  crm_product: { uniq_crm_product_organization_id_code: ['COALESCE(organization_id)', 'code'] },
+  crm_product: { uniq_crm_product_organization_id_code: ['organization_id', 'code'] },
   crm_registry: { uniq_crm_registry_slug: ['slug'] },
 };
 
@@ -279,21 +281,29 @@ describe('ADR-0120 — one app package, three tenancy postures (S13/S14 acceptan
           .rejects.toThrow(REJECTED);
       });
 
-      it('S7/S8 — the NULL-organization bucket is a real bucket, in every posture', async () => {
-        // THE #5030 headline, and the reason `'organization'` could ship at all:
-        // before D3 this pair inserted twice on a single-organization stack
-        // (SQL UNIQUE is NULL-distinct), so every field-level unique was a
-        // silent no-op there. It must now be enforced under `single` exactly as
-        // under `isolated` — the posture is not what makes a constraint real.
-        // The NULL bucket exists only on a database built before 18.x (ADR-0131
-        // D1 makes a fresh tenant column NOT NULL).
+      it('S7/S8 — NULL organization: refused on a fresh table, exempt on a pre-18 one, in every posture', async () => {
+        // THE #5030 headline: before ADR-0120 D3 a NULL-organization pair
+        // inserted twice on a single-organization stack (SQL UNIQUE is
+        // NULL-distinct), so every field-level unique was a silent no-op there.
+        // ADR-0131 D1 closes that at the COLUMN, not the index: a fresh tenant
+        // column is NOT NULL, so the row cannot be written at all — under
+        // `single` exactly as under `isolated`; the posture is not what makes a
+        // constraint real.
+        await expect(driver.create('crm_contact', { email: 'platform@b.com' }))
+          .rejects.toThrow(/NOT NULL constraint failed|null value in column/);
+        // A database built before 18.x keeps its nullable column; there the
+        // plain key part is NULL-distinct, so NULL-organization rows are exempt
+        // (the D3 platform bucket is retired, not rebuilt)…
         await asPre18TenantColumn(driver, 'crm_contact');
         await driver.create('crm_contact', { email: 'platform@b.com' });
         await expect(driver.create('crm_contact', { email: 'platform@b.com' }))
-          .rejects.toThrow(REJECTED);
-        // …while an organization-owned row with the same value still fits (S8).
+          .resolves.toBeTruthy();
+        // …while an organization-owned row with the same value still fits (S8),
+        // once — the organization stays constrained.
         await expect(driver.create('crm_contact', { organization_id: 'org_a', email: 'platform@b.com' }))
           .resolves.toBeTruthy();
+        await expect(driver.create('crm_contact', { organization_id: 'org_a', email: 'platform@b.com' }))
+          .rejects.toThrow(REJECTED);
       });
 
       it('S2 — a platform-wide unique field crosses organizations, in every posture', async () => {
@@ -308,12 +318,15 @@ describe('ADR-0120 — one app package, three tenancy postures (S13/S14 acceptan
           .resolves.toBeTruthy();
         await expect(driver.create('crm_case', { organization_id: 'org_a', department: 'ops', code: 'C1' }))
           .rejects.toThrow(REJECTED);
-        // …and the NULL bucket is constrained too (D3 reaches declared indexes).
-        // The NULL bucket exists only on a database built before 18.x (ADR-0131
-        // D1 makes a fresh tenant column NOT NULL).
+        // …and NULL-organization rows, which exist only on a database built
+        // before 18.x, are exempt from the declared composite exactly as from
+        // the field-level one: its organization key part is plain (ADR-0131 D1).
         await asPre18TenantColumn(driver, 'crm_case');
         await driver.create('crm_case', { department: 'ops', code: 'C9' });
         await expect(driver.create('crm_case', { department: 'ops', code: 'C9' }))
+          .resolves.toBeTruthy();
+        // The relaxation left the composite in force for organizations.
+        await expect(driver.create('crm_case', { organization_id: 'org_a', department: 'ops', code: 'C1' }))
           .rejects.toThrow(REJECTED);
       });
 
@@ -340,10 +353,11 @@ describe('ADR-0120 — one app package, three tenancy postures (S13/S14 acceptan
           .rejects.toThrow(REJECTED);
         await expect(driver.create('crm_team', { organization_id: 'org_b', name: 'Core' }))
           .resolves.toBeTruthy();
-        // The un-closed NULL hole, pinned as the honest status quo (D5c nudges
-        // toward the respelling that closes it; nothing forces it).
-        // The NULL bucket exists only on a database built before 18.x (ADR-0131
-        // D1 makes a fresh tenant column NOT NULL).
+        // NULL-organization rows are exempt, pinned as the honest status quo.
+        // Since ADR-0131 D1 the respelling D5c nudges toward is plain too, so
+        // this is no longer a hole one spelling has and the other closes: such
+        // rows exist only on a database built before 18.x (a fresh tenant
+        // column is NOT NULL).
         await asPre18TenantColumn(driver, 'crm_team');
         await driver.create('crm_team', { name: 'Platform' });
         await expect(driver.create('crm_team', { name: 'Platform' })).resolves.toBeTruthy();

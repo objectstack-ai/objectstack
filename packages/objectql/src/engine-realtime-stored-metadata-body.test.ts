@@ -15,7 +15,7 @@ import { ObjectQL } from './engine.js';
 
 const CRED = 'event-cred-a91f';
 const datasourceBody = (cred = CRED) =>
-  JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: cred } });
+  JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', authToken: cred } });
 
 const sysMetadata = {
   name: 'sys_metadata',
@@ -112,7 +112,7 @@ describe('[#21120] realtime data.record.* events redact a stored metadata body',
     // The event still describes the row — type survives, the body is still present but projected.
     expect(payload.after.type).toBe('datasource');
     expect(payload.after.metadata).toBeDefined();
-    expect(JSON.parse(payload.after.metadata).config.encryptionKey).toBeUndefined();
+    expect(JSON.parse(payload.after.metadata).config.authToken).toBeUndefined();
     expect(JSON.parse(payload.after.metadata).config.url).toBe('libsql://db.turso.io');
   });
 

@@ -992,7 +992,7 @@
     "data/TenancyConfig:tenantField",
     "data/TursoConfig:authToken [RETIRED]",
     "data/TursoConfig:concurrency",
-    "data/TursoConfig:encryptionKey",
+    "data/TursoConfig:encryptionKey [RETIRED]",
     "data/TursoConfig:mode",
     "data/TursoConfig:sync",
     "data/TursoConfig:syncUrl",

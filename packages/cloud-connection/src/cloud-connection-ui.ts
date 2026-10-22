@@ -15,6 +15,25 @@
 
 import type { Page } from '@objectstack/spec/ui';
 
+/**
+ * Ruling 乙 (#25119): the ONE capability the Cloud Connection surface is gated
+ * on — the nav entry below, the connection record `GET /status` serves, and the
+ * three doors that change the connection (`CloudConnectionPlugin`).
+ *
+ * It is `manage_platform_settings`, the Integrations group's own gate
+ * (`requiredPermissions` on `group_integrations`, `SETUP_APP` in
+ * `@objectstack/platform-objects`), which the platform's capability registry
+ * describes as the one for "platform-only Setup pages". One constant, read by
+ * the entry and by the doors, so the two cannot drift apart. ⛔ Not
+ * `setup.access`: that admits the organization administrator's default set,
+ * which the Integrations group does not.
+ *
+ * The page itself declares nothing: a page carries no permission key
+ * (`PageSchema`), so it is held at this line where its data is served — the
+ * panel reads `status` and drives the doors.
+ */
+export const CLOUD_CONNECTION_CAPABILITY = 'manage_platform_settings';
+
 /** Setup page hosting the binding panel widget. */
 export const CloudConnectionSettingsPage: Page = {
     name: 'cloud_connection_settings',
@@ -68,7 +87,12 @@ export const CloudConnectionSettingsPage: Page = {
  * (`@objectstack/mcp`) at 110 — so 200 sorts this entry last.
  *
  * The group's own `requiredPermissions` (`manage_platform_settings`, on
- * `SETUP_APP` in `@objectstack/platform-objects`) now applies to the entry.
+ * `SETUP_APP` in `@objectstack/platform-objects`) applies to the entry, and
+ * the entry declares the same capability on itself
+ * ({@link CLOUD_CONNECTION_CAPABILITY}, ruling 乙, #25119): the rule the page's
+ * doors enforce is stated by the plugin that enforces it, not borrowed from
+ * wherever the group happens to sit — the shape `service-datasource`'s
+ * `nav_datasources` entry takes in the same group.
  *
  * A platform-managed runtime registers none of this
  * (`CloudConnectionPlugin`, `platformManaged`).
@@ -85,6 +109,7 @@ export const CLOUD_CONNECTION_NAV_CONTRIBUTIONS = [
                 pageName: 'cloud_connection_settings',
                 label: 'Cloud Connection',
                 icon: 'cloud',
+                requiredPermissions: [CLOUD_CONNECTION_CAPABILITY],
             },
         ],
     },

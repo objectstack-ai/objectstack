@@ -79,12 +79,13 @@ export function validateRecordTitle(stack: AnyRec): RecordTitleFinding[] {
         path,
         message:
           `${objName}: titleFormat is retired (ADR-0079) — migrate to nameField ` +
-          `(single field) or a formula field designated nameField`,
+          `(single field); a composite title that import, sort or search must match is a stored ` +
+          `field with an expression designated nameField (a formula title is for display only)`,
         // [#22161] One remedy line; why the template is retired (render-only,
         // neither returned nor queryable) is `os explain title-format-retired`.
         hint:
-          `Set nameField: '<field>' for a single-field title, or add a formula field (returnType: 'text') ` +
-          `and designate it via nameField; then drop titleFormat`,
+          `Set nameField: '<field>' for one field; a composite title to import, sort or search by is a ` +
+          `text field with an expression, stored on write (a text formula is display-only); drop titleFormat`,
       });
     }
 
@@ -104,8 +105,8 @@ export function validateRecordTitle(stack: AnyRec): RecordTitleFinding[] {
         // [#22161] One remedy line; the runtime's fallback title, and why this
         // is only a warning, are `os explain title-unresolvable`.
         hint:
-          `Set nameField to a text/email field (or a formula field with returnType: 'text'), or add a ` +
-          `text field named "name"/"title"`,
+          `Set nameField to a text/email field (a composite title to import, sort or search by: a text ` +
+          `field with an expression; a text formula is display-only), or add a text field named "name"/"title"`,
       });
     }
   }

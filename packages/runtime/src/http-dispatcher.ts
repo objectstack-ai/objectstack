@@ -560,7 +560,13 @@ export class HttpDispatcher {
                 : k?.getService?.(name);
         },
         success: (data, meta) => this.success(data, meta),
-        error: (message, code, details) => this.error(message, code, details),
+        // [#24914, ruling B′] `extra` is the declared `userMessage` slot only
+        // (see the deps contract); an absent one passes nothing, so a call
+        // without it builds exactly the envelope it always built.
+        error: (message, code, details, extra) => this.error(
+            message, code, details, undefined,
+            typeof extra?.userMessage === 'string' ? { userMessage: extra.userMessage } : undefined,
+        ),
         routeNotFound: (route) => this.routeNotFound(route),
         errorFromThrown: (e, fallbackStatus) => this.errorFromThrown(e, fallbackStatus),
         resolveActiveOrganizationId: (context) => this.resolveActiveOrganizationId(context),
