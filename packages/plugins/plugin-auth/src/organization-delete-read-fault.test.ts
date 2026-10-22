@@ -17,20 +17,26 @@
  * Pinned here, each with its CONTROL (the same delete, the read back, goes
  * ahead):
  *
+ *  - the caller's session read fails: 503, nothing attempted. `resolveActor`
+ *    answers a failed session read with `null` by default, the value no
+ *    session gives; the admission asks it with `failedReadThrows`;
  *  - the caller's `sys_member` read fails: 503, nothing attempted;
  *  - the `sys_organization` read fails: 503, nothing attempted;
  *  - the Default Organization decision's count fails: 503, nothing attempted.
  *
- * And the case that keeps falling through: the vendor's own `hasPermission`
- * reads nothing here, so it throws only on the member row itself, and the
- * vendor's identical call throws first too, before its first write.
+ * And the cases that keep falling through: no session at all, and a
+ * credential carrying a control character even when its read fails (both the
+ * vendor's 401); and the vendor's own `hasPermission`, which reads nothing
+ * here, so it throws only on the member row itself, and the vendor's identical
+ * call throws first too, before its first write.
  *
  * Real stack: `ObjectQL` over `@objectstack/driver-sql` + better-sqlite3, the
  * objects from this plugin's manifest and a real `AuthManager` with the
  * organization plugin (the `session-read-failure-answer.test.ts` harness).
- * Each fault is scoped to the admission: the read throws once, and only when
- * the admission itself makes it, so better-auth's own reads of the same table
- * are the real ones. That is what lets a request that falls through reach
+ * Each fault is scoped to the admission: the read throws only when the
+ * admission itself makes it (the session read: only inside the admission's
+ * `resolveActor` call), so better-auth's own reads of the same table are the
+ * real ones. That is what lets a request that falls through reach
  * better-auth's writes, which the engine hooks below record whether or not the
  * request's transaction later rolls them back.
  */
@@ -159,26 +165,41 @@ function deepStack(): string {
   }
 }
 
+interface AdmissionRead {
+  /** The engine methods the read goes through. */
+  methods: ReadonlyArray<'find' | 'findOne' | 'count'>;
+  object: string;
+  /** A frame the call must be made inside of. */
+  frame?: string;
+  /** The first `AuthManager` method on the stack: the one that made the call. */
+  caller?: string;
+  /** How many of those calls throw; the session read makes two (both of `resolveActor`'s paths). */
+  times?: number;
+}
+
 /**
- * The admission's own `method` call on `object` throws, once: the call must be
- * made from inside `frame` and by the admission itself (its first
- * `AuthManager` frame is `assertOrganizationDeletable`, so a session read made
- * inside `resolveActor` does not qualify). Every other call is the real one.
+ * The admission's own read of `object` throws: the call must be made from
+ * inside `assertOrganizationDeletable` (and `frame`), and by `caller` (by
+ * default the admission itself, so a session read made inside `resolveActor`
+ * does not qualify unless asked for). Every other call is the real one.
  */
-function failAdmissionRead(engine: ObjectQL, method: 'findOne' | 'count', object: string, frame = 'assertOrganizationDeletable') {
+function failAdmissionRead(engine: ObjectQL, read: AdmissionRead) {
+  const { methods, object, frame = 'assertOrganizationDeletable', caller = 'assertOrganizationDeletable', times = 1 } = read;
   let fired = 0;
   const target = engine as unknown as Record<string, (object: string, ...rest: unknown[]) => Promise<unknown>>;
-  const real = target[method].bind(engine);
-  const spy = vi.spyOn(target, method).mockImplementation(async (name: string, ...rest: unknown[]) => {
-    const stack = deepStack();
-    const caller = /AuthManager\.(\w+)/.exec(stack)?.[1];
-    if (fired === 0 && name === object && stack.includes(frame) && caller === 'assertOrganizationDeletable') {
-      fired += 1;
-      throw new Error(`${object} store unavailable (injected)`);
-    }
-    return real(name, ...rest);
+  const spies = methods.map((method) => {
+    const real = target[method].bind(engine);
+    return vi.spyOn(target, method).mockImplementation(async (name: string, ...rest: unknown[]) => {
+      const stack = deepStack();
+      const first = /AuthManager\.(\w+)/.exec(stack)?.[1];
+      if (fired < times && name === object && stack.includes('assertOrganizationDeletable') && stack.includes(frame) && first === caller) {
+        fired += 1;
+        throw new Error(`${object} store unavailable (injected)`);
+      }
+      return real(name, ...rest);
+    });
   });
-  return { fired: () => fired, restore: () => spy.mockRestore() };
+  return { fired: () => fired, restore: () => spies.forEach((spy) => spy.mockRestore()) };
 }
 
 /** The refusal, asserted on its envelope: 503 with the standard code, naming the table it could not read. */
@@ -210,25 +231,34 @@ async function expectControlDeletes(engine: ObjectQL, manager: AuthManager, cook
 }
 
 describe('[#25059] an organization-delete read that fails refuses 503 before better-auth\'s first write', () => {
-  const cases: Array<{ name: string; method: 'findOne' | 'count'; object: string; frame?: string }> = [
-    { name: 'the caller\'s sys_member read', method: 'findOne', object: 'sys_member' },
-    { name: 'the sys_organization read', method: 'findOne', object: 'sys_organization' },
-    { name: 'the Default Organization decision\'s count', method: 'count', object: 'sys_organization', frame: 'isDefaultOrganizationTarget' },
+  const cases: Array<{ name: string; read: AdmissionRead; fires: number }> = [
+    {
+      name: 'the caller\'s session read',
+      read: { methods: ['find', 'findOne'], object: 'sys_session', caller: 'resolveActor', times: Number.POSITIVE_INFINITY },
+      fires: 2,
+    },
+    { name: 'the caller\'s sys_member read', read: { methods: ['findOne'], object: 'sys_member' }, fires: 1 },
+    { name: 'the sys_organization read', read: { methods: ['findOne'], object: 'sys_organization' }, fires: 1 },
+    {
+      name: 'the Default Organization decision\'s count',
+      read: { methods: ['count'], object: 'sys_organization', frame: 'isDefaultOrganizationTarget' },
+      fires: 1,
+    },
   ];
 
   for (const c of cases) {
     it(`${c.name} fails: 503 SERVICE_UNAVAILABLE, nothing attempted; CONTROL: with it back, the delete goes ahead`, async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       const { engine, manager, cookie } = await ownerOfTarget();
-      const fault = failAdmissionRead(engine, c.method, c.object, c.frame);
+      const fault = failAdmissionRead(engine, c.read);
       const attempted = recordAttemptedWrites(engine);
 
       const res = await post(manager, '/organization/delete', { organizationId: TARGET }, cookie);
       engine.unregisterHooksByPackage(RECORDER);
       fault.restore();
 
-      expect(fault.fired(), 'PREMISE: the admission\'s read really failed').toBe(1);
-      await expectReadFault(res, c.object);
+      expect(fault.fired(), 'PREMISE: the admission\'s read really failed').toBe(c.fires);
+      await expectReadFault(res, c.read.object);
       // better-auth's handler never ran: not even its first write, the
       // session's active organization, was attempted.
       await expectNothingChanged(engine, attempted);
@@ -236,6 +266,35 @@ describe('[#25059] an organization-delete read that fails refuses 503 before bet
       await expectControlDeletes(engine, manager, cookie);
     });
   }
+
+  it('no session at all still falls through: the vendor\'s 401, nothing attempted', async () => {
+    const { engine, manager } = await ownerOfTarget();
+    const attempted = recordAttemptedWrites(engine);
+
+    const res = await post(manager, '/organization/delete', { organizationId: TARGET }, '');
+    engine.unregisterHooksByPackage(RECORDER);
+
+    expect(res.status, await res.clone().text()).toBe(401);
+    await expectNothingChanged(engine, attempted);
+  });
+
+  it('a credential carrying a control character is no session, even when its read fails: the vendor\'s 401, nothing attempted', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { engine, manager } = await ownerOfTarget();
+    const fault = failAdmissionRead(engine, {
+      methods: ['find', 'findOne'], object: 'sys_session', caller: 'resolveActor', times: Number.POSITIVE_INFINITY,
+    });
+    const attempted = recordAttemptedWrites(engine);
+
+    // `%00` decodes to U+0000, a token no store holds and one PostgreSQL refuses to bind.
+    const res = await post(manager, '/organization/delete', { organizationId: TARGET }, 'better-auth.session_token=%00forged.sig');
+    engine.unregisterHooksByPackage(RECORDER);
+    fault.restore();
+
+    expect(fault.fired(), 'PREMISE: the admission read the session for that token, and the read failed').toBeGreaterThan(0);
+    expect(res.status, await res.clone().text()).toBe(401);
+    await expectNothingChanged(engine, attempted);
+  });
 
   it('a member row the vendor\'s own predicate throws on still falls through: the vendor answers, before its first write', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});

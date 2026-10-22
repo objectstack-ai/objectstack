@@ -8150,9 +8150,18 @@ export class AuthManager {
    * part) — the bearer plugin may convert `Authorization: Bearer` to a session
    * AFTER this global before-hook runs. Returns `null` when no valid session
    * can be resolved (→ caller lets `sessionMiddleware` issue the 401).
+   *
+   * [#25059] By default a session read that FAILED answers `null` too, the
+   * same value as no session. `failedReadThrows` tells the two apart for a
+   * caller whose fall-through would let writes run uncounted: when no actor
+   * was resolved and the explicit token read itself threw, that throw
+   * propagates. A request with no credential, a credential the store does not
+   * hold, an expired session, a credential that does not parse or one
+   * carrying a control character still answers `null`.
    */
   private async resolveActor(
     ctx: any,
+    options?: { failedReadThrows?: boolean },
   ): Promise<{ userId: string; activeOrgId?: string } | null> {
     try {
       const { getSessionFromCtx } = await import('better-auth/api');
@@ -8166,6 +8175,7 @@ export class AuthManager {
         };
       }
     } catch { /* fall through to explicit token resolution */ }
+    let failedRead: { cause: unknown } | undefined;
     try {
       const hdr = (k: string): string =>
         ((ctx?.headers?.get?.(k) ?? ctx?.request?.headers?.get?.(k)) as string) || '';
@@ -8185,10 +8195,20 @@ export class AuthManager {
         if (cm?.[1]) token = unsigned(decodeURIComponent(cm[1]));
       }
       if (token) {
-        const sess: any = await (ctx as any).context.adapter.findOne({
-          model: 'session',
-          where: [{ field: 'token', value: token }],
-        });
+        let sess: any;
+        try {
+          sess = await (ctx as any).context.adapter.findOne({
+            model: 'session',
+            where: [{ field: 'token', value: token }],
+          });
+        } catch (cause) {
+          // A token carrying a control character is none the store holds, and
+          // a read of it can fail on the request's own bytes (PostgreSQL
+          // refuses U+0000 in a text parameter): that failure stays no session.
+          const storable = !Array.from(token).some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
+          if (options?.failedReadThrows && storable) failedRead = { cause };
+          throw cause;
+        }
         const exp = sess?.expiresAt ?? sess?.expires_at;
         if (sess && (!exp || new Date(exp).getTime() > Date.now())) {
           const userId = String(sess.userId ?? sess.user_id ?? '');
@@ -8202,6 +8222,7 @@ export class AuthManager {
         }
       }
     } catch { /* unresolved → null */ }
+    if (failedRead) throw failedRead.cause;
     return null;
   }
 
@@ -8319,7 +8340,8 @@ export class AuthManager {
    * refusal, and no count. What the vendor itself answers falls through to it:
    * no session, no organization id, no membership, no permission, no
    * organization row. A READ this decides on that fails does not fall
-   * through [#25059]: the vendor's own reads could then succeed and its writes
+   * through [#25059], the session read included (`resolveActor` with
+   * `failedReadThrows`): the vendor's own reads could then succeed and its writes
    * run with nothing counted, so it refuses here with 503
    * `SERVICE_UNAVAILABLE` ({@link organizationDeleteReadFaultBody}), and so
    * does a failure deciding whether the target is the Default Organization.
@@ -8350,10 +8372,10 @@ export class AuthManager {
       }
     };
 
-    // `resolveActor` never throws: a session read that fails answers null, as
-    // no session does, so that one reaches the vendor, whose own session read
-    // decides it.
-    const actor = await this.resolveActor(ctx);
+    // The session read refuses on failure too, so a session the store could
+    // not read is never taken for no session; no session at all still falls
+    // through.
+    const actor = await read('sys_session', () => this.resolveActor(ctx, { failedReadThrows: true }));
     if (!actor?.userId) return; // the vendor answers 401
     const callerRow: any = await read('sys_member', () =>
       sys.findOne('sys_member', { where: { organization_id: organizationId, user_id: actor.userId } }),
