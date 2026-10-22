@@ -33,7 +33,9 @@ export const entry: SemanticMigration = {
     + 'still reaches it from any object not authored through the builder. The security gate keeps '
     + 'refusing these inserts. (The later step-18 entry `cbp-master-relation-tiers-retired` goes '
     + 'further for the first shape: a `master_detail` without `required: true` is refused at parse, '
-    + 'and the runtime no longer resolves a master from it.)',
+    + 'and the runtime no longer resolves a master from it. The same entry now refuses the other two '
+    + 'at parse on the object\'s one required master, so `ObjectSchema.create` no longer lets them '
+    + 'through either.)',
   acceptanceCriteria:
     '`os lint` reports no `relationship/master-detail-required` finding at `error`: on every '
     + 'object declaring `sharingModel: \'controlled_by_parent\'`, each `master_detail` reference '
@@ -41,10 +43,12 @@ export const entry: SemanticMigration = {
     + 'which emits `required: true`) and carries neither `readonly: true` nor `system: true`. '
     + '⚠️ WHICH DOOR: this rule\'s refusal is `os lint`\'s and the metadata-generation rubric\'s '
     + 'only. The rule is not in the authoring-rule registry, so `os build`, `os validate` and the '
-    + 'metadata save door do not run it, and a stack carrying the `readonly` or `system` shape still '
-    + 'builds and publishes — read `os lint`\'s exit code, not a green build. (A missing `required` '
-    + 'on an object\'s only `master_detail` is refused at parse by every one of those doors since '
-    + '`cbp-master-relation-tiers-retired`.) Stored metadata is not rewritten and keeps loading, and '
+    + 'metadata save door do not run it. They refuse at parse, under `cbp-master-relation-tiers-retired`, '
+    + 'the shapes ADR-0055 §1 decides on the object\'s one required master: a missing `required` on its only '
+    + '`master_detail`, and `readonly: true` or `system: true` on the one required `master_detail`. A flag '
+    + 'or a missing `required` on any other, non-required `master_detail` of the object is this rule\'s '
+    + 'alone — read '
+    + '`os lint`\'s exit code there, not a green build. Stored metadata is not rewritten and keeps loading, and '
     + 'the security gate still refuses an insert that omits the master FK on these shapes. Repo '
     + 'census at the time of the change: 129 authored objects across the example '
     + 'apps, the platform and plugin objects and the CLI\'s golden eval corpus, 7 of them '

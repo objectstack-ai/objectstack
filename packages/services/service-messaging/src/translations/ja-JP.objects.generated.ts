@@ -197,11 +197,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the user, the topic and the channel this toggle covers (computed on read)"
+        help: "レコードのタイトル:この設定の対象ユーザー(または All users)、トピック、チャネル(読み取り時に計算)"
       },
       user_id: {
         label: "User",
-        help: "Recipient user id, or '*' for the admin-global default."
+        help: "この設定を適用するユーザー。空のままにすると、すべてのユーザーに適用される既定値になります。"
       },
       topic: {
         label: "Topic",

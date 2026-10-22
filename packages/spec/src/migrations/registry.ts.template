@@ -1327,6 +1327,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'retired from the load path.',
   },
   {
+    id: 'api-docs-viewer-keys-retired',
+    order: 108,
+    text:
+      'It also retires the three keys that declared an HTML API documentation viewer (ADR-0049 '
+      + 'enforce-or-remove): `ApiDocumentationConfig.ui`, with its value schemas '
+      + '`ApiTestingUiConfigSchema` and `ApiTestingUiType`, and the REST API plugin config\'s '
+      + '`openApi.uiPath` and `openApi.uiFramework`. Nothing ever read them, and since the docs viewer '
+      + 'page was taken offline the API origin serves no viewer at all, only the OpenAPI document at '
+      + '`GET {basePath}/openapi.json`. Each key is refused at parse with a prescription naming that '
+      + 'document. No D2 conversion: neither config is a stack collection member or a stored row. The '
+      + 'D3 record is the semantic entry `api-docs-viewer-keys-retired`.',
+  },
+  {
     id: 'cbp-master-relation-tiers-retired',
     order: 95,
     text:

@@ -34,6 +34,15 @@ import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const fixtureSql = readFileSync(new URL('./upgrade-harness/fixture-18.0/database.sql', import.meta.url), 'utf8');
 
+/**
+ * The organization uniques a `kernel:ready` migration in `metadata-protocol`
+ * rebuilds on every boot (runtime-managed, ADR-0120 D4), so no boot leaves
+ * their 18.0 spelling in place: `sys_setting`'s identity index, and
+ * `sys_notification_preference`'s, NULL-safe on `user_id`.
+ */
+const RUNTIME_MANAGED_TABLES = new Set(['sys_setting', 'sys_notification_preference']);
+const RUNTIME_MANAGED_INDEX = /^uniq_(sys_setting_|sys_notification_preference_)/;
+
 /** One unique index of the file, as SQLite recorded its DDL. */
 interface UniqueIndex {
   name: string;
@@ -166,12 +175,14 @@ describe('[18.x step 7b] the organization key part across the 18.0 → HEAD upgr
       expectNoDestructiveIndexDrift(await managedDrift(stack!));
     });
 
-    it('the 12 declared organization composites survive the HEAD boot byte for byte', () => {
-      // `sys_setting`'s identity index is the thirteenth: the metadata
-      // protocol's own runtime migration rebuilds it on every boot, now over
-      // the plain organization key.
-      const declared = COALESCE_INDEXES_18_0.filter((i) => !i.name.startsWith('uniq_sys_setting_'));
-      expect(declared).toHaveLength(12);
+    it('the 11 declared organization composites survive the HEAD boot byte for byte', () => {
+      // The other two are runtime-managed: the metadata protocol's own
+      // migrations rebuild them on every boot over the plain organization key —
+      // `sys_setting`'s identity index, and `sys_notification_preference`'s
+      // one-global-default-per-key index, NULL-safe on its `user_id` (an empty
+      // User is the admin-global default, ADR-0118 D1).
+      const declared = COALESCE_INDEXES_18_0.filter((i) => !RUNTIME_MANAGED_INDEX.test(i.name));
+      expect(declared).toHaveLength(11);
       const after = new Map(organizationUniqueIndexes(restored).map((i) => [i.name, i.sql]));
       for (const index of declared) expect(after.get(index.name), index.name).toBe(index.sql);
     });
@@ -197,10 +208,10 @@ describe('[18.x step 7b] the organization key part across the 18.0 → HEAD upgr
       try {
         const ql = (await first.kernel.getServiceAsync('objectql')) as { getDriverForObject(object: string): unknown };
         // The tables whose organization unique 18.0.0 keyed through COALESCE —
-        // the ones whose equivalence is under test. (`sys_setting`'s identity
-        // index is its runtime migration's, rebuilt every boot.)
+        // the ones whose equivalence is under test. (The runtime-managed
+        // indexes are their migrations', rebuilt every boot.)
         const tenantTables = [
-          ...new Set(organizationUniqueIndexes(born).map((i) => i.table).filter((t) => t !== 'sys_setting')),
+          ...new Set(organizationUniqueIndexes(born).map((i) => i.table).filter((t) => !RUNTIME_MANAGED_TABLES.has(t))),
         ];
         await relaxTenantColumns(ql, tenantTables);
       } finally {
@@ -209,8 +220,8 @@ describe('[18.x step 7b] the organization key part across the 18.0 → HEAD upgr
       const db = new DatabaseSync(born);
       try {
         for (const index of organizationUniqueIndexes(born)) {
-          // `sys_setting`'s identity index is its runtime migration's, rebuilt every boot.
-          if (index.table === 'sys_setting') continue;
+          // A runtime-managed index is its migration's, rebuilt every boot.
+          if (RUNTIME_MANAGED_TABLES.has(index.table)) continue;
           const sql = index.sql.replace(/\(\s*([`"]?)organization_id\1\s*([,)])/, "(COALESCE($1organization_id$1, '__global__')$2")
             .replace(/,\s*([`"]?)organization_id\1\s*([,)])/, ", COALESCE($1organization_id$1, '__global__')$2");
           if (sql === index.sql) continue;

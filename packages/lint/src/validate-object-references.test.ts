@@ -5,9 +5,7 @@ import {
   validateObjectReferences as validateObjectReferencesUnrecorded,
   OBJECT_REFERENCE_UNKNOWN,
   OBJECT_REFERENCE_UNREGISTERED_PLATFORM,
-  USER_FIELD_FOREIGN_REFERENCE,
 } from './validate-object-references.js';
-import { Field, ObjectSchema, referenceTargetOf } from '@objectstack/spec/data';
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import { PLATFORM_OBJECT_PREFIXES } from '@objectstack/spec/system';
 import { explainRule } from './rule-explanations.js';
@@ -706,102 +704,18 @@ describe('[#19289] validateObjectReferences — a `user` target comes from the T
     expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNKNOWN);
   });
 
-  it('control: the rule still REPORTS a real miss — an explicit carrier naming an unknown object errors', () => {
+  it('control: the rule still REPORTS a real miss — a `lookup` naming an unknown object errors', () => {
     // Without this, "no findings" above reads equally well as a rule that
-    // stopped judging `user` fields altogether.
-    // [#24808] A `user` field naming any object but `sys_user` also draws the
-    // foreign-target warning, so the unknown-object error is read by rule.
-    const findings = validateObjectReferences(userField({ reference: 'zzz_nope' }));
-    expect(findings.filter((f) => f.rule === OBJECT_REFERENCE_UNKNOWN)).toHaveLength(1);
-    expect(findings.map((f) => f.rule).sort()).toEqual([OBJECT_REFERENCE_UNKNOWN, USER_FIELD_FOREIGN_REFERENCE].sort());
+    // stopped judging fields altogether. [#24952] A `user` field can no longer
+    // carry the miss: its target is the type's constant whatever the carrier
+    // says (`FieldSchema` refuses a foreign name), so the same field leg is
+    // proven on a `lookup`, and a foreign carrier on `user` resolves to
+    // `sys_user` and draws nothing.
+    const lookup = validateObjectReferences(userField({ type: 'lookup', reference: 'zzz_nope' }));
+    expect(lookup).toHaveLength(1);
+    expect(lookup[0].rule).toBe(OBJECT_REFERENCE_UNKNOWN);
+    expect(validateObjectReferences(userField({ reference: 'zzz_nope' }))).toEqual([]);
   });
-});
-
-/**
- * [#24808] A `user` field's target is FIXED to `sys_user` by the spec, and
- * nothing enforced it: the reproduction below parses through `ObjectSchema`
- * and resolves through `referenceTargetOf` to the authored object. Under the
- * 「甲」 ruling the 18.x half is this warning (no ADR-0087 conversion can carry
- * the refusal: a `lookup` joins the referential delete walk a `user` field
- * sits outside), so the parse half below pins that the shape still LOADS.
- */
-describe('[#24808] validateObjectReferences — a `user` field naming another object warns', () => {
-  const stackWith = (assignee: Record<string, unknown>) => ({
-    objects: [
-      { name: 'probe_account', fields: { name: { type: 'text', label: 'Name' } } },
-      { name: 'probe_task', fields: { name: { type: 'text', label: 'Name' }, owner: assignee } },
-    ],
-  });
-  const PROBE = { type: 'user', label: 'Owner', reference: 'probe_account' };
-
-  it('reproduction: the shape parses and the arbiter follows the authored object', () => {
-    const parsed = ObjectSchema.safeParse({ name: 'probe_task', fields: { owner: PROBE } });
-    expect(parsed.success).toBe(true);
-    expect(referenceTargetOf(PROBE)).toBe('probe_account');
-  });
-
-  it('warns — never errors — and names the field, the target and the lookup spelling', () => {
-    const findings = validateObjectReferences(stackWith(PROBE));
-    expect(findings).toHaveLength(1);
-    const [f] = findings;
-    expect(f.rule).toBe(USER_FIELD_FOREIGN_REFERENCE);
-    expect(f.severity).toBe('warning');
-    expect(f.path).toBe('objects[1].fields.owner.reference');
-    expect(f.where).toBe('object "probe_task" · field "owner"');
-    expect(f.message).toContain('"probe_account"');
-    expect(f.hint).toContain("{ type: 'lookup', reference: 'probe_account' }");
-  });
-
-  it('warns on an object extension too — the verdict needs no artifact context', () => {
-    const findings = validateObjectReferences({
-      objectExtensions: [{ extend: 'sys_user_profile', fields: { mentor: { ...PROBE } } }],
-    });
-    expect(findings.filter((f) => f.rule === USER_FIELD_FOREIGN_REFERENCE)).toEqual([
-      expect.objectContaining({ path: 'objectExtensions[0].fields.mentor.reference', severity: 'warning' }),
-    ]);
-  });
-
-  it('warns on the map form of `fields` and on the array form of `objects` alike', () => {
-    const findings = validateObjectReferences({
-      objects: { probe_task: { fields: { owner: PROBE } }, probe_account: { fields: {} } },
-    });
-    expect(findings.map((f) => f.rule)).toEqual([USER_FIELD_FOREIGN_REFERENCE]);
-  });
-
-  it('control: the two legal spellings — no `reference`, and `reference: "sys_user"` — stay silent', () => {
-    expect(validateObjectReferences(stackWith({ type: 'user', label: 'Owner' }))).toEqual([]);
-    expect(validateObjectReferences(stackWith({ type: 'user', label: 'Owner', reference: 'sys_user' }))).toEqual([]);
-    expect(validateObjectReferences(stackWith(Field.user({ label: 'Owner' })))).toEqual([]);
-  });
-
-  it('control: a `lookup` to the same object is the canonical spelling and draws nothing', () => {
-    expect(validateObjectReferences(stackWith(Field.lookup('probe_account', { label: 'Owner' })))).toEqual([]);
-    expect(validateObjectReferences(stackWith({ type: 'lookup', reference: 'probe_account' }))).toEqual([]);
-  });
-
-  it('control: an unreadable carrier still REFUSES rather than reading as a foreign target', () => {
-    expect(() => validateObjectReferences(stackWith({ type: 'user', reference: { object: 'sys_user' } })))
-      .toThrow(/`reference` is an object/);
-  });
-
-  it('prints one line each, and `os explain` carries the reasoning the verdict leaves out', () => {
-    const [f] = validateObjectReferences(stackWith(PROBE));
-    for (const text of [f.message, f.hint]) {
-      expect(text).not.toContain('\n');
-      expect(text.length, text).toBeLessThanOrEqual(200);
-    }
-    const entry = explainRule(USER_FIELD_FOREIGN_REFERENCE);
-    expect(entry?.rule).toBe(USER_FIELD_FOREIGN_REFERENCE);
-    expect(entry!.paragraphs.join('\n')).toContain("deleteBehavior: 'set_null'");
-  });
-
-  for (const command of ['validate', 'build', 'lint'] as const) {
-    it(`reaches \`os ${command}\` through the authoring registry, as an advisory and never a gate`, () => {
-      const { errors, advisories } = splitBySeverity(runAuthoringRules(command, { normalized: stackWith(PROBE) as never }));
-      expect(errors.filter((f) => f.rule === USER_FIELD_FOREIGN_REFERENCE)).toEqual([]);
-      expect(advisories.filter((f) => f.rule === USER_FIELD_FOREIGN_REFERENCE)).toHaveLength(1);
-    });
-  }
 });
 
 /**

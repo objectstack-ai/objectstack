@@ -401,7 +401,7 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'object',
     path: ROOT_PATH,
     key: 'titleFormat',
-    why: "`[DEPRECATED → nameField (ADR-0079)]` render-only title template the server cannot return or query, deliberately not offered to new authors; its own describe prescribes the migration — a single-field title to `nameField`, a composite to a formula field designated as `nameField` — and both targets are authorable",
+    why: "`[DEPRECATED → nameField (ADR-0079)]` render-only title template the server cannot return or query, deliberately not offered to new authors; its own describe prescribes the migration — a single-field title to `nameField`, a composite title that import, sort or search must match to a stored computed field (a non-formula field with an `expression`) designated as `nameField`, a text formula staying legal for display only — and every target is authorable",
   },
   {
     kind: 'omit',

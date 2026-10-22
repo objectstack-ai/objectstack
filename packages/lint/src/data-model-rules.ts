@@ -310,16 +310,19 @@ const CBP_ORPHAN_CONSEQUENCE =
  * forces `required: true` on every `master_detail` reference under
  * `controlled_by_parent` and refuses an explicit `required: false` —
  * `forceCbpMasterDetailRequired` in `packages/spec/src/data/object.zod.ts`).
- * The builder never inspects `readonly` / `system`, so shapes 2 and 3 pass
- * through `create()` untouched, and shape 1 survives every path that does not
- * go through `create()` (a plain object literal, raw `.parse()` of stored
- * metadata); this rule is where all three meet a refusal at authoring time.
+ * The spec parse refuses, at every door that parses, every shape that leaves
+ * the object without exactly one writable required master (`ObjectSchema`'s
+ * `controlledByParentMasterRefusal`: a missing `required` since ruling B,
+ * `readonly` / `system` on the one master since #25092, ruling 6328204856
+ * route A, shape `master-not-writable`). What only this rule reports is a
+ * shape on a second, non-required `master_detail` beside the master.
  *
  * ⚠ Reach: `lintDataModel` is `os lint`'s sweep and the metadata-generation
  * rubric (`score.ts`), and nothing else — it is not an `AUTHORING_RULES` entry
  * (`authoring-rule-wiring.test.ts` → `DIRECT_CALL_RATCHET`), so `os build`,
- * `os validate` and the metadata save door do not run it. The `error` moves
- * `os lint`'s exit code and the rubric's `valid`, not a publish verdict.
+ * `os validate` and the metadata save door do not run it; they meet the spec
+ * parse's refusal above instead. The `error` moves `os lint`'s exit code and
+ * the rubric's `valid`, not a publish verdict.
  *
  * One finding per field, located at the first defect it names; the `fix`
  * names every edit the field needs.

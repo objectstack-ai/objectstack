@@ -1,6 +1,6 @@
 # ADR-0131: Organization ownership is total — no NULL `organization_id`; declared metadata stays in code; a row exists only when an organization authored it
 
-**Status**: Accepted (2026-09-04) — accepted by the merge that landed it on `main` ([#14976](https://github.com/objectstack-ai/objectstack/pull/14976), commit `0ed271574`), which is itself the acceptance act for a governed surface (Prime Directive #14). Execution is paused under #15193 and the maintainer's standing instruction; that pause is carried there, not by this status line. · **Amended** (2026-09-17, [#18413](https://github.com/objectstack-ai/objectstack/issues/18413) — maintainer ruling option **B** on [#18336](https://github.com/objectstack-ai/objectstack/issues/18336), 2026-09-16: **D5's assignment of `reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` to D13 is withdrawn**. Those two symbols retire on the **17.x** line under [#11663](https://github.com/objectstack-ai/objectstack/issues/11663)'s design, **walled posture only**; the `single` posture keeps its zero-config first-user promotion and its grant row. **D5's Default-Organization ownership of that row is unchanged** and still lands on the v18 line under C3 — nothing about NULL ownership moves here. D14 gains one named exception. See **"Amendment (2026-09-17, #18413): the legacy-anchor retirement leaves D13 for the walled posture"** at the end.) · **Amended** (2026-10-16 — maintainer ruling on the v18 upgrade of long-lived development databases: **`os dev` runs D10's ceremony itself on a local SQLite development database**, after copying it, and boots again; `os serve` / `os start` and every other database keep the manual ceremony and the boot refusal, and **what the ceremony decides on the operator's behalf is printed as a warning before its first write**. The ceremony plans and applies **each object in the database the deployment keeps it in** (the `telemetry` sibling included), and **adopts the shipped permission sets an install seeded as `admin` rows** as the platform seeds they are. See **"Amendment (2026-10-16): the development exception, the telemetry sibling, and the legacy shipped-set seeds"** at the end.) · **Amended** (2026-10-22, #24897 — maintainer ruling letter **A** on [#25134](https://github.com/objectstack-ai/objectstack/issues/25134), record `6328195425`: **D1's text states where the tenant column is NOT NULL and which nullable columns remain**, adopting the card's wording; the decision that NULL is not a state is unchanged. Dated notes beside D1, D2, D5, D7, D8, D9 and D14 record the 18.x line as shipped: the release scope of 18.0.0, the lean-embedding exception and its boundaries under ruling A on [#25133](https://github.com/objectstack-ai/objectstack/issues/25133), and the step 7 parts each describes.)
+**Status**: Accepted (2026-09-04) — accepted by the merge that landed it on `main` ([#14976](https://github.com/objectstack-ai/objectstack/pull/14976), commit `0ed271574`), which is itself the acceptance act for a governed surface (Prime Directive #14). Execution is paused under #15193 and the maintainer's standing instruction; that pause is carried there, not by this status line. · **Amended** (2026-09-17, [#18413](https://github.com/objectstack-ai/objectstack/issues/18413) — maintainer ruling option **B** on [#18336](https://github.com/objectstack-ai/objectstack/issues/18336), 2026-09-16: **D5's assignment of `reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` to D13 is withdrawn**. Those two symbols retire on the **17.x** line under [#11663](https://github.com/objectstack-ai/objectstack/issues/11663)'s design, **walled posture only**; the `single` posture keeps its zero-config first-user promotion and its grant row. **D5's Default-Organization ownership of that row is unchanged** and still lands on the v18 line under C3 — nothing about NULL ownership moves here. D14 gains one named exception. See **"Amendment (2026-09-17, #18413): the legacy-anchor retirement leaves D13 for the walled posture"** at the end.) · **Amended** (2026-10-16 — maintainer ruling on the v18 upgrade of long-lived development databases: **`os dev` runs D10's ceremony itself on a local SQLite development database**, after copying it, and boots again; `os serve` / `os start` and every other database keep the manual ceremony and the boot refusal, and **what the ceremony decides on the operator's behalf is printed as a warning before its first write**. The ceremony plans and applies **each object in the database the deployment keeps it in** (the `telemetry` sibling included), and **adopts the shipped permission sets an install seeded as `admin` rows** as the platform seeds they are. See **"Amendment (2026-10-16): the development exception, the telemetry sibling, and the legacy shipped-set seeds"** at the end.) · **Amended** (2026-10-22, #24897 — maintainer ruling letter **A** on [#25134](https://github.com/objectstack-ai/objectstack/issues/25134), record `6328195425`, 「25134 … 同意」: **D1's text states where the tenant column is NOT NULL and which nullable columns remain**, adopting the card's wording; the decision that NULL is not a state is unchanged. Dated notes beside D1, D2, D5, D7, D8, D9 and D14 record the 18.x line as shipped: the release scope of 18.0.0, the lean-embedding exception and its boundaries under ruling A on [#25133](https://github.com/objectstack-ai/objectstack/issues/25133), and the step 7 parts each describes.)
 **Deciders**: ObjectStack maintainer, 2026-09-03/04, live chat on
 [#13564](https://github.com/objectstack-ai/objectstack/issues/13564), verbatim and untranslated,
 in the order the model was built: the premise 「我理解只有代码定义的元数据是跨租户的，对象、字段、视图等
@@ -245,7 +245,7 @@ with tenancy disabled (`sys_sso_provider`) is not a tenant column. An object who
 organization declares `systemFields.tenant: false` (or `tenancy.enabled: false`,
 [ADR-0066](./0066-unified-authorization-model.md) D2) and has **no column**.
 
-> **Amended (2026-10-22, ruling of record `6328195425` on #25134, letter A) — D1 says where the column
+> **Amended (2026-10-22, ruling of record `6328195425` on #25134, letter A, 「25134 … 同意」) — D1 says where the column
 > is NOT NULL, and which nullable columns remain.** The paragraph above is the wording the ruling
 > adopted: the paragraph under 「A 让 D1 变成的样子」 in #25134's card. It replaces this text, as
 > accepted on 2026-09-04: "Every object that carries `organization_id` carries it **NOT NULL** — at the
@@ -263,9 +263,11 @@ organization declares `systemFields.tenant: false` (or `tenancy.enabled: false`,
 > 2. **`os migrate plan` lists the tenant columns still nullable**, in an advisory section that names
 >    `os migrate organization-ownership` as the remedy. The section is not drift, proposes no op and
 >    changes no exit code. No boot line is added. The same advisory goes into the 18.0 upgrade notes.
->    This is #25134's execution, in flight.
+>    #25179 (`6251f59051`) shipped it: each listed column is marked `tightens` or `leaves`, with the
+>    reason, and `--json` carries it as `nullableTenantColumns`. The ceremony now reports a shard the
+>    driver created NOT NULL as `already-not-null`.
 > 3. **Order.** The advisory's "the ceremony leaves nullable only …" holds only once a production boot
->    that composes no organization object is refused (#25133; see the D9 note).
+>    that composes no organization object is refused (#25155, `ab488d9b7d`; see the D9 note).
 
 > **Note (2026-10-22, record `6323222024` on #24583) — the driver creates the tenant column NOT NULL.**
 > From step 7 part 7b-0 on (#24940, `5e9b100743`), a table the SQL or Turso driver creates carries its
@@ -511,8 +513,11 @@ spelling moves: the copy-once import, full editability, no upgrade channel and t
 > reported loudly at load and never becomes an overlay. **D10's ownership ceremony** migrates each
 > existing customised copy to a clone plus the base switched off, and deletes the uncustomised mirrors
 > (fate 2). The promise that a customised copy keeps answering and a switch-off survives redeploys is
-> kept by that migration and the ledger, not by shadowing. This is a ruled decision that #24421 builds;
-> it has not shipped.
+> kept by that migration and the ledger, not by shadowing. *(2026-10-22: this decision shipped in
+> 18.0.0. #24428 (`964a23700f`) added the `sharing_rule` activation type and the same-name refusal,
+> #24599 (`1e8b6284c0`) closed the `/meta` door, and the D10 ceremony's clone migration is in
+> `packages/cli/src/utils/organization-ownership-apply.ts`. #24421, the card this note named, was filed
+> for the superseded B′ shape.)*
 
 Creating one's own item — a new permission set, position, view, flow — is environment authoring
 (Studio, or Setup acting as a metadata editor under `single`), gated as D2/D3 describe and refused to
@@ -678,14 +683,17 @@ has a NULL arm; no layer has a shared-owner set (there are no shared owners — 
 
 > **Note (2026-10-22, seat decision `6325596117` on #25140, Q1 letter A) — one organization-less
 > answer is left, on an uncertified database only.** `organizationOutOfWriteReach`
-> (`packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach`), which
-> storage's three upload doors ask before their first write, answers "in reach" for an upload row
-> stamped with no organization; the comment above
-> `packages/services/service-storage/src/storage-routes.ts#requireStartingOrganization` says so
-> ("a row stamped with no organization stays in reach"). Under this decision
-> no scoped read reaches that row, so the answer is wrong. The row can exist only on a database that has
-> not been through the D10 ceremony, which `os serve` refuses at boot, and a table 7b-0's driver
-> created refuses it at NOT NULL. The seat kept the function as it is, and records the case here.
+> (`packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach`) answers "in
+> reach" for an upload row stamped with no organization; the comment above
+> `packages/services/service-storage/src/storage-routes.ts#requireStartingOrganization` says so ("a row
+> stamped with no organization stays in reach"). Four doors ask it: the commit, chunk and
+> chunked-completion doors before their first write, and the progress door when its expiry stamp is
+> due. Under this decision no scoped read reaches that row, so the answer is wrong. Such a row cannot
+> reach those doors through `os serve`. A v17 or pre-release store, which may hold one, is refused at
+> boot until the D10 ceremony has run. An 18.0.0-born store is served, but the storage doors ride the
+> HTTP server, which the production refusals of a boot with no auth or no auth secret gate, so no served
+> write leaves such a row there. A table 7b-0's driver created refuses the row at NOT NULL. The seat
+> kept the function as it is, and records the case here.
 
 ### D9 — A missing stamp is a refused write, in every posture
 
@@ -697,7 +705,7 @@ what is missing (ADR-0123 D4). ⛔ Nothing defaults to any owner other than the 
 scope — and its ledger retires (D13).
 
 > **Note (2026-10-22, #24583 reports `6284717698` and `6288405082`; ruling of record `6328987873` on
-> #25133, letter A) — the lean-embedding exception, and where it stops.** The rule above applies where
+> #25133, letter A, 「同意」) — the lean-embedding exception, and where it stops.** The rule above applies where
 > an organization can exist. When the composition registers no `sys_organization`, there is none to
 > derive and none a write could name: `resolveSystemWriteOrganization`
 > (`packages/core/src/security/system-write-organization.ts`) answers `no-organization-object`,
@@ -714,10 +722,11 @@ scope — and its ledger retires (D13).
 > 2. **A production boot that composes no organization object is refused.** 7b-3 refused `os serve`
 >    when it serves a data API with the auth tier on and no secret resolved (#24845, under the seat
 >    decision `6284744613`, rule A1 of #3963). Ruling `6328987873` extends that to every production
->    boot: `os serve` or `os start` without `--dev`, with the `auth` tier off and no `AuthPlugin`
->    mounted, or with the tier on and no secret, is refused whether or not `--server`. A migrate-and-exit
->    job is such a boot. The refusal texts no longer offer `--no-server` as the remedy. The `host-kernel`
->    reason (the cloud runtime) keeps its warn-only path. This is #25133's fix, in flight.
+>    boot, and #25155 (`ab488d9b7d`, the fix for #25133) shipped it: `os serve` or `os start` without
+>    `--dev`, with the `auth` tier off and no `AuthPlugin` mounted, or with the tier on and no secret, is
+>    refused whether or not `--server`, before any plugin starts. A migrate-and-exit job is such a boot.
+>    The refusal texts no longer offer `--no-server` as the remedy. The `host-kernel` reason (the cloud
+>    runtime) keeps its warn-only path.
 > 3. **So the exception holds only for programmatic embedding and `--dev`** (`os dev` included). No
 >    served production composition reaches it.
 >
@@ -977,8 +986,10 @@ fence above and §8's order stand, and this note sits beside them.
    the rulings.
 4. **What 18.0.0 fixed for its databases.** Every database it creates is birth-marked at
    `ORGANIZATION_OWNERSHIP_SHAPE_GENERATION` 1, with nullable tenant columns and `COALESCE` unique
-   indexes. ⛔ No post-GA part bumps the generation, and 7a-2, 7b-0 and 7b-1+7b-2 each pin that such a
-   database boots on their head with zero refusals and zero destructive drift (record `6291577585`). The ceremony, which it does not
+   indexes. ⛔ No post-GA part bumps the generation, and 7a-2, 7b-0 and 7b-1+7b-2 are each held to
+   such a database booting on their head with zero refusals and zero destructive drift (record
+   `6291577585`). The pin is the upgrade harness's fixture-18.0.0 leg (#24911, `81e6edd463`), which
+   held on every merge of step 7 (record `6323222024`). The ceremony, which it does not
    require, tightens its tenant columns (D1).
 
 Items 1 to 3 of the scope note below are read against items 1 and 4 here. The walled half of stage 8b

@@ -28,6 +28,7 @@
   "src/ai/agent-lifecycle-retirement.test.ts",
   "src/ai/agent-memory-store-retirement.test.ts",
   "src/ai/tool-confirmation-prescription-tense.pin.test.ts",
+  "src/api/docs-viewer-keys-retirement.test.ts",
   "src/api/error-catalog-docs.test.ts",
   "src/api/export-job-family-retirement.test.ts",
   "src/api/rest-api-config-dead-keys-retirement.test.ts",

@@ -168,16 +168,13 @@ export const REFERENCE_VALUE_TYPES: ReadonlySet<string> = new Set([
  * it. Metadata authored without it (hand-written JSON, an AI author, a Studio
  * form) is fully specified, not under-specified.
  *
- * ⚠️ [#24808] Declared, not yet enforced: `FieldSchema` admits any string on a
- * `user` field's `reference`, and {@link referenceTargetOf} returns an
- * authored carrier FIRST, so `{ type: 'user', reference: 'probe_account' }`
- * resolves to `probe_account`. Under the 「甲」 ruling that stays so for
- * protocol 18 — no ADR-0087 conversion can rewrite such a field losslessly (a
- * `lookup` joins the referential delete walk a `user` field sits outside), so
- * re-targeting it here would change a loading field's behaviour unannounced.
- * The loud half ships instead: `@objectstack/lint`'s
- * `user-field-foreign-reference` warning. The refusal, and with it the
- * carrier ceasing to matter here, is the next protocol major's.
+ * Enforced at both ends since #24952 (#24808 ruled A on #24854, shipped in an
+ * 18.x minor under the amended 「甲」 ruling): `FieldSchema` refuses a `user`
+ * field whose `reference` names any object but `sys_user`, and
+ * {@link referenceTargetOf} answers this constant for a member type whatever
+ * the carrier says, so a row that reached a reader without the parse (a stored
+ * body saved before the refusal, a raw registration) still resolves to the one
+ * target the type declares. A link to another object is a `lookup`.
  */
 const IMPLICIT_REFERENCE_TARGETS: ReadonlyMap<string, string> = new Map([
   ['user', SystemObjectName.USER],
@@ -220,8 +217,13 @@ export function referenceTargetOf(def: unknown): string | undefined {
   const { type } = def as { type?: unknown };
   const reference = referenceCarrierOf(def, 'referenceTargetOf');
   if (typeof type !== 'string' || !REFERENCE_VALUE_TYPES.has(type)) return undefined;
-  if (reference) return reference;
-  return IMPLICIT_REFERENCE_TARGETS.get(type);
+  // [#24952] A type that fixes its target answers that target, whatever the
+  // carrier says: the carrier is still READ above (an unreadable one throws),
+  // but for `user` it can only materialize the constant — `FieldSchema`
+  // refuses any other name.
+  const implicit = IMPLICIT_REFERENCE_TARGETS.get(type);
+  if (implicit) return implicit;
+  return reference || undefined;
 }
 
 /**

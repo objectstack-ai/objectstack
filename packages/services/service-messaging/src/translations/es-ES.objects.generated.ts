@@ -197,11 +197,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the user, the topic and the channel this toggle covers (computed on read)"
+        help: "Título del registro: la persona (o All users), el tema y el canal que cubre este ajuste (calculado al leer)"
       },
       user_id: {
         label: "User",
-        help: "Recipient user id, or '*' for the admin-global default."
+        help: "El usuario al que se aplica esta preferencia. Déjelo vacío para el valor predeterminado que se aplica a todos los usuarios."
       },
       topic: {
         label: "Topic",

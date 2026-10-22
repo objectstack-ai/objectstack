@@ -441,6 +441,32 @@ export function driftFindingWithoutRemedy(entry: Pick<ManagedDriftEntry, 'messag
     : entry.message;
 }
 
+/**
+ * [ADR-0131 D10 item 5] The column whose drop the organization-ownership
+ * ceremony owns: on a database it has not certified, the ceremony drops it
+ * itself and `os migrate apply --allow-destructive` refuses the run.
+ */
+const CEREMONY_OWNED_DROP_COLUMN = 'organization_id';
+
+/** Is `entry` the drop of a column the organization-ownership ceremony owns? */
+export function isCeremonyOwnedColumnDrop(entry: Pick<ManagedDriftEntry, 'op'>): boolean {
+  return entry.op.type === 'drop_column' && entry.op.column === CEREMONY_OWNED_DROP_COLUMN;
+}
+
+/**
+ * [ADR-0131 D10 item 5] The boot's `[schema-drift]` line for a ceremony-owned
+ * column drop ({@link isCeremonyOwnedColumnDrop}) on a database the driver
+ * reads as not certified: the finding without its `--allow-destructive`
+ * sentence, which that database refuses, and the ceremony in its place, in
+ * the words `os migrate plan` shows under the same entry.
+ */
+export function ceremonyOwnedDropFinding(entry: Pick<ManagedDriftEntry, 'message' | 'op'>): string {
+  return (
+    `${driftFindingWithoutRemedy(entry)} — a drop the organization-ownership ceremony owns, and it has not ` +
+    `verified on this database: run "os migrate organization-ownership", which drops it itself.`
+  );
+}
+
 /** Columns the driver creates unconditionally — never metadata fields. */
 export const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
 

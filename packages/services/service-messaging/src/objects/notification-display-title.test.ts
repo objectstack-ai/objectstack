@@ -2,9 +2,15 @@
 
 /**
  * The record title of the notification objects that declared a
- * `titleFormat` and no title pointer (#20044): `sys_notification_delivery`,
- * `sys_notification_preference` and `sys_notification_receipt` (the fourth,
- * `sys_notification_subscription`, is retired).
+ * `titleFormat` and no title pointer (#20044): `sys_notification_delivery`
+ * and `sys_notification_receipt` (`sys_notification_subscription` is retired).
+ *
+ * `sys_notification_preference` left this table when its `user_id` became a
+ * `sys_user` reference (ADR-0118 D1): its title now names the PERSON one hop
+ * through that reference ('All users' for the empty reference, the admin-global
+ * default), so it no longer equals the `titleFormat` text this file holds the
+ * others to. Its case — the raw-id title 'usr_alice · billing.invoice · email'
+ * — is reversed in `../preference-user-reference.integration.test.ts`.
  *
  * ADR-0079 resolves a record's title as `nameField ?? displayNameField ??
  * derivation`, and an explicit `nameField` takes precedence over the
@@ -15,8 +21,8 @@
  * A renderer honouring the order therefore drew the raw id as the record
  * page's H1.
  *
- * The two composite titles now point at `display_title`, a text formula over
- * the columns `titleFormat` names. `sys_notification_receipt`'s title is one
+ * The composite title points at `display_title`, a text formula over the
+ * columns `titleFormat` names. `sys_notification_receipt`'s title is one
  * column (`{state}`), so its `nameField` names that column directly — the
  * describe's own migration for a single-field title. An explicit pointer is
  * honoured whatever the field's type (ADR-0079 D4); `select` is only kept out
@@ -47,7 +53,6 @@ import {
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveDisplayField } from '@objectstack/spec/data';
 import { NotificationDelivery } from './notification-delivery.object.js';
-import { NotificationPreference } from './notification-preference.object.js';
 import { NotificationReceipt } from './notification-receipt.object.js';
 import { installDefaultOrganization } from '../default-organization.testkit.js';
 
@@ -83,15 +88,6 @@ const CASES: Case[] = [
     title: 'email → usr_alice',
     refused: ['channel', 'recipient_id'],
     defaulted: {},
-  },
-  {
-    schema: NotificationPreference,
-    pointer: 'display_title',
-    row: () => ({ user_id: 'usr_alice', topic: 'billing.invoice', channel: 'email', created_at: NOW }),
-    title: 'usr_alice · billing.invoice · email',
-    refused: ['user_id'],
-    // `topic` / `channel` default to the '*' wildcard (ADR-0030 Layer 3).
-    defaulted: { topic: 'usr_alice · * · email', channel: 'usr_alice · billing.invoice · *' },
   },
   {
     schema: NotificationReceipt,

@@ -293,8 +293,8 @@ InvoiceLine = {
 - **Computed column** — a *stored* `currency`/`number` field with an `expression`
   renders read-only and recomputes live in the grid, then persists. Keep it
   stored (NOT a `formula` field) so the parent `summary` can roll it up; the
-  server only treats `type: 'formula'` as computed, so on a stored field the
-  `expression` is a client compute hint and the sent value is stored verbatim.
+  engine computes a stored field's `expression` from the row the write stores
+  and stores the result, so a client-sent value never stands.
 - **Catalog auto-fill** — a `lookup` line field + sibling columns whose names
   match fields on the referenced record (e.g. `unit_price`, `description`) →
   picking a record fills those cells.

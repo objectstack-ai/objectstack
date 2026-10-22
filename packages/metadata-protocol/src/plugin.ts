@@ -38,6 +38,10 @@ import {
     backfillSeedTenancy,
     resolveSeedTenancySeam,
 } from './migrations/seed-tenancy-backfill.js';
+import {
+    ensureNotificationPreferenceIdentityIndex,
+    resolveNotificationPreferenceIndexSeam,
+} from './migrations/notification-preference-identity-index.js';
 import { createRecordedBySentinelPlan } from './migrations/recorded-by-sentinel.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
@@ -335,6 +339,24 @@ export function assembleMetadataProtocol(
                     } catch (e: unknown) {
                         ctx.logger.warn(
                             '[metadata-protocol] seed/API tenancy backfill skipped — the repair that adopts untenanted seed rows into the install\'s one organization and merges their autonumber counter did not run this boot',
+                            { error: e instanceof Error ? e.message : String(e) },
+                        );
+                    }
+                    // `sys_notification_preference`'s one-global-default-per-key
+                    // index: the fourth runtime-managed tightening (ADR-0120 D4),
+                    // the `sys_setting` paradigm above applied to a
+                    // `user_id` whose EMPTY reference is the admin-global default
+                    // (ADR-0118 D1). Same seam, same gate, own try/catch: the table
+                    // belongs to `service-messaging`, so it may be absent here,
+                    // which the migration answers as a silent no-op.
+                    try {
+                        const seam = resolveNotificationPreferenceIndexSeam(ql);
+                        await ensureNotificationPreferenceIdentityIndex(seam?.exec, ctx.logger, {
+                            client: seam?.client,
+                        });
+                    } catch (e: unknown) {
+                        ctx.logger.warn(
+                            '[metadata-protocol] notification preference index migration skipped — the NULL-safe index that allows one admin-global default (an empty User) per topic and channel in an organization was not ensured this boot',
                             { error: e instanceof Error ? e.message : String(e) },
                         );
                     }

@@ -197,11 +197,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the user, the topic and the channel this toggle covers (computed on read)"
+        help: "记录标题:此开关适用的人员(或 All users)、主题和通道(读取时计算)"
       },
       user_id: {
         label: "用户",
-        help: "接收用户 ID,'*' 表示管理员全局默认值。"
+        help: "此偏好适用的用户。留空即为适用于所有用户的默认值。"
       },
       topic: {
         label: "主题",

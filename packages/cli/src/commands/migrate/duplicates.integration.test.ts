@@ -311,9 +311,9 @@ describe('#8928 os migrate duplicates — against a really booted stack', () => 
     // sees that something is blocked without reading every entry.
     expect(produced.summary.runtimeIndexesBlocked).toBe(1);
     expect(produced.summary.runtimeIndexBlockingRows).toBe(2);
-    // `sys_setting` is absent on this fixture; whatever each status, the three
+    // `sys_setting` is absent on this fixture; whatever each status, the four
     // indexes are all accounted for.
-    expect(produced.runtimeIndexPreflight).toHaveLength(3);
+    expect(produced.runtimeIndexPreflight).toHaveLength(4);
     expect(produced.reportVersion).toBe(2);
 
     // The whole run — boot included — wrote nothing. If a future change arms a
