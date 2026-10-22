@@ -138,6 +138,8 @@
     "data/PostgresConfig",
     "data/Query",
     "data/QueryFilter",
+    "data/QueryPageWindow",
+    "data/QueryPageWindowParam",
     "data/QueryTransportParams",
     "data/QueryWithTransport",
     "data/RangeOperator",

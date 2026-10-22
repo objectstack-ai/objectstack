@@ -85,9 +85,23 @@ export interface RefusedStoredShape {
   readonly surface: string;
   /**
    * Report every refused site in `stack`, once each. Reads only: returns
-   * nothing and never mutates `stack`.
+   * nothing and never mutates `stack` or `context`.
    */
-  detect(stack: Dict, report: (detail: ConversionTodoDetail) => void): void;
+  detect(stack: Dict, report: (detail: ConversionTodoDetail) => void, context: RefusedShapeContext): void;
+}
+
+/**
+ * [#25279] What the caller's door sees beyond the stack, for a detector whose
+ * refusing door reads more than one item. Every field is optional: a caller
+ * that passes nothing gets the verdicts the stack alone can answer.
+ */
+export interface RefusedShapeContext {
+  /**
+   * The datasource definitions the caller's door resolves by name
+   * (`ApplyConversionsOptions.knownDatasources`), read by
+   * {@link externalBindingOnManagedDatasource} after the stack's own.
+   */
+  readonly knownDatasources?: ReadonlyMap<string, { readonly schemaMode?: unknown }>;
 }
 
 // ── #23270: a controlled_by_parent object without exactly one required master ──
@@ -188,22 +202,28 @@ const controlledByParentWithoutOneMaster: RefusedStoredShape = {
 const externalBindingOnManagedDatasource: RefusedStoredShape = {
   id: 'object-external-binding-managed-datasource-refused',
   toMajor: 18,
-  surface: 'object.external — a federated binding on the primary datasource or on a managed one the stack declares',
-  detect(stack, report) {
+  surface: 'object.external — a federated binding on the primary datasource, or on a managed one the stack '
+    + 'declares or the caller resolves (a stored or registered datasource)',
+  detect(stack, report, context) {
     // The datasources this stack declares, as the stack-level half of the rule
-    // reads them. A stored object row arrives alone, so for it only the
-    // primary half (`datasource: 'default'`, written or omitted) can answer.
+    // reads them, then [#25279] the ones the caller's door resolves by name. A
+    // stored object row arrives alone, so for it the stack answers only the
+    // primary half (`datasource: 'default'`, written or omitted); the
+    // migration pass hands down the datasource the save door would read for
+    // it (the stored row, else the registered definition), so the listing
+    // names the row exactly when that door refuses its next save.
     const declared = new Map<string, Dict>();
     for (const ds of Array.isArray(stack.datasources) ? stack.datasources : []) {
       if (isDict(ds) && typeof ds.name === 'string') declared.set(ds.name, ds);
     }
+    const definitionOf = (name: string) => declared.get(name) ?? context.knownDatasources?.get(name);
     mapCollection(stack, 'objects', (obj, path) => {
       const datasource = typeof obj.datasource === 'string' ? obj.datasource : undefined;
       const refusal = externalBindingDatasourceRefusal(
         obj.name,
         obj.external,
         datasource,
-        datasource === undefined ? undefined : declared.get(datasource),
+        datasource === undefined ? undefined : definitionOf(datasource),
       );
       if (refusal === undefined) return obj;
       report({
@@ -473,6 +493,8 @@ export const REFUSED_STORED_SHAPES: readonly RefusedStoredShape[] = [
 /**
  * Run every {@link REFUSED_STORED_SHAPES} detector over `stack` and hand each
  * finding to `report` with the refused shape it belongs to. Reads only.
+ * `context` is what the caller's door sees beyond the stack
+ * ({@link RefusedShapeContext}).
  *
  * The notice itself — its `code`, its `conversionId` (the refusal's D3 entry
  * id) and its message — is built by the one caller, `applyConversions`, beside
@@ -481,9 +503,10 @@ export const REFUSED_STORED_SHAPES: readonly RefusedStoredShape[] = [
  */
 export function reportRefusedStoredShapes(
   stack: Dict,
+  context: RefusedShapeContext,
   report: (refused: RefusedStoredShape, detail: ConversionTodoDetail) => void,
 ): void {
   for (const refused of REFUSED_STORED_SHAPES) {
-    refused.detect(stack, (detail) => report(refused, detail));
+    refused.detect(stack, (detail) => report(refused, detail), context);
   }
 }
