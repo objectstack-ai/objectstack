@@ -13,6 +13,9 @@ import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // predicate write, which also bounds the id list a predicate write's read
 // question composes (see PREDICATE_WRITE_READABLE_ID_CAP).
 import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, MAX_BULK_PER_ROW_HOOK_ROWS, type FieldMaskingRule } from '@objectstack/spec/data';
+// [ADR-0055 §1] The parse's own one-master judgement, asked of an object that
+// reached the registry without the parse (see `resolveCbpRelation`).
+import { controlledByParentMasterRefusal } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { NumberComparandDoorFieldMeta } from '@objectstack/spec/data';
 // [#7414] The SHARED operation-message catalog #7307 built for the data path's
@@ -92,6 +95,7 @@ import {
   isPlatformOwnershipFloorPolicy,
   masterGateCoversOperation,
   masterGovernsRowWrites,
+  OWD_DELEGATING_ROW_WRITES,
   owdDeclaresOpenRowWrites,
   owdOpenWritesCoversOperation,
   withOwnershipFloorAlternates,
@@ -140,6 +144,7 @@ import {
   MasterDetailRelationMissingError,
   DetailRecordNotFoundError,
   MasterReferenceMissingError,
+  MasterReferenceNotWritableError,
   MaskedValueWriteError,
 } from './errors.js';
 // [ADR-0138 D4] The guest entry's organization step, and the located refusal
@@ -678,6 +683,45 @@ interface CbpRelation {
    * for why.
    */
   omissionRefusedByValidation: boolean;
+  /**
+   * [ADR-0055 §1] The parse's refusal of this declaration when its one master
+   * reference is not writable (`readonly: true` or `system: true`, the
+   * `master-not-writable` shape of `controlledByParentMasterRefusal`), else
+   * `null`.
+   *
+   * The relation still resolves for such an object, on purpose: its stored
+   * rows keep the master their reads derive from, so an object registered
+   * without the parse does not lose access to rows it already has. What the
+   * write gate refuses is a NEW detail that names a master in that field
+   * ({@link MasterReferenceNotWritableError}). The engine does not treat a
+   * caller's value in a field the declaration keeps from the author as an
+   * ordinary master reference, so a detail written through it can land outside
+   * its master. The refusal follows the declaration the parse refuses, not one
+   * of its flags: one rule and one prescription.
+   */
+  masterNotWritable: string | null;
+}
+
+/**
+ * [ADR-0055 §1] {@link CbpRelation.masterNotWritable} for one registered
+ * object: the parse's refusal message when the object delegates its row access
+ * to a master and its one master reference is not writable, else `null`.
+ */
+function masterNotWritableRefusal(object: string, schema: unknown, fields: Record<string, unknown>): string | null {
+  if (!masterGovernsRowWrites(schema)) return null;
+  const refusal = controlledByParentMasterRefusal(object, OWD_DELEGATING_ROW_WRITES, fields);
+  return refusal?.shape === 'master-not-writable' ? refusal.message : null;
+}
+
+/**
+ * [ADR-0055 §1] Does an insert's body name a master in `fk`? A single create's
+ * body, or any row of a batch create's, carrying a value there. A body that
+ * names none is the empty-master branch's, unchanged.
+ */
+function insertNamesMaster(data: unknown, fk: string): boolean {
+  const names = (row: unknown) =>
+    row != null && typeof row === 'object' && !Array.isArray(row) && (row as Record<string, unknown>)[fk] != null;
+  return Array.isArray(data) ? data.some(names) : names(data);
 }
 
 /**
@@ -8877,6 +8921,9 @@ export class SecurityPlugin implements Plugin {
         // mirrors and cannot widen if the resolver ever changes.
         omissionRefusedByValidation:
           def?.type === 'master_detail' && !!def?.required && !def?.readonly && !def?.system,
+        // Asked of the parse's own predicate, never re-derived here, so the
+        // shape and the prescription are the ones `ObjectSchema` refuses.
+        masterNotWritable: masterNotWritableRefusal(object, schema, Object.fromEntries(entries)),
       };
     }
     this.cbpRelCache.set(object, rel);
@@ -9618,6 +9665,15 @@ export class SecurityPlugin implements Plugin {
     // narrowing is real — the non-null assertions this branch used to need
     // (`rel!.fk`) were the load-bearing half of the same defect.
     if (!rel) throw new MasterDetailRelationMissingError(object, operation);
+    // [ADR-0055 §1] Also a metadata defect, and answered before any master is
+    // asked: an insert naming a master under a declaration the parse refuses
+    // because that one master reference is not writable
+    // ({@link CbpRelation.masterNotWritable}). Only an insert mints a detail
+    // this way. The rows already stored keep the master their reads derive
+    // from, and an update's value there never re-points one outside it.
+    if (operation === 'insert' && rel.masterNotWritable !== null && insertNamesMaster(opCtx.data, rel.fk)) {
+      throw new MasterReferenceNotWritableError(object, operation, rel.masterNotWritable);
+    }
 
     // [ADR-0055 §3 · #25044] Every master the write involves is asked, not one
     // of them. A body that names a master reference involves that master too,
@@ -9771,6 +9827,12 @@ export class SecurityPlugin implements Plugin {
       //     master reference authored with no `required` comes out of
       //     `create()` as `required: true` plus the flag, which is exactly a
       //     shape `validateRecord` skips.
+      //     ⚠️ [#25092] SUPERSEDED for these two: the parse now refuses them
+      //     (`master-not-writable`), `create()` included, since it ends in the
+      //     parse. They reach this branch only through a door that does not
+      //     parse, and there an insert that names a master never gets here: it
+      //     is refused above ({@link CbpRelation.masterNotWritable}). The
+      //     freeze below still binds the omitted-master insert for both.
       //
       // And nothing warns on the way past: the lint measured by #8959 is
       // unchanged — the predicate is still `def.required !== true` at

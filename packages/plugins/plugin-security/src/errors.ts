@@ -143,6 +143,38 @@ export class MasterDetailRelationMissingError extends Error {
 }
 
 /**
+ * [ADR-0055 §1] An insert names a master under a `controlled_by_parent`
+ * declaration whose one required `master_detail` is not writable (`readonly:
+ * true` or `system: true`) → `422 INVALID_METADATA`.
+ *
+ * The parse refuses that declaration (`controlledByParentMasterRefusal`, shape
+ * `master-not-writable`), so an object reaches this only through a door that
+ * does not parse: a raw `registerObject` / `registerApp`, a non-strict
+ * `defineStack`, or a stored row the boot registers under its
+ * `[metadata_spec_invalid]` diagnostic. The write gate still derives the
+ * object's READ access from that field, so rows already stored keep their
+ * master; what it refuses is a new detail. The engine does not treat a
+ * caller's value in a field the declaration keeps from the author as an
+ * ordinary master reference, so such a row can land without the master its
+ * access derives from: readable by nobody, while the insert reports success.
+ *
+ * The message is the parse's own, prefixed with the write it refused, so the
+ * prescription is the one `os validate` and the metadata save door give for
+ * the same declaration, and the two cannot drift. Same code and status as
+ * {@link MasterDetailRelationMissingError}: a broken declaration, not an access
+ * verdict.
+ */
+export class MasterReferenceNotWritableError extends Error {
+  readonly code = 'INVALID_METADATA';
+  readonly status = 422;
+  readonly statusCode = 422;
+  constructor(object: string, operation: string, declarationRefusal: string) {
+    super(`[Security] Configuration defect: ${operation} on '${object}' cannot be written. ${declarationRefusal}`);
+    this.name = 'MasterReferenceNotWritableError';
+  }
+}
+
+/**
  * The by-id write names a detail row that does not exist → `404
  * RECORD_NOT_FOUND`.
  *
@@ -206,11 +238,12 @@ export class DetailRecordNotFoundError extends Error {
  *     (a `master_detail` with no `required`; `required` + `readonly`;
  *     `required` + `system`) — there this gate is the only refusal there is,
  *     and its 422 is what stops an unreadable orphan detail row being minted.
- *     The 2026-08-16 ruling (commit 8abada3ba) orders a publish-time lint ramp, but
- *     it has not landed — nothing refuses them at publish today, so an app
- *     can newly declare one and land here (#8959). This is the answer those
- *     shapes get for as long as they stay declarable, not merely until some
- *     legacy app is republished.
+ *     The parse now refuses all three (the first since #23100, which also
+ *     took it out of the relation resolver; the two flagged ones since
+ *     #25092), so they arrive only through a door that does not parse. An
+ *     insert that omits the master still gets this answer there; one that
+ *     names a master under a flagged declaration gets
+ *     {@link MasterReferenceNotWritableError}'s.
  *
  * The wording is unchanged in both, so a surface that pins either sentence sees
  * the same string it always did — what moved is WHICH inserts arrive here.
