@@ -402,8 +402,8 @@ async function boot(cell: Cell) {
 type Rig = Awaited<ReturnType<typeof boot>>;
 
 const member = (userId: string, set: string) => ({ userId, positions: [], permissions: [set], posture: 'MEMBER' });
-/** The table a statement's FIRST `from` names — the table it reads, not one inside a subquery of it. */
-const fromTable = (sql: string): string | undefined => /^select .*? from `?([a-z0-9_]+)`?/i.exec(sql)?.[1];
+/** The table a statement's FIRST `from` names — the table it reads, not one inside a subquery of it (SQLite backticks, PostgreSQL double quotes). */
+const fromTable = (sql: string): string | undefined => /^select .*? from ["`]?([a-z0-9_]+)["`]?/i.exec(sql)?.[1];
 /** A statement that reads `table` — not one that reads another table with `table` inside a subquery. */
 const readsTable = (table: string) => (sql: string) => fromTable(sql) === table;
 /** The leaves a scope carries, as the objects they name, in walk order. */

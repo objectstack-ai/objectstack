@@ -43,6 +43,7 @@ import { SysPosition, SysPermissionSet, SysPositionPermissionSet } from './__tes
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SecurityPlugin } from './security-plugin.js';
+import { isReadableIds } from '@objectstack/spec/data';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 import { wireEngineSecuritySource } from './engine-security-source.testkit.js';
@@ -280,10 +281,19 @@ async function boot() {
       ids(await engine.findOne(object, { where: { id }, context: { ...(context as object) } } as never)),
     count: (object: string, context: unknown) => engine.count(object, { context: { ...(context as object) } } as never),
     readMaster: (context: unknown) => outcomeOf(engine.find(MASTER, { context: { ...(context as object) } } as never)),
-    /** The ids `getReadFilter`'s scope admits, read with it as the only predicate. */
+    /**
+     * The ids `getReadFilter`'s scope admits for `context`. [ADR-0139 D6] The
+     * scope carries the engine's leaf over the master, which the engine
+     * composes for the context of the READ — so it is run under the caller's
+     * own context, as the analytics engine-bound face runs it, never under a
+     * system one (where the leaf composes as "no restriction" for the system).
+     * The find is also scoped by the middleware; what this measures is that
+     * the scope carries the leaf and the composed read admits what it should.
+     */
     readThroughReadFilter: async (object: string, context: unknown) => {
       const scope = await security!.getReadFilter(object, { ...(context as object) });
-      return ids(await engine.find(object, { where: scope ?? {}, context: { isSystem: true } } as never));
+      expect(leavesIn(scope)).toEqual([MASTER]);
+      return ids(await engine.find(object, { where: scope ?? {}, context: { ...(context as object) } } as never));
     },
     stored: async (object: string, id: string) =>
       ((await engine.findOne(object, { where: { id }, context: { isSystem: true } } as never)) ?? null) as Record<string, unknown> | null,
@@ -298,6 +308,16 @@ async function boot() {
 type Rig = Awaited<ReturnType<typeof boot>>;
 
 const member = (userId: string, set: string) => ({ userId, positions: [], permissions: [set], posture: 'MEMBER' });
+/** The leaves a scope carries, as the objects they name. */
+function leavesIn(node: unknown, out: string[] = []): string[] {
+  if (node === null || typeof node !== 'object') return out;
+  if (Array.isArray(node)) { for (const item of node) leavesIn(item, out); return out; }
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (key === '$in' && isReadableIds(value)) out.push(value.object);
+    else leavesIn(value, out);
+  }
+  return out;
+}
 
 /** Two principals the master's own read door refuses at the object gate. */
 const UNADMITTED = [

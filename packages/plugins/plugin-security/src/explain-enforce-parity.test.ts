@@ -1258,7 +1258,15 @@ function delegatedRows(posture: TenancyPosture, label: string, walled: boolean):
     [D_ORG, true, 'update', 'PARENT', 'p_org_mine', 'its own row', 'admitted'],
     [D_ORG, true, 'update', 'PARENT', 'p_beta', "its own row in another organization", walled ? REFUSED_NOT_FOUND : 'admitted'],
     [D_ORG, true, 'update', 'DETAIL', 'd_under_org', 'a detail under its own master', 'admitted'],
-    [D_ORG, true, 'update', 'DETAIL', 'd_under_theirs', "a detail under someone else's master", REFUSED_NOT_FOUND],
+    // [ADR-0139 D6] The detail follows its master's DELEGATED read: `m_theirs`
+    // is readable to the agent acting for the `org` writer (as `p_theirs` is,
+    // one row below the parent cells: refused at the write gate, not absent),
+    // so its detail is read and the update is refused by the master-edit
+    // gate, 403. Before the switch the id-list derivation scoped the agent's
+    // half of the master set at the ceiling's EFFECTIVE depth ('own'), so the
+    // detail was absent to a caller who could read its master — the drift
+    // ADR-0055 §2's equality forbids — and the update answered 404.
+    [D_ORG, true, 'update', 'DETAIL', 'd_under_theirs', "a detail under someone else's master", REFUSED_DENIED],
     [D_OWN, true, 'update', 'PARENT', 'p_own_mine', 'its own row', 'admitted'],
     [D_OWN, true, 'update', 'PARENT', 'p_theirs', 'a row it cannot read', REFUSED_NOT_FOUND],
     // The delegators themselves.
