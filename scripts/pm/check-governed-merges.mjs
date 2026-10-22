@@ -414,14 +414,19 @@
  * them. What moved is the LANDING each row waits for, carried as `tier` on the
  * row and derived per PR by `governedTierFor`:
  *
- *   H  人合 — every register row except `.claude/**` (today: `docs/adr/**`,
+ *   H  人合 — every register row except objectstack's `.claude/**` (today: `docs/adr/**`,
  *      `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`, `CLAUDE.md`, and since
  *      the B2 ruling of 2026-10-13 the `workflows` row, `.github/workflows/**`,
  *      scoped to objectstack, objectui and cloud): the maintainer's hand, or
  *      an authorized APPROVED review by `GOVERNED_APPROVERS` and then the
  *      owning seat lands it. The tier ruling left this landing as it was; the
- *      list itself grew by one row on 2026-10-13.
- *   S  席内达档复核落地 — the whole `.claude/**` tree: the owning seat lands it
+ *      list itself grew by one row on 2026-10-13. The `.claude/**` row of every
+ *      repository but objectstack lands here too (#25199): its `tierRepos` names
+ *      objectstack alone, because no other repository's own queue guard has a
+ *      Tier S arm (objectui's, measured, refuses `.claude/**` without an
+ *      authorized approval; cloud's, objectos' and hotcrm's are unread and fail
+ *      closed to H).
+ *   S  席内达档复核落地 — objectstack's whole `.claude/**` tree: the owning seat lands it
  *      through the queue once the PR thread (or its card) carries a
  *      `## Contract review` record for the PR's CURRENT head with
  *      `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**` and every
@@ -1000,6 +1005,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the governed predicate: the 2026-08-18 unified list, exactly': 9,
   'the dispatch-gates declaration (#9979)': 9,
   '⚖️ the two landing tiers (#19133, ruled 2026-09-18)': 19,
+  "a row's tier is scoped per repository (#25199)": 12,
   'since parsing': 4,
   'the window: landing order, not committer dates (#12633)': 15,
   'since-ref is topological (#12633 route B)': 7,
@@ -1034,7 +1040,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 33;
+const SELF_TEST_BATTERY_FLOOR = 34;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1172,10 +1178,18 @@ export const HUMAN_MERGE_LINE_THRESHOLD = 3000;
  * it — no ruling names them, and a new gate defaults to no. Every reader of
  * this table therefore asks for ONE repository (`governedPathsIn(paths,
  * repo)`), and a call that names none is refused, never answered for "all".
+ *
+ * A row's `tier` may be scoped the same way, by a `tierRepos` key naming the
+ * ids where it holds; in every other repository the row governs, it lands
+ * Tier H, the fail-closed tier. `surfaceTierIn` is the one reader of that key,
+ * and `governedSurfacesFor` hands every matcher the tier for its repository.
+ * The `claude-tree` row's Tier S holds in objectstack alone: the tier is the
+ * landing the repository's own queue guard enforces, and only objectstack's
+ * has a Tier S arm (#25199).
  */
 export const GOVERNED_SURFACES = Object.freeze([
   Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', tier: GOVERNED_TIER_H, what: 'architecture decision records' }),
-  Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', tier: GOVERNED_TIER_S, what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
+  Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', tier: GOVERNED_TIER_S, tierRepos: Object.freeze(['objectstack']), what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
   Object.freeze({ id: 'skills-catalog', prefix: 'skills/', glob: 'skills/**', tier: GOVERNED_TIER_H, what: 'the published skills catalog' }),
   Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', tier: GOVERNED_TIER_H, what: 'the repo-root agent instruction file' }),
   Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', tier: GOVERNED_TIER_H, what: 'the repo-root Claude instruction file' }),
@@ -1405,6 +1419,18 @@ export function surfaceRepos(surface) {
 }
 
 /**
+ * The landing tier ONE register row carries in `repo`: its `tier` when it
+ * declares no `tierRepos` or names `repo` there, else Tier H — the fail-closed
+ * tier, so a repository added to `GOVERNED_REPOS` later never inherits a
+ * cheaper landing than its own guard enforces. Pure, and the only reader of
+ * `tierRepos`.
+ */
+export function surfaceTierIn(surface, repo) {
+  if (!Array.isArray(surface?.tierRepos) || surface.tierRepos.includes(repo)) return surface?.tier;
+  return GOVERNED_TIER_H;
+}
+
+/**
  * The register's question has a repository in it, or it has no answer. Throws
  * on a missing or unknown id — loudly, naming the ids this register knows —
  * rather than answering for every repository: a scoped row answers differently
@@ -1432,11 +1458,17 @@ export function assertGovernedRepo(repo, caller = 'governedPathsIn') {
 
 /**
  * The register's rows that govern `repo`, in report order — the per-repository
- * view every matcher reads. Refuses a missing or unknown repository.
+ * view every matcher reads, each carrying the tier it lands in `repo`
+ * (`surfaceTierIn`): a row whose tier holds there is handed over as the table's
+ * own frozen row, any other as a frozen copy carrying Tier H. Refuses a missing
+ * or unknown repository.
  */
 export function governedSurfacesFor(repo) {
   assertGovernedRepo(repo, 'governedSurfacesFor');
-  return GOVERNED_SURFACES.filter((surface) => surfaceRepos(surface).includes(repo));
+  return GOVERNED_SURFACES.filter((surface) => surfaceRepos(surface).includes(repo)).map((surface) => {
+    const tier = surfaceTierIn(surface, repo);
+    return tier === surface.tier ? surface : Object.freeze({ ...surface, tier });
+  });
 }
 
 /**
@@ -4492,6 +4524,34 @@ async function selfTest() {
   const allLifted = applyGeneratedExceptions(testVerdict([liftPath], { repo: REPO }), lifted);
   assert('and-null-once-every-hit-is-lifted', allLifted.governed === false && allLifted.tier === null, JSON.stringify(allLifted.tier));
   assert('the-tier-words-name-the-landing-each-waits-for', /GOVERNED_APPROVERS/.test(GOVERNED_TIERS.H.landing) && /Contract review/.test(GOVERNED_TIERS.S.landing) && !/--pair/.test(GOVERNED_TIERS.S.landing));
+
+  // ── a row's tier is scoped per repository (#25199) ───────────────────────
+  //
+  // The tier a row lands on is the one the repository's OWN queue guard
+  // enforces, and only objectstack's guard has a Tier S arm: objectui's refuses
+  // a `.claude/**` diff without an authorized approval. So the `claude-tree`
+  // row's Tier S holds in objectstack alone and every other repository reads
+  // it Tier H — membership untouched, the raw row untouched for the readers of
+  // its glob words (the queue guard's `tierSGlobs`).
+  battery('a row\'s tier is scoped per repository (#25199)');
+  const claudeRow = GOVERNED_SURFACES.find((s) => s.id === 'claude-tree');
+  const HOOK = '.claude/hooks/x.sh';
+  const PR_13320 = ['guard-main-checkout-bash', 'guard-shared-stash', 'guard-tree-enum'].flatMap((h) => [`.claude/hooks/${h}.selftest.sh`, `.claude/hooks/${h}.sh`]);
+  const elsewhere = everyRepo.filter((r) => r !== 'objectstack');
+  assert('the-claude-tree-row-holds-Tier-S-in-objectstack-alone', claudeRow.tier === GOVERNED_TIER_S && claudeRow.tierRepos.join() === 'objectstack' && claudeRow.repos === undefined, JSON.stringify(claudeRow));
+  assert('it-is-the-only-row-that-scopes-its-tier', GOVERNED_SURFACES.filter((s) => s.tierRepos !== undefined).map((s) => s.id).join() === 'claude-tree');
+  assert('every-tier-scope-is-a-non-empty-duplicate-free-subset-of-the-rows-own-repositories-on-a-Tier-S-row', GOVERNED_SURFACES.every((s) => s.tierRepos === undefined || (s.tier === GOVERNED_TIER_S && Array.isArray(s.tierRepos) && s.tierRepos.length > 0 && new Set(s.tierRepos).size === s.tierRepos.length && s.tierRepos.every((id) => surfaceRepos(s).includes(id)))));
+  assert('an-objectstack-claude-path-is-Tier-S-unchanged', governedTierFor([HOOK], 'objectstack') === GOVERNED_TIER_S && testVerdict([HOOK], { repo: 'objectstack' }).tier === GOVERNED_TIER_S);
+  assert('an-objectui-claude-path-is-governed-by-the-same-row-and-lands-Tier-H', governedPathsIn([HOOK], 'objectui').map((s) => `${s.id}:${s.tier}`).join() === 'claude-tree:H' && governedTierFor([HOOK], 'objectui') === GOVERNED_TIER_H && testVerdict([HOOK], { repo: 'objectui' }).governed === true);
+  assert('cloud-objectos-and-hotcrm-read-Tier-H-their-guards-unread-so-fail-closed', elsewhere.every((r) => governedTierFor([HOOK], r) === GOVERNED_TIER_H && governedPathsIn([HOOK], r).map((s) => s.id).join() === 'claude-tree'));
+  assert('a-repository-the-scope-does-not-name-answers-H-including-one-added-later', surfaceTierIn(claudeRow, 'objectstack') === GOVERNED_TIER_S && surfaceTierIn(claudeRow, 'a-future-repo') === GOVERNED_TIER_H && GOVERNED_SURFACES.filter((s) => s.tierRepos === undefined).every((s) => everyRepo.every((r) => surfaceTierIn(s, r) === s.tier)));
+  assert('the-scope-moves-no-membership-every-repository-keeps-its-rows-in-order', everyRepo.every((r) => governedSurfacesFor(r).map((s) => s.id).join() === GOVERNED_SURFACES.filter((s) => surfaceRepos(s).includes(r)).map((s) => s.id).join()));
+  assert('objectstack-is-handed-the-tables-own-frozen-rows-and-the-raw-row-keeps-S-for-the-glob-words', governedSurfacesFor('objectstack').every((s) => GOVERNED_SURFACES.includes(s)) && governedSurfacesFor('objectui').find((s) => s.id === 'claude-tree') !== claudeRow && Object.isFrozen(governedSurfacesFor('objectui').find((s) => s.id === 'claude-tree')) && claudeRow.tier === GOVERNED_TIER_S);
+  const ui13320 = testVerdict(PR_13320, { repo: 'objectui' });
+  const ui13320Text = renderTestVerdict(ui13320);
+  assert('the-objectui-13320-replay-reads-GOVERNED-Tier-H-and-says-so', ui13320.governed === true && ui13320.tier === GOVERNED_TIER_H && ui13320.hitPaths.length === 6 && /landing tier: H/.test(ui13320Text) && !/Tier S/.test(ui13320Text), ui13320Text);
+  assert('and-the-same-six-paths-in-objectstack-still-read-Tier-S', testVerdict(PR_13320, { repo: 'objectstack' }).tier === GOVERNED_TIER_S && /Tier S/.test(renderTestVerdict(testVerdict(PR_13320, { repo: 'objectstack' }))));
+  assert('an-objectui-mixed-diff-stays-H-and-the-exit-stays-the-shared-3', governedTierFor([HOOK, 'README.md'], 'objectui') === GOVERNED_TIER_H && governedTierFor([HOOK, 'AGENTS.md'], 'objectui') === GOVERNED_TIER_H && runTestModeExitFor([HOOK], 'objectui') === EXIT_TEST_GOVERNED);
 
   // ── --since parsing ───────────────────────────────────────────────────────
   battery('since parsing');
