@@ -210,11 +210,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       topic: {
         label: "Topic",
-        help: "Notification topic, or '*' for all topics."
+        help: "通知の送信に使われるトピック:フローの通知ステップが指定するトピック、またはプラットフォームが送信するトピック(例: approval.requested、collab.mention)。すべてのトピックを対象にするには * を入力します。どこからも送信されないトピックは何にも一致しません。"
       },
       channel: {
         label: "Channel",
-        help: "Channel id (inbox/email/push/…), or '*' for all channels."
+        help: "チャネル:inbox(アプリ内の通知、常に利用可能)、email(メールサービスの設定後)、sms(SMS サービスの設定後)、またはインストール済みプラグインが追加したチャネルの ID。すべてのチャネルを対象にするには * を入力します。どのチャネルも使用しない ID は何にも一致しません。"
       },
       enabled: {
         label: "Enabled",

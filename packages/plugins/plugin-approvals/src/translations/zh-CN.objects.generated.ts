@@ -354,7 +354,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       delegator_id: {
         label: "委派人",
-        help: "即将不在岗的用户；规则生效期间，路由到其个人的审批人槽位将被改派。"
+        help: "即将不在岗的用户。你只能委派自己的审批，所以这里始终是你：默认填入你本人，不提供其他人选。规则生效期间，路由到其个人的审批人槽位将被改派。"
       },
       delegate_id: {
         label: "候补人",
@@ -374,7 +374,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "组织",
-        help: "拥有此规则的租户；留空 = 对该委派人跨租户生效。"
+        help: "此委派所属的组织。它只改派在该组织中发起的审批。"
       },
       created_at: {
         label: "创建时间"

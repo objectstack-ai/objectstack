@@ -354,7 +354,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       delegator_id: {
         label: "Delegator",
-        help: "The user going out of office; their individually-routed approver slots are rerouted while active."
+        help: "The user going out of office. You can delegate only your own approvals, so this is always you: it starts as you and offers no one else. Their individually-routed approver slots are rerouted while active."
       },
       delegate_id: {
         label: "Delegate",
@@ -374,7 +374,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Tenant that owns this rule; null = applies across tenants for this delegator."
+        help: "The organization this delegation belongs to. It reroutes only the approvals opened in this organization."
       },
       created_at: {
         label: "Created At"

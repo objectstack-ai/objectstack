@@ -166,23 +166,29 @@ export const FLOW_CLONE_DROPPED_KEYS: readonly string[] = Object.freeze([
  *     and the only thing standing between them and that surprise is this
  *     sentence.
  *
- * [#20726, ADR-0126 §7.2] The off-switch it names is the CLONE's own: its
- * `status`, published through `PUT /:name`. A clone carries no package
+ * [#20726, ADR-0126 §7.2] The clone's own off-switch is its `status`
+ * (`obsolete`), published through `PUT /:name`. A clone carries no package
  * envelope (see {@link FLOW_CLONE_DROPPED_KEYS}), so it is a flow authored in
  * this deployment, and the activation toggle — which switches packaged flows
  * only — refuses it. That holds whatever the clone was copied from: the clone
- * door takes any registered flow as its source, packaged or not, so the
- * notice makes no claim about the source's provenance.
+ * door takes any registered flow as its source, packaged or not.
+ *
+ * The notice is admin copy — the console shows it verbatim on the clone
+ * result — so it names the controls the admin uses, never an endpoint or a
+ * request body: the Packaged automation page's `Switch "…" off` action for a
+ * packaged original, and Studio's Enabled switch (publish to apply) for the
+ * clone. The REST recipe is developer copy and lives in the client SDK's
+ * `automation.toggle` TSDoc.
  */
 export const FLOW_CLONE_NOTICE =
     'References are not re-pointed: this clone calls exactly what the original called '
     + '(subflows, actions and objects are unchanged). It is created with status `draft`, '
     + 'which is a lifecycle label and NOT an off-switch — a cloned record-change or schedule '
     + 'flow is bound to its trigger and will run alongside the flow it was copied from. '
-    + 'If that is not what you want, switch the clone off through its own status: send its '
-    + 'complete definition with `status: \'obsolete\'` to `PUT /api/v1/automation/<name>`. '
-    + 'The activation toggle (`POST /api/v1/automation/<name>/toggle`) switches packaged flows '
-    + 'only and refuses the clone.';
+    + 'If that is not what you want, switch one of them off. A packaged original is switched '
+    + 'off on the Packaged automation page, with its Switch "…" off action; that switch covers '
+    + 'packaged flows only and does not reach the clone. To switch the clone itself off, open it '
+    + 'in Studio, set its Enabled switch to Disabled, and publish.';
 
 /** ADR-0112 envelope for the same-name refusal: a status AND a code. */
 export const FLOW_CLONE_NAME_TAKEN_STATUS = 409;

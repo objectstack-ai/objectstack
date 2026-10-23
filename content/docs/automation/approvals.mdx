@@ -900,6 +900,13 @@ background job — so a lapsed delegation simply stops applying. Chains
 identity**; the reroute is recorded as an `ooo_substitute` audit action and both
 the delegate and the skipped approver are notified.
 
+A delegation belongs to the organization it is created in, and reroutes only the
+approvals opened in that organization; a request's organization is its record's.
+To cover approvals in two organizations, create a delegation in each. A
+delegation that names no organization, which only a database upgraded from
+before 18.0 can hold, reroutes nothing, and the approval service logs a warning
+naming it (ADR-0131).
+
 <Callout type="info">
 **Group-routed approvers are not rerouted.** `type: position` / `team` /
 `department` / `org_membership_level` keep their whole membership, so there is

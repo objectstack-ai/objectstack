@@ -20,6 +20,11 @@ import { F } from '@objectstack/spec';
  * shared `isGrantActive` predicate — never by a background job (ADR-0049).
  * The window is half-open `[valid_from, valid_until)` in UTC.
  *
+ * `organization_id` is the organization the delegation belongs to: it
+ * reroutes only the approvals opened in that organization, and an
+ * organization-less row reroutes none (ADR-0131 D1;
+ * `ApprovalService.lookupActiveDelegation`).
+ *
  * Scope note: this is the community-core OOO auto-skip only. Long-term proxy
  * "act-as" access (viewing/acting on another user's full queue under their
  * authority), delegation governance / segregation-of-duties, and org-wide
@@ -94,13 +99,20 @@ export const SysApprovalDelegation = ObjectSchema.create({
     // `lookupFilters` is the picker's candidate query, and the engine resolves
     // `{current_user_id}` against the caller on every read. Presentation only
     // — the guard stays the enforcement, and what a write may store is
-    // unchanged. Pinned in `sys-approval-delegation-delegator-picker.test.ts`.
+    // unchanged. Since that one value is always the acting user, the field
+    // also defaults to it: `defaultValue: 'current_user'` is the spec's
+    // runtime token for a `sys_user` lookup (`DEFAULT_VALUE_TOKENS`), so a new
+    // delegation opens with the Delegator already filled instead of at an
+    // empty picker. Pinned in `sys-approval-delegation-delegator-picker.test.ts`.
     delegator_id: Field.lookup('sys_user', {
       label: 'Delegator',
       required: true,
+      defaultValue: 'current_user',
       lookupFilters: [{ field: 'id', operator: 'eq', value: '{current_user_id}' }],
       group: 'Delegation',
-      description: 'The user going out of office; their individually-routed approver slots are rerouted while active.',
+      description:
+        'The user going out of office. You can delegate only your own approvals, so this is always you: '
+        + 'it starts as you and offers no one else. Their individually-routed approver slots are rerouted while active.',
     }),
 
     delegate_id: Field.lookup('sys_user', {
@@ -140,7 +152,7 @@ export const SysApprovalDelegation = ObjectSchema.create({
       label: 'Organization',
       required: false,
       group: 'System',
-      description: 'Tenant that owns this rule; null = applies across tenants for this delegator.',
+      description: 'The organization this delegation belongs to. It reroutes only the approvals opened in this organization.',
     }),
 
     created_at: Field.datetime({

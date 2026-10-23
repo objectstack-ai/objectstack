@@ -177,6 +177,7 @@ function makeRig(opts: {
       return ref;
     },
     countBoundObjects: async () => 0,
+    listObjectsBoundTo: async () => [],
     registerPool: (record) =>
       connection.connect(record, {
         context: { origin: record.origin ?? 'runtime', trigger: 'runtime-admin' },
