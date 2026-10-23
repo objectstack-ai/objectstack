@@ -82,6 +82,7 @@ function makeService(seed: StoredDatasource[]) {
     deleteDatasourceRecord: async () => {},
     writeSecret: async () => 'sys_secret:new',
     countBoundObjects: async () => 0,
+    listObjectsBoundTo: async () => [],
   };
   return { records, service: new DatasourceAdminService(cfg) };
 }

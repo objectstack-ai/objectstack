@@ -21,7 +21,7 @@ import {
 import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
 import type { DatasourceConnectPolicy } from './contracts/connect-policy.js';
 import type { Logger } from './logger.js';
-import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 
 /**
  * Minimal metadata-service surface used for datasource persistence + the
@@ -498,6 +498,26 @@ export class DatasourceAdminServicePlugin implements Plugin {
           degraded: diagnosed?.degraded === true,
           errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
         };
+      },
+
+      // [ADR-0015 §4.2 · #25277] The objects a datasource write is judged
+      // against. Read from the engine's object registry (the `objectql`
+      // service's `registry`), the registry the metadata save door writes
+      // through to: an object saved through `PUT /api/v1/meta/object/:name` or
+      // imported from a remote table is in it the moment it is saved, and boot
+      // restores the stored rows into it. ⛔ Not the metadata service's
+      // `listObjects()`, which holds a copy of this registry taken once at boot
+      // and never sees a runtime save. A host with no engine registry serves
+      // no objects, so none can be bound.
+      //
+      // Resolved where it is used, never at `init()` (AGENTS.md, "Startup
+      // registry reads").
+      listObjectsBoundTo: async (datasource) => {
+        const registry = safeGetService<Partial<Pick<IObjectQLEngine, 'registry'>>>(ctx, 'objectql')?.registry;
+        if (typeof registry?.getAllObjects !== 'function') return [];
+        return (registry.getAllObjects() as Array<{ name?: unknown; datasource?: unknown; external?: unknown }>)
+          .filter((o) => o?.datasource === datasource)
+          .map((o) => ({ name: o.name, external: o.external }));
       },
 
       // Hot pool (de)registration converges on the shared

@@ -35,7 +35,7 @@
  *    are the same zero.
  */
 
-import { DatasourceSchema, validateDriverConfig } from '@objectstack/spec/data';
+import { DatasourceSchema, externalBindingDatasourceRefusal, validateDriverConfig } from '@objectstack/spec/data';
 import type { IPubSub } from '@objectstack/spec/contracts';
 import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
 import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
@@ -219,6 +219,23 @@ export interface DatasourceAdminServiceConfig {
   countBoundObjectsDiagnosed?: (
     datasource: string,
   ) => Promise<{ count: number; degraded: boolean; errors: string[] }>;
+  /**
+   * [ADR-0015 §4.2 · #25277] The objects that name `datasource` as theirs, each
+   * with its `external` binding as declared (absent when it has none) — the
+   * input to {@link DatasourceAdminService.boundExternalRefusal}, which judges a
+   * datasource this door is about to store as managed against the objects
+   * bound to it with `external`.
+   *
+   * Required, not optional like {@link countBoundObjectsDiagnosed}: that member
+   * refines a verdict the door already has, while this one IS the verdict's
+   * input. A host that could leave it out would store the pair the metadata
+   * save door refuses, which is the defect this seam exists to close.
+   *
+   * The plugin answers it from the engine's object registry, the registry the
+   * metadata save door writes through to, so an object saved or imported at
+   * runtime is counted the moment it is saved.
+   */
+  listObjectsBoundTo: (datasource: string) => Promise<Array<{ name?: unknown; external?: unknown }>>;
   /** Hot-(re)register a runtime datasource's connection pool after write. */
   registerPool?: (record: StoredDatasource) => Promise<void> | void;
   /** Tear down a runtime datasource's pool on remove. */
@@ -632,6 +649,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // [#21058] Before the secret write: a refused record must leave nothing
     // behind, the bound secret included.
     this.assertValidRecord(this.withSecretBinding(record, secret));
+    // [ADR-0015 §4.2 · #25277] Same position, same reason: objects can name a
+    // datasource before it exists (the save door gives a binding on a
+    // datasource it cannot see no verdict), so a create is judged too.
+    await this.assertNoExternalBindingConflict(record);
 
     if (secret) {
       const credentialsRef = await this.config.writeSecret(secret, { name: input.name });
@@ -711,6 +732,11 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // keeps the userinfo username).
     if (secret !== undefined || RECORD_JUDGED_PATCH_KEYS.some((key) => patch[key] !== undefined)) {
       this.assertValidRecord(this.withSecretBinding(merged, secret));
+      // [ADR-0015 §4.2 · #25277] The merged record against the objects bound
+      // to it, under the same condition: a `label`/`active`-only write stays
+      // possible on a row that already pairs badly, so it can still be taken
+      // out of service. The secret does not move the verdict.
+      await this.assertNoExternalBindingConflict(merged);
     }
 
     if (secret) {
@@ -1069,6 +1095,37 @@ export class DatasourceAdminService implements IDatasourceAdminService {
   /** {@link recordRefusal} for a write door: refuses by throwing (a `400` at the route). */
   private assertValidRecord(record: StoredDatasource): void {
     const refusal = this.recordRefusal(record, `Invalid datasource '${record.name}'.`);
+    if (refusal) throw new Error(refusal);
+  }
+
+  /**
+   * [ADR-0015 §4.2 · #25277] Why `record` cannot be stored as it is: it is
+   * managed (`schemaMode: 'managed'`, or none, the spec default) while objects
+   * bind it with `external`. `undefined` when no such object exists.
+   *
+   * The metadata save door refuses this pair on `PUT /api/v1/meta/datasource`
+   * (`externalBindingSaveRefusal` in `@objectstack/metadata-protocol`). This
+   * door writes the datasource without entering that one, so it asks the same
+   * spec predicate, {@link externalBindingDatasourceRefusal}, the way that
+   * door's datasource half asks it: once per object bound with `external`, and
+   * only the `managed` verdict counts. A binding on the primary datasource is a
+   * fact about the object alone, and this door never writes `default`. ⛔ Never
+   * a restatement of the rule: the predicate is its one copy, and its message
+   * names the object, the rule and the fix.
+   */
+  private async boundExternalRefusal(record: StoredDatasource): Promise<string | undefined> {
+    const findings: string[] = [];
+    for (const object of await this.config.listObjectsBoundTo(record.name)) {
+      const refusal = externalBindingDatasourceRefusal(object.name, object.external, record.name, record);
+      if (refusal?.shape === 'managed') findings.push(`schemaMode: ${refusal.message}`);
+    }
+    if (findings.length === 0) return undefined;
+    return `Invalid datasource '${record.name}'.\n${findings.join('\n')}`;
+  }
+
+  /** {@link boundExternalRefusal} for a write door: refuses by throwing (a `400` at the route). */
+  private async assertNoExternalBindingConflict(record: StoredDatasource): Promise<void> {
+    const refusal = await this.boundExternalRefusal(record);
     if (refusal) throw new Error(refusal);
   }
 
