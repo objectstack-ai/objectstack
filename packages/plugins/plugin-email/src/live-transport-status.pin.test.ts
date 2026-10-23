@@ -49,11 +49,9 @@ async function boot(mailValues: Record<string, Resolved>) {
     from_email: { value: 'no-reply@example.test', source: 'global' },
     ...mailValues,
   });
-  const engine = {
-    async insert(_o: string, row: any) { return { id: row.id }; },
-    async update() {},
-    async find() { return []; },
-  };
+  // Only what this boot reads: the settings binding waits for an engine, and
+  // nothing in these tests writes a row.
+  const engine = { async find() { return []; } };
   const services: Record<string, unknown> = { manifest: { register: () => {} }, objectql: engine, settings };
   const hooks: Record<string, Array<() => Promise<void> | void>> = {};
   const ctx = {
