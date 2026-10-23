@@ -210,11 +210,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       topic: {
         label: "Topic",
-        help: "Notification topic, or '*' for all topics."
+        help: "The topic the notifications are sent under: the topic a flow's notify step names, or one the platform sends, such as approval.requested or collab.mention. Enter * for all topics. A topic nothing sends matches nothing."
       },
       channel: {
         label: "Channel",
-        help: "Channel id (inbox/email/push/…), or '*' for all channels."
+        help: "The channel: inbox (notifications shown inside the app, always available), email (once an email service is configured), sms (once an SMS service is configured), or the id of a channel an installed plugin adds. Enter * for all channels. An id no channel uses matches nothing."
       },
       enabled: {
         label: "Enabled",

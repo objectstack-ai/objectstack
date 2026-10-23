@@ -164,7 +164,7 @@ export const NotificationPreference = ObjectSchema.create({
             // this package registers instead; the pin holds that list equal to
             // the `id`s of the three channels it builds (no `push` exists).
             description:
-                'The channel: inbox (the in-app inbox, always available), email (once an email service is configured), ' +
+                'The channel: inbox (notifications shown inside the app, always available), email (once an email service is configured), ' +
                 'sms (once an SMS service is configured), or the id of a channel an installed plugin adds. ' +
                 'Enter * for all channels. An id no channel uses matches nothing.',
         }),
