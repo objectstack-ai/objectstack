@@ -211,3 +211,26 @@ requiredPermissions: ['manage_platform_settings'], // capability AND-gate → me
 > is the half that holds however permissive the caller's grants are (an AND-gate
 > checked **before** the CRUD grant). Posture model: ADR-0066; tenant wall:
 > ADR-0095 D1.
+
+## Shipping a new version: renaming or removing an access item is a risk
+
+Once a package version is installed, the environment's administrators act on
+its access items:
+- they switch a permission set, position or sharing rule off;
+- they clone a set to narrow it;
+- they point their own sets at the package's objects, fields and capabilities.
+
+Those choices are recorded against the item's **name**. A later version that
+renames or removes one of these items can quietly undo the choice on upgrade:
+
+| Change in the new version | What an environment that acted on the old version gets |
+|---|---|
+| Rename a permission set, position or sharing rule | The old name's switch-off no longer matches, and the item under its new name arrives switched **on** |
+| Remove a capability, object or field | A customer's cloned or own set now names something that does not exist |
+| Add a field deny to a shipped set | A customer's clone of that set does not carry it |
+
+Keep shipped names stable. When a change like this is genuinely needed, say so
+in the release notes: what was renamed or removed, and what an administrator
+should re-check after upgrading (their switch-offs, their clones, and the sets
+that reference it). Not every install path stops to ask before such an upgrade,
+so the release note is the warning an installer can always see.
