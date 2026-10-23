@@ -44,10 +44,13 @@ function fakeSettings(values: Record<string, Resolved>) {
     },
     /** What the page states, as the settings GET route asks for it (waits for a running re-apply). */
     statement: () => liveStatus!(),
-    /** The "Send test email" answer for the stored values, with nothing edited on the form. */
-    sendTest: () => actions.get('mail/test')!({
+    /**
+     * The "Send test email" answer for the stored values — with nothing edited
+     * on the form, or with `form` as the unsaved form state the page posts.
+     */
+    sendTest: (form?: Record<string, unknown>) => actions.get('mail/test')!({
       values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.value])),
-      payload: { to: 'admin@example.test' },
+      payload: form ? { to: 'admin@example.test', values: form } : { to: 'admin@example.test' },
     }),
   };
 }
@@ -175,5 +178,51 @@ describe('CONTROL — saving provider "log" after a boot with no SMTP', () => {
     const answer = await h.settings.sendTest();
     expect(answer).toMatchObject({ ok: false, severity: 'warning' });
     expect(nm.sendMail).not.toHaveBeenCalled();
+  });
+});
+
+// "Send test email" tests the FORM's choice, saved or not. With "None (log
+// only)" picked and not saved, the test used to go through the live service —
+// a real mail over a live SMTP, answered `ok: true`.
+describe('"Send test email" with provider "log" on the form, not saved, while SMTP is live', () => {
+  const SMTP_SAVED = {
+    provider: { value: 'smtp', source: 'global' },
+    smtp_host: { value: 'smtp.saved.test', source: 'global' },
+  };
+
+  it('sends nothing, and the answer says nothing was delivered', async () => {
+    const h = await boot(SMTP_SAVED);
+    expect(h.service.options.transport).toBeInstanceOf(SmtpTransport);
+    nm.sendMail.mockClear();
+
+    const answer = await h.settings.sendTest({ provider: 'log' });
+    expect(nm.sendMail).not.toHaveBeenCalled();
+    expect(answer).toMatchObject({ ok: false, severity: 'warning' });
+    expect(answer.message).toMatch(/^Nothing was delivered/);
+    expect(answer.message).toMatch(/no mail left this machine/);
+    expect(answer.message).toMatch(/Mail is delivered through SMTP \(smtp\.saved\.test:587\)/);
+    // A test changes nothing: the live transport is still the saved SMTP.
+    expect(h.service.options.transport).toBeInstanceOf(SmtpTransport);
+  });
+
+  it('SMTP built at boot from the boot options: sends nothing either', async () => {
+    const h = await boot({}, { provider: 'smtp', providerOptions: { host: 'smtp.env.test', port: 2525 } });
+    expect(h.service.options.transport).toBeInstanceOf(SmtpTransport);
+    nm.sendMail.mockClear();
+
+    const answer = await h.settings.sendTest({ provider: 'log' });
+    expect(nm.sendMail).not.toHaveBeenCalled();
+    expect(answer).toMatchObject({ ok: false, severity: 'warning' });
+    expect(answer.message).toMatch(/^Nothing was delivered/);
+  });
+
+  it('CONTROL — provider "smtp" with a host on the form still sends', async () => {
+    const h = await boot(SMTP_SAVED);
+    nm.sendMail.mockClear();
+
+    const answer = await h.settings.sendTest({ provider: 'smtp', smtp_host: 'smtp.form.test', smtp_port: 587 });
+    expect(nm.sendMail).toHaveBeenCalledTimes(1);
+    expect(answer).toMatchObject({ ok: true, severity: 'info' });
+    expect(answer.message).toMatch(/^Sent test email to admin@example\.test via smtp \(smtp\.form\.test:587\)/);
   });
 });
