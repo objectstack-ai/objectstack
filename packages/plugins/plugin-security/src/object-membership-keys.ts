@@ -277,7 +277,7 @@ export function resolverCollisionsOf(ql: any, resolver: IRlsMembershipResolver |
 /** The sentence both the boot and the request log for a key both sources claim. */
 export function resolverCollisionMessage(key: string, objects: readonly string[]): string {
   return (
-    `[security/#25234] membership key '${key}' is declared by ${objects.map((o) => `'${o}'`).join(', ')} ` +
+    `[security] membership key '${key}' is declared by ${objects.map((o) => `'${o}'`).join(', ')} ` +
     '(`membershipKeys`) AND owned by the registered rls-membership-resolver: one key has one source, so it ' +
     'resolves from NEITHER and every policy reading `current_user.' + key + '` matches no rows. Rename one of them.'
   );
@@ -372,7 +372,7 @@ async function stageOneKey(
     errorOnce(
       host,
       `twice:${key}`,
-      `[security/#25234] membership key '${key}' is declared on ${objects.map((o) => `'${o}'`).join(', ')}: one key ` +
+      `[security] membership key '${key}' is declared on ${objects.map((o) => `'${o}'`).join(', ')}: one key ` +
         'name is one request-wide set, so it resolves from none of them and every policy reading it matches no rows.',
       { key, objects },
     );
@@ -391,7 +391,7 @@ async function stageOneKey(
     bagOf(context)[key] = outcome.values;
   } else {
     host.logger?.warn?.(
-      `[security/#25234] membership key '${key}' (declared on '${declaration.object}') did not resolve for this ` +
+      `[security] membership key '${key}' (declared on '${declaration.object}') did not resolve for this ` +
         `request: ${outcome.detail}. Every policy reading it fails closed.`,
       { key, object: declaration.object, reason: outcome.reason, userId: context.userId },
     );
