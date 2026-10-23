@@ -862,6 +862,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Editar equipo",
         successMessage: "Equipo actualizado"
       },
+      add_team_member: {
+        label: "Añadir miembro",
+        successMessage: "Miembro del equipo añadido"
+      },
       remove_team: {
         label: "Eliminar equipo",
         confirmText: "¿Eliminar este equipo? Los miembros perderán cualquier acceso con ámbito de equipo. Esta acción no se puede deshacer.",

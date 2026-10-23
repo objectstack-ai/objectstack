@@ -862,6 +862,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "チームを編集",
         successMessage: "チームを更新しました"
       },
+      add_team_member: {
+        label: "メンバーを追加",
+        successMessage: "チームメンバーを追加しました"
+      },
       remove_team: {
         label: "チームを削除",
         confirmText: "このチームを削除しますか？メンバーはチームスコープのアクセスを失います。この操作は取り消せません。",

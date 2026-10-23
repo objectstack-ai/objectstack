@@ -862,6 +862,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Edit Team",
         successMessage: "Team updated"
       },
+      add_team_member: {
+        label: "Add Member",
+        successMessage: "Team member added"
+      },
       remove_team: {
         label: "Delete Team",
         confirmText: "Delete this team? Members will lose any team-scoped access. This cannot be undone.",

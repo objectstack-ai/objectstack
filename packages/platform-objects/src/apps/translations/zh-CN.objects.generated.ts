@@ -862,6 +862,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "编辑团队",
         successMessage: "团队已更新"
       },
+      add_team_member: {
+        label: "添加成员",
+        successMessage: "团队成员已添加"
+      },
       remove_team: {
         label: "删除团队",
         confirmText: "要删除该团队吗？成员将失去所有团队范围内的访问权限。此操作无法撤销。",
