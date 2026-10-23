@@ -4806,11 +4806,18 @@ describe('AuthManager', () => {
       find: vi.fn(async () => []),
     });
 
-    it('is a no-op when idle + absolute are both off', async () => {
+    // [#25343] Both off no longer means no-op: the `last_activity_at`
+    // heartbeat runs on every deployment (ruling 6358844136, letter A); its
+    // memo and throttle are pinned in session-heartbeat-default-config.test.ts.
+    it('with idle + absolute both off it revokes nothing but still writes the heartbeat', async () => {
       const engine = oneEngine({ id: 's1', created_at: new Date(0).toISOString() });
       const m = mgr(engine, {});
       await (m as any).enforceSessionControls('s1', undefined);
-      expect(engine.findOne).not.toHaveBeenCalled();
+      expect(engine.findOne).toHaveBeenCalledTimes(1);
+      expect(engine.update).toHaveBeenCalledTimes(1);
+      const patch = engine.update.mock.calls[0][1];
+      expect(patch.last_activity_at instanceof Date).toBe(true);
+      expect(patch.revoke_reason).toBeUndefined();
     });
 
     it('revokes (absolute_max) when the session is older than the absolute cap', async () => {
