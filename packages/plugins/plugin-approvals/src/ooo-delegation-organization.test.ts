@@ -22,6 +22,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import type { ApprovalRequestRow } from '@objectstack/spec/contracts';
 import { ApprovalService } from './approval-service.js';
 
@@ -54,11 +55,39 @@ function makeEngine(seed: Record<string, Row[]> = {}) {
   return {
     _tables: tables,
     async find(object: string, options?: any) {
-      return ensure(object).filter((r) => matches(r, options?.filter ?? options?.where));
+      const rows = ensure(object).filter((r) => matches(r, options?.filter ?? options?.where));
+      return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async insert(object: string, data: Row) { ensure(object).push({ ...data }); return { ...data }; },
-    async update(_o: string, _w: any, _d: any) { return {}; },
-    async delete() { return {}; },
+    // Writes check their call shape through the engine's own predicates, so
+    // the double is no looser than ObjectQL (`check:engine-double-contract`).
+    async update(object: string, data: Row, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const table = ensure(object);
+      if (dispatch.kind === 'multi') {
+        let n = 0;
+        for (let i = 0; i < table.length; i++) {
+          if (matches(table[i], options?.where)) { table[i] = { ...table[i], ...data }; n++; }
+        }
+        return { updated: n };
+      }
+      const i = table.findIndex((r) => r.id === dispatch.id);
+      if (i >= 0) table[i] = { ...table[i], ...data };
+      return i >= 0 ? { ...table[i] } : null;
+    },
+    async delete(object: string, options?: any) {
+      const dispatch = assertEngineDeleteDispatch(options);
+      const table = ensure(object);
+      if (dispatch.kind === 'multi') {
+        const survivors = table.filter((r) => !matches(r, options?.where));
+        const deleted = table.length - survivors.length;
+        table.splice(0, table.length, ...survivors);
+        return { deleted };
+      }
+      const i = table.findIndex((r) => r.id === dispatch.id);
+      if (i >= 0) table.splice(i, 1);
+      return { id: dispatch.id };
+    },
     async count(object: string) { return ensure(object).length; },
     // The record a request is about carries its own organization, so the
     // request's organization is the record's, not the acting context's.
