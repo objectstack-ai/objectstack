@@ -713,6 +713,45 @@ jobs:
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
 
+      # ⭐ A SHARD WHOSE TESTS READ NO `.d.ts` BUILDS ITS CLOSURE WITHOUT THEM
+      # (#25375). vitest loads JavaScript, so on most shards every declaration
+      # the closure emits -- spec's 6 GB-heap pass, cli's type-checking `tsc`
+      # -- is written and never read. `OS_SKIP_DTS=1` goes to $GITHUB_ENV, so
+      # both closure builds below, the test step and the shard's main seed all
+      # hash in one namespace (turbo.json `globalEnv`).
+      #
+      # ⛔ EXCEPT a shard carrying a package in DTS_READERS, whose tests compile
+      # against BUILT declarations and go red without them (TS7016). Measured
+      # on 830a63a, the whole Test Core list under `OS_SKIP_DTS=1`: red only in
+      #   @objectstack/cli       published-subpath-console/-hook-body.pin (its
+      #                          own dist/*.d.ts), scaffold-emission-typechecks,
+      #                          scaffold-test-script-passes (spec's .d.ts)
+      #   @objectstack/metadata  typescript-serializer-annotation (spec's .d.ts)
+      # A new test that reads a built `.d.ts` reds the same loud way on a
+      # skipping shard: add its package here. Every other package's counts
+      # matched the DTS-on run but one: spec's root-entry-type-nameability
+      # pin skips (by its own design) and runs in lint.yml's built-dist step.
+      #
+      # Local cold closure, 65 packages, 4 cores, `--force`: 5m59s with
+      # declarations, 1m24s without. The cost is replay: a skipping shard
+      # cannot replay Build Core's DTS-on remote artifacts, only the DTS-off
+      # ones the queue and main runs of these shards write.
+      - name: Choose this shard's declaration build
+        run: |
+          DTS_READERS='@objectstack/cli @objectstack/metadata'
+          KEEP=""
+          while read -r PKG _; do
+            for R in $DTS_READERS; do
+              [ "$PKG" = "$R" ] && KEEP="$KEEP $PKG"
+            done
+          done < "$RUNNER_TEMP/shard-packages.txt"
+          if [ -n "$KEEP" ]; then
+            echo "Declarations kept: this shard tests$KEEP, which read built .d.ts."
+          else
+            echo "OS_SKIP_DTS=1" >> "$GITHUB_ENV"
+            echo "Declarations skipped: OS_SKIP_DTS=1 for the rest of this shard."
+          fi
+
       # ⛔ THIS SHARD'S `^build` CLOSURE IS BUILT HERE, ON THE TURBO REMOTE
       # CACHE (#22077), so `Run this shard's tests` REPLAYS it from the local
       # cache instead of building it. Before this step the closure was built
@@ -728,7 +767,7 @@ jobs:
       # 3d9188502e, turbo 2.11.5, all six shards of the local partition: this
       # plan equals the test plan's build tasks, 32 to 63 per shard, with
       # identical hashes, 0 differing and 0 extra, and every one of them has
-      # Build Core's hash. A `test` task that `dependsOn: ["build"]` (cli and
+      # Build Core's hash -- unless the step above set OS_SKIP_DTS (#25375). A `test` task that `dependsOn: ["build"]` (cli and
       # metadata in turbo.json) also needs its OWN package's build. This filter
       # leaves that out on purpose, so a shard never builds a package its tests
       # do not need; the test step builds it as before. Today that is
