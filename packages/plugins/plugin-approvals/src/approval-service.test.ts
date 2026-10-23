@@ -3134,10 +3134,13 @@ describe('ApprovalService — out-of-office delegation (#1322)', () => {
     expect(req.pending_approvers).toEqual(['alice']);
   });
 
-  it('applies a cross-tenant (null org) rule regardless of request tenant', async () => {
+  // ADR-0131 D1: an organization-less row is no "every organization" rule.
+  // The full matrix, per posture, is `ooo-delegation-organization.test.ts`.
+  it('an organization-less rule reroutes nothing, in the request tenant or any other', async () => {
     seedDelegation([{ delegator_id: 'alice', delegate_id: 'bob', organization_id: null }]);
     const req = await svc.openNodeRequest(openInput(['alice']), CTX);
-    expect(req.pending_approvers).toEqual(['bob']);
+    expect(req.pending_approvers).toEqual(['alice']);
+    expect(engine._tables['sys_approval_action'].some((a: any) => a.action === 'ooo_substitute')).toBe(false);
   });
 });
 
