@@ -45,6 +45,12 @@
  * while they are first evaluated: this module's top level is imports, an
  * interface and function declarations.
  *
+ * `settleMembership` below is governed by ADR-0093 D2: the membership
+ * reconciler is the single owner of the "every user gets a membership"
+ * invariant, and this is the manager's single assembly of its inputs, which
+ * both creation seams call. `scripts/adr-anchors/` carries the invariant for
+ * this file, as it does for `auth-manager.ts`.
+ *
  * Nothing re-exports this module, so the published surface does not move.
  */
 

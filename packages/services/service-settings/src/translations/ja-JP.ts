@@ -508,6 +508,7 @@ export const jaJP: PlatformTranslationData = {
       actions: {
         test: { label: '接続テスト' },
         test_embedder: { label: 'Embedder をテスト' },
+        reset: { label: '環境変数のデフォルトにリセット' },
       },
       banners: {
         log_prompts_warning: { title: 'PII 漏えいの可能性',

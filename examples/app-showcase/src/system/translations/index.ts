@@ -372,16 +372,38 @@ export const ShowcaseTranslationBundle = {
       showcase_project: {
         label: '项目',
         pluralLabel: '项目',
+        description: '为某个客户交付的项目。',
+        // Every field the project grid and record surface as a column, and
+        // every option a status / health / labels cell renders — the grid
+        // that shows 进行中 for a task must not show "Active" for a project.
+        // `planned` reads 计划中 because `_validations.project_status_flow`
+        // below already says so; `active` reads 进行中 for the same reason
+        // `apps…nav_active_projects` does. `task_count` is a count column,
+        // hence 任务数; `total_estimate` reuses showcase_task's 预计工时.
         fields: {
           name: { label: '项目名称' },
           account: { label: '客户' },
           owner: { label: '负责人' },
-          status: { label: '状态' },
-          health: { label: '健康度' },
+          status: {
+            label: '状态',
+            options: { planned: '计划中', active: '进行中', on_hold: '已暂停', completed: '已完成', cancelled: '已取消' },
+          },
+          health: {
+            label: '健康度',
+            options: { green: '绿色', yellow: '黄色', red: '红色' },
+          },
           budget: { label: '预算' },
           spent: { label: '已花费' },
+          budget_remaining: { label: '剩余预算' },
           start_date: { label: '开始日期' },
           end_date: { label: '结束日期' },
+          labels: {
+            label: '标签',
+            options: { frontend: '前端', backend: '后端', design: '设计', qa: '测试', devops: '运维' },
+          },
+          team_members: { label: '团队成员' },
+          task_count: { label: '任务数' },
+          total_estimate: { label: '总预计工时' },
         },
         // The zh-CN mirror of the `en` `_validations` block — see the note
         // there. Without these two keys the write path's own refusals arrive in
@@ -503,6 +525,18 @@ export const ShowcaseTranslationBundle = {
           // The hook-refusal specimen: every click is refused by
           // showcase_guard_task_reopen, so it carries no successMessage.
           showcase_reopen_task: { label: '重新打开' },
+          // The rest of the task's row / toolbar / bulk actions, so a row menu
+          // never lists 重算工时 beside an English "Mark Done". 工时 is the
+          // word the recalc entries above use; 重新分配 is the reassign
+          // wizard's own flow label (`flows.showcase_reassign_wizard`); 新建…
+          // is the shape a create entry takes in this bundle.
+          showcase_mark_done: { label: '标记为完成', successMessage: '任务已标记为完成。' },
+          showcase_open_docs: { label: '打开文档' },
+          showcase_bulk_reassign: { label: '重新分配…' },
+          showcase_quick_view: { label: '快速查看' },
+          showcase_log_time: { label: '记录工时' },
+          showcase_new_task: { label: '新建任务' },
+          showcase_archive_task: { label: '归档', successMessage: '任务已归档（演示——未修改任何数据）。' },
         },
         // Section headings of the six form-view projections in
         // `ui/views/task.view.ts` (edit / tabbed / wizard / split / quick).
@@ -579,6 +613,12 @@ export const ShowcaseTranslationBundle = {
       showcase_contact: {
         label: '联系人',
         pluralLabel: '联系人',
+        // The list header renders the object's description, so leaving it out
+        // put one English sentence above an otherwise translated grid. The
+        // ADR reference is kept, as `showcase_client_brief.description` keeps
+        // its own.
+        description:
+          '演示「默认推导 + 稀疏覆盖」表单：一套扁平、分组、带意图标记的字段集，同时投影为完整的编辑表单和精简的新建表单（ADR-0047）。',
         fields: {
           name: { label: '姓名' },
           email: { label: '邮箱' },
@@ -586,7 +626,10 @@ export const ShowcaseTranslationBundle = {
           company: { label: '公司' },
           title: { label: '职务' },
           account: { label: '客户' },
-          stage: { label: '阶段' },
+          stage: {
+            label: '阶段',
+            options: { new: '新建', working: '跟进中', qualified: '合格', closed: '已关闭' },
+          },
           lead_score: { label: '线索评分' },
           notes: { label: '备注' },
         },
@@ -700,8 +743,35 @@ export const ShowcaseTranslationBundle = {
           },
         },
       },
+      // The expense report list is a sidebar entry (`nav_expense_reports`,
+      // 报销单), so its object label, description, every column and every
+      // status option are translated here — the sidebar's word and the list's
+      // header now agree. 草稿 / 已提交 / 已批准 follow the 已… shape this
+      // bundle uses for a reached state; 合计 is showcase_invoice's `total`.
+      showcase_expense_report: {
+        label: '报销单',
+        pluralLabel: '报销单',
+        description: '报销单的汇总金额由其明细行按条件汇总而来。',
+        fields: {
+          name: { label: '报销单标题' },
+          employee: { label: '员工' },
+          status: {
+            label: '状态',
+            options: { draft: '草稿', submitted: '已提交', approved: '已批准', reimbursed: '已报销' },
+          },
+          submitted_on: { label: '提交日期' },
+          total_amount: { label: '合计' },
+          approved_amount: { label: '已批准金额' },
+          reimbursable_amount: { label: '可报销金额' },
+          line_count: { label: '明细行数' },
+          rejected_count: { label: '已驳回行数' },
+          over_limit_count: { label: '超过 $500' },
+        },
+      },
       // See the `en` side for why this entry translates exactly ONE field and
-      // no more (check-i18n-coverage is a two-sided ratchet).
+      // no more (check-i18n-coverage is a two-sided ratchet). The line's other
+      // labels are still in the baseline: only the report list is a first
+      // screen.
       showcase_expense_line: {
         fields: {
           incurred_at: { label: '发生时间' },
@@ -751,10 +821,11 @@ export const ShowcaseTranslationBundle = {
         label: '分类', pluralLabel: '分类',
         fields: { name: { label: '名称' }, parent: { label: '上级' }, color: { label: '颜色' }, sort_order: { label: '排序' } },
       },
-      // `_views` only: these two objects have no zh-CN block of their own, and
-      // their object/field debt is inside the ratchet's baseline. Translating
-      // the VIEW labels the coverage fix newly surfaces is what keeps the gate
-      // from widening; the rest is left exactly as it was.
+      // `_views` only: this object has no zh-CN block of its own, and its
+      // object/field debt is inside the ratchet's baseline. Translating the
+      // VIEW labels the coverage fix newly surfaces is what kept the gate from
+      // widening; the rest is left exactly as it was. (showcase_business_unit
+      // below started the same way and now carries its object block too.)
       // (`default` = the container's DEFAULT list — see showcase_project.)
       showcase_inquiry: {
         _views: {
@@ -769,7 +840,24 @@ export const ShowcaseTranslationBundle = {
           tell_us_about_yourself: { label: '介绍一下您自己' },
         },
       },
+      // Object, fields and `kind` options as well as the views below: the
+      // sidebar entry (`nav_business_units`, 业务单元 — the platform bundle's
+      // word for `sys_business_unit`) opens this list. 上级单元 follows
+      // showcase_category's 上级.
       showcase_business_unit: {
+        label: '业务单元',
+        pluralLabel: '业务单元',
+        description: '组织架构层级——在自引用对象上演示树形 / 树形表格视图。',
+        fields: {
+          name: { label: '名称' },
+          parent: { label: '上级单元' },
+          kind: {
+            label: '类型',
+            options: { company: '公司', division: '事业部', department: '部门', team: '团队' },
+          },
+          manager: { label: '经理' },
+          headcount: { label: '人数' },
+        },
         _views: {
           default: { label: '全部单元' },
           org_chart: { label: '组织架构图' },
@@ -779,6 +867,31 @@ export const ShowcaseTranslationBundle = {
         // translatable (#8231). Bare object word, matching `全部单元` above.
         _sections: {
           unit: { label: '单元' },
+        },
+      },
+      // The B3 dynamic-options fixture, opened from `nav_cascade` (级联选择).
+      // Its description is a technical statement about the fixture, so the
+      // zh-CN copy states the same thing and keeps the metadata keys
+      // (`visibleWhen`, `dependsOn`) in their source spelling.
+      showcase_cascade: {
+        label: '级联选择',
+        pluralLabel: '级联选择',
+        description:
+          'B3 动态选项夹具：国家 → 省份级联（逐选项 visibleWhen + dependsOn），外加按角色门控的等级；在客户端（可选集合）和服务端（objectql 拒绝集合外的提交）同时强制执行。',
+        fields: {
+          name: { label: '名称' },
+          country: {
+            label: '国家',
+            options: { cn: '中国', us: '美国' },
+          },
+          province: {
+            label: '省 / 州',
+            options: { zj: '浙江', gd: '广东', ca: '加利福尼亚', tx: '得克萨斯' },
+          },
+          tier: {
+            label: '等级',
+            options: { standard: '标准', restricted: '受限（仅管理员）' },
+          },
         },
       },
       // `_sections` only, on the same footing as the two `_views`-only blocks
@@ -945,9 +1058,9 @@ export const ShowcaseTranslationBundle = {
           nav_accounts: { label: '客户' },
           nav_contacts: { label: '联系人' },
           nav_invoices: { label: '发票' },
-          // `showcase_expense_report` has no translated object label (it sits
-          // inside check-i18n-coverage's frozen baseline), so this renders the
-          // nav label directly; 报销单 is the standard word for the document.
+          // 报销单 is the standard word for the document, and the word
+          // `objects.showcase_expense_report` above gives the object, so the
+          // sidebar entry and the list it opens read the same.
           nav_expense_reports: { label: '报销单' },
           nav_products: { label: '产品' },
           nav_teams: { label: '团队' },
@@ -1050,6 +1163,25 @@ export const ShowcaseTranslationBundle = {
         },
       },
       showcase_ops_dashboard: {
+        // The first dashboard a visitor opens (`nav_ops`, 交付运营 — the same
+        // word here). Every widget title, so the KPI row never reads English
+        // under a translated header. Each title says the word of the value it
+        // filters on: 进行中的项目 is `fields.status.options.active` on
+        // showcase_project, 红色 its health option, 待评审 the task's
+        // 评审中, 总预算 the command center's `cc_k6`.
+        label: '交付运营',
+        description: '运营首页——核心 KPI、项目健康度与任务吞吐量。',
+        widgets: {
+          kpi_active_projects: { title: '进行中的项目' },
+          kpi_at_risk: { title: '风险项目（红色）' },
+          kpi_awaiting_review: { title: '待评审' },
+          kpi_total_budget: { title: '总预算' },
+          col_health: { title: '项目健康度分布' },
+          bar_status: { title: '任务状态分布' },
+          donut_priority: { title: '优先级构成' },
+          line_created: { title: '任务吞吐量（按月）' },
+          table_spend: { title: '各客户预算与已花费' },
+        },
         globalFilters: {
           task_status: {
             label: '任务状态',
@@ -1071,9 +1203,18 @@ export const ShowcaseTranslationBundle = {
     // Page component copy became declared surface with `pages.<name>.components`
     // (#6080), so these keys are born under the ratchet: leaving any of them
     // untranslated widens the frozen baseline and fails `check-i18n-coverage`.
-    // The pages' own label/title/subtitle predate the ratchet and stay in the
-    // frozen baseline, same as Revenue Pulse's older widget titles above.
+    // Most pages' own label/title/subtitle predate the ratchet and stay in the
+    // frozen baseline, same as Revenue Pulse's older widget titles above. The
+    // exceptions are the pages a visitor lands on first, whose `label` is the
+    // page heading: each reads the word its sidebar entry already uses
+    // (`apps.showcase_app.navigation`), so the heading matches the link that
+    // opened it.
     pages: {
+      showcase_capability_map: { label: '能力地图' },
+      showcase_my_work: { label: '我的工作', subtitle: '你的待办队列、团队产出，以及需要关注的事项。' },
+      showcase_review_queue: { label: '审批' },
+      showcase_task_board: { label: '任务看板' },
+      showcase_active_projects: { label: '进行中的项目' },
       // `ui/pages/invoice-document.page.ts` — the invoice print page.
       showcase_invoice_document: { label: '发票' },
       showcase_contact_form: {

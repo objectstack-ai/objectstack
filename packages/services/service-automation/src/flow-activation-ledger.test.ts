@@ -1029,7 +1029,7 @@ describe('#10243 — the process-local `flowEnabled` map is retired', () => {
     // [#25222] The engine's source is `engine.ts` plus every module a method's
     // body moved to: a grep-level pin reads them all, or a moved body is a place
     // the retired mechanism could come back unseen.
-    const ENGINE_SOURCES = ['./engine.ts', './flow-registration-checks.ts', './plugin-extension-api.ts'];
+    const ENGINE_SOURCES = ['./engine.ts', './flow-registration-checks.ts', './plugin-extension-api.ts', './dag-traversal.ts'];
     const engineSource = ENGINE_SOURCES.map((path) =>
         readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'),
     ).join('\n');
