@@ -2841,6 +2841,28 @@ export class AuthManager {
             // fall through — the vendor still decides everything it owns
           }
 
+          // ── [#25083] cloud-managed: invite-member issues nothing ────
+          // `beforeCreateInvitation` refuses a NEW invitation, but
+          // better-auth answers `resend: true` for an invitee who is
+          // already pending BEFORE it consults that hook: it extends the
+          // row's `expiresAt` and sends the invitation e-mail again
+          // (`organization/routes/crud-invites.mjs`, better-auth 1.7.12).
+          // The console reaches exactly that branch through
+          // `sys_invitation`'s `resend_invitation` action. On a
+          // cloud-managed environment no invitation leaves this door in
+          // either shape, so the route refuses ahead of the vendor's
+          // handler; the hook keeps its own arm as the second line. The
+          // fact is public (`features.cloudManaged` on `/auth/config`), so
+          // answering it ahead of the session check tells an anonymous
+          // caller nothing new.
+          if (ctx?.path === '/organization/invite-member' && isCloudManaged()) {
+            const { APIError } = await import('better-auth/api');
+            throw new APIError('CONFLICT', {
+              message: CLOUD_MANAGED_REFUSAL_MESSAGES.invitation,
+              code: CLOUD_MANAGED_REFUSAL_CODE,
+            });
+          }
+
           // ── ADR-0069 D2: account lockout (gate) ─────────────────────
           // Reject a sign-in for a locked identity BEFORE better-auth checks
           // the password — a lock must hold even against the correct password.
@@ -3745,10 +3767,11 @@ export class AuthManager {
           beforeCreateInvitation: async ({ invitation, inviter, organization }: any) => {
             // [#25083] A cloud-managed environment creates no invitation at
             // all: the organisation that hosts it invites its people in the
-            // cloud. First, before the role cap and the placement gate,
-            // because no invitation is issuable whatever its role or
-            // placement; after better-auth's own session and permission
-            // checks, which run before this hook.
+            // cloud. The `before` hook refuses `/organization/invite-member`
+            // first, resends included; this arm is the second line, for any
+            // other path that reaches the hook. First here, before the role
+            // cap and the placement gate, because no invitation is issuable
+            // whatever its role or placement.
             if (isCloudManaged()) {
               const { APIError } = await import('better-auth/api');
               throw new APIError('CONFLICT', {

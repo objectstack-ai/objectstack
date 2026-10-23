@@ -345,6 +345,56 @@ describe('[#25083] invitations and the admin user doors on a cloud-managed envir
     expect(s.invitationsOf('newcomer.25083@example.com')).toHaveLength(0);
   }, 120_000);
 
+  it('a resend of an invitation still pending from before answers 409 too, and its expiry does not move', async () => {
+    // better-auth answers `resend: true` BEFORE `beforeCreateInvitation`
+    // runs: it extends the pending row and sends the e-mail again. The row
+    // here was issued while the environment was still unmanaged, which is
+    // what every hosted environment holds until this lands.
+    const s = await stage();
+    const email = 'pending.25083@example.com';
+    const issued = await verdict(
+      await s.fire('/organization/invite-member', { email, role: 'member', organizationId: DEFAULT_ORG }, s.bearers.admin),
+    );
+    expect(issued.status, issued.text).toBe(200);
+    expect(s.invitationsOf(email)).toHaveLength(1);
+    // Still pending (an hour out), and earlier than the 48 hours a resend sets.
+    const fixedExpiry = new Date(Date.now() + 60 * 60_000);
+    s.invitationsOf(email)[0].expires_at = fixedExpiry;
+
+    setManaged(true);
+    const v = await verdict(
+      await s.fire(
+        '/organization/invite-member',
+        { email, role: 'member', organizationId: DEFAULT_ORG, resend: true },
+        s.bearers.admin,
+      ),
+    );
+    expectManagedRefusal(v, 'invitation');
+    expect(s.invitationsOf(email)).toHaveLength(1);
+    expect(s.invitationsOf(email)[0].expires_at).toEqual(fixedExpiry);
+  }, 120_000);
+
+  it('CONTROL: unmanaged, the same resend is answered and extends the expiry', async () => {
+    // Without this leg the case above would pass on a resend that never
+    // moved the expiry in this fixture at all.
+    const s = await stage();
+    const email = 'pending.25083@example.com';
+    await s.fire('/organization/invite-member', { email, role: 'member', organizationId: DEFAULT_ORG }, s.bearers.admin);
+    // Still pending (an hour out), and earlier than the 48 hours a resend sets.
+    const fixedExpiry = new Date(Date.now() + 60 * 60_000);
+    s.invitationsOf(email)[0].expires_at = fixedExpiry;
+
+    const v = await verdict(
+      await s.fire(
+        '/organization/invite-member',
+        { email, role: 'member', organizationId: DEFAULT_ORG, resend: true },
+        s.bearers.admin,
+      ),
+    );
+    expect(v.status, v.text).toBe(200);
+    expect(new Date(s.invitationsOf(email)[0].expires_at).getTime()).toBeGreaterThan(fixedExpiry.getTime());
+  }, 120_000);
+
   it('create-user answers 409 RESOURCE_CONFLICT to a platform admin and creates no user', async () => {
     const s = await stage();
     setManaged(true);
