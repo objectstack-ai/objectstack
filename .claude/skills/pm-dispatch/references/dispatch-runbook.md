@@ -137,7 +137,7 @@
 - 卡线程交回或其 PR 合入,席位当即告知 coordinator 释放槽位。
 - 请 coordinator 开线程附维护者原话消息:它只凭维护者明言设线程的 model 与 effort。
 - 席位留认领文本、派发令、契约复核、ACCEPT 与落地;线程实施、开 draft PR、驱动 CI。
-- 派发令落项目共享目录 `/mnt/project-files/<席位>/dispatch-<N>.md`:线程读不到席位 scratchpad。
+- 派发令由 coordinator 写进卡线程开场消息,⛔ 不落共享目录;卡上派发评论留一行指针。
 - 线程开起后第一动作:向席位报告指定推送分支并等待;⛔ 线程不贴认领、不写 assignee。
 - 席位按 AGENTS.md 的顺序写 assignee+`pm:dispatched`,再贴带该 `Branch:` 的认领;之后线程才开工。
 - 分支约定仍是 `claude/issue-<n>-<slug>`;线程只能推指定分支是实测平台例外,认领如实写。

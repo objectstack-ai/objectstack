@@ -1,4 +1,4 @@
-# 席位章程:项目总监(Project Director)
+# 席位章程:总监席(Director Seat)
 
 见 SKILL.md 〈升级与决策〉,⛔ 不复制框架本体;本文是岗位说明,现值状态恒在座位贴。
 
