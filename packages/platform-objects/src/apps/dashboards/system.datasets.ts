@@ -49,7 +49,16 @@ export const SysAuditLogDataset = defineDataset({
   object: 'sys_audit_log',
   dimensions: [
     { name: 'action', label: 'Action', field: 'action', type: 'string' },
-    { name: 'user_id', label: 'User', field: 'user_id', type: 'lookup' },
+    // Rows the platform writes itself carry no `user_id`; their bucket reads
+    // "System", not the renderer's default "(None)". An inline locale map:
+    // the translation bundles have no slot for a dimension's null label.
+    {
+      name: 'user_id',
+      label: 'User',
+      field: 'user_id',
+      type: 'lookup',
+      nullLabel: { en: 'System', 'zh-CN': '系统', 'ja-JP': 'システム', 'es-ES': 'Sistema' },
+    },
   ],
   measures: [{ name: 'event_count', label: 'Events', aggregate: 'count' }],
 });

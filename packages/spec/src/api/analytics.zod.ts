@@ -140,6 +140,13 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
         + 'single aggregate, and on a cube query answer (`POST /analytics/query`). Unlike '
         + '`builtinAggregate`, it says nothing about who named the column.',
       ),
+      nullLabel: z.string().optional().describe(
+        'Display name of a dimension column\'s null bucket: the dataset dimension\'s `nullLabel`, '
+        + 'resolved at the request locale like `label`. A renderer draws the column\'s null values '
+        + 'under it instead of its own default. Set only on a dimension column of a dataset answer '
+        + '(`POST /analytics/dataset/query`) whose dimension declares one; absent on measure columns '
+        + 'and on a cube query answer. Display copy only: grouping is unchanged.',
+      ),
     })).describe('Column metadata'),
     sql: z.string().optional().describe('Executed SQL (if debug enabled)'),
     totals: z.array(z.object({

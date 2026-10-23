@@ -136,6 +136,19 @@ export interface AnalyticsResult {
          * `AggregationFunction`, the one closed aggregate vocabulary.
          */
         aggregate?: AggregationFunction;
+        /**
+         * The display name of a DIMENSION column's null bucket: the dataset
+         * dimension's `nullLabel` (`DatasetDimensionSchema`), resolved to a
+         * string at the request locale by the same `I18nLabel` resolver as
+         * `label`. A renderer that buckets the column's null values draws
+         * them under this name instead of its own default (`'(None)'`).
+         *
+         * Present only on a dimension column of a `queryDataset` answer whose
+         * dataset dimension declares a `nullLabel` that resolves; absent
+         * otherwise, on every measure column, and on a `query` (cube) answer.
+         * Display copy only: it never changes which rows fall in the bucket.
+         */
+        nullLabel?: string;
     }>;
     /** Generated SQL (if available) */
     sql?: string;
