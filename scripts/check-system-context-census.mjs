@@ -155,7 +155,7 @@
  * ⭐ `collapsesOntoRead` is the declaration this migration made necessary. Under
  * symbol granularity a citation can share its symbol with a census read site -- the
  * `owner_id` guard block and the short-circuit that skips it are both inside
- * `packages/plugins/plugin-security/src/security-plugin.ts#start` -- so the row
+ * `packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts#registerAuthzMiddleware` -- so the row
  * stops EXCUSING anything while its `why`
  * and its `rowSeams` are still worth keeping. The field says so, and the gate
  * refuses when the declaration and the census disagree in EITHER direction: an
@@ -430,10 +430,10 @@ export const NON_READ_ANCHORS = [
   },
   // ── Constructs a table row deliberately cites alongside its read ─────────────
   {
-    file: 'packages/plugins/plugin-security/src/security-plugin.ts',
-    symbol: 'start',
+    file: 'packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts',
+    symbol: 'registerAuthzMiddleware',
     collapsesOntoRead: true,
-    why: 'row 2 -- the `owner_id` guard block that the row-1 short-circuit skips; both are inside `start`',
+    why: 'row 2 -- the `owner_id` guard block that the row-1 short-circuit skips; both are inside `registerAuthzMiddleware`',
     rowSeams: ['`owner_id` is not auto-stamped on INSERT', 'The whole security middleware short-circuits'],
   },
   {
