@@ -418,7 +418,16 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 241],
+  // Raised 241 → 245 by the pre-dispatch premise check (the same maintainer's
+  // word of 2026-10-23, 「立卡」 and 「并且立刻派发」 on the proposal 「席位派发前先用
+  // 子代理核实前提。核实成立就派；不成立、但改法明确的，就改卡后再派；判断不了的，
+  // 转决策，不占卡线程名额」; quoted on card #25507, claim comment 6370029859):
+  // four lines at the head of the pre-dispatch section — the read-only subagent
+  // and when a card-thread card runs it, the three exits, what 「改法明确」 may and
+  // may not change, and the `Premise:` claim line. Measured delta +4; the section
+  // heading was renamed in place. Not a CROSS_FILE_MOVES destination, so no
+  // `ruledRaises` record applies. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 245],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
@@ -1341,7 +1350,19 @@ export const CEILINGS = new Map([
   // 120-byte cap), with no restatement left in the section to pay with. Not a
   // CROSS_FILE_MOVES destination, so no `ruledRaises` record applies. Landed
   // count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 64],
+  // Raised 64 → 68 by the business-rationale card (maintainer's word 2026-10-23,
+  // project chat, verbatim and untranslated: 「我说的是业务需求上的合理性，谁来判断」
+  // and 「立卡」 on the proposal that names the field and the three triage exits;
+  // quoted on card #25507 and in its claim, comment 6370029859). The text is the
+  // fourth filing-gate answer 「业务理由」 (who benefits, the scenario, the cost of
+  // not doing it) and the triage reading of it: clear and on the North-Star
+  // direction ⇒ queue; missing or not holding ⇒ returned to the filer, never
+  // written for them and never closed on it; a product trade-off ⇒ the decision
+  // inbox; batch filings sampled to the maintainer. Five lines landed, one paid
+  // in place (③ and ④ of the gate merged onto one line), so the measured delta
+  // is +4. Not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
+  // applies. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 68],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
