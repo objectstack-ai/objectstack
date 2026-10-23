@@ -70,23 +70,16 @@ import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/a
 import { createObjectQLAdapterFactory, withSystemContext, withSystemReadContext } from './objectql-adapter.js';
 import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
-import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
+import { setAuthActorResolver } from './auth-actor-attribution.js';
 import {
   SIGN_IN_EMAIL_PATH,
   type AuthEventAuditSurface,
 } from './auth-session-audit.js';
-import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
-import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
-import { refuseAnonymousSession } from './anonymous-session-refusal.js';
 import {
-  buildBetterAuthRouteOwnership,
   type BetterAuthRouteOwnership,
 } from './better-auth-route-ownership.js';
 import {
-  ADMIN_SESSION_COOKIE_KEY,
-  STOP_IMPERSONATING_PATH,
   rotateCallerBearerOnImpersonation,
-  withBearerAdminSessionRecovery,
 } from './impersonation-bearer-rotation.js';
 import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
 import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-verified-reset.js';
@@ -111,8 +104,8 @@ import {
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { readAccountInvitation, settleImportResetDelivery } from './account-invitation-marker.js';
 import { resolveClientAddress } from './client-address.js';
-import { vendorClientAddressOptions, withVendorClientAddress } from './client-address-vendor.js';
-import { clientAddressStateEntries, readRequestClientAddress } from './request-client-address.js';
+import { vendorClientAddressOptions } from './client-address-vendor.js';
+import { readRequestClientAddress } from './request-client-address.js';
 import {
   type MembershipPolicy,
   type ReconcileOutcome,
@@ -246,6 +239,16 @@ import {
   verifyMcpAccessToken,
   type McpAccessTokenHost,
 } from './auth-manager-mcp-access-token.js';
+// [#25224 cut 10] The request routing — the seam every better-auth request
+// passes through, route ownership and the endpoint path both key on; the
+// methods of the same names below hand each body the members it reads
+// (`RequestRoutingHost`).
+import {
+  betterAuthEndpointPath,
+  handleRequest,
+  ownsRoute,
+  type RequestRoutingHost,
+} from './auth-manager-request-routing.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -1237,7 +1240,7 @@ export function ipMatchesRange(ip: string, range: string): boolean {
  */
 const SCIM_PROTOCOL_PATH_PREFIX = '/scim/v2';
 
-function isScimProtocolPath(endpointPath: string | undefined): boolean {
+export function isScimProtocolPath(endpointPath: string | undefined): boolean {
   return (
     endpointPath === SCIM_PROTOCOL_PATH_PREFIX ||
     endpointPath?.startsWith(`${SCIM_PROTOCOL_PATH_PREFIX}/`) === true
@@ -6366,205 +6369,15 @@ export class AuthManager {
    *   handed that address and no other (`client-address-vendor.ts`).
    * @returns Web standard Response object
    */
-  async handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
-    // ADR-0069 D7 — the client address this request's sign-in audit stamps,
-    // established ONCE, here, by the same trust rule the D5 allow-list judges
-    // with (`resolveClientAddress`). Read before any rewrite below, and carried
-    // to the after-hook in better-auth's request state (`request-client-address.ts`).
-    const clientHeaders: Record<string, string> = {};
-    request.headers.forEach((value, name) => {
-      clientHeaders[name] = value;
-    });
-    const clientAddress = this.resolveClientAddress({
-      headers: clientHeaders,
-      ...(transport?.remoteAddress ? { remoteAddress: transport.remoteAddress } : {}),
-    });
-
-    // The vendored library's OWN client-address reader (session `ip_address`,
-    // the sign-in audit fingerprint, its per-address rate limiter) reads only
-    // the platform-owned header (`vendorClientAddressOptions`, composed in
-    // `createAuthInstance`). Written HERE, from the address just established,
-    // after dropping any copy the caller sent — so the library answers the same
-    // address the D5 allow-list judged, or none. See `client-address-vendor.ts`.
-    request = withVendorClientAddress(request, clientAddress);
-
-    // Dev DX: better-auth's CSRF protection rejects state-changing requests
-    // (e.g. `/sign-in/email`) with a 403 when neither `Origin` nor `Referer`
-    // is present. Browsers always send one; non-browser API clients (curl,
-    // fetch from a script, integration tests) often don't, so they hit an
-    // opaque 403 in local dev. A request with *no* Origin header is never a
-    // browser-driven cross-site attack — CSRF is fundamentally cross-origin —
-    // so in non-production we synthesize a same-origin `Origin` from the
-    // request URL. It matches the dev localhost trusted-origins set, so the
-    // CSRF check passes without weakening protection in production (gated on
-    // NODE_ENV, the same dev signal used for the fallback auth secret above).
-    if (
-      process.env.NODE_ENV !== 'production' &&
-      !request.headers.get('origin') &&
-      !request.headers.get('referer')
-    ) {
-      try {
-        const headers = new Headers(request.headers);
-        headers.set('origin', new URL(request.url).origin);
-        request = new Request(request, { headers });
-      } catch {
-        /* malformed URL — leave the request untouched */
-      }
-    }
-
-    const auth = await this.getOrCreateAuth();
-
-    // [#8243] Let a bearer client carry the `admin_session` recovery credential
-    // back out of impersonation. better-auth's `/admin/stop-impersonating`
-    // resolves the admin through the `admin_session` COOKIE alone, so in a
-    // cookie-blocked deployment — the exact context `bearer()` exists for — the
-    // exit path is dead. We accept the credential on a header and write it into
-    // the request's own `Cookie` before better-auth sees it; the vendor route
-    // then runs completely unmodified, checking everything it always checked.
-    //
-    // The REQUEST seam, not a before-hook: `bearer()`'s before-hook rebuilds
-    // the header set from `c.request.headers`, so a `Cookie` injected by any
-    // hook is clobbered by whichever hook sorts after it. Written into the
-    // request itself, `bearer()`'s parse-mutate-serialize keeps it.
-    if (this.betterAuthEndpointPath(request) === STOP_IMPERSONATING_PATH) {
-      try {
-        const authContext: any = await (auth as any).$context;
-        const adminCookieName: string | undefined =
-          authContext?.createAuthCookie?.(ADMIN_SESSION_COOKIE_KEY)?.name;
-        if (adminCookieName) {
-          request = await withBearerAdminSessionRecovery(request, adminCookieName);
-        }
-      } catch {
-        // Cookie name unresolvable (e.g. a dynamic-baseURL context we cannot
-        // reach here) → leave the request alone. The vendor route then answers
-        // exactly as it does today for a missing cookie: a loud failure, never
-        // a silent wrong identity.
-      }
-    }
-
-    // better-auth's HTTP entrypoint (`createBetterAuth.handler`) wraps execution
-    // in `runWithAdapter` but NOT `runWithRequestState`. Endpoints that read
-    // request-state via `defineRequestState()` (e.g. `should-session-refresh`,
-    // `oauth`) therefore throw "No request state found" when reached via HTTP.
-    // The `customSession` plugin triggers this by invoking the inner
-    // `getSession()` endpoint directly, bypassing `to-auth-endpoints`'
-    // auto-wrap. We establish the ALS store here so all downstream endpoint
-    // calls inherit a valid request-state WeakMap.
-    const { runWithRequestState } = await import('@better-auth/core/context');
-    // [#4586] Open the actor-attribution scope around the WHOLE request, so
-    // every write better-auth makes on the way — adapter writes, the
-    // membership reconciler in `user.create.after`, anything a plugin hook
-    // triggers — can be credited to the human who made the request. Opening it
-    // costs nothing: the scope starts empty, the before-hook drops a resolver
-    // in, and the session is looked up only if some write asks. Attribution
-    // only — the authorization subject of those writes is unchanged (system).
-    // `await`, not a bare return: both scope helpers are generic over their
-    // callback, so the composed call is typed `Promise< Promise< Response > >`.
-    // The previous single call site flattened it with the `await` below.
-    const runHandler = async (): Promise<Response> =>
-      await runWithAuthActorScope(() =>
-        runWithRequestState(
-          new WeakMap<object, unknown>(clientAddressStateEntries(clientAddress)),
-          () => auth.handler(request),
-        ),
-      );
-
-    // [#7724] A subject-erasure request is ONE unit of work, and better-auth
-    // does not treat it as one: `internalAdapter.deleteUser` deletes the
-    // sessions, then the accounts, then the user, in three unrelated adapter
-    // calls with no transaction. Measured 2026-08-20 against the installed
-    // better-auth 1.7.1: `deleteUser` at `dist/db/internal-adapter.mjs:233-247`
-    // is three separate `deleteManyWithHooks` / `deleteWithHooks` calls
-    // (session `:235`, account `:239`, user `:243`), and the string
-    // "transaction" does not occur anywhere in that file — a zero result that
-    // means something because "deleteManyWithHooks" occurs 8 times in it, so
-    // the search does reach the text. (The session call is now conditional on
-    // `!secondaryStorage || storeSessionInDatabase`; ObjectStack wires no
-    // `secondaryStorage` — deliberately, see `session-tombstone.ts` — so all
-    // three fire here.) Anything
-    // that refuses the LAST of those three leaves the first two committed: the
-    // credential rows are gone, the `sys_user` row is not, and the deployment
-    // is left with an identity that still occupies the org roster and can no
-    // longer sign in. Nothing tells the operator, and there is no way back.
-    const endpointPath = this.betterAuthEndpointPath(request);
-
-    // [#3653 / #14522] A SCIM protocol request (`/scim/v2/*`) runs inside
-    // `scimRequestScope`, which is what makes the adapter's `transaction`
-    // config open a REAL engine transaction around the vendor's provisioning
-    // multi-writes (`objectql-adapter.ts`, the scoping note there). Opened
-    // HERE, with `run(...)` around the whole request, for the same reason the
-    // actor-attribution scope above is: `run` has a callback boundary that
-    // every `als.run` the vendor performs underneath nests inside. The stamp
-    // used to be an `enterWith` inside the SCIM plugin's `verifyBearerToken`
-    // callback, and it never reached the writes — the vendor resumes the
-    // endpoint handler from a continuation captured before the verifier ran
-    // (measured on 1.7.2: zero `engine.transaction` calls across
-    // `POST /Users` + `PATCH /Users/{id}`). Keyed on the endpoint path prefix
-    // so it is exactly as narrow as before — SCIM protocol requests only; the
-    // non-SCIM flows keep their sequential posture, which the scoping note
-    // records as load-bearing. Pinned by `scim-transaction-scope.test.ts`.
-    const runRequest = isScimProtocolPath(endpointPath)
-      ? async (): Promise<Response> => {
-          const { scimRequestScope } = await import('./scim-connection-service.js');
-          return scimRequestScope.run({ scim: true }, runHandler);
-        }
-      : runHandler;
-    // [#24948] An organization delete is one unit of work on the same terms:
-    // better-auth clears the caller's active organization and deletes the
-    // members and invitations before the organization row, with no
-    // transaction, and the engine's refusal on that last row used to leave the
-    // organization standing with no owner.
-    const vendorResponse =
-      endpointPath !== undefined &&
-      (SESSION_ERASURE_PATHS.has(endpointPath) || endpointPath === ORGANIZATION_DELETE_PATH)
-        ? await this.runSubjectErasureAtomically(runRequest)
-        : await runRequest();
-
-    // [#10349] The better-auth-native `/admin/` routes refuse an anonymous
-    // caller through the vendor's `adminMiddleware`
-    // (`APIError.fromStatus('UNAUTHORIZED')`, no body argument), so the refusal
-    // reaches the client as a 401 that announces `application/json` and carries
-    // the EMPTY STRING — no envelope, nothing to branch on. The ObjectStack raw
-    // `/admin/*` mounts answer the identical question with the ADR-0112
-    // envelope and `code: 'UNAUTHENTICATED'` (`platform-admin-gate.ts`), and
-    // which of the two a caller gets depends only on which implementation
-    // happens to serve that route — an implementation detail, not a contract.
-    //
-    // This is the ONE seam every vendor route passes through, which is why the
-    // normalization belongs here and not in ten routes we do not own. It is
-    // scoped to the `/admin/` NAMESPACE (option C): the prefix test costs no new
-    // concept, because this method already discriminates on `endpointPath` twice
-    // above — `STOP_IMPERSONATING_PATH` and `SESSION_ERASURE_PATHS`.
-    //
-    // Status and admission are untouched; see the module header for the three
-    // narrowings and the measurement behind each.
-    const enveloped = await envelopeVendorAdminRefusal(endpointPath, vendorResponse);
-
-    // [#17238] And the anonymous `/get-session` answer becomes the same
-    // declared refusal. better-auth serves `200` + the literal JSON `null`
-    // when no session backs the request, which is a value no
-    // `SessionResponse` can express — so `ObjectStackClient.auth.me()`, which
-    // declares `Promise<SessionResponse>`, resolved OUTSIDE its own type on
-    // the most ordinary call a logged-out caller makes. Ruled by the director
-    // seat (batch #117 item 4): the code moves, the published schema does not.
-    //
-    // Same seam and same reason as the `/admin/` normalization above — this is
-    // the ONE place every vendor route passes through — but ⚠️ NOT the same
-    // kind of change: that one is forbidden to move admission and this one IS
-    // the admission move (`200` -> `401`). `anonymous-session-refusal.ts`
-    // carries the three narrowings that keep every other answer identical.
-    const response = await refuseAnonymousSession(endpointPath, enveloped);
-
-    if (response.status >= 500) {
-      try {
-        const body = await response.clone().text();
-        console.error('[AuthManager] better-auth returned error:', response.status, body);
-      } catch {
-        console.error('[AuthManager] better-auth returned error:', response.status, '(unable to read body)');
-      }
-    }
-
-    return response;
+  handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+    // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
+    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically'> = {
+      betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
+      getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
+      resolveClientAddress: (...a) => this.resolveClientAddress(...a),
+      runSubjectErasureAtomically: (...a) => this.runSubjectErasureAtomically(...a),
+    };
+    return handleRequest.call(host, request, transport);
   }
 
   /**
@@ -6736,19 +6549,21 @@ export class AuthManager {
    * request it cannot decide, so a failure to enumerate can never take the
    * #4088 surface down with it.
    */
-  async ownsRoute(request: Request): Promise<boolean> {
-    const endpointPath = this.betterAuthEndpointPath(request);
-    if (endpointPath === undefined) return false;
-    try {
-      const auth = await this.getOrCreateAuth();
-      if (this.routeOwnershipFor !== auth || !this.routeOwnership) {
-        this.routeOwnership = buildBetterAuthRouteOwnership((auth as any)?.api);
-        this.routeOwnershipFor = auth;
-      }
-      return this.routeOwnership.owns(request.method, endpointPath);
-    } catch {
-      return false;
-    }
+  ownsRoute(request: Request): Promise<boolean> {
+    // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
+    const readRouteOwnership = () => this.routeOwnership;
+    const writeRouteOwnership = (v: AuthManager['routeOwnership']) => { this.routeOwnership = v; };
+    const readRouteOwnershipFor = () => this.routeOwnershipFor;
+    const writeRouteOwnershipFor = (v: AuthManager['routeOwnershipFor']) => { this.routeOwnershipFor = v; };
+    const host: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'routeOwnership' | 'routeOwnershipFor'> = {
+      betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
+      getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
+      get routeOwnership() { return readRouteOwnership(); },
+      set routeOwnership(v) { writeRouteOwnership(v); },
+      get routeOwnershipFor() { return readRouteOwnershipFor(); },
+      set routeOwnershipFor(v) { writeRouteOwnershipFor(v); },
+    };
+    return ownsRoute.call(host, request);
   }
 
   /** Memoized `auth.api` ownership table, and the instance it was built from. */
@@ -6764,16 +6579,11 @@ export class AuthManager {
    * talking about one thing.
    */
   private betterAuthEndpointPath(request: Request): string | undefined {
-    let pathname: string;
-    try {
-      pathname = new URL(request.url).pathname;
-    } catch {
-      return undefined;
-    }
-    const base = this.getBasePath();
-    if (!pathname.startsWith(base)) return undefined;
-    const endpoint = pathname.slice(base.length).replace(/\/+$/, '');
-    return endpoint.startsWith('/') ? endpoint : undefined;
+    // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
+    const host: Pick<RequestRoutingHost, 'getBasePath'> = {
+      getBasePath: (...a) => this.getBasePath(...a),
+    };
+    return betterAuthEndpointPath.call(host, request);
   }
 
   /**
