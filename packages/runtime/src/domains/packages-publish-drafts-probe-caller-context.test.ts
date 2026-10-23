@@ -44,16 +44,24 @@ const DATASET = DatasetSchema.parse({
     measures: [{ name: 'task_count', label: 'Tasks', aggregate: 'count' }],
 });
 
-const itemsWithWidgetValues = (values: string[]): Record<string, unknown> => ({
+/**
+ * The same measure over a relationship path the dataset never declares in
+ * `include`: a dataset that cannot compile (`DATASET_INVALID`), whoever reads it.
+ */
+const DATASET_UNDECLARED_JOIN = DatasetSchema.parse({
+    ...DATASET,
+    measures: [{ name: 'task_count', label: 'Tasks', aggregate: 'sum', field: 'project.estimate' }],
+});
+
+const itemsWithDataset = (dataset: unknown): Record<string, unknown> => ({
     'dashboard task_board': {
         name: 'task_board',
-        widgets: [{ id: 'w_tasks', dataset: 'task_metrics', values }],
+        widgets: [{ id: 'w_tasks', dataset: 'task_metrics', values: ['task_count'] }],
     },
-    'dataset task_metrics': DATASET,
+    'dataset task_metrics': dataset,
 });
-const ITEMS = itemsWithWidgetValues(['task_count']);
-/** A widget selecting a measure the dataset never declares: a query that cannot compile. */
-const ITEMS_UNDECLARED_MEASURE = itemsWithWidgetValues(['task_cnt']);
+const ITEMS = itemsWithDataset(DATASET);
+const ITEMS_UNDECLARED_JOIN = itemsWithDataset(DATASET_UNDECLARED_JOIN);
 
 /** The fix every widget query failure that is NOT an access refusal keeps. */
 const DATASET_FIX = `Fix the dataset definition (or the widget's values/dimensions) so the query compiles, then republish.`;
@@ -183,12 +191,12 @@ describe('publish-drafts widget probes run as the publishing caller (#25484)', (
     });
 
     it('a query that cannot compile, for a caller who CAN read, keeps the dataset fix', async () => {
-        const { probes } = await publishAs(READER, ITEMS_UNDECLARED_MEASURE);
+        const { probes } = await publishAs(READER, ITEMS_UNDECLARED_JOIN);
 
         expect(probes?.checked?.widgets).toBe(1);
         const failed = probes.issues.filter((i: any) => i.code === 'widget_query_failed'); // adr0112-ok: D6c build-probe diagnostics code
         expect(failed).toHaveLength(1);
         expect(failed[0]).toMatchObject({ layer: 'runtime', severity: 'error', fix: DATASET_FIX });
-        expect(failed[0].message).not.toContain('Access denied');
+        expect(failed[0].message).toContain('is not declared in the dataset');
     });
 });
