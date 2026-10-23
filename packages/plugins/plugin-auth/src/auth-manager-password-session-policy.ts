@@ -450,13 +450,80 @@ export async function unlockUser(this: Pick<PasswordSessionPolicyHost, 'getDataE
   return true;
 }
 
+/**
+ * [#25343] The `last_activity_at` heartbeat's throttle: at most one write per
+ * session per minute, and — when no session limit is configured — at most one
+ * `sys_session` read per session per minute as well.
+ */
+const SESSION_HEARTBEAT_INTERVAL_MS = 60_000;
+/**
+ * [#25343] The most sessions one {@link SessionHeartbeatMemo} remembers. An
+ * entry is worth keeping for one {@link SESSION_HEARTBEAT_INTERVAL_MS} only,
+ * so the cap is a bound on memory, not on correctness: an evicted session is
+ * read once more, exactly as if the memo had expired.
+ */
+export const SESSION_HEARTBEAT_MEMO_MAX = 10_000;
+
+/**
+ * [#25343] Per-process, per-session memo of "this session's row was read less
+ * than a minute ago", consulted only when neither the idle nor the absolute
+ * limit is configured (ADR-0069 D4). There the read exists only to feed the
+ * heartbeat, which writes at most once a minute, so a read inside that minute
+ * cannot lead to a write and is skipped. With a limit on, every request still
+ * reads: enforcement needs the row's current state, and the memo is not asked.
+ *
+ * Bounded least-recently-noted: a `Map` keeps insertion order, `note` moves
+ * the session to the end, and the oldest entry — the stalest — is dropped
+ * past {@link SESSION_HEARTBEAT_MEMO_MAX}.
+ */
+class SessionHeartbeatMemo {
+  private readonly readAt = new Map<string, number>();
+
+  isFresh(sessionId: string, now: number): boolean {
+    const at = this.readAt.get(sessionId);
+    return at !== undefined && now - at <= SESSION_HEARTBEAT_INTERVAL_MS;
+  }
+
+  note(sessionId: string, now: number): void {
+    this.readAt.delete(sessionId);
+    this.readAt.set(sessionId, now);
+    if (this.readAt.size > SESSION_HEARTBEAT_MEMO_MAX) {
+      const oldest = this.readAt.keys().next().value;
+      if (oldest !== undefined) this.readAt.delete(oldest);
+    }
+  }
+}
+
+/**
+ * [#25343] One memo per data engine, held weakly: in a running process that
+ * is the one engine the manager is wired to (so the memo is per-process), and
+ * a second engine — another manager, a test double — never answers from the
+ * first one's memo.
+ */
+const sessionHeartbeatMemos = new WeakMap<object, SessionHeartbeatMemo>();
+
+function sessionHeartbeatMemoFor(engine: object): SessionHeartbeatMemo {
+  let memo = sessionHeartbeatMemos.get(engine);
+  if (!memo) {
+    memo = new SessionHeartbeatMemo();
+    sessionHeartbeatMemos.set(engine, memo);
+  }
+  return memo;
+}
+
 /** The body of `AuthManager#enforceSessionControls`; the method's docblock there is its contract. */
 export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation'>, sessionId: string | undefined, createdAtHint: unknown): Promise<void> {
   const idleMin = Math.floor(Number(this.config.sessionIdleTimeoutMinutes) || 0);
   const absHrs = Math.floor(Number(this.config.sessionAbsoluteMaxHours) || 0);
-  if (idleMin <= 0 && absHrs <= 0) return;
+  // [#25343] Both limits off no longer returns here: `last_activity_at` is
+  // "the last request on this session" on every deployment, not only where an
+  // idle timeout reads it (ruling 6358844136, letter A). What both-off buys
+  // instead is the memo below, so the added read is throttled like the write.
+  const limitsOff = idleMin <= 0 && absHrs <= 0;
   const engine = this.getDataEngine();
   if (!engine || !sessionId) return;
+  const memo = limitsOff ? sessionHeartbeatMemoFor(engine) : undefined;
+  if (memo?.isFresh(sessionId, Date.now())) return;
   try {
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
     const srow = await engine.findOne('sys_session', {
@@ -464,8 +531,9 @@ export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHos
       fields: ['id', 'created_at', 'last_activity_at', 'revoked_at'],
       context: SYSTEM_CTX,
     });
-    if (!srow?.id || srow.revoked_at) return;
     const now = Date.now();
+    memo?.note(sessionId, now);
+    if (!srow?.id || srow.revoked_at) return;
     let reason: string | undefined;
     if (absHrs > 0) {
       const created = srow.created_at ?? createdAtHint;
@@ -498,33 +566,42 @@ export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHos
       ));
       return;
     }
-    if (idleMin > 0) {
-      const la = srow.last_activity_at ? new Date(srow.last_activity_at as any).getTime() : 0;
-      if (now - la > 60_000) {
-        await engine.update('sys_session', { id: sessionId, last_activity_at: new Date(now) }, { context: SYSTEM_CTX } as any)
-          .catch((e: unknown) => this.logDurabilityDegradation(
-            'AuthManager: the session activity heartbeat was NOT written — the request '
-              + 'succeeds and the session stays live, so nothing looks wrong. '
-              + '`last_activity_at` keeps its older value, so the idle-timeout clock (ADR-0069 '
-              + 'D4) keeps measuring from that older instant and this session will be revoked '
-              + 'as idle EARLIER than the configured window — an active user signed out '
-              + 'mid-session for no visible reason. Remedy: make the sys_session update land; '
-              + 'the heartbeat retries on the next request past the one-minute throttle.',
-            e,
-            { object: 'sys_session', sessionId, field: 'last_activity_at' },
-          ));
-      }
+    // [#25343] The heartbeat runs on every deployment, idle timeout or not.
+    const la = srow.last_activity_at ? new Date(srow.last_activity_at as any).getTime() : 0;
+    if (now - la > SESSION_HEARTBEAT_INTERVAL_MS) {
+      await engine.update('sys_session', { id: sessionId, last_activity_at: new Date(now) }, { context: SYSTEM_CTX } as any)
+        .catch((e: unknown) => this.logDurabilityDegradation(
+          'AuthManager: the session activity heartbeat was NOT written — the request '
+            + 'succeeds and the session stays live, so nothing looks wrong. '
+            + '`last_activity_at` keeps its older value, so the idle-timeout clock (ADR-0069 '
+            + 'D4) keeps measuring from that older instant and this session will be revoked '
+            + 'as idle EARLIER than the configured window — an active user signed out '
+            + 'mid-session for no visible reason. Remedy: make the sys_session update land; '
+            + 'the heartbeat retries on the next request past the one-minute throttle.',
+          e,
+          { object: 'sys_session', sessionId, field: 'last_activity_at' },
+        ));
     }
   } catch (e) {
     // Never break a request. [#12981] But a control that silently stops
     // running is a control the operator still believes is on.
     this.logDurabilityDegradation(
-      'AuthManager: the per-request session controls did not run to completion — the request '
-        + 'succeeds, so nothing looks wrong. Idle and absolute session limits (ADR-0069 D4) '
-        + 'were not evaluated for this session, so a session past its limit is neither revoked '
-        + 'nor reported by the branch above. Remedy: this is the LOOKUP half failing (the '
-        + 'sys_session read), so check driver connectivity and read permission on sys_session; '
-        + 'the controls re-run on the next request.',
+      limitsOff
+        // [#25343] With no limit configured the read feeds only the heartbeat,
+        // so that is what was lost — saying "limits not evaluated" would name
+        // a control this deployment never turned on.
+        ? 'AuthManager: the session activity heartbeat did not run — the request succeeds, so '
+          + 'nothing looks wrong. `last_activity_at` was not advanced for this session, so the '
+          + 'Sessions list shows an older Last Activity than the session really has. Remedy: '
+          + 'this is the LOOKUP half failing (the sys_session read), so check driver '
+          + 'connectivity and read permission on sys_session; the heartbeat re-runs on the '
+          + 'next request.'
+        : 'AuthManager: the per-request session controls did not run to completion — the request '
+          + 'succeeds, so nothing looks wrong. Idle and absolute session limits (ADR-0069 D4) '
+          + 'were not evaluated for this session, so a session past its limit is neither revoked '
+          + 'nor reported by the branch above. Remedy: this is the LOOKUP half failing (the '
+          + 'sys_session read), so check driver connectivity and read permission on sys_session; '
+          + 'the controls re-run on the next request.',
       e,
       { object: 'sys_session', sessionId, idleMinutes: idleMin, absoluteHours: absHrs },
     );
