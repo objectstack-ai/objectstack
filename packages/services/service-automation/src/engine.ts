@@ -602,6 +602,19 @@ export interface FlowTrigger {
     readonly type: string;
     start(binding: FlowTriggerBinding, callback: (ctx: AutomationContext) => Promise<void>): void;
     stop(flowName: string): void;
+    /**
+     * [#25235] Optional. Called when the engine refuses to arm `flowName` ON
+     * PURPOSE before ever reaching {@link start} — the scheduled-work policy is
+     * off — so a trigger that keeps arming state outside this process can
+     * disarm what an earlier kernel left armed, whether or not this one bound
+     * it. {@link stop} cannot: it tears down only this process's own binding.
+     *
+     * The schedule trigger is the one that needs it: its `sys_job` row still
+     * `active` is how the next kernel tells "the kernel stopped ticking" from
+     * "the flow was refused", and a refusal that left the row armed would read
+     * as a silence and record every due time of it as `missed`.
+     */
+    release?(flowName: string): void;
 }
 
 // ─── Connector Registry (Plugin Extension Point) ────────────────────
@@ -2182,6 +2195,13 @@ export interface SuspendedRunStore {
      * so "open a past failed run" works after a restart.
      */
     loadTerminal?(runId: string): Promise<RunRecord | null>;
+    /**
+     * [#25235] The per-flow cap on terminal history rows this store enforces
+     * at write time, as configured; `0` when the cap is disabled. Optional — a
+     * store that does not say is read as declaring none. Read by
+     * {@link AutomationEngine.missedRunLimit}.
+     */
+    readonly maxTerminalRunsPerFlow?: number;
 }
 
 /** What a claimed dispatch turned into (#14501). */
@@ -3050,6 +3070,29 @@ export class AutomationEngine implements IAutomationService {
      * documents that reading of the two for `missed`; no step ran, so `steps`
      * is empty.
      */
+    /**
+     * [#25235] How many missed due times one detection may record for one
+     * flow, or `null` when it may record none.
+     *
+     * `null` without a persisted dispatch ledger: "no claim for this window"
+     * is then not evidence that nothing ran, so the detection is skipped
+     * rather than inferred (the trigger says so, naming the flow).
+     *
+     * Otherwise the run history's own per-flow cap
+     * ({@link SuspendedRunStore.maxTerminalRunsPerFlow}): the store keeps only
+     * that many newest terminal rows per flow and deletes the rest in the same
+     * write, so recording more would be writing rows it removes at once. A
+     * store that declares no cap (or `0`, cap disabled) leaves the engine's
+     * own run buffer (`maxLogSize`) as the history bound, and that is read
+     * instead — never a number of this method's own.
+     */
+    missedRunLimit(): number | null {
+        const ledger = this.flowDispatchStore;
+        if (!ledger || typeof ledger.read !== 'function') return null;
+        const cap = this.store?.maxTerminalRunsPerFlow;
+        return typeof cap === 'number' && cap > 0 ? cap : this.maxLogSize;
+    }
+
     async recordMissedRun(missed: MissedScheduledRun): Promise<MissedRunOutcome> {
         const store = this.flowDispatchStore;
         if (!store || typeof store.read !== 'function') return 'unverifiable';
@@ -3648,6 +3691,22 @@ export class AutomationEngine implements IAutomationService {
                 this.logger.info(
                     `Flow '${flowName}' is not armed on trigger '${resolved.triggerType}' — ${reason}`,
                 );
+            }
+            // [#25235] A refusal on purpose disarms what a previous kernel left
+            // armed — see {@link FlowTrigger.release}. On every pass, not once:
+            // the trigger may register after the flow, and a cancel by name of
+            // an already-disarmed job changes nothing.
+            const refusing = this.triggers.get(resolved.triggerType);
+            if (refusing && typeof refusing.release === 'function') {
+                try {
+                    refusing.release(flowName);
+                } catch (err) {
+                    this.logger.warn(
+                        `Flow '${flowName}' is not armed on trigger '${resolved.triggerType}', and disarming what ` +
+                            `an earlier start left armed for it failed. The failure is in this record's meta.`,
+                        describeThrownForLog(err),
+                    );
+                }
             }
             return;
         }

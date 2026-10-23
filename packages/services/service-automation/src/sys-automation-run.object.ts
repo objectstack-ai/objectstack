@@ -210,7 +210,7 @@ export const SysAutomationRun = ObjectSchema.create({
         label: 'Status',
         required: true,
         defaultValue: 'paused',
-        description: 'paused = a live suspended run (resumable); completed / failed / cancelled / timed_out / refused / missed = a terminal run kept as durable history. refused = the flow reached an `end` node declaring `outcome: \'refused\'` — a successful evaluation that said no, distinct from failed, with the rendered reason in refusal_message. missed = a scheduled due time that passed while the kernel was not ticking and was not run (started_at is the due time, finished_at when it was detected).',
+        description: 'paused = a live suspended run (resumable); completed / failed / cancelled / timed_out / refused / missed = a terminal run kept as durable history. refused = the flow reached an `end` node declaring `outcome: \'refused\'` — a successful evaluation that said no, distinct from failed, with the rendered reason in refusal_message. missed = a scheduled run that came due while the environment was not running; it is recorded afterwards and never run (started_at is the due time, finished_at when it was found).',
         group: 'State',
       },
     ),

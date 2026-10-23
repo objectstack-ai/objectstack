@@ -13,7 +13,7 @@ import {
     scheduledWorkDisabledReason,
     type ScheduledWorkPolicy,
 } from '@objectstack/types';
-import { dueTimesInSilence, MAX_MISSED_ENTRIES_PER_FLOW } from './missed-due-times.js';
+import { dueTimesInSilence } from './missed-due-times.js';
 
 /**
  * Structural mirror of the automation engine's `FlowTriggerBinding`
@@ -153,6 +153,13 @@ export interface ScheduleDispatchLedger {
      * optional for the same reason the two above are.
      */
     recordMissedRun?(missed: MissedScheduledRunInput): Promise<'recorded' | 'dispatched' | 'unverifiable'>;
+    /**
+     * [#25235] How many missed due times one detection may record per flow —
+     * the run history's own per-flow cap — or `null` when the ledger is not
+     * persisted and none may be. Mirror of `AutomationEngine.missedRunLimit`;
+     * a ledger without it records none, as with `null`.
+     */
+    missedRunLimit?(): number | null;
 }
 
 /** [#25235] What {@link ScheduleDispatchLedger.recordMissedRun} takes. */
@@ -740,7 +747,9 @@ export class ScheduleTrigger implements FlowTrigger {
             // Same ordering reason as the declaration refusal below: drop any
             // prior binding before throwing, so a rebind under a switch that
             // has since been turned off cannot leave the previous job armed.
-            this.stop(binding.flowName);
+            // [#25235] …nor a job an EARLIER kernel left armed: a refusal on
+            // purpose is not a silence — see {@link release}.
+            this.release(binding.flowName);
             refuseScheduledWorkDisabled(this.logger, 'schedule', binding.flowName, policy);
         }
 
@@ -750,6 +759,8 @@ export class ScheduleTrigger implements FlowTrigger {
             this.logger.warn(
                 `[schedule] flow '${binding.flowName}' has no recognizable schedule descriptor — not bound`,
             );
+            // [#25235] Not bound on purpose, so not a silence either.
+            this.release(binding.flowName);
             return;
         }
 
@@ -784,7 +795,8 @@ export class ScheduleTrigger implements FlowTrigger {
             // REMOVES the organization must not leave the previous, still-armed
             // job firing org-less ticks behind an error that says it was
             // refused — and the throw below leaves this method immediately.
-            this.stop(binding.flowName);
+            // [#25235] Released, not just stopped: see {@link release}.
+            this.release(binding.flowName);
             refuseMissingOrganization(this.logger, 'schedule', binding.flowName, binding);
         }
 
@@ -997,21 +1009,38 @@ export class ScheduleTrigger implements FlowTrigger {
         const prior = await priorArming;
         if (!prior || !prior.active || !prior.schedule || !prior.lastAliveAt) return;
         const armed = prior.schedule;
+
+        // [#25235] Without a persisted dispatch ledger "no claim for this
+        // window" is not evidence that nothing ran, so nothing is inferred
+        // from it: the detection is skipped, said once for the flow.
+        const ledger = this.getLedger();
+        const limit =
+            ledger && typeof ledger.recordMissedRun === 'function' && typeof ledger.missedRunLimit === 'function'
+                ? ledger.missedRunLimit()
+                : null;
+        if (!ledger || limit === null || typeof ledger.recordMissedRun !== 'function') {
+            this.logger.warn(
+                `[schedule] flow '${flowName}': its job was left armed by an earlier start, but there is no ` +
+                    `persisted dispatch ledger to tell a run that happened from one that did not, so due times ` +
+                    `that passed while nothing was ticking are NOT checked and none is recorded as missed.`,
+            );
+            return;
+        }
+
         const detected = this.now();
-        const { dueTimes, truncated } = dueTimesInSilence(armed, new Date(prior.lastAliveAt), detected);
+        const { dueTimes, dropped } = dueTimesInSilence(armed, new Date(prior.lastAliveAt), detected, limit);
         if (dueTimes.length === 0) return;
 
         const span =
             `${dueTimes.length === 1 ? 'due' : 'due between'} ${dueTimes[0].toISOString()}` +
             (dueTimes.length > 1 ? ` and ${dueTimes[dueTimes.length - 1].toISOString()}` : '');
-        const ledger = this.getLedger();
-        if (!ledger || typeof ledger.recordMissedRun !== 'function') {
+        if (dropped) {
             this.logger.warn(
-                `[schedule] flow '${flowName}' had ${dueTimes.length}${truncated ? '+' : ''} scheduled run(s) ` +
-                    `${span} pass while no kernel was ticking, and none was run — but the automation service ` +
-                    `cannot record a missed run, so they appear nowhere in its run history.`,
+                `[schedule] flow '${flowName}': ${dropped.atLeast ? 'at least ' : ''}${dropped.count} earlier ` +
+                    `scheduled run(s), the earliest due ${dropped.earliest.toISOString()}, also passed while nothing ` +
+                    `was ticking and are NOT recorded as missed — only the newest ${limit}, the run history's ` +
+                    `per-flow cap, are.`,
             );
-            return;
         }
 
         const detectedAt = detected.toISOString();
@@ -1042,11 +1071,7 @@ export class ScheduleTrigger implements FlowTrigger {
             this.logger.warn(
                 `[schedule] flow '${flowName}' MISSED ${recorded} scheduled run(s) ${span} while no kernel was ` +
                     `ticking — recorded as 'missed' in its run history and NOT run: a missed scheduled run is ` +
-                    `never replayed.` +
-                    (truncated
-                        ? ` More due times passed before ${dueTimes[0].toISOString()}; only the ` +
-                          `${MAX_MISSED_ENTRIES_PER_FLOW} most recent are recorded.`
-                        : ''),
+                    `never replayed.`,
             );
         }
         if (unverifiable > 0) {
@@ -1178,6 +1203,52 @@ export class ScheduleTrigger implements FlowTrigger {
             );
             return null;
         }
+    }
+
+    /**
+     * [#25235] Disarm this flow's job by its deterministic name, whether or not
+     * THIS kernel bound it — for a flow refused on purpose (the scheduled-work
+     * policy is off, an acting organization is missing, the descriptor is
+     * unreadable). The engine calls it for the policy refusal it makes before
+     * {@link start} is reached; {@link start} calls it on its own refusals.
+     *
+     * Why {@link stop} is not enough: it cancels only a binding this process
+     * holds, so a kernel that refuses a flow it never bound left the `sys_job`
+     * row an EARLIER kernel armed still `active` — and the next kernel to bind
+     * the flow reads an active row as "the kernel stopped ticking", recording
+     * every due time of the refusal as `missed`. Those due times were refused,
+     * not missed; a cancelled row says so.
+     */
+    release(flowName: string): void {
+        if (this.bound.has(flowName)) {
+            this.stop(flowName); // cancels the job by the same name
+            return;
+        }
+        this.replayPasses.delete(flowName);
+        const jobService = this.getJobService();
+        if (!jobService || typeof jobService.cancel !== 'function') {
+            this.logger.debug?.(
+                `[schedule] flow '${flowName}' refused with no job service to disarm an earlier start's job`,
+            );
+            return;
+        }
+        const jobName = `${JOB_PREFIX}:${flowName}`;
+        if (typeof jobService.setReplayGuard === 'function') {
+            try { jobService.setReplayGuard(jobName, null); } catch { /* the cancel below is what matters */ }
+        }
+        let cancelled: Promise<void>;
+        try {
+            cancelled = Promise.resolve(jobService.cancel(jobName));
+        } catch (err) {
+            cancelled = Promise.reject(err);
+        }
+        void cancelled.catch((err) => {
+            this.logger.warn(
+                `[schedule] flow '${flowName}' is refused, but disarming the job an earlier start left armed for ` +
+                    `it failed, so a later start may record its due times as missed: ` +
+                    `${(err as Error)?.message ?? String(err)}`,
+            );
+        });
     }
 
     stop(flowName: string): void {

@@ -17,6 +17,7 @@
 import { describe, it, expect } from 'vitest';
 import { AutomationEngine, InMemoryFlowDispatchStore, InMemorySuspendedRunStore } from '@objectstack/service-automation';
 import type { AutomationContext, JobSchedule, JobHandler } from '@objectstack/spec/contracts';
+import type { ScheduledWorkPolicy } from '@objectstack/types';
 import { ScheduleTrigger, type JobArmingReading, type JobServiceSurface } from './schedule-trigger.js';
 import { withScheduledWorkOn } from './deployment-switch.test-support.js';
 
@@ -64,10 +65,22 @@ function kernelJobService(table: JobTable, clock: { now: Date }) {
     };
 }
 
-/** The shared database, and a way to boot a kernel on it. */
-function deployment() {
+/** This kernel's scheduled-work policy: OFF refuses the flow on purpose. */
+const POLICY_OFF: ScheduledWorkPolicy = {
+    enabled: false,
+    posture: 'single',
+    requiresActingOrganization: false,
+    runOwnership: 'unscoped',
+};
+
+/**
+ * The shared database, and a way to boot a kernel on it. `maxTerminalRunsPerFlow`
+ * configures the run history's per-flow cap; `ledger: false` boots kernels with
+ * no persisted dispatch ledger.
+ */
+function deployment(options: { maxTerminalRunsPerFlow?: number; ledger?: boolean } = {}) {
     const table: JobTable = new Map();
-    const runHistory = new InMemorySuspendedRunStore();
+    const runHistory = new InMemorySuspendedRunStore({ maxTerminalRunsPerFlow: options.maxTerminalRunsPerFlow });
     const ledger = new InMemoryFlowDispatchStore();
     const clock = { now: new Date('2026-10-21T07:00:00Z') };
     const ran: AutomationContext[] = [];
@@ -75,9 +88,13 @@ function deployment() {
     const logger: any = { info() {}, debug() {}, error() {}, warn: (m: string) => warns.push(m) };
     logger.child = () => logger;
 
-    const boot = async () => {
-        const engine = new AutomationEngine(logger, runHistory);
-        engine.setFlowDispatchStore(ledger);
+    const boot = async (kernel: { scheduledWork?: 'off' } = {}) => {
+        const engine = new AutomationEngine(
+            logger,
+            runHistory,
+            kernel.scheduledWork === 'off' ? { scheduledWorkPolicy: POLICY_OFF } : undefined,
+        );
+        if (options.ledger !== false) engine.setFlowDispatchStore(ledger);
         engine.registerNodeExecutor({
             type: 'create_record',
             async execute(_node: unknown, _vars: unknown, context: AutomationContext) {
@@ -103,7 +120,7 @@ function deployment() {
         const jobs = kernelJobService(table, clock);
         engine.registerTrigger(new ScheduleTrigger(() => jobs.service, logger, () => engine, () => clock.now));
         await flush();
-        expect(table.get(JOB)?.active, 'the flow did not bind').toBe(true);
+        if (kernel.scheduledWork !== 'off') expect(table.get(JOB)?.active, 'the flow did not bind').toBe(true);
         return { engine, jobs };
     };
 
@@ -195,5 +212,76 @@ describe('[#25235] a scheduled run whose due time passed while no kernel was tic
 
         expect((await b.engine.listRuns(FLOW)).filter((r) => r.status === 'missed')).toEqual([]);
         expect(d.ran).toHaveLength(1);
+    });
+
+    it('an evicted kernel across three due times records one missed entry per due time', async () => {
+        const d = deployment();
+
+        const a = await d.boot();
+        await a.jobs.tick(JOB, '2026-10-21T08:00:00.000Z');
+        a.jobs.evict();
+
+        d.clock.now = new Date('2026-10-24T09:30:00.000Z');
+        const b = await d.boot();
+
+        const missed = (await b.engine.listRuns(FLOW, { status: 'missed' })).map((r) => r.startedAt).sort();
+        expect(missed).toEqual(['2026-10-22T08:00:00.000Z', '2026-10-23T08:00:00.000Z', '2026-10-24T08:00:00.000Z']);
+        expect(d.ran).toHaveLength(1);
+    });
+
+    it('a kernel that REFUSED the flow on purpose (scheduled work off) between two that ran it records no missed entry', async () => {
+        const d = deployment();
+
+        const a = await d.boot();
+        await a.jobs.tick(JOB, '2026-10-21T08:00:00.000Z');
+        a.jobs.evict(); // stopped with the job armed
+
+        // The middle kernel never binds the flow: its policy refuses it. The
+        // refusal disarms the job the first kernel left armed, by name.
+        d.clock.now = new Date('2026-10-21T12:00:00.000Z');
+        const off = await d.boot({ scheduledWork: 'off' });
+        expect(d.table.get(JOB)?.active, 'the refusal disarmed the earlier job').toBe(false);
+        off.jobs.evict();
+
+        d.clock.now = new Date('2026-10-24T09:30:00.000Z');
+        const c = await d.boot();
+
+        expect((await c.engine.listRuns(FLOW)).filter((r) => r.status === 'missed')).toEqual([]);
+        expect(d.ran).toHaveLength(1);
+    });
+
+    it('a long silence records only the newest due times the run history keeps per flow, and says what it dropped', async () => {
+        const d = deployment({ maxTerminalRunsPerFlow: 3 });
+
+        const a = await d.boot();
+        await a.jobs.tick(JOB, '2026-10-21T08:00:00.000Z');
+        a.jobs.evict();
+
+        d.clock.now = new Date('2026-10-27T09:30:00.000Z'); // six due times passed: 22nd–27th
+        const b = await d.boot();
+
+        const missed = (await b.engine.listRuns(FLOW, { status: 'missed' })).map((r) => r.startedAt).sort();
+        expect(missed).toEqual(['2026-10-25T08:00:00.000Z', '2026-10-26T08:00:00.000Z', '2026-10-27T08:00:00.000Z']);
+        const drop = d.warns.filter((w) => w.includes('NOT recorded as missed'));
+        expect(drop).toHaveLength(1);
+        expect(drop[0]).toContain(`flow '${FLOW}'`);
+        expect(drop[0]).toContain(': 3 earlier scheduled run(s)');
+        expect(drop[0]).toContain('the earliest due 2026-10-22T08:00:00.000Z');
+    });
+
+    it('with no persisted dispatch ledger the check is skipped — one warning naming the flow, nothing recorded', async () => {
+        const d = deployment({ ledger: false });
+
+        const a = await d.boot();
+        await a.jobs.tick(JOB, '2026-10-21T08:00:00.000Z');
+        a.jobs.evict();
+
+        d.clock.now = new Date('2026-10-22T09:30:00.000Z');
+        const b = await d.boot();
+
+        expect((await b.engine.listRuns(FLOW)).filter((r) => r.status === 'missed')).toEqual([]);
+        const skipped = d.warns.filter((w) => w.includes('no persisted dispatch ledger') && w.includes(`flow '${FLOW}'`));
+        expect(skipped).toHaveLength(1);
+        expect(d.warns.filter((w) => w.includes('MISSED'))).toEqual([]);
     });
 });

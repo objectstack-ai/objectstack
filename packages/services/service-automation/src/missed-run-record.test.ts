@@ -10,8 +10,9 @@
 import { describe, it, expect } from 'vitest';
 import { AutomationEngine, TERMINAL_RUN_STATUSES, missedRunId } from './engine.js';
 import { InMemoryFlowDispatchStore } from './flow-dispatch-store.js';
-import { InMemorySuspendedRunStore } from './suspended-run-store.js';
+import { InMemorySuspendedRunStore, DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW } from './suspended-run-store.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
+import type { ScheduledWorkPolicy } from '@objectstack/types';
 
 function recordingLogger() {
     const warns: string[] = [];
@@ -26,9 +27,13 @@ const DETECTED = '2026-10-22T09:30:00.000Z';
 const KEY = `schedule:${FLOW}:${DUE}`;
 const missed = { flowName: FLOW, dueAt: DUE, detectedAt: DETECTED, dispatchKey: KEY, organization: 'org_2mtx1w9d0k4bqf7v' };
 
-function engineOn(history = new InMemorySuspendedRunStore(), ledger: any = new InMemoryFlowDispatchStore()) {
+function engineOn(
+    history: any = new InMemorySuspendedRunStore(),
+    ledger: any = new InMemoryFlowDispatchStore(),
+    options?: ConstructorParameters<typeof AutomationEngine>[2],
+) {
     const { logger, warns } = recordingLogger();
-    const engine = new AutomationEngine(logger, history);
+    const engine = new AutomationEngine(logger, history, options);
     if (ledger) engine.setFlowDispatchStore(ledger);
     return { engine, history, ledger, warns };
 }
@@ -97,5 +102,84 @@ describe('[#25235] AutomationEngine.recordMissedRun', () => {
         expect((status.options ?? []).map((o: any) => (typeof o === 'string' ? o : o.value))).toContain('missed');
         const onlyWhen = SysAutomationRun.lifecycle?.retention?.onlyWhen as { status?: { $in?: string[] } } | undefined;
         expect(onlyWhen?.status?.$in).toContain('missed');
+    });
+});
+
+describe('[#25235] AutomationEngine.missedRunLimit — how many one detection may record per flow', () => {
+    it('is the run history\'s own per-flow cap, as the store was configured', () => {
+        expect(engineOn().engine.missedRunLimit()).toBe(DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW);
+        expect(engineOn(new InMemorySuspendedRunStore({ maxTerminalRunsPerFlow: 7 })).engine.missedRunLimit()).toBe(7);
+    });
+
+    it('a store that declares no cap leaves the engine run buffer as the bound', () => {
+        expect(engineOn(new InMemorySuspendedRunStore({ maxTerminalRunsPerFlow: 0 }), undefined, { maxLogSize: 40 }).engine.missedRunLimit()).toBe(40);
+        const undeclared = { save: async () => {}, load: async () => null, delete: async () => {}, list: async () => [] };
+        expect(engineOn(undeclared, undefined, { maxLogSize: 40 }).engine.missedRunLimit()).toBe(40);
+    });
+
+    it('is null — record none — without a persisted dispatch ledger', () => {
+        expect(engineOn(undefined, null).engine.missedRunLimit()).toBeNull();
+        expect(engineOn(undefined, { claim: async () => true }).engine.missedRunLimit()).toBeNull();
+    });
+});
+
+describe('[#25235] a flow refused by the scheduled-work policy is released, not just left unbound', () => {
+    const OFF: ScheduledWorkPolicy = { enabled: false, posture: 'single', requiresActingOrganization: false, runOwnership: 'unscoped' };
+    const ON: ScheduledWorkPolicy = { ...OFF, enabled: true };
+    const flow = {
+        name: FLOW,
+        label: FLOW,
+        type: 'schedule',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start', config: { schedule: { type: 'cron', expression: '0 8 * * *' } } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+    } as never;
+    function recordingTrigger() {
+        const calls: string[] = [];
+        return {
+            calls,
+            trigger: {
+                type: 'schedule',
+                start: (b: { flowName: string }) => void calls.push(`start:${b.flowName}`),
+                stop: (name: string) => void calls.push(`stop:${name}`),
+                release: (name: string) => void calls.push(`release:${name}`),
+            },
+        };
+    }
+
+    it('policy OFF: the trigger is asked to release the flow — whether the flow or the trigger registers first — and never to start it', () => {
+        for (const order of ['flow-first', 'trigger-first'] as const) {
+            const { engine } = engineOn(undefined, undefined, { scheduledWorkPolicy: OFF });
+            const rec = recordingTrigger();
+            if (order === 'flow-first') {
+                engine.registerFlow(FLOW, flow);
+                engine.registerTrigger(rec.trigger);
+            } else {
+                engine.registerTrigger(rec.trigger);
+                engine.registerFlow(FLOW, flow);
+            }
+            expect(rec.calls, order).toEqual([`release:${FLOW}`]);
+        }
+    });
+
+    it('policy ON: the flow is started and nothing is released', () => {
+        const { engine } = engineOn(undefined, undefined, { scheduledWorkPolicy: ON });
+        const rec = recordingTrigger();
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow(FLOW, flow);
+        expect(rec.calls).toEqual([`start:${FLOW}`]);
+    });
+
+    it('a trigger without release is unaffected, and a release that throws is said, not raised', () => {
+        const quiet = engineOn(undefined, undefined, { scheduledWorkPolicy: OFF });
+        quiet.engine.registerTrigger({ type: 'schedule', start() {}, stop() {} });
+        expect(() => quiet.engine.registerFlow(FLOW, flow)).not.toThrow();
+
+        const loud = engineOn(undefined, undefined, { scheduledWorkPolicy: OFF });
+        loud.engine.registerTrigger({ type: 'schedule', start() {}, stop() {}, release() { throw new Error('job table gone'); } });
+        expect(() => loud.engine.registerFlow(FLOW, flow)).not.toThrow();
+        expect(loud.warns.some((w) => w.includes(`Flow '${FLOW}' is not armed`) && w.includes('disarming'))).toBe(true);
     });
 });
