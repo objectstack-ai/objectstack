@@ -940,6 +940,8 @@ function grantOrganizationOf(row: unknown): string | null {
  * last-administrator guard asks too; this file supplies the grant's
  * organization as {@link grantOrganizationOf} normalizes it, the REQUESTED
  * posture and the Default Organization ({@link readDefaultOrganizationId}).
+ * ⛔ The normalizer is this reader's own by design: it reads any non-blank
+ * value as an id, where the guard's reads only a string or a number.
  */
 function grantAnchorsPlatformStanding(
   grant: unknown,
@@ -2481,6 +2483,10 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
  * on a guess, and the built-in defaults answer. This fallback is reached only
  * when the settings service is absent or has just failed, so it takes no
  * inputs that service would supply.
+ *
+ * ⛔ Kept by design, not drift: the requested posture where the service reads
+ * the one in force, and a failed derivation degraded where the service
+ * propagates it — both make this fallback the stricter reader.
  */
 async function localizationFallbackReach(ql: any, tenantId: string | undefined): Promise<OrganizationReach> {
   try {

@@ -1861,6 +1861,11 @@ export class SettingsService {
    * the one organization it derives, none (refused there, so `unowned` here),
    * or a composition with no organization object. A source that THROWS is not
    * caught, for the posture's reason (see {@link organizationWallStands}).
+   *
+   * The rule is core security's (`resolveOrganizationReach`); this service
+   * supplies its facts. ⛔ Kept by design, not drift: the posture IN FORCE where
+   * the resolver's localization fallback reads the requested one, and a failed
+   * read propagated where that fallback degrades it to the built-in defaults.
    */
   private async organizationReachOf(ctx: SettingsContext): Promise<OrganizationReach> {
     return resolveOrganizationReach({

@@ -9,7 +9,7 @@ refactor(core, plugin-auth, service-settings): one definition each for the `admi
 Clause-②: yes (widening)
 Metadata-protocol: none
 
-Two security rules were each spelled twice. A change to one copy could leave the other behind. Each now has one definition in `@objectstack/core`'s security module, and every reader calls it. No answer changes.
+Two security rules were each spelled twice. A change to one copy could leave the other behind. Each now has one definition in `@objectstack/core`'s security module, and every reader calls it. No behaviour change: every reader answers exactly as before.
 
 - **The anchor rule (ADR-0131 D5).** New export: `organizationAnchorsPlatformStanding(grantOrganizationId, { walled, defaultOrganizationId })`, with the type `PlatformStandingAnchorFacts`. It decides which `admin_full_access` grant anchors platform-admin standing:
   - behind a wall, no grant does;
@@ -34,5 +34,7 @@ Two security rules were each spelled twice. A change to one copy could leave the
   `SettingsService` and the resolver's direct localization fallback both call it. Each still supplies its own facts:
   - the service: the posture in force (the `tenancy` service), with a failed read propagated to its caller;
   - the fallback: the requested posture (`OS_TENANCY_POSTURE`), with a failed read degraded to the built-in defaults.
+
+  These two differences are kept by design: they make the fallback, which runs only when the service has failed, the stricter reader.
 
 No configuration, metadata or HTTP behaviour changes. Code that does not import the new exports needs no action.

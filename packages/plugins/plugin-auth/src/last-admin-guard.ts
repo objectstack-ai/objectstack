@@ -1159,6 +1159,8 @@ export function registerLastAdminGuard(
    * and neither does any grant under a wall or where no Default Organization
    * is nameable — a composition that registers no organization object among
    * them. The posture is the REQUESTED one, read as the resolver reads it.
+   * ⛔ The owner normalizer (`toId`: a string or a number) is this guard's own
+   * by design; the rule takes the organization already normalized.
    */
   const anchorOwnerTest = async (
     op: GuardedOp,
