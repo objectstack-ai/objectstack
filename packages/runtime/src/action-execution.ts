@@ -3147,6 +3147,11 @@ export function registeredActionHandlerProbe(_deps: ActionExecutionDeps,
  *  3. the metadata service's standalone `action` rows — the env-scoped
  *     kernels where the registry carries no copy.
  *
+ * [#25308] On a host whose `protocol` slot has a by-name read, sources 2 and 3
+ * are that read instead: the protocol's merged `action` item, which withholds
+ * a disabled package's. The two copies are read only where no such read
+ * exists (structural absence, answered as before).
+ *
  * Sources 2 and 3 are what the route was missing: a Studio-authored or
  * standalone `defineAction` declaration was invisible here, so its declared
  * `type` (and its `requiredPermissions`) were never read on the REST path
@@ -3178,6 +3183,33 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
         const owner = standaloneActionObjectName(deps, action);
         return owner === objectName || isObjectLessActionKey(owner);
     };
+
+    // [#25308] The standalone declaration is the protocol's by-name action
+    // read, in {@link readExposureDeclaration}'s shape: the execution face
+    // where the protocol has one, the item under its own name or nothing. That
+    // read withholds a disabled package's item (it answers it as absent, as
+    // `GET /api/v1/meta/action/NAME` does), so such an action resolves to no
+    // declaration and the caller's "no declaration" answer is the one a name
+    // nothing declares gets. ⛔ The registry and metadata-service copies below
+    // are not consulted when the read exists: both keep a disabled package's
+    // item, and the package question is the protocol's alone. A read that
+    // throws is the metadata plane failing to answer (ADR-0110 D3), never a
+    // cue to fall back to a copy that would run that item during the outage.
+    const protocol = await deps.resolveService(requestContext, 'protocol', envId) as ExposureDeclarationRead | undefined;
+    const byName = typeof protocol?.getMetaItemForExecution === 'function'
+        ? protocol.getMetaItemForExecution
+        : typeof protocol?.getMetaItem === 'function' ? protocol.getMetaItem : undefined;
+    if (byName) {
+        let envelope: unknown;
+        try {
+            envelope = await byName.call(protocol, { type: 'action', name: actionName });
+        } catch (err: any) {
+            return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
+        }
+        const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
+        const declared = item !== null && typeof item === 'object' && item.name === actionName && ownsRoute(item);
+        return { action: declared ? item : undefined, obj };
+    }
 
     try {
         const fromRegistry: any = ql?.registry?.getItem?.('action', actionName);
