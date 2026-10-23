@@ -18,8 +18,6 @@
  */
 
 export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "objects.sys_api_key._actions.create_api_key.params.expires_at.helpText": "7f6e17a0c3b2128d",
-  "objects.sys_api_key._actions.create_api_key.resultDialog.fields.expires_at": "df0ef5fae02b2044",
   "objects.sys_email.fields.bcc_addresses.label": "8674899b7b6d5126",
   "objects.sys_email.fields.cc_addresses.label": "02946d952cf15623",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
