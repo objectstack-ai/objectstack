@@ -537,6 +537,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   },
   {
     kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'membershipKeys',
+    why: "not offered while nothing applies it (#25234 ruling A, PR 1, the spec half): no server stages a declared membership key until plugin-security's `stageRlsMembership` reads it (PR 2), so a form row would let an author declare a set every policy reading it fails closed on, the declared-not-enforced trap Prime Directive #10 names. The ruling makes the Studio object-form row a separate objectui card; code, REST `/meta` and MCP authoring carry the key meanwhile. Revisit when the reader lands: a key is a named map entry of two column pickers, a filter and two prose strings, a form-face addition rather than a reconciliation",
+  },
+  {
+    kind: 'omit',
     type: 'app',
     path: ROOT_PATH,
     key: 'contextSelectors',

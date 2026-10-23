@@ -34,12 +34,36 @@ import { strictObject } from '../shared/strict-object';
  * 4. **Territory / Regional Access (§7.3.1 dynamic membership)**
  *    - Sales reps only see accounts in their assigned territories
  *    - `using: "account_id in current_user.territory_account_ids"`
- *      (the runtime stages `territory_account_ids` in `ExecutionContext.rlsMembership`)
+ *      (`territory_account_ids` is not a kernel value: the app supplies it in
+ *      `ExecutionContext.rlsMembership`, see "Where a membership key comes
+ *      from" below; until something does, the policy matches no rows)
  *
  * 5. **Manager / Hierarchy Access (§7.3.1 dynamic membership)**
  *    - Managers see records assigned to anyone they manage
  *    - `using: "assigned_to_id in current_user.team_member_ids"`
- *      (the runtime pre-resolves `team_member_ids`, no subquery needed)
+ *      (likewise app-supplied, no subquery needed)
+ *
+ * 6. **Portal / Partner Access (§7.3.1 dynamic membership)**
+ *    - A supplier's contacts see only that supplier's orders
+ *    - `using: "supplier in current_user.portal_supplier_ids"`
+ *      (declared as `membershipKeys.portal_supplier_ids` on the supplier-contact
+ *      roster object, see `MembershipKeySchema`)
+ *
+ * ## Where a membership key comes from
+ *
+ * The kernel resolves `current_user.id`, `organization_id`, `positions`,
+ * `org_user_ids`, `accessible_org_ids` and `email` itself. Any other
+ * `current_user.KEY` read with `in` is a membership set the APP supplies,
+ * through one of two sources:
+ *
+ * - a **registered membership resolver** (ADR-0105 D11, the
+ *   `rls-membership-resolver` service), code an installed plugin runs; or
+ * - a **declared membership key**: `ObjectSchema.membershipKeys` on the roster
+ *   object whose rows define the set. Not applied yet: the security plugin
+ *   does not read the declaration in this release.
+ *
+ * The platform stages no other key. A policy reading a key neither source
+ * supplies drops out and matches no rows (fail closed).
  * 
  * ## PostgreSQL RLS Comparison
  * 
@@ -270,8 +294,8 @@ function refineRowLevelSecurityPolicy(data: RowLevelSecurityPolicyClauses, ctx: 
  *   label: 'Managers Can View Team Records',
  *   object: 'task',
  *   operation: 'select',
- *   // The runtime resolves the manager's reports into
- *   // ExecutionContext.rlsMembership.team_member_ids — no subquery needed.
+ *   // `team_member_ids` is app-supplied (a registered membership resolver
+ *   // fills ExecutionContext.rlsMembership.team_member_ids), no subquery needed.
  *   using: 'assigned_to_id in current_user.team_member_ids',
  *   positions: ['manager', 'director'],
  *   enabled: true
@@ -297,7 +321,8 @@ function refineRowLevelSecurityPolicy(data: RowLevelSecurityPolicyClauses, ctx: 
  *   label: 'Sales Reps Access Regional Accounts',
  *   object: 'account',
  *   operation: 'select',
- *   // The runtime stages the rep's territory accounts in
+ *   // `territory_account_ids` is app-supplied: a registered membership resolver
+ *   // stages the rep's territory accounts in
  *   // ExecutionContext.rlsMembership.territory_account_ids.
  *   using: 'id in current_user.territory_account_ids',
  *   positions: ['sales_rep'],
@@ -493,14 +518,16 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    * - `current_user.organization_id` → `ExecutionContext.tenantId`
    * - `current_user.positions` → `ExecutionContext.positions` (array)
    * - `current_user.org_user_ids` → ids of fellow members of the active org
-   * - any key the runtime stages in `ExecutionContext.rlsMembership`
+   * - any other key an app supplies in `ExecutionContext.rlsMembership` (a
+   *   registered membership resolver; see "Where a membership key comes
+   *   from" in the module docblock)
    *
    * A referenced value that is missing/`null` (scalar) or empty (array)
    * makes that policy drop out — **fail-closed**, never fail-open.
    *
    * **Dynamic membership (§7.3.1)** — set-membership that would otherwise
    * need a subquery ("tasks assigned to anyone I manage", "accounts in my
-   * territories") is resolved by the runtime into
+   * territories") is resolved per request, by an app-supplied source, into
    * `ExecutionContext.rlsMembership` under a stable key, then referenced as
    * `field in current_user.<key>`. This keeps the compiler subquery-free
    * while still supporting hierarchy- and sharing-based access.
@@ -510,7 +537,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    * @example "organization_id == current_user.organization_id"
    * @example "owner_id == current_user.id"
    * @example "status == 'published'"
-   * @example "assigned_to_id in current_user.team_member_ids" // §7.3.1 pre-resolved
+   * @example "assigned_to_id in current_user.team_member_ids" // §7.3.1 app-supplied set
    * @example "true" // privileged-position allow-all
    */
   using: z.string()

@@ -214,6 +214,46 @@
         }
       }
     },
+    "membershipKeys": {
+      "status": "planned",
+      "verifiedAt": "2026-10-23",
+      "evidence": "packages/spec/src/data/object.zod.ts#ObjectSchemaBase (declares the key, optional, typed as the membership-key map); packages/spec/src/security/membership-key.zod.ts#MembershipKeySchema (the closed entry shape: `userField`, `valueField`, optional `filter`, `label`, `description`; `valueField` equal to `userField` refused); packages/spec/src/security/membership-key.zod.ts#MembershipKeysSchema (the map; a key name that is not snake_case or is one of the kernel context values in `RESERVED_RLS_MEMBERSHIP_KEYS` refused); packages/spec/src/stack.zod.ts#duplicateMembershipKeyFindings (one key declared on two objects refused by `defineStack` and `composeStacks`)",
+      "authorWarn": true,
+      "authorHint": "Not applied yet: no server reads `membershipKeys` in this release, so a policy reading `current_user.KEY` matches no rows. Until the security plugin stages the key, scope rows with positions or a registered membership resolver.",
+      "note": "PLANNED, the reader pending: #25234 ruling A (6355640929), PR 1 of 3, the spec half. The one reader is to be plugin-security's request staging, `stageRlsMembership` (packages/plugins/plugin-security/src/security-plugin.ts), gaining this declarative second source beside the registered `rls-membership-resolver` service: per key, lazily, once per request, as the platform's own Layer 0 system read independent of the caller's audience and posture, bounded at 1,000 values with overflow failing closed (PR 2). Measured before the key existed: `git grep membershipKeys` over the whole tree at origin/main ab510f42e7 returns zero hits (control: `defaultRowScope` under packages/plugins hits), so this declaration adds no reader and a policy reading a declared key fails closed exactly as an unstaged key does today. The field-type, filter and policy-comparison refusals (ruled refusals 4 to 7 and 11 to 13) are the authoring rules' (PR 3). Drilled into `children` because `check:liveness` refuses an undeclared container inheritance; each child is `planned` for the same reason as the container, and only the container carries `authorWarn`, so authoring the key warns once. Flip to `live` on the commit that lands PR 2, citing `stageRlsMembership` as the evidence and explain's `via: 'membership:KEY'` as the second read point, and drop `authorWarn` / `authorHint` in that same edit: a warned `live` row reds this gate. Flip the children with the container.",
+      "children": {
+        "userField": {
+          "status": "planned",
+          "verifiedAt": "2026-10-23",
+          "evidence": "packages/spec/src/security/membership-key.zod.ts#MembershipKeySchema (declares `userField`: the column holding the roster row's user, a snake_case column name)",
+          "note": "Planned with its container: no server reads `membershipKeys` until plugin-security's `stageRlsMembership` does. Flip with the container."
+        },
+        "valueField": {
+          "status": "planned",
+          "verifiedAt": "2026-10-23",
+          "evidence": "packages/spec/src/security/membership-key.zod.ts#MembershipKeySchema (declares `valueField`: the column whose values form the set, a snake_case column name, refused when equal to `userField`)",
+          "note": "Planned with its container: no server reads `membershipKeys` until plugin-security's `stageRlsMembership` does. Flip with the container."
+        },
+        "filter": {
+          "status": "planned",
+          "verifiedAt": "2026-10-23",
+          "evidence": "packages/spec/src/security/membership-key.zod.ts#MembershipKeySchema (declares `filter`: the optional CEL narrowing over this object's own columns)",
+          "note": "Planned with its container: no server reads `membershipKeys` until plugin-security's `stageRlsMembership` does. Flip with the container."
+        },
+        "label": {
+          "status": "planned",
+          "verifiedAt": "2026-10-23",
+          "evidence": "packages/spec/src/security/membership-key.zod.ts#MembershipKeySchema (declares `label`: the human-readable name of the set)",
+          "note": "Planned with its container: no server reads `membershipKeys` until plugin-security's `stageRlsMembership` does. Flip with the container."
+        },
+        "description": {
+          "status": "planned",
+          "verifiedAt": "2026-10-23",
+          "evidence": "packages/spec/src/security/membership-key.zod.ts#MembershipKeySchema (declares `description`: what the set holds and who it is for)",
+          "note": "Planned with its container: no server reads `membershipKeys` until plugin-security's `stageRlsMembership` does. Flip with the container."
+        }
+      }
+    },
     "publicSharing": {
       "status": "live",
       "verifiedAt": "2026-08-28",

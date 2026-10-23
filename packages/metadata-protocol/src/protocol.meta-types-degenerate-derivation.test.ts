@@ -309,8 +309,10 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      * 25 → 26 when it gained `record` (#24265, the row an app page binds as
      * `record`). `object`
      * moved 44 → 45 the same way when it gained `attachedOnRead` (#22386, the
-     * blocks a service attaches per caller on read), and 45 → 46 when it gained
-     * `defaultRowScope` (#24338, the object's default row scope). `field` moved 75 → 77 the
+     * blocks a service attaches per caller on read), 45 → 46 when it gained
+     * `defaultRowScope` (#24338, the object's default row scope), and 46 → 47
+     * when it gained `membershipKeys` (#25234, the roster object's declarative
+     * membership keys). `field` moved 75 → 77 the
      * same way when it gained `dueLike` and `settledWhen` (#22227, a date's
      * deadline and when it is settled), 77 → 78 when it gained
      * `conditionalFormatting` (#22228, a field's cell formatting rules), and
@@ -325,7 +327,7 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      */
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
         agent: 26, app: 30, dashboard: 22, dataset: 16, field: 80, flow: 23,
-        hook: 22, object: 46, page: 26, position: 13, report: 21, skill: 17, tool: 14,
+        hook: 22, object: 47, page: 26, position: 13, report: 21, skill: 17, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

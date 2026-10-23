@@ -23,5 +23,6 @@ export * from './public-form';
 export * from './explain.zod';
 export * from './sharing.zod';
 export * from './rls.zod';
+export * from './membership-key.zod';
 export * from './tenancy-posture';
 export * from './tenant-layer0-verdict';
