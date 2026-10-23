@@ -217,16 +217,23 @@ const arrange = async (config: Record<string, unknown> = {}) => {
  * reads twice). Every later request is the case the count is about.
  *
  * [#24061] An in-process session read signs no JWT any more, so it no longer
- * mints the signing key either: the warm-up request writes nothing. A write
- * inside the request is still declined across — pinned below with the
- * idle-timeout heartbeat, the write a session read still makes.
+ * mints the signing key either. [#25343] The one write a session read still
+ * makes is the `last_activity_at` heartbeat, which now runs on every
+ * deployment — on a session's first request and then at most once a minute.
+ * So the warm-up is one request per session: each writes exactly that
+ * heartbeat, and every request after it inside the minute writes nothing,
+ * which is the steady state of a live session. A write inside the request is
+ * still declined across — pinned below with that same heartbeat.
  */
 const arrangeWarm = async () => {
   const a = await arrange();
   const observersBefore = a.probe.middlewareCount();
   const warm = await resolveRequest(a, a.bearers.owner);
-  expect(warm.writes).toEqual([]);
+  expect(warm.writes).toEqual(['update sys_session']);
   expect(a.probe.middlewareCount()).toBe(observersBefore + 1);
+  for (const bearer of [a.bearers.member, a.bearers.leaver, a.bearers.operator]) {
+    expect((await resolveRequest(a, bearer)).writes).toEqual(['update sys_session']);
+  }
   return a;
 };
 
@@ -375,11 +382,16 @@ describe.concurrent('the real customSession hook and resolveAuthzContext resolve
     expect(countOf(reads, 'sys_user_position')).toBe(1);
   });
 
-  it('a write inside the request (the idle-timeout heartbeat): the memo declines, the envelope is unchanged', async () => {
-    // [ADR-0069 D4] With an idle timeout configured, the hook stamps the
-    // session's `last_activity_at` AFTER it resolved the grants — at most once
-    // a minute, and on a session's first request since sign-in.
-    const a = await arrange({ sessionIdleTimeoutMinutes: 30 });
+  it.each([
+    ['the default config (no session limit)', {}],
+    ['an idle timeout', { sessionIdleTimeoutMinutes: 30 }],
+  ])('a write inside the request (the heartbeat, under %s): the memo declines, the envelope is unchanged', async (_label, config) => {
+    // [ADR-0069 D4] The hook stamps the session's `last_activity_at` AFTER it
+    // resolved the grants — at most once a minute, and on a session's first
+    // request since sign-in. [#25343] On every deployment, not only where an
+    // idle timeout is configured: that once-a-minute request is the one that
+    // pays the second resolution.
+    const a = await arrange(config);
     // Register core's write observer with an anonymous request first (no
     // session, nothing written), so the ONLY reason left for the member's
     // first request to read twice is the write inside it.
