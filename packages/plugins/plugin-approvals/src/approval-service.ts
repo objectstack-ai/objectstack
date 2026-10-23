@@ -3265,7 +3265,7 @@ export class ApprovalService implements IApprovalService {
    * The rule is the same in every posture (ADR-0131 D11). Under `single`, D9
    * stamps the Default Organization on the delegation its author writes and on
    * the record a request is about, and the request takes its record's
-   * organization, so a delegation applies there as it did before.
+   * organization, so a delegation written there applies as it did before.
    */
   private async lookupActiveDelegation(
     delegatorId: string,

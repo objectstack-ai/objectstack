@@ -374,7 +374,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "组织",
-        help: "拥有此规则的租户；留空 = 对该委派人跨租户生效。"
+        help: "此委派所属的组织。它只改派在该组织中发起的审批。"
       },
       created_at: {
         label: "创建时间"
