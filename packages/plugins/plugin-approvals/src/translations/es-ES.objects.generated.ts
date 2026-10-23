@@ -354,7 +354,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       delegator_id: {
         label: "Delegator",
-        help: "The user going out of office; their individually-routed approver slots are rerouted while active."
+        help: "El usuario que se ausenta. Solo puedes delegar tus propias aprobaciones, así que siempre eres tú: el campo empieza contigo y no ofrece a nadie más. Mientras la delegación está activa, los puestos de aprobador asignados a esa persona se reenrutan."
       },
       delegate_id: {
         label: "Delegate",
