@@ -455,6 +455,27 @@ The `single` anchor's own disposition is #11979's (Choice 4B), which this record
 > outside `os serve` over a database built before 18.x, it let the deployment's only platform
 > administrator be banned. That anchor is retired.
 
+> **Note (2026-10-22, #25286, `09e07c259a`; landed record `6353078154` on #25271) — under `single`,
+> no slug change makes another organization the Default Organization.** Under `single`, a
+> `sys_organization` slug changed to `default` is admitted only on the organization that is already
+> the Default Organization. Every other such write is refused 403 `PERMISSION_DENIED` by the
+> last-admin guard's `sys_organization` `beforeUpdate` hook, for every context: better-auth's
+> `organization/update`, seeds and plugins alike, `isSystem` included. A read the guard cannot
+> complete refuses too. Before this hook, such a re-slug made that organization the Default
+> Organization, and every holder of a grant it owned a platform administrator. Walled postures are
+> unchanged, because no grant anchors there.
+>
+> - **Removed, with no in-place replacement:** moving the Default Organization among several
+>   organizations. Its second write, another organization re-slugged to `default`, is exactly the
+>   refused capture. To move the anchor, move the grant, not the slug: a grant re-owned by the
+>   Default Organization anchors.
+> - **The stranding it leaves.** Re-slugging the Default Organization away while other
+>   organizations exist is still admitted when an administrator stays standing (ADR-0135 D5.2,
+>   unchanged). After it, no organization is the Default Organization and none can take `default`,
+>   the previous holder included, until the store holds one organization again or declares a wall.
+>   The tenancy census already reports that shape at error level
+>   (`SINGLE_POSTURE_MANY_ORGANIZATIONS`), with those two ways out.
+
 ### D6 — Managed definitions are sealed; customization is environment-level state beside them, never an edit and never per organization
 
 **Two install modes.** The package **declares** the modes it permits (`installModes`, default

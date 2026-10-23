@@ -182,6 +182,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           mustChangePassword: {
             label: "Exigir cambio de contraseña en el primer inicio de sesión"
+          },
+          permissionSet: {
+            label: "Conjunto de permisos",
+            helpText: "Opcional. Concede este conjunto de permisos al nuevo usuario para que pueda abrir sus aplicaciones desde el primer inicio de sesión."
           }
         },
         resultDialog: {
@@ -191,6 +195,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             "user.email": "Correo electrónico",
             "user.phoneNumber": "Número de teléfono",
+            permissionSet: "Conjunto de permisos",
             temporaryPassword: "Contraseña temporal"
           }
         }

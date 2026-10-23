@@ -184,6 +184,53 @@
  * never sleeps and never retries the request — a loop against a zero budget is
  * how one repository's automation starves every other caller of that budget.
  *
+ * ## A blank page is not a reading — measured 2026-10-22
+ *
+ * Since 2026-10-21 the issues listing of this board answers `200 []` to more
+ * than half of the requests made to it: 39 of 68 probes on 2026-10-22, each
+ * with its own `x-github-request-id` and its own count against the rate limit,
+ * so no cache was involved; `cache-control: no-cache`, a cache-busting query,
+ * `direction`, `sort`, `per_page`, `state` and a `since` made no difference,
+ * and objectui and hotcrm answered the same way. `/repos/{repo}`, the pulls
+ * listing and the per-number comment pages never did (#24351). This tool read
+ * a blank first page as the short page, declared the open set complete at ZERO
+ * records, and the count check reported a SHORTFALL of the whole board — the
+ * PR leg's 12 requests were exactly a blank open listing followed by the
+ * history walk.
+ *
+ * So a listing page that answers EMPTY is not believed on sight. It is asked
+ * again — the same URL, the same page size, no sleep, each ask a request of
+ * the budget — up to `BLANK_PAGE_ASKS` times, and a blank that survives the
+ * bound is acted on by WHERE the walk is (`blankPageStep`):
+ *
+ *   past an anchor      (`since` set, or an offset page) it is believed. The
+ *                       cursor does not advance on a blank page, so a blank
+ *                       that was false costs one run and nothing permanent:
+ *                       the next run re-reads from the same inclusive cursor.
+ *   from the beginning  (no `since`, page 1) it is believed only if the board
+ *                       itself reports no open item — `open_issues_count` of
+ *                       `/repos/{repo}`, read once as the witness when the
+ *                       first page is blank. A board that reports open items
+ *                       cannot answer a blank first page, so the walk STOPS
+ *                       with its cursor (`stopped_by: blank-listing`): nothing
+ *                       is marked complete, the count check stays `pending`,
+ *                       and the run exits 0 as a planned stop. The next run
+ *                       asks again. Once the open set is complete, a streak
+ *                       of such runs is what the freshness row turns red; an
+ *                       archive still in its open phase reads `building` and
+ *                       never ages (§ Stale is not green) — the PR leg's
+ *                       fresh dry-run archive, not `main`'s, which has been
+ *                       incremental since 2026-09-10. Believing the blank
+ *                       would end a phase at zero records — the measured
+ *                       failure.
+ *
+ * ⛔ This is not the retry the section above forbids: it re-asks a `200` that
+ * carried no rows, never a refusal; it is bounded by the constant and by the
+ * budget; and it never sleeps. `run.blank_pages_reasked` counts the re-asks
+ * and the summary prints the count when it is not zero. The per-number reads
+ * (comments, reviews) are not re-asked: an empty page is their ordinary
+ * answer, and they were not seen to blank.
+ *
  * ## The count check, and why a mismatch is red rather than a warning
  *
  * `rest-channel.md`: an enumeration without a count check is not a reading. So
@@ -560,6 +607,29 @@ export function nextWalkStep({ batchLength, lastUpdatedAt, since, page, perPage 
   }
   // A whole page sharing one timestamp: the offset is the only way past it.
   return { done: false, since, page: page + 1, reanchored: false };
+}
+
+/** How many times one listing page is asked before a blank answer is acted on. */
+export const BLANK_PAGE_ASKS = 6;
+
+/**
+ * What the walk does with a listing page that answered EMPTY (§ A blank page
+ * is not a reading). `asks` counts the asks of THIS page so far, blank every
+ * time; `boardOpenItems` is the board's own `open_issues_count` (issues and
+ * pull requests), or null when it was not read.
+ *
+ *   ask-again  below the bound: the same page once more.
+ *   believe    at the bound, where a blank CAN be the board's answer — past an
+ *              anchor, where the cursor stays put and the next run re-reads.
+ *   stop       at the bound, from the BEGINNING of a board that reports open
+ *              items (or whose count is unknown): believing it would end a
+ *              phase at zero records.
+ */
+export function blankPageStep({ asks, since, page, boardOpenItems, bound = BLANK_PAGE_ASKS }) {
+  if (asks < bound) return { action: 'ask-again' };
+  const fromTheBeginning = since === null && page === 1;
+  if (fromTheBeginning && boardOpenItems !== 0) return { action: 'stop' };
+  return { action: 'believe' };
 }
 
 export const WALK_PHASES = Object.freeze(['open', 'history', 'incremental']);
@@ -1238,6 +1308,7 @@ async function snapshot(repo, options) {
   // the history walk at a delta cursor.
   let stoppedIn = null;
   let walkComplete = false;
+  let blankPagesReasked = 0;
   let board = { open_issues_count: null, open_pull_requests: null, read_at: null };
 
   /**
@@ -1248,10 +1319,32 @@ async function snapshot(repo, options) {
   async function walk(key, state, walkBudget = budget) {
     let since = cursors[key];
     let page = 1;
+    let blankAsks = 0;
+    let witness;
     for (;;) {
       walkBudget.spend();
       const batch = await rest(listingPath(repo, { since, page, state }));
       const rows = Array.isArray(batch) ? batch : [];
+      if (rows.length === 0) {
+        // § A blank page is not a reading. The witness — the board's own open
+        // count — is read once per walk, and only when a first page is blank.
+        blankAsks += 1;
+        if (since === null && page === 1 && witness === undefined) {
+          walkBudget.spend();
+          witness = (await rest(`/repos/${repo}`))?.open_issues_count ?? null;
+        }
+        const verdict = blankPageStep({ asks: blankAsks, since, page, boardOpenItems: witness ?? null });
+        if (verdict.action === 'ask-again') {
+          blankPagesReasked += 1;
+          continue;
+        }
+        if (verdict.action === 'stop') {
+          stopped = { kind: 'blank-listing', reason: `the ${key} listing answered EMPTY ${blankAsks} times from the beginning while the board reports ${witness ?? 'an unknown number of'} open item(s)` };
+          return false;
+        }
+      } else {
+        blankAsks = 0;
+      }
       for (const raw of rows) {
         if (seen.has(raw.number)) continue;
         if (options.limit && seen.size >= options.limit) {
@@ -1439,6 +1532,7 @@ async function snapshot(repo, options) {
       delta_ran: deltaRan,
       delta_completed_here: deltaCompletedHere,
       delta_requests: deltaRequests,
+      blank_pages_reasked: blankPagesReasked,
     },
   });
 
@@ -1482,7 +1576,7 @@ export function renderRun(result, options) {
     `  open set     ${openLine}`,
     `  delta        ${deltaLine}`,
     `  since        ${m.since ?? '(from the beginning)'} — ${m.since_reason}`,
-    `  read         ${m.run.numbers_read} number(s) in ${m.requests} request(s); walk ${m.run.walk_complete ? 'complete' : 'INCOMPLETE'}`,
+    `  read         ${m.run.numbers_read} number(s) in ${m.requests} request(s); walk ${m.run.walk_complete ? 'complete' : 'INCOMPLETE'}${m.run.blank_pages_reasked ? `; ${m.run.blank_pages_reasked} blank page(s) asked again` : ''}`,
     `  written      ${result.written.length} file(s)${result.manifestMoved ? ' + manifest' : ''}`,
     `  archive      ${m.counts.records} record(s): ${m.counts.issues_open} open / ${m.counts.issues_closed} closed issue(s), ${m.counts.pulls_open} open / ${m.counts.pulls_closed} closed pull request(s)`,
   ];
@@ -1518,6 +1612,12 @@ export function renderRun(result, options) {
     lines.push(
       `  STOPPED      rate limit: ${result.stopped.reason}`,
       `               Nothing was retried. The next run resumes the ${m.resume.phase} walk at ${m.resume.since}.`,
+    );
+  } else if (result.stopped?.kind === 'blank-listing') {
+    lines.push(
+      `  STOPPED      ${result.stopped.reason} — a blank page is not a reading.`,
+      '               Nothing was believed and nothing was marked complete; the count check stays pending. The next run asks again,',
+      `               ${m.resume.since ? `resuming the ${m.resume.phase} walk at ${m.resume.since}` : `from the beginning of the ${m.resume.phase} walk`}.`,
     );
   } else if (result.stopped) {
     lines.push(
@@ -1816,8 +1916,11 @@ function rearmThroughProxy(args) {
  * because those are what the walk is steering by — a stub that ignored them
  * would agree with any walk order at all.
  */
-function fakeBoard({ rows, openPulls = [] }) {
+function fakeBoard({ rows, openPulls = [], blankListings = 0 }) {
   const calls = [];
+  // The blank reply measured 2026-10-22, reproduced: the first N listing GETs
+  // answer `[]` whatever the board holds. The witness and the pulls do not.
+  let blanksLeft = blankListings;
   const serve = (path) => {
     if (path === '/repos/o/r') return { open_issues_count: rows.filter((r) => r.state === 'open').length };
     const url = new URL(`https://board${path}`);
@@ -1829,6 +1932,10 @@ function fakeBoard({ rows, openPulls = [] }) {
     if (thread) return page === 1 ? (rows.find((r) => r.number === Number(thread[1]))?.thread ?? []) : [];
     if (/^\/repos\/o\/r\/pulls\/\d+\/(reviews|comments)$/.test(url.pathname)) return [];
     if (url.pathname !== '/repos/o/r/issues') return [];
+    if (blanksLeft > 0) {
+      blanksLeft -= 1;
+      return [];
+    }
     const sinceAt = q.get('since') ? Date.parse(q.get('since')) : null;
     const matching = rows
       .filter((r) => (q.get('state') === 'open' ? r.state === 'open' : true))
@@ -1907,8 +2014,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the rate-limit stop, and the two properties that are structural': 8,
   'the delta walk, driven: the archive catches up with the live board': 19,
   'the freshness row: a stale archive is never a green run': 18,
+  'the blank page: asked again, then believed or stopped by where the walk is': 13,
 });
-const SELF_TEST_BATTERY_FLOOR = 12;
+const SELF_TEST_BATTERY_FLOOR = 13;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -2244,6 +2352,9 @@ export async function selfTest() {
   const idemDir = mkdtempSync(join(tmpdir(), 'board-snapshot-idem-'));
   const quietDir = mkdtempSync(join(tmpdir(), 'board-snapshot-quiet-'));
   const staleDir = mkdtempSync(join(tmpdir(), 'board-snapshot-stale-'));
+  const blankDir = mkdtempSync(join(tmpdir(), 'board-snapshot-blank-'));
+  const blankStopDir = mkdtempSync(join(tmpdir(), 'board-snapshot-blank-stop-'));
+  const plainDir = mkdtempSync(join(tmpdir(), 'board-snapshot-plain-'));
   try {
     // THE REGRESSION, driven from the manifest board-archive actually carried.
     //
@@ -2480,8 +2591,44 @@ export async function selfTest() {
     t('…while the streak stamp it carries forward is the one the previous manifest opened, never this run\'s',
       staleRun.manifest.freshness.pending_since === readJsonFile(join(staleDir, MANIFEST_NAME)).freshness.pending_since
       && Date.parse(staleRun.manifest.freshness.pending_since) < Date.parse(staleRun.manifest.generated_at) - STALE_AFTER_MS);
+
+    // -- the blank page ------------------------------------------------------
+    battery('the blank page: asked again, then believed or stopped by where the walk is');
+    const B = BLANK_PAGE_ASKS;
+    t('below the bound a blank page is asked again — from the beginning of a board that reports open items', blankPageStep({ asks: 1, since: null, page: 1, boardOpenItems: 118 }).action === 'ask-again');
+    t('…and past an anchor alike', blankPageStep({ asks: B - 1, since: '2026-10-21T00:00:00Z', page: 1, boardOpenItems: null }).action === 'ask-again');
+    t('at the bound, past an anchor, it is believed — the cursor stays put and the next run re-reads from it', blankPageStep({ asks: B, since: '2026-10-21T00:00:00Z', page: 1, boardOpenItems: 118 }).action === 'believe');
+    t('…and on an offset page alike', blankPageStep({ asks: B, since: null, page: 3, boardOpenItems: 118 }).action === 'believe');
+    t('at the bound, from the BEGINNING of a board that reports open items, the walk STOPS — believing it would end a phase at zero records', blankPageStep({ asks: B, since: null, page: 1, boardOpenItems: 118 }).action === 'stop');
+    t('…and so does a board whose count is unknown: a blank is believed only where it can be true', blankPageStep({ asks: B, since: null, page: 1, boardOpenItems: null }).action === 'stop');
+    t('…while a board that reports no open item can answer a blank first page, and is believed', blankPageStep({ asks: B, since: null, page: 1, boardOpenItems: 0 }).action === 'believe');
+    const smallOpen = Array.from({ length: 3 }, (_, i) => RAW({ number: 30000 + i, state: 'open', comments: 0, updated_at: `2026-10-2${i}T08:00:00Z` }));
+    const smallRows = [...smallOpen, oldClosed];
+    const blankOnce = fakeBoard({ rows: smallRows, blankListings: 1 });
+    const healed = await driveSnapshot({ dir: blankDir, board: blankOnce });
+    t('THE MEASURED FAILURE, HEALED: a first listing that answers [] no longer ends the open phase at zero — the second ask sees the rows, the open set completes with every one of them and the count check reads OK',
+      healed.manifest.walk.open_set.complete === true && healed.manifest.counts.issues_open === smallOpen.length && healed.manifest.count_check.verdict === 'ok' && healed.manifest.run.blank_pages_reasked === 1);
+    t('…the witness was read between the two asks, and the second ask is the SAME request: same URL, same page size',
+      blankOnce.calls[1] === '/repos/o/r' && blankOnce.calls[2] === blankOnce.calls[0] && blankOnce.calls[0].includes(`per_page=${PER_PAGE}`));
+    const blankAlways = fakeBoard({ rows: smallRows, blankListings: 99 });
+    const halted = await driveSnapshot({ dir: blankStopDir, board: blankAlways });
+    t('a listing that stays blank from the beginning STOPS the open walk: nothing is marked complete and the count check stays pending',
+      halted.stopped?.kind === 'blank-listing' && halted.manifest.walk.open_set.complete === false && halted.manifest.count_check.verdict === 'pending' && halted.manifest.resume?.stopped_by === 'blank-listing' && halted.manifest.resume?.phase === 'open');
+    t('…bounded to the request: exactly BLANK_PAGE_ASKS listings and one witness read, never a loop',
+      blankAlways.calls.filter((c) => c.startsWith('/repos/o/r/issues?')).length === B && halted.manifest.requests === B + 1);
+    const haltedRendered = renderRun(halted, { out: blankStopDir, dryRun: true });
+    t('…and the run says so and exits 0 — a planned stop the next run resumes, which the freshness row turns red if it becomes a streak',
+      haltedRendered.exitCode === EXIT_OK && /STOPPED      the open listing answered EMPTY/.test(haltedRendered.text) && /a blank page is not a reading/.test(haltedRendered.text));
+    const plain = fakeBoard({ rows: smallRows });
+    const unpaid = await driveSnapshot({ dir: plainDir, board: plain });
+    const quietBlank = fakeBoard({ rows: smallRows, blankListings: 99 });
+    const believed = await driveSnapshot({ dir: plainDir, board: quietBlank });
+    t('a board that answers rows pays nothing, and past an anchor a blank that survives the bound is believed: the incremental walk completes with its cursor UNMOVED, so the next run re-reads from it',
+      unpaid.manifest.run.blank_pages_reasked === 0 && !/asked again/.test(renderRun(unpaid, { out: plainDir, dryRun: true }).text)
+      && believed.stopped === null && believed.manifest.walk_phase === 'incremental' && believed.manifest.run.walk_complete === true
+      && believed.manifest.run.blank_pages_reasked === B - 1 && believed.manifest.next_since === unpaid.manifest.next_since);
   } finally {
-    for (const d of [liveDir, busyDir, stopDir, idemDir, quietDir, staleDir]) rmSync(d, { recursive: true, force: true });
+    for (const d of [liveDir, busyDir, stopDir, idemDir, quietDir, staleDir, blankDir, blankStopDir, plainDir]) rmSync(d, { recursive: true, force: true });
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);

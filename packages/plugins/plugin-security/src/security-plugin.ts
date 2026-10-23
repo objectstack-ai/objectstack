@@ -2,11 +2,10 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
-import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError, withoutOperationPrivateKeys } from '@objectstack/core';
+import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
-import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
 // merge boundaries that stamp it (see the RLS injection below).
 // [#21829] `MAX_BULK_PER_ROW_HOOK_ROWS`: the platform's row ceiling for one
@@ -21,7 +20,7 @@ import type { NumberComparandDoorFieldMeta } from '@objectstack/spec/data';
 import { renderOperationMessage } from '@objectstack/spec/system';
 // [#19989] The engine's own update-dispatch predicate, asked rather than
 // re-derived: step 3.6 needs to know which row the ENGINE will write.
-import { resolveEngineDeleteDispatch, resolveEngineUpdateDispatch, type EngineDeleteDispatchInput, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
+import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
 import {
   localWriteEpochSource,
   resolveWriteEpochSource,
@@ -82,17 +81,13 @@ import { cleanupPackagePermissions } from './cleanup-package-permissions.js';
 import { readDeclared, readDeclaredCapabilityContext } from './declared-capability-context.js';
 import { RLSCompiler, RLS_DENY_FILTER, compiledPolicyNameOf, policyDeclaresClause } from './rls-compiler.js';
 import {
-  computeTenantLayer0Verdict,
-  tenantLayer0FilterOf,
   andComposeLayers,
   intersectTenantLayer0Verdicts,
-  type TenantLayer0Input,
 } from './tenant-layer.js';
 import {
-  PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readDisabledCatalogNames, readPositionGrantsInForce, countPositionHolders } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readPositionGrantsInForce, countPositionHolders } from '@objectstack/core';
 // [#25223 cut 1] The leaf readers (policy collection, unresolved-posture
 // probes, field masks, field-name tables); the methods of the same names below
 // hand each body the members it reads (`ObjectInputsHost`).
@@ -144,10 +139,64 @@ import {
   controlledByParentChainRefusal,
   type CbpReadFilterHost,
 } from './security-plugin-cbp-read-filter.js';
-// [#25223 cut 5] Step 3.7's Layer 0 tenant write wall, composed once per write
-// (ADR-0123 D2, ADR-0095 D1); the method of the same name below hands the body
-// the members it reads (`WriteTenantWallHost`).
-import { composeWriteTenantWall, type WriteTenantWallHost } from './security-plugin-write-tenant-wall.js';
+// [#25223 cuts 5 and 6] Step 3.7's Layer 0 tenant write wall, composed once per
+// write (ADR-0123 D2, ADR-0095 D1), its no-active-organization pre-test and its
+// verdict for the write preview; the methods of the same names below hand each
+// body the members it reads (`WriteTenantWallHost`).
+import {
+  composeWriteTenantWall,
+  organizationWallRefusal,
+  writeWallVerdict,
+  type WriteTenantWallHost,
+} from './security-plugin-write-tenant-wall.js';
+// [#25223 cut 6] The context prologue of the engine middleware (ADR-0096 D5,
+// ADR-0090 D10) and its guest organization refusal (ADR-0138 D4); the methods
+// of the same names below hand each body the members it reads
+// (`OperationPrincipalsHost`). `principalLessDenial`, the strict-mode refusal
+// only the prologue throws, moved with it; it is imported type-only so that
+// `isPrincipalLessContext`'s docblock still links to it.
+import {
+  refuseGuestWithoutOrganization,
+  resolveOperationPrincipals,
+  type OperationPrincipalsHost,
+  type principalLessDenial,
+} from './security-plugin-operation-principals.js';
+// [#25223 cut 7] The RLS filter layers (ADR-0095 D1): the layered Layer 0 /
+// Layer 1 computation, the verified platform-owner probe its read wall asks,
+// the write `check` compile (ADR-0058 D4) and the membership staging both
+// compiles ask (ADR-0105 D11); the methods of the same names below hand each
+// body the members it reads (`RlsFilterHost`).
+import {
+  computeLayeredRlsFilter,
+  computeWriteCheckFilter,
+  isVerifiedPlatformOwnerSession,
+  stageRlsMembership,
+  type RlsFilterHost,
+} from './security-plugin-rls-filter.js';
+// [#25223 cut 8] The permission-set resolution for an execution context: the
+// resolution itself, the deactivated folded-set drop, the position-name fold
+// report and the memo's key; the methods of the same names below hand each
+// body the members it reads (`PermissionSetsHost`).
+import {
+  dropDeactivatedFoldedSets,
+  permissionSetMemoKey,
+  reportNameFoldCollisions,
+  resolvePermissionSetsForContextUnmemoized,
+  type PermissionSetsHost,
+} from './security-plugin-permission-sets.js';
+// [#25223 cut 8] The addressed-write readers: the by-id and predicate write
+// the caller addressed, the read question a predicate write is narrowed by,
+// the single id of a write and the by-id row read the provenance and
+// pre-image gates share; the methods of the same names below hand each body
+// the member it reads (`AddressedWritesHost`).
+import {
+  addressedByIdWriteId,
+  addressedPredicateWrite,
+  extractSingleId,
+  readableRowsScopeForPredicateWrite,
+  readRowById,
+  type AddressedWritesHost,
+} from './security-plugin-addressed-writes.js';
 import {
   isPlatformOwnershipFloorPolicy,
   masterGateCoversOperation,
@@ -167,13 +216,11 @@ import {
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
-  postureUsesUnionScope,
   type ObjectAccessScope,
   type TenancyPosture,
 } from '@objectstack/spec/security';
 import {
   RLS_MEMBERSHIP_RESOLVER_SERVICE,
-  RESERVED_RLS_MEMBERSHIP_KEYS,
   type IRlsMembershipResolver,
   type ISecurityService,
   type SharingWriteVerdict,
@@ -198,9 +245,6 @@ import {
   PermissionDeniedError,
   MaskedValueWriteError,
 } from './errors.js';
-// [ADR-0138 D4] The guest entry's organization step, and the located refusal
-// the CRUD gate raises where it refuses.
-import { GuestOrganizationUnresolvedError, resolveGuestOrganization } from '@objectstack/core';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
@@ -231,7 +275,7 @@ import { registerBuiltinCapabilities } from './builtin-capabilities.js';
  * the organization refusal (D4) and the owner-anchor stamp's guest branch (D1)
  * all ask it here.
  */
-function isGuestEnvelope(context: unknown): boolean {
+export function isGuestEnvelope(context: unknown): boolean {
   const c = context as { principalKind?: unknown; userId?: unknown } | null | undefined;
   return c?.principalKind === 'guest' && !c?.userId;
 }
@@ -275,7 +319,7 @@ const PLATFORM_ADMIN_ONLY_CAPABILITIES: readonly string[] = [
  * fall back to the capability probe. Sourced from core's `POSTURE_LADDER` so the
  * enforcement gate and the resolver's derivation can never drift on the enum.
  */
-function isCarriedPosture(v: unknown): boolean {
+export function isCarriedPosture(v: unknown): boolean {
   return typeof v === 'string' && (POSTURE_LADDER as readonly string[]).includes(v);
 }
 
@@ -514,29 +558,10 @@ const EMPTY_REQUIRED_PERMISSIONS: NormalizedRequiredPermissions = Object.freeze(
  * strict mode the empty list has NO exception left. ⛔ No door, probe or layer
  * carries a spelling of "no sets means no restriction".
  */
-function isPrincipalLessContext(context: any): boolean {
+export function isPrincipalLessContext(context: any): boolean {
   const positions = context?.positions ?? [];
   const explicitPermissionSets = context?.permissions ?? [];
   return positions.length === 0 && explicitPermissionSets.length === 0 && !context?.userId;
-}
-
-/**
- * [#21908] ADR-0096 D5 strict mode — the refusal the engine middleware throws
- * for a principal-less, non-system context ({@link isPrincipalLessContext}):
- * `PermissionDeniedError`, `403 PERMISSION_DENIED`, the engine's one deny
- * vocabulary. ⛔ Not the doors' anonymous pair (`401 UNAUTHENTICATED`): every
- * HTTP door answers that one first, so what reaches this line is in-process
- * plumbing, for which "authenticate" is a false remedy. The text names the two
- * that are true.
- */
-function principalLessDenial(operation: string, object: string): PermissionDeniedError {
-  return new PermissionDeniedError(
-    `[Security] Access denied: operation '${operation}' on object '${object}' was called with a ` +
-      `context that carries no principal (no user, no position, no permission set) and is not a ` +
-      `system context. Pass the caller's execution context, or, for platform plumbing whose own ` +
-      `door already authorized the caller, the explicit system opt-in (isSystem: true).`,
-    { operation, object },
-  );
 }
 
 /**
@@ -739,51 +764,6 @@ interface CbpRelation {
 const AUTHORED_ROW_WRITE_PROBE_CONTEXT = { isSystem: true, positions: [], permissions: [] } as const;
 
 /**
- * [ADR-0123 D2] Does this execution context carry ANY organization scope the
- * tenant wall could enforce with?
- *
- * The answer is posture-shaped, and that is the whole reason this is a function
- * rather than an `if (!ctx.tenantId)` at the call site: under `isolated` the
- * scope is the ACTIVE organization (`tenantId`), under `group` it is the
- * caller's MEMBERSHIP SET (`accessible_org_ids`) and the active organization no
- * longer bounds anything (ADR-0105 D2). Asking only about `tenantId` would
- * refuse every `group` caller who is legitimately scoped by membership; asking
- * only about the set would let an `isolated` caller through on a set the
- * `isolated` wall never reads.
- *
- * This is a cheap PRE-TEST, never the verdict. It exists so the common paths —
- * the `single` posture, and any caller who does have an organization — skip the
- * layered RLS compile entirely. The verdict is always
- * {@link isTenantWallDenial} over the Layer 0 filter, which is the one place
- * that knows about platform-admin exemptions, non-tenant objects and phantom
- * anchors.
- *
- * It answers the SCOPE question only. Under a union-scope posture a caller
- * scoped by membership can still lack the organization a NEW row lands in —
- * the active one ({@link carriesActiveOrganization}) — and step 3.7 judges
- * that separately, on the stored image of an insert.
- */
-function callerHasOrganizationScope(context: any, posture: TenancyPosture): boolean {
-  if (postureUsesUnionScope(posture)) {
-    const orgIds = context?.accessible_org_ids;
-    return Array.isArray(orgIds) && orgIds.length > 0;
-  }
-  return carriesActiveOrganization(context);
-}
-
-/**
- * [ADR-0105 D5 · ADR-0123 D2] Does this execution context carry an ACTIVE
- * organization (`tenantId`)? In every posture that is where a new row lands:
- * the engine stamps an insert's organization from it. Under `isolated` it is
- * also the whole read scope; under `group` the membership set is the read
- * scope and the active organization stays the write target (ADR-0105 D2).
- */
-export function carriesActiveOrganization(context: any): boolean {
-  const tenantId = context?.tenantId;
-  return tenantId != null && tenantId !== '';
-}
-
-/**
  * [#21771] Ruling A's read question, judged on the answer of a caller-context
  * by-id read: is the row ABSENT to this caller?
  *
@@ -838,7 +818,7 @@ async function unreadableUnderCallerRead(read: () => Promise<unknown>): Promise<
  *    is neither an answer nor a refusal, and reporting it as either would
  *    relabel it.
  */
-async function readUnlessRefused<T>(
+export async function readUnlessRefused<T>(
   read: () => Promise<T>,
 ): Promise<{ refused: true } | { refused: false; value: T }> {
   try {
@@ -913,7 +893,7 @@ export function copyOfCallerPredicate(where: unknown): unknown {
  * `organization_id $in […]`) or `null`, which no reference check can confuse
  * with it.
  */
-function isTenantWallDenial(filter: Record<string, unknown> | null | undefined): boolean {
+export function isTenantWallDenial(filter: Record<string, unknown> | null | undefined): boolean {
   return filter === RLS_DENY_FILTER;
 }
 
@@ -1035,7 +1015,7 @@ interface SecurityReportSink {
  * snake_case per the precedent beside it (`platform_owner_wall_bypass`): this
  * is a data value, not an error code (ADR-0112 governs those).
  */
-const POSITION_NAME_FOLD_EVENT = 'position_name_fold_grant';
+export const POSITION_NAME_FOLD_EVENT = 'position_name_fold_grant';
 
 const CONSOLE_SECURITY_SINK: SecurityReportSink = Object.freeze({
   warn: (...a: any[]) => { console.warn(...a); },
@@ -1232,7 +1212,7 @@ function userFacingDenialMessage(
  * it by the caller. The `modifyAllRecords` bypass on private / platform-global
  * objects still returns before this selector runs.
  */
-function writeCheckPolicies(
+export function writeCheckPolicies(
   applicable: RowLevelSecurityPolicy[],
   opts: { keepOwnershipFloor: boolean },
 ): RowLevelSecurityPolicy[] {
@@ -6947,14 +6927,8 @@ export class SecurityPlugin implements Plugin {
    * and nothing else off the context.
    */
   private permissionSetMemoKey(context: any): string {
-    const positions = Array.isArray(context?.positions) ? context.positions : [];
-    const permissions = Array.isArray(context?.permissions) ? context.permissions : [];
-    return JSON.stringify([
-      positions,
-      permissions,
-      context?.principalKind ?? null,
-      context?.userId ? 1 : 0,
-    ]);
+    // [#25223 cut 8] The body moved to `security-plugin-permission-sets.ts` (see `PermissionSetsHost`).
+    return permissionSetMemoKey(context);
   }
 
   /**
@@ -7043,88 +7017,24 @@ export class SecurityPlugin implements Plugin {
   }
 
   /** The actual resolution — see {@link resolvePermissionSetsForContext}. */
-  private async resolvePermissionSetsForContextUnmemoized(
+  private resolvePermissionSetsForContextUnmemoized(
     context: any,
   ): Promise<PermissionSet[]> {
-    // [ADR-0138 D3] The GUEST requests exactly the sets its envelope carries —
-    // the `guest` anchor's bindings, which `resolveAuthzContext` resolved in
-    // the organization D4 derived — and they are treated as any requested set
-    // below. Its position is NOT folded into the request: the position-name
-    // fold (#13419's ruling retires it) would hand an anonymous caller any set
-    // that merely shares the anchor's name, the one channel D3 item 3 says
-    // never reaches the guest. The baseline does not reach it either (applied
-    // only to a caller with a user id, below), and `everyone` is never among
-    // its positions.
-    const isGuest = isGuestEnvelope(context);
-    const positions = isGuest ? [] : (context?.positions ?? []);
-    const explicitPermissionSets = context?.permissions ?? [];
-    const requested = [...positions, ...explicitPermissionSets];
-    // [ADR-0090 D10] An AGENT principal's grants are EXACTLY its scope-derived
-    // ceiling set(s) — the additive human baseline (member_default) must NOT
-    // apply, or its write bit would silently widen a read-only agent past the
-    // scope the user consented to. The agent's floor is instead the restricted
-    // (no-object-access) set, so an agent whose sets fail to resolve fails
-    // CLOSED (every object op denied) rather than falling open. The delegating
-    // user's own baseline still applies on the OTHER side of the intersection
-    // (resolved from `onBehalfOf` via a context without this flag).
-    const isAgent = context?.principalKind === 'agent';
-    // [#7555] The human side is a LIST, and the agent side deliberately is not:
-    // the agent's ceiling is EXACTLY the restricted set, and composing the
-    // platform baseline into it is precisely the widening D10 forbids. The two
-    // branches produce arrays only so the code below reads once.
-    const baseline: string[] = isAgent
-      ? [MCP_AGENT_PERMISSION_SET_RESTRICTED]
-      : this.baselinePermissionSets;
-    // [ADR-0090 D5] Baseline is ADDITIVE, always (for humans): the baseline
-    // set(s) apply to every authenticated request IN ADDITION to whatever else
-    // resolved. The former "only when the user has nothing else" conditional
-    // was the fallback CLIFF — receiving your first explicit grant silently
-    // cost you the entire baseline. Agents skip this additive step (their
-    // ceiling is closed, not floored) — see above.
-    // [#7555] The same cliff had a second spelling the list closes: an app
-    // declaring an `isDefault` set REPLACED `member_default` here, so every
-    // member of that app lost the platform floor (and with it every built-in
-    // Account destination) the moment the app declared a posture of its own.
-    // [#13419] Recorded, not merely pushed: a name granted by the BASELINE is in
-    // force whether or not the position-name fold exists, so it is not evidence
-    // of the fold and must not be warned about below.
-    const baselineApplied: string[] = [];
-    if (!isAgent && context?.userId) {
-      for (const name of baseline) {
-        if (!requested.includes(name)) requested.push(name);
-        baselineApplied.push(name);
-      }
-    }
-    let permissionSets = await this.permissionEvaluator.resolvePermissionSets(
-      requested,
-      this.metadata,
-      this.bootstrapPermissionSets,
-      this.dbLoaderForContext(context),
-      { logger: this.logger },
-    );
-    permissionSets = await this.dropDeactivatedFoldedSets(positions, explicitPermissionSets, baselineApplied, permissionSets);
-    // [#13419 执行要点 3] Report — never alter — a grant that exists ONLY because
-    // this method folded a POSITION name into the permission-set request above.
-    this.reportNameFoldCollisions(positions, explicitPermissionSets, baselineApplied, permissionSets);
-    // Post-resolution fallback — closes the fail-open hole where a populated
-    // `positions` array maps to no permission set yet (no sys_position binding),
-    // which would otherwise skip RLS entirely and expose every tenant's data.
-    // For an agent, the fallback is the restricted set (deny all objects), NOT
-    // the human baseline — a mis-resolved agent must never inherit member access.
-    if (
-      permissionSets.length === 0 &&
-      context?.userId &&
-      baseline.length > 0
-    ) {
-      permissionSets = await this.permissionEvaluator.resolvePermissionSets(
-        baseline,
-        this.metadata,
-        this.bootstrapPermissionSets,
-        this.dbLoaderForContext(context),
-        { logger: this.logger },
-      );
-    }
-    return permissionSets;
+    // [#25223 cut 8] The body moved to `security-plugin-permission-sets.ts` (see `PermissionSetsHost`).
+    const readLogger = () => this.logger;
+    const readMetadata = () => this.metadata;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<PermissionSetsHost, 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'dbLoaderForContext' | 'dropDeactivatedFoldedSets' | 'logger' | 'metadata' | 'permissionEvaluator' | 'reportNameFoldCollisions'> = {
+      baselinePermissionSets: this.baselinePermissionSets,
+      bootstrapPermissionSets: this.bootstrapPermissionSets,
+      dbLoaderForContext: (...a) => this.dbLoaderForContext(...a),
+      dropDeactivatedFoldedSets: (...a) => this.dropDeactivatedFoldedSets(...a),
+      get logger() { return readLogger(); },
+      get metadata() { return readMetadata(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      reportNameFoldCollisions: (...a) => this.reportNameFoldCollisions(...a),
+    };
+    return resolvePermissionSetsForContextUnmemoized.call(host, context);
   }
 
   /**
@@ -7145,23 +7055,18 @@ export class SecurityPlugin implements Plugin {
    * with no such collision issues no read. A read that fails throws
    * (`AuthzStoreUnavailableError`), and the request fails closed.
    */
-  private async dropDeactivatedFoldedSets(
+  private dropDeactivatedFoldedSets(
     positions: unknown,
     explicitPermissionSets: unknown,
     baselineApplied: string[],
     resolved: PermissionSet[],
   ): Promise<PermissionSet[]> {
-    if (!Array.isArray(positions) || positions.length === 0 || resolved.length === 0) return resolved;
-    const judged = new Set<string>(baselineApplied);
-    for (const n of Array.isArray(explicitPermissionSets) ? explicitPermissionSets : []) {
-      if (typeof n === 'string') judged.add(n);
-    }
-    const resolvedNames = new Set(resolved.map((ps) => (ps as any)?.name).filter((n: unknown): n is string => typeof n === 'string'));
-    const folded = positions.filter((n): n is string => typeof n === 'string' && resolvedNames.has(n) && !judged.has(n));
-    if (folded.length === 0) return resolved;
-    const disabled = await readDisabledCatalogNames(this.ql, [], [...new Set(folded)]);
-    if (disabled.permissions.size === 0) return resolved;
-    return resolved.filter((ps) => !disabled.permissions.has((ps as any)?.name));
+    // [#25223 cut 8] The body moved to `security-plugin-permission-sets.ts` (see `PermissionSetsHost`).
+    const readQl = () => this.ql;
+    const host: Pick<PermissionSetsHost, 'ql'> = {
+      get ql() { return readQl(); },
+    };
+    return dropDeactivatedFoldedSets.call(host, positions, explicitPermissionSets, baselineApplied, resolved);
   }
 
   /**
@@ -7325,45 +7230,13 @@ export class SecurityPlugin implements Plugin {
     baselineApplied: string[],
     resolved: PermissionSet[],
   ): void {
-    if (!Array.isArray(positions) || positions.length === 0) return;
-    const governed = new Set<string>(
-      (Array.isArray(explicitPermissionSets) ? explicitPermissionSets : []).filter(
-        (n): n is string => typeof n === 'string',
-      ),
-    );
-    for (const name of baselineApplied) governed.add(name);
-    const resolvedNames = new Set<string>(
-      resolved.map((ps) => (ps as any)?.name).filter((n: unknown): n is string => typeof n === 'string'),
-    );
-    for (const position of positions) {
-      if (typeof position !== 'string' || position.length === 0) continue;
-      if (!resolvedNames.has(position)) continue;
-      if (governed.has(position)) continue;
-      if (this.nameFoldWarned.has(position)) continue;
-      this.nameFoldWarned.add(position);
-      // ⛔ No tracker id in the STRING — an operator reading this log has no tracker, no
-      // git log and no ADR to resolve `#NNNN` against (`check:doc-authoring`; maintainer
-      // ruling 2026-08-12). The card anchor lives in the docblock above, where the reader
-      // who can resolve it is already looking.
-      this.logger.warn?.(
-        `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' is in force for ` +
-          `holders of position '${position}' only because the two share a name — the definition ` +
-          `of position '${position}' does not name it in its permissionSets. This name-based ` +
-          `grant is deprecated and is removed in the next major version: from then on, holders ` +
-          `of position '${position}' do not receive permission set '${position}' unless the ` +
-          `position's definition names it. To keep the grant, declare it (position ` +
-          `'${position}': permissionSets: ['${position}']); if the shared name is a ` +
-          `coincidence, rename one of the two.`,
-        {
-          event: POSITION_NAME_FOLD_EVENT,
-          position,
-          permissionSet: position,
-          // The consequence as data, for a consumer that keys on fields rather
-          // than prose. The three fields above are unchanged on purpose.
-          removedIn: 'next_major',
-        },
-      );
-    }
+    // [#25223 cut 8] The body moved to `security-plugin-permission-sets.ts` (see `PermissionSetsHost`).
+    const readLogger = () => this.logger;
+    const host: Pick<PermissionSetsHost, 'logger' | 'nameFoldWarned'> = {
+      get logger() { return readLogger(); },
+      nameFoldWarned: this.nameFoldWarned,
+    };
+    reportNameFoldCollisions.call(host, positions, explicitPermissionSets, baselineApplied, resolved);
   }
 
   /**
@@ -7478,18 +7351,8 @@ export class SecurityPlugin implements Plugin {
    * verbs keep the pre-image check exactly as it was.
    */
   private addressedByIdWriteId(opCtx: any, nested: boolean, referentialFieldClear: boolean): unknown {
-    if (nested || referentialFieldClear) return undefined;
-    if (opCtx.operation === 'update') {
-      const data = opCtx.data;
-      if (data == null || typeof data !== 'object') return undefined;
-      const route = resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, opCtx.options);
-      return route.kind === 'by-id' ? route.id : undefined;
-    }
-    if (opCtx.operation === 'delete') {
-      const route = resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined);
-      return route.kind === 'by-id' ? route.id : undefined;
-    }
-    return undefined;
+    // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
+    return addressedByIdWriteId(opCtx, nested, referentialFieldClear);
   }
 
   /**
@@ -7527,16 +7390,8 @@ export class SecurityPlugin implements Plugin {
    *    the predicate path reads its matched rows from.
    */
   private addressedPredicateWrite(opCtx: any, nested: boolean, referentialFieldClear: boolean): boolean {
-    if (nested || referentialFieldClear) return false;
-    if (opCtx.operation === 'update') {
-      const data = opCtx.data;
-      if (data == null || typeof data !== 'object') return false;
-      return resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, opCtx.options).kind === 'multi';
-    }
-    if (opCtx.operation === 'delete') {
-      return resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
-    }
-    return false;
+    // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
+    return addressedPredicateWrite(opCtx, nested, referentialFieldClear);
   }
 
   /**
@@ -7564,52 +7419,18 @@ export class SecurityPlugin implements Plugin {
    * The id list is bounded by {@link PREDICATE_WRITE_READABLE_ID_CAP}; see
    * there for what happens above it.
    */
-  private async readableRowsScopeForPredicateWrite(opCtx: any): Promise<Record<string, unknown> | null> {
-    if (typeof this.ql?.find !== 'function') {
-      // The read question cannot be asked, and a write that cannot be narrowed
-      // must not run un-narrowed. Unreachable in a real deployment — `start()`
-      // registers no security middleware at all without a query engine — but a
-      // non-conforming engine double fails closed rather than writing wide.
-      throw new Error(
-        `[Security] Cannot narrow the predicate ${opCtx.operation} on '${opCtx.object}' to the rows the ` +
-          `caller can read: no query engine is available to ask.`,
-      );
-    }
-    const callerWhere = (opCtx.options as { where?: unknown } | undefined)?.where;
-    const answer = await readUnlessRefused(() =>
-      this.ql.find(opCtx.object, {
-        ...(callerWhere != null ? { where: copyOfCallerPredicate(callerWhere) } : {}),
-        fields: ['id'],
-        limit: PREDICATE_WRITE_READABLE_ID_CAP + 1,
-        // [#7145] The caller's envelope minus the operation-private keys: the
-        // write's own stamps (`__writeScope`, …) are not inputs to a read, and
-        // a copy keeps the read's stamps off the write's context.
-        context: withoutOperationPrivateKeys((opCtx.context ?? {}) as Record<string, unknown>),
-      }),
-    );
-    if (answer.refused) return null;
-    const rows: unknown[] = Array.isArray(answer.value) ? answer.value : [];
-    if (rows.length > PREDICATE_WRITE_READABLE_ID_CAP) {
-      throw predicateWriteReadableCapError(opCtx.object, opCtx.operation);
-    }
-    const ids = rows
-      .map((r) => (r && typeof r === 'object' ? (r as { id?: unknown }).id : undefined))
-      .filter((id) => id !== undefined && id !== null);
-    return { id: { $in: ids } };
+  private readableRowsScopeForPredicateWrite(opCtx: any): Promise<Record<string, unknown> | null> {
+    // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
+    const readQl = () => this.ql;
+    const host: Pick<AddressedWritesHost, 'ql'> = {
+      get ql() { return readQl(); },
+    };
+    return readableRowsScopeForPredicateWrite.call(host, opCtx);
   }
 
   private extractSingleId(opCtx: any): string | number | bigint | null {
-    const isScalar = (v: unknown): v is string | number | bigint =>
-      v !== null && (typeof v === 'string' || typeof v === 'number' || typeof v === 'bigint');
-    const data = opCtx?.data;
-    if (data && typeof data === 'object' && !Array.isArray(data) && isScalar(data.id)) {
-      return data.id;
-    }
-    const where = opCtx?.options?.where;
-    if (where && typeof where === 'object' && 'id' in where && isScalar((where as any).id)) {
-      return (where as any).id;
-    }
-    return null;
+    // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
+    return extractSingleId(opCtx);
   }
 
   /**
@@ -7653,23 +7474,13 @@ export class SecurityPlugin implements Plugin {
    * the provenance / existence gates, the CALLER's context for the pre-image —
    * and that choice is the caller's, not this method's.
    */
-  private async readRowById(object: string, id: unknown, context: any): Promise<Record<string, unknown> | null> {
-    // Not a read at all: there is no id to look one up by. Every call site
-    // already screens this; the guard is defence, and `null` is honest here
-    // because nothing was ever asked of the store.
-    if (id == null) return null;
-    if (typeof this.ql?.findOne !== 'function') {
-      // The third collapsed fact, and it is not absence either: the probe
-      // could not run. Unreachable in a real deployment — `start()` registers
-      // no security middleware at all without a query engine, so no gate can
-      // reach this line — but a non-conforming engine double must fail closed
-      // rather than manufacture a 404 for a row nobody looked for.
-      throw new Error(
-        `[Security] Cannot verify record '${String(id)}' on '${object}': no query engine is available to read it.`,
-      );
-    }
-    const row = await this.ql.findOne(object, { where: { id }, context });
-    return row && typeof row === 'object' ? (row as Record<string, unknown>) : null;
+  private readRowById(object: string, id: unknown, context: any): Promise<Record<string, unknown> | null> {
+    // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
+    const readQl = () => this.ql;
+    const host: Pick<AddressedWritesHost, 'ql'> = {
+      get ql() { return readQl(); },
+    };
+    return readRowById.call(host, object, id, context);
   }
 
   /**
@@ -7768,7 +7579,7 @@ export class SecurityPlugin implements Plugin {
     return hasPlatformAdminCapability(this.permissionEvaluator.getSystemPermissions(permissionSets));
   }
 
-  private async computeLayeredRlsFilter(
+  private computeLayeredRlsFilter(
     permissionSets: PermissionSet[],
     object: string,
     operation: string,
@@ -7791,395 +7602,33 @@ export class SecurityPlugin implements Plugin {
      */
     crossedByPlatformAdmin: boolean;
   }> {
-    // [ADR-0095 D1] Effective filter = Layer0(tenant) AND Layer1(business RLS).
-    // The two are computed independently and never share a compiler, a merge
-    // step, or a bypass bit (closes W1 by construction, W2 structurally).
-    const meta = await this.getObjectSecurityMeta(object);
-    const isWrite = operation === 'insert' || operation === 'update' || operation === 'delete';
-    // Posture permits a platform admin to cross the tenant wall (ADR-0066 ①):
-    // private / platform-global / better-auth-managed objects. Public tenant
-    // business objects do NOT permit it, so a platform admin stays org-scoped.
-    const posturePermits = meta.isPrivate || meta.tenancyDisabled || meta.isBetterAuthManaged;
-    // The superuser bit (`viewAllRecords`/`modifyAllRecords`) governs the BUSINESS
-    // RLS (Layer 1) short-circuit below — a TENANT_ADMIN legitimately sees every
-    // row WITHIN its org, no ownership/depth/sharing narrowing (ADR-0095 D2).
-    const superuserBypass = posturePermits
-      ? (isWrite
-          ? this.permissionEvaluator.hasSuperuserWriteBypass(object, permissionSets, { isPrivate: meta.isPrivate })
-          : this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate }))
-      : false;
-    // [Finding 2 / #2937 / ADR-0099 D1 (P1)] The Layer 0 cross-tenant EXEMPTION
-    // is stricter than the superuser bit: it requires a TRUE PLATFORM_ADMIN, so a
-    // tenant `organization_admin` (which also holds the superuser bit via its `'*'`
-    // wildcard) stays org-scoped even on private objects (invariant I1). The tier
-    // signal is the CARRIED rung when the context passed the resolver (#2956); the
-    // capability probe is the fallback for hand-built contexts that carry no rung.
-    // Both are computed so a disagreement (only possible on the fallback-eligible
-    // divergence class — scoped `admin_full_access` / piecemeal platform caps) is
-    // logged as a defect (ADR-0099 I4) and the NARROWER rung verdict is enforced.
-    const carriedPosture = context?.posture;
-    const probePlatformAdmin = this.hasPlatformAdminPosture(permissionSets);
-    let platformPosture: boolean;
-    if (isCarriedPosture(carriedPosture)) {
-      platformPosture = carriedPosture === 'PLATFORM_ADMIN';
-      if (platformPosture !== probePlatformAdmin) {
-        // rung ⊆ probe (I3), so this only fires as probe=true / rung≠PLATFORM_ADMIN
-        // — the adjudicated narrowing (#3211 G1). A breadcrumb, never a throw.
-        this.logger.warn?.(
-          '[authz/ADR-0099] Layer 0 exemption: carried posture rung and capability probe disagree; ' +
-            'enforcing the (narrower) carried rung',
-          { object, operation, carriedPosture, probePlatformAdmin, userId: context?.userId },
-        );
-      }
-    } else {
-      platformPosture = probePlatformAdmin;
-    }
-    const isPlatformAdmin = superuserBypass && platformPosture;
-
-    // Field set drives BOTH the Layer 1 field-existence net and the Layer 0
-    // "is this a tenant object?" check.
-    const objectFields = await this.getObjectFieldNames(this.metadata, object, this.ql);
-    const tenancyDisabled = this.tenancyDisabledCache.get(object) === true || meta.tenancyDisabled;
-
-    // [ADR-0105 D11] Stage app-resolved membership sets before Layer 1 compiles,
-    // so `field IN (current_user.<key>)` predicates can resolve. Lazy (only when
-    // a resolver is registered) and memoized per request — resolution is I/O and
-    // the same context is reused across every object touched by one request.
-    await this.stageRlsMembership(context);
-
-    // ── Layer 1: business RLS (ownership / unit depth / sharing / _self carve-outs).
-    // The wildcard tenant policy has LEFT this layer (retired from the seeds), so
-    // this superuser short-circuit now governs BUSINESS RLS only — it can no
-    // longer skip the tenant wall (that is Layer 0's own exemption, below).
-    let layer1: Record<string, unknown> | null = null;
-    if (!(posturePermits && superuserBypass)) {
-      let collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[], context);
-      // [#8023] An object whose author DECLARED `sharingModel:
-      // 'public_read_write'` does not inherit the platform's wildcard `update`
-      // ownership floor AT ALL. QA #7637 measured the contradiction it caused
-      // on the stock showcase: `showcase_project` declares that OWD, the access
-      // matrix grants `showcase_contributor` `edit: true`, no RLS is authored —
-      // and a PATCH of a row the persona had not created answered 403 with the
-      // record-level sentence. The floor is `member_default`'s
-      // `owner_only_writes` (object `'*'`, `created_by == current_user.id`,
-      // positions `['org_member']`), and it survived because the by-id gate
-      // only lets `ISharingService` REPLACE it on a positive `allow`, while a
-      // public object makes the service `abstain`.
-      //
-      // ⚠️ THE PLACEMENT IS THE FIX, not just where it reads best. Removing the
-      // floor HERE — before the #7665 derive-from-select branch below — leaves
-      // the update class EMPTY, so that branch then derives the write scope
-      // from the caller's SELECT narrowing and "you cannot mutate what you
-      // cannot see" still holds on this very object (#7792's by-id
-      // write-visibility property, which the card names as a non-regression
-      // criterion). Removing it at the `dropPlatformOwnershipFloor` filter
-      // further down would instead compile Layer 1 to null and hand back an
-      // UNGATED by-id write — the same hole #7665 closed, reopened by a fix for
-      // a different bug.
-      //
-      // Scope, stated twice because each half is load-bearing:
-      //   - only the PLATFORM's floor is dropped (provenance, ADR-0105 D3): an
-      //     app-authored policy spelling the identical predicate still reaches
-      //     the compiler and still refuses (ADR-0049);
-      //   - only `update` (`owdOpenWritesCoversOperation`): `owner_only_deletes`
-      //     stays, because `public_read_write` is "see and edit" and the alias
-      //     that also meant delete was removed for being wider than it.
-      // Layer 0 (the tenant wall) is untouched — a `public_read_write` object is
-      // org-wide open, never cross-tenant open.
-      //
-      // Both drops below ask ONE predicate,
-      // {@link platformFloorYieldsToObjectWriteModel}, which the post-image
-      // check (`computeWriteCheckFilter`) asks too, so the floor a defaulted
-      // check composes is the floor this pre-image composed.
-      //
-      // [commit 6feac910b] An ADR-0055 `controlled_by_parent` detail does not inherit the
-      // platform's wildcard write ownership floor either — for a DIFFERENT
-      // reason from the OWD above, and under one extra condition.
-      //
-      // The reason: the detail's OWD does not say nothing about writes, it says
-      // "derive them from the master", and the master has its own gate
-      // (`assertControlledByParentWrite`, step 2.8). Running the floor as well
-      // made two gates answer one write and let the widener-blind one win — the
-      // detail became creator-only, a row-level write rule its author never
-      // declared and no mechanism could drop, `modifyAllRecords` included
-      // (`checkEdit` abstains on the `public`-mapped model above its bypass
-      // branch, so step 2.7's `dropPlatformOwnershipFloor` could never fire
-      // here). Maintainer ruling 2026-08-15: the master gate is the SOLE
-      // row-write authority for such a detail.
-      //
-      // The extra condition is the ruling's own precondition, and it is why
-      // this reads an `opts` flag while the OWD line above reads only `meta`:
-      // the floor comes off only where the master gate DEMONSTRABLY covers the
-      // same operation, which is a fact about the call site. The by-id write
-      // pre-image gate vouches for it (step 2.8 runs immediately below it on
-      // the same pass, under a superset of its own guard); the bulk-write path
-      // does not and must not, because `assertControlledByParentWrite` returns
-      // early with no single id and nothing would replace the floor there.
-      // Both directions are pinned in
-      // `controlled-by-parent-detail-write-authority.test.ts`.
-      //
-      // ⚠️ THE PLACEMENT IS LOAD-BEARING, on exactly the reasoning #8023
-      // records two comments up. Dropping the floor HERE — ahead of the #7665
-      // derive-from-select branch — leaves the write class empty, so a detail
-      // that DOES author select policies still derives its write scope from
-      // its own read narrowing. Dropping it at the `dropPlatformOwnershipFloor`
-      // filter further down would skip that branch and compile Layer 1 to null.
-      // Scope, both halves load-bearing:
-      //   - only the PLATFORM's floor (provenance, ADR-0105 D3) — an
-      //     app-authored policy spelling the identical predicate still reaches
-      //     the compiler and still refuses (ADR-0049);
-      //   - only the write classes the master gate covers
-      //     (`masterGateCoversOperation`), which is every class the floor ships.
-      // Layer 0 (the tenant wall) is untouched, and so is the read path: the
-      // floor is a write-side construct that never applied to `select`.
-      if (this.platformFloorYieldsToObjectWriteModel(meta, object, operation, opts)) {
-        collected = collected.filter((p) => !isPlatformOwnershipFloorPolicy(p));
-      }
-      // [#7665] The write-visibility floor: a write target must be inside the
-      // caller's READABLE set. When NO policy of the write class applies to
-      // this (principal, object, operation) — nothing authored for the class,
-      // and the platform ownership floor outside its `positions` domain — the
-      // write class used to compile to a null Layer 1, and every write-side
-      // row gate composed from it became a no-op at once: the by-id pre-image
-      // gate (step 2.7), the controlled_by_parent master check, and the bulk
-      // write AST injection. QA #7637 measured the result on the stock
-      // showcase (select-only narrowing, `contributor` position, OWD
-      // `public_read_write`): a contributor PATCHed by id records they could
-      // not read — on the master AND on a controlled_by_parent detail — while
-      // the read side correctly hid them.
-      //
-      // So an empty write-class collection now DERIVES the write scope from
-      // the caller's SELECT narrowing — the same policies, compiled by the
-      // same compiler, that the read path enforces. "You cannot mutate what
-      // you cannot see" then holds by construction, and the explain engine
-      // reports the same narrowing for update/delete that it reports for
-      // read, instead of "No RLS policy applies".
-      //
-      // Deliberately NOT derived:
-      //   - when ANY write-class policy applies (an authored predicate, or
-      //     the in-domain platform floor): those paths keep their exact
-      //     semantics, including every widening direction #7401 / #6736
-      //     track — #7665 criterion 5 (derive ONLY when no update-scope
-      //     predicate exists). `checkAuthoredRowWrite` is additionally
-      //     protected by its own authored-set pre-check, so a derived scope
-      //     can never masquerade as an authored admission (#5493 / #7281);
-      //   - for `insert` — there is no pre-existing row to be visible (a
-      //     controlled_by_parent detail INSERT is still gated through its
-      //     master's derived scope by step 2.8);
-      //   - when the caller holds the read-side superuser bypass on a
-      //     posture-permitting object — their readable set is unbounded, so
-      //     the readability requirement imposes nothing. This is the mirror
-      //     of the read path's own Layer-1 short-circuit above, so the
-      //     derived write scope can never be NARROWER than the read scope it
-      //     is derived from.
-      //
-      // [#8059 site 1] The trigger asks whether a write-scope PREDICATE
-      // applies — NOT whether the applicable set is merely non-empty. Those
-      // read the same only while every write-class policy carries a `using`.
-      // A policy declaring `check` alone gates nothing about WHICH existing
-      // row may be targeted (it validates the post-image, ADR-0058 D4), yet
-      // it is fully applicable on object + `positions` + operation, so the
-      // emptiness test counted it and switched the derivation off. The
-      // collected policy then compiled to no row filter — it carries no
-      // `using` for the compiler to read — so Layer 1 was null exactly as it
-      // was before #7665, and every write-side row gate composed from it went
-      // back to being a no-op. Measured on the stock showcase: a contributor
-      // GET-404s `showcase_invoice` and PATCHes it by id, 200, row changed,
-      // because `invoice_owner_immutable` is `operation: 'update'` with
-      // `check` only. #7665 criterion 5 is a statement about PREDICATES, and
-      // this is it, spelled the way the criterion reads.
-      //
-      // The predicate test is a superset of the old emptiness test (an empty
-      // collection carries no `using` either), so every path #7665 pinned is
-      // reached on exactly the same inputs as before.
-      if (
-        !collected.some((p) => policyDeclaresClause(p, 'using')) &&
-        (operation === 'update' || operation === 'delete') &&
-        !(
-          posturePermits &&
-          this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate })
-        )
-      ) {
-        collected = this.collectRLSPolicies(permissionSets, object, 'select', (context?.positions ?? []) as string[], context);
-      }
-      // [#5492] Provenance composition: the caller (the by-id write pre-image
-      // gate) has already asked the declared write authority — `ISharingService`
-      // — and received a positive `allow`. Its answer REPLACES the platform's own
-      // ownership floor, which is the widener-blind second implementation of the
-      // same "ownership" contract. Only the PLATFORM's floor is replaceable; an
-      // app-authored policy — even one spelling the identical predicate under a
-      // different name — reaches the compiler untouched (ADR-0049, and the
-      // ADR-0105 F1 lesson that a token match swallows authored policies).
-      const allRlsPolicies = opts?.dropPlatformOwnershipFloor
-        ? collected.filter((p) => !isPlatformOwnershipFloorPolicy(p))
-        : collected;
-      if (allRlsPolicies.length > 0) {
-        // Field-existence safety, in TWO passes that answer two different
-        // questions. Schema-lookup failure runs neither: a schema that cannot
-        // be loaded must not manufacture denials.
-        //
-        // Pass 1, HERE — the ADR-0095 delta c carve-out, and only that. A
-        // wildcard `organization_id`-leading policy on an object that opted OUT
-        // of tenancy is NOT APPLICABLE to it, so it is skipped WITHOUT
-        // contributing to the deny sentinel; a leading miss on any other column
-        // is a deny contribution. `extractTargetField`'s leading `==` / `=` /
-        // `in` shape match is exactly the right instrument for that carve-out,
-        // because the shape it recognises is the shape the platform's own
-        // tenant policy is authored in.
-        //
-        // Pass 2, in the COMPILER — every column named ANYWHERE in the
-        // predicate, in any position and any polarity. ⚠️ This pass is what
-        // pass 1 cannot do and must not be widened to do: a predicate naming an
-        // undeclared column in a NEGATION-carrying position (`nope != "x"`,
-        // `!(nope == 1)`, `!(nope in […])`, or a trailing `||` arm) returned
-        // `null` from `extractTargetField`, so the policy was KEPT, `dropped`
-        // never incremented, the sentinel never armed — and a row that has no
-        // such column SATISFIES the negation, so the authored narrowing widened
-        // to every row inside the tenant wall instead of denying. Teaching the
-        // regex more spellings would only move the same defect one level over;
-        // the compiler judges the compiled tree, where a negation is a `$not`
-        // node and has no spelling left to hide behind. The matcher's
-        // include-direction ruling is untouched — it never sees the phantom.
-        let dropped = 0;
-        const compilable = objectFields
-          ? allRlsPolicies.filter((p) => {
-              const targetField = this.extractTargetField(p.using);
-              if (!targetField) return true;
-              if (objectFields.has(targetField)) return true;
-              if (tenancyDisabled && targetField === 'organization_id') {
-                return false;
-              }
-              dropped++;
-              return false;
-            })
-          : allRlsPolicies;
-        layer1 = this.rlsCompiler.compileFilter(
-          compilable,
-          context,
-          'using',
-          objectFields
-            ? {
-                declared: objectFields,
-                datetime: this.datetimeFieldNamesCache.get(object),
-                number: this.numberComparandFieldsCache.get(object),
-              }
-            : undefined,
-        );
-        // Every applicable policy dropped for a missing field → deny sentinel,
-        // by reference (ADR-0139 D2 step 2: recognised by identity).
-        if (layer1 == null && dropped > 0) {
-          layer1 = RLS_DENY_FILTER;
-        }
-      }
-    }
-
-    // ── Layer 0: tenant isolation — independent, always-first, AND-composed.
-    // Decides "tenant object?" directly from the field set + tenancy posture (NOT
-    // via extractTargetField's `=`-only shape match), so a `tenancy.enabled:false`
-    // global object correctly contributes nothing (ADR-0095 delta c).
-    // [#15813] The verdict is computed ONCE; the filter injected below is its
-    // projection. Recording the verdict costs no second computation.
-    const tenantLayer0Input: TenantLayer0Input = {
-      tenancyPosture: this.tenancyPosture,
-      organizationId: context?.tenantId,
-      // [ADR-0105 D2] The `group` wall's predicate. Resolved by
-      // `resolveAuthzContext` and carried on the context — never re-derived here.
-      accessibleOrgIds: context?.accessible_org_ids,
-      // [#7835] A FEDERATED object's `organization_id` may be the registry's
-      // injected anchor rather than a remote column — present in the field set,
-      // absent from the store the query actually runs against (the platform
-      // issues no DDL for `external` objects). Answering "yes, tenant object"
-      // there AND-composes `organization_id = <org>` onto a federated read,
-      // where it isolates nothing and — on SQLite — degrades to a constant-false
-      // string comparison: 0 rows, no error, HTTP 200. This is the
-      // plugin-security sibling of #7738 / PR #7833, which withheld
-      // `DriverOptions.tenantId` for the same objects one layer down; that fix
-      // cannot reach a `where` predicate composed into the AST.
-      //
-      // Only the PLATFORM's anchor is discounted (provenance, per
-      // `federated-phantom-anchors.ts`): a federated object that DECLARES a real
-      // remote `organization_id` keeps its wall, and every local object is
-      // untouched. `undefined` (schema unresolvable) still means "assume tenant
-      // object" — the fail-toward-isolation default is unchanged.
-      objectHasOrgIdField: objectFields
-        ? objectFields.has('organization_id') && !meta.tenantAnchorIsPhantom
-        : undefined,
-      tenancyDisabled,
-      posturePermitsCrossTenant: posturePermits,
-      isPlatformAdmin,
+    // [#25223 cut 7] The body moved to `security-plugin-rls-filter.ts` (see `RlsFilterHost`).
+    const readLogger = () => this.logger;
+    const readMetadata = () => this.metadata;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readRlsCompiler = () => this.rlsCompiler;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<RlsFilterHost, 'collectRLSPolicies' | 'datetimeFieldNamesCache' | 'extractTargetField' | 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'hasPlatformAdminPosture' | 'isVerifiedPlatformOwnerSession' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'permissionEvaluator' | 'platformFloorYieldsToObjectWriteModel' | 'ql' | 'rlsCompiler' | 'stageRlsMembership' | 'tenancyDisabledCache' | 'tenancyPosture'> = {
+      collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
+      datetimeFieldNamesCache: this.datetimeFieldNamesCache,
+      extractTargetField: (...a) => this.extractTargetField(...a),
+      getObjectFieldNames: (...a) => this.getObjectFieldNames(...a),
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      hasPlatformAdminPosture: (...a) => this.hasPlatformAdminPosture(...a),
+      isVerifiedPlatformOwnerSession: (...a) => this.isVerifiedPlatformOwnerSession(...a),
+      get logger() { return readLogger(); },
+      get metadata() { return readMetadata(); },
+      numberComparandFieldsCache: this.numberComparandFieldsCache,
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      platformFloorYieldsToObjectWriteModel: (...a) => this.platformFloorYieldsToObjectWriteModel(...a),
+      get ql() { return readQl(); },
+      get rlsCompiler() { return readRlsCompiler(); },
+      stageRlsMembership: (...a) => this.stageRlsMembership(...a),
+      tenancyDisabledCache: this.tenancyDisabledCache,
+      get tenancyPosture() { return readTenancyPosture(); },
     };
-    const tenantLayer0Verdict = computeTenantLayer0Verdict(tenantLayer0Input);
-    const layer0 = tenantLayer0FilterOf(tenantLayer0Verdict);
-    // [ADR-0095 D3 · ADR-0123 D2 · #24821] Did the platform operator's crossing,
-    // and nothing else, make this verdict `none`? Asked of the ONE ladder a
-    // second time with only the exemption's own fact withheld, so no rung —
-    // posture, tenant object, phantom anchor — is re-derived here. A `single`
-    // posture or a non-tenant object answers `none` both ways and is not a
-    // crossing. Step 3.7 reads it: crossing lets an operator read and update
-    // every organization's rows, and does not give a NEW row an organization.
-    const crossedByPlatformAdmin =
-      tenantLayer0Verdict.kind === 'none' &&
-      isPlatformAdmin &&
-      computeTenantLayer0Verdict({ ...tenantLayer0Input, isPlatformAdmin: false }).kind !== 'none';
-
-    // [#12974] Verified platform OWNER crosses the Layer 0 org wall — READS
-    // ONLY. Maintainer ruling 2026-08-29, verbatim and untranslated: 「能不能
-    // 简单点，对于超级管理员，配置了环境变量邮箱的，在执行墙的时候不要强制加上
-    // org_id 的过滤」— the ruling is about the wall's FILTER on operator
-    // screens reading; the director's correction (same card, after the dogfood
-    // gate) scopes the door accordingly. When the READ wall ARMS (layer0
-    // non-null on a select/count/aggregate: the `isolated` equality, the
-    // `group` union, or the fail-closed deny sentinel an org-less session
-    // otherwise hits), the org filter is NOT appended for a session whose
-    // account is the VERIFIED declared platform owner (`OS_PLATFORM_OWNER_EMAIL`
-    // under commit c0714eb5d's verified-email predicate — the same match the elevation
-    // gate makes; see `isVerifiedPlatformOwnerSession` for the fail-closed
-    // ladder). Everyone else's wall is byte-identical to before: the probe
-    // answers `false` on env-unset before touching any row, and it is not even
-    // consulted while Layer 0 contributes nothing.
-    //
-    // WRITES keep today's behaviour for everyone INCLUDING the owner (`isWrite`
-    // guards the branch): an org-less tenant-scoped write is REFUSED 403 naming
-    // the missing active organization — the ADR-0123 D2 contract, whose verdict
-    // is DERIVED from this very computation (`computeWriteTenantCheckFilter` →
-    // the deny sentinel). Lifting the write twin would not grant the owner a
-    // cross-org write; it would mint exactly the NULL-organization rows the
-    // platform is eliminating, and it measurably broke the dogfood pin (500
-    // where the 403 refusal belongs). The by-id write PRE-IMAGE read carries
-    // the write operation name through this method, so it stays walled too.
-    //
-    // ONLY the read-side Layer 0 is lifted. Layer 1 (business RLS, object/field
-    // permissions, the write `check` path) is untouched by construction — this
-    // branch rewrites the `layer0` half of the split and nothing else.
-    if (!isWrite && layer0 !== null && (await this.isVerifiedPlatformOwnerSession(context))) {
-      // The audit floor (hard piece 3 of the ruling): a structured warn-level
-      // log with the stable event name, per wall-bypassing READ computation —
-      // the only bypass kind left. plugin-audit is not wired into
-      // plugin-security (no dependency in either direction; its `audit`
-      // service ingress is a CLOSED auth-session vocabulary), so the
-      // `sys_audit_log` ledger is deliberately not the sink here. Named after
-      // the cloud precedent (`cross_org_admin_read`).
-      this.logger.warn?.(
-        `[security] ${PLATFORM_OWNER_WALL_BYPASS_EVENT}: verified platform owner crossed ` +
-          'the Layer 0 organization wall on a read — the org filter below was NOT appended (only the ' +
-          "declared platform owner's reads cross it; writes stay walled for everyone)",
-        {
-          event: PLATFORM_OWNER_WALL_BYPASS_EVENT,
-          object,
-          operation,
-          userId: context?.userId,
-          organizationId: context?.tenantId ?? null,
-          tenancyPosture: this.tenancyPosture,
-          suppressedFilter: layer0,
-        },
-      );
-      // [#15813] The recorded verdict follows the wall as APPLIED: lifted here,
-      // so `none` — a reader must not learn an organization from a wall that
-      // was not appended.
-      return { layer0: null, layer1, tenantLayer0Verdict: { kind: 'none' }, crossedByPlatformAdmin };
-    }
-
-    return { layer0, layer1, tenantLayer0Verdict, crossedByPlatformAdmin };
+    return computeLayeredRlsFilter.call(host, permissionSets, object, operation, context, opts);
   }
 
   /**
@@ -8225,33 +7674,13 @@ export class SecurityPlugin implements Plugin {
    * The `isSystem: true` read below cannot recurse: system operations
    * short-circuit the security middleware before any RLS computation.
    */
-  private async isVerifiedPlatformOwnerSession(context: any): Promise<boolean> {
-    const declared = resolvePlatformAdminEmails();
-    if (declared.emails.length === 0) return false;
-    if (!context || typeof context !== 'object') return false;
-    const userId = context.userId;
-    if (typeof userId !== 'string' || userId === '') return false;
-    if (typeof context.__verifiedPlatformOwner === 'boolean') return context.__verifiedPlatformOwner;
-    if (typeof context.email === 'string' && context.email.trim() !== '') {
-      if (!isConfiguredPlatformAdminEmail(context.email, declared)) {
-        context.__verifiedPlatformOwner = false;
-        return false;
-      }
-    }
-    let row: unknown = null;
-    try {
-      if (typeof this.ql?.findOne === 'function') {
-        row = await this.ql.findOne('sys_user', { where: { id: userId }, context: { isSystem: true } });
-      } else if (typeof this.ql?.find === 'function') {
-        const rows = await this.ql.find('sys_user', { where: { id: userId }, limit: 1, context: { isSystem: true } });
-        row = Array.isArray(rows) ? rows[0] : ((rows as any)?.value?.[0] ?? null);
-      }
-    } catch {
-      row = null;
-    }
-    const verdict = isVerifiedPlatformOwnerRow(row, declared);
-    context.__verifiedPlatformOwner = verdict;
-    return verdict;
+  private isVerifiedPlatformOwnerSession(context: any): Promise<boolean> {
+    // [#25223 cut 7] The body moved to `security-plugin-rls-filter.ts` (see `RlsFilterHost`).
+    const readQl = () => this.ql;
+    const host: Pick<RlsFilterHost, 'ql'> = {
+      get ql() { return readQl(); },
+    };
+    return isVerifiedPlatformOwnerSession.call(host, context);
   }
 
   /**
@@ -8263,95 +7692,32 @@ export class SecurityPlugin implements Plugin {
    * FilterCondition is matched against the post-image record by the caller
    * (fail closed).
    */
-  private async computeWriteCheckFilter(
+  private computeWriteCheckFilter(
     permissionSets: PermissionSet[],
     object: string,
     operation: string,
     context: any,
     preImageOpts?: RlsFilterOptions,
   ): Promise<Record<string, unknown> | null> {
-    // [ADR-0066 ①] modifyAllRecords bypasses write-side RLS (incl. the post-image
-    // check) on private/platform-global objects.
-    const meta = await this.getObjectSecurityMeta(object);
-    if (
-      (meta.isPrivate || meta.tenancyDisabled || meta.isBetterAuthManaged) &&
-      this.permissionEvaluator.hasSuperuserWriteBypass(object, permissionSets, { isPrivate: meta.isPrivate })
-    ) {
-      return null;
-    }
-    // [#8059 site 2] `heldPositions` is threaded through, exactly as every
-    // other `collectRLSPolicies` call site threads it. Omitting it did not
-    // widen the check — it DELETED it: `getApplicablePolicies` evaluates the
-    // ADR-0090 P2 applicability domain against the positions it is given, so
-    // with `[]` every policy declaring `positions` failed the domain test and
-    // was filtered out of the post-image check FOR EVERY CALLER, holder and
-    // non-holder alike. A position-scoped `check` clause was therefore inert
-    // (ADR-0049 enforce-or-remove; the same class #3539 closed for org-scoped
-    // policies) — the showcase's `invoice_owner_immutable` among them, which
-    // is why the by-id write measured in #8059 was not stopped on the way out
-    // either once site 1 had let it past the row gate. The domain still
-    // decides: a non-holder is outside it and the policy still does not apply
-    // to them.
-    // The platform ownership floor takes part in a defaulted check exactly
-    // when the pre-image gate kept it: the same three replacements drop it here
-    // (an `allow` from the declared write authority, a `public_read_write` OWD,
-    // a covering master gate), and nothing else does.
-    const floorReplaced =
-      !!preImageOpts?.dropPlatformOwnershipFloor ||
-      this.platformFloorYieldsToObjectWriteModel(meta, object, operation, preImageOpts);
-    const withCheck = writeCheckPolicies(
-      this.collectRLSPolicies(
-        permissionSets,
-        object,
-        operation,
-        (context?.positions ?? []) as string[],
-        context,
-      ),
-      { keepOwnershipFloor: !floorReplaced },
-    );
-    if (withCheck.length === 0) return null;
-    // [ADR-0105 D11 / commit 1d73d45c1] Stage the app-resolved membership sets on THIS
-    // context before the `check` clause compiles — the same staging the read
-    // side performs before Layer 1 compiles (`computeLayeredRlsFilter`). A
-    // bare insert performs no read, so without this line the `check` twin of
-    // a `using` clause that reads a resolver key
-    // (`record.f in current_user.<key>`) compiled against a context in which
-    // the key had never been staged: unresolved variable → policy dropped →
-    // `RLS_DENY_FILTER` → every such insert refused. The two write shapes
-    // that DID pass did so by accident of an earlier read on the SAME context
-    // object (the by-id pre-image at 2.7, the controlled_by_parent master
-    // read) having staged it first; staging is memoized per context, so
-    // those shapes still resolve exactly once. This OBTAINS the context the
-    // check should always have had — it relaxes nothing: no resolver, a
-    // throwing resolver or an unresolved key still drop the policy and still
-    // fail closed, on this path as on the read path.
-    await this.stageRlsMembership(context);
-    // [#17042] The write face's field-existence net — which this path had NONE
-    // of. `computeWriteCheckFilter` compiled `check` clauses with no column
-    // check at all, so a phantom column in a negated position
-    // (`nope != "x"`, `!(nope == 1)`, `!(nope in […])`, a trailing `||` arm)
-    // was satisfied VACUOUSLY by the post-image and PERMITTED the write the
-    // policy was authored to refuse — measured on both SQL drivers, the write
-    // being driver-independent because the check is evaluated in-process
-    // against the post-image (`matchesFilterCondition`, step 3.6). Only a
-    // POSITIVE phantom refused, by accident of `looseEq(undefined, value)`
-    // being false, which is why the hole was invisible to a suite that tested
-    // the positive shape. The guard is the SAME one the read layer passes, so
-    // the two faces can never again disagree about what an undeclared column
-    // means. `null` (schema not loadable) passes no guard and behaves as before.
-    const objectFields = await this.getObjectFieldNames(this.metadata, object, this.ql);
-    return this.rlsCompiler.compileFilter(
-      withCheck,
-      context,
-      'check',
-      objectFields
-        ? {
-            declared: objectFields,
-            datetime: this.datetimeFieldNamesCache.get(object),
-            number: this.numberComparandFieldsCache.get(object),
-          }
-        : undefined,
-    );
+    // [#25223 cut 7] The body moved to `security-plugin-rls-filter.ts` (see `RlsFilterHost`).
+    const readMetadata = () => this.metadata;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readRlsCompiler = () => this.rlsCompiler;
+    const host: Pick<RlsFilterHost, 'collectRLSPolicies' | 'datetimeFieldNamesCache' | 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'metadata' | 'numberComparandFieldsCache' | 'permissionEvaluator' | 'platformFloorYieldsToObjectWriteModel' | 'ql' | 'rlsCompiler' | 'stageRlsMembership'> = {
+      collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
+      datetimeFieldNamesCache: this.datetimeFieldNamesCache,
+      getObjectFieldNames: (...a) => this.getObjectFieldNames(...a),
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      get metadata() { return readMetadata(); },
+      numberComparandFieldsCache: this.numberComparandFieldsCache,
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      platformFloorYieldsToObjectWriteModel: (...a) => this.platformFloorYieldsToObjectWriteModel(...a),
+      get ql() { return readQl(); },
+      get rlsCompiler() { return readRlsCompiler(); },
+      stageRlsMembership: (...a) => this.stageRlsMembership(...a),
+    };
+    return computeWriteCheckFilter.call(host, permissionSets, object, operation, context, preImageOpts);
   }
 
   /**
@@ -8390,46 +7756,15 @@ export class SecurityPlugin implements Plugin {
    * resolver key resolved only when the request happened to read first
    * (commit 1d73d45c1).
    */
-  private async stageRlsMembership(context: any): Promise<void> {
-    if (!this.rlsMembershipResolver || !context || typeof context !== 'object') return;
-    // One resolution per request: the same context object is threaded through
-    // every object the operation touches.
-    if (context.__rlsMembershipStaged) return;
-    context.__rlsMembershipStaged = true;
-
-    let resolved: Record<string, string[]> = {};
-    try {
-      resolved = (await this.rlsMembershipResolver.resolve({
-        userId: context.userId,
-        tenantId: context.tenantId,
-        accessible_org_ids: context.accessible_org_ids,
-        positions: context.positions,
-        permissions: context.permissions,
-      })) ?? {};
-    } catch (e) {
-      this.logger.warn?.(
-        '[security/ADR-0105] rls-membership-resolver threw — its keys stay unresolved and the ' +
-          'policies referencing them will fail closed',
-        { error: (e as Error)?.message },
-      );
-      return;
-    }
-
-    const bag: Record<string, string[]> = { ...(context.rlsMembership ?? {}) };
-    for (const [key, value] of Object.entries(resolved)) {
-      if (RESERVED_RLS_MEMBERSHIP_KEYS.includes(key)) {
-        this.logger.warn?.(
-          '[security/ADR-0105] rls-membership-resolver tried to supply a RESERVED context key — ignored',
-          { key },
-        );
-        continue;
-      }
-      if (!Array.isArray(value)) continue;
-      // An already-staged key wins: a caller-supplied bag is closer to the
-      // request than a generic resolver.
-      if (bag[key] === undefined) bag[key] = value.filter((v) => typeof v === 'string');
-    }
-    if (Object.keys(bag).length > 0) context.rlsMembership = bag;
+  private stageRlsMembership(context: any): Promise<void> {
+    // [#25223 cut 7] The body moved to `security-plugin-rls-filter.ts` (see `RlsFilterHost`).
+    const readLogger = () => this.logger;
+    const readRlsMembershipResolver = () => this.rlsMembershipResolver;
+    const host: Pick<RlsFilterHost, 'logger' | 'rlsMembershipResolver'> = {
+      get logger() { return readLogger(); },
+      get rlsMembershipResolver() { return readRlsMembershipResolver(); },
+    };
+    return stageRlsMembership.call(host, context);
   }
 
   private async computeWriteTenantCheckFilter(
@@ -8468,7 +7803,7 @@ export class SecurityPlugin implements Plugin {
    * {@link canWriteObject} asks this same method, so the two doors share one
    * spelling of the wall. It is handed no row, stored or written.
    */
-  private async organizationWallRefusal(
+  private organizationWallRefusal(
     permissionSets: PermissionSet[],
     object: string,
     operation: string,
@@ -8476,20 +7811,15 @@ export class SecurityPlugin implements Plugin {
     delegatorSets: PermissionSet[] | null,
     delegatorContext: any,
   ): Promise<'caller' | 'delegator' | null> {
-    if (!this.orgScopingEnabled || callerHasOrganizationScope(context, this.tenancyPosture)) return null;
-    const callerWall = await this.computeWriteTenantCheckFilter(permissionSets, object, operation, context);
-    // [ADR-0090 D10] The delegator is walled on its own context, exactly as
-    // the forge guard walls it — an on-behalf-of write may not land a row
-    // the delegator itself could not place.
-    const delegatorWall =
-      delegatorSets && !callerHasOrganizationScope(delegatorContext, this.tenancyPosture)
-        ? await this.computeWriteTenantCheckFilter(delegatorSets, object, operation, delegatorContext)
-        : null;
-    return isTenantWallDenial(callerWall)
-      ? 'caller'
-      : isTenantWallDenial(delegatorWall)
-        ? 'delegator'
-        : null;
+    // [#25223 cut 6] The body moved to `security-plugin-write-tenant-wall.ts` (see `WriteTenantWallHost`).
+    const readOrgScopingEnabled = () => this.orgScopingEnabled;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'orgScopingEnabled' | 'tenancyPosture'> = {
+      computeWriteTenantCheckFilter: (...a) => this.computeWriteTenantCheckFilter(...a),
+      get orgScopingEnabled() { return readOrgScopingEnabled(); },
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return organizationWallRefusal.call(host, permissionSets, object, operation, context, delegatorSets, delegatorContext);
   }
 
   /**
@@ -8577,38 +7907,18 @@ export class SecurityPlugin implements Plugin {
    * organization a `beforeInsert` / `beforeUpdate` hook writes is judged by
    * the write's stored-image half alone — the preview's named limit.
    */
-  async writeWallVerdict(
+  writeWallVerdict(
     object: string,
     operation: 'insert' | 'update',
     context: any,
     rows: readonly Record<string, unknown>[],
   ): Promise<WriteWallRowVerdict[] | null> {
-    if (!context || typeof context !== 'object' || context.isSystem || !context.userId) return null;
-    if (operation !== 'insert' && operation !== 'update') return null;
-    let principals: Awaited<ReturnType<SecurityPlugin['resolveOperationPrincipals']>>;
-    try {
-      principals = await this.resolveOperationPrincipals(operation, object, context);
-    } catch {
-      return null;
-    }
-    const isRow = (row: unknown): row is Record<string, unknown> =>
-      !!row && typeof row === 'object' && !Array.isArray(row);
-    const wall = await this.composeWriteTenantWall(
-      object,
-      operation,
-      context,
-      rows.filter(isRow),
-      true,
-      principals,
-      { positions: context.positions ?? [], permissionSets: context.permissions ?? [] },
-    );
-    return rows.map((row): WriteWallRowVerdict => {
-      if (!isRow(row)) return { admitted: true, judgesOrganization: false };
-      const refused = wall.preTest ?? wall.judgePayload([row]) ?? wall.storedImage?.judgeLanding([row]) ?? null;
-      return refused
-        ? { admitted: false, field: refused.field, code: refused.error.code, message: refused.error.message }
-        : { admitted: true, judgesOrganization: wall.storedImage?.judgesOrganization === true };
-    });
+    // [#25223 cut 6] The body moved to `security-plugin-write-tenant-wall.ts` (see `WriteTenantWallHost`).
+    const host: Pick<WriteTenantWallHost, 'composeWriteTenantWall' | 'resolveOperationPrincipals'> = {
+      composeWriteTenantWall: (...a) => this.composeWriteTenantWall(...a),
+      resolveOperationPrincipals: (...a) => this.resolveOperationPrincipals(...a),
+    };
+    return writeWallVerdict.call(host, object, operation, context, rows);
   }
 
   /**
@@ -8950,65 +8260,23 @@ export class SecurityPlugin implements Plugin {
    *   refusal where it is made. A context with no active organization is not
    *   this rule's: its answers stay with ADR-0123 D2.
    */
-  private async resolveOperationPrincipals(
+  private resolveOperationPrincipals(
     operation: string,
     object: string,
     context: any,
   ): Promise<{ permissionSets: PermissionSet[]; delegatorSets: PermissionSet[] | null; delegatorContext: any }> {
-    if (isPrincipalLessContext(context)) {
-      throw principalLessDenial(operation, object);
-    }
-    await this.refuseGuestWithoutOrganization(context, operation, object);
-
-    let permissionSets: PermissionSet[] = [];
-    try {
-      permissionSets = await this.resolvePermissionSetsForContext(context);
-    } catch (e) {
-      this.logger.error?.(
-        `[security] permission resolution failed for operation '${operation}' on ` +
-        `object '${object}' (user ${context?.userId ?? 'unknown'}) — ` +
-        `denying request (fail-closed)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
-      throw new PermissionDeniedError(
-        `[Security] Access denied: permission subsystem unavailable for ` +
-        `operation '${operation}' on object '${object}'`,
-      );
-    }
-
-    let delegatorSets: PermissionSet[] | null = null;
-    let delegatorContext: any = null;
-    if (permissionSets.length > 0 && context?.onBehalfOf?.userId) {
-      const del = await resolveDelegatorContext(this.ql, context);
-      if (del.kind === 'missing') {
-        throw new PermissionDeniedError(
-          `[Security] Access denied: on-behalf-of principal names delegator ` +
-            `'${del.userId}', who does not exist — refusing to act (ADR-0090 D10 fail-closed)`,
-          { operation, object },
-        );
-      }
-      if (del.kind === 'resolved') {
-        const liveOrganization = delegatedOrganizationRefusal(context, del.context, this.tenancyPosture);
-        if (liveOrganization !== undefined) {
-          this.logger.warn?.(
-            `[Security] on-behalf-of ${operation} '${object}' REFUSED — the delegator is not a member of the ` +
-              `organization the request runs in (ADR-0090 D10, fail-closed)`,
-          );
-          throw new PermissionDeniedError(
-            `[Security] Access denied: on-behalf-of principal acts in organization '${liveOrganization}', which ` +
-              `delegator '${String(context.onBehalfOf.userId)}' is not a member of — refusing to act (ADR-0090 D10 fail-closed)`,
-            { operation, object },
-            `[ADR-0090 D10] tenancy posture '${this.tenancyPosture}' walls organizations, and a delegated operation is ` +
-              `bounded by the delegator's scope: it runs in the live principal's active organization, which the ` +
-              `delegator's own membership must back. Build the on-behalf-of context in an organization the delegator ` +
-              `is a member of. System contexts and the single posture are unaffected.`,
-          );
-        }
-        delegatorContext = del.context;
-        delegatorSets = await this.resolvePermissionSetsForContext(delegatorContext);
-      }
-    }
-    return { permissionSets, delegatorSets, delegatorContext };
+    // [#25223 cut 6] The body moved to `security-plugin-operation-principals.ts` (see `OperationPrincipalsHost`).
+    const readLogger = () => this.logger;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<OperationPrincipalsHost, 'logger' | 'ql' | 'refuseGuestWithoutOrganization' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      get logger() { return readLogger(); },
+      get ql() { return readQl(); },
+      refuseGuestWithoutOrganization: (...a) => this.refuseGuestWithoutOrganization(...a),
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return resolveOperationPrincipals.call(host, operation, object, context);
   }
 
   /**
@@ -9035,30 +8303,18 @@ export class SecurityPlugin implements Plugin {
    * organization object) leaves the guest to the gate as it is — denied while
    * it holds no set (D3 item 2).
    */
-  private async refuseGuestWithoutOrganization(context: any, operation: string, object: string): Promise<void> {
-    // A system context never reaches here: both callers of
-    // {@link resolveOperationPrincipals} return before it for one (the
-    // middleware's system short-circuit, and `checkControlledByParentWrite`'s
-    // first exit), so this rule reads no elevation of its own.
-    if (!isGuestEnvelope(context)) return;
-    const tenantId = context?.tenantId;
-    if (typeof tenantId === 'string' && tenantId !== '') return;
-    const decision = await resolveGuestOrganization(this.ql, this.tenancyPosture);
-    if (decision.kind !== 'refuse') return;
-    if (!this.guestOrganizationRefusalWarned.has(decision.reason)) {
-      this.guestOrganizationRefusalWarned.add(decision.reason);
-      this.logger.warn?.(
-        `[security] an anonymous request reached '${operation}' on '${object}' and was refused: this deployment ` +
-          `resolves no organization for the guest (${decision.reason}, tenancy posture '${this.tenancyPosture}'` +
-          `${decision.organizationCount !== undefined ? `, ${decision.organizationCount} organization(s)` : ''}). ` +
-          `ADR-0138 D4 derives the guest's organization only on a single-organization deployment, and no site ` +
-          `binding (D5) exists yet to name one per request, so every anonymous data operation here answers ` +
-          `501 NOT_IMPLEMENTED. Serve the endpoint to signed-in callers (authRequired: true), or run it on a ` +
-          `single-organization deployment. Reported once per reason.`,
-        { operation, object, reason: decision.reason },
-      );
-    }
-    throw new GuestOrganizationUnresolvedError(decision.reason);
+  private refuseGuestWithoutOrganization(context: any, operation: string, object: string): Promise<void> {
+    // [#25223 cut 6] The body moved to `security-plugin-operation-principals.ts` (see `OperationPrincipalsHost`).
+    const readLogger = () => this.logger;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<OperationPrincipalsHost, 'guestOrganizationRefusalWarned' | 'logger' | 'ql' | 'tenancyPosture'> = {
+      guestOrganizationRefusalWarned: this.guestOrganizationRefusalWarned,
+      get logger() { return readLogger(); },
+      get ql() { return readQl(); },
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return refuseGuestWithoutOrganization.call(host, context, operation, object);
   }
 
   /**

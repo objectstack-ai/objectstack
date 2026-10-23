@@ -605,5 +605,5 @@ When the batch is not atomic and some records fail, each failing entry carries a
 | `ETag` | Entity tag for conditional requests |
 
 <Callout type="info">
-**Rate limiting is opt-in:** ObjectStack ships a token-bucket `RateLimiter` primitive (`@objectstack/runtime`), but it is **not** wired into the default REST response path — a deployment must add it at the adapter layer. Only when a deployment does so will responses carry `X-RateLimit-Limit` / `X-RateLimit-Remaining` / `X-RateLimit-Reset` (and a `429` with `Retry-After` once the limit is hit).
+**Rate limiting is built in and off by default:** a stack that declares `server.security.rateLimit` with `enabled: true` has every request metered against a per-caller token bucket. A caller over budget gets `429` with a `Retry-After` header (seconds) and `error.code: "RATE_LIMIT_EXCEEDED"`. No `X-RateLimit-*` headers are sent on any response. See [HARDENING.md § Rate limiting](https://github.com/objectstack-ai/objectstack/blob/main/docs/HARDENING.md#rate-limiting).
 </Callout>

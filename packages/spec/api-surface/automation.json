@@ -70,6 +70,7 @@
     "Checkpoint (type)",
     "CheckpointParsed (type)",
     "CheckpointSchema (const)",
+    "ClosedTemplateScope (interface)",
     "ConcurrencyPolicy (type)",
     "ConcurrencyPolicyParsed (type)",
     "ConcurrencyPolicySchema (const)",
@@ -283,6 +284,7 @@
     "builtinNodeConfigKeysJudged (function)",
     "canonicalApproverType (function)",
     "classifyFlowFilterOperandString (function)",
+    "closedScopeTemplateRefusal (function)",
     "collectFlowGraphs (function)",
     "defineActionDescriptor (function)",
     "defineFlow (function)",
@@ -312,6 +314,7 @@
     "resolveFlowTriggerKind (function)",
     "resolveScheduleOrganization (function)",
     "structuralConditionRefusal (function)",
+    "templateSlotSource (function)",
     "textSlotTemplateRefusal (function)",
     "validateControlFlow (function)",
     "valueSlotTemplateRefusals (function)"

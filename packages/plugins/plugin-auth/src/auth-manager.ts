@@ -36,6 +36,7 @@ import {
   type LinkingAuthContext,
   refuseImplicitAccountLink,
 } from './implicit-account-linking.js';
+import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import { IdpLocaleSync } from './idp-locale-claim.js';
 import type { IDataEngine } from '@objectstack/core';
 import {
@@ -43,6 +44,8 @@ import {
   API_KEY_INACTIVITY_DAYS,
   API_KEY_MAX_EXPIRY_DAYS,
   accountScopeAuthGate,
+  // [#25083] Is this process a cloud-managed (hosted) environment? The ONE
+  // accessor every managed-mode judgement here asks, and nothing else.
   isCloudManaged,
   resolveUserAuthzGrants,
 } from '@objectstack/core';
@@ -134,23 +137,7 @@ import {
   applyUserUnban,
   SCIM_DEACTIVATION_BAN_REASON,
 } from './user-ban-write.js';
-import {
-  PHONE_SMS_TOPICS,
-  interpolatePhoneSms,
-  resolvePhoneSmsTemplateBody,
-} from './phone-sms-texts.js';
 import { invitationRoleLabel } from './invitation-role-label.js';
-// commit 35e94c96b — the stored rung of the ruled locale ladder reuses the messaging
-// seam's normalizer rather than growing a second one. `normalizeRecipientLocale`
-// is the platform's ONE reader of a value at rest in `sys_user.locale`, and its
-// refusal of the stringified-nothing literals (`"undefined"`, `"null"`) is part
-// of its contract — hotcrm measured that literal dead-lettering every delivery
-// for every user without a preference row. A private copy here would be a
-// second place for that refusal to rot.
-import {
-  RECIPIENT_LOCALE_FIELD,
-  normalizeRecipientLocale,
-} from '@objectstack/service-messaging';
 import {
   AUTH_USER_CONFIG,
   AUTH_SESSION_CONFIG,
@@ -160,18 +147,10 @@ import {
   buildTwoFactorPluginSchema,
   buildOauthProviderPluginSchema,
   buildDeviceAuthorizationPluginSchema,
-  buildJwtPluginSchema,
   buildAdminPluginSchema,
   buildPhoneNumberPluginSchema,
 } from './auth-schema-config.js';
 import {
-  createHostUsableJwksReader,
-  probeEd25519Support,
-  protectGetSessionJwtHook,
-  resolveJwtSigningAlgorithm,
-} from './jwt-key-algorithm.js';
-import {
-  createSigningKeyReader,
   retireHeldKeyrings,
   UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS,
 } from './signing-key-read-cache.js';
@@ -231,6 +210,35 @@ import {
   stampIdentitySource,
   type DatabaseHooksHost,
 } from './auth-manager-database-hooks.js';
+// [#25224 cut 5] The email and SMS delivery; the methods of the same names
+// below hand each body the members it reads (`EmailSmsDeliveryHost`).
+import {
+  assertPhoneOtpSendAllowed,
+  deliverPhoneOtp,
+  getOtpSendGuard,
+  renderPhoneSmsBody,
+  sendChangeEmailNotice,
+  sendPhoneInviteSms,
+  storedRecipientLocale,
+  type EmailSmsDeliveryHost,
+} from './auth-manager-email-sms-delivery.js';
+// [#25224 cut 6] The plugin assembly helpers; the methods of the same names
+// below hand each body the members it reads (`PluginAssemblyHost`).
+import {
+  addOptionalPlugin,
+  buildJwtPlugin,
+  reportJwtSigningFailure,
+  type PluginAssemblyHost,
+} from './auth-manager-plugin-assembly.js';
+// [#25224 cut 7] The database and the secret handed to better-auth; the
+// methods of the same names below hand each body the members it reads
+// (`DatabaseSecretHost`).
+import {
+  createDatabaseConfig,
+  generateSecret,
+  resolveAuthSecret,
+  type DatabaseSecretHost,
+} from './auth-manager-database-secret.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -1214,39 +1222,6 @@ export function ipMatchesRange(ip: string, range: string): boolean {
 }
 
 /**
- * #6039 / #2814 — the error code an SMS service reports a QUOTA refusal with.
- *
- * `SmsService.send()` cannot throw an HTTP-shaped error: it is a kernel service
- * with no idea who is calling. It reports the deployment's daily cost ceiling
- * being hit as a normal failed result whose `error` carries the service's
- * `CODE: message` envelope — here `TOO_MANY_REQUESTS: daily SMS quota
- * exhausted`. Turning that back into an HTTP answer is the auth endpoint's job,
- * which is why the mapping lives here (see {@link isSmsQuotaRefusal}).
- *
- * **Source of truth**: `SMS_QUOTA_EXCEEDED_CODE` in
- * `packages/services/service-sms/src/sms-daily-quota.ts` (exported alongside
- * `SMS_QUOTA_EXCEEDED_ERROR`).
- *
- * **Why it is restated instead of imported**: `@objectstack/service-sms` already
- * depends on THIS package — its day counter imports `InProcessCounterStore` /
- * `incrementFixedWindow` from `@objectstack/plugin-auth` — so importing the
- * constant back would close a dependency cycle. This is the same call, in the
- * other direction, that `normalizeSmsRecipient` makes in
- * `packages/services/service-sms/src/sms-service.ts` ("Same shape rule as
- * plugin-auth's `normalizePhoneNumber` … kept local: the two packages must not
- * depend on each other").
- *
- * Only the envelope's CODE token crosses the boundary, never its prose: the
- * message half is service-owned and may be reworded without touching this
- * file. That token is the service's own spelling, which is better-call's
- * status NAME for 429; it is not an ADR-0112 error code (`ErrorCode` refuses
- * it as a reason-phrase alias of `RATE_LIMIT_EXCEEDED`). So it is only ever
- * MATCHED here, never put in a body: the code the 429 carries to the caller
- * is {@link PHONE_OTP_SEND_REFUSAL_CODE}.
- */
-const SMS_QUOTA_EXCEEDED_CODE = 'TOO_MANY_REQUESTS';
-
-/**
  * [#14522] The better-auth endpoint path prefix every SCIM 2.0 protocol
  * endpoint lives under (`/scim/v2/Users`, `/scim/v2/Groups/:groupId`, …) —
  * the same predicate `@better-auth/scim` uses for its own after-hook matcher
@@ -1260,18 +1235,6 @@ function isScimProtocolPath(endpointPath: string | undefined): boolean {
     endpointPath === SCIM_PROTOCOL_PATH_PREFIX ||
     endpointPath?.startsWith(`${SCIM_PROTOCOL_PATH_PREFIX}/`) === true
   );
-}
-
-/**
- * #6039 — is this `SendSmsResult.error` the quota wall's refusal?
- *
- * Matched as a PREFIX of the service's `CODE: message` envelope, never as a
- * substring: a transport failure puts the provider's raw text in `error`
- * (`SmsService` truncates it and reports it verbatim), and one that happens to
- * mention the code mid-sentence is still a transport failure — 500, not 429.
- */
-function isSmsQuotaRefusal(error: string | undefined): boolean {
-  return typeof error === 'string' && error.startsWith(`${SMS_QUOTA_EXCEEDED_CODE}:`);
 }
 
 /**
@@ -1405,46 +1368,6 @@ function acceptLanguageHeader(source: unknown): string | undefined {
   }
   return undefined;
 }
-
-/**
- * #6039 — the 429 an SMS quota refusal must reach the caller as.
- *
- * better-call (better-auth's router) maps ONLY `APIError` to a real HTTP status:
- * `isAPIError(err) = err instanceof APIError || err?.name === 'APIError'`
- * (better-call@1.4.0 `dist/utils.mjs:55-56`), consumed at `dist/router.mjs:92`,
- * where everything else takes the `console.error` + `500 / null body` branch
- * (`:93-97`; re-measured 2026-08-23 against the installed copy).
- * A plain `Error` therefore buried `TOO_MANY_REQUESTS` in a server log while the
- * per-number wall on the same endpoint ({@link AuthManager.assertPhoneOtpSendAllowed})
- * answered 429 — one endpoint, two voices.
- *
- * The message follows the per-number wall's shape and carries NO budget detail:
- * no ceiling, no remaining count, no reset clock. #2814's requirement is that
- * the two walls be indistinguishable from outside — an attacker must not learn
- * which budget they hit, and a legitimate caller needs no more than "not now".
- * (The per-number wall names its own retry window because it can compute one;
- * this wall states no time it cannot honestly promise.)
- *
- * The status is spelled out as better-call's name for 429 rather than read off
- * {@link SMS_QUOTA_EXCEEDED_CODE}: that constant is the service envelope's
- * token, matched on the way in, and the HTTP status is this endpoint's own.
- */
-async function smsQuotaExceededApiError(message: string): Promise<Error> {
-  const { APIError } = await import('better-auth/api');
-  return new APIError('TOO_MANY_REQUESTS', { message, code: PHONE_OTP_SEND_REFUSAL_CODE });
-}
-
-/**
- * [#24243, ADR-0112] The ONE code both phone-OTP send walls answer with: the
- * deployment's daily SMS quota ({@link smsQuotaExceededApiError}) and the
- * per-number cooldown and hourly cap
- * ({@link AuthManager.assertPhoneOtpSendAllowed}). One code, not one per wall:
- * #2814 requires the two walls to be indistinguishable from outside, so a
- * caller learns "not now" and never which budget it hit. The standard
- * catalog's member for request pacing; `QUOTA_EXCEEDED` would name the first
- * wall alone, and so would tell them apart.
- */
-const PHONE_OTP_SEND_REFUSAL_CODE: StandardErrorCode = 'RATE_LIMIT_EXCEEDED';
 
 /** [#24243] The standard ADR-0112 code the slug guard's read fault answers with — the status's own name. */
 const SLUG_GUARD_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
@@ -1981,10 +1904,11 @@ export class AuthManager {
       // lock the registration policy without relying on UI state.
       emailAndPassword: (() => {
         const disableSignUpFromEnv = readDisableSignUpEnv();
-        // SSO-only ("enforced") forces self-registration off (the managed team
-        // signs in via the IdP). `enabled` stays true so the break-glass
-        // password endpoint keeps working for the env owner / local admin.
-        const effectiveDisableSignUp = this.resolveSsoOnly()
+        // SSO-only ("enforced") and a cloud-managed environment force
+        // self-registration off (see `signUpForcedOff`). `enabled` stays true
+        // so the break-glass password endpoint keeps working for the env
+        // owner / local admin.
+        const effectiveDisableSignUp = this.signUpForcedOff()
           ? true
           : (disableSignUpFromEnv ?? this.config.emailAndPassword?.disableSignUp);
         return {
@@ -2837,6 +2761,28 @@ export class AuthManager {
             // fall through — the vendor still decides everything it owns
           }
 
+          // ── [#25083] cloud-managed: invite-member issues nothing ────
+          // `beforeCreateInvitation` refuses a NEW invitation, but
+          // better-auth answers `resend: true` for an invitee who is
+          // already pending BEFORE it consults that hook: it extends the
+          // row's `expiresAt` and sends the invitation e-mail again
+          // (`organization/routes/crud-invites.mjs`, better-auth 1.7.12).
+          // The console reaches exactly that branch through
+          // `sys_invitation`'s `resend_invitation` action. On a
+          // cloud-managed environment no invitation leaves this door in
+          // either shape, so the route refuses ahead of the vendor's
+          // handler; the hook keeps its own arm as the second line. The
+          // fact is public (`features.cloudManaged` on `/auth/config`), so
+          // answering it ahead of the session check tells an anonymous
+          // caller nothing new.
+          if (ctx?.path === '/organization/invite-member' && isCloudManaged()) {
+            const { APIError } = await import('better-auth/api');
+            throw new APIError('CONFLICT', {
+              message: CLOUD_MANAGED_REFUSAL_MESSAGES.invitation,
+              code: CLOUD_MANAGED_REFUSAL_CODE,
+            });
+          }
+
           // ── ADR-0069 D2: account lockout (gate) ─────────────────────
           // Reject a sign-in for a locked identity BEFORE better-auth checks
           // the password — a lock must hold even against the correct password.
@@ -3264,24 +3210,17 @@ export class AuthManager {
    * `build` may return one plugin or an array that must land atomically
    * (e.g. jwt + oauthProvider): on failure NOTHING from the unit is pushed.
    */
-  private async addOptionalPlugin(
+  private addOptionalPlugin(
     plugins: any[],
     feature: string,
     build: () => Promise<any | any[]>,
   ): Promise<void> {
-    try {
-      const built = await build();
-      for (const p of Array.isArray(built) ? built : [built]) plugins.push(p);
-    } catch (err: any) {
-      const message = err?.message ?? String(err);
-      this.degradedFeatures.set(feature, message);
-      console.error(
-        `[AuthManager] Optional auth feature "${feature}" failed to initialize and is DISABLED ` +
-        `for this process — its endpoints will 404. Core email/password + session auth is unaffected. ` +
-        `Fix the underlying error (often a better-auth version mismatch) and restart. Cause: ${message}`,
-        err,
-      );
-    }
+    // [#25224 cut 6] The body moved to `auth-manager-plugin-assembly.ts` (see `PluginAssemblyHost`).
+    const readDegradedFeatures = () => this.degradedFeatures;
+    const host: Pick<PluginAssemblyHost, 'degradedFeatures'> = {
+      get degradedFeatures() { return readDegradedFeatures(); },
+    };
+    return addOptionalPlugin.call(host, plugins, feature, build);
   }
 
   /**
@@ -3328,60 +3267,18 @@ export class AuthManager {
    * read discards it, so it no longer pays the key read and the signature
    * (#24061; see `protectGetSessionJwtHook`).
    */
-  private async buildJwtPlugin(jwt: (options: any) => any): Promise<any> {
-    if (!this.ed25519ProbeResult) this.ed25519ProbeResult = probeEd25519Support();
-    const { keyPairConfig, ed25519Supported } = await resolveJwtSigningAlgorithm(
-      () => this.ed25519ProbeResult!,
-    );
-
-    if (!ed25519Supported) {
-      // Functional, not durability: the deployment is fully operational on
-      // ES256. Worth one line because it changes what /jwks publishes and what
-      // `alg` issued tokens carry, which an operator debugging a relying party
-      // otherwise cannot correlate to anything.
-      console.warn(
-        `[AuthManager] This host's WebCrypto has no Ed25519 (crypto.subtle.generateKey({name:'Ed25519'}) fails), ` +
-          `so JWTs are signed with ${keyPairConfig.alg} instead of better-auth's default EdDSA. ` +
-          `Any existing EdDSA key in sys_jwks is hidden from the JWKS on this host — it cannot be imported here — ` +
-          `and a fresh ${keyPairConfig.alg} key is minted on first use. The rows are not deleted.`,
-      );
-    }
-
-    const jwtPlugin = jwt({
-      schema: buildJwtPluginSchema(),
-      jwks: { keyPairConfig },
-      // [#24061] The keyring read goes through `createSigningKeyReader` on
-      // every host: it holds the rows across requests only while no
-      // `sys_jwks` write has passed this engine's middleware since they were
-      // read, and never past `SIGNING_KEY_CACHE_TTL_MS` — both halves of the
-      // cross-request caching rule (see `signing-key-read-cache.ts`). A miss
-      // reads exactly what it read before: better-auth's stock read, or, on a
-      // host without Ed25519, the host-usable keyring that hides keys this
-      // host cannot import (#3585).
-      adapter: {
-        getJwks: createSigningKeyReader({
-          engine: this.config.dataEngine,
-          read: ed25519Supported ? undefined : createHostUsableJwksReader(),
-        }),
-      },
-    });
-
-    const protectedHook = protectGetSessionJwtHook(jwtPlugin, (error) =>
-      this.reportJwtSigningFailure(error, keyPairConfig.alg),
-    );
-    if (!protectedHook) {
-      // The guard could not attach — better-auth moved or renamed the hook.
-      // Say so rather than shipping a build that looks protected and is not.
-      console.error(
-        '[AuthManager] Could not attach the JWT signing guard to better-auth\'s /get-session hook ' +
-          '(its `hooks.after` shape changed). A JWT signing failure will now 500 every /get-session ' +
-          'instead of degrading to a missing set-auth-jwt header, and every in-process session read ' +
-          'signs a JWT it discards (two sys_jwks reads per authenticated request). Re-check ' +
-          'the better-auth version in better-auth-schema-parity.test.ts.',
-      );
-    }
-
-    return jwtPlugin;
+  private buildJwtPlugin(jwt: (options: any) => any): Promise<any> {
+    // [#25224 cut 6] The body moved to `auth-manager-plugin-assembly.ts` (see `PluginAssemblyHost`).
+    const readConfig = () => this.config;
+    const readEd25519ProbeResult = () => this.ed25519ProbeResult;
+    const writeEd25519ProbeResult = (v: AuthManager['ed25519ProbeResult']) => { this.ed25519ProbeResult = v; };
+    const host: Pick<PluginAssemblyHost, 'config' | 'ed25519ProbeResult' | 'reportJwtSigningFailure'> = {
+      get config() { return readConfig(); },
+      get ed25519ProbeResult() { return readEd25519ProbeResult(); },
+      set ed25519ProbeResult(v) { writeEd25519ProbeResult(v); },
+      reportJwtSigningFailure: (...a) => this.reportJwtSigningFailure(...a),
+    };
+    return buildJwtPlugin.call(host, jwt);
   }
 
   /**
@@ -3395,19 +3292,16 @@ export class AuthManager {
    * delivering, and the operator has to act.
    */
   private reportJwtSigningFailure(error: unknown, alg: string): void {
-    const message = (error as any)?.message ?? String(error);
-    this.degradedFeatures.set('jwtSigning', message);
-    if (this.jwtSigningFailureReported) return;
-    this.jwtSigningFailureReported = true;
-    console.error(
-      `[AuthManager] JWT signing failed with alg "${alg}", so /get-session responses carry no ` +
-        `set-auth-jwt header and OIDC/MCP token issuance will not work. The session itself is valid — ` +
-        `sign-in and cookie auth are unaffected. Common causes: this host's WebCrypto cannot use the ` +
-        `algorithm of the key in sys_jwks, or OS_AUTH_SECRET changed since the key was encrypted. ` +
-        `Set OS_OIDC_PROVIDER_ENABLED=false if this deployment does not need to act as an IdP. ` +
-        `Cause: ${message}`,
-      error,
-    );
+    // [#25224 cut 6] The body moved to `auth-manager-plugin-assembly.ts` (see `PluginAssemblyHost`).
+    const readDegradedFeatures = () => this.degradedFeatures;
+    const readJwtSigningFailureReported = () => this.jwtSigningFailureReported;
+    const writeJwtSigningFailureReported = (v: AuthManager['jwtSigningFailureReported']) => { this.jwtSigningFailureReported = v; };
+    const host: Pick<PluginAssemblyHost, 'degradedFeatures' | 'jwtSigningFailureReported'> = {
+      get degradedFeatures() { return readDegradedFeatures(); },
+      get jwtSigningFailureReported() { return readJwtSigningFailureReported(); },
+      set jwtSigningFailureReported(v) { writeJwtSigningFailureReported(v); },
+    };
+    return reportJwtSigningFailure.call(host, error, alg);
   }
 
   /**
@@ -3739,6 +3633,20 @@ export class AuthManager {
           // denied (auto-org-admin-grant.ts keeps it read-only on those
           // tables precisely so a fresh org admin cannot rebind themselves).
           beforeCreateInvitation: async ({ invitation, inviter, organization }: any) => {
+            // [#25083] A cloud-managed environment creates no invitation at
+            // all: the organisation that hosts it invites its people in the
+            // cloud. The `before` hook refuses `/organization/invite-member`
+            // first, resends included; this arm is the second line, for any
+            // other path that reaches the hook. First here, before the role
+            // cap and the placement gate, because no invitation is issuable
+            // whatever its role or placement.
+            if (isCloudManaged()) {
+              const { APIError } = await import('better-auth/api');
+              throw new APIError('CONFLICT', {
+                message: CLOUD_MANAGED_REFUSAL_MESSAGES.invitation,
+                code: CLOUD_MANAGED_REFUSAL_CODE,
+              });
+            }
             const inviterUserId = inviter?.id ?? inviter?.userId ?? null;
             const organizationId = organization?.id ?? invitation?.organizationId;
 
@@ -4768,71 +4676,14 @@ export class AuthManager {
    * silently.  We therefore wrap the ObjectQL adapter in a factory function
    * so it is correctly recognised as a `DBAdapterInstance`.
    */
-  private async createDatabaseConfig(): Promise<any> {
-    // Use ObjectQL adapter factory if dataEngine is provided
-    if (this.config.dataEngine) {
-      // createObjectQLAdapterFactory returns an AdapterFactory
-      // (options => DBAdapter) which better-auth invokes via getBaseAdapter().
-      // The factory is created by better-auth's createAdapterFactory and
-      // automatically applies modelName/fields transformations declared in
-      // the betterAuth config above.
-      return createObjectQLAdapterFactory(this.config.dataEngine, {
-        // ADR-0093 D7 — the adapter is the one place that sees the created
-        // user's id INSIDE the creating endpoint call; staging it here lets the
-        // session seam recognise that user without reading the row back.
-        onRecordCreated: async (objectName, row) => {
-          if (objectName !== 'sys_user') return;
-          const { tryGetCurrentAuthEndpointContext } = await import('@better-auth/core/context');
-          this.stageUserCreatedInRequest(tryGetCurrentAuthEndpointContext(), row?.id);
-        },
-      });
-    }
-
-    // Fallback warning if no dataEngine is provided
-    console.warn(
-      '⚠️  WARNING: No dataEngine provided to AuthManager! ' +
-      'Using in-memory storage. This is NOT suitable for production. ' +
-      'Please provide a dataEngine instance (e.g., ObjectQL) in AuthManagerOptions.'
-    );
-
-    // ⛔ NOT `undefined`, and ⛔ do not "simplify" it back to that.
-    //
-    // Handing better-auth no `database` makes it build its own in-memory store
-    // in `getBaseAdapter`, and that store is keyed by the schema KEY while
-    // every read resolves by `modelName`. Re-measured 2026-10-21 for #25096 on
-    // better-auth 1.7.12, unchanged since the 1.7.2 reading
-    // (`db/adapter-base.mjs` builds the store by schema KEY;
-    // `@better-auth/memory-adapter` throws on the lookup, naming the model):
-    //
-    //   getAuthTables(options) -> { oauthResource: { modelName: 'sys_oauth_resource' }, … }
-    //   its memoryDB           -> { oauthResource: [] }            // keyed by KEY
-    //   the adapter then asks  -> 'sys_oauth_resource'             // resolved by modelName
-    //   => Error: Model sys_oauth_resource not found
-    //
-    // So on that path EVERY model this package renames is unreachable —
-    // `user`/`sys_user` included. It stayed invisible for as long as nothing
-    // touched a renamed model during boot; the RFC 8707 resource seed does,
-    // from the oauth-provider plugin's `init`, where the throw surfaces as an
-    // UNHANDLED REJECTION rather than a failed request.
-    //
-    // Keying the store by `modelName` is what the adapter actually reads, so
-    // this fixes the dev/test fallback instead of working around it. Production
-    // never reaches this branch — it returns the ObjectQL factory above.
-    //
-    // The import is dynamic on purpose (the rest of better-auth is loaded the
-    // same way here); `createAuthInstance` awaits this method, and better-auth
-    // then calls the returned factory SYNCHRONOUSLY, so the module has to be
-    // resolved before we hand it over, not inside it.
-    const [{ memoryAdapter }, { getAuthTables }] = await Promise.all([
-      import('better-auth/adapters/memory'),
-      import('@better-auth/core/db'),
-    ]);
-    return (options: any) => {
-      const tables = getAuthTables(options) as Record<string, { modelName?: string }>;
-      const db: Record<string, unknown[]> = {};
-      for (const [key, table] of Object.entries(tables)) db[table?.modelName ?? key] = [];
-      return memoryAdapter(db)(options);
+  private createDatabaseConfig(): Promise<any> {
+    // [#25224 cut 7] The body moved to `auth-manager-database-secret.ts` (see `DatabaseSecretHost`).
+    const readConfig = () => this.config;
+    const host: Pick<DatabaseSecretHost, 'config' | 'stageUserCreatedInRequest'> = {
+      get config() { return readConfig(); },
+      stageUserCreatedInRequest: (...a) => this.stageUserCreatedInRequest(...a),
     };
+    return createDatabaseConfig.call(host);
   }
 
   /**
@@ -4840,36 +4691,22 @@ export class AuthManager {
    */
   /** The auth secret, resolved once — see {@link resolvedAuthSecret}. */
   private resolveAuthSecret(): string {
-    if (!this.resolvedAuthSecret) {
-      this.resolvedAuthSecret = this.config.secret || this.generateSecret();
-    }
-    return this.resolvedAuthSecret;
+    // [#25224 cut 7] The body moved to `auth-manager-database-secret.ts` (see `DatabaseSecretHost`).
+    const readConfig = () => this.config;
+    const readResolvedAuthSecret = () => this.resolvedAuthSecret;
+    const writeResolvedAuthSecret = (v: AuthManager['resolvedAuthSecret']) => { this.resolvedAuthSecret = v; };
+    const host: Pick<DatabaseSecretHost, 'config' | 'generateSecret' | 'resolvedAuthSecret'> = {
+      get config() { return readConfig(); },
+      generateSecret: (...a) => this.generateSecret(...a),
+      get resolvedAuthSecret() { return readResolvedAuthSecret(); },
+      set resolvedAuthSecret(v) { writeResolvedAuthSecret(v); },
+    };
+    return resolveAuthSecret.call(host);
   }
 
   private generateSecret(): string {
-    const envSecret = readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true });
-    if (envSecret) return envSecret;
-
-    // No secret configured. In production this is FATAL: a predictable
-    // `dev-secret-<timestamp>` makes session tokens forgeable (session
-    // forgery). Refuse to boot rather than run insecurely.
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error(
-        '[auth] OS_AUTH_SECRET is required in production but is not set. ' +
-        'Refusing to boot with a temporary development secret — session tokens ' +
-        'would be forgeable. Set OS_AUTH_SECRET to a strong random value.'
-      );
-    }
-
-    // Development / test only: fall back to an ephemeral secret, loudly.
-    const fallbackSecret = 'dev-secret-' + Date.now();
-    console.warn(
-      '⚠️  WARNING: No OS_AUTH_SECRET environment variable set! ' +
-      'Using a temporary development secret. ' +
-      'This is NOT secure for production use. ' +
-      'Please set OS_AUTH_SECRET in your environment variables.'
-    );
-    return fallbackSecret;
+    // [#25224 cut 7] The body moved to `auth-manager-database-secret.ts`; it reads no member of this class.
+    return generateSecret();
   }
 
   /**
@@ -6296,46 +6133,21 @@ export class AuthManager {
    * ALREADY holds a row gets their own language, and only a genuinely new
    * invitee still takes the deployment default.)
    */
-  private async sendChangeEmailNotice(
+  private sendChangeEmailNotice(
     from: { email: string; name?: string; id?: string },
     newEmail: string,
     requestSource?: unknown,
   ): Promise<void> {
-    try {
-      const email = this.getEmailService();
-      if (!email) return;
-      // The endpoint lower-cases `newEmail` before it does anything with it
-      // (`update-user.mjs`: `ctx.body.newEmail.toLowerCase()`), so the raw body
-      // spelling is not what would become the account identity. Report the
-      // address that would actually land.
-      const target = newEmail.trim().toLowerCase();
-      if (!target) return;
-      // commit 35e94c96b — the stored rung on top of the #14319 ladder. The recipient is
-      // the account holder, so their own column outranks the header the
-      // request happened to carry.
-      const storedLocale = from.id ? await this.storedRecipientLocale({ id: from.id }) : undefined;
-      await email.sendTemplate({
-        template: 'auth.email_change_notice',
-        to: { address: from.email, ...(from.name ? { name: from.name } : {}) },
-        ...this.emailLocaleArg(requestSource, storedLocale),
-        data: {
-          user: { name: from.name || from.email, email: from.email, ...(from.id ? { id: from.id } : {}) },
-          newEmail: target,
-          appName: this.getAppName(),
-        },
-        relatedObject: 'sys_user',
-        ...(from.id ? { relatedId: from.id } : {}),
-        // [ADR-0131 D7, Q2 A] A notice to the account holder: identity mail.
-        identityMail: true,
-      });
-    } catch (err) {
-      // Best-effort by design — see the ⛔ above. Logged so an operator can see
-      // a notice was lost; never rethrown, so the change-email flow cannot be
-      // taken down by its own security notification.
-      this.config.logger?.warn?.('AuthManager: change-email notice to the previous address failed', {
-        error: (err as Error)?.message,
-      });
-    }
+    // [#25224 cut 5] The body moved to `auth-manager-email-sms-delivery.ts` (see `EmailSmsDeliveryHost`).
+    const readConfig = () => this.config;
+    const host: Pick<EmailSmsDeliveryHost, 'config' | 'emailLocaleArg' | 'getAppName' | 'getEmailService' | 'storedRecipientLocale'> = {
+      get config() { return readConfig(); },
+      emailLocaleArg: (...a) => this.emailLocaleArg(...a),
+      getAppName: (...a) => this.getAppName(...a),
+      getEmailService: (...a) => this.getEmailService(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
+    };
+    return sendChangeEmailNotice.call(host, from, newEmail, requestSource);
   }
 
   /**
@@ -6357,27 +6169,16 @@ export class AuthManager {
   /** Lazy per-number OTP send guard (#2780) — see otp-send-guard.ts. */
   private _otpSendGuard?: OtpSendGuard;
   private getOtpSendGuard(): OtpSendGuard {
-    if (!this._otpSendGuard) {
-      const otpCfg = this.config.phoneOtp ?? {};
-      // WHERE the budget is counted decides whether it is a budget at all
-      // (#4790): counted per process, a declared "5 per hour" is 5×N across N
-      // nodes. Precedence, most deliberate first:
-      //  1. a host-supplied `secondaryStorage` — an explicit cross-node KV;
-      //  2. `sharedCounterStore` — AuthPlugin's lazily-resolved kernel `cache`,
-      //     which also announces the degraded (no cache) case loudly;
-      //  3. neither → the guard's own bounded per-process store.
-      const storeOption = this.config.secondaryStorage
-        ? { storage: this.config.secondaryStorage }
-        : this.config.sharedCounterStore
-          ? { resolveStore: this.config.sharedCounterStore }
-          : {};
-      this._otpSendGuard = new OtpSendGuard({
-        ...(otpCfg.cooldownSeconds != null ? { cooldownSeconds: otpCfg.cooldownSeconds } : {}),
-        ...(otpCfg.maxPerHour != null ? { maxPerHour: otpCfg.maxPerHour } : {}),
-        ...storeOption,
-      });
-    }
-    return this._otpSendGuard;
+    // [#25224 cut 5] The body moved to `auth-manager-email-sms-delivery.ts` (see `EmailSmsDeliveryHost`).
+    const readOtpSendGuard = () => this._otpSendGuard;
+    const writeOtpSendGuard = (v: AuthManager['_otpSendGuard']) => { this._otpSendGuard = v; };
+    const readConfig = () => this.config;
+    const host: Pick<EmailSmsDeliveryHost, '_otpSendGuard' | 'config'> = {
+      get _otpSendGuard() { return readOtpSendGuard(); },
+      set _otpSendGuard(v) { writeOtpSendGuard(v); },
+      get config() { return readConfig(); },
+    };
+    return getOtpSendGuard.call(host);
   }
 
   /**
@@ -6388,17 +6189,13 @@ export class AuthManager {
    * hourly cap is exhausted. No-op while OTP is undeliverable — the send
    * callback then fails loudly with 400 SMS_SERVICE_REQUIRED instead.
    */
-  async assertPhoneOtpSendAllowed(phone: string): Promise<void> {
-    if (!phone || !this.isPhoneOtpDeliverable()) return;
-    const decision = await this.getOtpSendGuard().checkAndRecord(phone);
-    if (!decision.ok) {
-      const { APIError } = await import('better-auth/api');
-      throw new APIError('TOO_MANY_REQUESTS', {
-        message: `Too many verification codes requested for this phone number. Retry in ${decision.retryAfterSeconds ?? 60}s.`,
-        // The quota wall's code too (#2814): see PHONE_OTP_SEND_REFUSAL_CODE.
-        code: PHONE_OTP_SEND_REFUSAL_CODE,
-      });
-    }
+  assertPhoneOtpSendAllowed(phone: string): Promise<void> {
+    // [#25224 cut 5] The body moved to `auth-manager-email-sms-delivery.ts` (see `EmailSmsDeliveryHost`).
+    const host: Pick<EmailSmsDeliveryHost, 'getOtpSendGuard' | 'isPhoneOtpDeliverable'> = {
+      getOtpSendGuard: (...a) => this.getOtpSendGuard(...a),
+      isPhoneOtpDeliverable: (...a) => this.isPhoneOtpDeliverable(...a),
+    };
+    return assertPhoneOtpSendAllowed.call(host, phone);
   }
 
   /**
@@ -6417,83 +6214,18 @@ export class AuthManager {
    *    a log line or an error message (the SmsService logs masked numbers
    *    and statuses, never bodies).
    */
-  private async deliverPhoneOtp(phone: string, code: string): Promise<void> {
-    const sms = this.getSmsService();
-    if (!sms || !this.isPhoneOtpDeliverable()) {
-      // Absent service, or a log-only transport in production (the code
-      // would vanish into a log no user can read) — refuse loudly, as a real
-      // `APIError` like the quota branch below: better-call maps ONLY an
-      // `APIError` to a status, and a plain `Error` reached the caller as a
-      // 500 with a null body, leaving the login page nothing to branch on.
-      // 400 + `SMS_SERVICE_REQUIRED` mirrors the email sibling
-      // (`EMAIL_SERVICE_REQUIRED`, also 400): a delivery service this request
-      // needs is not configured on this deployment. The code is registered
-      // for this package in the ADR-0112 error-code ledger. The message names
-      // the capability and the fix, and never the OTP code.
-      const { APIError } = await import('better-auth/api');
-      throw new APIError('BAD_REQUEST', {
-        message:
-          'Phone verification codes are unavailable: this deployment has no configured SMS ' +
-          'delivery service. An administrator can configure one under Setup → Settings → SMS ' +
-          'Delivery; until then, sign in with your phone number and password.',
-        code: 'SMS_SERVICE_REQUIRED',
-      });
-    }
-    const otpCfg = this.config.phoneOtp ?? {};
-    const minutes = Math.max(1, Math.round((otpCfg.expiresIn ?? 300) / 60));
-    // #2815 — localised, tenant-customisable body: a sys_notification_template
-    // row for (auth.phone_otp, sms, resolved locale) wins; the built-in
-    // bilingual text is the fallback. Purpose-neutral wording on purpose —
-    // one provider template covers sign-in and reset, and the SMS reveals
-    // nothing about what the code unlocks.
-    //
-    // commit 35e94c96b — the recipient of an OTP IS the user, so the locale is theirs to
-    // name: `sys_user.locale` first, the deployment default underneath.
-    //
-    // ⚠️ The row is looked up here rather than taken from the callback: the
-    // card's suggested shape assumed `sendPhoneOtp` already held one, and it
-    // does not — better-auth's phone-number plugin calls both `sendOTP` and
-    // `sendPasswordResetOTP` with `{ phoneNumber, code }` and no user
-    // (measured in the installed 1.7.x `routes.mjs`; `request-password-reset`
-    // resolves the user for its own gate and does not pass it on). One
-    // projected read on the unique `phone_number` index is the cost, paid only
-    // once the send is going to happen, and swallowed on any failure.
-    //
-    // ⚠️ Matched EXACTLY, as better-auth matches it for its own user lookup on
-    // the same route — a caller that posts a differently formatted spelling of
-    // a stored number resolves no row and lands on the deployment default,
-    // which is the documented floor rather than a failure.
-    const storedLocale = await this.storedRecipientLocale({ phone_number: phone });
-    const body = await this.renderPhoneSmsBody(
-      PHONE_SMS_TOPICS.otp,
-      {
-        code,
-        appName: this.getAppName(),
-        minutes,
-      },
-      storedLocale,
-    );
-    const result = await sms.send({
-      to: phone,
-      body,
-      // Template-only providers (Aliyun) substitute into a registered OTP
-      // template; `code` is the conventional variable name.
-      templateParams: { code },
-    });
-    if (result.status === 'failed') {
-      // #6039 — the deployment's daily SMS quota refused this send. Answer it
-      // the way the per-number wall on this same endpoint answers: a real
-      // `APIError`, hence 429 TOO_MANY_REQUESTS instead of a 500 with a null
-      // body. Everything else stays a plain Error — a transport outage IS a
-      // server-side failure and 500 is the honest answer for it.
-      if (isSmsQuotaRefusal(result.error)) {
-        throw await smsQuotaExceededApiError(
-          'Too many verification codes requested. Please try again later.',
-        );
-      }
-      // `result.error` is transport detail (never the code) — safe to surface.
-      throw new Error(`Phone OTP could not be sent: ${result.error ?? 'SMS delivery failed'}`);
-    }
+  private deliverPhoneOtp(phone: string, code: string): Promise<void> {
+    // [#25224 cut 5] The body moved to `auth-manager-email-sms-delivery.ts` (see `EmailSmsDeliveryHost`).
+    const readConfig = () => this.config;
+    const host: Pick<EmailSmsDeliveryHost, 'config' | 'getAppName' | 'getSmsService' | 'isPhoneOtpDeliverable' | 'renderPhoneSmsBody' | 'storedRecipientLocale'> = {
+      get config() { return readConfig(); },
+      getAppName: (...a) => this.getAppName(...a),
+      getSmsService: (...a) => this.getSmsService(...a),
+      isPhoneOtpDeliverable: (...a) => this.isPhoneOtpDeliverable(...a),
+      renderPhoneSmsBody: (...a) => this.renderPhoneSmsBody(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
+    };
+    return deliverPhoneOtp.call(host, phone, code);
   }
 
   /**
@@ -6505,57 +6237,17 @@ export class AuthManager {
    * Throws when no SMS service is wired (callers gate on
    * {@link isSmsServiceAvailable} first).
    */
-  async sendPhoneInviteSms(phone: string): Promise<void> {
-    const sms = this.getSmsService();
-    if (!sms) {
-      throw new Error('SMS_SERVICE_REQUIRED: no SMS service is configured for this deployment.');
-    }
-    // #2815 — localised, tenant-customisable body (see deliverPhoneOtp).
-    // `loginUrl` points at the actual Console sign-in page; `baseUrl` (bare
-    // origin) is kept for backward-compatibility with tenant-overridden
-    // templates that still interpolate `{{baseUrl}}`.
-    //
-    // #14641 — the invitee's OWN stored language, on the same two branches the
-    // invitation EMAIL takes. A number that resolves no row, or a row naming no
-    // language, keeps the deployment default. Matched exactly on
-    // `phone_number`, the same predicate {@link deliverPhoneOtp} matches on.
-    //
-    // ⚠️ What this yields TODAY, so the next reader does not over-read it: the
-    // one in-repo caller (the identity import endpoint's `invite` policy)
-    // CREATES the account before sending, so a ROW is always there — but
-    // `admin-import-users.ts` never writes `locale` and the column declares no
-    // default, so the value is empty at send time and this path still resolves
-    // to the deployment default, exactly as it did before #14641. The rung is
-    // wired, not yet exercised in-repo: it answers for an out-of-repo caller,
-    // or for a future import that populates the column. ⛔ Do not read this
-    // site as a behaviour change users see today — that one is on the
-    // invitation EMAIL, whose invitee may already hold a locale-bearing row.
-    const storedLocale = await this.storedRecipientLocale({ phone_number: phone });
-    const body = await this.renderPhoneSmsBody(
-      PHONE_SMS_TOPICS.invite,
-      {
-        appName: this.getAppName(),
-        baseUrl: this.getCanonicalOrigin(),
-        loginUrl: this.getConsolePageUrl('/login'),
-      },
-      storedLocale,
-    );
-    const result = await sms.send({ to: phone, body, templateParams: { content: body } });
-    if (result.status === 'failed') {
-      // #6039 — same quota wall, same outward shape as the OTP path above.
-      // (The one in-repo caller, admin import-users, catches this per row and
-      // records INVITE_SMS_FAILED rather than failing the request — so what
-      // changes there is that the row's message no longer carries the raw
-      // service envelope. The 429 matters for any caller that surfaces this
-      // rejection directly, which is what a public AuthManager method must be
-      // correct for.)
-      if (isSmsQuotaRefusal(result.error)) {
-        throw await smsQuotaExceededApiError(
-          'Too many SMS messages requested. Please try again later.',
-        );
-      }
-      throw new Error(`Invitation SMS failed: ${result.error ?? 'SMS delivery failed'}`);
-    }
+  sendPhoneInviteSms(phone: string): Promise<void> {
+    // [#25224 cut 5] The body moved to `auth-manager-email-sms-delivery.ts` (see `EmailSmsDeliveryHost`).
+    const host: Pick<EmailSmsDeliveryHost, 'getAppName' | 'getCanonicalOrigin' | 'getConsolePageUrl' | 'getSmsService' | 'renderPhoneSmsBody' | 'storedRecipientLocale'> = {
+      getAppName: (...a) => this.getAppName(...a),
+      getCanonicalOrigin: (...a) => this.getCanonicalOrigin(...a),
+      getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
+      getSmsService: (...a) => this.getSmsService(...a),
+      renderPhoneSmsBody: (...a) => this.renderPhoneSmsBody(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
+    };
+    return sendPhoneInviteSms.call(host, phone);
   }
 
   /**
@@ -6658,22 +6350,12 @@ export class AuthManager {
    * `unique: true` in the better-auth `user` table this object is backed by
    * (`@better-auth/core` `db/get-tables.mjs`).
    */
-  private async storedRecipientLocale(where: Record<string, unknown>): Promise<string | undefined> {
-    const engine = this.getDataEngine();
-    if (!engine || typeof engine.findOne !== 'function') return undefined;
-    try {
-      const row = await engine.findOne('sys_user', {
-        where,
-        fields: [RECIPIENT_LOCALE_FIELD],
-        context: { isSystem: true, positions: [], permissions: [] },
-      } as never);
-      return normalizeRecipientLocale((row as Record<string, unknown> | null | undefined)?.[RECIPIENT_LOCALE_FIELD]);
-    } catch {
-      // A `sys_user` shape without the column, a datasource outage, an engine
-      // that rejects the projection — all mean "no stored language", never
-      // "no mail".
-      return undefined;
-    }
+  private storedRecipientLocale(where: Record<string, unknown>): Promise<string | undefined> {
+    // [#25224 cut 5] The body moved to `auth-manager-email-sms-delivery.ts` (see `EmailSmsDeliveryHost`).
+    const host: Pick<EmailSmsDeliveryHost, 'getDataEngine'> = {
+      getDataEngine: (...a) => this.getDataEngine(...a),
+    };
+    return storedRecipientLocale.call(host, where);
   }
 
   /**
@@ -6742,20 +6424,20 @@ export class AuthManager {
    * organization's row"). No tenancy service, or a failed resolution, is
    * `null` too: the built-in text, never a blocked send.
    */
-  private async renderPhoneSmsBody(
+  private renderPhoneSmsBody(
     topic: string,
     data: Record<string, unknown>,
     storedLocale?: string,
   ): Promise<string> {
-    const locale = storedLocale ?? this.smsLocale;
-    let organizationId: string | null = null;
-    try {
-      organizationId = (await this.config.getTenancy?.()?.defaultOrgId()) ?? null;
-    } catch {
-      organizationId = null;
-    }
-    const template = await resolvePhoneSmsTemplateBody(this.getDataEngine(), topic, locale, organizationId);
-    return interpolatePhoneSms(template, data);
+    // [#25224 cut 5] The body moved to `auth-manager-email-sms-delivery.ts` (see `EmailSmsDeliveryHost`).
+    const readConfig = () => this.config;
+    const readSmsLocale = () => this.smsLocale;
+    const host: Pick<EmailSmsDeliveryHost, 'config' | 'getDataEngine' | 'smsLocale'> = {
+      get config() { return readConfig(); },
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      get smsLocale() { return readSmsLocale(); },
+    };
+    return renderPhoneSmsBody.call(host, topic, data, storedLocale);
   }
 
   /**
@@ -7800,6 +7482,18 @@ export class AuthManager {
   }
 
   /**
+   * Is local self-registration forced off, whatever `disableSignUp` says?
+   * Under SSO-only ({@link resolveSsoOnly}), and [#25083] on a cloud-managed
+   * environment, whose people the hosting organisation invites in the cloud.
+   * Read by the wiring and by `getPublicConfig()` alike, so the advertised
+   * flag cannot disagree with the wired one. Break-glass is untouched: neither
+   * case disables `emailAndPassword.enabled`.
+   */
+  private signUpForcedOff(): boolean {
+    return this.resolveSsoOnly() || isCloudManaged();
+  }
+
+  /**
    * The tenancy posture ACTUALLY IN FORCE on this deployment — the one fact
    * both `organization/create`'s gate and `/auth/config`'s
    * `features.multiOrgEnabled` are derived from, so the two can never disagree.
@@ -7907,7 +7601,8 @@ export class AuthManager {
     const disableSignUpFromEnv = readDisableSignUpEnv();
     // SSO-only ("enforced") hides the local password form + self-registration.
     // `enabled` stays true (break-glass), but signup is forced off and the UI
-    // suppresses the password form via `features.ssoEnforced` below.
+    // suppresses the password form via `features.ssoEnforced` below. A
+    // cloud-managed environment forces signup off too (`signUpForcedOff`).
     const ssoOnly = this.resolveSsoOnly();
     // [#11739] The audience posture, resolved once for this response: the
     // forced-verification mirror below and `features.audiencePosture` must
@@ -7919,7 +7614,7 @@ export class AuthManager {
     const audience = this.getAudience();
     const emailPassword = {
       enabled: emailPasswordConfig.enabled !== false, // Default to true
-      disableSignUp: ssoOnly ? true : (disableSignUpFromEnv ?? emailPasswordConfig.disableSignUp ?? false),
+      disableSignUp: this.signUpForcedOff() ? true : (disableSignUpFromEnv ?? emailPasswordConfig.disableSignUp ?? false),
       // Mirrors the wiring in createAuthInstance() through the SAME resolver:
       // a self-registration-permitting posture forces verification ON, except
       // an `open` deployment's explicit opt-out (#20389) — the advertised flag
@@ -9126,10 +8821,12 @@ export class AuthManager {
 
   /**
    * ADR-0069 D4 — idle / absolute session enforcement, run per request from
-   * `customSession`. No-op when both are off. Revokes (expires in place +
-   * stamps revoked_at/revoke_reason) when a limit is exceeded so better-auth
-   * returns no session on the NEXT request; otherwise touches `last_activity_at`
-   * (throttled to once a minute). Best-effort — never throws.
+   * `customSession`. Revokes (expires in place + stamps
+   * revoked_at/revoke_reason) when a limit is exceeded so better-auth returns
+   * no session on the NEXT request; otherwise touches `last_activity_at`
+   * (throttled to once a minute). [#25343] The touch runs on every deployment,
+   * limits or not; with both off, a per-process 60-second memo per session
+   * skips the `sys_session` read too. Best-effort — never throws.
    */
   private enforceSessionControls(sessionId: string | undefined, createdAtHint: unknown): Promise<void> {
     // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).

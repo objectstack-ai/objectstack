@@ -205,6 +205,23 @@ describe('AnalyticsResultResponseSchema', () => {
     expect(resp.data.fields[2].format).toBe('0.0%');
   });
 
+  // A dimension column's null-bucket name rides the same channel. The parse
+  // strips undeclared keys, so an undeclared `nullLabel` would vanish here.
+  it('should preserve fields[].nullLabel on a dimension column', () => {
+    const resp = AnalyticsResultResponseSchema.parse({
+      success: true,
+      data: {
+        rows: [{ user_id: null, event_count: 740 }],
+        fields: [
+          { name: 'user_id', type: 'string', label: 'User', nullLabel: 'System' },
+          { name: 'event_count', type: 'number', label: 'Events' },
+        ],
+      },
+    });
+    expect(resp.data.fields[0].nullLabel).toBe('System');
+    expect('nullLabel' in resp.data.fields[1]).toBe(false);
+  });
+
   // #14492 — the built-in aggregate discriminator rides the same channel, and
   // it is the CLOSED `AggregationFunction` vocabulary: a spelling outside it is
   // refused at the member, not stripped or passed through.

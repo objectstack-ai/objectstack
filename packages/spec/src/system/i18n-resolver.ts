@@ -76,6 +76,7 @@
 import { mapFlowNodeList } from '../conversions/walk.js';
 import { flowScreenFieldOptionKey } from '../automation/flow-screen-option-key.js';
 import { pageComponentSlotPositions } from '../ui/component.zod.js';
+import { templateSlotSource } from '../automation/flow-text-slot-template.js';
 
 import type {
   PlatformTranslationBundle,
@@ -158,7 +159,11 @@ export interface BulkActionDefLike {
   /** `BulkActionDefSchema.name` — the `bulkActions` key. */
   name?: string;
   label?: string;
-  confirmText?: string;
+  /**
+   * A `template` slot (#24798): the bare string, or the parsed
+   * `{ dialect: 'template', source }` envelope a served view carries.
+   */
+  confirmText?: string | { dialect: 'template'; source: string };
   confirmLabel?: string;
   params?: Array<BulkActionParamLike>;
   [key: string]: unknown;
@@ -958,7 +963,16 @@ function translateBulkActionDefs(
       : lookupBulkActionText(bundle, objectName, viewKey, defName, pick, opts);
 
     const label = text(packagedDef, 'label', def.label, (n) => n.label);
-    const confirmText = text(packagedDef, 'confirmText', def.confirmText, (n) => n.confirmText);
+    // `confirmText` is a template slot (#24798): the authored side and the
+    // packaged side may each be a bare string or the parsed envelope, so both
+    // are compared by their `source` — an unchanged envelope still takes the
+    // catalog, and a diverged one keeps the authored sentence.
+    const confirmText = text(
+      packagedDef ? { confirmText: templateSlotSource(packagedDef.confirmText) } : undefined,
+      'confirmText',
+      templateSlotSource(def.confirmText),
+      (n) => n.confirmText,
+    );
     const confirmLabel = text(packagedDef, 'confirmLabel', def.confirmLabel, (n) => n.confirmLabel);
 
     let params = def.params;

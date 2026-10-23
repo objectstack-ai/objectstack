@@ -33,6 +33,10 @@ export * from './set-initial-password.js';
 export * from './admin-user-endpoints.js';
 export * from './admin-ban-endpoints.js';
 export * from './platform-admin-gate.js';
+// [#25083] The cloud-managed refusals, exported so a host that mounts its own
+// twin of one of these doors (the cloud's per-environment `set-initial-password`,
+// objectstack-ai/cloud#3169) answers with the same status, code and message.
+export * from './cloud-managed.js';
 export * from './last-local-credential.js';
 export * from './placeholder-email.js';
 export * from './admin-import-users.js';

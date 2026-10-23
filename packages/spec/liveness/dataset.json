@@ -68,6 +68,14 @@
           "proof": "packages/qa/dogfood/test/analytics-timezone.dogfood.test.ts#analytics-tz-bucketing",
           "note": "ADR-0054 high-risk class (analytics): a time dimension's single granularity auto-buckets at query time (dataset-executor.ts:272-287); the proof asserts the day bucket SHIFTS with the org timezone (2024-03-01T03:00Z buckets to 2024-02-29 in America/Los_Angeles) — guarding the analytics-strategy ↔ in-memory count ↔ REST exec-context integration that #2018 fixed. 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — `:146` had rotted onto a docblock opener `/**`, and the note's `dataset-executor.ts:272-287` onto a closing brace and a comment line about the PRESENTATION's choice; the precedence resolver is at ~:315. On a row that carries an ADR-0054 high-risk proof, both pointers were wrong. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the review accepting that re-anchoring sorts as OLDEST).",
           "verifiedAt": "2026-08-28"
+        },
+        "nullLabel": {
+          "status": "planned",
+          "verifiedAt": "2026-10-23",
+          "evidenceScope": "cross-repo",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: no chart renderer draws a dimension's null bucket under its `nullLabel`, so the bucket still shows the renderer's own default label until the renderer half ships.",
+          "note": "PLANNED RECORD (#25391, 2026-10-23): declared spec-first by ruling 6358843349 on #25330 (letter A), whose consumer half follows under #25330 — the objectui chart renderer reads `nullLabel` over its global `chart.nullCategory` default, and `packages/platform-objects` `system.datasets.ts` sets `user_id`'s null label. Display copy in the `label` slot's own type (I18nLabelSchema); it changes no grouping. No reader on either side today: objectstack — the dataset compiler (packages/services/service-analytics/src/dataset-compiler.ts#compileDataset) copies `name` / `label` / `field` / `type` / `dateGranularity` into the Cube dimension and nothing else, and a dataset response's dimension descriptor is `{ name, type, label }`; objectui @0d12e953 (the `.objectui-sha` pin) and main @a14737b — the only `nullLabel` spellings are the local parameter of objectui: packages/core/src/utils/chart-series.ts#pivotSeriesBuckets, fed from `ChartSeriesOptions.nullCategoryLabel ?? NULL_CATEGORY_LABEL`, never from a dataset dimension. Which channel carries the key to the renderer (the served dataset document or the response's dimension descriptor) is the consumer half's decision, not this row's."
         }
       }
     },
