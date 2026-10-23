@@ -35,10 +35,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Recipient Type",
         help: "Kind of principal that holds the grant",
         options: {
-          user: "user",
-          group: "group",
-          position: "position",
-          unit_and_subordinates: "unit_and_subordinates"
+          user: "User",
+          group: "Group",
+          position: "Position",
+          unit_and_subordinates: "Business unit and subordinates"
         }
       },
       recipient_id: {
@@ -49,8 +49,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Access Level",
         help: "What the recipient can do — read, or read and edit",
         options: {
-          read: "read",
-          edit: "edit"
+          read: "Read",
+          edit: "Read and edit"
         }
       },
       source: {
