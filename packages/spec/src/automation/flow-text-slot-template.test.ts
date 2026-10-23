@@ -15,7 +15,9 @@ import { describe, expect, it } from 'vitest';
 import {
   FLOW_NODE_TEXT_SLOTS,
   TEXT_SLOT_TEMPLATE_REFUSAL,
+  closedScopeTemplateRefusal,
   flowNodeTextSlotSources,
+  templateSlotSource,
   textSlotTemplateRefusal,
 } from './flow-text-slot-template';
 import { valueSlotTemplateRefusals } from './flow-value-slot-template';
@@ -241,6 +243,64 @@ describe('textSlotTemplateRefusal — a `{{ }}` hole over a `$` root the engine 
     // …while a path beside it is still rewritten, and an engine-bound one is doubled as before.
     expect(textSlotTemplateRefusal('{name}: {$Foo}')).toContain('`{{ name }}: {$Foo}`');
     expect(textSlotTemplateRefusal('Failed: {$error.message}')).toContain('`Failed: {{ $error.message }}`');
+  });
+});
+
+describe('closedScopeTemplateRefusal — the same judge over a CLOSED scope (#24798)', () => {
+  const scope = { slot: "A bulk action's `confirmText`", roots: ['count', 'tier'] };
+
+  it('passes plain text, holes over bound roots, a formatter, an index and a sub-path', () => {
+    for (const text of ['Delete every selected record?', 'Update {{count}} to {{tier}}?', '{{ count | number }} rows', '{{ tier[0] }}', '{{ tier.label | upper }}']) {
+      expect(closedScopeTemplateRefusal(text, scope), text).toBeUndefined();
+    }
+  });
+
+  it('names every hole over an unbound root once, a `$` root included, and the roots it binds', () => {
+    const message = closedScopeTemplateRefusal('{{ x }} {{ x }} {{ $User.Id }} {{ record.name }}', scope)!;
+    expect(message).toMatch(/^A bulk action's `confirmText` binds only `count`, `tier`/);
+    expect(message).toContain('`{{ x }}`, `{{ $User.Id }}`, `{{ record.name }}`');
+    expect(message.match(/\{\{ x \}\}/g)).toHaveLength(1);
+  });
+
+  it('reads the single brace exactly as the flow judge does: a bound path is rewritten as its hole', () => {
+    const message = closedScopeTemplateRefusal('Update {count} to {tier}', scope)!;
+    expect(message.startsWith("A bulk action's `confirmText` reads `{{ }}` template holes (ADR-0032 §3)")).toBe(true);
+    expect(message).toContain('Write `Update {count} to {tier}` as `Update {{ count }} to {{ tier }}`.');
+    // The same tokens the flow judge finds — a token touching a brace is the compile step's.
+    expect(closedScopeTemplateRefusal('Total {{ count }', scope)).toBeUndefined();
+    expect(textSlotTemplateRefusal('Total {{ count }')).toBeUndefined();
+  });
+
+  it('prescribes no rewrite for a token no bound hole spells — an unbound path, logic, a macro', () => {
+    const message = closedScopeTemplateRefusal('{foo} {count * 2} {NOW()}', scope)!;
+    expect(message).not.toContain('Write `');
+    expect(message).toContain('`{foo}` names `foo`, which this slot does not bind');
+    expect(message).toContain('`{count * 2}` is logic');
+    expect(message).toContain('`{NOW()}` is not one of the roots this slot binds');
+  });
+
+  it('judges both in one text, single brace first', () => {
+    const message = closedScopeTemplateRefusal('{count} and {{ y }}', scope)!;
+    expect(message.indexOf('reads `{{ }}`')).toBeLessThan(message.indexOf('binds only'));
+  });
+
+  it('leaves a hole that does not compile as a path to the compile step', () => {
+    expect(closedScopeTemplateRefusal('{{ count * 2 }}', scope)).toBeUndefined();
+  });
+
+  it('control: the flow judge is unchanged — an open scope names no ordinary root', () => {
+    expect(textSlotTemplateRefusal('{{ x }} {{ record.name }}')).toBeUndefined();
+    expect(textSlotTemplateRefusal('{{ $User.Id }}')).toBeDefined();
+  });
+});
+
+describe('templateSlotSource — one reading of a template slot value', () => {
+  it('reads a string, the source of a template envelope, and nothing else', () => {
+    expect(templateSlotSource('a {{ b }}')).toBe('a {{ b }}');
+    expect(templateSlotSource({ dialect: 'template', source: 'a' })).toBe('a');
+    expect(templateSlotSource({ dialect: 'cel', source: 'a' })).toBeUndefined();
+    expect(templateSlotSource(['a'])).toBeUndefined();
+    expect(templateSlotSource(null)).toBeUndefined();
   });
 });
 
