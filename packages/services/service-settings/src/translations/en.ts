@@ -78,7 +78,7 @@ export const en: PlatformTranslationData = {
             'The product name in the console, on the sign-in page and in the browser title, ' +
             'and in sign-in emails, the authenticator app and MCP sign-in. ' +
             'Leave empty to use the name this deployment was set up with. ' +
-            'This is not the organization\'s own name, which is changed on the Organization record (Rename Organization).',
+            'This is not the organization\'s own name, which is the Name on the Organization record.',
         },
         accent_color: {
           label: 'Accent colour',

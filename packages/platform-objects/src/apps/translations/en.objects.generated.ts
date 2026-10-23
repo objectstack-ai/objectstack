@@ -527,7 +527,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       name: {
         label: "Name",
-        help: "The organization's name, changed with Rename Organization. The product name the console shows is set in Settings → Branding."
+        help: "The organization's own name. The product name the console shows is a different setting, set in Settings → Branding."
       },
       slug: {
         label: "Slug",

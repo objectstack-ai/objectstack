@@ -74,7 +74,7 @@ export const esES: PlatformTranslationData = {
             'El nombre del producto en la consola, en la página de inicio de sesión y en el título del navegador, ' +
             'y en los correos de inicio de sesión, la aplicación de autenticación y el inicio de sesión de MCP. ' +
             'Déjelo vacío para usar el nombre con el que se configuró esta implantación. ' +
-            'No es el nombre de la organización, que se cambia en el registro de la organización (Renombrar organización).',
+            'No es el nombre propio de la organización, que es el Nombre del registro de la organización.',
         },
         accent_color: {
           label: 'Color de acento',

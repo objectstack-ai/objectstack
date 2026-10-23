@@ -527,7 +527,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       name: {
         label: "名前",
-        help: "組織の名前。「組織名を変更」で変更します。コンソールに表示される製品名は 設定 → ブランディング で設定します。"
+        help: "組織自体の名前。コンソールに表示される製品名は別の設定で、設定 → ブランディング で設定します。"
       },
       slug: {
         label: "スラッグ",

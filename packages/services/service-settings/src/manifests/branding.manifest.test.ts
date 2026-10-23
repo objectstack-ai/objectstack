@@ -82,7 +82,7 @@ describe('brandingSettingsManifest', () => {
     it('is labelled the product name, and its help points at the organization record for the organization\'s name', () => {
       expect(name().label).toBe('Product name');
       expect(name().description).toMatch(/not the organization's own name/);
-      expect(name().description).toMatch(/Organization record \(Rename Organization\)/);
+      expect(name().description).toMatch(/the Name on the Organization record/);
       expect(name().description).toMatch(/Leave empty/);
     });
   });

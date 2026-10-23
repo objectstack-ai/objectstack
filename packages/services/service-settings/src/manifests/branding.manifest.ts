@@ -35,10 +35,10 @@ import type { SettingsManifest } from '@objectstack/spec/system';
  * ## The product's name, not the organization's
  *
  * `workspace_name` names the PRODUCT the deployment shows. The organization's
- * own name is `sys_organization.name`, renamed with the Organization record's
- * Rename Organization action (#25347). Two names, two homes, and each label
- * says which one it is: the label here is "Product name", never "Organization
- * name", and its help points at the record.
+ * own name is `sys_organization.name`, the Name on the Organization record
+ * (#25347). Two names, two homes, and each label says which one it is: the
+ * label here is "Product name", never "Organization name", and its help points
+ * at the record.
  *
  * ## Single posture only
  *
@@ -80,7 +80,7 @@ export const brandingSettingsManifest: SettingsManifest = {
         'The product name in the console, on the sign-in page and in the browser title, ' +
         'and in sign-in emails, the authenticator app and MCP sign-in. ' +
         'Leave empty to use the name this deployment was set up with. ' +
-        'This is not the organization\'s own name, which is changed on the Organization record (Rename Organization).' },
+        'This is not the organization\'s own name, which is the Name on the Organization record.' },
 
     { type: 'group', id: 'appearance', label: 'Appearance', required: false },
     { type: 'color', key: 'accent_color', label: 'Accent colour', required: false,

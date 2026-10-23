@@ -245,16 +245,7 @@ export const SysOrganization = ObjectSchema.create({
       target: '/api/v1/auth/organization/update',
       recordIdParam: 'organizationId',
       bodyShape: { wrap: 'data' },
-      // Gated on the organization CAPABILITY, not on `multiOrgEnabled` (#25347):
-      // a `single` deployment has one organization, and this is the only door
-      // that renames it — the generic edit form keeps `name` readonly (ADR-0092
-      // D4) and `update_organization` stays multi-org-only for its slug. Without
-      // it a single-organization deployment could never change "Default
-      // Organization". Nothing here is multi-org: no slug is sent, so neither
-      // better-auth's slug-taken check nor `beforeUpdateOrganization`'s slug
-      // guard runs, and the default organization is found by its slug, which a
-      // rename keeps.
-      requiresFeature: 'organization',
+      requiresFeature: 'multiOrgEnabled',
       // The same door as `update_organization`, so the same grades.
       requiresMembershipReach: 'update_organization',
       successMessage: 'Organization renamed',
@@ -306,9 +297,10 @@ export const SysOrganization = ObjectSchema.create({
     // params are declared on the action, not read off these flags). The
     // engine's own static-`readonly` strip exempts system-context writers, so
     // better-auth's adapter (which stamps `isSystem`) still writes them.
-    // [#25347] The organization's one name, and its help says where it is
-    // changed (`rename_organization`) and what it is not: the product name the
-    // console shows is Settings → Branding's `workspace_name`, a separate home.
+    // [#25347] The organization's one name, and its help says what it is not:
+    // the product name the console shows is Settings → Branding's
+    // `workspace_name`, a separate home. It names no door: the rename doors are
+    // multi-organization only, so under `single` none is offered.
     name: Field.text({
       label: 'Name',
       required: true,
@@ -316,7 +308,7 @@ export const SysOrganization = ObjectSchema.create({
       searchable: true,
       maxLength: 255,
       description:
-        'The organization\'s name, changed with Rename Organization. The product name the console shows is set in Settings → Branding.',
+        'The organization\'s own name. The product name the console shows is a different setting, set in Settings → Branding.',
       group: 'Identity',
     }),
 

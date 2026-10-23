@@ -527,7 +527,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       name: {
         label: "Nombre",
-        help: "El nombre de la organización, que se cambia con Renombrar organización. El nombre del producto que muestra la consola se define en Configuración → Marca."
+        help: "El nombre propio de la organización. El nombre del producto que muestra la consola es otro ajuste, que se define en Configuración → Marca."
       },
       slug: {
         label: "Slug",
