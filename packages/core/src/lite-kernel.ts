@@ -6,6 +6,7 @@ import type { LoggerConfig } from '@objectstack/spec/system';
 import { ObjectKernelBase } from './kernel-base.js';
 import { registerPluginByName } from './plugin-registration.js';
 import { assertPluginContract } from './plugin-contract.js';
+import { isCloudManaged } from './stack-auth.js';
 
 /**
  * ObjectKernel - MiniKernel Architecture
@@ -86,6 +87,11 @@ export class LiteKernel extends ObjectKernelBase {
      */
     async bootstrap(): Promise<void> {
         this.validateState('idle');
+
+        // The cloud-managed fuse, as in `ObjectKernel.bootstrap()`: every
+        // kernel in the process reads the one memoized fact before any plugin
+        // initialises. See `isCloudManaged()`.
+        isCloudManaged();
 
         this.state = 'initializing';
         this.logger.info('Bootstrap started');
