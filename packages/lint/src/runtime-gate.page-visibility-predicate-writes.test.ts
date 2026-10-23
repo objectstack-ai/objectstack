@@ -184,7 +184,10 @@ describe('#24491 — the page door gives the build\'s visibility-predicate verdi
   });
 
   it('the `view` control: a view write is judged exactly as before', () => {
+    // `validateStackExpressions` joined for its bulk `confirmText` pass alone
+    // (#24798) — no visibility predicate is judged by it on a view write.
     expect(runtimeAuthoringRulesFor('view').map((r) => r.name)).toEqual([
+      'validateStackExpressions',
       'validatePresetComparands',
       'validateReferenceIntegrity',
       ...FAMILY,

@@ -217,8 +217,9 @@ export function createLazyCounterStore(opts: LazyCounterStoreOptions): () => Pro
       degradedWarned = true;
       opts.logger?.warn?.(
         `${prefix} ${opts.subject}: no cache service to count in — falling back to a per-process store. ` +
-          'This deployment has no `cache` service registered at all; a multi-node deployment needs a shared cache ' +
-          '(Redis via @objectstack/service-cache) or each node enforces the limit independently (ADR-0069 D2)' +
+          'This deployment has no `cache` service registered at all; a multi-node deployment needs a shared cache — ' +
+          'an ICacheService backed by a store every node reaches, registered as the `cache` service ' +
+          "(ctx.registerService('cache', impl)) — or each node enforces the limit independently (ADR-0069 D2)" +
           (opts.degradedImpact ? `. ${opts.degradedImpact}` : ''),
       );
     }

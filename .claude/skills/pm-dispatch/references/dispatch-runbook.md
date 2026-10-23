@@ -132,14 +132,14 @@
 - S 级机械卡留席内 `mode:subagent`:开线程要重新克隆、重读技能与 `os-dev.md`,起步成本不值。
 - 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明;卡线程照计 `batch`。
 - 项目的 coordinator 跨席位统一调度卡线程;每席一个线程跑 PM 循环,卡线程即 dev。
-- 席位随时把候选卡交 coordinator,附优先级、派发令文件与建议 effort,⛔ 不等自己的槽位。
-- coordinator 按优先级开线程,p1 先;全项目上限 = 各席 `batch` 之和,满即排队。
+- 席位随时把候选卡交 coordinator,附优先级、派发令全文与建议 effort,⛔ 不等自己的槽位。
+- coordinator 按优先级开线程,p1 先;全项目上限由维护者按项目定(`coordinator.md`),满即排队。
 - 卡线程交回或其 PR 合入,席位当即告知 coordinator 释放槽位。
 - 请 coordinator 开线程附维护者原话消息:它只凭维护者明言设线程的 model 与 effort。
 - 席位留认领文本、派发令、契约复核、ACCEPT 与落地;线程实施、开 draft PR、驱动 CI。
-- 派发令落项目共享目录 `/mnt/project-files/<席位>/dispatch-<N>.md`:线程读不到席位 scratchpad。
-- 线程开起后第一动作:向席位报告指定推送分支并等待;⛔ 线程不贴认领、不写 assignee。
-- 席位按 AGENTS.md 的顺序写 assignee+`pm:dispatched`,再贴带该 `Branch:` 的认领;之后线程才开工。
+- 派发令由 coordinator 写进卡线程开场消息,⛔ 不落共享目录;卡上派发评论留一行指针。
+- coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写 assignee。
+- 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领;线程核对最新认领指向本分支方开工。
 - 分支约定仍是 `claude/issue-<n>-<slug>`;线程只能推指定分支是实测平台例外,认领如实写。
 - worktree 照建;仓 `.claude/agents` 类型未加载(实测),线程照读 `os-dev.md`。
 - 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);审核期线程不关,接 FAIL。

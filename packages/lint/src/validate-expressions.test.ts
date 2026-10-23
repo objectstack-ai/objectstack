@@ -10,6 +10,7 @@ import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, ExpressionInputSchema, ObjectStac
 import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { EvalUserSchema } from '@objectstack/spec/identity';
 import { SharingRuleSchema } from '@objectstack/spec/security';
+import { BulkActionDefSchema } from '@objectstack/spec/ui';
 // [#15137] The published refusal sentence a `value`-slot finding must lead
 // with — asserted from the spec's own export, never re-spelled in a test.
 import {
@@ -3291,12 +3292,20 @@ const flowShape = () => {
  * the author a named replacement instead of a bare "unrecognized key" (#4343).
  * Reading a key to REJECT it is the opposite of reading a key to honour it.
  */
-const NOT_A_SINGLE_SHAPE = ['cfg', 'startCfg'];
+// [#24798] `viewEntry` — one `views[]` entry as the bulk `confirmText` pass
+// walks it — is a union too: a `defineView` container (`list` / `listViews`),
+// a flattened list overlay (`viewKind: 'list'`, the list view's own keys at
+// the top level) or a ViewItem record (`config`). Its reads are recognisers
+// for those three shapes, mirrored from `validate-list-view-field-refs.ts`, and
+// the bulk defs they reach are read off the tabled `bulkDef` receiver.
+const NOT_A_SINGLE_SHAPE = ['cfg', 'startCfg', 'viewEntry'];
 
 const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: string; keys: () => string[] }> = [
   {
     receiver: 'stack',
-    expected: ['actions', 'flows', 'hooks', 'objects', 'sharingRules'],
+    // `views` joined with #24798: the bulk `confirmText` pass walks the views'
+    // list containers.
+    expected: ['actions', 'flows', 'hooks', 'objects', 'sharingRules', 'views'],
     declaredBy: 'ObjectStackSchema',
     keys: () => Object.keys(ObjectStackSchema.shape),
   },
@@ -3305,7 +3314,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // `validationRules` is absent — one of the five #5017 removed.
     // `attachedOnRead` joined with #22386 (#22211 ruling A): the declared read
     // attachments, whose block names join the field index.
-    expected: ['actions', 'attachedOnRead', 'fields', 'name', 'validations'],
+    // `listViews` joined with #24798: an object's own list views carry bulk
+    // defs whose `confirmText` is judged.
+    expected: ['actions', 'attachedOnRead', 'fields', 'listViews', 'name', 'validations'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },
@@ -3315,6 +3326,15 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     expected: ['defaultValue', 'options', 'reference', 'required', 'type'],
     declaredBy: 'FieldSchema',
     keys: () => Object.keys(FieldSchema.shape),
+  },
+  {
+    // [#24798] One `bulkActionDefs[]` entry: its `confirmText` template slot,
+    // and its `name` for the location (its params are read by the spec's
+    // `bulkConfirmTemplateRoots`, not by name here).
+    receiver: 'bulkDef',
+    expected: ['confirmText', 'name'],
+    declaredBy: 'BulkActionDefSchema',
+    keys: () => shapeKeysOf(BulkActionDefSchema),
   },
   {
     receiver: 'rule',

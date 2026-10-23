@@ -265,7 +265,9 @@ on(['action:group', 'action:menu'], ['actions[].visible.ast', 'actions[].disable
 on(['action:button', 'action:icon'], ['visible.ast', 'disabled.ast'], EXPRESSION_AST);
 on(['record:line_items'], ['columns[].readonlyWhen.ast', 'columns[].requiredWhen.ast'], EXPRESSION_AST);
 on(['object-master-detail-form'], ['details[].columns[].readonlyWhen.ast', 'details[].columns[].requiredWhen.ast'], EXPRESSION_AST);
-on(['object-grid', 'list-view'], ['conditionalFormatting[].condition.ast', 'bulkActionDefs[].visible.ast'], EXPRESSION_AST);
+// [#24798] A bulk def's `confirmText` is a `template` slot, so its envelope
+// carries the same engine AST beside `source`.
+on(['object-grid', 'list-view'], ['conditionalFormatting[].condition.ast', 'bulkActionDefs[].visible.ast', 'bulkActionDefs[].confirmText.ast'], EXPRESSION_AST);
 on(['object-kanban'], ['conditionalFormatting[].condition.ast'], EXPRESSION_AST);
 // The S-forms stage: an inline form field (`customFields[]`, and a section's
 // inline entry) and the form view's `{ field }` entry carry the three `*When`

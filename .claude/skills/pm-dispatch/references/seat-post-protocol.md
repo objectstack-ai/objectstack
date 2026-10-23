@@ -14,6 +14,8 @@
 - 当前 PM 段登记三元:GitHub 账号(`get_me` 自查)、会话 ID 或 Routine ID、上任时刻。
 - 审计与认领评论的作者字段是平台盖章的硬读数,接管仲裁与活性判定优先用它对账正文。
 - 班次叙事 ⛔ 不进贴正文:逐卡状态在卡与 PR 上必填,轮次合计走轮次报告。
+- 存根四项:在座账号与项目 · 上任时刻 · 热文件串行队 · 指针行「姿态台账住项目」。
+- 第五行可选撞墙注记(预计 HH:MM 恢复);存根只在坐席、串行队改、撞墙、移交刷新。
 - 接管压缩:接任 PM 把交接的有效内容按四段模板重述为新正文,编辑历史即存档。
 - 旧账留在上一版 body revision,审计评论带版本指针(哪一版、何时)。
 - 热文件串行队是跨轮跨班次的常设事实:文件 → 有序卡片清单 → 每张卡认领的区域。
@@ -48,16 +50,14 @@
 5. 第 2、3 步由 `node scripts/pm/check-handover.mjs --session=ID --account=LOGIN` 核,退出 0 才写空座正文。
 6. 贴正文改 `⏳ vacant` + 台账:前任会话 ID、注销时间、队列快照、串行队、跨车道备忘。
 7. 收班简报与审计评论存档;接任指引 = `/pm-dispatch 接手` + 先读座位贴。
-8. `list_triggers` 清点本会话定时器:删入座 Routine,一次性的逐个清理或随移交物转交。
-9. 在飞卡与留跑会话贴里点名(卡号+派发会话 ID);派出的会话离任 PM 自己 `archive_session`。
-10. 向维护者交最终报告。
+8. 在飞卡与留跑会话贴里点名(卡号+派发会话 ID);派出的会话离任 PM 自己 `archive_session`。
+9. 向维护者交最终报告。
 
 ## 座位 Routine 创建
 
 - 由维护者在 claude.ai 的 Routines UI 创建,凭据随 Routine 所挂 repo sources 走。
 - Routines UI 并无 GitHub 连接器入口。
-- 会话内 `create_trigger` 的 fresh-session Routine 不挂 repo sources,拿不到 GitHub 工具。
-- 表现为静默零产出;⛔ 不要在会话里 `create_trigger` 出一个座位 Routine 就当它在跑。
+- 会话内 `create_trigger` 的 Routine 拿不到 GitHub 工具、零产出;⛔ 不把它当座位 Routine 在跑。
 - 模型不能经 API 钉住,同样在 UI 钉;Routine 继承环境默认模型,环境默认变了它跟着变。
 - 创建后先手动 fire 一轮烟测,判据取 GitHub 上的产出:标签写入、审计评论、座位贴编辑。
 - ⛔ 不取会话看起来起来了;零产出即技术性失败。

@@ -40,6 +40,32 @@ pnpm dev            # → http://localhost:3000/_studio
 pnpm verify
 ```
 
+### Booting it walled (`isolated` / `group`)
+
+The showcase declares `@objectstack/organizations` (the Apache-2.0 multi-organization
+runtime, app-declared per ADR-0132 D3). `os serve` loads it only when
+`OS_TENANCY_POSTURE` is `isolated` or `group`; under `single`, the default, it is never
+loaded and the boot is unchanged. A production walled boot needs this env, with no edit
+to the app:
+
+```bash
+pnpm --filter '@objectstack/example-showcase^...' build   # once
+cd examples/app-showcase
+NODE_ENV=production \
+OS_TENANCY_POSTURE=isolated \
+OS_AUTH_SECRET=$(openssl rand -hex 32) \
+OS_SECRET_KEY=$(openssl rand -hex 32) \
+OS_DATABASE_URL=file:./.objectstack/data/app.db \
+OS_PLATFORM_OWNER_EMAIL=owner@example.com \
+OS_AUTH_MEMBERSHIP_POLICY=invite-only \
+  pnpm exec objectstack serve -p 3000
+```
+
+Each variable answers one boot refusal: the auth secret, the encryption key, the
+storage, the platform owner (a walled posture never promotes the first sign-up), and a
+declared membership policy (`invite-only` or an explicit `auto`). Keep both secrets
+stable across restarts of the same database.
+
 ## What it covers
 
 ### Data layer (ObjectQL)
