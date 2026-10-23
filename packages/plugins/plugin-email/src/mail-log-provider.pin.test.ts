@@ -59,8 +59,9 @@ async function boot(mail: Record<string, Resolved>, opts: EmailServicePluginOpti
     from_email: { value: 'no-reply@example.test', source: 'global' },
     ...mail,
   });
-  // The settings binding waits for an engine; nothing here writes a row.
-  const engine = { async find() { return []; }, async insert() { return {}; }, async update() { return {}; } };
+  // The settings binding waits for an engine; nothing here writes a row
+  // (`persist: false` below), so it answers reads only.
+  const engine = { async find() { return []; } };
   const services: Record<string, unknown> = { manifest: { register: () => {} }, objectql: engine, settings };
   const hooks: Record<string, Array<() => Promise<void> | void>> = {};
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
