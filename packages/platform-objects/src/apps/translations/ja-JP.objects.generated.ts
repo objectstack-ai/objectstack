@@ -146,7 +146,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理者",
               delegated_admin: "委任管理者",
-              member: "メンバー"
+              member: "メンバー",
+              external: "外部メンバー"
             }
           }
         }
@@ -581,7 +582,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理者",
               delegated_admin: "委任管理者",
-              member: "メンバー"
+              member: "メンバー",
+              external: "外部メンバー"
             }
           }
         }
@@ -642,7 +644,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           owner: "所有者",
           admin: "管理者",
           delegated_admin: "委任管理者",
-          member: "メンバー"
+          member: "メンバー",
+          external: "外部メンバー"
         }
       }
     },
@@ -666,7 +669,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理者",
               delegated_admin: "委任管理者",
-              member: "メンバー"
+              member: "メンバー",
+              external: "外部メンバー"
             }
           }
         }
@@ -720,7 +724,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           owner: "所有者",
           admin: "管理者",
           delegated_admin: "委任管理者",
-          member: "メンバー"
+          member: "メンバー",
+          external: "外部メンバー"
         }
       },
       status: {
@@ -794,7 +799,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理者",
               delegated_admin: "委任管理者",
-              member: "メンバー"
+              member: "メンバー",
+              external: "外部メンバー"
             }
           }
         }

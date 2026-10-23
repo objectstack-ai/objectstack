@@ -146,7 +146,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
               owner: "Owner",
               admin: "Admin",
               delegated_admin: "Delegated Admin",
-              member: "Member"
+              member: "Member",
+              external: "External"
             }
           }
         }
@@ -581,7 +582,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
               owner: "Owner",
               admin: "Admin",
               delegated_admin: "Delegated Admin",
-              member: "Member"
+              member: "Member",
+              external: "External"
             }
           }
         }
@@ -642,7 +644,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           owner: "Owner",
           admin: "Admin",
           delegated_admin: "Delegated Admin",
-          member: "Member"
+          member: "Member",
+          external: "External"
         }
       }
     },
@@ -666,7 +669,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
               owner: "Owner",
               admin: "Admin",
               delegated_admin: "Delegated Admin",
-              member: "Member"
+              member: "Member",
+              external: "External"
             }
           }
         }
@@ -720,7 +724,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           owner: "Owner",
           admin: "Admin",
           delegated_admin: "Delegated Admin",
-          member: "Member"
+          member: "Member",
+          external: "External"
         }
       },
       status: {
@@ -794,7 +799,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
               owner: "Owner",
               admin: "Admin",
               delegated_admin: "Delegated Admin",
-              member: "Member"
+              member: "Member",
+              external: "External"
             }
           }
         }

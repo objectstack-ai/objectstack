@@ -146,7 +146,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
               owner: "Propietario",
               admin: "Administrador",
               delegated_admin: "Administrador delegado",
-              member: "Miembro"
+              member: "Miembro",
+              external: "Externo"
             }
           }
         }
@@ -581,7 +582,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
               owner: "Propietario",
               admin: "Administrador",
               delegated_admin: "Administrador delegado",
-              member: "Miembro"
+              member: "Miembro",
+              external: "Externo"
             }
           }
         }
@@ -642,7 +644,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           owner: "Propietario",
           admin: "Administrador",
           delegated_admin: "Administrador delegado",
-          member: "Miembro"
+          member: "Miembro",
+          external: "Externo"
         }
       }
     },
@@ -666,7 +669,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
               owner: "Propietario",
               admin: "Administrador",
               delegated_admin: "Administrador delegado",
-              member: "Miembro"
+              member: "Miembro",
+              external: "Externo"
             }
           }
         }
@@ -720,7 +724,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           owner: "Propietario",
           admin: "Administrador",
           delegated_admin: "Administrador delegado",
-          member: "Miembro"
+          member: "Miembro",
+          external: "Externo"
         }
       },
       status: {
@@ -794,7 +799,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
               owner: "Propietario",
               admin: "Administrador",
               delegated_admin: "Administrador delegado",
-              member: "Miembro"
+              member: "Miembro",
+              external: "Externo"
             }
           }
         }
