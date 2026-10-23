@@ -25,6 +25,8 @@
  *   reviewFace / REVIEW_FACES which face made the review owed, and the ONE tier NAME it stands at
  *   reviewScopeHits          the at-tier review's scope floor — `reviewFace`'s `hits`, the record's `Scope:` line
  *   readLocalRuns            the `Local-runs:` line, and `localRunsStand` on it — judged when present, absent not re-judged
+ *   readReviewedByAccount    the `Reviewed-by-account:` line — the reviewer's account (#25415)
+ *   readAttributionLogin     the PR body's project-thread attribution login (#25415)
  *   isModelIdentifierToken   the token a refusal must never quote back
  *   REVIEW_OF_RECORD_THREADS the ONE thread set, and REVIEW_OF_RECORD_LOCATION its words
  *   unexplainedPathsBetween  the pure-regeneration test a carried record re-runs, prose arm included
@@ -532,6 +534,69 @@ function stripValueDecoration(raw) {
  * reviewer, and who that is stays human.
  */
 export const REVIEWED_BY_LINE = keyLineRegex('Reviewed-by');
+
+/**
+ * The `Reviewed-by-account:` key line (#25415) — the ACCOUNT the reviewing
+ * session ran under, which `Reviewed-by:` cannot carry: every relay comment is
+ * authored `objectstack-fleet[bot]`, so the session id names a session and no
+ * comment field names the account behind it. Read in `keyLineRegex`'s one
+ * convention; `Reviewed-by:` does not match it (the key is literal up to its colon).
+ *
+ * ⛔ The value is ONE GitHub login, a leading `@` tolerated. A bot login, prose,
+ * or two logins read `unreadable`: the writer account is never a reviewer, and a
+ * line the guard cannot compare is not an independent review.
+ */
+export const REVIEWED_BY_ACCOUNT_LINE = keyLineRegex('Reviewed-by-account');
+
+const GITHUB_LOGIN = /^@?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))$/;
+
+/**
+ * What one comment declares about the reviewer's account.
+ *
+ * @returns {{ state: 'missing' } | { state: 'unreadable', line: string } | { state: 'read', login: string }}
+ */
+export function readReviewedByAccount(text) {
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const m = REVIEWED_BY_ACCOUNT_LINE.exec(line);
+    if (!m) continue;
+    const rest = stripValueDecoration(m[1]).replace(/(?:[ \t]|\*\*|`)+$/, '');
+    const login = GITHUB_LOGIN.exec(rest);
+    return login ? { state: 'read', login: login[1] } : { state: 'unreadable', line: quoteLine(line) };
+  }
+  return { state: 'missing' };
+}
+
+/**
+ * The project-thread attribution line a pull request body carries (#25220,
+ * #25415): `<!-- claude-projects-attribution: {"github_login":"…"} -->`, the
+ * only place the AUTHORING account is written, since the relay authors every PR
+ * and comment as `objectstack-fleet[bot]`.
+ *
+ * ⛔ Read on ANY line of the body, not only the first: the marker is invisible
+ * once rendered, and a body that carries it anywhere is an attributed pull
+ * request. Reading only line 1 would let an edit above it turn the check off —
+ * the fail-open direction. A marker whose JSON names no login reads `unreadable`,
+ * which the guard refuses on.
+ *
+ * @returns {{ state: 'absent' } | { state: 'unreadable', line: string } | { state: 'read', login: string }}
+ */
+const ATTRIBUTION_LINE = /<!--\s*claude-projects-attribution:\s*(\{.*?\})\s*-->/;
+
+export function readAttributionLogin(body) {
+  for (const line of String(body ?? '').split(/\r?\n/)) {
+    if (!/claude-projects-attribution/.test(line)) continue;
+    const m = ATTRIBUTION_LINE.exec(line);
+    let login = null;
+    try {
+      login = m ? JSON.parse(m[1])?.github_login : null;
+    } catch {
+      login = null;
+    }
+    const token = GITHUB_LOGIN.exec(String(login ?? ''));
+    return token ? { state: 'read', login: token[1] } : { state: 'unreadable', line: quoteLine(line) };
+  }
+  return { state: 'absent' };
+}
 
 /**
  * The `Served-tier:` key line -- the THIRD provenance fact a verdict declares
@@ -1324,6 +1389,9 @@ export function locateReviewOfRecord(pair, carriedHead = null) {
     // The provenance fact C7 judges, read off the SAME comment this row chose,
     // so the two can never disagree about which verdict governs this head.
     served: readServedTier(row?.body),
+    // The reviewer's ACCOUNT, off the same comment (#25415). Read, never judged
+    // here: whether it must differ from the PR's attribution is the guard's leg.
+    account: readReviewedByAccount(row?.body),
   };
   const signed = String(row?.body ?? '').split(/\r?\n/).some((line) => REVIEWED_BY_LINE.test(line));
   return signed ? { state: 'found', ...found } : { state: 'unsigned', ...found };
@@ -1364,6 +1432,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
   '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 18,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
+  '#25415: the reviewer ACCOUNT and the PR attribution login — read, never judged here': 7,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1371,7 +1440,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 8 → 10 with the two B′-with-C batteries (ruling record 6159870311): two batteries, two rows.
 // Raised 10 → 11 with the letter-C scope battery (ruling record 6184805932): one battery, one row.
 // Raised 11 → 12 with the letter-B narrowing-face battery (ruling record 6203713500): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 12;
+// Raised 12 → 13 with the #25415 account battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1741,6 +1811,15 @@ export async function selfTest() {
   // READS the record now EMITS it, and these cases are what make "copy it" a
   // safe instruction: the printed bytes are driven back through the very
   // readers that judge a real record.
+  battery('#25415: the reviewer ACCOUNT and the PR attribution login — read, never judged here');
+  t('`Reviewed-by-account:` reads ONE login, decoration and a leading @ tolerated', readReviewedByAccount('- **Reviewed-by-account:** `@lane-a`').login === 'lane-a' && readReviewedByAccount('Reviewed-by-account: lane-b').login === 'lane-b');
+  t('…absent is `missing`; and `Reviewed-by:` is NOT that key', readReviewedByAccount('Reviewed-by: `session_x`').state === 'missing' && readReviewedByAccount('').state === 'missing');
+  t('⛔ prose, two logins or a bot login read `unreadable`', ['Reviewed-by-account: the other account', 'Reviewed-by-account: a, b', 'Reviewed-by-account: `objectstack-fleet[bot]`'].every((x) => readReviewedByAccount(x).state === 'unreadable'));
+  t('`Reviewed-by:` still matches only its own key, so an account line does not sign a record', !REVIEWED_BY_LINE.test('Reviewed-by-account: lane-a') && REVIEWED_BY_ACCOUNT_LINE.test('Reviewed-by-account: lane-a'));
+  t('the attribution login reads off the body, on any line', readAttributionLogin('<!-- claude-projects-attribution: {"github_login":"os-x"} -->\nbody').login === 'os-x' && readAttributionLogin('Fixes #1\n\n<!-- claude-projects-attribution: {"github_login":"os-y"} -->').login === 'os-y');
+  t('…no marker is `absent`; a marker with no readable login is `unreadable`, never absent', readAttributionLogin('Fixes #1').state === 'absent' && readAttributionLogin('<!-- claude-projects-attribution: {"github_login":""} -->').state === 'unreadable' && readAttributionLogin('<!-- claude-projects-attribution: {broken -->').state === 'unreadable');
+  t('the locator carries the account read off the SAME comment it chose', (() => { const r = locateReviewOfRecord(pairOf({ prComments: [RECORD(HEAD_9AF9, ['Reviewed-by: `session_x`', 'Reviewed-by-account: lane-a'])] })); return r.state === 'found' && r.account.login === 'lane-a'; })());
+
   battery('#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy');
   const TPL_TEXT = contractReviewTemplateLines().join('\n');
   const TPL_RECORD = contractReviewRecordLines().join('\n');
