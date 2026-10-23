@@ -650,8 +650,8 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // behind, the bound secret included.
     this.assertValidRecord(this.withSecretBinding(record, secret));
     // [ADR-0015 §4.2 · #25277] Same position, same reason: objects can name a
-    // datasource before it exists (the save door gives a binding on a
-    // datasource it cannot see no verdict), so a create is judged too.
+    // datasource before it exists (the save door gives no verdict on a
+    // binding whose datasource it cannot see), so a create is judged too.
     await this.assertNoExternalBindingConflict(record);
 
     if (secret) {
