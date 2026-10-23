@@ -15,7 +15,16 @@ import { createMemoryQueue } from '@objectstack/core';
 import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { DbQueueAdapter } from '@objectstack/service-queue';
 import { EmailServicePlugin, resolveDurableQueue } from './email-plugin.js';
-import { EmailService, EMAIL_SEND_QUEUE } from './email-service.js';
+import { EmailService, EMAIL_SEND_QUEUE, LogTransport } from './email-service.js';
+
+// "Send test email" tests the FORM's provider through a one-shot transport, so
+// a press with an SMTP host on the form reaches nodemailer, never the harness
+// transport. Only the SMTP wire is faked; everything above it is real.
+const nm = vi.hoisted(() => ({ createTransport: vi.fn(), sendMail: vi.fn() }));
+vi.mock('nodemailer', () => ({
+  default: { createTransport: nm.createTransport },
+  createTransport: nm.createTransport,
+}));
 
 // ── harness ────────────────────────────────────────────────────────────────
 
@@ -511,7 +520,20 @@ describe('settings gate — a save degrades, it never breaks the boot or the mai
 // ── mail/test ──────────────────────────────────────────────────────────────
 
 describe('mail/test is never queued', () => {
+  // The form names an SMTP host, so the press builds a one-shot SMTP service
+  // and its answer is that connection's own. (A form provider of `log` used to
+  // reach the harness transport here: the press tested the LIVE service while
+  // the form said "None (log only)". It now tests a one-shot LogTransport.)
+  const SMTP_FORM = { provider: 'smtp', smtp_host: 'smtp.form.test', smtp_port: 587, from_email: 'no-reply@example.test' };
+
+  beforeEach(() => {
+    nm.createTransport.mockReset();
+    nm.sendMail.mockReset();
+    nm.createTransport.mockImplementation(() => ({ sendMail: nm.sendMail, close: vi.fn() }));
+  });
+
   it('sends inline and reports the transport result, with queue mode on', async () => {
+    nm.sendMail.mockResolvedValue({ messageId: '<wire-1@smtp>', response: '250 2.0.0 Ok' });
     const h = await boot({
       plugin: { queueDelivery: true },
       mail: { queue_delivery: { value: true, source: 'global' } },
@@ -519,7 +541,7 @@ describe('mail/test is never queued', () => {
     await h.ready();
 
     const result = await h.settings.action('test')!({
-      values: { provider: 'log', from_email: 'no-reply@example.test' },
+      values: SMTP_FORM,
       payload: { to: 'ops@example.test' },
     });
 
@@ -528,28 +550,51 @@ describe('mail/test is never queued', () => {
     // removed from this button.
     expect(result.ok).toBe(true);
     expect(String(result.message)).toMatch(/Sent test email to ops@example\.test/);
-    expect(h.transport.send).toHaveBeenCalledTimes(1);
+    expect(nm.sendMail).toHaveBeenCalledTimes(1);
+    expect(h.transport.send).not.toHaveBeenCalled();
     expect(h.jobs()).toHaveLength(0);
     // The audit row is finalized, not left at `queued` for a worker.
     expect(last(h.sysEmail())).toMatchObject({ status: 'sent' });
   });
 
   it('reports a real SMTP failure instead of enqueueing it', async () => {
+    nm.sendMail.mockRejectedValue(new Error('535 5.7.8 authentication failed'));
     const h = await boot({
-      transport: { send: vi.fn(async () => { throw new Error('535 5.7.8 authentication failed'); }) },
       plugin: { queueDelivery: true },
       mail: { queue_delivery: { value: true, source: 'global' } },
     });
     await h.ready();
 
     const result = await h.settings.action('test')!({
-      values: { provider: 'log', from_email: 'no-reply@example.test' },
+      values: SMTP_FORM,
       payload: { to: 'ops@example.test' },
     });
 
     expect(result.ok).toBe(false);
     expect(String(result.message)).toMatch(/535 5\.7\.8/);
     expect(h.jobs()).toHaveLength(0);
+  });
+
+  it('a press that tests the LIVE service (a live LogTransport, provider log) is inline too', async () => {
+    const h = await boot({
+      plugin: { queueDelivery: true },
+      mail: {
+        provider: { value: 'log', source: 'global' },
+        queue_delivery: { value: true, source: 'global' },
+      },
+    });
+    await h.ready();
+    expect(h.service().options.transport).toBeInstanceOf(LogTransport);
+
+    const result = await h.settings.action('test')!({
+      values: { provider: 'log', from_email: 'no-reply@example.test' },
+      payload: { to: 'ops@example.test' },
+    });
+
+    expect(result).toMatchObject({ ok: false, severity: 'warning' });
+    expect(h.transport.send).not.toHaveBeenCalled();
+    expect(h.jobs()).toHaveLength(0);
+    expect(last(h.sysEmail())).toMatchObject({ status: 'sent' });
   });
 });
 
