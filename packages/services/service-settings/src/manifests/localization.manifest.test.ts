@@ -86,4 +86,12 @@ describe('localizationSettingsManifest', () => {
     }
     expect(specs.filter((s) => s.type === 'group').map((s) => s.id)).not.toContain('formats');
   });
+
+  it('the timezone help says it is the zone in effect, and the organization record\'s does not change it (#25347)', () => {
+    // Two timezones, no rule shown: `sys_organization.timezone` has no reader,
+    // so this key is the one every date calculation uses, and its help says so.
+    const tz = (localizationSettingsManifest.specifiers as any[]).find((s) => s.key === 'timezone');
+    expect(tz.description).toMatch(/the timezone in effect for the organization/);
+    expect(tz.description).toMatch(/the Timezone field on the Organization record does not change it/);
+  });
 });
