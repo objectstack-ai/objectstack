@@ -94,7 +94,8 @@ function makeDoor() {
     p.engine = {
         find: async (object: string, query: any) => {
             engineFinds.push({ object, context: query?.context });
-            return [{ id: 'r1' }];
+            const rows = [{ id: 'r1' }, { id: 'r2' }];
+            return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
         },
         findOne: async () => null,
     };
