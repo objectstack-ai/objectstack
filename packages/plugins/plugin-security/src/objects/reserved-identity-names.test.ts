@@ -99,10 +99,10 @@ async function refusalOf(run: () => Promise<unknown>): Promise<any> {
 describe('#15972 the reserved set is IMPORTED from the spec constant, never retyped', () => {
   it('IS `BUILTIN_IDENTITY_NAMES` — the constant that declares the identities', () => {
     // Value equality AND membership equality: a re-spelled array with the same
-    // four strings would satisfy `toEqual`, so the four names are also asserted
+    // strings would satisfy `toEqual`, so the five names are also asserted
     // to arrive in the same order the declaration ships them.
     expect([...RESERVED_IDENTITY_NAMES]).toEqual([...BUILTIN_IDENTITY_NAMES]);
-    expect(RESERVED_IDENTITY_NAMES).toHaveLength(4);
+    expect(RESERVED_IDENTITY_NAMES).toHaveLength(5);
   });
 
   it('is a CLOSED enumeration — ⛔ not an `org_*` pattern', () => {

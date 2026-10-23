@@ -77,7 +77,7 @@ const POSTURE_ENV = 'OS_TENANCY_POSTURE';
 const OWNER_ENV = 'OS_PLATFORM_OWNER_EMAIL';
 const ORG = 'org_eq';
 const LATE_ORG = 'org_late';
-const BUILTIN_NAMES = ['everyone', 'guest', 'org_admin', 'org_member', 'org_owner', 'platform_admin'];
+const BUILTIN_NAMES = ['everyone', 'guest', 'org_admin', 'org_external', 'org_member', 'org_owner', 'platform_admin'];
 
 /** The non-system administrator whose writes are the data door's (superuser wildcard). */
 const QA_ADMIN = {

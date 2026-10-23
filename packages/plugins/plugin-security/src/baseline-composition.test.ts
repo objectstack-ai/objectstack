@@ -85,7 +85,11 @@ const appDefault: PermissionSet = {
 const PLATFORM_ONLY_OBJECT = 'sys_user_preference';
 
 it('guard: the platform baseline is the only default set granting the discriminator object', () => {
+  // `external_default` grants it too (its holder's own preference row), but no
+  // member resolves it: only the `org_external` identity names it (ruling
+  // 6355206139 E4), and these members never hold that identity.
   const granting = securityDefaultPermissionSets
+    .filter((p) => p.name !== 'external_default')
     .filter((p) => (p.objects as any)?.[PLATFORM_ONLY_OBJECT]?.allowRead === true)
     .map((p) => p.name);
   expect(granting).toEqual([PLATFORM_BASELINE_PERMISSION_SET]);

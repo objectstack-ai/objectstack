@@ -22,7 +22,9 @@ describe('securityBuiltinPositions', () => {
   it('carries the spec’s label and description for every identity name', () => {
     for (const name of BUILTIN_IDENTITY_NAMES) {
       const declared = securityBuiltinPositions.find((p) => p.name === name);
-      expect(declared).toEqual({ name, ...BUILTIN_IDENTITY_METADATA[name] });
+      // [Ruling 6355206139 E4] `org_external` alone also names its own baseline set.
+      const binding = name === 'org_external' ? { permissionSets: ['external_default'] } : {};
+      expect(declared).toEqual({ name, ...BUILTIN_IDENTITY_METADATA[name], ...binding });
     }
   });
 
@@ -43,7 +45,7 @@ describe('registerBuiltinPositions', () => {
         calls.push([type, item, keyField, packageId]);
       },
     };
-    expect(registerBuiltinPositions(registry, 'com.example.owner')).toBe(6);
+    expect(registerBuiltinPositions(registry, 'com.example.owner')).toBe(BUILTIN_IDENTITY_NAMES.length + AUDIENCE_ANCHOR_POSITIONS.length);
     expect(calls.map(([type, item, keyField, packageId]) => [type, item.name, keyField, packageId])).toEqual(
       [...BUILTIN_IDENTITY_NAMES, ...AUDIENCE_ANCHOR_POSITIONS].map((name) => ['position', name, 'name', 'com.example.owner']),
     );
