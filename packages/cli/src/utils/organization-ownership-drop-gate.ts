@@ -38,7 +38,7 @@
  */
 
 import type { MigrationFlagEngine } from '@objectstack/platform-objects/system';
-import type { DataMigrationFlag } from '@objectstack/spec/system';
+import { OrganizationOwnershipBirthMarkerSchema, type DataMigrationFlag } from '@objectstack/spec/system';
 
 /** The column the ceremony owns the drop of. */
 export const ORGANIZATION_COLUMN = 'organization_id';
@@ -66,4 +66,40 @@ export async function readOrganizationOwnershipMarker(
   const { isDataMigrationFlagVerified, ORGANIZATION_OWNERSHIP_MIGRATION_ID } = await import('@objectstack/spec/system');
   const flag = await readDataMigrationFlag(engine, ORGANIZATION_OWNERSHIP_MIGRATION_ID);
   return { verified: isDataMigrationFlagVerified(flag), flag };
+}
+
+/**
+ * Which row let the drop through, for the success line `os migrate apply`
+ * prints: the BIRTH MARKER or a ceremony run. Both are the ceremony's
+ * verified `sys_migration` row, and the gate treats them alike; only the text
+ * differs. The boot guard writes the birth marker on a datastore it observed
+ * being created from empty, with `details.birth`
+ * (`OrganizationOwnershipBirthMarkerSchema`, `@objectstack/spec/system`); the
+ * ceremony writes `details: { checkpoint }`, replacing the whole field, so a
+ * row carries one or the other. It claims no ceremony ran, so the line must
+ * not say one verified.
+ *
+ * Pure: it reads the `flag` the gate's one marker read returned, never the
+ * database again. Answers `null` for a ceremony run, a row without details,
+ * or no row; `createdAt` falls back to the row's `verified_at` (the guard
+ * writes both from one clock) when the birth object does not parse.
+ */
+export function organizationOwnershipBirthOf(
+  flag: Pick<DataMigrationFlag, 'details' | 'verified_at'> | null,
+): { createdAt: string | null; platformVersion: string | null } | null {
+  if (!flag) return null;
+  let details: unknown = flag.details;
+  if (typeof details === 'string') {
+    try {
+      details = JSON.parse(details);
+    } catch {
+      return null;
+    }
+  }
+  const birth = (details as { birth?: unknown } | null)?.birth;
+  if (birth === null || typeof birth !== 'object') return null;
+  const parsed = OrganizationOwnershipBirthMarkerSchema.safeParse(birth);
+  return parsed.success
+    ? { createdAt: parsed.data.createdAt, platformVersion: parsed.data.platformVersion }
+    : { createdAt: flag.verified_at ?? null, platformVersion: null };
 }

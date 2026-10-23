@@ -36,7 +36,7 @@ import {
 } from '../../utils/schema-migration-plugins.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
-import { ceremonyOrganizationColumnDrops } from '../../utils/organization-ownership-drop-gate.js';
+import { ceremonyOrganizationColumnDrops, organizationOwnershipBirthOf } from '../../utils/organization-ownership-drop-gate.js';
 import {
   DropGateReads,
   describeDriftEntries,
@@ -627,9 +627,17 @@ export default class MigrateApply extends Command {
           return;
         }
         if (!flags.json) {
+          // Say which row let the drop through (#25466): a birth marker
+          // records that no ceremony was owed, never that one ran.
+          const birth = organizationOwnershipBirthOf(marker.flag);
           printSuccess(
-            `organization_id on ${organizationDrops.join(', ')}: the organization-ownership ceremony verified `
-            + `(${marker.flag?.verified_at}) — the drop may proceed.`,
+            birth
+              ? `organization_id on ${organizationDrops.join(', ')}: this database was created from empty `
+                + `(${birth.createdAt}${birth.platformVersion ? `, platform ${birth.platformVersion}` : ''}) and carries the `
+                + 'organization-ownership birth marker, so it holds no legacy organization rows and the ceremony is not '
+                + 'needed for it — the drop may proceed.'
+              : `organization_id on ${organizationDrops.join(', ')}: the organization-ownership ceremony verified `
+                + `(${marker.flag?.verified_at}) — the drop may proceed.`,
           );
         }
       }
