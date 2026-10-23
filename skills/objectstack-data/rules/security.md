@@ -20,11 +20,9 @@ export const salesUser = definePermissionSet({
 // defineStack({ permissions: [salesUser], ... })
 ```
 
-- **Stack key: `permissions`** (named for the metadata kind, not the factory).
-  `permissionSets:` is **refused at load** — the strict top level fails with an
-  `Unrecognized key(s) on this stack definition` error naming the key, never a
-  silent drop; `ObjectStackDefinitionSchema`
-  (`node_modules/@objectstack/spec/src/stack.zod.ts`) is the enumeration of record.
+- `permissionSets:` is **refused at load** with an `Unrecognized key(s) on this
+  stack definition` error naming the key; `ObjectStackDefinitionSchema`
+  (`node_modules/@objectstack/spec/src/stack.zod.ts`) enumerates the keys.
 - Bits: `allowCreate` / `allowRead` / `allowEdit` / `allowDelete`, plus
   `allowTransfer` (ownership change), `viewAllRecords` / `modifyAllRecords`
   (super-user, bypass sharing).
@@ -43,13 +41,11 @@ optional `organization_id` (`null` = every org context). Optional `valid_from` /
 `valid_until` bound a half-open window; `granted_by` is stamped by the gate on
 insert — never author it.
 
-⚠️ **`permission_set` takes the set's `name`, never a record id** — a name the
-security catalog does not hold is refused `400 VALIDATION_FAILED`
-(`reference_not_found`), and a row with no name is refused `required`.
+⚠️ **Never a record id** — a `permission_set` the security catalog does not hold
+is refused `400 VALIDATION_FAILED` (`reference_not_found`); none at all, `required`.
 One grant per user, set and organization: enforced by the `unique: 'organization'` index.
 
-Assignment is one call: `POST /api/v1/data/sys_user_permission_set` with
-`{ user_id, permission_set: '<name>', organization_id }`. Only a tenant admin —
+Assignment is one `POST /api/v1/data/sys_user_permission_set`. Only a tenant admin —
 or a delegated `adminScope` carrying `manageAssignments` for that set and user
 (ADR-0090 D12) — may write it; plain CRUD bits on the table are not enough.
 
@@ -144,7 +140,7 @@ over permission-set field grants.
 fields: {
   ssn: {
     type: 'text',
-    requiredPermissions: ['view_pii'],  // mask on read / deny on write without it
+    requiredPermissions: ['view_pii'],
   },
 }
 ```
@@ -188,9 +184,7 @@ none — e.g. identity tables a plugin writes via its own adapter
   better-auth-managed identity table). It never crosses the Layer 0 wall —
   crossing takes a *true platform admin* (the superuser bit **and** a
   platform-exclusive capability: `manage_metadata`, `manage_platform_settings`,
-  `studio.access`, `manage_users`) on one of those same postures. So an org
-  admin with the superuser bit stays org-scoped; on an ordinary tenant object
-  nobody crosses (the admin sees 0 rows too).
+  `studio.access`, `manage_users`) on one of those same postures.
 
 **Recipe — env-global, admin-only object that admins can fully see:**
 
@@ -205,32 +199,21 @@ requiredPermissions: ['manage_platform_settings'], // capability AND-gate → me
 > reads every row env-wide — the shipped `viewer_readonly` still carries one, as
 > may an app-declared default profile or a customer-authored set. (The
 > `member_default` baseline is **not** one of them: it is explicit-allow and
-> grants only the objects it names.) `requiredPermissions` *by itself* leaves the
-> object a tenant object, so the wall keeps denying the untagged rows and even a
-> platform admin sees nothing. The pair is the correct combo; `requiredPermissions`
-> is the half that holds however permissive the caller's grants are (an AND-gate
-> checked **before** the CRUD grant). Posture model: ADR-0066; tenant wall:
-> ADR-0095 D1.
+> grants only the objects it names.) `requiredPermissions` *by itself* leaves a
+> tenant object, whose untagged rows the wall denies to everyone (above); it is
+> the half that holds however permissive the caller's grants are. Posture model:
+> ADR-0066.
 
-## Shipping a new version: renaming or removing an access item is a risk
+## Renaming or removing a shipped access item
 
-Once a package version is installed, the environment's administrators act on
-its access items:
-- they switch a permission set, position or sharing rule off;
-- they clone a set to narrow it;
-- they point their own sets at the package's objects, fields and capabilities.
+Administrators act on a package's access items by **name**: they switch a
+permission set, position or sharing rule off, clone a set, and name its objects,
+fields and capabilities in their own sets. A later version can quietly undo them
+on upgrade:
 
-Those choices are recorded against the item's **name**. A later version that
-renames or removes one of these items can quietly undo the choice on upgrade:
+- **Rename** → the old switch-off stops matching; the renamed item arrives switched **on**.
+- **Remove** an object, field or capability → a customer's clone or own set names something that no longer exists.
+- **Add a field deny** to a shipped set → a customer's clone does not carry it.
 
-| Change in the new version | What an environment that acted on the old version gets |
-|---|---|
-| Rename a permission set, position or sharing rule | The old name's switch-off no longer matches, and the item under its new name arrives switched **on** |
-| Remove a capability, object or field | A customer's cloned or own set now names something that does not exist |
-| Add a field deny to a shipped set | A customer's clone of that set does not carry it |
-
-Keep shipped names stable. When a change like this is genuinely needed, say so
-in the release notes: what was renamed or removed, and what an administrator
-should re-check after upgrading (their switch-offs, their clones, and the sets
-that reference it). Not every install path stops to ask before such an upgrade,
-so the release note is the warning an installer can always see.
+Keep shipped names stable. When such a change is genuinely needed, say so in the
+release notes: what changed, and what an administrator should re-check after upgrading.
