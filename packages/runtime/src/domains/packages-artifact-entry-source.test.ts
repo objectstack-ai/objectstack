@@ -19,7 +19,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
-import { ObjectQLPlugin } from '@objectstack/objectql';
+import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { ListInstalledPackagesResponseSchema } from '@objectstack/spec/api-assembled';
 import { AppPlugin } from '../app-plugin.js';
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -43,7 +43,10 @@ async function listBootedFrom(artifact: Record<string, unknown>): Promise<Record
     kernel.use(new AppPlugin(artifact));
     await kernel.bootstrap();
 
-    const dispatcher = new HttpDispatcher({ context: { getService: (name: string) => kernel.getService(name) } } as any);
+    // The route reads `.registry` and `.manifests` off the engine slot — the
+    // same handle `packages-writable-verdict.test.ts` hands it.
+    const objectql = kernel.getService<ObjectQL>('objectql');
+    const dispatcher = new HttpDispatcher({ context: { getService: (name: string) => (name === 'objectql' ? objectql : null) } } as any);
     const r = await dispatcher.handlePackages('/', 'GET', undefined, {}, {
         request: {},
         environmentId: 'pkg-artifact-entry-source-test',
