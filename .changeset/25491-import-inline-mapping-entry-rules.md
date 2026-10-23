@@ -4,14 +4,14 @@
 
 fix(rest)!: an inline import mapping entry's `transform`, `defaultValue` and `required` are applied, not dropped
 
-`POST /api/v1/data/:object/import` (and the async import job, which parses the same body) accepts `mapping` as a `FieldMappingEntry[]`, whose entries carry `transform`, `defaultValue` and `required`. The request parser kept only each entry's `sourceField` → `targetField` rename and dropped the rest, so a request asking for `transform: 'uppercase'` validated, ran, and stored the cell unchanged. Each entry's rules now run on its column before the cells are coerced:
+`POST /api/v1/data/:object/import` (and the async import job, which parses the same body) accepts `mapping` as a `FieldMappingEntry[]`, whose entries carry `transform`, `defaultValue` and `required`. The request parser kept only the column each entry names with `sourceField` and the field it names with `targetField` and dropped the rest, so a request asking for `transform: 'uppercase'` validated, ran, and stored the cell unchanged. Each entry's rules now run on its column before the cells are coerced:
 
 - `trim`, `uppercase` and `lowercase` rewrite a string cell. `none` and `lookup` copy it; a `lookup` cell is resolved to a record id by the import's reference resolution, as before.
 - `defaultValue` fills a cell that is blank (absent, empty, whitespace or one of the request's `nullValues`).
 - `required: true` refuses the request with `400 MISSING_REQUIRED_FIELD` when a row still leaves that column blank, naming the column and the rows. The refusal comes before any row is written, on the dry run and the commit alike.
 - `transform: 'date_format'` refuses the request with `400 UNSUPPORTED_TRANSFORM`: an entry carries no date format for it to apply. A cell mapped to a date or datetime field is already parsed as a date, so drop the transform. A transform name outside the declared set is refused the same way.
 
-A plain `{ sourceField, targetField }` entry, and the compact `{ column: field }` record, rename exactly as before.
+A plain `{ sourceField, targetField }` entry, and the compact `{ column: field }` record, map columns exactly as before.
 
 Clause-②: no (narrowing) — the import doors refuse two request shapes they used to run: an inline mapping entry declaring `transform: 'date_format'` (or a transform name outside the declared set), and an entry marked `required: true` whose column a row leaves blank. Nothing is widened.
 
