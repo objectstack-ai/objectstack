@@ -474,7 +474,7 @@ is executed. `POST /analytics/sql` refuses the same keys. To order by a member, 
 <Callout type="info">
 **`fields[]` is the resolved presentation surface — read it first.** Each entry carries
 `name` and `type` and, when the producer declares them, `label`, `format`, `currency`,
-`percentScale`, `builtinAggregate` and `aggregate`: the optional members
+`percentScale`, `builtinAggregate`, `aggregate` and `nullLabel`: the optional members
 `AnalyticsResultResponseSchema` declares (`packages/spec/src/api/analytics.zod.ts`),
 mirrored member for member by `IAnalyticsService.query`'s `AnalyticsResult` and bound to
 it at compile time. Optional means a given column may omit them — read them defensively,
@@ -505,6 +505,12 @@ chart can tell a count from a sum. `builtinAggregate` is narrower: it is present
 when the measure has no `label`, to mark a header that is the server's default. Neither
 is set on a dimension column or a derived measure, and the cube query on this page
 carries neither.
+
+A dimension column of a dataset answer carries `nullLabel` when its dataset dimension
+declares one: the name of the bucket of rows whose value for that dimension is null,
+resolved to the request's locale like `label`. A chart draws its null bucket under it
+instead of its own default. It is never set on a measure column, nor on the cube query
+on this page.
 </Callout>
 
 ### `GET /analytics/meta`

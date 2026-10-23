@@ -110,6 +110,8 @@ function permissiveService() {
     },
     // `ReadonlySet<string>` is the real shape the redaction helpers read.
     secretKeysOf: () => new Set<string>(),
+    // The read route's live-status lookup — nothing to state here.
+    liveStatusOf: async () => undefined,
     setMany: async (_ns: string, _values: unknown, ctx: SettingsContext) => { seen.push({ method: 'setMany', ctx }); return {}; },
     runAction: async (_ns: string, _id: string, _input: unknown, ctx: SettingsContext) => {
       seen.push({ method: 'runAction', ctx });

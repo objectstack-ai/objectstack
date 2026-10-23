@@ -379,7 +379,19 @@ export const CEILINGS = new Map([
   // rule line moved verbatim; the ACCEPT path-fork block stays here under
   // 路径分叉 because check:pm-governed-prose anchors its region in this file.
   // Landed count, headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/SKILL.md', 319],
+  // Lowered 319 → 318 by the domain:server lane merge (maintainer ruling
+  // 2026-10-22, letter 乙): the engine, services and cli rows of the 域车道 table
+  // became one row, and the alias rule for the three retired labels took one
+  // bullet. Then 318 → 317: #25240 (landed 2026-10-22, the claim template's
+  // `Metadata-protocol:` line) had paid one line more than it took and left
+  // the ceiling where it was; this ledger edit, merging `main` behind it,
+  // takes the ceiling down to the landed count. Then 317 → 318, which is still
+  // a lowering: #25348 (landed 2026-10-23, every autonomous-adjudication
+  // channel revoked) spent the last line of its 319 ceiling on the pointer
+  // line that binds every seat to the human floor; this branch, merged behind
+  // it, lands at 319 − 1 = 318, so the ceiling is the landed count once more.
+  // Headroom 0 (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/SKILL.md', 318],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -1238,8 +1250,24 @@ export const CEILINGS = new Map([
   // own counts (headroom 0, same convention as every entry above); added rows,
   // paid for by the SKILL.md decrease — the map's total goes down.
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 96],
+  // The project coordinator's interface with the seat threads (maintainer's
+  // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
+  // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
+  // post, cross-lane p1-first intake, one project-wide card-thread cap with
+  // waiting threads not counting, effort and tier by difficulty, ruling
+  // threads, quota pause, language and reporting — each section naming its
+  // reader and pointing at the rule's single source instead of restating it.
+  // It is beside seat-lifecycle.md because the coordinator is not a
+  // `domain:*` seat. A NEW file, so this is not a raise and funds nothing —
+  // set at the landed line count, headroom 0, same convention as above.
+  ['.claude/skills/pm-dispatch/references/coordinator.md', 49],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
   ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 51],
+  // Unchanged at 120 through the maintainer's revocation of every autonomous-
+  // adjudication channel: the delegated-adjudication lane, its confidence gate
+  // and the first-class self-ruling gate left (−13), and the same ruling batch
+  // ordered the human floor widened and the risk / workload criteria written
+  // as judgeable lines (+13); landed count, headroom 0, same convention.
   ['.claude/skills/pm-dispatch/references/triage-duties.md', 120],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
@@ -1307,6 +1335,12 @@ export const CEILINGS = new Map([
   // CROSS_FILE_MOVES destination, so no `ruledRaises` record applies. Landed
   // count, headroom 0, same convention.
   ['.claude/skills/pm-dispatch/references/filing-gate.md', 64],
+  // The project layer above the seats (maintainer's word: ONE project form, the
+  // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
+  // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
+  // a generated roster board). A NEW file, so this is an added row that funds
+  // nothing; set at the landed line count, headroom 0, same convention as above.
+  ['.claude/skills/pm-dispatch/references/project-forms.md', 54],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
@@ -1321,28 +1355,16 @@ export const CEILINGS = new Map([
   // Each −1: whole-text restructuring round, PR-2 (maintainer ruling
   // 2026-08-23) — the patrol-anchor sentence was carried verbatim by all seven
   // lanes and now lives once in SKILL.md 执行座位职责, so every lane drops it.
-  // cli.md pays −2 because it was carrying the map's last line of headroom.
-  // Lowered 40 → 32 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/engine.md', 32],
-  // Lowered 30 → 28 and 35 → 31 as the other two SOURCES of the cross-file
-  // move recorded on platform-readings.md above. A per-repo gate reading in a
-  // lane charter is read by one lane and missed by the other six, which is the
-  // whole defect the move repairs: services.md gave up the two aggregate-
-  // reading boundaries, cli.md the required-check set with its `in_progress`
-  // and advisory clauses. Landed counts, headroom 0, same convention.
-  // Lowered 28 → 27 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/services.md', 27],
-  // Lowered 31 → 29 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 29],
+  // engine.md 32 + services.md 27 + cli.md 29 → server.md (maintainer ruling
+  // 2026-10-22, verbatim: 「就叫 server 吧」, then 「同意」 on letter 乙 — the
+  // engine, services and cli lanes fold into one `domain:server` lane; the
+  // charter keeps three sections, one per former surface, and a seat reads the
+  // section its claim's file surface names). A consolidation, not a raise: the
+  // three per-lane spec red lines became one lane-wide line and the two
+  // pointers between the former lanes left, so the merged file lands one line
+  // under the 88 the three rows summed to. A NEW file, so an added row set at
+  // the landed line count, headroom 0, same convention as above.
+  ['.claude/skills/pm-dispatch/references/lanes/server.md', 87],
   // Lowered 39 → 38 by the rules-only rewrite (maintainer 2026-09-04:
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
@@ -1392,7 +1414,10 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 72],
+  // Lowered 72 → 70 by the same revocation: the in-project delegated-ruling
+  // channel and its standing order left; `needs_decision` joins the ruling
+  // batch the maintainer rules by hand. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 70],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // alternates between the two multi-lane repos, oldest-first inside a repo, with a
   // 4-hour starvation guard). A seat charter is read per seat session like every
@@ -1999,8 +2024,16 @@ export const CROSS_FILE_MOVES = new Map([
         },
       ],
       sources: [
-        ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
-        ['.claude/skills/pm-dispatch/references/lanes/services.md', 30],
+        // Two of the three original sources, lanes/cli.md (`was` 35) and
+        // lanes/services.md (`was` 30), merged with lanes/engine.md into
+        // lanes/server.md on 2026-10-22 (maintainer ruling, letter 乙). The
+        // merged file carries their place: its `was` is 35 + 30 + 32, the two
+        // sources' recorded pre-move ceilings plus engine.md's ceiling at the
+        // merge — engine.md was never a source, so entering it at its own
+        // ceiling adds nothing to the decrease this move was paid with. The
+        // 9 lines the two charters had already paid stay counted, and what the
+        // merge itself deleted is counted once, here.
+        ['.claude/skills/pm-dispatch/references/lanes/server.md', 97],
         ['.claude/skills/pm-dispatch/references/rest-channel.md', 93],
       ],
     },
@@ -2079,7 +2112,12 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   // rows lost their in-cell provenance and rationale; the widest survivor is
   // the `domain:engine` row. Landed width, headroom 0 (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/SKILL.md', 342],
+  // Lowered 342 → 341 by the domain:server lane merge (maintainer ruling
+  // 2026-10-22, letter 乙): the engine, services and cli rows of the 域车道
+  // table consolidated into one `domain:server` row that names package
+  // families and points at lanes/server.md for the enumeration. The widest
+  // survivor is that row. Landed width, headroom 0.
+  ['.claude/skills/pm-dispatch/SKILL.md', 341],
   ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 0],
   ['.claude/skills/pm-dispatch/references/state-machine.md', 0],
   ['.claude/skills/pm-dispatch/references/contract-review.md', 0],
@@ -2095,15 +2133,15 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   // The five per-phase references of the principle-only cut carry no table
   // row (their tables stayed in SKILL.md), so each pin is the measurement 0.
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 0],
+  ['.claude/skills/pm-dispatch/references/coordinator.md', 0],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 0],
   ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 0],
   ['.claude/skills/pm-dispatch/references/triage-duties.md', 0],
   ['.claude/skills/pm-dispatch/references/execution-duties.md', 0],
   ['.claude/skills/pm-dispatch/references/filing-gate.md', 0],
+  ['.claude/skills/pm-dispatch/references/project-forms.md', 0],
   ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 219],
-  ['.claude/skills/pm-dispatch/references/lanes/engine.md', 0],
-  ['.claude/skills/pm-dispatch/references/lanes/services.md', 0],
-  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/server.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/devx.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/skills.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 0],

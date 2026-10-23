@@ -16,11 +16,12 @@ import {
 describe('PUBLIC_AUTH_FEATURES registry', () => {
   const entries = Object.entries(PUBLIC_AUTH_FEATURES);
 
-  it('classifies all 11 public flags', () => {
-    expect(PUBLIC_AUTH_FEATURE_NAMES).toHaveLength(11);
+  it('classifies all 12 public flags', () => {
+    expect(PUBLIC_AUTH_FEATURE_NAMES).toHaveLength(12);
     expect([...PUBLIC_AUTH_FEATURE_NAMES].sort()).toEqual(
       [
         'admin',
+        'cloudManaged',
         'degradedTenancy',
         'deviceAuthorization',
         'multiOrgEnabled',
@@ -80,6 +81,10 @@ describe('featureGatePredicate', () => {
   it('default-on flags gate with != false (absent flag fails open)', () => {
     expect(featureGatePredicate('organization')).toBe('features.organization != false');
     expect(featureGatePredicate('multiOrgEnabled')).toBe('features.multiOrgEnabled != false');
+  });
+
+  it('hide-when-on flags gate with != true (absent flag fails open, ON hides)', () => {
+    expect(featureGatePredicate('cloudManaged')).toBe('features.cloudManaged != true');
   });
 });
 

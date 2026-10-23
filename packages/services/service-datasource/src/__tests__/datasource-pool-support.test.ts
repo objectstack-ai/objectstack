@@ -506,6 +506,7 @@ function adminHarness(seed: StoredDatasource[] = []) {
     deleteDatasourceRecord: async () => {},
     writeSecret: async () => 'sys_secret://x#1',
     countBoundObjects: async () => 0,
+    listObjectsBoundTo: async () => [],
     registerPool: (record) => { registered.push(record.name); },
   });
   return { service, records, registered };

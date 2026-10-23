@@ -354,7 +354,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       delegator_id: {
         label: "Delegator",
-        help: "The user going out of office; their individually-routed approver slots are rerouted while active."
+        help: "不在になるユーザーです。委任できるのは自分の承認だけなので、常にあなた自身です。最初からあなたが設定され、ほかのユーザーは選べません。有効な間、その人に個別に割り当てられた承認者枠は振り替えられます。"
       },
       delegate_id: {
         label: "Delegate",
@@ -362,7 +362,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Valid From",
-        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive — never by a background job."
+        help: "この時点より前はルールが無効です。空欄 = 直ちに有効。承認がルーティングされるたびに確認されるため、スケジュールされたジョブなしで予定どおりに有効になります。"
       },
       valid_until: {
         label: "Valid Until",
@@ -374,7 +374,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Tenant that owns this rule; null = applies across tenants for this delegator."
+        help: "この委任が属する組織です。この組織で開始された承認だけを振り替えます。"
       },
       created_at: {
         label: "Created At"

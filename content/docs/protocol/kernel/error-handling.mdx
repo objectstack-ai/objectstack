@@ -281,7 +281,7 @@ ObjectStack uses standard HTTP status codes:
 | **404** | Not Found | Resource doesn't exist |
 | **409** | Conflict | Resource already exists or version mismatch |
 | **413** | Content Too Large | An upload over the storage settings' `max_upload_mb`, or an import over its row ceiling — answered as [`PAYLOAD_TOO_LARGE`](/docs/api/error-catalog#payload_too_large) |
-| **422** | Unprocessable Entity | Semantic validation failed (e.g. metadata spec validation); also an absent `controlled_by_parent` master reference — see [`MISSING_REQUIRED_FIELD`](#missing_required_field) |
+| **422** | Unprocessable Entity | Semantic validation failed (e.g. metadata spec validation); also a `controlled_by_parent` detail whose stored master reference is null — see [`MISSING_REQUIRED_FIELD`](#missing_required_field) |
 | **429** | Too Many Requests | Rate limit exceeded |
 | **500** | Internal Server Error | Server-side error |
 | **503** | Service Unavailable | Server overloaded or maintenance |
@@ -534,7 +534,7 @@ code is the one the *master-access gate* and the package-publish route use.
 **Flat** (the 422 exception, on the `/data` door):
 ```json
 {
-  "error": "[Security] Missing master reference: insert on 'invoice_line' did not supply 'invoice_id'. A controlled_by_parent detail derives its access from its master, so 'invoice_id' must carry a master record id on every write.",
+  "error": "[Security] Missing master reference: update on 'invoice_line' cannot be authorized because record 'line_42' has no value in 'invoice_id'. A controlled_by_parent detail derives its access from its master, so that reference must be populated.",
   "code": "MISSING_REQUIRED_FIELD",
   "object": "invoice_line"
 }
@@ -552,24 +552,38 @@ code is the one the *master-access gate* and the package-publish route use.
 ```
 
 ⛔ Neither body carries a `details` bag. On the flat 422 there is no `fields` array either
-— see the table below for why.
+— see below for why.
 
-**Exception — an absent `controlled_by_parent` master reference answers 422 with no `fields`.**
-An object whose `sharingModel` is `controlled_by_parent` derives its access from a master
-record, so the gate that authorizes writes to it must resolve that master *before* the
-executor runs — and the executor is where required-field validation lives. When the master
-reference is absent, whichever of the two refuses first decides the envelope, and that
-depends on how the reference is declared:
+**Exception — a `controlled_by_parent` detail whose stored master reference is null answers
+422 with no `fields`.** An object whose `sharingModel` is `controlled_by_parent` derives its
+access from a master record, so the gate that authorizes writes to it must resolve that
+master *before* the executor runs — and the executor is where required-field validation
+lives. An update or delete **by id** of a detail record whose *stored* master reference is
+null answers `422 MISSING_REQUIRED_FIELD`, whatever the declaration, with the message
+prefixed `[Security] Missing master reference:`. The caller supplied no such field, so there
+is no request field to name in `fields` and no payload that would fix it.
+
+A request that leaves the master reference out, or empties it, is answered by whichever
+refuses first, and that depends on how the reference is declared:
 
 | Master reference declared as | Refused by | Status | `code` | `fields` |
 |---|---|:---:|---|:---:|
 | `master_detail` + `required`, not `readonly`/`system` | required-field validation | 400 | `VALIDATION_FAILED` | yes |
-| `master_detail` + `required` + `readonly` | the master-access gate | **422** | `MISSING_REQUIRED_FIELD` | **absent** |
-| `master_detail` + `required` + `system` | the master-access gate | **422** | `MISSING_REQUIRED_FIELD` | **absent** |
+| `master_detail` + `required` + `readonly` | the master-access gate | **422** | `INVALID_METADATA` | **absent** |
+| `master_detail` + `required` + `system` | the master-access gate | **422** | `INVALID_METADATA` | **absent** |
 
-Only the first row is the documented 400 shape. On the other two, messages are prefixed
-`[Security] Missing master reference:` and name the object and the field, but no `fields`
-array rides along.
+Only the first row is a declaration the parse accepts. A master reference marked `readonly`
+or `system` is not one an author's write supplies, so it cannot be the master (ADR-0055 §1):
+`ObjectSchema` refuses both at parse (`master-not-writable`). An object reaches the runtime
+with one only through a door that does not parse — a raw `registerObject` / `registerApp`,
+`defineStack(…, { strict: false })`, or a stored object the boot registers under its
+`[metadata_spec_invalid]` diagnostic. There the gate refuses **every** write that sets the
+reference, not only one that leaves it out: every insert, single or batch, whether or not it
+names a master, and every update whose body carries the key, whatever the value, `null`
+included. The message is prefixed `[Security] Configuration defect:` and carries the parse's
+own refusal, naming the object, the field, the flag and the fix. A delete, and an update
+that leaves the key out, are answered as on any detail, so the rows already stored keep
+their master.
 
 Two declarations are not rows of this table, because they name **no master at all**. A
 `controlled_by_parent` object derives its master from exactly one `master_detail` field
@@ -579,25 +593,16 @@ required `master_detail` fields. `ObjectSchema` refuses such an object at parse,
 one that reaches the runtime unparsed has every read denied and every write refused with
 `422 INVALID_METADATA`, whatever the request carries.
 
-The same `422 MISSING_REQUIRED_FIELD` also answers an update or delete **by id** whose
-*stored* master reference is null, whatever the declaration. That is a different path: the
-caller supplied no such field, so there is no request field to name in `fields` and no
-payload that would fix it.
-
 **Why the gate refuses rather than handing over.** Required-field validation skips
 provenance-flagged fields before its required check is reached (`system` and `readonly`
 fields are skipped outright). On those two shapes the gate is the only thing refusing the
-write, and letting it through was
-measured to create a detail record whose master reference is null — a record the
-`controlled_by_parent` read filter (`fk IN (readable masters)`) can never match, so it is
-readable by nobody and answers 422 on every later write by id. The refusal is correct; only
-its status departs from the rule above.
+write, and letting it through was measured to store a detail record outside its master — a
+record the `controlled_by_parent` read filter (`fk IN (readable masters)`) can never match,
+so it is readable by nobody. No payload fixes the declaration; only its owner can, by
+dropping the flag.
 
-**These shapes are authorable today.** `os lint` refuses both at *error*
-(`relationship/master-detail-required`), but that rule is not part of the publish gate —
-`os build`, `os validate` and the metadata save door do not run it. So a stack can publish
-clean and still reach the 422. Branch on `code`, and read the status off the response rather
-than deriving it from this page.
+Branch on `code`, and read the status off the response rather than deriving it from this
+page.
 
 #### `INVALID_FIELD`
 **HTTP Status:** 400  

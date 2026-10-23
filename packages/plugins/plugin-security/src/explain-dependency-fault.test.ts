@@ -120,6 +120,11 @@ function makeEngine(schema: Record<string, unknown>, storeFaults: ReadonlyMap<st
     sys_record_share: [{ ...READ_SHARE }],
     // The delegator exists, so `resolveDelegatorContext` reaches the grant reads.
     sys_user: [{ id: U_REPORTER, email: 'reporter@example.com' }],
+    // [#25107] …and is a member of the organization the agent runs in. This
+    // stack is walled (org scoping → `isolated`), where a delegator with no
+    // membership there is refused before its grants matter (ADR-0090 D10), so
+    // the control below would deny for that reason instead of answering neutral.
+    sys_member: [{ id: 'mem_reporter_org1', user_id: U_REPORTER, organization_id: 'org1', role: 'member' }],
   };
   for (const [table, fault] of storeFaults) tables[table] = unavailableTable(fault);
   // `$or` / `$and` conjoin WITH their sibling keys, the way a real driver ANDs

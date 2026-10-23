@@ -44,7 +44,7 @@ import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYSTEM = { context: { isSystem: true } } as const;
 const OWNER = 'owner@corp.example';
@@ -132,10 +132,10 @@ async function boot(opts: { organizationObject: boolean; nullableTenantColumn?: 
   const objects = [sysUser, sysMember, sysUserPermissionSet, sysUserPosition, ...(opts.organizationObject ? [sysOrganization] : [])];
   for (const o of objects) engine.registry.registerObject(o as never);
   await engine.syncSchemas();
-  // A tenant column that is NOT NULL nowhere: a store built before 18.x has one
-  // (ADR-0131 D1 makes a fresh one NOT NULL), and so does a driver that
-  // enforces no NOT NULL.
-  if (opts.nullableTenantColumn) await relaxEveryRegisteredTenantColumn(engine);
+  // A grant tenant column that is NOT NULL nowhere: a store built before 18.x
+  // has one (ADR-0131 D1 makes a fresh one NOT NULL), and so does a driver
+  // that enforces no NOT NULL.
+  if (opts.nullableTenantColumn) await relaxTenantColumns(engine, ['sys_user_permission_set']);
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
   registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard-parity' });
   return { engine, driver: driver as unknown as Rig['driver'] };

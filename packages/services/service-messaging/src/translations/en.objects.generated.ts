@@ -123,14 +123,19 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the delivery channel and its recipient (computed on read)"
+        help: "Record title: the delivery channel and the person it is for, or the address when the recipient is not a user (computed on read)"
       },
       notification_id: {
         label: "Notification Event",
         help: "FK → sys_notification (L2 event)"
       },
       recipient_id: {
-        label: "Recipient User"
+        label: "Recipient",
+        help: "The address the delivery is sent to: a user id, or an email address or phone number kept as given."
+      },
+      recipient_user_id: {
+        label: "Recipient User",
+        help: "The user the delivery is for. Empty when the recipient is an email address or phone number no user holds."
       },
       channel: {
         label: "Channel"
@@ -205,11 +210,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       topic: {
         label: "Topic",
-        help: "Notification topic, or '*' for all topics."
+        help: "The topic the notifications are sent under: the topic a flow's notify step names, or one the platform sends, such as approval.requested or collab.mention. Enter * for all topics. A topic nothing sends matches nothing."
       },
       channel: {
         label: "Channel",
-        help: "Channel id (inbox/email/push/…), or '*' for all channels."
+        help: "The channel: inbox (notifications shown inside the app, always available), email (once an email service is configured), sms (once an SMS service is configured), or the id of a channel an installed plugin adds. Enter * for all channels. An id no channel uses matches nothing."
       },
       enabled: {
         label: "Enabled",
@@ -217,7 +222,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Digest",
-        help: "Batch cadence (P3 digest middleware).",
+        help: "Collect these notifications into one summary instead of sending each as it arrives: daily sends it at midnight, weekly on Monday at midnight, none sends each one right away. Critical notifications are always sent at once. Takes effect on a preference whose channel is * (all channels).",
         options: {
           none: "none",
           daily: "daily",
@@ -226,7 +231,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Quiet Hours",
-        help: "Optional { tz, start, end } window (P3 quiet-hours middleware)."
+        help: "A daily window when notifications are held and delivered when it ends, for example { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Times are HH:MM in that time zone (UTC when tz is left out), and the window may run past midnight. Critical notifications are not held. Takes effect on a preference whose channel is * (all channels)."
       },
       created_at: {
         label: "Created At"

@@ -74,6 +74,8 @@ function permissiveService() {
     // makes the redaction helpers' `.size` read `undefined` and the PUT door
     // answers 500, i.e. the control would fail for a fixture reason.
     secretKeysOf: () => new Set<string>(),
+    // The read route's live-status lookup — nothing to state here.
+    liveStatusOf: async () => undefined,
     setMany: async () => ({}),
     runAction: async () => ({ ok: true }),
   } as any;

@@ -133,6 +133,7 @@ function harness(opts: HarnessOpts = {}) {
     // — see this file's reverse-verification note, where an earlier version
     // that left this at 0 produced an extra red for exactly that reason.
     countBoundObjects: async () => opts.plainCount ?? opts.diagnosed?.count ?? 0,
+    listObjectsBoundTo: async () => [],
     ...(opts.diagnosed ? { countBoundObjectsDiagnosed: async () => opts.diagnosed! } : {}),
     unregisterPool: (n) => { unregistered.push(n); },
   } as DatasourceAdminServiceConfig;

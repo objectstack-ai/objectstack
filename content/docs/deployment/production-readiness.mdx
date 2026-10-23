@@ -17,7 +17,7 @@ defaults, adapter recipes, go-live checklist) follow the deep-dive links.
 | :--- | :--- | :--- |
 | Security response headers (CSP / XCTO / X-Frame-Options / …) | **On** | [HARDENING.md](https://github.com/objectstack-ai/objectstack/blob/main/docs/HARDENING.md) |
 | HSTS | Off (opt-in once TLS is confirmed) | HARDENING.md |
-| Rate limiting (token bucket) | Off (opt-in via adapter) | HARDENING.md |
+| Inbound rate limit (token bucket) | Built in, off until `server.security.rateLimit.enabled` | [HARDENING.md § Rate limiting](https://github.com/objectstack-ai/objectstack/blob/main/docs/HARDENING.md#rate-limiting) |
 | CSRF | Adapter-layer (bearer-auth = N/A) | HARDENING.md |
 | Auth / session / JWT lifecycle | On via `@objectstack/plugin-auth` (better-auth) | HARDENING.md |
 | Metrics (counter / histogram / gauge) | Noop (no adapter) | [OBSERVABILITY.md](https://github.com/objectstack-ai/objectstack/blob/main/docs/OBSERVABILITY.md) |
@@ -97,18 +97,49 @@ send budget). Declare none and the family sits at 0 under normal traffic, so
 treat a cache hit-rate panel as reporting on your configuration before you
 treat it as reporting on your cache.
 
-Rate limiting is the one piece you wire at the adapter layer (Fastify
-preHandler, Hono middleware, etc.) because that's where you have
-reliable access to the caller's IP and authenticated identity. See
-the [HARDENING.md recipes](https://github.com/objectstack-ai/objectstack/blob/main/docs/HARDENING.md#rate-limiting).
+Rate limiting is built into the runtime and needs no adapter code — it is
+off until the stack declares a budget:
+
+```ts
+export default defineStack({
+  // …
+  server: {
+    security: {
+      rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 300 },
+    },
+    trustProxy: true, // only behind a proxy that overwrites X-Forwarded-For
+  },
+});
+```
+
+`objectstack serve` then meters every request the server routes (CORS
+preflights excepted) against one token bucket per caller, and answers an
+over-budget caller `429` with `Retry-After`. The bucket is keyed by the
+signed-in principal, and by the caller's address for anonymous traffic. That
+address is the connection's peer address unless `server.trustProxy` is
+`true`, in which case the leftmost `X-Forwarded-For` entry (else
+`X-Real-IP`) is believed — so set it only when a reverse proxy you control
+overwrites that header on every request; behind a proxy with it unset, all
+anonymous traffic shares the proxy's one bucket. The counters live in the
+kernel `cache` service, which `objectstack serve` serves in memory, per
+process: on several nodes the effective limit is the budget times the node
+count until a shared `cache` service is registered. Key rules, multi-node
+and per-class budgets:
+[HARDENING.md § Rate limiting](https://github.com/objectstack-ai/objectstack/blob/main/docs/HARDENING.md#rate-limiting).
 
 ## Go-live checklist
 
 - [ ] HSTS enabled (after TLS is confirmed and you accept the lock-in).
 - [ ] CSP tuned for your serving topology (deny-all API, looser for
       SPA-on-same-origin).
-- [ ] Rate limit configured at the adapter for `/auth/*`, write
-      verbs, and read verbs (auth bucket should be ~10/min/IP).
+- [ ] `server.security.rateLimit` enabled with a budget sized for your
+      traffic; the boot log shows `Inbound rate limit armed`. Sign-in can take its
+      own tighter budget (`rate_limit_max` / `rate_limit_window_seconds` in
+      Setup → Authentication).
+- [ ] `server.trustProxy` matches the topology: `true` only behind a reverse
+      proxy that overwrites `X-Forwarded-For`, unset otherwise.
+- [ ] Multi-node: a shared `cache` service is registered, or each node
+      enforces the budget on its own (the in-memory default is per process).
 - [ ] Metrics adapter wired; `/metrics` endpoint (Prom) or OTel
       exporter producing data; alerts wired for error rate + p95
       latency per route.

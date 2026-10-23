@@ -178,24 +178,35 @@ substitute. See the [Data API](/docs/api/data-api).
 ### `MISSING_REQUIRED_FIELD`
 **Cause:** A required field was not provided in the request body.  
 **Fix:** Include the missing field. Check `fields` for the field name — **except** on the
-`controlled_by_parent` master-reference paths below, where the status is `422` and no
-`fields` array is sent; read the field name out of the message there.  
+`controlled_by_parent` stored-master path below, where the status is `422` and no `fields`
+array is sent; read the field name out of the message there.  
 **Retry:** `no_retry`
 
 <Callout type="warn">
-**`MISSING_REQUIRED_FIELD` is `400` with one exception: an absent `controlled_by_parent`
-master reference answers `422`, without `fields`.**
+**`MISSING_REQUIRED_FIELD` is `400` with one exception: a `controlled_by_parent` detail
+whose stored master reference is null answers `422`, without `fields`.**
 
 An object whose `sharingModel` is `controlled_by_parent` derives its access from a master
 record, so the gate authorizing writes to it resolves that master *before* the executor —
-and the executor is where required-field validation runs. Which of the two refuses first
-depends on how the master reference is declared. A `master_detail` that is `required` and
-neither `readonly` nor `system` reaches validation and answers the documented
-`400 VALIDATION_FAILED` with `fields`. The other two declarable shapes never reach it and
-answer `422 MISSING_REQUIRED_FIELD` with no `fields`:
+and the executor is where required-field validation runs. An update or delete **by id** of
+a detail record whose *stored* master reference is null answers
+`422 MISSING_REQUIRED_FIELD`, whatever the declaration: the caller sent no such field, so
+nothing could be named in `fields` and no payload would fix it.
 
-- a `master_detail` that is `required` + `readonly`
-- a `master_detail` that is `required` + `system`
+A request that leaves the master reference out, or empties it, does not answer this code.
+On a `master_detail` that is `required` and neither `readonly` nor `system`, validation
+answers it with the documented `400 VALIDATION_FAILED` and `fields`. A master reference
+marked `readonly` or `system` is not one an author's write supplies, so it cannot be the
+master (ADR-0055 §1): `ObjectSchema` refuses that declaration at parse
+(`master-not-writable`), and on an object that reaches the runtime without the parse, every
+write that sets the reference answers `422 INVALID_METADATA`:
+
+- every insert, single or batch, whether or not it names a master;
+- every update whose body carries the reference key, whatever the value, `null` included.
+
+Its message starts `[Security] Configuration defect:` and carries the parse's own refusal,
+naming the object, the field, the flag and the fix. A delete, and an update that leaves the
+key out, are answered as on any detail.
 
 A `master_detail` with no `required`, and a `required` `lookup` on an object that declares no
 `master_detail`, are not master references at all: the master is exactly one `master_detail`
@@ -205,20 +216,14 @@ one that reaches the runtime unparsed answers every write `422 INVALID_METADATA`
 The full matrix is on the protocol page:
 [`MISSING_REQUIRED_FIELD`](/docs/protocol/kernel/error-handling#missing_required_field).
 
-An update or delete **by id** whose *stored* master reference is null answers the same
-`422`, whatever the declaration — the caller sent no such field, so nothing could be named
-in `fields` and no payload would fix it.
+The `INVALID_METADATA` refusal is not going to be relaxed: required-field validation skips
+`system` and `readonly` fields before its required check, so on those two declarations the
+gate is the only thing standing between the request and a detail record outside its master
+— which the `controlled_by_parent` read filter (`fk IN (readable masters)`) can never match,
+leaving a record readable by nobody.
 
-The refusal itself is correct and is not going to be relaxed: on those two shapes
-required-field validation does not fire (it skips `system` and `readonly` fields before its
-required check), so the gate is the only
-thing standing between the request and a detail record with a null master reference — which
-the `controlled_by_parent` read filter (`fk IN (readable masters)`) can never match, leaving
-a record readable by nobody.
-
-These shapes are **authorable today**: `os lint` reports both at error, but the publish gate
-does not run that rule. **Branch on `code`, treat `fields` as optional, and read the status
-off the response** rather than deriving it from the table at the end of this page.
+**Branch on `code`, treat `fields` as optional, and read the status off the response**
+rather than deriving it from the table at the end of this page.
 </Callout>
 
 ### `INVALID_FORMAT`
@@ -973,7 +978,7 @@ async function handleApiCall() {
 | 404 | `not_found` | `RECORD_NOT_FOUND`, `OBJECT_NOT_FOUND`, `ENDPOINT_NOT_FOUND` |
 | 409 | `conflict` | `CONCURRENT_MODIFICATION`, `UNIQUE_VIOLATION`, `DELETE_RESTRICTED` |
 | 413 | `validation` | `PAYLOAD_TOO_LARGE` — an upload over the storage settings' `max_upload_mb`, or an import over its row ceiling (see [above](#payload_too_large)) |
-| 422 | `validation` | `MISSING_REQUIRED_FIELD` on an absent `controlled_by_parent` master reference (see [above](#missing_required_field)) — this row is an exception to the 400 row, not a second home for the code |
+| 422 | `validation` | `MISSING_REQUIRED_FIELD` on a `controlled_by_parent` detail whose stored master reference is null (see [above](#missing_required_field)) — this row is an exception to the 400 row, not a second home for the code |
 | 429 | `rate_limit` | `RATE_LIMIT_EXCEEDED`, `QUOTA_EXCEEDED` |
 | 500 | `server` | `INTERNAL_ERROR`, `DATABASE_ERROR` |
 | 501 | `server` | `NOT_IMPLEMENTED` — the storage routes answer it when the adapter cannot issue presigned URLs |

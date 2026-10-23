@@ -2039,6 +2039,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "dimensions.dateGranularity": {
         label: "日期粒度"
       },
+      "dimensions.nullLabel": {
+        label: "空值标签"
+      },
       measures: {
         label: "度量",
         helpText: "每个度量：名称、聚合函数、字段（count 时可省略）、显示格式/货币"

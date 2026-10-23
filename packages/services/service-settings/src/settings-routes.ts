@@ -274,11 +274,21 @@ export function registerSettingsRoutes(
     async serve(req, res, ctx) {
       const ns = req.params.namespace;
       const payload = await service.getNamespace(ns, ctx);
+      // The page states what is LIVE, not only what is stored: the owning
+      // package's statement heads the specifiers as an `info_banner`, asked on
+      // this read (see `SettingsService.liveStatusOf`). Added here and not in
+      // `getNamespace`, which in-process consumers call to read values: the
+      // mail plugin reads `getNamespace('mail')` while rebuilding the very
+      // transport its statement waits on.
+      const liveStatus = await service.liveStatusOf(ns, ctx);
+      const manifest = liveStatus
+        ? { ...payload.manifest, specifiers: [liveStatus, ...payload.manifest.specifiers] }
+        : payload.manifest;
       // #7522 — redact BEFORE the payload leaves the process. `values.<key>.value`
       // and every `cascadeChain` entry of a secret-backed key are masked;
       // `source`, `locked` and `lockedReason` are untouched, so the console's
       // "configured" state and the env-lock affordances read the same as before.
-      sendOk(res, { ...payload, values: redactSecretValues(payload.values, service.secretKeysOf(ns)) });
+      sendOk(res, { ...payload, manifest, values: redactSecretValues(payload.values, service.secretKeysOf(ns)) });
     },
     refuse(res, err) {
       if (err instanceof SettingsForbiddenError) {

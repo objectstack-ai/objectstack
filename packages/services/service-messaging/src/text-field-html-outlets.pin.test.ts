@@ -81,6 +81,12 @@ const NOT_OUTLETS: Readonly<Record<string, NotOutletEntry>> = {
     'objects/notification-template.object.ts': {
         why: 'declares the `format` vocabulary (markdown, html, text, mjml); renders nothing',
     },
+    'template-hole-placement.ts': {
+        why: 'reads an html / mjml template body to say where each hole sits; places no value into markup (#25082)',
+    },
+    'notification-template-placement.ts': {
+        why: 'refuses a template save whose html / mjml body places a hole outside the placements template-renderer.ts encodes for; renders nothing (#25082)',
+    },
 };
 
 // ── The census ──────────────────────────────────────────────────────────────

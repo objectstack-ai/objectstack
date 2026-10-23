@@ -54,6 +54,8 @@ describe('create_user — the result dialog holds for a typed and a generated pa
     expect(action('create_user')?.resultDialog?.fields?.map((f) => [f.path, f.format])).toEqual([
       ['user.email', 'text'],
       ['user.phoneNumber', 'text'],
+      // #25338: present only when the request granted a permission set.
+      ['permissionSet', 'text'],
       ['temporaryPassword', 'secret'],
     ]);
   });

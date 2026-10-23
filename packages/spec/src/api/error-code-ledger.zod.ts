@@ -1142,6 +1142,16 @@ export const ERROR_CODE_LEDGER = {
     'STACK_PROVENANCE_MISSING',
   ],
   '@objectstack/cloud-connection': [
+    // [ADR-0126 §6 wall 3] install-local refused a marketplace UPGRADE that
+    // would un-make an access choice made in this system (a switch-off a
+    // vendor rename re-enables, a switch, clone reference or sharing rule row
+    // whose name the package no longer ships, a sharing rule name collision, a
+    // field deny a customer's set lacks), 409, before any write, until the
+    // same request carries the finding set's token (`confirmAccessUpgrade`);
+    // `details.findings` names each. Its own code because the caller's branch
+    // is its own: neither UNIQUE_SCOPE_CONFIRMATION_REQUIRED's per-index
+    // answer nor a conflict (which no confirmation lifts) leads to it.
+    'ACCESS_UPGRADE_CONFIRMATION_REQUIRED',
     'CLOUD_FETCH_FAILED',            // fetching the manifest/bundle from cloud failed
     'CLOUD_UNCONFIGURED',            // no cloud endpoint configured on this runtime
     'DEVICE_CODE_FAILED',            // cloud rejected the device-code exchange

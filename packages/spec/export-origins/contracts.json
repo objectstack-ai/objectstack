@@ -232,6 +232,8 @@
     "PlanUpgradeInput": "src/contracts/package-service.ts#PlanUpgradeInput (interface)",
     "Plugin": "src/contracts/plugin-validator.ts#Plugin (interface)",
     "PluginStartupResult": "src/kernel/startup-orchestrator.zod.ts#PluginStartupResult (type)",
+    "PositionGrantSummary": "src/contracts/security-service.ts#PositionGrantSummary (interface)",
+    "PositionGrantVia": "src/contracts/security-service.ts#PositionGrantVia (type)",
     "PresignedDownloadDescriptor": "src/contracts/storage-service.ts#PresignedDownloadDescriptor (interface)",
     "PresignedDownloadOptions": "src/contracts/storage-service.ts#PresignedDownloadOptions (interface)",
     "PresignedUploadDescriptor": "src/contracts/storage-service.ts#PresignedUploadDescriptor (interface)",

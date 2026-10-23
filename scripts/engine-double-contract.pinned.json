@@ -772,6 +772,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.external-binding-named-datasource-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.external-binding-named-datasource-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.external-binding-named-datasource-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.external-binding-primary-datasource-refusal.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1459,6 +1474,21 @@
     {
       "file": "packages/metadata-protocol/src/protocol.reference-target-unanswerable.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.restore-doors-save-refusal-family.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.restore-doors-save-refusal-family.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.restore-doors-save-refusal-family.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -2782,6 +2812,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/ooo-delegation-organization.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/ooo-delegation-organization.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/recall-refusal-user-copy.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3087,6 +3127,21 @@
       "pinned": 2
     },
     {
+      "file": "packages/plugins/plugin-auth/src/idp-locale-claim.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/idp-locale-claim.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/idp-locale-claim.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/impersonation-bearer-rotation.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3259,6 +3314,16 @@
     {
       "file": "packages/plugins/plugin-auth/src/self-registration-grant-first-membership.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/session-heartbeat-default-config.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/session-heartbeat-default-config.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -4678,6 +4743,11 @@
     },
     {
       "file": "packages/services/service-settings/src/settings-engine-id-fold-wins.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-settings/src/settings-organization-reach.pin.test.ts",
       "verb": "update",
       "pinned": 1
     },

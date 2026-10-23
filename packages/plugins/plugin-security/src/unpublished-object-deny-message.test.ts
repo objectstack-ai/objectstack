@@ -262,6 +262,7 @@ describe('[#10401] unpublished object — the deny stays, the explanation gets h
         getFieldMask: () => ({}),
         getPartialMaskRules: async () => ({}),
         baselinePermissionSets: ['member_default'],
+        tenancyPosture: 'single',
       }) as any;
 
     const explainCtx = { userId: 'u1', positions: ['everyone'], permissions: [] };

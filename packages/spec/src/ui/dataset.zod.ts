@@ -185,6 +185,19 @@ export const DatasetDimensionSchema = lazySchema(() => strictObject({
   type: z.enum(['string', 'number', 'date', 'boolean', 'lookup']).optional().meta({ title: 'Type' }),
   /** Default bucketing for date dimensions (day/week/month/quarter/year). */
   dateGranularity: DateGranularity.optional().meta({ title: 'Date Granularity' }),
+  /**
+   * The display name of this dimension's null bucket — the group of rows whose
+   * value for the dimension is null (e.g. `'System'` on a `user_id` axis, where
+   * the rows nobody wrote carry no user). Display copy only: it names the
+   * bucket, it never changes which rows fall in it or how they are grouped.
+   * When absent, a consumer draws its own default for that bucket.
+   */
+  nullLabel: I18nLabelSchema.optional()
+    .describe(
+      'Label for the bucket of rows whose value for this dimension is null (e.g. "System" on a user axis). '
+      + 'Display copy only: grouping is unchanged. When absent, consumers fall back to their own default label for that bucket.',
+    )
+    .meta({ title: 'Null Label' }),
 }));
 
 /**

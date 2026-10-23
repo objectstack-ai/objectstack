@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
+// [#25083] `isCloudManaged`: the ONE accessor the cloud-managed doors below ask.
+import { Plugin, PluginContext, IHttpServer, isCloudManaged, resolveRequestExecutionContext, type RequestAuthService } from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
 import {
   AuthConfig,
@@ -90,6 +91,7 @@ import {
   type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
+import { cloudManagedRefusal } from './cloud-managed.js';
 import {
   runAdminBanUser,
   runAdminUnbanUser,
@@ -2860,6 +2862,20 @@ export class AuthPlugin implements Plugin {
     rawApp.post(`${basePath}/set-initial-password`, async (c: any) => {
       try {
         const authApi = await this.authManager!.getApi();
+        // [#25083] On a cloud-managed environment the door narrows to a caller
+        // with platform-admin standing: everyone else signs in through the
+        // hosting organisation's identity provider, while an administrator can
+        // still give themselves the local password break-glass needs (ADR-0135
+        // D5.2 splits by population, never wholesale). A caller with no
+        // session falls through to the body, which answers it as before.
+        if (isCloudManaged()) {
+          // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`).
+          const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
+          if (session?.user?.id && !isPlatformAdminUser(session.user)) {
+            const refusal = cloudManagedRefusal('setInitialPassword');
+            return c.json(refusal.body, refusal.status);
+          }
+        }
         const { status, body } = await runSetInitialPassword(authApi as any, c.req.raw);
         return c.json(body, status);
       } catch (error) {
@@ -3169,10 +3185,55 @@ export class AuthPlugin implements Plugin {
       });
       // Gate: the shared `gateAdmin` hoisted above the SSO mounts (#9653).
 
+      // [#25338] create-user's optional permission set. The grant is judged
+      // under the CALLER's own execution context — resolved by the platform's
+      // one composition, as the data door resolves it for Setup's grant form —
+      // so the security middleware and the ADR-0090 D12 gate decide it there,
+      // never `gateAdmin`. The parameters are the `/auth/me` endpoints'
+      // (session only, no localization, no gate carried): this route admits a
+      // browser session and needs the caller's grants, nothing else. The
+      // account and the grant are one engine transaction (ADR-0034), with the
+      // engine's declared limit: a datasource without `beginTransaction` runs
+      // it unatomically (ADR-0119 D1, warned once per driver).
+      const createGrantFor = (c: any): import('./admin-user-endpoints.js').AdminCreateGrantSeam => ({
+        resolveActorContext: async () => {
+          const context = await resolveRequestExecutionContext({
+            headers: c.req.raw.headers,
+            ql: this.authManager!.getDataEngine(),
+            authService: this.authManager as unknown as RequestAuthService,
+            tenancy: () => this.tenancy ?? undefined,
+            anonymous: 'fail-closed',
+            authGate: 'withhold',
+            credentials: 'session-only',
+            sessionApi: 'required',
+            session: 'request',
+            localization: 'withhold',
+            requestLocale: undefined,
+            accessToken: 'withhold',
+            oauth: undefined,
+            onAdmission: undefined,
+          });
+          return context as Record<string, unknown> | undefined;
+        },
+        runAtomically: async <T,>(work: () => Promise<T>): Promise<T> => {
+          const engine = this.authManager!.getDataEngine() as
+            | { transaction?: <R>(callback: (trxCtx: any, info: any) => Promise<R>) => Promise<R> }
+            | undefined;
+          if (typeof engine?.transaction !== 'function') return work();
+          return engine.transaction(async () => work());
+        },
+      });
+
       rawApp.post(`${basePath}/admin/create-user`, async (c: any) => {
         try {
           const actor = await gateAdmin(c);
           if (actor instanceof Response) return actor;
+          // [#25083] After the identity and admin checks, before any write: a
+          // cloud-managed environment's users are invited in the cloud.
+          if (isCloudManaged()) {
+            const refusal = cloudManagedRefusal('createUser');
+            return c.json(refusal.body, refusal.status);
+          }
           const authApi: any = await this.authManager!.getApi();
           if (typeof authApi.createUser !== 'function') {
             return c.json(
@@ -3190,7 +3251,7 @@ export class AuthPlugin implements Plugin {
           // of recorded as the system. Attribution only: the route's own
           // authorization already happened above, and the writes stay system.
           const { status, body } = await runAttributedToUser(actor.id, () =>
-            runAdminCreateUser(adminUserDeps(), c.req.raw, actor),
+            runAdminCreateUser({ ...adminUserDeps(), createGrant: createGrantFor(c) }, c.req.raw, actor),
           );
           return c.json(body, status as any);
         } catch (error) {
@@ -3443,6 +3504,11 @@ export class AuthPlugin implements Plugin {
         try {
           const actor = await gateAdmin(c);
           if (actor instanceof Response) return actor;
+          // [#25083] Same placement and reason as create-user's refusal.
+          if (isCloudManaged()) {
+            const refusal = cloudManagedRefusal('importUsers');
+            return c.json(refusal.body, refusal.status);
+          }
           const { runAdminImportUsers } = await import('./admin-import-users.js');
           // [#4251] Resolved from `protocol`, not `metadata`. `getMetaItem` is a
           // PROTOCOL method (`ObjectStackProtocolImplementation`, registered by

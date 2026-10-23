@@ -57,6 +57,12 @@
  * proved by a TABLE PIN rather than a door reading — the size of that proof is
  * stated where those cases are, and it is why the string assertion in the
  * first block is load-bearing rather than decorative.
+ *
+ * [#25189] `email_template` is silent only for the liveness bridge now. Its
+ * writes also cross `validateEmailTemplateHolePlacements`, whose own door test
+ * (`validate-email-template-hole-placements.test.ts`) refuses a written
+ * template through `runRuntimeAuthoringRules`, so a wrong stack key for that
+ * type goes red there too. For `mapping` the table pin is still all there is.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -704,6 +710,11 @@ describe('#19542 — group C: wired, dispatched, and silent by ledger (email_tem
    * `email_template: 'emailTemplates'`. What catches either is ONE string
    * assertion, `each stack key is the collection the crossed rules actually
    * read` in the first block of this file.
+   *
+   * [#25189] For `email_template` that is no longer the whole proof: the hole
+   * placement rule judges its writes at this door, and its own test file
+   * reads the collection the key names. The paragraph below stands for
+   * `mapping`.
    *
    * So for group C the wiring is held by a TABLE PIN, not a door reading. That
    * is acceptable under the ruling's fence (「the wiring is the whole

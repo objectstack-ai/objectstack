@@ -123,7 +123,40 @@ export interface AdminUserEndpointDeps {
    * wires it.
    */
   getMembershipPolicy?(): MembershipPolicy;
+  /**
+   * [#25338] What create-user's optional `permissionSet` needs. Absent ⇒ a
+   * request that names a set is refused 501 and no user is created; a request
+   * that names none never reads it. See {@link AdminCreateGrantSeam}.
+   */
+  createGrant?: AdminCreateGrantSeam;
   logger?: { warn(msg: string): void };
+}
+
+/**
+ * [#25338] The seam behind create-user's optional permission set.
+ *
+ * The grant is written the way Setup's "Permission Sets → New" writes it: a
+ * `sys_user_permission_set` insert through the data engine under the CALLING
+ * administrator's own execution context — never `SYSTEM_CTX`. So the security
+ * middleware, the ADR-0090 D12 delegated-administration gate (which also
+ * stamps `granted_by`) and the catalog name check judge it exactly as they
+ * judge the form. ⛔ This route opens no assignment path of its own: the
+ * platform-admin gate in front of it decides who may CREATE a user, never
+ * what that user may be GRANTED.
+ */
+export interface AdminCreateGrantSeam {
+  /**
+   * The caller's execution context, resolved from the request by the platform's
+   * one composition (`resolveRequestExecutionContext`), or `undefined` when it
+   * resolves no principal — refused, fail closed.
+   */
+  resolveActorContext(): Promise<Record<string, unknown> | undefined>;
+  /**
+   * Run `work` as one unit of work (the engine's `transaction()`, ADR-0034), so
+   * a refused grant rolls the created user back with it: an account that
+   * exists without the access the administrator asked for is never left behind.
+   */
+  runAtomically<T>(work: () => Promise<T>): Promise<T>;
 }
 
 export interface AdminUserDataEngine {
@@ -166,7 +199,8 @@ export interface EndpointResult {
   body: {
     success: boolean;
     data?: Record<string, unknown>;
-    error?: { code: string; message: string };
+    /** `fields`: the per-field envelopes of a `VALIDATION_FAILED` refusal, passed through. */
+    error?: { code: string; message: string; fields?: unknown[] };
   };
 }
 
@@ -175,6 +209,9 @@ import { revokeSessionsAndApiKeys, type ForcedResetRevocationOutcome } from './f
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
 import { readJsonRequestBody } from './request-json-body.js';
+import { cloudManagedRefusal } from './cloud-managed.js';
+import { isCloudManaged } from '@objectstack/core';
+import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 
@@ -302,6 +339,32 @@ async function resolvePassword(
  * fail-open gate, so a failed stamp must not fail the whole operation; we
  * surface the *actual* stamped state in the response instead.
  */
+/**
+ * [#25083] The target's `sys_user.source` (`idp_provisioned` | `env_native`),
+ * read as the system. `ok: false` when it cannot be read at all (no engine,
+ * no read surface, or the read throws), so the cloud-managed check above
+ * fails closed instead of reading an outage as a local account.
+ */
+async function readUserSource(
+  deps: AdminUserEndpointDeps,
+  userId: string,
+): Promise<{ ok: true; value: string | null } | { ok: false }> {
+  const engine = deps.getDataEngine();
+  if (!engine?.find) return { ok: false };
+  try {
+    const rows = await engine.find('sys_user', {
+      where: { id: userId },
+      fields: ['id', 'source'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const row = Array.isArray(rows) ? (rows[0] as { source?: unknown } | undefined) : undefined;
+    return { ok: true, value: typeof row?.source === 'string' ? row.source : null };
+  } catch {
+    return { ok: false };
+  }
+}
+
 async function stampMustChangePassword(
   deps: AdminUserEndpointDeps,
   userId: string,
@@ -596,46 +659,126 @@ export async function runAdminCreateUser(
   const role = typeof body.role === 'string' && body.role.length > 0 ? body.role : undefined;
   const mustChangePassword = body.mustChangePassword !== false; // default true
 
+  // [#25338] The optional permission set, by name. Empty means none asked.
+  const rawPermissionSet = body.permissionSet;
+  if (rawPermissionSet !== undefined && rawPermissionSet !== null && typeof rawPermissionSet !== 'string') {
+    return badRequest('permissionSet must be the machine name of a permission set');
+  }
+  const permissionSet =
+    typeof rawPermissionSet === 'string' && rawPermissionSet.trim().length > 0 ? rawPermissionSet.trim() : undefined;
+
   const resolved = await resolvePassword(deps, body, 'password');
   if ('status' in resolved) return resolved;
 
-  let created: { user?: { id?: string; email?: string; name?: string } } | null;
-  try {
-    const authApi = await deps.getAuthApi();
-    // Header-less server call: trusted, skips better-auth's role check — the
-    // HTTP route already ran the ADR-0068 platform-admin gate.
-    created = await authApi.createUser({
-      body: {
-        email: email.toLowerCase(),
-        name,
-        password: resolved.password,
-        ...(role ? { role } : {}),
-        // phoneNumber is a user-model field contributed by the phoneNumber
-        // plugin's schema; `data` is better-auth's carrier for such fields.
-        ...(phoneNumber ? { data: { phoneNumber } } : {}),
-      },
-    });
-  } catch (error) {
-    return mapAuthApiError(error, 'create-user failed');
+  // [#25338] Everything the grant needs is settled BEFORE the account exists,
+  // so a host that cannot judge the grant refuses with nothing created.
+  let grant: { seam: AdminCreateGrantSeam; engine: AdminUserDataEngine; context: Record<string, unknown> } | undefined;
+  if (permissionSet !== undefined) {
+    const seam = deps.createGrant;
+    const engine = deps.getDataEngine();
+    if (!seam || !engine) {
+      return {
+        status: 501,
+        body: {
+          success: false,
+          error: {
+            code: 'NOT_IMPLEMENTED',
+            message:
+              'This server cannot assign a permission set while creating a user, so no user was created. '
+              + 'Create the user without one, then add the grant on their Permission Sets list.',
+          },
+        },
+      };
+    }
+    const context = await seam.resolveActorContext();
+    if (!context) {
+      return {
+        status: 403,
+        body: {
+          success: false,
+          error: {
+            code: 'PERMISSION_DENIED',
+            message:
+              'Your own access could not be resolved, so the permission set could not be judged and no user was created.',
+          },
+        },
+      };
+    }
+    grant = { seam, engine, context };
   }
 
-  const userId = created?.user?.id;
-  if (typeof userId !== 'string' || userId.length === 0) {
-    return {
-      status: 500,
-      body: { success: false, error: { code: 'INTERNAL_ERROR', message: 'better-auth returned no user id' } },
-    };
+  const createAccount = async (): Promise<CreatedAccount | EndpointResult> => {
+    let created: { user?: { id?: string; email?: string; name?: string } } | null;
+    try {
+      const authApi = await deps.getAuthApi();
+      // Header-less server call: trusted, skips better-auth's role check — the
+      // HTTP route already ran the ADR-0068 platform-admin gate.
+      created = await authApi.createUser({
+        body: {
+          email: email.toLowerCase(),
+          name,
+          password: resolved.password,
+          ...(role ? { role } : {}),
+          // phoneNumber is a user-model field contributed by the phoneNumber
+          // plugin's schema; `data` is better-auth's carrier for such fields.
+          ...(phoneNumber ? { data: { phoneNumber } } : {}),
+        },
+      });
+    } catch (error) {
+      return mapAuthApiError(error, 'create-user failed');
+    }
+
+    const userId = created?.user?.id;
+    if (typeof userId !== 'string' || userId.length === 0) {
+      return {
+        status: 500,
+        body: { success: false, error: { code: 'INTERNAL_ERROR', message: 'better-auth returned no user id' } },
+      };
+    }
+
+    const stamped = mustChangePassword
+      ? await stampMustChangePassword(deps, userId, true)
+      : false;
+
+    // Match the invite / add-member flows: give the new user a membership so a
+    // single-org deployment shows them under the Default Organization instead of
+    // as a member-less account. No-op in multi-org (≥2 orgs), and no-op under
+    // `membershipPolicy: 'invite-only'` (ADR-0093 D1) — see the helper.
+    const membership = await bindUserToSoleOrganization(deps, userId);
+
+    // [#25338] The grant, under the administrator's own context (see
+    // `AdminCreateGrantSeam`). A refusal throws, and the unit of work around
+    // this function rolls the account back with it.
+    if (grant && permissionSet !== undefined) {
+      try {
+        await grant.engine.insert(
+          'sys_user_permission_set',
+          { user_id: userId, permission_set: permissionSet },
+          { context: grant.context },
+        );
+      } catch (error) {
+        throw new GrantRefused(grantRefusal(error));
+      }
+    }
+
+    return { created, userId, stamped, membership };
+  };
+
+  let account: CreatedAccount | EndpointResult;
+  if (grant) {
+    try {
+      // A creation that fails answers without throwing: nothing landed, so
+      // there is nothing to roll back.
+      account = await grant.seam.runAtomically(createAccount);
+    } catch (error) {
+      if (error instanceof GrantRefused) return error.result;
+      throw error;
+    }
+  } else {
+    account = await createAccount();
   }
-
-  const stamped = mustChangePassword
-    ? await stampMustChangePassword(deps, userId, true)
-    : false;
-
-  // Match the invite / add-member flows: give the new user a membership so a
-  // single-org deployment shows them under the Default Organization instead of
-  // as a member-less account. No-op in multi-org (≥2 orgs), and no-op under
-  // `membershipPolicy: 'invite-only'` (ADR-0093 D1) — see the helper.
-  const membership = await bindUserToSoleOrganization(deps, userId);
+  if ('status' in account) return account;
+  const { created, userId, stamped, membership } = account;
 
   // The decisions only. The values this call wrote into the user's fields —
   // the identity, the role scalar, the must-change-password stamp — are on
@@ -668,7 +811,47 @@ export async function runAdminCreateUser(
         mustChangePassword: stamped,
         ...(membership.organizationId ? { organizationId: membership.organizationId } : {}),
         membershipCreated: membership.membershipCreated,
+        ...(permissionSet !== undefined ? { permissionSet } : {}),
         ...(resolved.generated ? { temporaryPassword: resolved.password } : {}),
+      },
+    },
+  };
+}
+
+/** What `runAdminCreateUser`'s unit of work hands back when the account exists. */
+interface CreatedAccount {
+  created: { user?: { id?: string; email?: string; name?: string } } | null;
+  userId: string;
+  stamped: boolean;
+  membership: { organizationId: string | null; membershipCreated: boolean };
+}
+
+/** [#25338] Thrown out of the unit of work so it rolls back; carries the refusal the caller answers. */
+class GrantRefused extends Error {
+  constructor(readonly result: EndpointResult) {
+    super(result.body.error?.message ?? 'permission set grant refused');
+    this.name = 'GrantRefused';
+  }
+}
+
+/**
+ * [#25338] The answer for a refused grant: the status and code the refusal
+ * itself declared (403 `PERMISSION_DENIED` from the D12 gate, 400
+ * `VALIDATION_FAILED` with its `fields` for a name the catalog does not hold),
+ * read as the data doors read a thrown error, and a sentence saying the user
+ * was not created either.
+ */
+function grantRefusal(error: unknown): EndpointResult {
+  const thrown = resolveThrownHttpError(error, 500);
+  const validation = validationFailureDetails(error);
+  return {
+    status: thrown.status,
+    body: {
+      success: false,
+      error: {
+        code: thrown.code,
+        message: `The permission set was not assigned, so no user was created: ${thrown.message}`,
+        ...(validation ? { fields: validation.fields } : {}),
       },
     },
   };
@@ -724,6 +907,30 @@ export async function runAdminSetUserPassword(
 
     if (!(await authCtx.internalAdapter.findUserById(userId))) {
       return { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'User not found' } } };
+    }
+
+    // [#25083] On a cloud-managed environment a password is set here only on
+    // a local account. An `idp_provisioned` user signs in through the hosting
+    // organisation's identity provider, which owns their password; an
+    // `env_native` row (the break-glass administrator among them) still
+    // answers, because ADR-0135 D5.2 narrows by population, never wholesale.
+    if (isCloudManaged()) {
+      const source = await readUserSource(deps, userId);
+      if (!source.ok) {
+        return {
+          status: 503,
+          body: {
+            success: false,
+            error: {
+              code: 'SERVICE_UNAVAILABLE',
+              message:
+                "The user's identity source could not be read, so whether this cloud-managed environment may set "
+                + 'their password here cannot be judged. No password was changed.',
+            },
+          },
+        };
+      }
+      if (source.value === 'idp_provisioned') return cloudManagedRefusal('setUserPassword');
     }
 
     // Mirrors the stock /admin/set-user-password core: hash, then update the

@@ -277,7 +277,7 @@ import type * as M189 from './system/fate-supplement.zod.js';
 import type * as M190 from './kernel/execution-context.zod.js';
 
 // ---------------------------------------------------------------------------
-// 788 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 789 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1203,6 +1203,7 @@ export type Iso_shared_protection__ProtectionSchema = Assert<Eq< z.input< typeof
 export type Iso_shared_valueDomain__ValueDomainSchema = Assert<Eq< z.input< typeof M184.ValueDomainSchema >, z.infer< typeof M184.ValueDomainSchema > >>;
 
 // stack.zod.ts
+export type Iso_stack__ArtifactPackageSourceSchema = Assert<Eq< z.input< typeof M116.ArtifactPackageSourceSchema >, z.infer< typeof M116.ArtifactPackageSourceSchema > >>;
 export type Iso_stack__ConflictStrategySchema = Assert<Eq< z.input< typeof M116.ConflictStrategySchema >, z.infer< typeof M116.ConflictStrategySchema > >>;
 export type Iso_stack__DatasourceMappingRuleSchema = Assert<Eq< z.input< typeof M116.DatasourceMappingRuleSchema >, z.infer< typeof M116.DatasourceMappingRuleSchema > >>;
 
@@ -1702,7 +1703,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 788 isomorphic pins', () => {
+  it('still declares all 789 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2555,7 +2556,13 @@ describe('ADR-0122 type-alias convention', () => {
     // 789 -> 788 is #25159: `ApiTestingUiType` left with the retired
     // `ApiDocumentationConfig.ui` docs-viewer key, so its pin
     // (Iso_api_documentation__ApiTestingUiType) left with it. -1.
-    expect(pins).toHaveLength(788);
+    //
+    // 788 -> 789 is #25232: `ArtifactPackageSourceSchema` (`stack.zod.ts`),
+    // the origins one artifact package entry may state — a plain string enum
+    // extracted from `InstalledPackageSourceSchema`, so it is pinned here
+    // (Iso_stack__ArtifactPackageSourceSchema) rather than given a `…Parsed`
+    // synonym. +1 added.
+    expect(pins).toHaveLength(789);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

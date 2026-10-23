@@ -322,6 +322,44 @@ export type SettingsActionHandler = (input: {
 }) => Promise<SettingsActionResult> | SettingsActionResult;
 
 /**
+ * What a namespace's page states about the RUNNING system, as opposed to what
+ * is stored. The stored values say what an operator chose; they do not say what
+ * is live. A `mail` namespace can store provider `smtp` with an empty host while
+ * the live transport is the development log, and the form alone reads as if
+ * SMTP were in use.
+ *
+ * The package that owns the live object answers this (`plugin-email` for `mail`),
+ * read at request time, never recorded at boot. The settings `GET` route places
+ * the answer at the top of the page as an `info_banner` with the id
+ * {@link SETTINGS_LIVE_STATUS_BANNER_ID}.
+ */
+export interface SettingsLiveStatus {
+  /** Banner title, e.g. "No mail leaves this machine". */
+  label: string;
+  /** Banner body (markdown). */
+  bannerText: string;
+  bannerSeverity: 'info' | 'success' | 'warning' | 'error';
+}
+
+/**
+ * Answers {@link SettingsLiveStatus} for one namespace on every page read.
+ * `undefined` = nothing to state.
+ */
+export type SettingsLiveStatusProvider = (input: {
+  namespace: string;
+  ctx: SettingsContext;
+}) => Promise<SettingsLiveStatus | undefined> | SettingsLiveStatus | undefined;
+
+/**
+ * The `info_banner` id that carries a namespace's live status. Reserved: a
+ * manifest must not declare it. It has no entry in the translation bundles on
+ * purpose. Its text is computed per request, and the console's banner lookup
+ * (`settings.NS.banners.ID.text`) would replace the computed text with a fixed
+ * translated one.
+ */
+export const SETTINGS_LIVE_STATUS_BANNER_ID = 'live_status';
+
+/**
  * Minimal logging surface the service needs: just the loud channel.
  *
  * Deliberately a structural minimum rather than the full `Logger` contract or

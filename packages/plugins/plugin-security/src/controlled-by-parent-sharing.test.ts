@@ -48,7 +48,7 @@ import { matchesFilterCondition } from '@objectstack/formula';
 // to the source in the checkout rather than a prebuilt dist.
 import { validateRecord, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import type { PermissionSet } from '@objectstack/spec/security';
-import { ObjectSchema } from '@objectstack/spec/data';
+import { ObjectSchema, controlledByParentMasterRefusal } from '@objectstack/spec/data';
 import { composeReadableIdsInMemory } from './readable-ids-in-memory.testkit.js';
 
 const REP = 'usr_rep';
@@ -101,11 +101,13 @@ const CONTACT_SCHEMA_NO_MASTER_DETAIL = {
  * `validateRecord` (`@objectstack/objectql`) walks every declared field on an
  * insert but skips provenance-flagged ones outright — `if (def.system ||
  * def.readonly) continue;` — before the required check, and never fires on a
- * field that is not `required` at all. The `readonly` / `system` shapes below
- * are AUTHORABLE (nothing at runtime refuses either flag on a required
- * `master_detail`), so on each of them this gate is the only refusal an absent
- * master FK meets, and each must still answer 422 — the suite asserts that
- * against the REAL validator rather than against a belief about it.
+ * field that is not `required` at all. On the `readonly` / `system` shapes
+ * below this gate is therefore the only refusal an absent master FK meets —
+ * the suite asserts that against the REAL validator rather than against a
+ * belief about it. Neither is authorable any more: the parse refuses both
+ * (`master-not-writable`, #25092), so they reach the runtime only through a
+ * door that does not parse, and there the gate refuses every insert under
+ * them as the declaration defect, `422 INVALID_METADATA` (#25095).
  *
  * [#23100] The first shape, a `master_detail` with no `required`, was the third
  * member of this set while `resolveCbpRelation`'s second fallback resolved it.
@@ -764,8 +766,9 @@ describe('[#5815] getReadFilter enforces the same read scope as the engine middl
  * 2026-08-15 supersedes #7474's envelope choice for one of its two shapes. An
  * INSERT that omits the FK is handed to required-field validation (`400
  * VALIDATION_FAILED` with `fields[]`) wherever validation provably refuses it;
- * the row above still holds for the stored-row shape and for the three
- * declarations validation does not cover. The insert leg below was rewritten
+ * the row above still holds for the stored-row shape. [#25095] Of the three
+ * declarations validation does not cover, the two flagged ones now answer an
+ * insert `422 INVALID_METADATA` instead (the third resolves no relation). The insert leg below was rewritten
  * for that ruling, not adjusted to match observed behaviour — the successor
  * asserts both sides of the condition.
  */
@@ -963,7 +966,7 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
   });
 
   /**
-   * [#8688] The three shapes the stand-down deliberately does NOT cover.
+   * [#8688] The shapes the stand-down deliberately does NOT cover.
    *
    * `validateRecord` skips provenance-flagged fields before the required check
    * (`if (def.system || def.readonly) continue;`) and never fires on a field
@@ -972,23 +975,28 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
    * (`fk IN (readable masters)`), so readable by nobody, and answering 422 on
    * every later by-id write. Each case asserts BOTH halves: the gate still
    * refuses, AND the real validator raises nothing, which is why it must.
+   *
+   * [#25095] The gate's answer for the two flagged shapes moved: the parse
+   * refuses the declaration (`master-not-writable`), and the gate refuses every
+   * insert under it as that defect, `422 INVALID_METADATA` with the parse's own
+   * message, before the empty-master branch is reached.
    */
   it.each([
     ['`required` + `readonly`', 'master-readonly' as const, CONTACT_SCHEMA_MASTER_READONLY],
     ['`required` + `system`', 'master-system' as const, CONTACT_SCHEMA_MASTER_SYSTEM],
-  ])('[#8688] 422 MISSING_REQUIRED_FIELD survives on insert: %s', async (_label, detail, schema) => {
+  ])('[#8688 → #25095] the gate still refuses an insert omitting the master: %s', async (_label, detail, schema) => {
     const payload = { name: 'New contact' };
 
     // Validation does not cover this shape — nothing downstream would refuse.
     expect(() => validateRecord(schema as any, payload, 'insert')).not.toThrow();
 
-    // …so the gate keeps answering, in the envelope and wording it always had.
+    // …so the gate answers, as the declaration defect the parse refuses.
     const h = await boot({ shareLevel: 'edit', detail });
     const err = await refusalOf(h.insertContact(payload));
-    expect(err.code).toBe('MISSING_REQUIRED_FIELD');
+    expect(err.code).toBe('INVALID_METADATA');
     expect(err.status).toBe(422);
     expect(err.statusCode).toBe(422);
-    expect(err.message).toContain("did not supply 'account'");
+    expect(err.message).toContain(controlledByParentMasterRefusal(schema.name, schema.sharingModel, schema.fields)!.message);
     expect(err.message).not.toContain('requires edit access to its master record');
   });
 

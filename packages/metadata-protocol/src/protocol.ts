@@ -172,10 +172,12 @@ import {
     classifyDottedFilterHead,
     foldQueryAliasSlots,
     QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
+    QueryPageWindowParamSchema,
     type QueryAliasConflict,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
     type ValidationAdvisoryEvent,
     discriminateDefaultValueShape,
+    externalBindingDatasourceRefusal,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal, METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 // [#13331] The cluster fan-out transport type only — the protocol never
@@ -4752,6 +4754,53 @@ function repeatedQueryParamError(param: string, count: number): Error {
 }
 
 /**
+ * [#25229] The page window (`limit` / `offset`, spelled `$top` / `top` /
+ * `$skip` / `skip` on the wire) as the non-negative integer every driver
+ * needs, or a refusal naming the parameter the caller wrote (#4226).
+ *
+ * The bare `Number(...)` this replaces failed three ways, none of them loud:
+ *
+ *  - `NaN` (`?$top=abc`) and a negative limit (`?$top=-1`) reached the driver,
+ *    which drops a window it cannot read — every row answered under a 200, the
+ *    #7321 class (a malformed window served as if no window was sent);
+ *  - a negative offset (`?$skip=-1`, `{"offset": -1}`) reached knex's
+ *    `QueryBuilder.offset`, which throws — a 500 for a caller's mistake;
+ *  - a blank value (`?$top=`) is `Number('') === 0`, an empty page nobody
+ *    asked for.
+ *
+ * A blank value is refused, not read as absent. The blank `?filter=` is
+ * absent because an empty filter and no filter mean the same thing; an empty
+ * window does not — absent means "every row", so reading `?$top=` that way is
+ * the silent widening above under another name, and reading it as `0` is the
+ * guess this replaces. `0` itself stays valid: `$top=0` asks for the total
+ * alone.
+ *
+ * Only the two arms a door can deliver are read: a number (a JSON body) and a
+ * string (a querystring). Anything else — `true`, which `Number` would quietly
+ * make `1` — is refused like any other value that is not a count.
+ *
+ * [#25269] The accept set is the spec's `QueryPageWindowParamSchema`, parsed
+ * here rather than restated: the same declaration is what `FindDataRequestSchema`
+ * and `HttpFindQueryParamsSchema` publish for these parameters, so a client
+ * generated from them is told exactly what this check lets through.
+ */
+function pageWindowValue(value: unknown, param: string): number {
+    const window = QueryPageWindowParamSchema.safeParse(value);
+    if (window.success) return window.data;
+    // `String` for a number: `JSON.stringify(Infinity)` is `null`.
+    const shown = typeof value === 'number' ? String(value) : JSON.stringify(value) ?? String(value);
+    const err: any = new Error(
+        `Query parameter '${param}' must be a non-negative integer; got `
+        + `${shown.length > 64 ? `${shown.slice(0, 64)}…` : shown}. The query was not run: a window `
+        + 'the driver cannot read is either dropped, answering every row, or rejected by the database.',
+    );
+    err.status = 400;
+    err.code = 'INVALID_REQUEST';
+    err.param = param;
+    throw err;
+}
+
+/**
  * [#7321] Refuse a repeated occurrence of any list-query parameter this
  * normalizer reads as single-valued, and normalise the benign one-element array
  * away so nothing below has to know the union existed.
@@ -6770,11 +6819,15 @@ export class ObjectStackProtocolImplementation implements
      * site as stored and emits NO notice for it, so "no notices" alone means
      * "nothing to persist", never "on protocol": {@link migrateStoredMetadata}
      * reads `todos` to tell the two apart. They change nothing in `item`.
+     *
+     * [#25279] `knownDatasources` is handed to the chain for the refused-shape
+     * listing ({@link storedRowKnownDatasources}); it changes nothing either.
      */
     private convertStoredItemDetailed(
         type: string,
         data: unknown,
         onNotice?: (notice: ConversionNotice) => void,
+        knownDatasources?: ReadonlyMap<string, { readonly schemaMode?: unknown }>,
     ): { item: unknown; notices: ConversionNotice[]; todos: ConversionTodoNotice[] } {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
         if (singular === 'flow') return { item: data, notices: [], todos: [] };
@@ -6788,8 +6841,35 @@ export class ObjectStackProtocolImplementation implements
             onTodo: (t) => {
                 todos.push(t);
             },
+            ...(knownDatasources ? { knownDatasources } : {}),
         });
         return { item, notices, todos };
+    }
+
+    /**
+     * [ADR-0015 §4.2 · #25279] The datasource a stored `object` row's
+     * `external` binding names, as {@link externalBindingSaveRefusal} would
+     * read it at that row's next save ({@link externalBindingDatasourceDefinition}),
+     * for {@link migrateStoredMetadata}'s refused-shape listing.
+     *
+     * A stored object row reaches the conversion chain alone, so the listing's
+     * `external` detector could answer only the primary half (`'default'`)
+     * while the save door also refuses a binding on a stored or registered
+     * managed datasource. Handed down here, the listing names the row exactly
+     * when that door refuses it. `undefined` for any other row, a row with no
+     * `external`, and a datasource no layer holds (no verdict, as at the door).
+     * A read that fails propagates, as it does at the door.
+     */
+    private async storedRowKnownDatasources(
+        singularType: string,
+        body: unknown,
+    ): Promise<ReadonlyMap<string, { readonly schemaMode?: unknown }> | undefined> {
+        if (singularType !== 'object' || !body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+        const { external, datasource } = body as { external?: unknown; datasource?: unknown };
+        if (external === undefined || external === null) return undefined;
+        if (typeof datasource !== 'string' || datasource === '') return undefined;
+        const definition = await this.externalBindingDatasourceDefinition(datasource);
+        return definition ? new Map([[datasource, definition]]) : undefined;
     }
 
     /**
@@ -7237,19 +7317,115 @@ export class ObjectStackProtocolImplementation implements
      * `restoreVersion` → `put` keeps on the row it writes, so the judge and the
      * write read one binding.
      *
+     * [#25278] …and, third, the save door's refusal family that runs after its
+     * schema gate ({@link refuseRestoredBodyTheSaveDoorRefuses}), on the same
+     * body and in the same position, so a refused version writes nothing.
+     *
      * @param type The canonical (singular) type the row is restored under.
      * @param name The name the row is restored under.
      * @param binding The package binding of the active row the version is restored into (`null`: none).
+     * @param source The restoring door, as the history row and the audit row record it.
      */
-    private restoredBodyWriter(type: string, name: string, binding: string | null): (historyBody: unknown) => unknown {
+    private restoredBodyWriter(type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
         const derive = this.restoredBodyDerivation(type);
-        return (historyBody) => {
+        return async (historyBody) => {
             const nameRefusal = savedItemNameRefusal(type, historyBody, name, 'restore');
             if (nameRefusal) throw nameRefusal;
             const ownerRefusal = permissionSetOwnerBindingRefusal(type, historyBody, name, binding, 'restore');
             if (ownerRefusal) throw ownerRefusal;
+            await this.refuseRestoredBodyTheSaveDoorRefuses(type, name, historyBody, binding, source);
             return derive ? derive(historyBody) : historyBody;
         };
+    }
+
+    /**
+     * [#25278] The save door's refusal family, asked of a history body a
+     * restore is about to make the active row.
+     *
+     * `saveMetaItem` refuses these shapes after its schema gate. A restore
+     * writes a stored version back, so a version saved before a refusal
+     * existed, or one half of a pair whose other half has moved since, came
+     * back live through `rollbackMetaItem` and `revertCommit`'s restore limb
+     * with no refusal at all. Each is asked here through the save door's own
+     * judge, with its envelope, in the save door's order, ⛔ never a copy of a
+     * rule:
+     *
+     *  - a hook with no `body` ({@link runtimeHookWithoutBodyRefusal});
+     *  - a second default record page of an object
+     *    ({@link defaultRecordPageSaveRefusal});
+     *  - an `external` object binding on a datasource this environment holds as
+     *    managed, from either side of the pair
+     *    ({@link externalBindingSaveRefusal}): a datasource restored to managed
+     *    while objects bind it `external` is refused naming them, and an
+     *    object restored `external` on a datasource that is managed now is
+     *    refused at `external`;
+     *  - a `runAs: 'system'` flow an anonymous endpoint names
+     *    ({@link anonymousElevatedFlowRefusal}): a restore writes an ACTIVE
+     *    row, the case the save door asks it of;
+     *  - the shared runtime authoring rules
+     *    ({@link assertRuntimeAuthoringRules}), judged as an `active` write
+     *    bound to the row's own package, and told which credentials the
+     *    write-only channel holds — the restore keeps them (R2) — as the draft
+     *    promotion tells it;
+     *  - the authoring gate a domain plugin registers
+     *    ({@link runAuthoringGate}), on the channel the save door asks it on.
+     *
+     * Not asked, each for its reason:
+     *
+     *  - the schema gate itself. A history body is a stored row, and whether
+     *    today's parse may refuse a stored version is the ADR-0087 stored-shape
+     *    question (stored rows keep their conversion path), which this does
+     *    not decide. Every judge above reads its body defensively, and the
+     *    runtime gate reports a rule that throws instead of blocking on it.
+     *  - ADR-0070 D1's read-only-base create refusal
+     *    (`SysMetadataRepository.readOnlyBaseCreateError`). D1 judges a
+     *    package a caller NAMES for a new item; a restore names none and
+     *    writes into the active row's own binding, which `put` keeps. `put`'s
+     *    package-door note records why D1 is not extended to the doors that
+     *    carry a row's own binding: it would refuse the repair of legacy
+     *    package-bound rows.
+     *  - the credential channel's `store` refusal. A restore stores no
+     *    credential: the channel keeps its current one
+     *    ({@link restoredBodyDerivation}).
+     *
+     * The runtime gate's advisories are not carried: neither restore receipt
+     * declares a key for them, and adding one is a response-shape change.
+     *
+     * Asked from {@link restoredBodyWriter} inside `restoreVersion`, before it
+     * reads the active row or puts, so a refused version writes nothing.
+     * `rollbackMetaItem` rethrows the refusal; `revertCommit` reports it per
+     * item in `failed[]`, judged against the store as each item reaches it.
+     */
+    private async refuseRestoredBodyTheSaveDoorRefuses(
+        type: string,
+        name: string,
+        body: unknown,
+        binding: string | null,
+        source: string,
+    ): Promise<void> {
+        const hookRefusal = runtimeHookWithoutBodyRefusal(type, body, name);
+        if (hookRefusal) throw hookRefusal;
+        const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(type, body, name, 'restored');
+        if (defaultPageRefusal) throw defaultPageRefusal;
+        const bindingRefusal = await this.externalBindingSaveRefusal(type, body, name);
+        if (bindingRefusal) throw bindingRefusal;
+        const elevatedRefusal = await this.anonymousElevatedFlowRefusal(type, body, name);
+        if (elevatedRefusal) throw elevatedRefusal;
+        const channel = this.credentialChannelFor(type);
+        await this.assertRuntimeAuthoringRules({
+            type,
+            name,
+            state: 'active',
+            body,
+            source,
+            packageId: binding,
+            ...(channel
+                ? { restoredCredentialPaths: () => channel.heldPaths({ name, state: 'active', item: body }) }
+                : {}),
+        });
+        if (this.authoringChannel !== 'package-author') {
+            await this.runAuthoringGate({ type, name, state: 'active', body });
+        }
     }
 
     /**
@@ -14624,8 +14800,15 @@ export class ObjectStackProtocolImplementation implements
         // (`options.limit = Number(options.top)` — the alias overwrote the
         // canonical key, so `{top: 1, limit: 3}` answered 1 over HTTP and 3
         // through a direct engine call).
-        if (options.limit != null) options.limit = Number(options.limit);
-        if (options.offset != null) options.offset = Number(options.offset);
+        //
+        // [#25229] The coercion is CHECKED, not bare (see
+        // {@link pageWindowValue}). This is the one statement every list door
+        // reaches with the window still unvalidated — `GET /data/:object`'s
+        // querystring, `POST /data/:object/query`'s body (whose schema checks
+        // the type, not the sign) and the runtime dispatcher — so the refusal
+        // lives here, once.
+        if (options.limit != null) options.limit = pageWindowValue(options.limit, slotParam('limit'));
+        if (options.offset != null) options.offset = pageWindowValue(options.offset, slotParam('offset'));
 
         // Projection: comma-separated string → array. A single-value
         // querystring param arrives as a bare string — `?fields=name` or the
@@ -22347,10 +22530,12 @@ export class ObjectStackProtocolImplementation implements
      *    every registry slot of that name, as it does on every read
      *    (ADR-0005), so its own body decides for the name.
      *
-     * Asked twice: by `saveMetaItem` on the body it is about to store (draft or
+     * Asked by `saveMetaItem` on the body it is about to store (draft or
      * publish mode), and by the draft publish (`promoteDraftForPublish`) on the
      * draft body it is about to promote — the save judged only the pages
      * active at that moment, and another may have taken the default since.
+     * [#25278] And by the restore doors on the history body they write back
+     * (`refuseRestoredBodyTheSaveDoorRefuses`), for the same reason.
      *
      * The page saved under `saveName` is never its own holder: a save under the
      * existing default's own name is an overlay of that page (ADR-0005), not a
@@ -22376,7 +22561,7 @@ export class ObjectStackProtocolImplementation implements
         type: string,
         item: unknown,
         saveName: string,
-        verb: 'saved' | 'published' = 'saved',
+        verb: 'saved' | 'published' | 'restored' = 'saved',
     ): Promise<(Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422 }) | undefined> {
         if (type !== 'page') return undefined;
         const object = defaultRecordPageObject(item);
@@ -22445,6 +22630,132 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [ADR-0015 §4.2 · #25211] The save doors' half of "`object.external` only
+     * on a datasource whose `schemaMode` is not 'managed'": the pair of the item
+     * being saved and the stored or registered item on the other side of it,
+     * which no parse can see.
+     *
+     * `ObjectSchema`'s refinement judges a binding on the primary datasource
+     * (`'default'`, written or omitted) inside the schema gate, and
+     * `defineStack` / `composeStacks` a binding on a datasource a stack
+     * declares (#25168). A binding on a datasource stored or registered here
+     * reached neither. Measured before this: an object saved `external` on a
+     * managed `wh`, and `wh` saved as managed (or with no `schemaMode`, the
+     * spec default) under objects bound to it with `external`, were both
+     * stored, in draft and in publish mode and under `force`, and the runtime
+     * then disagrees with itself about the object: its schema sync skips the
+     * DDL as federated while the boot validation and the write gate judge it
+     * as managed.
+     *
+     * Both directions, because either item can be the one saved last:
+     *  - an `object` with `external`: judged against the datasource it names,
+     *    as this door's own by-name read resolves it ({@link readMetaItem}: the
+     *    environment's stored row, else the definition the code layer
+     *    registers);
+     *  - a `datasource`: judged against every object that binds it with
+     *    `external` ({@link objectsBoundExternallyTo}). Only the `managed`
+     *    verdict counts here; a binding on the primary datasource is a fact
+     *    about the object alone, which its own save is refused for.
+     * The judgement is the spec's ({@link externalBindingDatasourceRefusal}),
+     * ⛔ never a copy, so a finding reads as the parse's and `defineStack`'s
+     * do. A datasource neither layer holds gets no verdict.
+     *
+     * Asked in draft and in publish mode by {@link saveMetaItem}, after the
+     * schema gate, and again by {@link promoteDraftForPublish} on the draft
+     * body, because the other half can change between a draft's save and its
+     * publish; [#25278] and by the restore doors on the history body they
+     * write back ({@link refuseRestoredBodyTheSaveDoorRefuses}), because it can
+     * change after a version is saved too. An object's draft is not among the
+     * objects a datasource save meets: the draft is judged at its own publish. `force` does not reach
+     * it: `force` acknowledges a destructive diff, and this is no diff.
+     * Answered as the schema gate answers: `422 INVALID_METADATA`, the
+     * findings in `issues`, at `external` for an object and at `schemaMode`
+     * for a datasource.
+     */
+    private async externalBindingSaveRefusal(
+        singularType: string,
+        item: unknown,
+        name: string,
+        writeFace?: MetadataWriteFace,
+    ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+        const body = item as { external?: unknown; datasource?: unknown };
+        const issues: MetadataIssueEntry[] = [];
+        if (singularType === 'object') {
+            if (body.external === undefined || body.external === null) return undefined;
+            const datasource = typeof body.datasource === 'string' && body.datasource !== '' ? body.datasource : undefined;
+            const definition = datasource === undefined
+                ? undefined
+                : await this.externalBindingDatasourceDefinition(datasource);
+            const refusal = externalBindingDatasourceRefusal(name, body.external, datasource, definition);
+            if (refusal) issues.push({ path: refusal.path, message: refusal.message, code: 'custom' });
+        } else if (singularType === 'datasource') {
+            for (const bound of await this.objectsBoundExternallyTo(name)) {
+                const refusal = externalBindingDatasourceRefusal(bound.name, bound.external, name, item as { schemaMode?: unknown });
+                if (refusal?.shape === 'managed') issues.push({ path: 'schemaMode', message: refusal.message, code: 'custom' });
+            }
+        }
+        if (issues.length === 0) return undefined;
+        const err = new Error(
+            `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+        ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+        err.code = 'INVALID_METADATA';
+        err.status = 422;
+        err.issues = issues;
+        return err;
+    }
+
+    /**
+     * [#25211 · #25279] The definition of the datasource an `external` object
+     * names, as this environment resolves it by name ({@link readMetaItem}: the
+     * stored row, else the definition the code layer registers), or `undefined`
+     * when no layer holds one. The ONE read behind the object half of
+     * {@link externalBindingSaveRefusal} and the stored-migration pass's listing
+     * of the same refusal ({@link storedRowKnownDatasources}), so the two cannot
+     * judge a binding against different datasources.
+     */
+    private async externalBindingDatasourceDefinition(
+        datasource: string,
+    ): Promise<{ readonly schemaMode?: unknown } | undefined> {
+        const definition = (await this.readMetaItem({ type: 'datasource', name: datasource }))?.item;
+        return definition && typeof definition === 'object' ? definition as { schemaMode?: unknown } : undefined;
+    }
+
+    /**
+     * [#25211] Every object this environment holds that binds `datasource`
+     * with `external`, for {@link externalBindingSaveRefusal}'s datasource
+     * half: the environment's stored active rows ({@link readActiveOverlayRows},
+     * read as the list read parses them), and the registry's objects no stored
+     * row overlays (an object's stored row is its base layer, ADR-0029 D9).
+     * Drafts are not read: a draft does not bind anything until its publish,
+     * which is judged on its own.
+     */
+    private async objectsBoundExternallyTo(datasource: string): Promise<Array<{ name: string; external: unknown }>> {
+        const bound = new Map<string, unknown>();
+        let records: any[] = [];
+        try {
+            records = await this.readActiveOverlayRows({ type: 'object' });
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        const stored = this.storedOverlayEntries({ type: 'object' }, records);
+        const storedNames = new Set(stored.map((entry) => entry.name));
+        const take = (name: string, obj: unknown) => {
+            const o = obj as { datasource?: unknown; external?: unknown } | null | undefined;
+            if (o?.datasource === datasource && o.external !== undefined && o.external !== null) bound.set(name, o.external);
+        };
+        for (const entry of stored) take(entry.name, entry.data);
+        const registry = this.engine.registry;
+        if (typeof registry?.getAllObjects === 'function') {
+            for (const obj of registry.getAllObjects() as Array<{ name?: unknown }>) {
+                if (typeof obj?.name !== 'string' || storedNames.has(obj.name)) continue;
+                take(obj.name, obj);
+            }
+        }
+        return [...bound].map(([name, external]) => ({ name, external }));
+    }
+
+    /**
      * [ADR-0138 D2b] The flow half of the anonymous door × elevated flow
      * refusal: a flow published with `runAs: 'system'` while an
      * `authRequired: false` endpoint of `type: 'flow'` names it.
@@ -22461,10 +22772,12 @@ export class ObjectStackProtocolImplementation implements
      * this door cannot grow two opinions of the pair.
      *
      * Asked at every door a flow body reaches `active` through: the save in
-     * publish mode ({@link saveMetaItem}) and the draft promotion
+     * publish mode ({@link saveMetaItem}), the draft promotion
      * ({@link promoteDraftForPublish}) the per-item publish and
-     * `publishPackageDrafts` share. A draft save is let through: a draft does
-     * not execute, and its publish is judged here. `migrate-stored` re-saves
+     * `publishPackageDrafts` share, and [#25278] the restore doors
+     * ({@link refuseRestoredBodyTheSaveDoorRefuses}). A draft save is let
+     * through: a draft does not execute, and its publish is judged here.
+     * `migrate-stored` re-saves
      * (the credential move, `os migrate meta --stored`) are not judged: they
      * rewrite a row that already exists, and refusing one would leave a
      * credential the move exists to take out of the row in cleartext. Such a
@@ -23943,6 +24256,17 @@ export class ObjectStackProtocolImplementation implements
             if (defaultPageRefusal) throw defaultPageRefusal;
         }
 
+        // [ADR-0015 §4.2 · #25211] An `object` bound `external` to a datasource
+        // this environment holds as managed, or a `datasource` saved as managed
+        // while objects bind it with `external`, is refused, in draft and in
+        // publish mode, after the schema (the body is the type it says, and the
+        // parse has judged a binding on the primary datasource) and before the
+        // authoring gate and every write. See {@link externalBindingSaveRefusal}.
+        {
+            const bindingRefusal = await this.externalBindingSaveRefusal(singularType, request.item, request.name, request.writeFace);
+            if (bindingRefusal) throw bindingRefusal;
+        }
+
         // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an
         // anonymous endpoint of `type: 'flow'` names it is refused, in publish
         // mode only (a draft does not execute; its publish is judged at the
@@ -24882,9 +25206,15 @@ export class ObjectStackProtocolImplementation implements
             // flow carrying a `{…}` token at a value slot — a CRUD filter
             // operand among them — parsed, rewrote nothing and was counted
             // `canonical`, while `registerFlow` refused it at boot.
+            //
+            // [#25279] A stored object's `external` binding is judged against the
+            // datasource the save door reads for it, so the listing names the
+            // row exactly when that door refuses its next save.
             const { item, notices, todos } = flowResult
                 ? { item: flowResult.storable, notices: flowResult.notices, todos: flowResult.todos ?? [] }
-                : this.convertStoredItemDetailed(singular, body);
+                : this.convertStoredItemDetailed(
+                    singular, body, undefined, await this.storedRowKnownDatasources(singular, body),
+                );
             const changed = flowResult ? item !== body : notices.length > 0;
             // [#17321] A site the chain left as stored — no lossless rewrite
             // exists for it (ADR-0087 D3: a structured TODO, never silence) —
@@ -25683,6 +26013,17 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, draftForGate.body, request.name, 'published');
             if (defaultPageRefusal) throw defaultPageRefusal;
+        }
+        // [ADR-0015 §4.2 · #25211] …and an object draft bound `external` to a
+        // datasource that is managed by the time it is published, or a
+        // datasource draft that would go `active` as managed under objects that
+        // bind it with `external`: the draft save judged the other half as it
+        // stood then. Judged again here, on the draft body and with the save
+        // door's predicate and envelope, before `repo.promoteDraft` writes, so a
+        // batch publish aborts on it too. See {@link externalBindingSaveRefusal}.
+        if (draftForGate) {
+            const bindingRefusal = await this.externalBindingSaveRefusal(singularType, draftForGate.body, request.name);
+            if (bindingRefusal) throw bindingRefusal;
         }
         // [ADR-0138 D2b] …and a flow draft that would go `active` with
         // `runAs: 'system'` while an anonymous endpoint of `type: 'flow'` names
@@ -29935,12 +30276,15 @@ export class ObjectStackProtocolImplementation implements
                         intent,
                         // [#21470] The divergent `name` refusal, [ADR-0086 D3]
                         // the permission set's owner judge against the binding
-                        // read above, then [#20790] R2's credential-channel
+                        // read above, [#25278] the save door's refusal family,
+                        // then [#20790] R2's credential-channel
                         // strip. A refused version lands
                         // in `failed[]` below, with nothing written. Judged under
                         // the SINGULAR type, the spelling the write-through
                         // registers under. See {@link restoredBodyWriter}.
-                        deriveRestoredBody: this.restoredBodyWriter(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name, restorePackageId),
+                        deriveRestoredBody: this.restoredBodyWriter(
+                            PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name, restorePackageId, 'protocol.revertCommit',
+                        ),
                         ...memberOption(member),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
@@ -30285,12 +30629,13 @@ export class ObjectStackProtocolImplementation implements
                 source: 'protocol.rollbackMetaItem',
                 ...(request.message ? { message: request.message } : {}),
                 intent,
-                // [#21470] The divergent `name` refusal and [ADR-0086 D3] the
-                // permission set's owner judge against the binding read above,
+                // [#21470] The divergent `name` refusal, [ADR-0086 D3] the
+                // permission set's owner judge against the binding read above
+                // and [#25278] the save door's refusal family, each
                 // rethrown below with nothing written; then [#20790] R2 — a rollback past the
                 // credential move keeps the write-only channel's current
                 // credential and stores none. See {@link restoredBodyWriter}.
-                deriveRestoredBody: this.restoredBodyWriter(singularType, request.name, rollbackPackageId),
+                deriveRestoredBody: this.restoredBodyWriter(singularType, request.name, rollbackPackageId, 'protocol.rollbackMetaItem'),
                 // [#22877] The member whose lineage `toVersion` is taken from.
                 ...memberOption(member),
             });

@@ -133,7 +133,16 @@ export const NotificationPreference = ObjectSchema.create({
             // stored topic could never match an event the platform can store.
             // '*' is 1 char.
             maxLength: 200,
-            description: "Notification topic, or '*' for all topics.",
+            // [#25346, ruling A 2026-10-23] Free text, not a picker: no list of
+            // topics exists to pick from. A topic is whatever string the sender
+            // writes — a flow's notify step names its own, and platform features
+            // send fixed ones (`approval.*` in plugin-approvals, `collab.mention`
+            // in plugin-audit, …) — and nothing registers them. So the help says
+            // where a topic comes from instead. `notification-preference-
+            // topic-channel-help.test.ts` pins both helps.
+            description:
+                'The topic the notifications are sent under: the topic a flow\'s notify step names, or one the platform sends, ' +
+                'such as approval.requested or collab.mention. Enter * for all topics. A topic nothing sends matches nothing.',
         }),
 
         channel: Field.text({
@@ -147,7 +156,17 @@ export const NotificationPreference = ObjectSchema.create({
             // precedent (sys_session.revoke_reason, maxLength: 64). '*' is
             // 1 char.
             maxLength: 64,
-            description: "Channel id (inbox/email/push/…), or '*' for all channels.",
+            // [#25346, ruling A 2026-10-23] Free text, not a picker. The channels
+            // are known only at runtime, and the seam is open (any plugin may
+            // `registerChannel` its own id), while a `select` is closed on the
+            // write path and its option values are machine identifiers, which
+            // cannot spell the stored '*' wildcard. So the help names the ids
+            // this package registers instead; the pin holds that list equal to
+            // the `id`s of the three channels it builds (no `push` exists).
+            description:
+                'The channel: inbox (notifications shown inside the app, always available), email (once an email service is configured), ' +
+                'sms (once an SMS service is configured), or the id of a channel an installed plugin adds. ' +
+                'Enter * for all channels. An id no channel uses matches nothing.',
         }),
 
         enabled: Field.boolean({
@@ -160,13 +179,20 @@ export const NotificationPreference = ObjectSchema.create({
             label: 'Digest',
             required: false,
             defaultValue: 'none',
-            description: 'Batch cadence (P3 digest middleware).',
+            description:
+                'Collect these notifications into one summary instead of sending each as it arrives: daily sends it at midnight, ' +
+                'weekly on Monday at midnight, none sends each one right away. Critical notifications are always sent at once. ' +
+                'Takes effect on a preference whose channel is * (all channels).',
         }),
 
         quiet_hours: Field.json({
             label: 'Quiet Hours',
             required: false,
-            description: 'Optional { tz, start, end } window (P3 quiet-hours middleware).',
+            description:
+                'A daily window when notifications are held and delivered when it ends, for example ' +
+                '{ "tz": "Europe/Berlin", "start": "22:00", "end": "07:00" }. Times are HH:MM in that time zone (UTC when tz is left out), ' +
+                'and the window may run past midnight. Critical notifications are not held. ' +
+                'Takes effect on a preference whose channel is * (all channels).',
         }),
 
         created_at: Field.datetime({ label: 'Created At', readonly: true }),

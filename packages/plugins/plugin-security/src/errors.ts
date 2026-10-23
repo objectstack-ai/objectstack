@@ -143,6 +143,41 @@ export class MasterDetailRelationMissingError extends Error {
 }
 
 /**
+ * [ADR-0055 §1 · #25095] A write sets the master reference of a
+ * `controlled_by_parent` declaration whose one required `master_detail` is not
+ * writable (`readonly: true` or `system: true`) → `422 INVALID_METADATA`.
+ * Every insert sets it, single or batch; an update sets it when its body
+ * carries the key, whatever the value.
+ *
+ * The parse refuses that declaration (`controlledByParentMasterRefusal`, shape
+ * `master-not-writable`), so an object reaches this only through a door that
+ * does not parse: a raw `registerObject` / `registerApp`, a non-strict
+ * `defineStack`, or a stored row the boot registers under its
+ * `[metadata_spec_invalid]` diagnostic. The security plugin still derives the
+ * object's READ access from that field, so rows already stored keep their
+ * master, and a delete or an update that leaves the key alone is answered as
+ * before. The engine does not take a caller's value in a field the
+ * declaration keeps from the author as an ordinary master reference, so a
+ * write that sets it could leave a detail outside the master its access
+ * derives from: readable by nobody, while the write reports success.
+ *
+ * The message is the parse's own, prefixed with the write it refused, so the
+ * prescription is the one `os validate` and the metadata save door give for
+ * the same declaration, and the two cannot drift. Same code and status as
+ * {@link MasterDetailRelationMissingError}: a broken declaration, not an access
+ * verdict.
+ */
+export class MasterReferenceNotWritableError extends Error {
+  readonly code = 'INVALID_METADATA';
+  readonly status = 422;
+  readonly statusCode = 422;
+  constructor(object: string, operation: string, declarationRefusal: string) {
+    super(`[Security] Configuration defect: ${operation} on '${object}' cannot be written. ${declarationRefusal}`);
+    this.name = 'MasterReferenceNotWritableError';
+  }
+}
+
+/**
  * The by-id write names a detail row that does not exist → `404
  * RECORD_NOT_FOUND`.
  *
@@ -197,20 +232,23 @@ export class DetailRecordNotFoundError extends Error {
  * insert whose master FK is absent and lets `validateRecord` answer, wherever
  * validation provably covers that omission.
  *
- * This class keeps BOTH shapes, and both are live:
+ * This class keeps BOTH shapes:
  *
  *   • the STORED-ROW shape, unconditionally — no reordering of insert-path
  *     validation can reach a persisted null FK, and `fields[]` would name a
  *     field that was never in the request;
  *   • the INSERT shape for the three declarations validation does NOT cover
  *     (a `master_detail` with no `required`; `required` + `readonly`;
- *     `required` + `system`) — there this gate is the only refusal there is,
- *     and its 422 is what stops an unreadable orphan detail row being minted.
- *     The 2026-08-16 ruling (commit 8abada3ba) orders a publish-time lint ramp, but
- *     it has not landed — nothing refuses them at publish today, so an app
- *     can newly declare one and land here (#8959). This is the answer those
- *     shapes get for as long as they stay declarable, not merely until some
- *     legacy app is republished.
+ *     `required` + `system`) — there this gate was the only refusal there
+ *     was, and its 422 is what stopped an unreadable orphan detail row being
+ *     minted. The parse now refuses all three (the first since #23100, which
+ *     also took it out of the relation resolver; the two flagged ones since
+ *     #25092), so they arrive only through a door that does not parse, and
+ *     there no insert of theirs reaches this class any more: the first
+ *     resolves no relation ({@link MasterDetailRelationMissingError}), and
+ *     every insert under a flagged one is
+ *     {@link MasterReferenceNotWritableError}'s (#25095). The shape stays as
+ *     the backstop the freeze note at the gate's empty-master branch keeps.
  *
  * The wording is unchanged in both, so a surface that pins either sentence sees
  * the same string it always did — what moved is WHICH inserts arrive here.

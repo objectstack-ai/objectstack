@@ -176,6 +176,13 @@ describe('createLazyCacheRateLimitStorage — no cache service at all (#4772 acc
     const msg = logger.warn.mock.calls[0][0] as string;
     expect(msg).toContain('no `cache` service registered at all');
     expect(msg).toContain('per-process store');
+    // The remedy is the path that boots today: a shared ICacheService
+    // registered as `cache`. It never names @objectstack/service-cache as the
+    // Redis remedy — that package's Redis adapter refuses to start.
+    expect(msg).toContain("registered as the `cache` service (ctx.registerService('cache', impl))");
+    expect(msg).not.toContain('@objectstack/service-cache');
+    expect(msg).not.toMatch(/redis/i);
+    expect(msg).toContain('(ADR-0069 D2)');
     expect(logger.info).not.toHaveBeenCalled();
   });
 

@@ -78,6 +78,14 @@ export default defineConfig({
         find: /^@objectstack\/metadata-protocol$/,
         replacement: path.resolve(__dirname, '../metadata-protocol/src/index.ts'),
       },
+      // [ADR-0126 §6 wall 3] The access upgrade suite runs the door against
+      // the security plugin's REAL check (`createAccessUpgradeCheck`), so it
+      // judges THIS checkout's comparison, not a `plugin-security/dist` that
+      // may be behind it. Anchored like the entries above.
+      {
+        find: /^@objectstack\/plugin-security$/,
+        replacement: path.resolve(__dirname, '../plugins/plugin-security/src/index.ts'),
+      },
     ],
   },
   // Discovery is untouched — but this file is NOT "the alias and nothing else".

@@ -89,6 +89,7 @@
  * direction this gate must never take.
  */
 
+import { isCloudManaged } from '@objectstack/core';
 import {
   AUDIENCE_POSTURES,
   SystemUserId,
@@ -228,6 +229,10 @@ export const OPEN_POSTURE_VERIFICATION_OFF_WARNING =
  *     (#20389: a pre-production deployment with no mail transport otherwise
  *     dead-ends every sign-up at the verify page), and refused when only the
  *     console stored it (`verificationDeclaredBy: 'console'`).
+ *
+ * On a cloud-managed environment (`isCloudManaged()`, `@objectstack/core`)
+ * every posture but `invite_only` is refused: the vocabulary is unchanged, the
+ * refusal is the runtime's.
  */
 export function assertAudienceConfig(
   raw: AudienceConfig | undefined,
@@ -246,6 +251,17 @@ export function assertAudienceConfig(
     );
   }
   const posture: AudiencePosture = (rawPosture as AudiencePosture | undefined) ?? 'invite_only';
+  // [#25083] A cloud-managed environment never opens self-registration: the
+  // organisation that hosts it invites its people in the cloud. Refused rather
+  // than coerced, so a declared `open` never reads as in force — at
+  // construction the refusal stops the boot, and on a merged patch the
+  // standing posture keeps ruling.
+  if (posture !== 'invite_only' && isCloudManaged()) {
+    fail(
+      `posture '${posture}' opens self-registration, which a cloud-managed environment (OS_CLOUD_MANAGED) never offers: ` +
+      "the organisation that hosts it invites its people in the cloud. Use posture 'invite_only' (the default), or remove the posture.",
+    );
+  }
   const domains = raw.allowedEmailDomains;
   if (domains !== undefined && !Array.isArray(domains)) {
     fail('allowedEmailDomains must be an array of bare domain names');

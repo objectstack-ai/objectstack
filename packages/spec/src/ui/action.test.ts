@@ -182,6 +182,18 @@ describe('requiresFeature lowering', () => {
     expect(result).not.toHaveProperty('requiresFeature');
   });
 
+  it('lowers a hide-when-on flag to != true on an action', () => {
+    const result = ActionSchema.parse({
+      name: 'create_user',
+      label: 'Create User',
+      type: 'api',
+      target: '/api/v1/auth/admin/create-user',
+      requiresFeature: 'cloudManaged',
+    });
+    expect(result.visible).toEqual({ dialect: 'cel', source: 'features.cloudManaged != true' });
+    expect(result).not.toHaveProperty('requiresFeature');
+  });
+
   it('AND-composes with an explicit string visible — existing first, gate last', () => {
     const result = ActionSchema.parse({
       name: 'transfer_ownership',

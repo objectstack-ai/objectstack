@@ -16,8 +16,8 @@ export const entry: SemanticMigration = {
   // No backticks in `surface`: build-upgrade-guide.ts renders it inside a
   // code span AND a table cell.
   surface:
-    'ObjectQL find, findOne, count, aggregate and the update and delete predicates on an object '
-    + 'with an organization column, called with an execution context that names an organization: '
+    'ObjectQL find, findOne, count, aggregate, and update and delete by id or by predicate, on an '
+    + 'object with an organization column, called with an execution context that names an organization: '
     + 'the DriverOptions tenantId and tenantIds the engine hands every driver',
   replacement:
     'the driver read scope is the organization wall\'s verdict (computeTenantLayer0Verdict, '

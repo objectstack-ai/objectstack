@@ -34,6 +34,15 @@ const DESIGN_RECORD_VOCABULARY: ReadonlyArray<readonly [string, RegExp]> = [
   ['a review-finding id', /finding F/],
   ['an API call', /\bemit\(\)/],
   ['a runtime internal', /\bkernel\b/i],
+  // The developer notes a Setup pass met in field help: a column reference,
+  // a function name, an internal component, a storage-history note and an
+  // inert-column notice. What the field means and what to do with it is the
+  // help; where it is stored and which code reads it is the comment.
+  ['a foreign-key note', /\bforeign key to\b/i],
+  ['a function name', /\bisGrantActive\b/],
+  ['an internal component', /\bmiddleware\b|\bbetter-auth is oblivious\b|\bReaper\b/i],
+  ['a column-history note', /\bNULL only on\b/],
+  ['an inert-column notice', /\bInert today\b/i],
 ];
 
 function vocabularyIn(text: string): string[] {
@@ -90,6 +99,11 @@ describe('messaging objects: admin-facing copy carries no design-record vocabula
     expect(vocabularyIn('Bypass rule (finding F2).')).toEqual(['a review-finding id']);
     expect(vocabularyIn('One row per emit().')).toEqual(['an API call']);
     expect(vocabularyIn('The Kernel API is additive.')).toEqual(['a runtime internal']);
+    expect(vocabularyIn('Foreign key to sys_user.id')).toEqual(['a foreign-key note']);
+    expect(vocabularyIn('Enforced at resolution time via isGrantActive.')).toEqual(['a function name']);
+    expect(vocabularyIn('Batch cadence (P3 digest middleware).')).toEqual(['an internal component']);
+    expect(vocabularyIn('NULL only on a grant written before the column existed.')).toEqual(['a column-history note']);
+    expect(vocabularyIn('Inert today: nothing reads it.')).toEqual(['an inert-column notice']);
     expect(vocabularyIn('Which topics and channels each user receives.')).toEqual([]);
   });
 

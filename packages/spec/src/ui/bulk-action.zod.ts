@@ -3,7 +3,8 @@
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
-import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema, ExpressionSchema } from '../shared/expression.zod';
+import { templateExpressionInput } from '../shared/typed-expression-input';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { FieldType } from '../data/field.zod';
 
@@ -330,6 +331,72 @@ export const BulkActionParamSchema = lazySchema(() => strictObject(
 export type BulkActionParam = z.input<typeof BulkActionParamSchema>;
 
 /**
+ * [#24798, ADR-0032 Decisions 2–3] The root a bulk `confirmText` hole names
+ * for the affected-record count — the number of selected records the run will
+ * cover (the dialog's own `rows.length`, after the def's `visible` narrowed
+ * the selection). The platform's default confirm sentence already says it;
+ * this is the spelling an authored sentence uses: `{{ count }}`.
+ */
+export const BULK_CONFIRM_COUNT_ROOT = 'count';
+
+/**
+ * The roots a bulk action's `confirmText` holes may name — its CLOSED scope:
+ * {@link BULK_CONFIRM_COUNT_ROOT}, then each of the def's params by `name`, in
+ * declaration order. A hole over any other root renders a blank fragment, so
+ * the doors (`objectstack validate`, `objectstack compile`, the publish gate)
+ * name it through the one template-slot judge
+ * (`automation/flow-text-slot-template.ts`, `closedScopeTemplateRefusal`).
+ *
+ * The roots are BARE — `{{ tier }}`, never `{{ params.tier }}` — because that
+ * is how the flow text slots' scope spells its roots (a flow variable is
+ * `{{ v }}`, a node output `{{ lookup.result }}`, with no namespace in front),
+ * and how the shipped confirm sentences already spell them. `count` comes
+ * first and wins: a param named `count` is reachable only through the dialog
+ * field, never through a hole.
+ */
+export function bulkConfirmTemplateRoots(def: { readonly params?: unknown }): string[] {
+  const roots = [BULK_CONFIRM_COUNT_ROOT];
+  if (!Array.isArray(def.params)) return roots;
+  for (const param of def.params) {
+    const name = (param as { name?: unknown } | null)?.name;
+    if (typeof name === 'string' && name.length > 0 && !roots.includes(name)) roots.push(name);
+  }
+  return roots;
+}
+
+/**
+ * The bulk `confirmText` slot: ADR-0032's `template` dialect, the input
+ * `TemplateExpressionInputSchema` takes — a bare string is shorthand for
+ * `{ dialect: 'template', source }`, an envelope must declare
+ * `dialect: 'template'` — built from the package-internal constructor (as a
+ * notify node's `title` / `message` are) so its refusal prescribes this slot's
+ * own hole, `{{ count }}`, rather than `{{record.name}}`, a root it does not
+ * bind.
+ *
+ * ⚠️ One arm wider than a template slot, on purpose: a BLANK string parses as
+ * itself. `confirmText` was a plain `z.string()`, so `''` passed. The doors
+ * refuse it (#25205), with the hole findings, the same way and in the same
+ * release: every one of them is a door verdict over text that parses. The arm
+ * stays so the parse does not narrow: the boot load and the read path judge a
+ * stored view with this parse, and a stored blank sentence keeps loading and
+ * serving until its next save, which the doors judge.
+ */
+const BULK_CONFIRM_TEXT_DIALECT_ONLY =
+  'A bulk action\'s `confirmText` is a template-typed slot: it accepts a bare template string or an envelope '
+  + 'declaring `dialect: \'template\'` only. Write `\'Update {{ count }} record(s)?\'` or '
+  + '`{ dialect: \'template\', source: \'Update {{ count }} record(s)?\' }`.';
+
+const BulkConfirmTextSchema = z.union([
+  templateExpressionInput(ExpressionSchema, {
+    sourceRequired: BULK_CONFIRM_TEXT_DIALECT_ONLY,
+    dialectOnly: BULK_CONFIRM_TEXT_DIALECT_ONLY,
+  }),
+  // `trim()`'s whitespace set is exactly `\s` (ECMA-262), so this arm takes the blank strings
+  // `NON_BLANK_STRING` refuses — as a `pattern` the JSON Schema carries, not a dropped refinement.
+  z.string().regex(/^\s*$/),
+], { error: () => BULK_CONFIRM_TEXT_DIALECT_ONLY });
+
+/**
  * Rich, schema-driven definition of one button in the multi-select bar.
  *
  * Two vocabularies reach that bar and they are not interchangeable:
@@ -400,7 +467,7 @@ export const BulkActionDefSchema = lazySchema(() => strictObject(
   execution: BulkActionExecutionSchema.optional().describe("For `operation: 'custom'` — 'aggregate' dispatches the named action ONCE for the whole selection, carrying every id in `params._selectedIds`. Required on a custom def: the per-record form is declared as `bulkActions: ['<name>']` instead."),
   patch: z.record(z.string(), z.unknown()).optional().describe("For `operation: 'update'` — static field values applied to every selected record, merged UNDER the user-supplied params so a fixed value can be declared without exposing it in the dialog."),
   params: z.array(BulkActionParamSchema).optional().describe('Inputs collected once before the run. Omit to skip the params step and go straight to confirm.'),
-  confirmText: z.string().optional().describe('Confirmation text shown above the affected-record summary.'),
+  confirmText: BulkConfirmTextSchema.optional().describe("Confirmation text shown above the affected-record summary — a `template` slot (ADR-0032): a bare string is shorthand for `{ dialect: 'template', source }`, and text with no hole is shown as written. Holes are `{{ path }}` or `{{ path | formatter[:arg] }}` over two kinds of root, written bare: `count`, the number of records the run covers, and each of the def's params by `name` (`{{ tier }}`, never `{{ params.tier }}`; `count` wins over a param of that name). A param hole renders that param's DISPLAY value: the chosen option's `label` for an option-bearing param (a multi-value param's labels joined with ', '), the picked record's display name for a `lookup` / user param, and the entered value otherwise, so a number, date or currency value takes a formatter (`{{ amount | currency:EUR }}`, `{{ due | date:long }}`). Formatters come from the template engine's whitelist (`TEMPLATE_FORMATTERS`, `@objectstack/formula`); a hole holds no logic (no CEL, no arithmetic). Example: 'Update tier on {{ count }} account(s) to {{ tier }}?'. A hole over any other root, and a single-brace `{x}` token, are refused by name at `objectstack validate`, `compile` and the publish gate, as are a hole holding logic or an unknown formatter and a blank sentence."),
   confirmLabel: z.string().optional().describe('Custom Confirm button label (default: "Run").'),
   visible: EvaluatedExpressionInputSchema.optional().describe('Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm: a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record.'),
   requiredPermissions: z.array(z.string()).optional().describe("[ADR-0066 D4] Capability gate on the button, `action.requiredPermissions` semantics verbatim: absent or empty always passes, several are AND-ed, and a client that cannot resolve the caller's capabilities fails OPEN (the server stays the authority). This key exists for INLINE defs — notably the `update`/`delete` data-plane forms, which dispatch no action and so have nothing to inherit a gate from; a def promoted from `bulkActions: ['<name>']` (or an aggregate def naming a declared action) inherits the action's own declaration instead. On a data-plane def the gate governs visibility only — the write itself is still authorized by the data API's object permissions and server hooks."),

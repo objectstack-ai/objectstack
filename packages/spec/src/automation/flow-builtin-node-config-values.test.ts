@@ -139,6 +139,10 @@ describe('one refusal per judged builtin, at each typed key', () => {
   // [type, the edit onto its VALID config, the key the refusal names]
   const PROBES: ReadonlyArray<readonly [string, Config, string]> = [
     ['get_record', { limit: '10' }, 'limit'],
+    // [#25302] The executor hands `limit` to the driver as the LIMIT as written.
+    ['get_record', { limit: 2.5 }, 'limit'],
+    ['get_record', { limit: 0 }, 'limit'],
+    ['get_record', { limit: -1 }, 'limit'],
     ['get_record', { fields: 'name' }, 'fields'],
     ['create_record', { objectName: 5 }, 'objectName'],
     ['update_record', { multi: 'true' }, 'multi'],
@@ -333,6 +337,64 @@ describe('[#23260] a value carrying a `{token}` is judged for its type, like any
       expect(refusals[0]!.message, key).not.toMatch(/expected (number|record), received string/);
       expect(judgedAtTheDoors('http', config), key).toEqual([`contract:${key}`]);
     }
+  });
+});
+
+/**
+ * [#25302] `get_record`'s `limit` is a positive integer. The executor does not
+ * read through `findData`, so the Data API's page-window normalizer never
+ * judges it: `limit > 1` is handed to `data.find` as the LIMIT as written
+ * (`2.5` included), and anything else (`0`, `-1`, `0.5`) silently became a
+ * single-record `findOne`. The contract now refuses the value at every door.
+ */
+describe('[#25302] get_record limit is a positive integer', () => {
+  it('a fraction is refused at nodes.1.config.limit, in the contract\'s words', () => {
+    const config = { ...VALID.get_record, limit: 2.5 };
+    const issues = issuesOf(flowWith('get_record', config));
+    expect(issues.map(({ code, path }) => ({ code, path }))).toEqual([{ code: 'custom', path: 'nodes.1.config.limit' }]);
+    expect(contractSentence('get_record', config, 'limit')).not.toBe('');
+    expect(issues[0]!.message).toContain(contractSentence('get_record', config, 'limit'));
+  });
+
+  it.each([[2.5], [0], [-1], [0.5], [Number.MAX_SAFE_INTEGER + 2]])(
+    'defineStack refuses limit %s in its ADR-0112 envelope, at flows.0.nodes.1.config.limit',
+    (limit) => {
+      let refusal: { code?: unknown; status?: unknown; issues?: Array<{ path: unknown[]; code: string }> } | undefined;
+      try {
+        defineStack({
+          manifest: { id: 'com.example.limit', name: 'limit', version: '1.0.0', type: 'app', namespace: 'lim' },
+          objects: [{ name: 'lim_account', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } }],
+          flows: [flowWith('get_record', { objectName: 'lim_account', limit }, 'lim_probe')],
+        } as never);
+      } catch (e) {
+        refusal = e as typeof refusal;
+      }
+      expect(refusal, 'defineStack must refuse the flow').toBeDefined();
+      expect({ code: refusal!.code, status: refusal!.status }).toEqual({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      expect(refusal!.issues!.map((i) => ({ path: i.path.join('.'), code: i.code }))).toEqual([
+        { path: 'flows.0.nodes.1.config.limit', code: 'custom' },
+      ]);
+    },
+  );
+
+  it('the registered `flow` type schema — what the metadata save door validates against — refuses it', () => {
+    const schema = getMetadataTypeSchema('flow') as unknown as typeof FlowSchema;
+    const r = schema.safeParse(flowWith('get_record', { ...VALID.get_record, limit: 0 }));
+    expect(r.success).toBe(false);
+    expect(r.success ? [] : r.error.issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.config.limit']);
+  });
+
+  it.each([[1], [2], [200]])('CONTROL: limit %s parses, and the judge says nothing', (limit) => {
+    const config = { ...VALID.get_record, limit };
+    expect(flowNodeConfigRefusals('get_record', config)).toEqual([]);
+    const r = FlowSchema.safeParse(flowWith('get_record', config));
+    expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
+  });
+
+  it('CONTROL: a node with no limit parses unchanged', () => {
+    const { limit: _omitted, ...config } = VALID.get_record;
+    expect(flowNodeConfigRefusals('get_record', config)).toEqual([]);
+    expect(FlowSchema.safeParse(flowWith('get_record', config)).success).toBe(true);
   });
 });
 

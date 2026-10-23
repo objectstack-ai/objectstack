@@ -315,10 +315,12 @@ type Write = (source: string) => string;
 
 /**
  * A `has()` guard for a path of keys — the absent-variable and absent-key
- * remedy. `has()` takes a field selection over names alone: an index anywhere
- * in its argument (`has(a[0].b)`, `has(vars["$x"].y)`) is refused when it
- * runs, so a path with a numeric segment, a `$`-named head or a keyword
- * segment gets no guard.
+ * remedy. `has()` refuses an index as the last step of its argument
+ * (`has(a[0])`, `has(vars["$x"])`) when it runs; an index before the last
+ * step is a presence test like any other (`has(a[0].b)`). The guard tests
+ * every step of the path, and a numeric segment, a `$`-named head or a keyword
+ * segment is read by index, so one of its tests would end on that index: such
+ * a path gets no guard.
  *
  * The guard tests one step at a time, from `vars`, which holds only the
  * variables the run has bound: `has(vars.source) && has(vars.source.id) ?

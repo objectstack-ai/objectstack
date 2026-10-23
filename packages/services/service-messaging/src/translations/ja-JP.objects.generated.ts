@@ -123,14 +123,19 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the delivery channel and its recipient (computed on read)"
+        help: "Record title: the delivery channel and the person it is for, or the address when the recipient is not a user (computed on read)"
       },
       notification_id: {
         label: "Notification Event",
         help: "FK → sys_notification (L2 event)"
       },
       recipient_id: {
-        label: "Recipient User"
+        label: "Recipient",
+        help: "The address the delivery is sent to: a user id, or an email address or phone number kept as given."
+      },
+      recipient_user_id: {
+        label: "Recipient User",
+        help: "The user the delivery is for. Empty when the recipient is an email address or phone number no user holds."
       },
       channel: {
         label: "Channel"
@@ -205,11 +210,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       topic: {
         label: "Topic",
-        help: "Notification topic, or '*' for all topics."
+        help: "通知の送信に使われるトピック:フローの通知ステップが指定するトピック、またはプラットフォームが送信するトピック(例: approval.requested、collab.mention)。すべてのトピックを対象にするには * を入力します。どこからも送信されないトピックは何にも一致しません。"
       },
       channel: {
         label: "Channel",
-        help: "Channel id (inbox/email/push/…), or '*' for all channels."
+        help: "チャネル:inbox(アプリ内の通知、常に利用可能)、email(メールサービスの設定後)、sms(SMS サービスの設定後)、またはインストール済みプラグインが追加したチャネルの ID。すべてのチャネルを対象にするには * を入力します。どのチャネルも使用しない ID は何にも一致しません。"
       },
       enabled: {
         label: "Enabled",
@@ -217,7 +222,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Digest",
-        help: "Batch cadence (P3 digest middleware).",
+        help: "これらの通知を 1 件ずつ送らず、1 通のまとめにします。daily は深夜 0 時、weekly は月曜の深夜 0 時に送信し、none は 1 件ずつすぐに送信します。緊急の通知は常にすぐに送信されます。チャネルが *（すべてのチャネル）の設定でのみ有効です。",
         options: {
           none: "none",
           daily: "daily",
@@ -226,7 +231,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Quiet Hours",
-        help: "Optional { tz, start, end } window (P3 quiet-hours middleware)."
+        help: "通知を保留し、終了時にまとめて配信する毎日の時間帯。例: { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。時刻はそのタイムゾーンの HH:MM で指定します（tz を省略した場合は UTC）。時間帯は深夜 0 時をまたいでもかまいません。緊急の通知は保留されません。チャネルが *（すべてのチャネル）の設定でのみ有効です。"
       },
       created_at: {
         label: "Created At"

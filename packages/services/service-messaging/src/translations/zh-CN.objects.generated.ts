@@ -123,14 +123,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the delivery channel and its recipient (computed on read)"
+        help: "记录标题:投递通道及其所针对的人员;接收方不是用户时为该地址(读取时计算)"
       },
       notification_id: {
         label: "通知事件",
         help: "外键 → sys_notification(L2 事件)"
       },
       recipient_id: {
-        label: "接收用户"
+        label: "接收方",
+        help: "投递发送到的地址:用户 ID,或按原样保留的电子邮件地址或电话号码。"
+      },
+      recipient_user_id: {
+        label: "接收用户",
+        help: "此投递所针对的用户。接收方是没有对应用户的电子邮件地址或电话号码时为空。"
       },
       channel: {
         label: "通道"
@@ -205,11 +210,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       topic: {
         label: "主题",
-        help: "通知主题,'*' 表示所有主题。"
+        help: "通知发送时使用的主题:流程中通知步骤指定的主题,或平台功能发出的主题,例如 approval.requested、collab.mention。填 * 表示所有主题。没有任何发送方使用的主题不会匹配任何通知。"
       },
       channel: {
         label: "通道",
-        help: "通道 ID(inbox/email/push/…),'*' 表示所有通道。"
+        help: "通道:inbox(站内收件箱,始终可用)、email(配置邮件服务后可用)、sms(配置短信服务后可用),或已安装插件添加的通道 ID。填 * 表示所有通道。没有任何通道使用的 ID 不会匹配任何通知。"
       },
       enabled: {
         label: "启用",
@@ -217,7 +222,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "摘要",
-        help: "批量发送节奏(P3 摘要中间件)。",
+        help: "将这些通知合并为一份摘要，而不是逐条发送：daily 在午夜发送，weekly 在周一午夜发送，none 则每条立即发送。紧急通知始终立即发送。仅在渠道为 *（所有渠道）的偏好设置上生效。",
         options: {
           none: "不摘要",
           daily: "每日",
@@ -226,7 +231,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "免打扰时段",
-        help: "可选的 { tz, start, end } 时间窗(P3 免打扰中间件)。"
+        help: "每天的免打扰时段，期间的通知会暂缓，并在时段结束时送达，例如 { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。时间为该时区的 HH:MM（未填 tz 时为 UTC），时段可以跨越午夜。紧急通知不会暂缓。仅在渠道为 *（所有渠道）的偏好设置上生效。"
       },
       created_at: {
         label: "创建时间"

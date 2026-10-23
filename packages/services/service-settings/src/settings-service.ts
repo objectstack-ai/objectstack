@@ -19,6 +19,9 @@ import {
 } from './crypto-adapter.js';
 import {
   type SettingsActionHandler,
+  type SettingsLiveStatus,
+  type SettingsLiveStatusProvider,
+  SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,
   type SettingsEngine,
@@ -41,7 +44,16 @@ import { renderValidationMessage } from '@objectstack/spec/system';
 // The one predicate every layer asks "does this posture wall organizations
 // off from each other?" with (`group` / `isolated`), never a re-spelled list.
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
-import type { SystemWriteOrganizationDecision } from '@objectstack/core';
+import {
+  organizationIdOf,
+  organizationReachAdmits,
+  organizationReachRowOwner,
+  resolveGuestOrganization,
+  resolveOrganizationReach,
+  UNOWNED_ORGANIZATION_REACH,
+  type OrganizationReach,
+  type SystemWriteOrganizationDecision,
+} from '@objectstack/core';
 import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import {
@@ -126,7 +138,7 @@ function callerUserIdOf(ctx: SettingsContext): string | null {
 }
 
 /**
- * The caller's organization, or `null` when the context names none.
+ * The caller's organization, and a row's.
  *
  * `sys_setting` declares its row identity as `(organization_id, namespace,
  * key, scope, user_id)`: a `tenant` row is one row PER ORGANIZATION, and a
@@ -136,25 +148,20 @@ function callerUserIdOf(ctx: SettingsContext): string | null {
  * organization wall ever reaches those calls. The organization therefore has
  * to be carried here, explicitly, in every `where` and every written row — it
  * is taken from `SettingsContext.tenantId`, which the HTTP door fills from the
- * vetted authorization context. An absent or empty id names no organization.
+ * vetted authorization context, and handed to core security's reach rule
+ * ({@link organizationReachOf}). An absent or empty id names no organization —
+ * for the caller and for a row alike, spelled one way ({@link organizationIdOf}).
  */
-function callerOrganizationIdOf(ctx: SettingsContext): string | null {
-  return typeof ctx.tenantId === 'string' && ctx.tenantId !== '' ? ctx.tenantId : null;
-}
-
-/** A row's organization, with "no organization" spelled one way. */
 function organizationOf(row: SettingsRow): string | null {
-  return typeof row.organization_id === 'string' && row.organization_id !== ''
-    ? row.organization_id
-    : null;
+  return organizationIdOf(row.organization_id);
 }
 
-/**
- * Which `sys_setting` rows a caller's `tenant` and `user` rungs may draw on.
- *
- * [ADR-0131 D1/D8] A row with no organization is no organization's: no reach
- * reads it as a fallback for an organization, and none reads another
- * organization's row for a caller that names none.
+/*
+ * Which `sys_setting` rows a caller's `tenant` and `user` rungs may draw on is
+ * core security's ONE organization-reach rule ([ADR-0131 D1/D8/D9],
+ * `OrganizationReach` / `resolveOrganizationReach`, `@objectstack/core`) — the
+ * rule the resolver's direct localization fallback asks too, so the fallback
+ * never answers what this service would refuse:
  *
  *  - `own` — that organization's rows, and only those. The organization is the
  *    caller's own, or — for a caller that names none where no wall stands —
@@ -163,25 +170,20 @@ function organizationOf(row: SettingsRow): string | null {
  *    brand name, a boot-time locale) reads, and writes, as the organization it
  *    serves.
  *  - `no-organization-object` — the composition registers no organization
- *    object, so no organization can exist (the lean embedding, kept by the
- *    ruling ADR-0131's D9 note records): the rows written with no
- *    organization, the only rows such a composition can hold.
- *  - `unowned` — no organization to name: a caller that names none under a
- *    posture that walls organizations off from each other (`group` /
- *    `isolated`), or where D9 derives none (no organization yet, or several).
- *    No tenant or user rung at all; the global rung and the default answer.
+ *    object: the rows written with no organization.
+ *  - `unowned` — no organization to name: no tenant or user rung at all; the
+ *    global rung and the default answer.
+ *
+ * This service supplies the facts ({@link SettingsService.organizationReachOf}):
+ * the posture IN FORCE, and D9's decision from its organization source.
  */
-type OrganizationReach =
-  | { kind: 'own'; organizationId: string }
-  | { kind: 'no-organization-object' }
-  | { kind: 'unowned' };
 
 /**
  * The reach of a caller with no organization to name — and the reach a read of
  * a `global` key is made with: such a key has no tenant or user rung, so no
  * reach could change its answer, and no row below the global rung is loaded.
  */
-const UNOWNED: OrganizationReach = Object.freeze({ kind: 'unowned' as const });
+const UNOWNED: OrganizationReach = UNOWNED_ORGANIZATION_REACH;
 
 /**
  * Where the service learns the tenancy posture IN FORCE — the `tenancy`
@@ -200,8 +202,12 @@ export type SettingsTenancyPostureSource = () =>
  * facts. The plugin supplies it at bind time; it is asked only for such a
  * caller, on a key below the global rung.
  *
- * Unset — a service constructed directly — reads as a composition that
- * registers no organization object: nothing names an organization to it.
+ * Unset, the service asks the same predicate itself, through the engine it
+ * holds ({@link SettingsService.organizationReachOf}). A host that binds its own
+ * engine on a composition with no organization object states that with a
+ * source answering `{ kind: 'no-organization-object' }`. A service with no
+ * engine at all (the in-memory store) holds no organization's rows, and keeps
+ * that reading.
  */
 export type SettingsOrganizationSource = () => Promise<SystemWriteOrganizationDecision>;
 
@@ -868,10 +874,12 @@ export class SettingsService {
   private tenancyPosture?: SettingsTenancyPostureSource;
   /**
    * The organization a caller that names none acts in where no wall stands,
-   * bound with the engine. Unset reads as a composition with no organization
-   * object. See {@link organizationReachOf}.
+   * bound with the engine. Unset, it is derived through the engine the service
+   * holds. See {@link organizationReachOf}.
    */
   private organizationSource?: SettingsOrganizationSource;
+  /** Live-status providers by namespace — see {@link registerLiveStatus}. */
+  private readonly liveStatusProviders = new Map<string, SettingsLiveStatusProvider>();
   /** Change subscribers, optionally scoped to a namespace. */
   private readonly subscribers = new Set<{
     ns?: string;
@@ -916,7 +924,8 @@ export class SettingsService {
       /**
        * ADR-0131 D9's answer for a caller that names no organization where no
        * wall stands: the one organization it reads and writes as, none, or a
-       * composition with no organization object.
+       * composition with no organization object. Omitted, the service asks
+       * D9 through `engine` itself (see `organizationDecision`).
        */
       organization?: SettingsOrganizationSource;
     },
@@ -1567,6 +1576,59 @@ export class SettingsService {
     reg.actions.set(actionId, handler);
   }
 
+  /**
+   * Register (or replace) the provider that states a namespace's LIVE status
+   * on its page. See {@link SettingsLiveStatus}. The last registration wins,
+   * the same override rule as {@link registerAction}.
+   */
+  registerLiveStatus(namespace: string, provider: SettingsLiveStatusProvider): void {
+    if (!this.registry.has(namespace)) throw new UnknownNamespaceError(namespace);
+    this.liveStatusProviders.set(namespace, provider);
+  }
+
+  /**
+   * The namespace's live-status statement as an `info_banner` specifier, ready
+   * to head the page, or `undefined` when no provider is registered or the
+   * provider has nothing to state.
+   *
+   * Asked on every page read and never cached, so the statement follows a
+   * runtime swap (a transport rebuilt from this very namespace). A provider
+   * that throws is not passed over in silence: the page then says the live
+   * status could not be read, because a missing statement reads as "nothing
+   * to worry about".
+   */
+  async liveStatusOf(
+    namespace: string,
+    ctx: SettingsContext = {},
+  ): Promise<SettingsManifest['specifiers'][number] | undefined> {
+    const provider = this.liveStatusProviders.get(namespace);
+    if (!provider) return undefined;
+    let status: SettingsLiveStatus | undefined;
+    try {
+      status = await provider({ namespace, ctx });
+    } catch (err: any) {
+      this.logger?.warn?.(
+        `SettingsService: the live status of settings namespace '${namespace}' could not be read — `
+        + `the page states that instead. Cause: ${err?.message ?? err}`,
+      );
+      status = {
+        label: 'Live status unavailable',
+        bannerText: 'The server could not read what is live for these settings right now. '
+          + 'The values below are what is stored, which is not necessarily what is in use.',
+        bannerSeverity: 'error',
+      };
+    }
+    if (!status) return undefined;
+    return {
+      type: 'info_banner',
+      id: SETTINGS_LIVE_STATUS_BANNER_ID,
+      label: status.label,
+      required: false,
+      bannerText: status.bannerText,
+      bannerSeverity: status.bannerSeverity,
+    } as SettingsManifest['specifiers'][number];
+  }
+
   // ---------------------------------------------------------------------
   // Resolver
   // ---------------------------------------------------------------------
@@ -1863,17 +1925,39 @@ export class SettingsService {
    * the one organization it derives, none (refused there, so `unowned` here),
    * or a composition with no organization object. A source that THROWS is not
    * caught, for the posture's reason (see {@link organizationWallStands}).
+   *
+   * The rule is core security's (`resolveOrganizationReach`); this service
+   * supplies its facts. ⛔ Kept by design, not drift: the posture IN FORCE where
+   * the resolver's localization fallback reads the requested one, and a failed
+   * read propagated where that fallback degrades it to the built-in defaults.
    */
   private async organizationReachOf(ctx: SettingsContext): Promise<OrganizationReach> {
-    const organizationId = callerOrganizationIdOf(ctx);
-    if (organizationId !== null) return { kind: 'own', organizationId };
-    if (await this.organizationWallStands()) return UNOWNED;
-    const source = this.organizationSource;
-    if (!source) return { kind: 'no-organization-object' };
-    const decision = await source();
-    if (decision.kind === 'derived') return { kind: 'own', organizationId: decision.organizationId };
-    if (decision.kind === 'no-organization-object') return { kind: 'no-organization-object' };
-    return UNOWNED;
+    return resolveOrganizationReach({
+      callerOrganizationId: ctx.tenantId,
+      wallStands: () => this.organizationWallStands(),
+      deriveOrganization: () => this.organizationDecision(),
+    });
+  }
+
+  /**
+   * ADR-0131 D9's answer for a caller that names no organization where no wall
+   * stands: the bound source's when the host stated one, else the predicate
+   * asked here, through the engine this service holds.
+   *
+   * The second branch is the same call the plugin's source makes
+   * (`resolveGuestOrganization`, the one spelling of D9 for a caller with no
+   * organization of its own), so a host that binds its own engine, or hands
+   * one to the constructor, reads and writes as the organization the
+   * composition derives rather than as no organization. An engine that exposes
+   * no registry cannot say the organization object is absent, and the
+   * predicate reads that as registered: a host that means the lean composition
+   * says so with its source. No engine at all is the in-memory store, which
+   * holds no organization's rows.
+   */
+  private async organizationDecision(): Promise<SystemWriteOrganizationDecision> {
+    if (this.organizationSource) return this.organizationSource();
+    if (!this.engine) return { kind: 'no-organization-object' };
+    return resolveGuestOrganization(this.engine, await this.tenancyPosture?.());
   }
 
   /**
@@ -2287,7 +2371,7 @@ export class SettingsService {
       // in, or a second write misses the first and inserts beside it. Only a
       // composition with no organization object stores a row with none.
       const userId = scope === 'user' ? callerUserId : null;
-      const organizationId = scope !== 'global' && reach?.kind === 'own' ? reach.organizationId : null;
+      const organizationId = scope !== 'global' && reach ? organizationReachRowOwner(reach) ?? null : null;
       const isEncrypted = reg.encryptedKeys.has(key);
       const isNull = rawValue === null || typeof rawValue === 'undefined';
 
@@ -2974,10 +3058,7 @@ export class SettingsService {
    * predicate the engine query, the in-memory filter and the rung's pick share.
    */
   private static withinReach(row: SettingsRow, reach: OrganizationReach): boolean {
-    const organizationId = organizationOf(row);
-    if (reach.kind === 'own') return organizationId === reach.organizationId;
-    if (reach.kind === 'no-organization-object') return organizationId === null;
-    return false;
+    return organizationReachAdmits(reach, row.organization_id);
   }
 
   /**
@@ -3009,7 +3090,8 @@ export class SettingsService {
     reach: OrganizationReach,
   ): Promise<SettingsRow[]> {
     // No organization to name: no tenant or user rung, so nothing to read.
-    if (reach.kind === 'unowned') return [];
+    const organization_id = organizationReachRowOwner(reach);
+    if (organization_id === undefined) return [];
     // A user-keyed load must still see the tenant rows (user_id NULL):
     // resolveKey's user→tenant→global cascade and the Phase-2 upper-scope lock
     // check both search THIS one result set, so a bare user_id equality starves
@@ -3027,7 +3109,6 @@ export class SettingsService {
     // crossed with the ONE organization the reach owns (`OrganizationReach`) —
     // none at all only in a composition with no organization object, whose
     // rows carry none (ADR-0131's D9 note).
-    const organization_id = reach.kind === 'own' ? reach.organizationId : null;
     const where: Record<string, unknown> = {
       namespace,
       $or: rungs.map((rung) => ({ ...rung, organization_id })),

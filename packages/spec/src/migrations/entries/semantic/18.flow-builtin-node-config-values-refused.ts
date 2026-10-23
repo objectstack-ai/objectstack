@@ -10,6 +10,10 @@ import type { SemanticMigration } from '../../types.js';
 // narrows a flow's accept set; no key is removed, so there is no tombstone and
 // no RETIRED_KEYS_BY_MAJOR row. There is no D2 conversion either: the platform
 // cannot know the value the author meant, and the runtime never ran such a node.
+// (#25302) The one exception is `get_record`'s `limit` range: a fraction or a
+// count below 1 did run, as the driver's LIMIT as written (`2.5`) or as a
+// single-record `findOne` (`0`, `-1`), so its refusal changes what such a node
+// did rather than how it fails, and still no conversion can know the count.
 //
 // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
 // inside a code span and a table cell.
@@ -21,7 +25,7 @@ export const entry: SemanticMigration = {
     + 'contract refuses — a value of the wrong type (create_record outputVariable 42, a screen field min '
     + 'written as the string 1, get_record limit as a string, update_record multi as a string), a value '
     + 'outside the declared set or range (notify severity loud, screen mode view, loop maxIterations 0, '
-    + 'try_catch retry.maxRetries above 10), an empty script function or subflow flowName, or a rule '
+    + 'try_catch retry.maxRetries above 10, get_record limit 2.5 or 0 where a positive integer is declared), an empty script function or subflow flowName, or a rule '
     + 'finding on present keys (a notify template beside an inline title). A value carrying a token in '
     + 'braces is judged like any other (get_record limit written as a token, refused as the wrong type), '
     + 'and at a key its executor reads as written (a notify sourceObject, actorId or payload; an http '
@@ -36,7 +40,8 @@ export const entry: SemanticMigration = {
     + 'string (`outputVariable: \'taskId\'`), a number where it wants a number (`min: 1`, `limit: 10`, '
     + '`maxIterations: 5`, `timeoutMs: 5000`), a boolean where it wants a boolean (`multi: true`, '
     + '`durable: true`), one of the declared values (`severity: \'warning\'`, `mode: \'edit\'`), or a value '
-    + 'inside the declared range. A number or boolean slot takes a LITERAL only: every builtin executor '
+    + 'inside the declared range (a `get_record` `limit` is a positive integer: `limit: 1` reads one record, '
+    + 'a larger whole number a list of at most that many). A number or boolean slot takes a LITERAL only: every builtin executor '
     + 'parses the config as authored, so a `{token}` template there (`limit: \'{page.size}\'`, '
     + '`maxIterations: \'{cap}\'`) is refused at the build doors as the wrong type, as every run refused '
     + 'it — and at an `http` node\'s `durable` and `timeoutMs`, which `http` once interpolated before it '
@@ -72,7 +77,10 @@ export const entry: SemanticMigration = {
     + 'refused: registered from the metadata registry or `sys_metadata` at boot it is skipped with a '
     + '`warn` naming it, its trigger not armed, while the flows beside it register; a '
     + '`defineStack({ flows })` source throws `StackSchemaInvalidError` for the whole stack; an artifact '
-    + 'file is refused whole at load. ADR-0087, ADR-0031.',
+    + 'file is refused whole at load. One value in this set used to run rather than fail: a `get_record` '
+    + '`limit` that is not a positive integer. The executor reads around the Data API\'s page-window '
+    + 'normalizer, so `limit: 2.5` reached the driver as its LIMIT as written, and `0` or `-1` silently read '
+    + 'one record through `findOne`. ADR-0087, ADR-0031.',
   acceptanceCriteria:
     'Run `objectstack validate` over every stack authored in config files, and boot every deployed '
     + 'stack. Each refusal names the node and the key: `FlowSchema.parse` anchors a `custom` issue at '

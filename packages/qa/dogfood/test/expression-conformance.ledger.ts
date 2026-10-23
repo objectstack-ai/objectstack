@@ -629,6 +629,16 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     note: 'EXPERIMENTAL, and the state is a deliberate split between two questions. `packages/spec/liveness/object.json` classifies the KEY `live` with the note "objectui ({{record.field}} interpolation)" — that ledger asks whether anything READS the key, and the answer is yes. THIS ledger asks what EVALUATES the expression and under which fail policy, and the only interpolation site named is in the sibling repo objectui, which is not in this checkout: ⛔ NOT measured here, so it is not written into `enforcement` as if it had been. Marking the row `enforced` on a second-hand reading is exactly the invented cell this ledger exists to prevent; marking it `removed` would contradict a governed ledger that measured more than I could. Re-state as `enforced` when someone measures the objectui site — or as `removed` when ADR-0079 retires the key.',
   },
   {
+    // #24798 (ruling B, the spec half): `confirmText` became a `template` slot over a closed scope.
+    id: 'template-bulk-confirm-text',
+    summary: 'list-view bulk action confirm sentence (BulkActionDef.confirmText) — `{{ count }}` and `{{ <param> }}` template holes over a closed scope',
+    dialect: 'template', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
+    enforcement:
+      'PARSE ONLY in this repo — `ui/bulk-action.zod.ts` types the slot with `templateExpressionInput` (the input `TemplateExpressionInputSchema` takes, with refusals prescribing `{{ count }}`), normalizing a bare string to `{dialect:"template",source}` and, for 18.x, still accepting a blank string as written. NO EVALUATOR FOUND here: the sentence is drawn by the console\'s bulk dialog in the sibling objectui repo, not in this checkout, and filling its holes is the renderer half of the ruling. At build and at the publish gate `validateStackExpressions` judges it — `closedScopeTemplateRefusal` over the roots `bulkConfirmTemplateRoots(def)` declares (`count` and the def\'s params by name), then `validateExpression(\'template\', …)` — and every finding is an ERROR: `objectstack validate` / `compile` fail and the publish gate answers 422, while the parse still accepts what it accepted (a blank string included), so a stored view keeps loading until its next save',
+    covers: ['ui/bulk-action.zod.ts:BulkActionDefSchema.confirmText'],
+    note: 'EXPERIMENTAL until the console fills the holes. The spec half declares the slot, its closed scope and the display-value rule a param hole renders; the console half — the dialog rendering the slot through the formula template engine, `count` first and the param roots second — lands in objectui, and this row is re-stated as `enforced` with the fail policy that renderer has once it is measured there. Until then a hole reaches the screen as literal text, as it did before the slot was typed.',
+  },
+  {
     id: 'template-notify-content',
     summary: 'flow `notify` node inline content (NotifyConfig.title, .message) — `{{ }}` template holes rendered per run by the formula template engine',
     dialect: 'template', mode: 'interpret', state: 'enforced', failPolicy: 'throw',

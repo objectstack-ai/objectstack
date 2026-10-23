@@ -123,14 +123,19 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the delivery channel and its recipient (computed on read)"
+        help: "Record title: the delivery channel and the person it is for, or the address when the recipient is not a user (computed on read)"
       },
       notification_id: {
         label: "Notification Event",
         help: "FK → sys_notification (L2 event)"
       },
       recipient_id: {
-        label: "Recipient User"
+        label: "Recipient",
+        help: "The address the delivery is sent to: a user id, or an email address or phone number kept as given."
+      },
+      recipient_user_id: {
+        label: "Recipient User",
+        help: "The user the delivery is for. Empty when the recipient is an email address or phone number no user holds."
       },
       channel: {
         label: "Channel"
@@ -205,11 +210,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       topic: {
         label: "Topic",
-        help: "Notification topic, or '*' for all topics."
+        help: "El tema con el que se envían las notificaciones: el tema que indica el paso de notificación de un flujo, o uno que envía la plataforma, como approval.requested o collab.mention. Escriba * para todos los temas. Un tema que nadie envía no coincide con nada."
       },
       channel: {
         label: "Channel",
-        help: "Channel id (inbox/email/push/…), or '*' for all channels."
+        help: "El canal: inbox (notificaciones dentro de la aplicación, siempre disponible), email (una vez configurado un servicio de correo electrónico), sms (una vez configurado un servicio de SMS) o el id de un canal que añada un plugin instalado. Escriba * para todos los canales. Un id que ningún canal usa no coincide con nada."
       },
       enabled: {
         label: "Enabled",
@@ -217,7 +222,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Digest",
-        help: "Batch cadence (P3 digest middleware).",
+        help: "Agrupa estas notificaciones en un único resumen en lugar de enviar cada una al llegar: daily lo envía a medianoche, weekly el lunes a medianoche y none envía cada una de inmediato. Las notificaciones críticas siempre se envían al momento. Se aplica en una preferencia cuyo canal es * (todos los canales).",
         options: {
           none: "none",
           daily: "daily",
@@ -226,7 +231,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Quiet Hours",
-        help: "Optional { tz, start, end } window (P3 quiet-hours middleware)."
+        help: "Una franja diaria en la que las notificaciones se retienen y se entregan al terminar, por ejemplo { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Las horas son HH:MM en esa zona horaria (UTC si se omite tz) y la franja puede pasar de medianoche. Las notificaciones críticas no se retienen. Se aplica en una preferencia cuyo canal es * (todos los canales)."
       },
       created_at: {
         label: "Created At"

@@ -429,10 +429,12 @@ describe('SqlDriver tenant scope (organization_id)', () => {
       try {
       await driver.initObjects(objects);
 
-      await driver.create('account', { id: 'x1', organization_id: 'org_a', name: 'X1' });
-      await driver.create('account', { id: 'x2', organization_id: 'org_a', name: 'X2' });
-      // Second create on same object:op should NOT add another warn (throttle).
-      expect(warnSpy.filter(w => w.meta?.op === 'create')).toHaveLength(1);
+      // Deletes: an insert whose row carries its organization is not audited
+      // at all (ADR-0131 8c-1), so a create cannot exercise the throttle.
+      await driver.delete('account', 'x1');
+      await driver.delete('account', 'x2');
+      // Second delete on same object:op should NOT add another warn (throttle).
+      expect(warnSpy.filter(w => w.meta?.op === 'delete')).toHaveLength(1);
       } finally {
         if (priorPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
         else process.env.OS_TENANCY_POSTURE = priorPosture;

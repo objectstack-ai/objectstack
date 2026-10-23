@@ -49,6 +49,7 @@ import {
     FLOW_CLONE_DROPPED_KEYS,
     FLOW_CLONE_MUTATED_FIELDS,
     FLOW_CLONE_NAME_TAKEN_STATUS,
+    FLOW_CLONE_NOTICE,
     FLOW_CLONE_STATUS,
 } from '../flow-clone.js';
 
@@ -456,11 +457,27 @@ describe('#12156 — the source, the notice, and the gate', () => {
         // `obsolete`/`invalid`, so a cloned record-change flow runs beside the
         // one it was copied from. Saying so is cheaper than the surprise.
         expect(notice).toMatch(/off-switch/i);
-        // [#20726] And the off-switch it names is one the clone has: its own
-        // `status`, through its update door. A clone carries no package
-        // envelope, and the activation toggle switches packaged flows only.
-        expect(notice).toContain("status: 'obsolete'");
-        expect(notice).toContain('PUT /api/v1/automation/');
+        // [#20726] And it names the switches an admin has. A clone carries no
+        // package envelope, so the packaged-flow switch does not reach it; the
+        // clone is switched off in Studio, the original from its own row.
+        expect(notice).toContain('Switch "…" off');
+        expect(notice).toContain('does not reach the clone');
+        expect(notice).toContain('open it in Studio, set its Enabled switch to Disabled, and publish');
+    });
+
+    it('is admin copy: it names controls, never an endpoint or a request body', async () => {
+        // The console shows this notice verbatim on the clone result. The REST
+        // recipe for the same switch is developer copy, in the client SDK.
+        const source = packagedExemplar();
+        const { dispatcher } = makeDispatcher([source]);
+
+        const result = await dispatcher.handleAutomation(clonePath(source.name as string), 'POST', NEW, CTX);
+        const notice: string = ((result.response?.body?.data ?? result.response?.body) as any)?.notice ?? '';
+
+        expect(notice).toBe(FLOW_CLONE_NOTICE);
+        expect(notice).not.toContain('/api/');
+        expect(notice).not.toMatch(/request body/i);
+        expect(notice).not.toMatch(/\b(PUT|POST)\b/);
     });
 
     it('is an authoring write — a caller without `manage_metadata` is refused 403, nothing registered', async () => {

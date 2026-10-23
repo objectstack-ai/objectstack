@@ -7681,7 +7681,7 @@ export class SqlDriver implements IDataDriver {
       toInsert.id = nanoid(DEFAULT_ID_LENGTH);
     }
 
-    this.auditMissingTenant(object, 'create', options);
+    this.auditMissingTenant(object, 'create', options, [toInsert]);
     this.injectTenantOnInsert(object, toInsert, options);
 
     // #5495. The autonumber counter is bootstrapped from the data table exactly
@@ -10141,7 +10141,6 @@ export class SqlDriver implements IDataDriver {
    * contract's type now, pinned by `sql-driver-doors-declared-types.test.ts`.
    */
   async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
-    this.auditMissingTenant(object, 'bulkCreate', options);
     // Same client-side id assignment as create() (id/_id normalization,
     // nanoid fallback when neither is supplied) — a row missing an id must
     // not be silently inserted with a NULL primary key just because the
@@ -10158,6 +10157,7 @@ export class SqlDriver implements IDataDriver {
       }
       return toInsert;
     });
+    this.auditMissingTenant(object, 'bulkCreate', options, rows);
     for (const row of rows) {
       if (row && typeof row === 'object') this.injectTenantOnInsert(object, row, options);
     }
@@ -16085,11 +16085,24 @@ export class SqlDriver implements IDataDriver {
    * `tenantId` (ADR-0131 D8). Telling that second write to "pass tenantId"
    * prescribes the one change that would break it, so ⛔ the remedy sentence
    * never addresses the write as if it were only the first kind.
+   *
+   * [ADR-0131 8c-1] An INSERT names its organization in a second place: the
+   * row's own tenant column, the slot {@link injectTenantOnInsert} fills from
+   * `tenantId`. A `create` / `bulkCreate` whose every row already carries that
+   * column is confined to the organizations its rows name, so there is nothing
+   * to report — and that is how the elevated seed and replay inserts of a
+   * walled boot arrive (a system insert with no organization is refused above
+   * this driver, ADR-0131 D9). `insertRows` is those rows, passed by the two
+   * insert doors only; one row without the column keeps the line. ⛔ Never for
+   * update, delete or upsert: there the column is a value being written, not
+   * the statement's scope (the line says so), and an upsert's merge leg can
+   * reach a row of another organization. Diagnostics only: no write changes.
    */
   protected auditMissingTenant(
     object: string,
     op: 'create' | 'update' | 'delete' | 'bulkCreate' | 'bulkDelete' | 'updateMany' | 'deleteMany' | 'upsert',
     options?: DriverOptions,
+    insertRows?: readonly unknown[],
   ): void {
     if (process.env.OS_TENANT_AUDIT === '0') return;
     if (options?.bypassTenantAudit === true) return;
@@ -16109,6 +16122,13 @@ export class SqlDriver implements IDataDriver {
     if (!this.isMultiTenantMode()) return;
     const field = this.resolveTenantField(object);
     if (!field) return;
+    // Empty is spelled as `injectTenantOnInsert` spells it: a row it would
+    // stamp is a row that does not carry its organization.
+    const carriesTenant = (row: unknown): boolean => {
+      const value = row && typeof row === 'object' ? (row as Record<string, unknown>)[field] : undefined;
+      return value !== undefined && value !== null && value !== '';
+    };
+    if (insertRows !== undefined && insertRows.length > 0 && insertRows.every(carriesTenant)) return;
     const key = `${object}:${op}`;
     if (this.tenantAuditWarned.has(key)) return;
     this.tenantAuditWarned.add(key);

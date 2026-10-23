@@ -173,9 +173,18 @@ describe('every new APIError( in plugin-auth/src carries an ADR-0112 code (#2424
     // 24, `objectql-adapter.ts` 3, `impersonation-bearer-rotation.ts` 2,
     // `admin-impersonate-endpoint.ts` 1). A floor, not an exact count, so a new
     // throw does not have to edit this line; only losing them does.
+    // [#25224] `AuthManager`'s throws are counted over the files its methods'
+    // bodies live in: `auth-manager.ts` and the bodies moved out of it whole.
+    const authManagerFiles = [
+      'auth-manager.ts',
+      'auth-manager-actor-guards.ts',
+      'auth-manager-sign-in-lockout.ts',
+      'auth-manager-password-session-policy.ts',
+      'auth-manager-email-sms-delivery.ts',
+    ];
     expect(sites.length).toBeGreaterThanOrEqual(30);
     expect(new Set(sites.map((s) => s.file)).size).toBeGreaterThanOrEqual(4);
-    expect(perFile.find((f) => f.file === 'auth-manager.ts')?.sites.length ?? 0).toBeGreaterThanOrEqual(24);
+    expect(perFile.filter((f) => authManagerFiles.includes(f.file)).reduce((n, f) => n + f.sites.length, 0)).toBeGreaterThanOrEqual(24);
   });
 
   it('the textual control agrees with the walk in every file', () => {

@@ -86,14 +86,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ai_access: {
         label: "AI Access",
-        help: "Whether this user holds an AI seat — grants access to the in-UI AI agents (build / ask). The framework synthesizes the `ai_seat` capability from this flag (plugin-hono-server resolveCtx). Assignment is capped by the licensed / purchased seat count (enforced by @objectstack/security-enterprise AiSeatPlugin). Owned by objectql (better-auth is oblivious to this column)."
+        help: "Whether this user holds an AI seat. A seat grants the `ai_seat` capability, which opens the AI assistants in the app (build and ask). How many users can hold one is limited by the seats your license includes."
       },
       image: {
         label: "Profile Image"
       },
       locale: {
         label: "Locale",
-        help: "Preferred language for notifications, as a BCP-47 tag (e.g. zh-CN, ja-JP). Read per recipient at delivery time; when unset the deployment default applies. Owned by objectql (better-auth is oblivious to this column)."
+        help: "Preferred language for this user's notifications, as a language tag such as zh-CN or ja-JP. When unset, the deployment's default language applies."
       },
       manager_id: {
         label: "Manager",
@@ -130,9 +130,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       unverified: {
         label: "Unverified"
-      },
-      two_factor: {
-        label: "2FA Enabled"
       },
       banned: {
         label: "Banned"
@@ -185,6 +182,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           mustChangePassword: {
             label: "Require Password Change On First Login"
+          },
+          permissionSet: {
+            label: "Permission Set",
+            helpText: "Optional. Grants this permission set to the new user, so they can open their apps on first sign-in."
           }
         },
         resultDialog: {
@@ -194,6 +195,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             "user.email": "Email",
             "user.phoneNumber": "Phone Number",
+            permissionSet: "Permission Set",
             temporaryPassword: "Temporary Password"
           }
         }
@@ -921,11 +923,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Kind",
         help: "Categorisation hint — does not change graph semantics.",
         options: {
-          company: "company",
-          division: "division",
-          department: "department",
-          office: "office",
-          cost_center: "cost_center"
+          company: "Company",
+          division: "Division",
+          department: "Department",
+          office: "Office",
+          cost_center: "Cost Center"
         }
       },
       parent_business_unit_id: {
@@ -1123,12 +1125,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       create_api_key: {
         label: "Create Key",
         description: "Create a key for a script or integration. The key acts as you, with your access, in the organization you are working in now.",
+        params: {
+          expires_at: {
+            helpText: "Leave empty for the default lifetime set under Setup → Authentication → API keys (Default key lifetime, 90 days unless changed). A date later than the Maximum key lifetime there is refused."
+          }
+        },
         resultDialog: {
           title: "API key created",
           description: "Copy the key now — it is shown only once and cannot be recovered. If it leaks, revoke it and create a new one.",
           acknowledge: "I have saved the key",
           fields: {
-            key: "API Key"
+            key: "API Key",
+            expires_at: "Expires At"
           }
         }
       },
@@ -1582,19 +1590,19 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "Client ID",
-        help: "Foreign key to sys_oauth_application.client_id"
+        help: "The client ID of the OAuth application this token was issued to."
       },
       session_id: {
         label: "Session",
-        help: "Foreign key to sys_session.id"
+        help: "The sign-in session this token was issued in."
       },
       user_id: {
         label: "User",
-        help: "Foreign key to sys_user.id"
+        help: "The user this token acts for."
       },
       refresh_id: {
         label: "Refresh Token",
-        help: "Foreign key to sys_oauth_refresh_token.id"
+        help: "The refresh token this access token was issued from."
       },
       reference_id: {
         label: "Reference ID",
@@ -1646,15 +1654,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "Client ID",
-        help: "Foreign key to sys_oauth_application.client_id"
+        help: "The client ID of the OAuth application this token was issued to."
       },
       session_id: {
         label: "Session",
-        help: "Foreign key to sys_session.id"
+        help: "The sign-in session this token was issued in."
       },
       user_id: {
         label: "User",
-        help: "Foreign key to sys_user.id"
+        help: "The user this token acts for."
       },
       reference_id: {
         label: "Reference ID",
@@ -1718,11 +1726,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "Client ID",
-        help: "Foreign key to sys_oauth_application.client_id"
+        help: "The client ID of the OAuth application the user consented to."
       },
       user_id: {
         label: "User",
-        help: "Foreign key to sys_user.id"
+        help: "The user who gave this consent."
       },
       reference_id: {
         label: "Reference ID",
@@ -1820,11 +1828,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "Client ID",
-        help: "Foreign key to sys_oauth_application.client_id"
+        help: "The client ID of the OAuth application this grant is for."
       },
       resource_id: {
         label: "Resource ID",
-        help: "Foreign key to sys_oauth_resource.identifier"
+        help: "The identifier of the protected resource the application may request tokens for."
       },
       metadata: {
         label: "Metadata",
@@ -3042,7 +3050,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       package_version_id: {
         label: "Package Version",
-        help: "Foreign key to sys_package_version (UUID). Null = platform-built-in or env-level override."
+        help: "The package release this metadata was installed from. Empty for built-in platform metadata and for changes made in this environment."
       },
       managed_by: {
         label: "Managed By",

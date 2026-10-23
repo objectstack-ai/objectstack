@@ -52,7 +52,7 @@ import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js'
 import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 /** The environment-authored set the member holds a grant of, as the security catalog declares it. */
 const LEGACY_REPORTS = { name: 'legacy_reports', label: 'Legacy reports' };
@@ -139,10 +139,9 @@ async function readersByPrincipal(posture: Posture): Promise<Record<string, unkn
     ],
   } as any);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, ['sys_permission_set']);
   engines.push(engine);
 
   const services: Record<string, unknown> = {

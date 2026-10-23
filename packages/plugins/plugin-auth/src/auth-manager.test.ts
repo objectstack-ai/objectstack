@@ -38,7 +38,7 @@ vi.mock('better-auth/plugins/haveibeenpwned', () => ({
 import { betterAuth } from 'better-auth';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 import { ADMIN_FULL_ACCESS, ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
-import { AuthzStoreUnavailableError } from '@objectstack/core';
+import { AuthzStoreUnavailableError, resetCloudManagedForTesting } from '@objectstack/core';
 
 describe('AuthManager', () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
@@ -3183,9 +3183,32 @@ describe('AuthManager', () => {
         // default, `invite_only` — no legacy limbo.
         audiencePosture: 'invite_only',
         degradedTenancy: false,
+        // [#25292] `OS_CLOUD_MANAGED` is unset here, so not managed.
+        cloudManaged: false,
         privacyUrl: 'https://objectstack.ai/privacy',
         termsUrl: 'https://objectstack.ai/terms',
       });
+    });
+
+    // [#25292] `features.cloudManaged` is served from `isCloudManaged()`, the
+    // one accessor every managed-mode judgement reads, so the console's
+    // hide-when-on gate and the server agree on the mode.
+    it('serves features.cloudManaged from OS_CLOUD_MANAGED', () => {
+      const prev = process.env.OS_CLOUD_MANAGED;
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+      });
+      try {
+        process.env.OS_CLOUD_MANAGED = '1';
+        resetCloudManagedForTesting();
+        expect((manager.getPublicConfig() as any).features.cloudManaged).toBe(true);
+      } finally {
+        if (prev === undefined) delete process.env.OS_CLOUD_MANAGED;
+        else process.env.OS_CLOUD_MANAGED = prev;
+        resetCloudManagedForTesting();
+      }
+      expect((manager.getPublicConfig() as any).features.cloudManaged).toBe(false);
     });
 
     // Enterprise SSO (@better-auth/sso) is opt-in: the plugin is only wired
@@ -4783,11 +4806,18 @@ describe('AuthManager', () => {
       find: vi.fn(async () => []),
     });
 
-    it('is a no-op when idle + absolute are both off', async () => {
+    // [#25343] Both off no longer means no-op: the `last_activity_at`
+    // heartbeat runs on every deployment (ruling 6358844136, letter A); its
+    // memo and throttle are pinned in session-heartbeat-default-config.test.ts.
+    it('with idle + absolute both off it revokes nothing but still writes the heartbeat', async () => {
       const engine = oneEngine({ id: 's1', created_at: new Date(0).toISOString() });
       const m = mgr(engine, {});
       await (m as any).enforceSessionControls('s1', undefined);
-      expect(engine.findOne).not.toHaveBeenCalled();
+      expect(engine.findOne).toHaveBeenCalledTimes(1);
+      expect(engine.update).toHaveBeenCalledTimes(1);
+      const [, patch] = engine.update.mock.calls[0] as unknown as [string, Record<string, unknown>];
+      expect(patch.last_activity_at instanceof Date).toBe(true);
+      expect(patch.revoke_reason).toBeUndefined();
     });
 
     it('revokes (absolute_max) when the session is older than the absolute cap', async () => {

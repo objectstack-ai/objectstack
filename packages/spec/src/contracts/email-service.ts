@@ -77,8 +77,11 @@ export interface SendEmailInput {
    * export and cleanup script that filters by organization, which is worse
    * than a null. Producers that already hold one (e.g. the messaging email
    * channel's `delivery.notification.organizationId`) thread it here; omit
-   * it when the caller genuinely has none — absent stays legal and the row
-   * is simply unstamped. Mail about a person rather than an organization
+   * it when the caller genuinely has none — absent stays legal, and the
+   * engine then stamps the one organization it can derive for the row or
+   * refuses the insert where it can derive none (ADR-0131 D9); the row stays
+   * unstamped only in a composition that registers no organization object.
+   * Mail about a person rather than an organization
    * (auth verification, password reset) is {@link identityMail} instead. Forward-stamping only; pre-existing org-less rows are not
    * backfilled.
    */

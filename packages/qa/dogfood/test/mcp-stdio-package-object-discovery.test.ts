@@ -42,6 +42,14 @@
  * the plugin's own stdio server over an in-process transport speaking the
  * JSON-RPC a stdio client speaks.
  *
+ * [#25245] The `objectstack://objects` resources read the same view. They read
+ * the `metadata` service until then: measured on the `env_local` boot row at
+ * the base tree, `resources/read` of `objectstack://objects` answered
+ * `{ objects: [], totalCount: 0 }` and of `objectstack://objects/qa_pkg_open`
+ * `404 RESOURCE_NOT_FOUND`, while the tools listed and described both; and on
+ * the shape that copies, they still listed and described a disabled package's
+ * objects. Their pins sit beside the tools' and assert the two answer alike.
+ *
  * ## What is real, and the one seam that is not
  *
  * As in `mcp-stdio-runtime-object-exposure.test.ts`: the kernel is real
@@ -220,6 +228,8 @@ interface Booted {
   call(name: string, args: Record<string, unknown>): Promise<ToolAnswer>;
   /** What `resources/read` on a record URI answered, parsed. */
   readRecord(object: string, id: string): Promise<any>;
+  /** [#25245] What `resources/read` on `uri` answered, parsed. */
+  readResource(uri: string): Promise<any>;
 }
 
 /**
@@ -320,6 +330,12 @@ async function boot(
   });
   session.notify('notifications/initialized');
 
+  const readResource = async (uri: string): Promise<any> => {
+    const frame = await session.rpc('resources/read', { uri });
+    expect(frame.error, `resources/read ${uri} failed at the protocol level`).toBeUndefined();
+    return JSON.parse(frame.result.contents[0].text as string);
+  };
+
   return {
     kernel,
     engine,
@@ -334,10 +350,9 @@ async function boot(
       return { isError: frame.result.isError === true, text, json };
     },
     async readRecord(object, id) {
-      const frame = await session.rpc('resources/read', { uri: `objectstack://objects/${object}/records/${id}` });
-      expect(frame.error, 'resources/read failed at the protocol level').toBeUndefined();
-      return JSON.parse(frame.result.contents[0].text as string);
+      return readResource(`objectstack://objects/${object}/records/${id}`);
     },
+    readResource,
   };
 }
 
@@ -351,8 +366,15 @@ async function shutdown(booted: Booted | undefined): Promise<void> {
 const outcome = (answer: ToolAnswer) =>
   (answer.isError ? { code: answer.json?.error?.code, status: answer.json?.error?.status } : 'SERVED');
 
-const nonSystem = (answer: ToolAnswer) =>
-  ((answer.json?.objects as Array<{ name: string }> | undefined) ?? []).map((o) => o.name).filter((n) => !/^sys_/i.test(n));
+/** The non-system names of an `{ objects }` listing. */
+const nonSystemNames = (listing: { objects?: Array<{ name: string }> } | undefined) =>
+  (listing?.objects ?? []).map((o) => o.name).filter((n) => !/^sys_/i.test(n));
+
+const nonSystem = (answer: ToolAnswer) => nonSystemNames(answer.json);
+
+/** [#25245] The two object resources' URIs. */
+const OBJECT_LIST_URI = 'objectstack://objects';
+const objectUri = (name: string) => `objectstack://objects/${name}`;
 
 /** The six MCP data tools, each called on `object`. */
 const DATA_TOOLS: ReadonlyArray<readonly [string, (object: string) => Record<string, unknown>]> = [
@@ -427,6 +449,31 @@ for (const { shape, environmentId } of SHAPES) {
           .toMatchObject({ isError: true, text: expect.stringContaining('not found') });
       });
 
+      it('[#25245] resources/read objectstack://objects lists both package objects, with a complete totalCount — the listing list_objects serves', async () => {
+        const listed = await k!.readResource(OBJECT_LIST_URI);
+        expect(nonSystemNames(listed)).toEqual(expect.arrayContaining([pkg.open, pkg.gated]));
+        expect(listed).not.toHaveProperty('partial');
+        expect(listed.totalCount).toBe(listed.objects.length);
+        expect(nonSystemNames(listed).sort()).toEqual(nonSystem(await k!.call('list_objects', {})).sort());
+      });
+
+      it('[#25245] resources/read objectstack://objects/NAME answers both package objects as describe_object does, the declared exposure included', async () => {
+        const open = await k!.readResource(objectUri(pkg.open));
+        const gated = await k!.readResource(objectUri(pkg.gated));
+
+        expect(open.name).toBe(pkg.open);
+        expect(open.fields.map((f: any) => f.name)).toContain('name');
+        expect(gated).toMatchObject({ name: pkg.gated, enableFeatures: { apiEnabled: false } });
+        expect(open).toEqual((await k!.call('describe_object', { objectName: pkg.open })).json);
+        expect(gated).toEqual((await k!.call('describe_object', { objectName: pkg.gated })).json);
+        // The control: a name nothing serves is still the coded miss.
+        expect(await k!.readResource(objectUri('qa_pkg_nowhere'))).toEqual({
+          error: 'Object "qa_pkg_nowhere" not found',
+          code: 'RESOURCE_NOT_FOUND',
+          status: 404,
+        });
+      });
+
       for (const [tool, args] of DATA_TOOLS) {
         it(`${tool} refuses the object the package declared apiEnabled: false — 404 OBJECT_API_DISABLED, the store never asked`, async () => {
           const store = storeSpies(k!.engine, pkg.gated);
@@ -486,6 +533,19 @@ for (const { shape, environmentId } of SHAPES) {
       for (const name of [pkg.open, pkg.gated]) {
         expect(await k!.call('describe_object', { objectName: name }))
           .toMatchObject({ isError: true, text: expect.stringContaining('not found') });
+      }
+    });
+
+    it('[#25245] neither listed nor described by the objectstack://objects resources — the coded miss, as describe_object answers', async () => {
+      const listed = nonSystemNames(await k!.readResource(OBJECT_LIST_URI));
+      expect(listed).not.toContain(pkg.open);
+      expect(listed).not.toContain(pkg.gated);
+      for (const name of [pkg.open, pkg.gated]) {
+        expect(await k!.readResource(objectUri(name))).toEqual({
+          error: `Object "${name}" not found`,
+          code: 'RESOURCE_NOT_FOUND',
+          status: 404,
+        });
       }
     });
 

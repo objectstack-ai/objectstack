@@ -354,7 +354,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       delegator_id: {
         label: "Delegator",
-        help: "The user going out of office; their individually-routed approver slots are rerouted while active."
+        help: "El usuario que se ausenta. Solo puedes delegar tus propias aprobaciones, así que siempre eres tú: el campo empieza contigo y no ofrece a nadie más. Mientras la delegación está activa, los puestos de aprobador asignados a esa persona se reenrutan."
       },
       delegate_id: {
         label: "Delegate",
@@ -362,7 +362,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Valid From",
-        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive — never by a background job."
+        help: "La regla está inactiva antes de este instante. Vacío = activa de inmediato. Se comprueba cada vez que se enruta una aprobación, por lo que la regla empieza a tiempo sin ninguna tarea programada."
       },
       valid_until: {
         label: "Valid Until",
@@ -374,7 +374,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Tenant that owns this rule; null = applies across tenants for this delegator."
+        help: "La organización a la que pertenece esta delegación. Solo redirige las aprobaciones abiertas en esta organización."
       },
       created_at: {
         label: "Created At"

@@ -90,7 +90,7 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 import { wireEngineSecuritySource } from './engine-security-source.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
@@ -328,10 +328,9 @@ async function bootRls(predicate: string, opts: { grantCrud?: boolean } = {}) {
     ],
   } as never);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, [OBJ]);
   await engine.insert(OBJ, [
     { id: 'r1', status: 'open', title: 'x', amount: 5 },
     { id: 'r2', status: 'open', title: 'open', amount: 7 },
@@ -479,10 +478,9 @@ async function bootPrincipal(source: PostureSource) {
     ],
   } as never);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, ['sys_permission_set']);
 
   const e = engine as unknown as { insert: (o: string, row: Record<string, unknown>, opts: never) => Promise<unknown> };
   for (const id of [ALPHA, BETA]) await e.insert('sys_organization', { id, name: id, slug: id }, SYS);
@@ -665,10 +663,6 @@ async function bootSharing(opts: { faultReadFilter?: boolean; authored?: boolean
     ],
   } as never);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
   await engine.insert(LINE, [
     { id: 'l_other', name: 'owned by someone else', owner_id: 'u_somebody' },
     { id: 'l_own', name: 'owned by the control', owner_id: 'u_own' },
@@ -843,10 +837,9 @@ async function bootDelegated(posture: TenancyPosture) {
     ],
   } as never);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, ['sys_permission_set']);
 
   const e = engine as unknown as { insert: (o: string, row: Record<string, unknown>, opts: never) => Promise<unknown> };
   for (const id of [ALPHA, BETA]) await e.insert('sys_organization', { id, name: id, slug: id }, SYS);

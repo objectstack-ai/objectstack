@@ -50,9 +50,25 @@
  * the object. Every context the prologue admits keeps the scope it had, and
  * one parity cell reads the provider beside the engine's own find over the
  * same contexts.
+ *
+ * ## The probes and the diagnostics answer the same rule [#25107]
+ *
+ * Every other reader in this plugin that resolves a delegator on its own asks
+ * the prologue's check too (`delegatedOrganizationRefusal`, the one ask of
+ * `vetOrganizationClaim` they share with the prologue), so none of them
+ * answers an admission for a context the operation refuses: the admission
+ * probes `canReadObject`, `canWriteObject` and `canExport` answer `false`; the
+ * four field projections answer no field; the explanation denies on the
+ * principal layer; the narrowing diagnostic reports nothing; and the
+ * explanation's per-record write gate asks the sharing service nothing. Every
+ * context the prologue admits keeps its answer, and a parity cell reads each
+ * probe beside the engine operation it describes.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -80,19 +96,24 @@ const OBJECTS = [
   // [#25106] An organization-less object: no wall applies to it, so only the
   // context rule can answer the deny sentinel for it.
   { name: 'qa_catalog', label: 'Catalog', tenancy: { enabled: false }, fields: FIELDS },
+  // [#25107] Read only by the narrowing diagnostic's cells: the delegator reads
+  // it org-wide, and the agent's ceiling declares owner-only.
+  { name: 'qa_ledger', label: 'Ledger', fields: FIELDS },
 ];
 
+// [#25107] `allowExport` on every grant, so the export probe's admitted
+// cells are admitted by a grant and only this rule can refuse one.
 const MEMBER: PermissionSet = {
   name: 'member_default',
   label: 'Member',
-  objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+  objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowExport: true } },
 } as unknown as PermissionSet;
 
 const PLATFORM_ADMIN: PermissionSet = {
   name: 'admin_full_access',
   label: 'Platform Administrator',
   objects: {
-    '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true },
+    '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowExport: true, viewAllRecords: true, modifyAllRecords: true },
   },
   systemPermissions: ['manage_platform_settings', 'manage_metadata'],
 } as unknown as PermissionSet;
@@ -101,10 +122,24 @@ const PLATFORM_ADMIN: PermissionSet = {
 const VAULT_WRITER: PermissionSet = {
   name: 'qa_vault_writer',
   label: 'Vault writer',
-  objects: { qa_vault: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+  objects: { qa_vault: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowExport: true } },
 } as unknown as PermissionSet;
 
-const SETS = [MEMBER, PLATFORM_ADMIN, VAULT_WRITER];
+/** [#25107] The delegator reads the ledger org-wide... */
+const LEDGER_READER: PermissionSet = {
+  name: 'qa_ledger_reader',
+  label: 'Ledger reader',
+  objects: { qa_ledger: { allowRead: true, viewAllRecords: true } },
+} as unknown as PermissionSet;
+
+/** ...and an agent's ceiling declares it owner-only, so the narrowing diagnostic has something to say. */
+const QA_CEILING: PermissionSet = {
+  name: 'qa_ceiling',
+  label: 'Agent ceiling',
+  objects: { qa_ledger: { allowRead: true, readScope: 'own' } },
+} as unknown as PermissionSet;
+
+const SETS = [MEMBER, PLATFORM_ADMIN, VAULT_WRITER, LEDGER_READER, QA_CEILING];
 
 const SYS_CTX = { isSystem: true, userId: 'usr_system', tenantId: ORG_A };
 
@@ -121,6 +156,19 @@ function operator(activeOrganization: string | undefined, delegated = true) {
   };
 }
 
+/** [#25107] An agent acting for the delegator under the ceiling above. */
+function agent(activeOrganization: string) {
+  return {
+    userId: 'usr_agent',
+    principalKind: 'agent',
+    tenantId: activeOrganization,
+    accessible_org_ids: [activeOrganization],
+    positions: [],
+    permissions: ['qa_ceiling'],
+    onBehalfOf: { userId: DELEGATOR },
+  };
+}
+
 type Posture = 'group' | 'isolated' | 'single';
 
 const engines: ObjectQL[] = [];
@@ -130,7 +178,7 @@ afterEach(async () => {
   }
 });
 
-async function boot(posture: Posture) {
+async function boot(posture: Posture, options: { sharing?: Record<string, unknown> } = {}) {
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never) as never,
@@ -164,14 +212,17 @@ async function boot(posture: Posture) {
     await engine.insert('sys_member', { id: `mem_${org}`, user_id: DELEGATOR, organization_id: org, role: 'member' }, { context: SYS_CTX } as never);
   }
   const driverOf = (o: string) => (engine as unknown as { getDriver(x: string): { create(x: string, r: Record<string, unknown>): Promise<unknown> } }).getDriver(o);
-  await driverOf('sys_permission_set').create('sys_permission_set', {
-    id: 'ps_qa_vault_writer', name: 'qa_vault_writer', label: 'Vault writer', organization_id: null, managed_by: 'admin', active: true,
-    object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
-  });
+  for (const [id, name, label] of [['ps_qa_vault_writer', 'qa_vault_writer', 'Vault writer'], ['ps_qa_ledger_reader', 'qa_ledger_reader', 'Ledger reader']]) {
+    await driverOf('sys_permission_set').create('sys_permission_set', {
+      id, name, label, organization_id: null, managed_by: 'admin', active: true,
+      object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
+    });
+  }
   // The grant in `org_d` too: the D10 grant intersection must not be what
   // refuses a cell below, or removing the rule would leave the cell green.
   for (const org of [ORG_A, ORG_C, ORG_D]) {
     await engine.insert('sys_user_permission_set', { id: `ups_${org}`, user_id: DELEGATOR, permission_set: 'qa_vault_writer', organization_id: org }, { context: SYS_CTX } as never);
+    await engine.insert('sys_user_permission_set', { id: `ups_ledger_${org}`, user_id: DELEGATOR, permission_set: 'qa_ledger_reader', organization_id: org }, { context: SYS_CTX } as never);
   }
   // One stored row per object in `org_d`, for the read, update and delete cells.
   for (const object of ['qa_account', 'qa_vault']) {
@@ -193,13 +244,15 @@ async function boot(posture: Posture) {
     services['org-scoping'] = { name: 'com.objectstack.org-scoping' };
     services.tenancy = { posture };
   }
+  if (options.sharing) services.sharing = options.sharing;
+  const registered = new Map<string, unknown>();
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
     // `kernel:ready` never fires here: without a `hook` the plugin starts its
     // platform bootstrap un-awaited, and a short case then destroys the engine
     // under that bootstrap's reads. Nothing this file pins reads what it sets.
     hook: () => undefined,
-    registerService: vi.fn(),
+    registerService: (name: string, service: unknown) => { registered.set(name, service); },
     getService: (name: string) => {
       if (!(name in services)) throw new Error(`service not registered: ${name}`);
       return services[name];
@@ -216,7 +269,10 @@ async function boot(posture: Posture) {
     const rows = await knex(object).select('id', 'name', 'organization_id');
     return [...rows].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   };
-  return { engine, plugin, stored };
+  const security = () => registered.get('security') as {
+    describeDelegationNarrowing(object: string, context: unknown): Promise<{ narrowed: boolean; effectiveScope?: string }>;
+  };
+  return { engine, plugin, stored, security };
 }
 
 interface Outcome { ok: boolean; value?: unknown; code?: string; status?: number; message?: string; developerMessage?: string }
@@ -453,4 +509,192 @@ describe('[#25106 · ADR-0021 D-C] parity: the read scope agrees with the engine
       expect(refused).toEqual(PROVIDER_OBJECTS.map((object) => `delegated in org_d · ${object}`));
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// [#25107 · ADR-0090 D10] The admission probes, the field projections, the
+// explanation and the narrowing diagnostic answer the same rule: where the
+// prologue refuses a delegated context, none of them answers an admission.
+// ---------------------------------------------------------------------------
+
+type Booted = Awaited<ReturnType<typeof boot>>;
+
+const FIELD_PROJECTIONS = ['getReadableFields', 'getMetadataReadableFields', 'getWritableFields', 'getQueryableFields'] as const;
+
+/** Every probe this card covers, for one context on one object: what each answers. */
+async function probeAnswers(b: Booted, object: string, context: Record<string, unknown>) {
+  const explained = await b.plugin.explainAccessForCaller({ object, operation: 'read' }, { ...context });
+  const fields: Record<string, string[] | undefined> = {};
+  for (const projection of FIELD_PROJECTIONS) fields[projection] = await b.plugin[projection](object, { ...context });
+  return {
+    canReadObject: await b.plugin.canReadObject(object, { ...context }),
+    canWriteInsert: await b.plugin.canWriteObject(object, 'insert', { ...context }, { id: 'probe', name: 'probe' }),
+    canWriteUpdate: await b.plugin.canWriteObject(object, 'update', { ...context }, { name: 'probe' }),
+    canExport: await b.plugin.canExport(object, { ...context }),
+    fields,
+    explained,
+  };
+}
+
+const MEMBERSHIP_DETAIL = (organization: string) => `not a member of organization '${organization}'`;
+
+describe('[#25107 · ADR-0090 D10] the probes answer the refusal where the prologue refuses', () => {
+  for (const posture of ['group', 'isolated'] as const) {
+    for (const object of PROVIDER_OBJECTS) {
+      it(`\`${posture}\` · ${object}: every admission probe is false, every field projection is empty, and the explanation denies`, async () => {
+        const b = await boot(posture);
+        const answers = await probeAnswers(b, object, operator(ORG_D));
+        expect(answers.canReadObject, 'canReadObject').toBe(false);
+        expect(answers.canWriteInsert, 'canWriteObject insert').toBe(false);
+        expect(answers.canWriteUpdate, 'canWriteObject update').toBe(false);
+        expect(answers.canExport, 'canExport').toBe(false);
+        for (const projection of FIELD_PROJECTIONS) expect(answers.fields[projection], projection).toEqual([]);
+
+        const { explained } = answers;
+        expect(explained.allowed).toBe(false);
+        const layer = (name: string) => explained.layers.find((l) => l.layer === name);
+        expect(layer('principal')?.verdict).toBe('denies');
+        expect(layer('principal')?.detail).toContain(MEMBERSHIP_DETAIL(ORG_D));
+        expect(layer('object_crud')?.verdict).toBe('denies');
+        expect(layer('object_crud')?.detail).toContain(MEMBERSHIP_DETAIL(ORG_D));
+      });
+    }
+
+    it(`\`${posture}\`: the narrowing diagnostic reports nothing for a delegated read the prologue refuses`, async () => {
+      const b = await boot(posture);
+      expect(await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_D))).toEqual({ narrowed: false });
+    });
+
+    it(`\`${posture}\`: the explanation's per-record write gate asks the sharing service nothing for such a context`, async () => {
+      const canEdit = vi.fn(async () => true);
+      const b = await boot(posture, { sharing: { canEdit } });
+      const explained = await b.plugin.explainAccessForCaller(
+        { object: 'qa_account', operation: 'update', recordId: 'qa_account_in_d' },
+        operator(ORG_D),
+      );
+      expect(explained.allowed).toBe(false);
+      expect(canEdit).not.toHaveBeenCalled();
+    });
+  }
+});
+
+describe('[#25107] what the rule leaves alone in the probes', () => {
+  const ALL_FIELDS = ['id', 'name'];
+  const expectAdmitted = (answers: Awaited<ReturnType<typeof probeAnswers>>, cell: string) => {
+    expect(answers.canReadObject, `${cell}: canReadObject`).toBe(true);
+    expect(answers.canWriteInsert, `${cell}: canWriteObject insert`).toBe(true);
+    expect(answers.canWriteUpdate, `${cell}: canWriteObject update`).toBe(true);
+    expect(answers.canExport, `${cell}: canExport`).toBe(true);
+    for (const projection of FIELD_PROJECTIONS) {
+      expect(answers.fields[projection], `${cell}: ${projection}`).toEqual(expect.arrayContaining(ALL_FIELDS));
+    }
+    expect(answers.explained.allowed, `${cell}: explain`).toBe(true);
+    expect(answers.explained.layers.find((l) => l.layer === 'principal')?.verdict, `${cell}: principal layer`).toBe('neutral');
+  };
+
+  for (const posture of ['group', 'isolated'] as const) {
+    it(`\`${posture}\`: a delegated context in an organization the delegator belongs to is admitted by every probe`, async () => {
+      const b = await boot(posture);
+      for (const object of PROVIDER_OBJECTS) expectAdmitted(await probeAnswers(b, object, operator(ORG_A)), object);
+    });
+
+    it(`\`${posture}\`: the same caller in \`org_d\` WITHOUT the delegation link is admitted by every probe`, async () => {
+      const b = await boot(posture);
+      for (const object of PROVIDER_OBJECTS) expectAdmitted(await probeAnswers(b, object, operator(ORG_D, false)), object);
+    });
+
+    it(`\`${posture}\`: a delegated context with NO active organization is not this rule's — the read probes keep their answer`, async () => {
+      // Its writes are ADR-0123 D2's, and the private object's grant lives
+      // only inside an organization, so the public objects' reads are the
+      // cells this rule could have moved and did not.
+      const b = await boot(posture);
+      for (const object of ['qa_account', 'qa_catalog']) {
+        expect(await b.plugin.canReadObject(object, operator(undefined)), object).toBe(true);
+        expect(await b.plugin.getReadableFields(object, operator(undefined)), object).toEqual(expect.arrayContaining(ALL_FIELDS));
+      }
+    });
+
+    it(`\`${posture}\`: the narrowing diagnostic still reports a narrowed delegated read in an organization the delegator belongs to`, async () => {
+      const b = await boot(posture);
+      const verdict = await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_A));
+      expect(verdict.narrowed).toBe(true);
+      expect(verdict.effectiveScope).toBe('own');
+    });
+
+    it(`\`${posture}\`: the explanation's per-record write gate still asks the sharing service as the agent, then as the delegator`, async () => {
+      const canEdit = vi.fn(async (_object: string, _recordId: string, _context: { userId?: string; onBehalfOf?: unknown }) => true);
+      const b = await boot(posture, { sharing: { canEdit } });
+      await seedForReads(b.engine);
+      await b.plugin.explainAccessForCaller(
+        { object: 'qa_account', operation: 'update', recordId: 'qa_account_in_a' },
+        operator(ORG_A),
+      );
+      expect(canEdit.mock.calls.map(([, , c]) => [c.userId, c.onBehalfOf ? 'on behalf' : 'own'])).toEqual([
+        ['usr_operator', 'on behalf'],
+        [DELEGATOR, 'own'],
+      ]);
+    });
+  }
+
+  it('`single`: there is no wall, so a delegated context in `org_d` is admitted by every probe and its narrowing is reported', async () => {
+    const b = await boot('single');
+    for (const object of PROVIDER_OBJECTS) expectAdmitted(await probeAnswers(b, object, operator(ORG_D)), object);
+    expect((await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_D))).narrowed).toBe(true);
+  });
+});
+
+describe('[#25107 · ADR-0090 D10] parity: each probe agrees with the engine operation it describes', () => {
+  for (const posture of ['group', 'isolated'] as const) {
+    it(`\`${posture}\`: refused by the engine ⇔ the probe refuses, for a read, an insert and an export`, async () => {
+      const b = await boot(posture);
+      await seedForReads(b.engine);
+      const contexts: Record<string, Record<string, unknown>> = {
+        'delegated in org_d': operator(ORG_D),
+        'delegated in org_a': operator(ORG_A),
+        'undelegated in org_d': operator(ORG_D, false),
+      };
+      const refused: string[] = [];
+      let n = 0;
+      for (const [label, context] of Object.entries(contexts)) {
+        for (const object of PROVIDER_OBJECTS) {
+          const cell = `${label} · ${object}`;
+          const found = await attempt(() => b.engine.find(object, { context: { ...context } } as never));
+          const row = { id: `parity_${++n}`, name: 'parity' };
+          const inserted = await attempt(() => b.engine.insert(object, { ...row }, { context: { ...context } } as never));
+          const answers = await probeAnswers(b, object, context);
+          if (!found.ok) refused.push(cell);
+          expect(answers.canReadObject, `${cell}: canReadObject ⇔ find`).toBe(found.ok);
+          expect(answers.canExport, `${cell}: canExport ⇔ find (an export reads as a find)`).toBe(found.ok);
+          expect(answers.explained.allowed, `${cell}: explain read ⇔ find`).toBe(found.ok);
+          expect(answers.canWriteInsert, `${cell}: canWriteObject insert ⇔ insert`).toBe(inserted.ok);
+        }
+      }
+      // Not vacuous on either side: the engine refuses exactly the delegated
+      // context the delegator's membership does not back.
+      expect(refused).toEqual(PROVIDER_OBJECTS.map((object) => `delegated in org_d · ${object}`));
+    });
+  }
+});
+
+describe('[#25107] every reader in this package that resolves a delegator asks the organization refusal', () => {
+  // An enumeration pin over this package's own source: a reader that resolves
+  // a delegator and does not ask the prologue's check is the defect this card
+  // closed, at a site nobody has written yet. Each source file must ask the
+  // check as often as it resolves a delegator (the definitions excluded).
+  const SRC = dirname(fileURLToPath(import.meta.url));
+  const calls = (text: string, name: string) =>
+    (text.match(new RegExp(`\\b${name}\\(`, 'g')) ?? []).length - (text.match(new RegExp(`function ${name}\\(`, 'g')) ?? []).length;
+
+  it('per source file, the asks equal the resolutions — and the three files that resolve one are all counted', () => {
+    const counted: Record<string, [number, number]> = {};
+    for (const file of readdirSync(SRC, { recursive: true }) as string[]) {
+      if (!file.endsWith('.ts') || file.endsWith('.test.ts') || file.includes('.testkit.')) continue;
+      const text = readFileSync(join(SRC, file), 'utf8');
+      const resolutions = calls(text, 'resolveDelegatorContext');
+      if (resolutions === 0) continue;
+      counted[file] = [resolutions, calls(text, 'delegatedOrganizationRefusal')];
+    }
+    expect(Object.keys(counted).sort()).toEqual(['explain-engine.ts', 'security-plugin-operation-principals.ts', 'security-plugin.ts']);
+    for (const [file, [resolutions, asks]] of Object.entries(counted)) expect(asks, file).toBe(resolutions);
+  });
 });

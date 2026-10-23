@@ -202,6 +202,7 @@ describe('[#3545] unresolvable object metadata — security posture fails closed
         getFieldMask: () => ({}),
         getPartialMaskRules: async () => ({}),
         baselinePermissionSets: ['member_default'],
+        tenancyPosture: 'single',
       }) as any;
 
     const ctx = { userId: 'u1', positions: ['everyone'], permissions: [] };

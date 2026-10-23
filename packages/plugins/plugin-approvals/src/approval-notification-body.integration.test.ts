@@ -76,7 +76,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 const asUser = (userId: string, positions: string[] = []) =>
@@ -214,10 +214,9 @@ describe('every approval notification carries its text in body', () => {
       engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
     }
     await engine.syncSchemas();
-    // The organization-less rows below (positions, holdings) exist only on a
-    // store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-    // NULL): this is that store.
-    await relaxEveryRegisteredTenantColumn(engine);
+    // The organization-less rows below exist only on a store built before 18.x
+    // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+    await relaxTenantColumns(engine, ['sys_user']);
     for (const u of USERS) await engine.insert('sys_user', u, { context: SYSTEM } as any);
 
     svc = new ApprovalService({
@@ -264,8 +263,9 @@ describe('every approval notification carries its text in body', () => {
     await svc.remind(ids.bare, { actorId: 'u_sub' }, asUser('u_sub'));
 
     // ── Out of office: the routing substitutes a delegate ──
+    // A delegation applies only in its own organization (ADR-0131): the deal's.
     await engine.insert('sys_approval_delegation', {
-      id: 'dlg_1', delegator_id: 'u_ooo', delegate_id: 'u_bob', reason: 'leave',
+      id: 'dlg_1', delegator_id: 'u_ooo', delegate_id: 'u_bob', reason: 'leave', organization_id: orgOfDeal('ooo'),
       valid_from: '2026-09-01T00:00:00.000Z', valid_until: '2026-12-31T00:00:00.000Z',
       created_at: '2026-09-01T00:00:00.000Z', updated_at: '2026-09-01T00:00:00.000Z',
     }, { context: SYSTEM } as any);
@@ -274,7 +274,7 @@ describe('every approval notification carries its text in body', () => {
     // [#24065] The control: the absent approver names no account, so no name
     // can be read for them; the delegate the same hop routes to does.
     await engine.insert('sys_approval_delegation', {
-      id: 'dlg_2', delegator_id: GONE, delegate_id: 'u_alice', reason: 'leave',
+      id: 'dlg_2', delegator_id: GONE, delegate_id: 'u_alice', reason: 'leave', organization_id: orgOfDeal('ooo_gone'),
       valid_from: '2026-09-01T00:00:00.000Z', valid_until: '2026-12-31T00:00:00.000Z',
       created_at: '2026-09-01T00:00:00.000Z', updated_at: '2026-09-01T00:00:00.000Z',
     }, { context: SYSTEM } as any);

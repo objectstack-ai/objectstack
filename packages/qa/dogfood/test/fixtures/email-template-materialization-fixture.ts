@@ -44,8 +44,10 @@ export const etPasswordReset = defineEmailTemplateDefinition({
   name: 'auth.password_reset',
   label: 'ET Password Reset',
   subject: 'Authored reset for {{user.name}}',
-  bodyHtml: '<p>Authored body: <a href="{{url}}">reset</a></p>',
-  variables: [{ name: 'url', type: 'string', required: true }],
+  // The link is a declared `url` variable forming the whole href, the one
+  // placement an unescaped hole is admitted in (`validateEmailTemplateHolePlacements`).
+  bodyHtml: '<p>Authored body: <a href="{{{url}}}">reset</a></p>',
+  variables: [{ name: 'url', type: 'url', required: true }],
 });
 
 export const emailTemplateFixtureStack = defineStack({

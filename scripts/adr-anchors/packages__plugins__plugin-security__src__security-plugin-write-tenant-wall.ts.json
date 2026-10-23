@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-security/src/security-plugin-write-tenant-wall.ts",
+  "adrs": [
+    "ADR-0123"
+  ],
+  "invariant": "ADR-0123 D2 — an authenticated session with NO active organization is a legal state with fail-closed semantics, and the two sides are deliberately ASYMMETRIC: tenant-scoped reads resolve to nothing (Layer 0's deny sentinel, silent, HTTP 200) while tenant-scoped insert/update are REFUSED with a 403 whose message names the missing active organization. Step 3.7's no-active-organization refusal is that write half. Deleting it, or 'simplifying' it into the sibling forge guard, restores the state the ruling closed: the forge guard validates SUPPLIED organization_id values only, so a payload naming no tenant written by a caller having no tenant walks past it, lands with organization_id NULL, and is then hidden by the read wall from every reader including its own author. `delete` is absent on purpose (it places no row; the Layer 0 row wall already resolves its target to nothing), and the refusal must stay ordered AHEAD of the forge guard so a caller with no organization scope is told that, not that the value they supplied is foreign."
+}

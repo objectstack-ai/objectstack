@@ -35,6 +35,9 @@ export {
 } from './local-crypto-provider.js';
 export {
   type SettingsActionHandler,
+  type SettingsLiveStatus,
+  type SettingsLiveStatusProvider,
+  SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,
   type SettingsDiagnosticsLogger,
@@ -78,7 +81,11 @@ export {
 // because a host that binds its own engine (control-plane mocks, embedded
 // runtimes) has to be able to get the SAME ledger row rather than re-deriving
 // its shape; the action value and target-object constants travel with it for the
-// same reason a pin must not spell them by hand.
+// same reason a pin must not spell them by hand. [#25249] Such a host with no
+// organization object declares it (`bindEngine`'s `organization` extra answering
+// `no-organization-object`); left out, a tenant-rung read or write by a caller naming
+// none is refused as organization-less, or raises `AuthzStoreUnavailableError`
+// naming `sys_organization`.
 export {
   buildConfigChangeAuditSink,
   CONFIG_CHANGE_ACTION,

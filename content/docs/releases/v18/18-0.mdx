@@ -59,7 +59,10 @@ Read with `npm view` and `npm pack` on 2026-10-20, after the publish:
 | Prereleases | `18.0.0-next.0` … `next.3` and `next.5`. `next.4` was never published, although the CHANGELOG carries a section for it |
 
 Install 18 by its exact version (`18.0.0`) or a caret range (`^18.0.0`); both
-resolve `latest`. Moving the stale `next` tag is a release act, outside these
+resolve `latest`. A caret range also takes every later 18.x release by itself,
+and under the v18 level rule a later minor or patch can break you: 18.1.0 does
+(see the [18.1.0 notes](/docs/releases/v18/18-1)). Pin the exact version when
+you cannot read each release's notes before it lands. Moving the stale `next` tag is a release act, outside these
 notes.
 
 ### How to read the 18.0.0 CHANGELOG
@@ -622,7 +625,8 @@ Every line here was answered by the walk's 18.0.0 server after the ceremony.
 The v18 line keeps landing on `main`, and the version commit did not take
 everything that landed before it. Read on `main` at `71696121a6`: 26 pending
 changesets, ten of them `minor`, so the release that publishes them is
-**18.1.0**. They fall in two sets.
+**18.1.0**. They fall in two sets. (By the 18.1.0 cut the pending set had grown
+to more than 220 changesets; the [18.1.0 notes](/docs/releases/v18/18-1) cover all of them.)
 
 **Shipped in 18.0.0, listed in no 18.0.0 CHANGELOG.** Eight of the 26 belong to
 commits that landed before the 18.0.0 version commit (`06cab4849a`), so their

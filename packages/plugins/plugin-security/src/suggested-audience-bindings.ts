@@ -80,7 +80,7 @@ import {
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { describeAnchorForbiddenBits, postureEnforcesWall } from '@objectstack/spec/security';
 import { EVERYONE_POSITION } from '@objectstack/spec';
-import { securityCatalogReaderOf } from '@objectstack/core';
+import { findDefaultOrganization, securityCatalogReaderOf } from '@objectstack/core';
 import { METADATA_AUTHORING_CAPABILITY } from '@objectstack/metadata-core';
 import { PermissionDeniedError } from './errors.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
@@ -539,22 +539,23 @@ function declaredOwnerOf(entry: { packageId?: string }): string | undefined {
 
 /**
  * The deployment's Default Organization — the owner of every row of this
- * record (ADR-0131 D3/D5). The one with `slug='default'`, else the only
- * organization there is; `undefined` when neither exists.
+ * record (ADR-0131 D3/D5): the one definition (`findDefaultOrganization`,
+ * `@objectstack/core` — `slug='default'`, else the only organization there is)
+ * over this module's read. `undefined` when neither exists. Read-only: this
+ * module never creates one.
  *
- * The same derivation as plugin-auth's Default Organization boot invariant
- * (`default-organization-invariant.ts`), read-only: this module never creates
- * one.
+ * The read is this module's on purpose: it reads under `scopedSystemCtx()`,
+ * the context every other read of this record runs under, and a failed read
+ * THROWS rather than reading as no organization — the promotion
+ * (`bootstrap-platform-admin.ts`) and the record's writers each decide what an
+ * unreadable store means.
  */
 export async function resolveDefaultOrganizationId(ql: any): Promise<string | undefined> {
-  const read = async (where: Record<string, unknown>, limit: number): Promise<any[]> => {
-    const rows = await ql.find(ORGANIZATION_OBJECT, { where, fields: ['id'], limit, context: scopedSystemCtx() });
+  const read = async (where: Readonly<Record<string, unknown>>, limit: number): Promise<any[]> => {
+    const rows = await ql.find(ORGANIZATION_OBJECT, { where: { ...where }, fields: ['id'], limit, context: scopedSystemCtx() });
     return Array.isArray(rows) ? rows : [];
   };
-  const bySlug = await read({ slug: 'default' }, 1);
-  if (typeof bySlug[0]?.id === 'string' && bySlug[0].id !== '') return bySlug[0].id;
-  const all = await read({}, 2);
-  return all.length === 1 && typeof all[0]?.id === 'string' && all[0].id !== '' ? all[0].id : undefined;
+  return (await findDefaultOrganization(read)).id;
 }
 
 /** Is `row` this record's — owned by the Default Organization? (module doc) */

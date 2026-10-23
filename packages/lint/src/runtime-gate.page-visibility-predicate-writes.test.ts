@@ -43,6 +43,7 @@ import {
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_OVER_BUDGET,
   VISIBILITY_PREDICATE_SYNTAX,
+  VISIBILITY_PREDICATE_HAS_ARGUMENT,
   VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
   VISIBILITY_ROOT_MISLAYERED,
 } from './validate-visibility-predicates.js';
@@ -59,6 +60,7 @@ const FAMILY_IDS = new Set<string>([
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_OVER_BUDGET,
   VISIBILITY_PREDICATE_SYNTAX,
+  VISIBILITY_PREDICATE_HAS_ARGUMENT,
   VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
   VISIBILITY_ROOT_MISLAYERED,
   PREDICATE_PATH_UNRESOLVED,
@@ -90,6 +92,9 @@ const REFUSED = [
   // A wrong reference: no binding root resolves `status`.
   { body: "status == 'open'", rule: VISIBILITY_BARE_IDENTIFIER, subject: '`status`' },
   { body: 'record.status ==', rule: VISIBILITY_PREDICATE_SYNTAX, subject: 'not valid CEL' },
+  // [#25281] A `has()` argument the engine refuses: a bare name, an index as the last step.
+  { body: 'has(status)', rule: VISIBILITY_PREDICATE_HAS_ARGUMENT, subject: '`status`' },
+  { body: 'has(record.items[0])', rule: VISIBILITY_PREDICATE_HAS_ARGUMENT, subject: '`record.items[0]`' },
 ] as const;
 
 /**
@@ -179,7 +184,10 @@ describe('#24491 — the page door gives the build\'s visibility-predicate verdi
   });
 
   it('the `view` control: a view write is judged exactly as before', () => {
+    // `validateStackExpressions` joined for its bulk `confirmText` pass alone
+    // (#24798) — no visibility predicate is judged by it on a view write.
     expect(runtimeAuthoringRulesFor('view').map((r) => r.name)).toEqual([
+      'validateStackExpressions',
       'validatePresetComparands',
       'validateReferenceIntegrity',
       ...FAMILY,
@@ -197,6 +205,10 @@ describe('#24491 — the page door gives the build\'s visibility-predicate verdi
     const fn = family(gateView(view('totallyBogusFn(1)')).errors);
     expect(fn.map((f) => [f.rule, f.path])).toEqual([
       [VISIBILITY_PREDICATE_UNKNOWN_FUNCTION, 'views[0].form.sections[0].fields[0]'],
+    ]);
+    // [#25281] The `has()` argument arm reaches the view door the same way.
+    expect(family(gateView(view('has(status)')).errors).map((f) => [f.rule, f.path])).toEqual([
+      [VISIBILITY_PREDICATE_HAS_ARGUMENT, 'views[0].form.sections[0].fields[0]'],
     ]);
     // The path half is live on the view surface it was built for.
     const path = family(gateView(view("data.tpye == 'text'", { provider: 'schema', schemaId: 'field' })).errors);

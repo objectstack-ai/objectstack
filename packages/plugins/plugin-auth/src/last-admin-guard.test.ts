@@ -590,7 +590,9 @@ describe('[#5892] the guard fails CLOSED — an unverifiable population refuses 
     // because the guard could not prove it.
     await expect(ban(engine, 'usr_admin')).rejects.toThrow(/could not be verified/i);
     await expect(ban(engine, 'usr_admin')).rejects.toThrow(/sys_member is unreadable/);
-    await expect(ban(engine, 'usr_admin')).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    // [ADR-0112] Refused, but no verdict: the read-fault code, not the 403 a
+    // refusal on the merits answers.
+    await expect(ban(engine, 'usr_admin')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
     expect(await bannedFlag(engine, 'usr_admin')).toBeFalsy();
   });
 
@@ -601,6 +603,9 @@ describe('[#5892] the guard fails CLOSED — an unverifiable population refuses 
     await seedUser(engine, 'usr_admin', { role: 'admin' });
 
     await expect(ban(engine, 'usr_admin')).rejects.toThrow(/more than 1 rows/);
+    // A read that COMPLETED and proved too large is a refusal with a remedy,
+    // not a read fault: it keeps the 403.
+    await expect(ban(engine, 'usr_admin')).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
   });
 
   it('an environment with no administrator at all is not blocked (nothing to protect)', async () => {
@@ -935,7 +940,8 @@ describe('[#5941] the delete guard fails CLOSED too', () => {
     await expect(removeUser(engine, 'usr_admin')).rejects.toThrow(/could not be verified/i);
     await expect(removeUser(engine, 'usr_admin')).rejects.toThrow(/sys_member is unreadable/);
     await expect(removeUser(engine, 'usr_admin')).rejects.toMatchObject({
-      code: 'PERMISSION_DENIED',
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
     });
     expect(await userExists(engine, 'usr_admin')).toBe(true);
   });
@@ -1557,7 +1563,7 @@ describe('[#5978] the standing halves fail CLOSED', () => {
 
     await expect(
       engine.update('sys_member', { id: 'mem_usr_admin', role: 'member' }, SYSTEM),
-    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', object: 'sys_member' });
+    ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, object: 'sys_member' });
     expect(await memberRole(engine, 'mem_usr_admin')).toBe('admin');
   });
 

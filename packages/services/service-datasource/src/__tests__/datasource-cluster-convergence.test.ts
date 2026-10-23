@@ -583,6 +583,7 @@ describe('[#13805] the attach seam — loopback, idempotency, the missing conver
       deleteDatasourceRecord: async () => {},
       writeSecret: async () => 'ref',
       countBoundObjects: async () => 0,
+      listObjectsBoundTo: async () => [],
       logger,
       ...over,
     };

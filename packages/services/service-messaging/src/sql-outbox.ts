@@ -40,6 +40,7 @@ interface DeliveryRow {
     id: string;
     notification_id: string;
     recipient_id: string;
+    recipient_user_id?: string | null;
     channel: string;
     topic?: string | null;
     payload?: unknown; // json column — engine returns object or string per driver
@@ -114,6 +115,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             id,
             notification_id: input.notificationId,
             recipient_id: input.recipientId,
+            recipient_user_id: input.recipientUserId ?? null,
             channel: input.channel,
             topic: input.topic ?? null,
             payload: input.payload ?? {},

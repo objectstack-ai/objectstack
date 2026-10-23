@@ -233,6 +233,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../packages/drivers/driver-sql
+      '@objectstack/organizations':
+        specifier: workspace:*
+        version: link:../../packages/plugins/organizations
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -788,6 +791,9 @@ importers:
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../lint
+      '@objectstack/plugin-security':
+        specifier: workspace:*
+        version: link:../plugins/plugin-security
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3

@@ -145,6 +145,7 @@ import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
+import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
 import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
@@ -715,8 +716,23 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // entry-level change: it rides the object crossing above. MEASURED first:
     // 0 in-repo producers reference either family table, against 45 files
     // that reference an ordinary platform table.
+    //
+    // [#24798, ruling B] `view` joins, for ONE pass: a bulk action def's
+    // `confirmText`, now an ADR-0032 `template` slot over `count` and the
+    // def's params. On a view write `runStackExpressionPasses` runs that pass
+    // alone (by construction, as for an object write), and on an object write
+    // it also judges the object's own `listViews`. #24798 shipped every
+    // finding as a `warning`, because every such sentence parsed before the
+    // slot was typed; #25205 makes each an `error`, so a view or object write
+    // carrying one is refused (a narrowing no conversion carries, shipped in
+    // 18.x as its own BREAKING minor under the amended 「甲」, 6303865025).
+    // MEASURED first over the shipped corpus at `b42c621c05` and again at
+    // `925fd0772c`: 6 bulk defs carry a `confirmText` (examples/app-showcase
+    // `project.view.ts`), none with a brace → 0 findings, against an error for
+    // each of an unbound hole, a single-brace token, a hole holding logic and
+    // a blank sentence in `validate-expressions.bulk-confirm-text.test.ts`.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'action', 'hook', 'object'],
+    runtimeTypes: ['flow', 'action', 'hook', 'object', 'view'],
     run: (stack, ctx) =>
       runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
         severity: i.severity ?? 'error',
@@ -2303,6 +2319,35 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['object'],
     run: (stack) => validateRuleSchemaFormats(stack),
+  },
+  // [#25189] The email half of #25082 (ruling `6335348115`, F1 A2): a hole an
+  // email template's `bodyHtml` places where the mail renderer cannot encode
+  // it for that placement is refused, naming the placement and the supported
+  // ones. The classification is `@objectstack/formula`'s
+  // `judgeMailHtmlHoles` (F3 C2, context-strict plus the built-in auth
+  // templates' url `href` shape), the same judge `plugin-email`'s built-in
+  // pin reads. Gating: no reading of such a body renders as its author wrote
+  // it for every value.
+  //
+  // Runtime publish gate: `email_template` already maps to `emailTemplates`
+  // (`lintLivenessProperties` crossed it, and is silent there), and this rule
+  // judges each written template on its own — no sibling, no context
+  // collection — so the door's verdict and the whole-stack verdict are the
+  // same value. A stored template is not judged until its next publish, and a
+  // draft not at all (ruling item 4). MEASURED first, with this judge: 0
+  // refusals over HotCRM's 76 declared bodies (`c8a7a7047feb`) and over every
+  // shipped template here; the five non-production bodies it refused (two
+  // docs examples, the dogfood materialization fixture, one conversion
+  // fixture's before and after) were corrected in the same change.
+  {
+    name: 'validateEmailTemplateHolePlacements',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-email-template-hole-placements.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['email_template'],
+    run: (stack) => validateEmailTemplateHolePlacements(stack),
   },
 ];
 

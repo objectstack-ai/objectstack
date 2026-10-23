@@ -122,7 +122,7 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 // there is no reason to add a second import path to the same function.
 import { recordNotFoundError } from '@objectstack/core';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
-import { metaItemsArray } from './mcp-server-runtime.js';
+import { metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
 import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
@@ -374,6 +374,35 @@ async function readMergedObjects(reads: StdioObjectReads): Promise<ObjectDef[] |
   const protocol = protocolOf(reads);
   if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
   return metaItemsArray(await protocol.getMetaItems({ type: 'object' })) as ObjectDef[];
+}
+
+/**
+ * [#25245] This transport's ONE reading of which objects exist and what each
+ * declares: the protocol's merged listing ({@link readMergedObjects}), and a
+ * name from that same listing, so a name the listing omits (a disabled
+ * package's object among them) is absent on both reads. On a host with no
+ * merged read, the metadata service's `listObjects()` / `getObject()`, as
+ * before.
+ *
+ * Two consumers, so they cannot disagree: this bridge's `list_objects` /
+ * `describe_object`, and the `objectstack://objects` resources, which
+ * `plugin.ts` hands this view to `bridgeResources`. Those resources read the
+ * metadata service until #25245, so on a kernel with an `environmentId` they
+ * listed none of a package's boot-registered objects and answered `404` for
+ * each, while the tools listed and described them.
+ */
+export function stdioObjectView(reads: StdioObjectReads): McpObjectView {
+  return {
+    async listObjects() {
+      return (await readMergedObjects(reads)) ?? (((await reads.metadataService.listObjects()) ?? []) as ObjectDef[]);
+    },
+    async getObject(name) {
+      const merged = await readMergedObjects(reads);
+      return merged !== undefined
+        ? merged.find((o) => o?.name === name)
+        : (((await reads.metadataService.getObject(name)) ?? undefined) as ObjectDef | undefined);
+    },
+  };
 }
 
 /**
@@ -836,13 +865,13 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   // [#25138] One definition source for the gate, the relation-target gate and
   // the write-response strip, and one listing for discovery.
   const reads: StdioObjectReads = { metadataService, protocol };
+  // [#25245] …and that listing is the view the object resources read too.
+  const objectView = stdioObjectView(reads);
 
   const bridge: McpDataBridge = {
     async listObjects(): Promise<McpObjectSummary[]> {
       // [#25138] The protocol's merged listing ({@link readMergedObjects}).
-      const objects = (await readMergedObjects(reads))
-        ?? (((await metadataService.listObjects()) ?? []) as ObjectDef[]);
-      return objects.map((o) => ({
+      return ((await objectView.listObjects()) as ObjectDef[]).map((o) => ({
         name: o.name,
         label: o.label ?? o.name,
         fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
@@ -870,10 +899,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     // describe, and a name the listing omits (a disabled package's object among
     // them) is "not found" here too, as on the HTTP bridge.
     async describeObject(name: string): Promise<unknown | null> {
-      const merged = await readMergedObjects(reads);
-      const def = merged !== undefined
-        ? merged.find((o) => o?.name === name)
-        : ((await metadataService.getObject(name)) as ObjectDef | undefined | null);
+      const def = (await objectView.getObject(name)) as ObjectDef | undefined;
       if (!def) return null;
       const fields = def.fields ?? {};
       // The field list is an ARRAY here, not the stored map: `validate_expression`
