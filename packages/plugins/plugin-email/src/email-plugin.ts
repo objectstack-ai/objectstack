@@ -1249,8 +1249,12 @@ export class EmailServicePlugin implements Plugin {
    *  - `provider = 'smtp'` builds a real {@link SmtpTransport} from
    *    `smtp_host` / `smtp_port` / `smtp_secure` / `smtp_user` /
    *    `smtp_password` and swaps it in (ADR-0012 — SMTP ships in core).
-   *  - `provider = 'log'` keeps the LogTransport. The from-address is
-   *    still applied.
+   *  - `provider = 'log'` installs the LogTransport, replacing whatever was
+   *    live — a boot-built SMTP (`OS_EMAIL_SMTP_*` / `providerOptions`) or a
+   *    host-supplied transport included, as every other selected provider
+   *    replaces it. The page offers it as "None (log only — no real
+   *    delivery)", so saving it stops delivery. The from-address is still
+   *    applied.
    *  - `provider = 'resend' | 'postmark'` rebuilds the transport using
    *    `api_key` from settings.
    *  - anything else — including `sendgrid` / `ses`, which the settings page
@@ -1384,9 +1388,25 @@ export class EmailServicePlugin implements Plugin {
     }
 
     if (provider === 'log') {
+      // "None (log only — no real delivery)" is a stop, and it stops: the
+      // LogTransport replaces whatever was live, exactly as a saved SMTP host
+      // or API key replaces it. Keeping the previous transport here (a
+      // leftover from when `smtp` and `log` were both transport no-ops) went
+      // on delivering over a boot-built SMTP while the page label and this
+      // line both said nothing was delivered.
+      const replaced = this.service.options.transport instanceof LogTransport
+        ? undefined
+        : describeLiveMailTransport(this.service).label;
+      if (replaced) {
+        this.service.setTransport(new LogTransport(ctx.logger));
+        this.liveSmtp = undefined;
+      }
       ctx.logger.info(
         `EmailServicePlugin: mail settings applied (provider=log, from=${appliedFrom ?? '∅'}); `
-        + 'transport unchanged — messages are logged and recorded in sys_email, never delivered.',
+        + (replaced
+          ? `the LogTransport now replaces the previous live transport (was: "${replaced}") — `
+          : 'the LogTransport stays live — ')
+        + 'messages are logged and recorded in sys_email, never delivered.',
       );
       return;
     }
