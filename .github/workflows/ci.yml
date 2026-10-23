@@ -64,24 +64,24 @@ on:
 # Superseded runs on the same PR waste runners and delay feedback; cancel them.
 # A push to `main` is the opposite case, and gets a group of its OWN (#25373).
 #
-# ⭐ `github.event.after` IS LOAD-BEARING IN THIS KEY. A push run is the ONLY
-# run that saves the Turbo cache seed ("Save Turbo cache (main only)", gated on
-# `github.event_name == 'push'`) that every PR shard, Build Core and the queue
-# build restore, and it is the only run that tests its own merge's `--affected`
-# set (see `on.schedule` above). The save steps sit at the END of a ~28 min
-# run, and main merges land every ~9–16 min. Under the old shared key
-# `ci-CI-push-refs/heads/main` the next merge cancelled it: 32 of 40 push runs
-# on 2026-10-23 01:03Z–11:03Z, so the seed was written 8 times in 40 merges and
-# PR shards rebuilt their closures cold (3–6 min each instead of 0–1.7).
-# `cancel-in-progress: false` alone does NOT fix it: GitHub keeps ONE pending
-# run per group and cancels it when a third arrives; replayed on the same 40
-# arrivals, 18 still die. So the push segment is the pushed commit.
-# `github.event.after` is set on a push and absent on `schedule`,
-# `workflow_dispatch` and `merge_group`, which still fall through to
-# `github.ref`; on `pull_request` the PR number wins before it is reached. Two
-# push runs never share a group, so every one runs to completion and saves. The
-# seed key carries `github.sha`, so two overlapping main runs never write the
-# same key.
+# ⭐ `github.event.after` IS LOAD-BEARING IN THIS KEY. A push run is the only
+# run that tests ITS OWN merge: Test Core computes `--affected` against
+# `github.event.before` (see `on.schedule` above), so a push run that does not
+# finish leaves that merge's diff with no Test Core verdict on `main` until the
+# next hourly run. Main merges land every ~9–16 min and a push run takes ~27,
+# so under the old shared key `ci-CI-push-refs/heads/main` the next merge
+# cancelled it: 31 of 40 push runs on 2026-10-23 01:03Z–11:03Z, most of them
+# inside "Run this shard's tests". (The Turbo seed is NOT what was lost: the
+# "Save Turbo cache (main only)" steps are `if: always()` and run on a
+# cancelled job too.) `cancel-in-progress: false` alone does NOT fix it:
+# GitHub keeps ONE pending run per group and cancels it when a third arrives;
+# replayed on the same 40 arrivals, 18 still die. So the push segment is the
+# pushed commit. `github.event.after` is set on a push and absent on
+# `schedule`, `workflow_dispatch` and `merge_group`, which still fall through
+# to `github.ref`; on `pull_request` the PR number wins before it is reached.
+# Two push runs never share a group, so every one runs to completion. The seed
+# key carries `github.sha`, so two overlapping main runs never write the same
+# key.
 #
 # ⭐ `github.event_name` IS LOAD-BEARING TOO (#16467). A `schedule` and a
 # `workflow_dispatch` run on `main` both fall through to `refs/heads/main`;

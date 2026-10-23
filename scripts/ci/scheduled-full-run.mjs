@@ -222,9 +222,9 @@ export function concurrencyVerdict(groupExpression, { workflow = 'W' } = {}) {
     );
   }
 
-  // EVERY PUSH RUN FINISHES (#25373). A push run is the only run that saves
-  // the Turbo cache seed every PR and queue build restores, and the only run
-  // that tests its own merge's `--affected` set. Sharing a group between two
+  // EVERY PUSH RUN FINISHES (#25373). A push run is the only run that tests
+  // its own merge's `--affected` set; a cancelled one leaves that merge with
+  // no verdict on main until the next hourly run. Sharing a group between two
   // merges lets the second cancel the first -- and `cancel-in-progress: false`
   // does not save it, because GitHub keeps ONE pending run per group and
   // cancels that one when a third arrives. So two pushes of two different
@@ -233,7 +233,7 @@ export function concurrencyVerdict(groupExpression, { workflow = 'W' } = {}) {
   if (nextPush === push) {
     findings.push(
       `two pushes to main share the concurrency group '${push}', so the next merge cancels the ` +
-        "previous merge's run before it saves the Turbo cache seed. Put `github.event.after` in the " +
+        "previous merge's run before its own tests finish. Put `github.event.after` in the " +
         'key, after the PR number.'
     );
   }
@@ -1182,7 +1182,7 @@ async function selfTest() {
   //    never been shown to fail.
   const BAD = 'ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}';
   // The #16467 key: event-separated, but every push to main in ONE group, so
-  // the next merge cancels the previous one before it saves the seed (#25373).
+  // the next merge cancels the previous one before its tests finish (#25373).
   const SHARED_PUSH =
     'ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}';
   const GOOD =
@@ -2336,8 +2336,8 @@ function checkConcurrency() {
     console.error(
       `scheduled-full-run: ${bad} workflow file(s) carry a concurrency key that lets one main run cancel ` +
         'another: the hourly full run is the only thing testing the whole workspace on main since push ' +
-        'went affected-only, and a push run is the only writer of the Turbo cache seed and the only test of ' +
-        "its own merge's affected set, so this is a coverage refusal, not a style one."
+        "went affected-only, and a push run is the only test of its own merge's affected set, so this is a " +
+        'coverage refusal, not a style one.'
     );
     process.exit(1);
   }

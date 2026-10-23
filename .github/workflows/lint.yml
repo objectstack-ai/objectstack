@@ -89,9 +89,9 @@ on:
 # Same policy as ci.yml: superseded runs on the same PR waste runners and delay
 # feedback; cancel them. A push to `main` gets a group of its own, keyed by the
 # pushed commit (`github.event.after`, #25373), so no merge ever cancels the
-# previous merge's run: the typecheck lane's "Save Turbo cache" step is the only
-# writer of the seed the PR typecheck lanes restore, and it sits at the end of
-# the run (27 of 40 push runs were cancelled before it on 2026-10-23).
+# previous merge's run and every merge gets its own lint and typecheck verdict
+# on `main` (27 of 40 push runs were cancelled by their successor on
+# 2026-10-23).
 #
 # ⭐ `github.event_name` is in the key for the reason ci.yml's concurrency block
 # states in full (#16467): `schedule` and `workflow_dispatch` both fall through
