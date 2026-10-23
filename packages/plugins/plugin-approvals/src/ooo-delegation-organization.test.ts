@@ -22,6 +22,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { ApprovalRequestRow } from '@objectstack/spec/contracts';
 import { ApprovalService } from './approval-service.js';
 
 interface Row { [k: string]: any }
@@ -59,6 +60,11 @@ function makeEngine(seed: Record<string, Row[]> = {}) {
     async update(_o: string, _w: any, _d: any) { return {}; },
     async delete() { return {}; },
     async count(object: string) { return ensure(object).length; },
+    // The record a request is about carries its own organization, so the
+    // request's organization is the record's, not the acting context's.
+    getSchema(object: string) {
+      return object === 'purchase_order' ? { name: object, fields: { organization_id: { type: 'lookup' } } } : undefined;
+    },
     registerHook() { /* no-op */ },
     unregisterHooksByPackage() { /* no-op */ },
   };
@@ -90,7 +96,7 @@ function openInput(approver: string, organization: string | null) {
     runId: 'run_1',
     nodeId: 'signoff',
     flowName: 'po_approval',
-    config: { approvers: [{ type: 'user', value: approver }], behavior: 'first_response' as const, lockRecord: false },
+    config: { approvers: [{ type: 'user' as const, value: approver }], behavior: 'first_response' as const, lockRecord: false },
     record,
   };
 }
@@ -111,8 +117,11 @@ function rig(posture: string, seed: Record<string, Row[]>) {
     logger: { warn },
     tenancyPosture: () => posture,
   });
+  /** Every request here routes to a named approver, so it opens rather than auto-completing. */
+  const open = async (input: ReturnType<typeof openInput>, c: any) =>
+    (await svc.openNodeRequest(input, c)) as ApprovalRequestRow;
   const substitutions = () => engine._tables['sys_approval_action']?.filter((a) => a.action === 'ooo_substitute') ?? [];
-  return { engine, svc, warn, substitutions };
+  return { engine, svc, warn, open, substitutions };
 }
 
 /** Two organizations; alice is out of office in A, carol's rule names no organization. */
@@ -133,28 +142,28 @@ for (const posture of ['isolated', 'group'] as const) {
     beforeEach(() => { r = rig(posture, WALLED_SEED()); });
 
     it('a delegation of organization A does not reroute an approval in organization B', async () => {
-      const req = await r.svc.openNodeRequest(openInput('alice', 'o_b'), ctx('o_b'));
+      const req = await r.open(openInput('alice', 'o_b'), ctx('o_b'));
       expect(req.pending_approvers).toEqual(['alice']);
       expect(r.substitutions()).toHaveLength(0);
       expect(r.engine._tables['sys_approval_request'][0].organization_id).toBe('o_b');
     });
 
     it('the same-organization delegation still applies', async () => {
-      const req = await r.svc.openNodeRequest(openInput('alice', 'o_a'), ctx('o_a'));
+      const req = await r.open(openInput('alice', 'o_a'), ctx('o_a'));
       expect(req.pending_approvers).toEqual(['bob']);
       expect(r.substitutions()).toHaveLength(1);
       expect(r.substitutions()[0].comment).toBe('alice → bob — Annual leave');
     });
 
     it("the request's organization is its record's: a delegation of A does not follow a member signed in to A onto B's record", async () => {
-      const req = await r.svc.openNodeRequest(openInput('alice', 'o_b'), ctx('o_a'));
+      const req = await r.open(openInput('alice', 'o_b'), ctx('o_a'));
       expect(req.pending_approvers).toEqual(['alice']);
       expect(r.substitutions()).toHaveLength(0);
     });
 
     it('an organization-less row reroutes nothing, in either organization, and is reported once per lookup', async () => {
       for (const org of ['o_a', 'o_b']) {
-        const req = await r.svc.openNodeRequest({ ...openInput('carol', org), recordId: `po_${org}` }, ctx(org));
+        const req = await r.open({ ...openInput('carol', org), recordId: `po_${org}` }, ctx(org));
         expect(req.pending_approvers).toEqual(['carol']);
       }
       expect(r.substitutions()).toHaveLength(0);
@@ -170,7 +179,7 @@ for (const posture of ['isolated', 'group'] as const) {
         delegation('del_blank', 'alice', 'bob', ''),
         delegation('del_absent', 'alice', 'erin', undefined),
       ];
-      const req = await r.svc.openNodeRequest(openInput('alice', 'o_a'), ctx('o_a'));
+      const req = await r.open(openInput('alice', 'o_a'), ctx('o_a'));
       expect(req.pending_approvers).toEqual(['alice']);
       expect(r.substitutions()).toHaveLength(0);
       expect(r.warn.mock.calls.map(([, fields]) => fields?.delegationId).filter(Boolean).sort())
@@ -179,13 +188,13 @@ for (const posture of ['isolated', 'group'] as const) {
 
     it('beside an organization-less row, the same-organization row is the one that applies', async () => {
       r.engine._tables['sys_approval_delegation'].push(delegation('del_none_alice', 'alice', 'mallory', null));
-      const req = await r.svc.openNodeRequest(openInput('alice', 'o_a'), ctx('o_a'));
+      const req = await r.open(openInput('alice', 'o_a'), ctx('o_a'));
       expect(req.pending_approvers).toEqual(['bob']);
     });
 
     it('a chain stops at a hop whose delegation names no organization', async () => {
       r.engine._tables['sys_approval_delegation'].push(delegation('del_bob', 'bob', 'mallory', null));
-      const req = await r.svc.openNodeRequest(openInput('alice', 'o_a'), ctx('o_a'));
+      const req = await r.open(openInput('alice', 'o_a'), ctx('o_a'));
       expect(req.pending_approvers).toEqual(['bob']);
       expect(r.substitutions()).toHaveLength(1);
     });
@@ -195,7 +204,7 @@ for (const posture of ['isolated', 'group'] as const) {
       // under a wall refuses such a request's organization-less insert (D9);
       // this fake engine stores it, so what is pinned is the slate, which used
       // to keep every row of the delegator.
-      const req = await r.svc.openNodeRequest(openInput('alice', null), ctx(null));
+      const req = await r.open(openInput('alice', null), ctx(null));
       expect(req.pending_approvers).toEqual(['alice']);
       expect(r.substitutions()).toHaveLength(0);
     });
@@ -215,14 +224,14 @@ describe("OOO delegation under 'single' — the Default Organization stamps both
 
   it('a delegation of the Default Organization reroutes an approval on its records', async () => {
     const r = rig('single', SINGLE_SEED());
-    const req = await r.svc.openNodeRequest(openInput('alice', 'o_default'), ctx('o_default'));
+    const req = await r.open(openInput('alice', 'o_default'), ctx('o_default'));
     expect(req.pending_approvers).toEqual(['bob']);
     expect(r.substitutions()).toHaveLength(1);
   });
 
   it('an organization-less row reroutes nothing here either, and is reported', async () => {
     const r = rig('single', SINGLE_SEED());
-    const req = await r.svc.openNodeRequest(openInput('carol', 'o_default'), ctx('o_default'));
+    const req = await r.open(openInput('carol', 'o_default'), ctx('o_default'));
     expect(req.pending_approvers).toEqual(['carol']);
     expect(r.substitutions()).toHaveLength(0);
     expect(r.warn.mock.calls.some(([, fields]) => fields?.delegationId === 'del_none')).toBe(true);
