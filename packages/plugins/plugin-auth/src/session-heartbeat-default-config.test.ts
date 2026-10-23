@@ -18,6 +18,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager.js';
 import { SESSION_HEARTBEAT_MEMO_MAX } from './auth-manager-password-session-policy.js';
 
@@ -34,7 +35,8 @@ function sessionEngine(rows: Row[], opts: { failFindOnce?: boolean } = {}) {
   let failNext = opts.failFindOnce === true;
   return {
     byId,
-    findOne: vi.fn(async (_object: string, q: any) => {
+    findOne: vi.fn(async (object: string, q: any) => {
+      assertEngineFindOnePredicate(object, q);
       if (failNext) {
         failNext = false;
         throw new Error('driver unavailable');
@@ -42,8 +44,10 @@ function sessionEngine(rows: Row[], opts: { failFindOnce?: boolean } = {}) {
       const r = byId.get(q?.where?.id);
       return r ? { ...r } : null;
     }),
-    update: vi.fn(async (_object: string, patch: any) => {
-      const r = byId.get(patch.id);
+    update: vi.fn(async (_object: string, patch: any, options?: any) => {
+      const dispatch = assertEngineUpdateDispatch(patch, options);
+      if (dispatch.kind !== 'by-id') throw new Error('this double serves by-id updates only');
+      const r = byId.get(String(dispatch.id));
       if (r) Object.assign(r, patch);
       return {};
     }),
