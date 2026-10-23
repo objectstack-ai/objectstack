@@ -33,12 +33,10 @@ import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
 // The ADR-0015 §4.2 binding predicate, shared with `defineStack`'s
 // cross-reference pass and the v18 stored-row listing. Internal to the spec.
 import { externalBindingDatasourceRefusal } from './external-binding-datasource';
-// The object's default row scope: the RLS policy shape without `object`. No
-// cycle: `security/rls.zod` imports only zod and `shared/`.
-import { DefaultRowScopeSchema } from '../security/rls.zod';
-// The roster object's declarative membership keys. No cycle: the module imports
-// only zod, `shared/` and the resolver contract's constants.
-import { MembershipKeysSchema } from '../security/membership-key.zod';
+// The object's default row scope (the RLS policy shape without `object`) and the
+// roster object's declarative membership keys. No cycle: `security/rls.zod`
+// imports only zod, `shared/` and the resolver contract's constants.
+import { DefaultRowScopeSchema, MembershipKeysSchema } from '../security/rls.zod';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write

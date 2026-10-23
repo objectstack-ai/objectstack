@@ -35,12 +35,36 @@ object-level permissions (CRUD), RLS provides record-level filtering.
 4. **Territory / Regional Access (§7.3.1 dynamic membership)**
    - Sales reps only see accounts in their assigned territories
    - `using: "account_id in current_user.territory_account_ids"`
-     (the runtime stages `territory_account_ids` in `ExecutionContext.rlsMembership`)
+     (`territory_account_ids` is not a kernel value: the app supplies it in
+     `ExecutionContext.rlsMembership`, see "Where a membership key comes
+     from" below; until something does, the policy matches no rows)
 
 5. **Manager / Hierarchy Access (§7.3.1 dynamic membership)**
    - Managers see records assigned to anyone they manage
    - `using: "assigned_to_id in current_user.team_member_ids"`
-     (the runtime pre-resolves `team_member_ids`, no subquery needed)
+     (likewise app-supplied, no subquery needed)
+
+6. **Portal / Partner Access (§7.3.1 dynamic membership)**
+   - A supplier's contacts see only that supplier's orders
+   - `using: "supplier in current_user.portal_supplier_ids"`
+     (declared as `membershipKeys.portal_supplier_ids` on the supplier-contact
+     roster object, see `MembershipKeySchema`)
+
+### Where a membership key comes from
+
+The kernel resolves `current_user.id`, `organization_id`, `positions`,
+`org_user_ids`, `accessible_org_ids` and `email` itself. Any other
+`current_user.KEY` read with `in` is a membership set the APP supplies,
+through one of two sources:
+
+- a **registered membership resolver** (ADR-0105 D11, the
+  `rls-membership-resolver` service), code an installed plugin runs; or
+- a **declared membership key**: `ObjectSchema.membershipKeys` on the roster
+  object whose rows define the set. Not applied yet: the security plugin
+  does not read the declaration in this release.
+
+The platform stages no other key. A policy reading a key neither source
+supplies drops out and matches no rows (fail closed).
 
 ### PostgreSQL RLS Comparison
 
@@ -111,8 +135,8 @@ See also: https://help.salesforce.com/s/articleView?id=sf.security_sharing_rules
 ## TypeScript Usage
 
 ```typescript
-import { DefaultRowScopeSchema, RLSEvaluationResultSchema, RLSOperation, RLSUserContextSchema, RowLevelSecurityPolicySchema } from '@objectstack/spec/security';
-import type { DefaultRowScope, RLSEvaluationResult, RLSOperation, RLSUserContext, RowLevelSecurityPolicy } from '@objectstack/spec/security';
+import { DefaultRowScopeSchema, MembershipKeySchema, MembershipKeyNameSchema, MembershipKeysSchema, RLSEvaluationResultSchema, RLSOperation, RLSUserContextSchema, RowLevelSecurityPolicySchema } from '@objectstack/spec/security';
+import type { DefaultRowScope, MembershipKey, MembershipKeyName, MembershipKeys, RLSEvaluationResult, RLSOperation, RLSUserContext, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 
 // Validate data
 const result = DefaultRowScopeSchema.parse(data);
@@ -134,6 +158,37 @@ const result = DefaultRowScopeSchema.parse(data);
 | **check** | `string` | optional | Validation condition judged on every row an insert or an update writes (enforced at application level): each row of an insert, an array insert included, as its `beforeInsert` hooks leave it, and each row an update changes, by id or `multi: true`, as the prior row merged with the final payload after its `beforeUpdate` hooks. One failing row refuses the whole write. A by-id update is also judged, before its hooks, on the prior row merged with the change set as sent. The default to `using` is decided per operation across the applicable policies, not per policy: when any applicable policy for that operation declares `check`, only the declared checks decide (OR-combined) and a USING-only sibling adds nothing; only when none declares `check` does each applicable policy's `using` stand in as its check (OR-combined). Applicable = not `enabled: false`, `object` matches or is '*', `operation` matches or is 'all', and the caller holds one of its `positions` when it lists any. Refused on a policy whose `operation` is `select` or `delete`, which write no new row to check: limit the rows such a policy admits with `using`, and declare the `check` on an `insert`, `update` or `all` policy. |
 | **positions** | `string[]` | optional | Positions this policy applies to (omit for all) |
 | **enabled** | `boolean` | optional (default: `true`) | Whether this policy is active |
+
+
+---
+
+## MembershipKey
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userField** | `string` | ✅ | The column of this object that holds the user a row belongs to: a single-valued user reference (`user`, or a `lookup` / `master_detail` to `sys_user`). A row counts for the signed-in user when this column holds their user id. |
+| **valueField** | `string` | ✅ | The column of this object whose values form the set: a reference (`lookup`, `master_detail` or `user`), multi-valued allowed. A policy compares the set with a column that references the same object, or with `id` on that object. Never the same column as `userField`. |
+| **filter** | `string` | optional | Optional condition a roster row must also meet, in canonical CEL over this object's own columns and within the row-level security subset a policy's `using` lowers (e.g. "active == true"). It may not read any `current_user.*` value. |
+| **label** | `string` | optional | Human-readable name of the set |
+| **description** | `string` | optional | What the set holds and who it is for |
+
+
+---
+
+## MembershipKeyName
+
+The membership key name: policies read the set as `current_user.KEY`
+
+**Type:** `string`
+
+
+---
+
+## MembershipKeys
+
+**Type:** `Record<string, { userField: string; valueField: string; filter?: string; label?: string; … }>`
 
 
 ---

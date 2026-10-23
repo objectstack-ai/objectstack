@@ -24,7 +24,7 @@ import { describe, expect, it } from 'vitest';
 
 import { RESERVED_RLS_MEMBERSHIP_KEYS } from '../contracts/rls-membership-resolver';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
-import { MembershipKeySchema, MEMBERSHIP_KEY_MAX_VALUES } from '../security/membership-key.zod';
+import { MembershipKeySchema, MEMBERSHIP_KEY_MAX_VALUES } from '../security/rls.zod';
 import { composeStacks, defineStack } from '../stack.zod';
 import { ObjectExtensionSchema, ObjectSchema } from './object.zod';
 
@@ -240,7 +240,7 @@ describe('composeStacks — one membership key declared on two objects across th
   it("a different declaration of one key on one object under `'merge'` is the collection refusal, not this one", () => {
     const other = () => defineStack({
       manifest: manifest('com.example.mk-c'),
-      objects: [withKeys({ portal_supplier_ids: { ...KEY, filter: 'active == false' } })],
+      objects: [{ ...SUPPLIER_CONTACT, membershipKeys: { portal_supplier_ids: { ...KEY, filter: 'active == false' } } }],
     });
     const err = refusalOf(() => composeStacks([a(), other()], { objectConflict: 'merge' }));
     expect(err?.message).toContain("its 'membershipKeys' is declared with different values");
