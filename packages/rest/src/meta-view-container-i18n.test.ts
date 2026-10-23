@@ -186,6 +186,22 @@ describe('#22614 — a view container is translated as a container', () => {
         ]);
     });
 
+    it('translates an envelope-form bulk confirmText that matches its packaged base (#24798)', async () => {
+        const container = shipped({
+            listViews: {
+                bulk: grid('Bulk', {
+                    bulkActionDefs: [{ name: 'close_all', label: 'Close all', confirmText: { dialect: 'template', source: 'Sure?' } }],
+                }),
+            },
+        });
+        const [packagedBulk] = expandViewContainer(OBJ, container);
+        const protocol = protocolOf({ [OBJ]: container, [`${OBJ}.bulk`]: packagedBulk });
+        const out = await read(structuredClone(container), 'zh-CN', protocol);
+        expect(out.listViews.bulk.bulkActionDefs).toEqual([
+            { name: 'close_all', label: '全部关闭', confirmText: '确定关闭？' },
+        ]);
+    });
+
     it("looks each view's packaged base up by its qualified name, so an explicit override beats the catalog", async () => {
         const packaged = shipped({ list: grid('All Notes'), listViews: { mine: grid('My Notes') } });
         const [packagedDefault, packagedMine] = expandViewContainer(OBJ, packaged).sort((a, b) => a.name.localeCompare(b.name));

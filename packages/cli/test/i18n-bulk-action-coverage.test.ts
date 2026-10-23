@@ -102,6 +102,20 @@ describe('the extractor scaffolds a key for every string the selection bar draws
     expect(confirm?.inline).toBe('Set these labels on every selected project?');
   });
 
+  it('seeds a `confirmText` written as its template envelope exactly as the bare string (#24798)', () => {
+    // `confirmText` is a `template` slot, so `{ dialect: 'template', source }`
+    // is the same authored sentence; without reading the envelope it was
+    // recorded like an absent key, with nothing to translate.
+    const source = 'Set {{ count }} project(s)?';
+    const seedOf = (confirmText: unknown) => bulkEntries(objectConfig({
+      bulkActionDefs: [{ name: 'set_labels', operation: 'update', confirmText }],
+    })).find((e) => e.path.at(-1) === 'confirmText');
+    const fromEnvelope = seedOf({ dialect: 'template', source });
+    expect(fromEnvelope?.sourceValue).toBe(source);
+    expect(fromEnvelope?.inline).toBe(source);
+    expect(fromEnvelope).toEqual(seedOf(source));
+  });
+
   it('records an unauthored optional key without seeding it', () => {
     // The other half of the contract above: the key exists so a bundle that
     // authors it is recognised, but nothing is scaffolded and coverage demands

@@ -32,6 +32,19 @@
 
 /** Skill identity (mirrors the `SKILL.md` YAML frontmatter). */
 export const OBJECTSTACK_SKILL_NAME = 'objectstack';
+/**
+ * The name every connect snippet this platform prints gives the MCP server
+ * (the `<name>` in `claude mcp add --transport http <name> <url>`).
+ *
+ * ONE name for one endpoint: the served `SKILL.md` below and `os dev`'s boot
+ * banner (`printMcpConnectHint` in `@objectstack/cli`) both read this
+ * constant, so a reader who follows either never registers the same server
+ * twice under two names. It is deliberately the platform's name, not the app
+ * folder's or the manifest's: the served skill is generic across every app
+ * the caller's key can reach (ADR-0036 Amendment C), and neither the skill
+ * route nor discovery serves an app name a console snippet could read.
+ */
+export const OBJECTSTACK_MCP_SERVER_NAME = 'objectstack';
 export const OBJECTSTACK_SKILL_DESCRIPTION =
   'Query and modify data in an ObjectStack app over MCP — discover objects, ' +
   'read and filter records, and create/update/delete under your own ' +
@@ -107,7 +120,7 @@ intersection of the consent scopes you grant and your own permissions/RLS (it
 can never exceed either). Example (Claude Code):
 
 \`\`\`
-claude mcp add --transport http objectstack ${url}
+claude mcp add --transport http ${OBJECTSTACK_MCP_SERVER_NAME} ${url}
 \`\`\`
 
 **API key (headless: CI, scripts, agents without a browser).** Send an
