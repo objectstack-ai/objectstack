@@ -107,8 +107,11 @@ export const zhCN: PlatformTranslationData = {
       },
       keys: {
         workspace_name: {
-          label: '组织名称',
-          help: '控制台、登录页与浏览器标题中的产品名,也用于登录邮件、身份验证器应用与 MCP 登录。',
+          label: '产品名称',
+          help:
+            '控制台、登录页与浏览器标题中的产品名,也用于登录邮件、身份验证器应用与 MCP 登录。' +
+            '留空则使用本部署设定的名称。' +
+            '这不是组织自身的名称,组织名称在组织记录上修改(重命名组织)。',
         },
         accent_color: {
           label: '主题色',
@@ -156,7 +159,7 @@ export const zhCN: PlatformTranslationData = {
       keys: {
         timezone: {
           label: '默认时区',
-          help: '决定公式中的"今天"是哪一天、报表如何按日期分组,以及日期和时间如何显示。可填写任意 IANA 时区名称(如 Asia/Shanghai)。',
+          help: '决定公式中的"今天"是哪一天、报表如何按日期分组,以及日期和时间如何显示。可填写任意 IANA 时区名称(如 Asia/Shanghai)。这是组织实际生效的时区:组织记录上的「时区」字段不会改变它。',
           options: {
             UTC: 'UTC',
             'America/Los_Angeles': '(UTC−08/−07) 洛杉矶',

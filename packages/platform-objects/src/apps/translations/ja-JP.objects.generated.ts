@@ -526,7 +526,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     description: "マルチテナントグループ化のための組織",
     fields: {
       name: {
-        label: "名前"
+        label: "名前",
+        help: "組織の名前。「組織名を変更」で変更します。コンソールに表示される製品名は 設定 → ブランディング で設定します。"
       },
       slug: {
         label: "スラッグ",
@@ -545,7 +546,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "タイムゾーン",
-        help: "この組織で日付の境界を計算する IANA タイムゾーン（例: UTC、Asia/Shanghai）。独自のタイムゾーンを持たないすべてのビジネスユニットが継承するルートの既定値です。未設定の場合は UTC です。"
+        help: "IANA タイムゾーン（例: UTC、Asia/Shanghai）。独自のタイムゾーンを持たないビジネスユニットのルートの既定値として保存されます。現在、日付の計算には影響しません。数式、レポート、表示される日付は 設定 → ローカリゼーション → 既定のタイムゾーン を使います。"
       },
       parent_organization_id: {
         label: "親組織",

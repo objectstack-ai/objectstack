@@ -69,10 +69,12 @@ export const esES: PlatformTranslationData = {
       },
       keys: {
         workspace_name: {
-          label: 'Nombre de la organización',
+          label: 'Nombre del producto',
           help:
             'El nombre del producto en la consola, en la página de inicio de sesión y en el título del navegador, ' +
-            'y en los correos de inicio de sesión, la aplicación de autenticación y el inicio de sesión de MCP.',
+            'y en los correos de inicio de sesión, la aplicación de autenticación y el inicio de sesión de MCP. ' +
+            'Déjelo vacío para usar el nombre con el que se configuró esta implantación. ' +
+            'No es el nombre de la organización, que se cambia en el registro de la organización (Renombrar organización).',
         },
         accent_color: {
           label: 'Color de acento',
@@ -327,7 +329,7 @@ export const esES: PlatformTranslationData = {
         finance: { title: 'Finanzas' },
       },
       keys: {
-        timezone: { label: 'Zona horaria predeterminada', help: 'Determina qué significa «hoy» en las fórmulas, cómo agrupan las fechas los informes y cómo se muestran las fechas y horas. Acepta cualquier nombre de zona horaria IANA (p. ej. Europe/Madrid).' },
+        timezone: { label: 'Zona horaria predeterminada', help: 'Determina qué significa «hoy» en las fórmulas, cómo agrupan las fechas los informes y cómo se muestran las fechas y horas. Acepta cualquier nombre de zona horaria IANA (p. ej. Europe/Madrid). Es la zona horaria vigente para la organización: el campo Zona horaria del registro de la organización no la cambia.' },
         locale: { label: 'Idioma predeterminado', help: 'Configuración regional BCP-47 para los catálogos de mensajes y el formato de números/fechas.' },
         default_country: { label: 'País predeterminado', help: 'Código ISO 3166-1 alfa-2 (p. ej. US, GB, CN). Se usa para los valores por defecto de dirección y teléfono.' },
         currency: { label: 'Moneda predeterminada', help: 'Código ISO 4217 aplicado cuando un campo de moneda no indica la suya.' },

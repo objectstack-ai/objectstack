@@ -24,10 +24,21 @@ import type { SettingsManifest } from '@objectstack/spec/system';
  *
  * A value nobody saved (`source: 'default'`) is not served: the deployment's
  * own branding applies (`OS_PRODUCT_NAME`, `OS_LOGO_URL`, `OS_BRAND_COLOR`, or
- * the host's `RuntimeConfigPlugin` options). That is why `accent_color`
- * declares no `default`: a default here would be shown on the settings page as
- * a colour the console never uses. `workspace_name` keeps its `'ObjectStack'`
- * default, which is also the name the auth emails fall back to.
+ * the host's `RuntimeConfigPlugin` options; `OS_APP_NAME` for the auth
+ * readers). That is why no key here declares a `default`: a default would be
+ * shown on the settings page as a value the console never uses. The name's
+ * `'ObjectStack'` default did exactly that (#25347): an unsaved page read
+ * "ObjectStack" while the console read "ObjectOS". So `workspace_name` is not
+ * `required` either: an empty value means "use the deployment's name", and
+ * both readers already treat an empty value as unset.
+ *
+ * ## The product's name, not the organization's
+ *
+ * `workspace_name` names the PRODUCT the deployment shows. The organization's
+ * own name is `sys_organization.name`, renamed with the Organization record's
+ * Rename Organization action (#25347). Two names, two homes, and each label
+ * says which one it is: the label here is "Product name", never "Organization
+ * name", and its help points at the record.
  *
  * ## Single posture only
  *
@@ -63,11 +74,13 @@ export const brandingSettingsManifest: SettingsManifest = {
   order: 5,
   specifiers: [
     { type: 'group', id: 'identity', label: 'Identity', required: false },
-    { type: 'text', key: 'workspace_name', label: 'Organization name', required: true,
-      default: 'ObjectStack', minLength: 1, maxLength: 60,
+    { type: 'text', key: 'workspace_name', label: 'Product name', required: false,
+      minLength: 1, maxLength: 60,
       description:
         'The product name in the console, on the sign-in page and in the browser title, ' +
-        'and in sign-in emails, the authenticator app and MCP sign-in.' },
+        'and in sign-in emails, the authenticator app and MCP sign-in. ' +
+        'Leave empty to use the name this deployment was set up with. ' +
+        'This is not the organization\'s own name, which is changed on the Organization record (Rename Organization).' },
 
     { type: 'group', id: 'appearance', label: 'Appearance', required: false },
     { type: 'color', key: 'accent_color', label: 'Accent colour', required: false,

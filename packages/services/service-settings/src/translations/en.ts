@@ -73,10 +73,12 @@ export const en: PlatformTranslationData = {
       },
       keys: {
         workspace_name: {
-          label: 'Organization name',
+          label: 'Product name',
           help:
             'The product name in the console, on the sign-in page and in the browser title, ' +
-            'and in sign-in emails, the authenticator app and MCP sign-in.',
+            'and in sign-in emails, the authenticator app and MCP sign-in. ' +
+            'Leave empty to use the name this deployment was set up with. ' +
+            'This is not the organization\'s own name, which is changed on the Organization record (Rename Organization).',
         },
         accent_color: {
           label: 'Accent colour',
@@ -122,7 +124,7 @@ export const en: PlatformTranslationData = {
         finance: { title: 'Finance' },
       },
       keys: {
-        timezone: { label: 'Default timezone', help: 'Decides what "today" means in formulas, how reports group dates, and how dates and times are shown. Accepts any IANA time zone name (e.g. Europe/Paris).' },
+        timezone: { label: 'Default timezone', help: 'Decides what "today" means in formulas, how reports group dates, and how dates and times are shown. Accepts any IANA time zone name (e.g. Europe/Paris). This is the timezone in effect for the organization: the Timezone field on the Organization record does not change it.' },
         locale: { label: 'Default language', help: 'BCP-47 locale for message catalogs and number/date formatting.' },
         default_country: { label: 'Default country', help: 'ISO 3166-1 alpha-2 code (e.g. US, GB, CN).' },
         currency: { label: 'Default currency' },

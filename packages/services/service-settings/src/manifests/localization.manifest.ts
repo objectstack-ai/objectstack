@@ -49,7 +49,11 @@ export const localizationSettingsManifest: SettingsManifest = {
       // Localization and the first-run timezone prompt), so it names effects,
       // not formula functions; `localization-timezone-help.pin.test.ts` holds
       // every served locale to that.
-      description: 'Decides what "today" means in formulas, how reports group dates, and how dates and times are shown. Accepts any IANA time zone name (e.g. Europe/Paris).',
+      // [#25347] The second sentence says which timezone wins: this key is the
+      // organization's zone in effect (tenant scope, one row per organization),
+      // and `sys_organization.timezone`, which no reader consults, does not
+      // change it. That field's help says the same from its side.
+      description: 'Decides what "today" means in formulas, how reports group dates, and how dates and times are shown. Accepts any IANA time zone name (e.g. Europe/Paris). This is the timezone in effect for the organization: the Timezone field on the Organization record does not change it.',
       // The description has always promised the IANA domain; since #5712 the
       // declaration matches it: any valid IANA zone is accepted on the write
       // and env doors, and the curated options below are a UI convenience
