@@ -194,9 +194,8 @@ export const SysUserDetailPage: Page = {
                     'email',
                     'phone_number',
                     'email_verified',
+                    'two_factor_enabled', // not a highlight: drawn in the Security tab, behind the 2FA gate
                     'role',
-                    // drawn only in the Security tab, behind the 2FA gate:
-                    'two_factor_enabled',
                   ],
                   sections: [
                     {
