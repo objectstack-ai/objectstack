@@ -312,12 +312,13 @@ describe('publish-drafts backfill crosses the door (#24253)', () => {
         expect(PublishPackageDraftsResponseSchema.parse(data).backfillApplied).toEqual(stopped);
     });
 
-    it('without the key, the protocol is sent neither a backfill nor a context', async () => {
+    it('without the key, the protocol is sent no backfill but still THIS caller\'s context (#25484: the build probes read as it)', async () => {
         const { publishPackageDrafts } = await publishDrafts({ apps: [] });
 
         const sent = publishPackageDrafts.mock.calls[0]![0];
         expect('backfill' in sent).toBe(false);
-        expect('context' in sent).toBe(false);
+        expect(sent.context).toEqual(PKG_ADMIN().executionContext);
+        expect(sent.context?.isSystem).toBeUndefined();
     });
 
     it('the protocol\'s request refusal answers 400 VALIDATION_ERROR with its issues, nothing flipped or announced', async () => {
