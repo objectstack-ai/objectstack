@@ -245,7 +245,14 @@ describe('os migrate apply --allow-destructive: the success line names the row t
       expect(organizationSuccessLine()).toBeUndefined();
       payloads.push(payload);
     }
-    expect(payloads[0]).toEqual(payloads[1]);
+    // `duration` is each run's own wall time, so it is checked for shape and
+    // normalised; every other field must be equal.
+    for (const payload of payloads) {
+      expect(typeof payload.duration).toBe('number');
+      expect(payload.duration).toBeGreaterThanOrEqual(0);
+    }
+    const [birth, ceremony] = payloads.map((payload) => ({ ...payload, duration: 0 }));
+    expect(birth).toEqual(ceremony);
   }, RUN_TIMEOUT);
 });
 
