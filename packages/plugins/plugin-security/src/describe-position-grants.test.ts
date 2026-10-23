@@ -69,6 +69,8 @@ const TABLES: Record<string, Array<Record<string, unknown>>> = {
 
 function matches(row: Record<string, unknown>, where: Record<string, any> | undefined): boolean {
   for (const [key, cond] of Object.entries(where ?? {})) {
+    // The reads under test filter by equality and `$in` only; a combinator is refused, never read as a field.
+    if (key.startsWith('$')) throw new Error(`describe-position-grants double: unsupported combinator ${key}`);
     if (cond && typeof cond === 'object' && Array.isArray(cond.$in)) {
       if (!cond.$in.includes(row[key])) return false;
     } else if (row[key] !== cond) return false;
