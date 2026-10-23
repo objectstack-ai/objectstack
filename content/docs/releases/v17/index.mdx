@@ -22,8 +22,9 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
 > 17.2.0 — published 2026-08-23, which took over from 17.1.0 — published
 > 2026-08-20, which took over from 17.0.0 — published 2026-08-14, closing a
 > train that ran through `17.0.0-rc.0` … `rc.6` (the last of them cut
-> 2026-08-10). A plain install now resolves 17.7.0. `changeset pre
-> exit` ran with the 17.0.0 cut, so the `@objectstack/*` packages no longer
+> 2026-08-10). A plain install resolved 17.7.0 until 2026-10-20, when 18.0.0
+> took npm's `latest` tag; a plain install now resolves the
+> [v18](/docs/releases/v18) line. `changeset pre exit` ran with the 17.0.0 cut, so the `@objectstack/*` packages no longer
 > publish as `17.0.0-rc.N`. Caret ranges on `^16.x` hold at 16.x until you opt
 > in, which is the reason this train is a major at all: its breaking density
 > (the `ApiMethod` shrink, the GraphQL removal, the ADR-0104 write cutover, the

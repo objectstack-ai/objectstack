@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
+import { ObjectKernel, resolveArtifactPackageEntries, type Plugin, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from './plugin.js';
 import type { ObjectQL } from './engine.js';
 import { SchemaRegistry } from './registry.js';
@@ -91,6 +91,55 @@ describe('the manifest service stamps the registering caller\'s source (#23972)'
     const ql = await boot([]);
     expect(() => ql.registerApp(body(MARKET_ID, 'srcmarket'), undefined, 'authored' as never)).toThrow(TypeError);
     expect(ql.registry.getPackage(MARKET_ID)).toBeUndefined();
+  });
+});
+
+describe('an artifact entry states its own package\'s source (ADR-0130 D4 entry, `ArtifactPackageSchema.source`)', () => {
+  // A merged artifact: the control plane folds an environment's marketplace
+  // installs into the one artifact the environment boots from, beside its code.
+  const merged = (entries: Array<{ manifest: unknown; source?: unknown }>) => ({ ...body(BUNDLE_A, 'srcbundle'), packages: entries });
+
+  it('a package whose entry states marketplace records marketplace; its sibling stating nothing records code', async () => {
+    const ql = await boot([[merged([
+      { manifest: body(BUNDLE_A, 'srcbundle') },
+      { manifest: body(BUNDLE_B, 'srcbundlex'), source: 'marketplace' },
+    ]), undefined]]);
+    expect([sourceOf(ql, BUNDLE_A), sourceOf(ql, BUNDLE_B)]).toEqual(['code', 'marketplace']);
+  });
+
+  it('an entry that states code is stamped code; one stating marketplace is stamped marketplace', async () => {
+    const ql = await boot([[merged([
+      { manifest: body(BUNDLE_A, 'srcbundle'), source: 'code' },
+      { manifest: body(BUNDLE_B, 'srcbundlex'), source: 'marketplace' },
+    ]), undefined]]);
+    expect([sourceOf(ql, BUNDLE_A), sourceOf(ql, BUNDLE_B)]).toEqual(['code', 'marketplace']);
+  });
+
+  it('the entry\'s statement is the more specific one: it is stamped over the door\'s, which still covers the entries that state none', async () => {
+    const ql = await boot([[merged([
+      { manifest: body(BUNDLE_A, 'srcbundle') },
+      { manifest: body(BUNDLE_B, 'srcbundlex'), source: 'code' },
+    ]), { source: 'marketplace' }]]);
+    expect([sourceOf(ql, BUNDLE_A), sourceOf(ql, BUNDLE_B)]).toEqual(['marketplace', 'code']);
+  });
+
+  it('CONTROL: an artifact none of whose entries states a source keeps today\'s behaviour — code', async () => {
+    const ql = await boot([[merged([
+      { manifest: body(BUNDLE_A, 'srcbundle') },
+      { manifest: body(BUNDLE_B, 'srcbundlex') },
+    ]), undefined]]);
+    expect([sourceOf(ql, BUNDLE_A), sourceOf(ql, BUNDLE_B)]).toEqual(['code', 'code']);
+  });
+
+  it.each(['authored', 'cloud'])('an entry stating `%s` is refused at the entry gate the load path reads', (source) => {
+    let refusal: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      resolveArtifactPackageEntries(merged([{ manifest: body(BUNDLE_A, 'srcbundle'), source }]));
+    } catch (err) {
+      refusal = err as Error & { code?: string; status?: number };
+    }
+    expect(refusal).toMatchObject({ code: 'INVALID_ARTIFACT_PACKAGE_ENTRY', status: 422 });
+    expect(refusal?.message).toContain('source');
   });
 });
 

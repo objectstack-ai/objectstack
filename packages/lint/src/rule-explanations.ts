@@ -853,6 +853,23 @@ const VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION: RuleExplanation = {
+  rule: 'visibility-predicate-has-argument',
+  covers: 'what `has()` accepts as its argument',
+  paragraphs: [
+    'CEL defines the macro in one form, `has(e.f)`: a presence test on field `f` of whatever `e` ' +
+      'evaluates to, where `f` is a plain field name written after a dot. Any other argument — a name ' +
+      'alone (`has(status)`), an index as the last step (`has(record.items[0])`), a call, a literal or ' +
+      'an operator — is refused by the engine as `has() invalid argument` on every evaluation, whatever ' +
+      'the record holds. On a view or page surface the console then falls OPEN and the element renders ' +
+      'unconditionally, exactly like one carrying no predicate at all.',
+    'Write the test the definition admits: `has(record.status)` or `\'status\' in record` for a field ' +
+      '(`data` instead of `record` on a metadata-editing form), and `size(record.items) > 0` to ask whether ' +
+      'a list has a first element. `has()` over a selection whose receiver is indexed or called, such as ' +
+      '`has(record.items[0].name)`, is accepted.',
+  ],
+};
+
 const VISIBILITY_BARE_IDENTIFIER_EXPLANATION: RuleExplanation = {
   rule: 'visibility-bare-identifier',
   covers: 'why every value is read through a namespace',
@@ -4772,6 +4789,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [VISIBILITY_PREDICATE_OVER_BUDGET_EXPLANATION.rule]: VISIBILITY_PREDICATE_OVER_BUDGET_EXPLANATION,
   [VISIBILITY_PREDICATE_SYNTAX_EXPLANATION.rule]: VISIBILITY_PREDICATE_SYNTAX_EXPLANATION,
   [VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION.rule]: VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION,
+  [VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION.rule]: VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION,
   [VISIBILITY_BARE_IDENTIFIER_EXPLANATION.rule]: VISIBILITY_BARE_IDENTIFIER_EXPLANATION,
   [HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,

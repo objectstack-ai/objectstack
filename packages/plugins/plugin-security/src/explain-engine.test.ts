@@ -65,6 +65,7 @@ function makeDeps(overrides: Partial<ExplainEngineDeps> & { sets?: any[]; schema
     getFieldMask: () => ({}),
     getPartialMaskRules: async () => ({}),
     baselinePermissionSets: ['member_default'],
+    tenancyPosture: 'single',
     ...overrides,
   };
 }

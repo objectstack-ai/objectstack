@@ -137,3 +137,19 @@ export type {
   PackagedPermissionSetOverlayReading,
   OverlayDetectionOptions,
 } from './packaged-permission-set-overlay-detection.js';
+// [ADR-0126 §6 wall 3] The access upgrade check the marketplace door asks
+// before it replaces an installed package — registered by `SecurityPlugin`
+// under `ACCESS_UPGRADE_CHECK_SERVICE`; exported for a host that composes its
+// own sources, and for the door's own tests.
+export {
+  ACCESS_UPGRADE_CHECK_SERVICE,
+  accessUpgradeDelta,
+  createAccessUpgradeCheck,
+} from './access-upgrade-check.js';
+export type {
+  AccessUpgradeCheck,
+  AccessUpgradeCheckEngine,
+  AccessUpgradeCheckRequest,
+  AccessUpgradeCheckResult,
+  AccessUpgradeCheckSources,
+} from './access-upgrade-check.js';

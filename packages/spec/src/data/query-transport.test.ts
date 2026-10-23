@@ -250,6 +250,27 @@ describe('§3 the fold is TOTAL — every admitted value shape lowers, or the pa
     });
     it('an empty-string `$top` — the `limit: 0` case', () => refuses({ object: 'a', $top: '' }));
     it('a non-numeric `$skip`', () => refuses({ object: 'a', $skip: 'abc' }));
+    // [#25269] The page window the door enforces: a non-negative integer, on
+    // every spelling and both arms. The table over the door's own verdicts is
+    // `metadata-protocol`'s `protocol.page-window-declared.test.ts`.
+    it.each([
+      ['limit', -1], ['limit', 1.5], ['offset', -5], ['offset', 0.5], ['top', -1],
+      ['$top', -1], ['$top', 1.5], ['$skip', -1], ['skip', 2.5],
+    ])('a `%s` of %s — a number that is not a page window', (key, value) => {
+      const issues = refuses({ object: 'a', [key]: value });
+      expect(issues).toHaveLength(1);
+    });
+    it.each([['$top', '-1'], ['$top', '1.5'], ['$skip', '-5'], ['skip', '0.5']])(
+      'a `%s` of %j — digits that are not a page window, refused at the canonical path naming the spelling',
+      (key, value) => {
+        const issues = refuses({ object: 'a', [key]: value });
+        expect(issues).toHaveLength(1);
+        expect(issues[0].path).toEqual([key === '$top' ? 'limit' : 'offset']);
+        expect(issues[0].message).toContain(`'${key}'`);
+      },
+    );
+    it('`0` stays a window on every spelling (`$top=0` asks for the total alone)', () =>
+      parsesTo({ object: 'a', $top: '0', skip: 0 }, { object: 'a', limit: 0, offset: 0 }));
     it('a `$count` that is neither the boolean nor its two spellings', () =>
       refuses({ object: 'a', $count: 'yes' }));
     it('a non-object query', () => expect(QueryWithTransportSchema.safeParse('nope').success).toBe(false));

@@ -17,9 +17,9 @@ export const lifecycleSettingsManifest = {
   label: 'Data Lifecycle',
   icon: 'Timer',
   description:
-    'Governance for ADR-0057 data lifecycle enforcement: retention window ' +
-    'overrides, per-table row quotas, and growth alerts for the platform ' +
-    'LifecycleService (Reaper / Rotator / Archiver).',
+    'How long system data is kept: override retention windows, cap row counts ' +
+    'per table, and get alerted when a table grows unexpectedly. The platform ' +
+    'applies these on its periodic cleanup sweep.',
   scope: 'global',
   readPermission: 'manage_platform_settings',
   writePermission: 'manage_platform_settings',
@@ -44,9 +44,9 @@ export const lifecycleSettingsManifest = {
       default: {},
       description:
         'Per-object window overrides: { "<object>": { "maxAge": "1y", "expireAfter": "30d" } }. ' +
-        'Duration literals: h/d/w/y. Tenant-scoped — a regulated tenant sets years while dev keeps days (ADR-0057 §3.2). ' +
-        'An override BELOW a retention floor a consumer registered (e.g. the job queue\'s dedup window) is rejected at ' +
-        'sweep time and logged at error — the declared window keeps running.',
+        'Durations use h/d/w/y. Set per organization, so a regulated organization can keep years while a development one keeps days. ' +
+        'An override shorter than the minimum a platform feature needs (for example the job queue\'s duplicate-detection window) ' +
+        'is ignored and logged as an error, and the default window keeps applying.',
     },
     {
       type: 'json',

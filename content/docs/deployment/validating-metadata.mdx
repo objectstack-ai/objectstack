@@ -481,6 +481,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Platform-schedule `create_record` organization (#6285) | — | — | — | ✓ᶠ |
 | Public-form anonymous intake on this deployment's tenancy posture — advisory only (#21476) | — | — | — | ✓ᵛ |
 | Autonumber `{field}` interpolation | ✓ | ✓ | ✓ | ✓ᵒ |
+| Email template HTML hole placements — a hole in a placement the mail renderer's encoding does not suit (#25189) | ✓ | ✓ | ✓ | ✓ᵉ |
 | View references — form targets, view-key collisions (#2554) | ✓ | ✓ | ✓ | — |
 | Flow authoring anti-patterns (#1874) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Flow trigger readiness — a flow that looks armed and never launches (#5762) | ✓ | ✓ | ✓ | ✓ᶠ |
@@ -495,10 +496,11 @@ orthogonal to both, and no cell here can carry it; it is written out in
 **Every superscript in the `runtime publish` column is one metadata type whose
 writes that rule inspects: `✓ᶠ` `flow`, `✓ᵛ` `view`, `✓ᵈ` `dashboard`, `✓ᵒ`
 `object`, `✓ᵖ` `page`, `✓ˢ` `seed`, `✓ᵇ` `book`, `✓ᵖᵉ` `permission`,
-`✓ᵖᵒ` `position`, `✓ᵃ` `app`** — the two `ᵖ`-initial pairs carry a second
-letter because `page` already holds `ᵖ` on its own. Read the codes
-**longest-first**: `ᵖᵒ` is `position`, never `page` followed by `object`. A cell
-lists one superscript per declared type, in the order the rule declares them, and that
+`✓ᵖᵒ` `position`, `✓ᵃ` `app`, `✓ᵉ` `email_template`** — the two
+`ᵖ`-initial pairs carry a second letter because `page` already holds `ᵖ` on its
+own. Read the codes **longest-first**: `ᵖᵒ` is `position`, never `page`
+followed by `object`, and `ᵖᵉ` is `permission`, never `page` followed by
+`email_template`. A cell lists one superscript per declared type, in the order the rule declares them, and that
 rule's own `runtimeTypes` in `AUTHORING_RULES` is the authority — the set has
 grown a type at a time (#4463 shipped P1 as `flow` and four rule families, #7220
 moved the whole `views[]` visibility-predicate family across in one edit, #7529
@@ -506,8 +508,9 @@ put widget-binding integrity on `dashboard`, #8307 → #8310 walked the ADR-0090
 security-posture block across `seed`, then `permission` and `book`, then
 `object`, #4716 crossed the five remaining **gating** object rules —
 functional completeness, managed API methods, autonumber formats, and both
-validation-rule enforceability checks — onto `object`, and #19370 took the
-vocabulary freeze across all five of its own write types at once), so read the
+validation-rule enforceability checks — onto `object`, #19370 took the
+vocabulary freeze across all five of its own write types at once, and #25189
+put the email template hole placement rule on `email_template`), so read the
 rule rather than assuming a save of some other type reaches storage unjudged.
 
 That last move is also why the vocabulary freeze is a row of its own. It was
@@ -732,7 +735,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (50)...
+  → Running author-time rules (51)...
   → Checking that every required capability has a provider installable in this edition...
   → Checking package docs (ADR-0046)...
 

@@ -375,8 +375,8 @@ export class OrganizationsPlugin implements Plugin {
           //
           // `isSystem` short-circuited above, so the legitimate writers that
           // deliberately name another organization — the per-org seed replay,
-          // the orphan claim, imports, migrations — run under SYSTEM_CTX and
-          // meet neither this stamp nor the wall.
+          // imports, migrations — run under SYSTEM_CTX and meet neither this
+          // stamp nor the wall.
           if (data.organization_id == null || data.organization_id === '') {
             data.organization_id = opCtx.context.tenantId;
           }

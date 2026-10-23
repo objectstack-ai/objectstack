@@ -276,6 +276,49 @@ read at each runtime's own consult point; an empty ledger changes nothing anywhe
    they never write the ledger — the ledger records the customer's **choices**, and no upgrade
    un-makes a choice. The converse holds too: disabling never blocks or edits the base's upgrade
    stream. The two never meet: the base's version history and the ledger share no columns.
+
+   > **Note (2026-10-23, ruling of record `6259332195` on #24443, items 1–2, 4–5) — wall 3 is true
+   > in practice for the access class.** Two stages of #24446 make this wall hold for sharing rules,
+   > permission sets, positions and capabilities. They add no spec key and no rename spelling.
+   >
+   > - **The boot report** (U1, #25311, `54df640b38`). At `kernel:bootstrapped`, plugin-security
+   >   compares the customer's access state with the registry the boot holds. That state is the
+   >   activation-ledger rows, the environment-authored permission sets and positions (clones
+   >   included) and the `sys_sharing_rule` rows. The report lists orphans, suspected re-enablements,
+   >   sharing-rule collisions, broken references and field denies a customer set lacks. It writes and
+   >   refuses nothing.
+   > - **The marketplace refusal** (U2, #25355, `448374d3f8`). On a re-install over an installed
+   >   package, before its first write, `POST /api/v1/marketplace/install-local` runs the same
+   >   comparison through the `security.accessUpgradeCheck` service. It runs over the registry and
+   >   over a projection with the incoming manifest. Only the delta refuses: 409
+   >   `ACCESS_UPGRADE_CONFIRMATION_REQUIRED`, naming each finding, and nothing is written. A finding
+   >   that predates the upgrade does not block it; the boot report keeps raising it. A check that
+   >   cannot read its sources answers 503 and writes nothing.
+   > - **The confirm token.** The refusal carries a `findingSet` token. The same call with
+   >   `confirmAccessUpgrade` set to that token installs. The install's own entry in the marketplace
+   >   install ledger, not the activation ledger, records the confirmation (`findingSet`,
+   >   `confirmedBy`, `confirmedAt`). The token confirms exactly the findings it names: if they
+   >   change, the call is refused again with the fresh set, and a bare `true` confirms nothing. The
+   >   CLI sends it as `os package install … --confirm-access-upgrade`.
+   > - **Who is told.** Under `single`, the administrator. The boot report notifies the Default
+   >   Organization's `admin_full_access` holders and any `OS_PLATFORM_OWNER_EMAIL` address, once per
+   >   finding set. The refusal answers the administrator who installs (`manage_metadata`). Under a
+   >   wall (`group`, `isolated`), the operator. The boot report is one `error` line in the operator's
+   >   log and writes into no organization (seat ruling `6353787407`, option A). Only the operator
+   >   reaches the refusal: ADR-0131 D12 answers a tenant administrator 403 first, with no finding.
+   >   A tenant administrator is never the fallback.
+   > - **Two accepted limits**, both following from §9 (a clone records no base and no link) and from
+   >   the bare `(metadata_type, name)` ledger key. A re-enablement is only *suspected*: nothing
+   >   records which name replaced which, so a package with several unswitched names yields several
+   >   candidates. The field-deny check reads "grants the same object", not "copied from that set",
+   >   so it can name an unrelated customer set and is a review item.
+   > - **Two doors are still open**, each with its card. `POST /api/v1/packages` with `overwrite`
+   >   replaces an installed package without this check (#25382). A cloud-fetched marketplace
+   >   install of a package shipping a catalog name an environment-authored item holds writes its
+   >   install entry, and the next cold boot refuses; it is to be refused before the first write, not
+   >   confirmed (#25366).
+   > - **The other classes follow after v18** (ruling item 4), as does the retirement of
+   >   `package-upgrade.zod.ts`. Until then this wall holds in practice for the access class only.
 4. **The paper protocol is not the model.** The three-layer
    `metadata-customization.zod.ts` surface (#12057 — exported, documented, zero consumers) is
    **superseded by this ADR as a matter of record**: nothing may build against it, and its

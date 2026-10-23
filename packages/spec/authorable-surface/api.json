@@ -206,6 +206,7 @@
     "api/AuthEndpoint:signUpEmail",
     "api/AuthEndpoint:verifyEmail",
     "api/AuthFamilies:admin",
+    "api/AuthFeaturesConfig:cloudManaged",
     "api/AuthFeaturesConfig:magicLink [RETIRED]",
     "api/AuthFeaturesConfig:organization",
     "api/AuthFeaturesConfig:passkeys [RETIRED]",

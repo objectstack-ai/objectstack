@@ -36,6 +36,21 @@ export const ExecutionStatus = z.enum([
   // refusal text rides beside it on the run row as `refusalMessage`. Appended
   // last so every reader that indexes `.options` keeps its positions.
   'refused',     // Terminal: the flow refused (an `end` node with outcome: 'refused')
+  /**
+   * A scheduled flow's due time that passed while no kernel was ticking,
+   * recorded ONCE by the next kernel that found the gap (one entry per missed
+   * due time). Terminal: the run was never started, is never resumed, and is
+   * never replayed — no catch-up run follows it. DISTINCT from `cancelled`
+   * (nobody cancelled it) and from `failed` (nothing ran, so nothing failed).
+   *
+   * What the entry carries, with no field of its own: on the `ExecutionLog`,
+   * `startedAt` is the due time and `completedAt` the detection time, while
+   * `durationMs` and `refusalMessage` are absent and `steps` is empty; on the
+   * stored run row, `started_at` / `finished_at` carry the same two instants
+   * and `duration_ms`, `error` and `refusal_message` are absent. Appended last,
+   * like `refused`, so every reader that indexes `.options` keeps its positions.
+   */
+  'missed',      // Terminal: a scheduled due time passed while no kernel was ticking; never run
 ]);
 export type ExecutionStatus = z.input<typeof ExecutionStatus>;
 

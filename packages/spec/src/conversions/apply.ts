@@ -81,6 +81,21 @@ export interface ApplyConversionsOptions {
    */
   onTodo?: (todo: ConversionTodoNotice) => void;
   /**
+   * [#25279] Datasource definitions the caller's door can see beyond the stack
+   * being converted, by name. Read only by the refused-shape listing above
+   * (so only with an `onTodo` sink), and there only by the `external`-binding
+   * detector: a stored object row arrives alone, so without this the listing
+   * could judge only a binding on the primary datasource, while the save door
+   * also judges one on a datasource stored or registered beside it.
+   *
+   * Each value is the named datasource's definition as the caller's door
+   * resolves it (an absent `schemaMode` is the spec default, `'managed'`); a
+   * name absent from the map gets no verdict, exactly as a door that sees no
+   * definition gives none. A datasource the stack itself declares is read from
+   * the stack first. Nothing is converted from it and nothing is rewritten.
+   */
+  knownDatasources?: ReadonlyMap<string, { readonly schemaMode?: unknown }>;
+  /**
    * Conversion ids this seam refuses to replay, whatever `includeRetired`
    * says. Empty/absent by default: every seam replays the whole window it
    * opened.
@@ -122,7 +137,7 @@ export function applyConversions(
   stack: Record<string, unknown>,
   options: ApplyConversionsOptions = {},
 ): Record<string, unknown> {
-  const { onNotice, onTodo, includeRetired = false, excludeConversionIds } = options;
+  const { onNotice, onTodo, includeRetired = false, excludeConversionIds, knownDatasources } = options;
   const excluded = excludeConversionIds && excludeConversionIds.length > 0
     ? new Set(excludeConversionIds)
     : null;
@@ -185,7 +200,7 @@ export function applyConversions(
   // judged on the converted stack and listed through the same sink: a row the
   // chain leaves refused must not read as already on protocol.
   if (onTodo) {
-    reportRefusedStoredShapes(current, (refused, detail) =>
+    reportRefusedStoredShapes(current, { knownDatasources }, (refused, detail) =>
       onTodo({
         code: CONVERSION_TODO_CODE,
         conversionId: refused.id,

@@ -14,6 +14,13 @@
  *  - every insert, single or batch, whether or not its body names a master;
  *  - every update whose body carries the reference key, a master or `null`.
  *
+ * Why the raw door alone pins it (ruling 6345869077 item 6): the three doors
+ * that skip the parse — `defineStack` with `strict: false`, plugin code's raw
+ * `registerApp` / `registerObject`, and an 18.0.0-era `sys_metadata` row the
+ * boot registers under `[metadata_spec_invalid]` — all end in the one
+ * `SchemaRegistry` entry the gate's resolver reads through `ql.getSchema()`,
+ * so a declaration from any of them reaches the gate in the same form.
+ *
  * One rule for both flags, for a member and for a platform admin alike, on an
  * ordinary object and on a `sys_`-named one (which the engine treats
  * differently on insert — the rule does not). What stays as it was:

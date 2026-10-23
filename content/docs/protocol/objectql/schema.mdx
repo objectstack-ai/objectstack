@@ -719,9 +719,9 @@ full_name:
 
 Row-level isolation runs on **one platform column**: `organization_id`, a lookup to
 `sys_organization`. The registry injects it into every registered object that has not
-opted out (`hidden`, `readonly`, `required: false` — it is server-populated on insert
-and stays NULL where no organization context exists), so a tenant-scoped object
-declares **nothing** about tenancy:
+opted out (`hidden`, `readonly`, `required: false` — the platform stamps it on
+insert, so the author never writes it), so a tenant-scoped object declares **nothing**
+about tenancy:
 
 ```yaml
 name: customer
@@ -730,6 +730,22 @@ fields:
     type: text
     required: true
 ```
+
+`required: false` describes the authoring surface, not the stored value: NULL is not an
+organization (ADR-0131 D1). An insert is stamped with the writer's organization — under
+the `single` posture, with the Default Organization — and a write that names none is
+refused wherever an organization can exist (ADR-0131 D9). A table the SQL or Turso
+driver creates carries the column `NOT NULL` at `CREATE TABLE`, so the database itself
+refuses a row with no organization, an `upsert` included (ADR-0131 D1; changeset
+`tenant-column-not-null-ddl` of `@objectstack/driver-sql` and `@objectstack/driver-turso`).
+The in-memory driver enforces no `NOT NULL`. A table that already existed — created by an
+earlier release, or one the driver adds the column to — keeps a nullable column until
+[`os migrate organization-ownership`](/docs/deployment/cli#os-migrate-organization-ownership)
+tightens it, and that ceremony cannot tighten a rotated shard or a table on the Turso
+remote face; [`os migrate plan`](/docs/deployment/cli#tenant-columns-still-nullable-advisory)
+lists every tenant column still nullable, with the reason. An object whose rows belong
+to no organization does not leave the column empty — it opts out, and has no column at
+all.
 
 The column's existence does not depend on the deployment's tenancy posture — only its
 *index* does, since nothing filters by organization on a single-organization stack. An

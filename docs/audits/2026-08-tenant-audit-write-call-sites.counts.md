@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 236 |
-| Object name statically decidable | 160 |
+| Write call sites | 237 |
+| Object name statically decidable | 161 |
 | Object name chosen at run time | 76 |
-| Against a tenancy-enabled object | 159 |
+| Against a tenancy-enabled object | 160 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 177 |
+| Threading a tenant context | 178 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 51 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 134 |
+| Threading a decidably elevated context | 135 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 94 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-22 at `78b1ed16a`.
+Measured on 2026-10-23 at `fb63d396b`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 700 |
-| engine-shaped types recognised | 86 |
+| tracked non-test sources scanned | 714 |
+| engine-shaped types recognised | 87 |
 | declared objects in the registry | 117 |
-| same-named calls subtracted as non-engine | 169 |
+| same-named calls subtracted as non-engine | 172 |
 
 ## Every site
 
@@ -130,10 +130,12 @@ Measured on 2026-10-22 at `78b1ed16a`.
 | `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/adopt-membership.ts` | `update` | `SystemObjectName.MEMBER` | undecidable | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/audience-gate-test-support.ts` | `insert` | `sys_invitation` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_account` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_session` | enabled | options unreadable | 3 |
-| `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_two_factor` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_user` | enabled | options unreadable | 8 |
+| `packages/plugins/plugin-auth/src/auth-manager-database-hooks.ts` | `update` | `sys_user` | enabled | options unreadable | 2 |
+| `packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts` | `update` | `sys_account` | enabled | options unreadable | 1 |
+| `packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts` | `update` | `sys_session` | enabled | options unreadable | 3 |
+| `packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts` | `update` | `sys_two_factor` | enabled | options unreadable | 1 |
+| `packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts` | `update` | `sys_user` | enabled | options unreadable | 3 |
+| `packages/plugins/plugin-auth/src/auth-manager-sign-in-lockout.ts` | `update` | `sys_user` | enabled | options unreadable | 3 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `delete` | `sys_verification` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `insert` | `sys_verification` | enabled | elevated | 1 |
@@ -145,6 +147,7 @@ Measured on 2026-10-22 at `78b1ed16a`.
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `update` | `sys_member` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-auth/src/idp-locale-claim.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/member-role-canonical.ts` | `update` | `MEMBER_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/membership-backfill-ledger.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/membership-ended-session.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 2 |

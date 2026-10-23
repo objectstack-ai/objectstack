@@ -20,7 +20,7 @@
  * engine over better-sqlite3 `:memory:`, so the engine dispatches the hooks.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
@@ -264,6 +264,21 @@ describe('[#24948] the same question about deleting the Default Organization, as
     await expect(guard.judgeOrganizationDelete('org_default')).rejects.toMatchObject(refusal);
     // A question, not a write: the membership is still there.
     expect((await members(engine)).map((m) => m.id)).toEqual(['mem_owner']);
+  });
+
+  it('a read the question cannot complete refuses with the read-fault code, once: an inner envelope\'s answer passes the outer one unchanged', async () => {
+    const engine = await promotedSingle();
+    const real = engine.find.bind(engine);
+    vi.spyOn(engine, 'find').mockImplementation(async (object: string, ...rest: any[]) => {
+      if (object === 'sys_user_permission_set') throw new Error('sys_user_permission_set is unreadable');
+      return (real as any)(object, ...rest);
+    });
+
+    const err = (await guard.judgeOrganizationDelete('org_default').catch((e: unknown) => e)) as Error & { code?: unknown; status?: unknown };
+    vi.restoreAllMocks();
+    expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(err.message.match(/SERVICE_UNAVAILABLE:/g)).toHaveLength(1);
+    expect(err.message).toContain('sys_user_permission_set is unreadable');
   });
 
   it('CONTROL: with another administrator standing elsewhere, the delete is admitted', async () => {

@@ -525,6 +525,25 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         return handleActionActivationWrite(deps, ql, parts, body, _context);
     }
 
+    // [#25296] AN OBJECT THE DATA PLANE REFUSES HAS NO ACTION THAT MAY RUN.
+    // An object whose owning package is disabled stays registered in the
+    // engine's schema registry, which the declaration resolution below reads,
+    // so its declarations resolved and its handler ran (a script action
+    // answered `200` with the body's result) while `/data` refused the object
+    // `404 OBJECT_PACKAGE_DISABLED`, `GET /meta/object` omitted it and the MCP
+    // `run_action` tool answered "not found". Refused here with the protocol's
+    // own error, before every gate that reads the declaration (D4's 403, the
+    // activation ledger's 409, the "no declaration" 404) and before any record
+    // load or dispatch: what those gates answer is about an action of an object
+    // that is not served. An object-less action names no object to ask about.
+    if (!actionExec.isObjectLessActionKey(objectName)) {
+        try {
+            await actionExec.refuseDisabledPackageObject(deps, _context, objectName, _context?.environmentId);
+        } catch (err) {
+            return { handled: true, response: deps.errorFromThrown(err, 404) };
+        }
+    }
+
     // [ADR-0066 D4] Dual-surface action gate — the server is the source of
     // truth. Resolve the action's declared `requiredPermissions` from the
     // object schema and reject (403) when the caller's systemPermissions

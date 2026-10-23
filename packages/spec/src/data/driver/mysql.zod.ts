@@ -121,7 +121,7 @@ export const MysqlConfigSchema = lazySchema(() => strictObject(
   ssl: DriverSslToggleSchema.optional().meta({ title: 'Use SSL/TLS' }),
 
   /** Dev-only, loosen-only schema self-heal (#2186). */
-  autoMigrate: SqlAutoMigrateSchema.optional(),
+  autoMigrate: SqlAutoMigrateSchema.optional().meta({ title: 'Auto-migrate schema' }),
 })
   .describe('MySQL / MariaDB connection configuration')
   .superRefine((cfg, ctx) => {

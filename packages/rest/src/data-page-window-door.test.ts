@@ -29,6 +29,14 @@
  * is the door-level half: the status and `code` each door answers, the
  * spelling it names, that the driver was never asked, and the controls paging
  * exactly as before.
+ *
+ * [#25269] The `POST` body's published schema (`FindDataRequestSchema`) now
+ * declares that same window, so the `POST` door refuses a malformed one where
+ * it refuses every other malformed body — at the schema, `400
+ * VALIDATION_FAILED`, `fields[0]` naming `query.<key>` — exactly as it already
+ * refused `{"limit":"ten"}`. Still a 400 before any read; the code is the
+ * schema door's rather than the normalizer's, because the schema now says what
+ * the normalizer enforces.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -152,13 +160,13 @@ describe('[#25229] the page window on both list doors — sqlite', () => {
     expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
   });
 
-  it('POST: 400 INVALID_REQUEST naming the body key — no read', async () => {
+  it('POST: 400 VALIDATION_FAILED naming the body key — the declared schema refuses it, no read', async () => {
     const before = reads.n;
     for (const [name, body, param] of REFUSED_POST) {
       const res = await query(body);
       expect(res.status, `${name}: ${JSON.stringify(res.body)}`).toBe(400);
-      expect(res.body.code, name).toBe('INVALID_REQUEST');
-      expect(res.body.error, name).toContain(`Query parameter '${param}' must be a non-negative integer`);
+      expect(res.body.code, name).toBe('VALIDATION_FAILED');
+      expect(res.body.fields?.[0]?.field, name).toBe(`query.${param}`);
     }
     expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
   });

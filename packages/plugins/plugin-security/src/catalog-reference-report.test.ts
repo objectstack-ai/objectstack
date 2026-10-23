@@ -53,7 +53,7 @@ import {
   type CatalogReferenceReport,
   type CatalogReferenceReportEngine,
 } from './catalog-reference-report.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const POSTURE_ENV = 'OS_TENANCY_POSTURE';
@@ -133,10 +133,9 @@ async function boot(opts: { posture?: 'single' | 'isolated' } = {}): Promise<Boo
     ],
   } as any);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, ['sys_permission_set', 'sys_position', 'sys_position_permission_set', 'sys_user_position']);
   engines.push(engine);
 
   (engine as any).registry.registerItem('position', { name: PKG_POSITION, label: 'Package lead' }, 'name', PKG);

@@ -64,6 +64,18 @@ export type {
 } from './cel-engine';
 export { cronEngine } from './cron-engine';
 export { templateEngine, TEMPLATE_FORMATTERS, formatValue } from './template-engine';
+// #25189 — where a hole may sit in a mail template's HTML face (ruling
+// 6335348115 on #25082, F1 A2 / F3 C2). Here because both readers already
+// depend on this package and on nothing else they share: `@objectstack/lint`'s
+// authoring rule, and `@objectstack/plugin-email`'s built-in template pin,
+// which also holds this grammar to the renderer's.
+export {
+  judgeMailHtmlHoles,
+  MAIL_HTML_SUPPORTED_PLACEMENTS,
+  MAIL_HTML_PLACEMENT_LABELS,
+  MAIL_HTML_SUPPORTED_SHAPES,
+} from './mail-html-hole-placement';
+export type { MailHtmlHole, MailHtmlHolePlacement, MailHtmlHoleJudgeOptions } from './mail-html-hole-placement';
 export { registerStdLib, buildScope, registerPermissionPredicate, registerCapabilityPredicate } from './stdlib';
 export type { PermissionBinding } from './stdlib';
 // objectui#4421 / batch #147 — the permission predicate's data door. `can` reads

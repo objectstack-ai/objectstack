@@ -36,12 +36,17 @@ function todosOf(stack: Record<string, unknown>): { stack: Record<string, unknow
   return { stack: out, todos };
 }
 
-function storedTodos(type: string, row: Record<string, unknown>) {
+function storedTodos(
+  type: string,
+  row: Record<string, unknown>,
+  knownDatasources?: ReadonlyMap<string, { readonly schemaMode?: unknown }>,
+) {
   const todos: ConversionTodoNotice[] = [];
   const notices: ConversionNotice[] = [];
   const item = applyConversionsToStoredItem(type, row, {
     onTodo: (t) => todos.push(t),
     onNotice: (n) => notices.push(n),
+    ...(knownDatasources ? { knownDatasources } : {}),
   }) as Record<string, any>;
   return { item, todos, notices };
 }
@@ -62,6 +67,7 @@ describe('the refused-shape list — registered against the migration chain', ()
       'view-data-api-provider-retired',
       'flow-value-slot-template-dialect-refused',
       'object-external-binding-managed-datasource-refused',
+      'visibility-predicate-has-argument-refused',
     ]);
   });
 
@@ -532,5 +538,126 @@ describe('#25168 — a stored object whose `external` binding is on a managed da
       objects: [federatedRow({ datasource: 'warehouse' })],
     };
     expect(todosOf(stack).todos.filter((t) => t.conversionId === 'object-external-binding-managed-datasource-refused')).toEqual([]);
+  });
+});
+
+describe('#25279 — a stored object bound `external` to a datasource the caller resolves is judged against it', () => {
+  const listed = (todos: ConversionTodoNotice[]) =>
+    todos.filter((t) => t.conversionId === 'object-external-binding-managed-datasource-refused');
+
+  it.each<[string, Record<string, unknown>]>([
+    ["declared `schemaMode: 'managed'`", { name: 'warehouse', driver: 'sqlite', config: {}, schemaMode: 'managed' }],
+    ['declaring no `schemaMode` (managed by the spec default)', { name: 'warehouse', driver: 'sqlite', config: {} }],
+  ])('a stored row on a known datasource %s is listed, once, and not rewritten', (_label, datasource) => {
+    const row = federatedRow({ datasource: 'warehouse' });
+    const { item, todos, notices } = storedTodos('object', row, new Map([['warehouse', datasource]]));
+    expect(item).toEqual(row);
+    expect(notices).toEqual([]);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe('object-external-binding-managed-datasource-refused');
+    expect(todo.path).toBe('objects[0].external');
+    expect(todo.reason).toContain("Object 'wh_order' declares `external` on datasource 'warehouse', whose `schemaMode` is 'managed'");
+    expect(JSON.parse(todo.from)).toEqual({ datasource: 'warehouse', external: { remoteName: 'orders' } });
+  });
+
+  it.each([
+    ["a federated datasource (`schemaMode: 'external'`)", 'external'],
+    ["a `schemaMode: 'validate-only'` datasource", 'validate-only'],
+  ])('a stored row on %s is not listed', (_label, schemaMode) => {
+    const known = new Map([['warehouse', { name: 'warehouse', schemaMode }]]);
+    expect(listed(storedTodos('object', federatedRow({ datasource: 'warehouse' }), known).todos)).toEqual([]);
+  });
+
+  it('a known datasource the row does not name gives no verdict', () => {
+    const known = new Map([['other', { name: 'other', schemaMode: 'managed' }]]);
+    expect(listed(storedTodos('object', federatedRow({ datasource: 'warehouse' }), known).todos)).toEqual([]);
+  });
+
+  it('a datasource the stack declares is read before the caller\'s', () => {
+    const stack = {
+      datasources: [{ name: 'warehouse', driver: 'sqlite', config: {}, schemaMode: 'external', external: {} }],
+      objects: [federatedRow({ datasource: 'warehouse' })],
+    };
+    const todos: ConversionTodoNotice[] = [];
+    applyConversions(stack, {
+      includeRetired: true,
+      onTodo: (t) => todos.push(t),
+      knownDatasources: new Map([['warehouse', { schemaMode: 'managed' }]]),
+    });
+    expect(listed(todos)).toEqual([]);
+  });
+
+  it('without an `onTodo` sink nothing reads the known datasources', () => {
+    const known = new Map<string, { schemaMode?: unknown }>();
+    const get = known.get.bind(known);
+    let reads = 0;
+    known.get = (name: string) => {
+      reads++;
+      return get(name);
+    };
+    applyConversionsToStoredItem('object', federatedRow({ datasource: 'warehouse' }), { knownDatasources: known });
+    expect(reads).toBe(0);
+  });
+});
+
+// ── #25281 ────────────────────────────────────────────────────────────────
+
+const HAS_ARGUMENT_ID = 'visibility-predicate-has-argument-refused';
+
+const hasPage = (visibleWhen: unknown) => ({
+  name: 'pipeline_home',
+  label: 'Pipeline',
+  type: 'app',
+  regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Pipeline' }, visibleWhen }] }],
+});
+
+const hasView = (visibleWhen: unknown) => ({
+  name: 'task_form',
+  label: 'Task',
+  form: { sections: [{ label: 'Main', visibleWhen, fields: [{ field: 'notes', visibleWhen }] }] },
+});
+
+describe('#25281 — a stored page or view whose visibleWhen hands `has()` an argument that is not a field selection is listed', () => {
+  it.each([
+    ['has(status)', 'status'],
+    ['has(record.items[0])', 'record.items[0]'],
+  ])('a page component carrying `%s`: one TODO naming the argument and the fate; the row is not rewritten', (predicate, argument) => {
+    const row = hasPage(predicate);
+    const { item, todos } = storedTodos('page', row);
+    expect(item).toEqual(row);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe(HAS_ARGUMENT_ID);
+    expect(todo.path).toBe('pages[0].regions[0].components[0].visibleWhen');
+    expect(todo.reason).toContain(`passes \`${argument}\` to \`has()\``);
+    expect(todo.reason).toContain('has() invalid argument');
+    expect(todo.reason).toContain('No lossless rewrite');
+    expect(JSON.parse(todo.from)).toBe(predicate);
+  });
+
+  it('a form view: the section and its field are each listed, at their own path', () => {
+    const { todos } = storedTodos('view', hasView({ dialect: 'cel', source: 'has(status)' }));
+    expect(todos.filter((t) => t.conversionId === HAS_ARGUMENT_ID).map((t) => t.path)).toEqual([
+      'views[0].form.sections[0].visibleWhen',
+      'views[0].form.sections[0].fields[0].visibleWhen',
+    ]);
+  });
+
+  it.each([
+    'has(record.status)',
+    "has(record.items[0].name) && record.items[0].name != ''",
+    "record.note == 'has(x)'",
+    undefined,
+  ])('`%s` is not listed', (predicate) => {
+    expect(storedTodos('page', hasPage(predicate)).todos).toEqual([]);
+    expect(storedTodos('view', hasView(predicate)).todos).toEqual([]);
+  });
+
+  it('the stored page parses: the listing names a predicate the parse accepts and the authoring rule refuses', () => {
+    // The parse does not judge CEL, so the row loads and is served; the refusal
+    // belongs to `visibility-predicate-has-argument` at the save door and in
+    // `os validate` (pinned beside that rule, `@objectstack/lint`).
+    expect(PageSchema.safeParse(hasPage('has(status)')).success).toBe(true);
   });
 });

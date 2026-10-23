@@ -1,7 +1,5 @@
 # 座位生命周期(开轮、座位贴、收班)
 
-每个座位每次 fire 读本文:开轮互斥读数之前读〈开轮互斥〉,收班之前读其余各节。
-
 ## 开轮互斥
 
 - 开轮互斥:fire 开始、首个写动作之前读四个读数,未收班活动任一未满一轮 ⇒ 自退。
@@ -20,6 +18,7 @@
 - 异于上一开轮标记即先重读;留开轮标记(session ID + fire 时刻 + 该触碰,注明重读)再跑轮。
 - 同读 harness 载入面 `.claude/**` 的最新触碰与内容是否已在共享检出 HEAD。
 - 否 ⇒ 记座位贴,自然收班时换会话,⛔ 不中断批次;读数走 `scripts/pm/check-harness-current.mjs`。
+- `session-start-fleet.sh` 钩子开会话即印 SKILL.md 触碰 sha 与车道席位贴行,供比对开轮标记。
 
 ## 座位贴协议
 
@@ -66,7 +65,7 @@
 ## 轮次报告与节奏
 
 - 每轮向维护者打中文轮次报告(chat 通道):issue → 判决 → PR 链接 → 备注的表。
-- 报告加升级项、代裁清单(分诊)、awaiting a human merge 项、逐 PR 熔断命中项(无则 none)。
+- 报告加升级项、呈裁清单、awaiting a human merge 项、逐 PR 熔断命中项(无则 none)。
 - 报告含 `UNRECOGNISED` 行:对本轮门禁日志 grep `UNRECOGNISED` 逐行照录,`NOT APPLICABLE` 行也在内。
 - 健康指标五个:可派发库存(open `pm:queue` 未认领及趋势);决策箱(待维护者数)。
 - 决策箱指标还要点名带开放下游依赖的决策卡,从 `Blocked-by:` 反向索引现算。

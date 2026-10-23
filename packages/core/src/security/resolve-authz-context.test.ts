@@ -219,9 +219,9 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
   it('reads sys_setting once (all three keys) when no settings service is wired', async () => {
     const ql = makeCountingQl({
       sys_setting: [
-        { namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'Asia/Tokyo' },
-        { namespace: 'localization', key: 'locale', scope: 'tenant', value: 'ja-JP' },
-        { namespace: 'localization', key: 'currency', scope: 'tenant', value: 'JPY' },
+        { namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'Asia/Tokyo' },
+        { namespace: 'localization', key: 'locale', scope: 'tenant', organization_id: 'o1', value: 'ja-JP' },
+        { namespace: 'localization', key: 'currency', scope: 'tenant', organization_id: 'o1', value: 'JPY' },
       ],
     });
     const loc = await resolveLocalizationContext({ ql, tenantId: 'o1' });
@@ -283,7 +283,7 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
     };
     const ql = makeCountingQl({
       sys_setting: [
-        { namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'Europe/Paris' },
+        { namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'Europe/Paris' },
       ],
     });
     const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
@@ -505,7 +505,7 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
   // the same staleness property through the invalidation instead of through the
   // absence of a cache.
   it('without an engine write-epoch seam, a successful read is never cached: a value change between two calls is visible on the very next call', async () => {
-    const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'UTC' }];
+    const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeCountingQl({ sys_setting: rows });
     const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
     expect(first.timezone).toBe('UTC');
@@ -523,11 +523,11 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
   // unconfigured tenant must be visible on the very next call, same as the
   // value-change case above. (#11966: same seam-absent arm as that case.)
   it('without a seam, a legitimate empty result is not cached either: the first write for a previously-unconfigured tenant is visible immediately', async () => {
-    const rows: Array<{ namespace: string; key: string; scope: string; value: string }> = [];
+    const rows: Array<{ namespace: string; key: string; scope: string; organization_id: string; value: string }> = [];
     const ql = makeCountingQl({ sys_setting: rows });
     const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
     expect(first).toEqual({ timezone: 'UTC', locale: 'en-US', currency: undefined });
-    rows.push({ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'Asia/Tokyo' });
+    rows.push({ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'Asia/Tokyo' });
     const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
     expect(second.timezone).toBe('Asia/Tokyo');
     expect(ql.counts.sys_setting).toBe(2);
@@ -627,7 +627,7 @@ describe('resolveLocalizationContext — only a backend fault populates the memo
   // has nothing to do with the backend.
   it('a settings refusal never freezes a SUCCESSFUL direct read: a row change is visible on the very next call', async () => {
     const settings = makeBindWindowSettings(); // stays unbound → refuses every call
-    const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'UTC' }];
+    const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', organization_id: 'o1', value: 'UTC' }];
     const ql = makeCountingQl({ sys_setting: rows });
 
     const first = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });

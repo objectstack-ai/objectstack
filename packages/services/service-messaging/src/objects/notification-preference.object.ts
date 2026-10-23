@@ -160,13 +160,20 @@ export const NotificationPreference = ObjectSchema.create({
             label: 'Digest',
             required: false,
             defaultValue: 'none',
-            description: 'Batch cadence (P3 digest middleware).',
+            description:
+                'Collect these notifications into one summary instead of sending each as it arrives: daily sends it at midnight, ' +
+                'weekly on Monday at midnight, none sends each one right away. Critical notifications are always sent at once. ' +
+                'Takes effect on a preference whose channel is * (all channels).',
         }),
 
         quiet_hours: Field.json({
             label: 'Quiet Hours',
             required: false,
-            description: 'Optional { tz, start, end } window (P3 quiet-hours middleware).',
+            description:
+                'A daily window when notifications are held and delivered when it ends, for example ' +
+                '{ "tz": "Europe/Berlin", "start": "22:00", "end": "07:00" }. Times are HH:MM in that time zone (UTC when tz is left out), ' +
+                'and the window may run past midnight. Critical notifications are not held. ' +
+                'Takes effect on a preference whose channel is * (all channels).',
         }),
 
         created_at: Field.datetime({ label: 'Created At', readonly: true }),

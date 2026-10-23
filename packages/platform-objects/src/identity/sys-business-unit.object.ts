@@ -116,16 +116,22 @@ export const SysBusinessUnit = ObjectSchema.create({
       group: 'Identity',
     }),
 
-    kind: Field.select(
-      ['company', 'division', 'department', 'office', 'cost_center'],
-      {
-        label: 'Kind',
-        required: true,
-        defaultValue: 'department',
-        description: 'Categorisation hint — does not change graph semantics.',
-        group: 'Identity',
-      },
-    ),
+    // Labelled options: the bare-string shorthand makes each label equal its
+    // value, so the form showed `cost_center` as option text.
+    kind: Field.select({
+      label: 'Kind',
+      required: true,
+      defaultValue: 'department',
+      description: 'Categorisation hint — does not change graph semantics.',
+      group: 'Identity',
+      options: [
+        { value: 'company', label: 'Company' },
+        { value: 'division', label: 'Division' },
+        { value: 'department', label: 'Department' },
+        { value: 'office', label: 'Office' },
+        { value: 'cost_center', label: 'Cost Center' },
+      ],
+    }),
 
     // ── Hierarchy ────────────────────────────────────────────────
     // `restrict`, not the lookup default `set_null`: deleting a unit that still

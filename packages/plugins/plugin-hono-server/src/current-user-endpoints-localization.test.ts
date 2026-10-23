@@ -132,14 +132,15 @@ function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, setti
         sys_user: [{ id: USER, email: 'lang@example.com', locale: storedLocale }],
         // The endpoint reads all three `localization` keys in ONE `$in` query,
         // so the table carries whichever of them the fixture configured — and
-        // nothing for the rest.
+        // nothing for the rest. Each row is the caller's organization's: the
+        // fallback reads that organization's rows only (ADR-0131 D8).
         sys_setting: ([
             ['locale', settingLocale],
             ['timezone', settingTimezone],
             ['currency', settingCurrency],
         ] as Array<[string, string | undefined]>)
             .filter(([, value]) => value !== undefined)
-            .map(([key, value]) => ({ namespace: 'localization', key, value, scope: 'tenant' })),
+            .map(([key, value]) => ({ namespace: 'localization', key, value, scope: 'tenant', organization_id: ORG })),
     };
     const ql = {
         find: async (object: string, opts: any) => {
