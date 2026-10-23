@@ -129,7 +129,8 @@ describe("a runAs:'system' flow writes no identity assignment; a runAs:'user' fl
     const orgs = await ql.find('sys_organization', { context: SYS });
     orgA = String(orgs[0].id);
     const members = ['usr_admin', 'usr_plain', 'usr_target', 'usr_seeded', 'usr_granted', 'usr_platform'];
-    for (const id of [...members, 'usr_outsider']) {
+    // Two non-members: the refused flows aim at one, the platform control writes the other.
+    for (const id of [...members, 'usr_outsider', 'usr_outsider_platform']) {
       await ql.insert('sys_user', { id, name: id, email: `${id}@example.test` }, { context: SYS });
     }
     for (const id of members) {
@@ -216,7 +217,7 @@ describe("a runAs:'system' flow writes no identity assignment; a runAs:'user' fl
     const r = rows('usr_platform');
     await ql.insert('sys_user_permission_set', { id: 'ups_platform', ...r.sys_user_permission_set }, { context: SYS });
     await ql.insert('sys_user_position', { id: 'up_platform', ...r.sys_user_position }, { context: SYS });
-    await ql.insert('sys_member', { id: 'mem_platform', ...r.sys_member }, { context: SYS });
+    await ql.insert('sys_member', { id: 'mem_platform', ...r.sys_member, user_id: 'usr_outsider_platform' }, { context: SYS });
     await ql.insert('sys_invitation', { id: 'inv_platform', ...r.sys_invitation }, { context: SYS });
     await ql.update('sys_member', { role: 'admin' }, { where: { id: 'mem_platform' }, context: SYS } as never);
     await ql.delete('sys_invitation', { where: { id: 'inv_platform' }, context: SYS } as never);
