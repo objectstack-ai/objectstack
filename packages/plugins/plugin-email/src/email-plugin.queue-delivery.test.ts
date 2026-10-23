@@ -140,8 +140,11 @@ function fakeCtx(services: Record<string, unknown>) {
 /** Last element — the package's tsconfig lib predates Array.prototype.at. */
 function last<T>(arr: T[]): T | undefined { return arr[arr.length - 1]; }
 
+// The out-of-the-box `mail` namespace (provider `smtp` at its manifest
+// default, no host): the re-apply keeps the transport this harness hands the
+// plugin. A saved `log` would not — it installs the LogTransport.
 const MAIL_DEFAULTS: Record<string, Resolved> = {
-  provider: { value: 'log', source: 'global' },
+  provider: { value: 'smtp', source: 'default' },
   from_email: { value: 'no-reply@example.test', source: 'global' },
   from_name: { value: 'ObjectStack', source: 'default' },
   queue_delivery: { value: false, source: 'default' },
