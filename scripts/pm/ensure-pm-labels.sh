@@ -50,7 +50,10 @@
 # after its own earlier retirement, and identity into domain:services) are
 # deliberately ABSENT — recreating a retired label puts an ownerless lane back
 # into GitHub's autocomplete. Their leftover label OBJECTS may still exist in
-# the repos; deleting those objects is a separate, deliberate PM action.
+# the repos; deleting those objects is a separate, deliberate PM action. One
+# TRANSITIONAL exception, recorded at its rows in the domain-lane block below:
+# the three lanes that folded into domain:server on 2026-10-22 keep alias rows
+# until their last open card lands.
 # The objectui-repo STREAM labels domain:spec / domain:devx / domain:tooling,
 # retired in objectui only on 2026-10-22 (maintainer ruling 「甲，现在做」), are
 # recorded beside the objectui domain:ui row further down, for the reason the
@@ -440,9 +443,27 @@ gh label create pm:seat -R objectstack-ai/objectstack -c 1d76db -d "Seat registr
 
 # Domain lanes — the roster lives in SKILL.md's domain table; keep both in sync
 # BY PR whenever a lane is added or retired.
-for D in engine services devx spec cli skills; do
+#
+# domain:server — the engine, services and cli lanes folded into ONE lane
+# (maintainer ruling 2026-10-22, verbatim: 「就叫 server 吧」, then 「同意」 on
+# letter 乙). Its three former labels are the one TRANSITIONAL exception to the
+# header's retired-lanes-are-absent rule: they keep a row each below so that
+# `--reconcile` writes the "retired, alias of domain:server" description the
+# ruling asks for onto the live objects — in-flight cards keep their old label
+# until they land and open cards are relabelled by triage only after the merge
+# lands, so the objects stay in use for a while and a reader hovering one must
+# learn where it went. The description is the whole point of those rows:
+# create-if-missing is a no-op on objects that exist. The readers that keep
+# seeing every card through the old spellings live in
+# scripts/pm/check-half-states.mjs (LANE_LABEL_ALIASES). The cleanup PR that
+# retires the three objects (zero open cards on each) deletes these three rows
+# and that map together, and the header's rule resumes for them.
+for D in server devx spec skills; do
   gh label create "domain:$D" -R objectstack-ai/objectstack -c bfd4f2 -d "Domain lane — seat card indexed by label:pm:seat" 2>/dev/null || true
 done
+gh label create domain:engine   -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (engine surface); in-flight cards keep it until they land" 2>/dev/null || true
+gh label create domain:services -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (services surface); in-flight cards keep it until landed" 2>/dev/null || true
+gh label create domain:cli      -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (cli surface); in-flight cards keep it until they land" 2>/dev/null || true
 
 # domain:cloud is a PARKING label, not a lane: no seat, never dispatched in this
 # repo. Cloud-service journeys found in objectstack / objectui keep it until the
