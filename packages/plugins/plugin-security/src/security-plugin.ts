@@ -2,11 +2,10 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
-import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError, withoutOperationPrivateKeys } from '@objectstack/core';
+import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
-import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
 // merge boundaries that stamp it (see the RLS injection below).
 // [#21829] `MAX_BULK_PER_ROW_HOOK_ROWS`: the platform's row ceiling for one
@@ -21,7 +20,7 @@ import type { NumberComparandDoorFieldMeta } from '@objectstack/spec/data';
 import { renderOperationMessage } from '@objectstack/spec/system';
 // [#19989] The engine's own update-dispatch predicate, asked rather than
 // re-derived: step 3.6 needs to know which row the ENGINE will write.
-import { resolveEngineDeleteDispatch, resolveEngineUpdateDispatch, type EngineDeleteDispatchInput, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
+import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
 import {
   localWriteEpochSource,
   resolveWriteEpochSource,
@@ -88,7 +87,7 @@ import {
 import {
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readDisabledCatalogNames, readPositionGrantsInForce, countPositionHolders } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readPositionGrantsInForce, countPositionHolders } from '@objectstack/core';
 // [#25223 cut 1] The leaf readers (policy collection, unresolved-posture
 // probes, field masks, field-name tables); the methods of the same names below
 // hand each body the members it reads (`ObjectInputsHost`).
@@ -174,6 +173,30 @@ import {
   stageRlsMembership,
   type RlsFilterHost,
 } from './security-plugin-rls-filter.js';
+// [#25223 cut 8] The permission-set resolution for an execution context: the
+// resolution itself, the deactivated folded-set drop, the position-name fold
+// report and the memo's key; the methods of the same names below hand each
+// body the members it reads (`PermissionSetsHost`).
+import {
+  dropDeactivatedFoldedSets,
+  permissionSetMemoKey,
+  reportNameFoldCollisions,
+  resolvePermissionSetsForContextUnmemoized,
+  type PermissionSetsHost,
+} from './security-plugin-permission-sets.js';
+// [#25223 cut 8] The addressed-write readers: the by-id and predicate write
+// the caller addressed, the read question a predicate write is narrowed by,
+// the single id of a write and the by-id row read the provenance and
+// pre-image gates share; the methods of the same names below hand each body
+// the member it reads (`AddressedWritesHost`).
+import {
+  addressedByIdWriteId,
+  addressedPredicateWrite,
+  extractSingleId,
+  readableRowsScopeForPredicateWrite,
+  readRowById,
+  type AddressedWritesHost,
+} from './security-plugin-addressed-writes.js';
 import {
   isPlatformOwnershipFloorPolicy,
   masterGateCoversOperation,
@@ -795,7 +818,7 @@ async function unreadableUnderCallerRead(read: () => Promise<unknown>): Promise<
  *    is neither an answer nor a refusal, and reporting it as either would
  *    relabel it.
  */
-async function readUnlessRefused<T>(
+export async function readUnlessRefused<T>(
   read: () => Promise<T>,
 ): Promise<{ refused: true } | { refused: false; value: T }> {
   try {
@@ -992,7 +1015,7 @@ interface SecurityReportSink {
  * snake_case per the precedent beside it (`platform_owner_wall_bypass`): this
  * is a data value, not an error code (ADR-0112 governs those).
  */
-const POSITION_NAME_FOLD_EVENT = 'position_name_fold_grant';
+export const POSITION_NAME_FOLD_EVENT = 'position_name_fold_grant';
 
 const CONSOLE_SECURITY_SINK: SecurityReportSink = Object.freeze({
   warn: (...a: any[]) => { console.warn(...a); },
@@ -6904,14 +6927,8 @@ export class SecurityPlugin implements Plugin {
    * and nothing else off the context.
    */
   private permissionSetMemoKey(context: any): string {
-    const positions = Array.isArray(context?.positions) ? context.positions : [];
-    const permissions = Array.isArray(context?.permissions) ? context.permissions : [];
-    return JSON.stringify([
-      positions,
-      permissions,
-      context?.principalKind ?? null,
-      context?.userId ? 1 : 0,
-    ]);
+    // [#25223 cut 8] The body moved to `security-plugin-permission-sets.ts` (see `PermissionSetsHost`).
+    return permissionSetMemoKey(context);
   }
 
   /**
@@ -7000,88 +7017,24 @@ export class SecurityPlugin implements Plugin {
   }
 
   /** The actual resolution — see {@link resolvePermissionSetsForContext}. */
-  private async resolvePermissionSetsForContextUnmemoized(
+  private resolvePermissionSetsForContextUnmemoized(
     context: any,
   ): Promise<PermissionSet[]> {
-    // [ADR-0138 D3] The GUEST requests exactly the sets its envelope carries —
-    // the `guest` anchor's bindings, which `resolveAuthzContext` resolved in
-    // the organization D4 derived — and they are treated as any requested set
-    // below. Its position is NOT folded into the request: the position-name
-    // fold (#13419's ruling retires it) would hand an anonymous caller any set
-    // that merely shares the anchor's name, the one channel D3 item 3 says
-    // never reaches the guest. The baseline does not reach it either (applied
-    // only to a caller with a user id, below), and `everyone` is never among
-    // its positions.
-    const isGuest = isGuestEnvelope(context);
-    const positions = isGuest ? [] : (context?.positions ?? []);
-    const explicitPermissionSets = context?.permissions ?? [];
-    const requested = [...positions, ...explicitPermissionSets];
-    // [ADR-0090 D10] An AGENT principal's grants are EXACTLY its scope-derived
-    // ceiling set(s) — the additive human baseline (member_default) must NOT
-    // apply, or its write bit would silently widen a read-only agent past the
-    // scope the user consented to. The agent's floor is instead the restricted
-    // (no-object-access) set, so an agent whose sets fail to resolve fails
-    // CLOSED (every object op denied) rather than falling open. The delegating
-    // user's own baseline still applies on the OTHER side of the intersection
-    // (resolved from `onBehalfOf` via a context without this flag).
-    const isAgent = context?.principalKind === 'agent';
-    // [#7555] The human side is a LIST, and the agent side deliberately is not:
-    // the agent's ceiling is EXACTLY the restricted set, and composing the
-    // platform baseline into it is precisely the widening D10 forbids. The two
-    // branches produce arrays only so the code below reads once.
-    const baseline: string[] = isAgent
-      ? [MCP_AGENT_PERMISSION_SET_RESTRICTED]
-      : this.baselinePermissionSets;
-    // [ADR-0090 D5] Baseline is ADDITIVE, always (for humans): the baseline
-    // set(s) apply to every authenticated request IN ADDITION to whatever else
-    // resolved. The former "only when the user has nothing else" conditional
-    // was the fallback CLIFF — receiving your first explicit grant silently
-    // cost you the entire baseline. Agents skip this additive step (their
-    // ceiling is closed, not floored) — see above.
-    // [#7555] The same cliff had a second spelling the list closes: an app
-    // declaring an `isDefault` set REPLACED `member_default` here, so every
-    // member of that app lost the platform floor (and with it every built-in
-    // Account destination) the moment the app declared a posture of its own.
-    // [#13419] Recorded, not merely pushed: a name granted by the BASELINE is in
-    // force whether or not the position-name fold exists, so it is not evidence
-    // of the fold and must not be warned about below.
-    const baselineApplied: string[] = [];
-    if (!isAgent && context?.userId) {
-      for (const name of baseline) {
-        if (!requested.includes(name)) requested.push(name);
-        baselineApplied.push(name);
-      }
-    }
-    let permissionSets = await this.permissionEvaluator.resolvePermissionSets(
-      requested,
-      this.metadata,
-      this.bootstrapPermissionSets,
-      this.dbLoaderForContext(context),
-      { logger: this.logger },
-    );
-    permissionSets = await this.dropDeactivatedFoldedSets(positions, explicitPermissionSets, baselineApplied, permissionSets);
-    // [#13419 执行要点 3] Report — never alter — a grant that exists ONLY because
-    // this method folded a POSITION name into the permission-set request above.
-    this.reportNameFoldCollisions(positions, explicitPermissionSets, baselineApplied, permissionSets);
-    // Post-resolution fallback — closes the fail-open hole where a populated
-    // `positions` array maps to no permission set yet (no sys_position binding),
-    // which would otherwise skip RLS entirely and expose every tenant's data.
-    // For an agent, the fallback is the restricted set (deny all objects), NOT
-    // the human baseline — a mis-resolved agent must never inherit member access.
-    if (
-      permissionSets.length === 0 &&
-      context?.userId &&
-      baseline.length > 0
-    ) {
-      permissionSets = await this.permissionEvaluator.resolvePermissionSets(
-        baseline,
-        this.metadata,
-        this.bootstrapPermissionSets,
-        this.dbLoaderForContext(context),
-        { logger: this.logger },
-      );
-    }
-    return permissionSets;
+    // [#25223 cut 8] The body moved to `security-plugin-permission-sets.ts` (see `PermissionSetsHost`).
+    const readLogger = () => this.logger;
+    const readMetadata = () => this.metadata;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<PermissionSetsHost, 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'dbLoaderForContext' | 'dropDeactivatedFoldedSets' | 'logger' | 'metadata' | 'permissionEvaluator' | 'reportNameFoldCollisions'> = {
+      baselinePermissionSets: this.baselinePermissionSets,
+      bootstrapPermissionSets: this.bootstrapPermissionSets,
+      dbLoaderForContext: (...a) => this.dbLoaderForContext(...a),
+      dropDeactivatedFoldedSets: (...a) => this.dropDeactivatedFoldedSets(...a),
+      get logger() { return readLogger(); },
+      get metadata() { return readMetadata(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      reportNameFoldCollisions: (...a) => this.reportNameFoldCollisions(...a),
+    };
+    return resolvePermissionSetsForContextUnmemoized.call(host, context);
   }
 
   /**
@@ -7102,23 +7055,18 @@ export class SecurityPlugin implements Plugin {
    * with no such collision issues no read. A read that fails throws
    * (`AuthzStoreUnavailableError`), and the request fails closed.
    */
-  private async dropDeactivatedFoldedSets(
+  private dropDeactivatedFoldedSets(
     positions: unknown,
     explicitPermissionSets: unknown,
     baselineApplied: string[],
     resolved: PermissionSet[],
   ): Promise<PermissionSet[]> {
-    if (!Array.isArray(positions) || positions.length === 0 || resolved.length === 0) return resolved;
-    const judged = new Set<string>(baselineApplied);
-    for (const n of Array.isArray(explicitPermissionSets) ? explicitPermissionSets : []) {
-      if (typeof n === 'string') judged.add(n);
-    }
-    const resolvedNames = new Set(resolved.map((ps) => (ps as any)?.name).filter((n: unknown): n is string => typeof n === 'string'));
-    const folded = positions.filter((n): n is string => typeof n === 'string' && resolvedNames.has(n) && !judged.has(n));
-    if (folded.length === 0) return resolved;
-    const disabled = await readDisabledCatalogNames(this.ql, [], [...new Set(folded)]);
-    if (disabled.permissions.size === 0) return resolved;
-    return resolved.filter((ps) => !disabled.permissions.has((ps as any)?.name));
+    // [#25223 cut 8] The body moved to `security-plugin-permission-sets.ts` (see `PermissionSetsHost`).
+    const readQl = () => this.ql;
+    const host: Pick<PermissionSetsHost, 'ql'> = {
+      get ql() { return readQl(); },
+    };
+    return dropDeactivatedFoldedSets.call(host, positions, explicitPermissionSets, baselineApplied, resolved);
   }
 
   /**
@@ -7282,45 +7230,13 @@ export class SecurityPlugin implements Plugin {
     baselineApplied: string[],
     resolved: PermissionSet[],
   ): void {
-    if (!Array.isArray(positions) || positions.length === 0) return;
-    const governed = new Set<string>(
-      (Array.isArray(explicitPermissionSets) ? explicitPermissionSets : []).filter(
-        (n): n is string => typeof n === 'string',
-      ),
-    );
-    for (const name of baselineApplied) governed.add(name);
-    const resolvedNames = new Set<string>(
-      resolved.map((ps) => (ps as any)?.name).filter((n: unknown): n is string => typeof n === 'string'),
-    );
-    for (const position of positions) {
-      if (typeof position !== 'string' || position.length === 0) continue;
-      if (!resolvedNames.has(position)) continue;
-      if (governed.has(position)) continue;
-      if (this.nameFoldWarned.has(position)) continue;
-      this.nameFoldWarned.add(position);
-      // ⛔ No tracker id in the STRING — an operator reading this log has no tracker, no
-      // git log and no ADR to resolve `#NNNN` against (`check:doc-authoring`; maintainer
-      // ruling 2026-08-12). The card anchor lives in the docblock above, where the reader
-      // who can resolve it is already looking.
-      this.logger.warn?.(
-        `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' is in force for ` +
-          `holders of position '${position}' only because the two share a name — the definition ` +
-          `of position '${position}' does not name it in its permissionSets. This name-based ` +
-          `grant is deprecated and is removed in the next major version: from then on, holders ` +
-          `of position '${position}' do not receive permission set '${position}' unless the ` +
-          `position's definition names it. To keep the grant, declare it (position ` +
-          `'${position}': permissionSets: ['${position}']); if the shared name is a ` +
-          `coincidence, rename one of the two.`,
-        {
-          event: POSITION_NAME_FOLD_EVENT,
-          position,
-          permissionSet: position,
-          // The consequence as data, for a consumer that keys on fields rather
-          // than prose. The three fields above are unchanged on purpose.
-          removedIn: 'next_major',
-        },
-      );
-    }
+    // [#25223 cut 8] The body moved to `security-plugin-permission-sets.ts` (see `PermissionSetsHost`).
+    const readLogger = () => this.logger;
+    const host: Pick<PermissionSetsHost, 'logger' | 'nameFoldWarned'> = {
+      get logger() { return readLogger(); },
+      nameFoldWarned: this.nameFoldWarned,
+    };
+    reportNameFoldCollisions.call(host, positions, explicitPermissionSets, baselineApplied, resolved);
   }
 
   /**
@@ -7435,18 +7351,8 @@ export class SecurityPlugin implements Plugin {
    * verbs keep the pre-image check exactly as it was.
    */
   private addressedByIdWriteId(opCtx: any, nested: boolean, referentialFieldClear: boolean): unknown {
-    if (nested || referentialFieldClear) return undefined;
-    if (opCtx.operation === 'update') {
-      const data = opCtx.data;
-      if (data == null || typeof data !== 'object') return undefined;
-      const route = resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, opCtx.options);
-      return route.kind === 'by-id' ? route.id : undefined;
-    }
-    if (opCtx.operation === 'delete') {
-      const route = resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined);
-      return route.kind === 'by-id' ? route.id : undefined;
-    }
-    return undefined;
+    // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
+    return addressedByIdWriteId(opCtx, nested, referentialFieldClear);
   }
 
   /**
@@ -7484,16 +7390,8 @@ export class SecurityPlugin implements Plugin {
    *    the predicate path reads its matched rows from.
    */
   private addressedPredicateWrite(opCtx: any, nested: boolean, referentialFieldClear: boolean): boolean {
-    if (nested || referentialFieldClear) return false;
-    if (opCtx.operation === 'update') {
-      const data = opCtx.data;
-      if (data == null || typeof data !== 'object') return false;
-      return resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, opCtx.options).kind === 'multi';
-    }
-    if (opCtx.operation === 'delete') {
-      return resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
-    }
-    return false;
+    // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
+    return addressedPredicateWrite(opCtx, nested, referentialFieldClear);
   }
 
   /**
@@ -7521,52 +7419,18 @@ export class SecurityPlugin implements Plugin {
    * The id list is bounded by {@link PREDICATE_WRITE_READABLE_ID_CAP}; see
    * there for what happens above it.
    */
-  private async readableRowsScopeForPredicateWrite(opCtx: any): Promise<Record<string, unknown> | null> {
-    if (typeof this.ql?.find !== 'function') {
-      // The read question cannot be asked, and a write that cannot be narrowed
-      // must not run un-narrowed. Unreachable in a real deployment — `start()`
-      // registers no security middleware at all without a query engine — but a
-      // non-conforming engine double fails closed rather than writing wide.
-      throw new Error(
-        `[Security] Cannot narrow the predicate ${opCtx.operation} on '${opCtx.object}' to the rows the ` +
-          `caller can read: no query engine is available to ask.`,
-      );
-    }
-    const callerWhere = (opCtx.options as { where?: unknown } | undefined)?.where;
-    const answer = await readUnlessRefused(() =>
-      this.ql.find(opCtx.object, {
-        ...(callerWhere != null ? { where: copyOfCallerPredicate(callerWhere) } : {}),
-        fields: ['id'],
-        limit: PREDICATE_WRITE_READABLE_ID_CAP + 1,
-        // [#7145] The caller's envelope minus the operation-private keys: the
-        // write's own stamps (`__writeScope`, …) are not inputs to a read, and
-        // a copy keeps the read's stamps off the write's context.
-        context: withoutOperationPrivateKeys((opCtx.context ?? {}) as Record<string, unknown>),
-      }),
-    );
-    if (answer.refused) return null;
-    const rows: unknown[] = Array.isArray(answer.value) ? answer.value : [];
-    if (rows.length > PREDICATE_WRITE_READABLE_ID_CAP) {
-      throw predicateWriteReadableCapError(opCtx.object, opCtx.operation);
-    }
-    const ids = rows
-      .map((r) => (r && typeof r === 'object' ? (r as { id?: unknown }).id : undefined))
-      .filter((id) => id !== undefined && id !== null);
-    return { id: { $in: ids } };
+  private readableRowsScopeForPredicateWrite(opCtx: any): Promise<Record<string, unknown> | null> {
+    // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
+    const readQl = () => this.ql;
+    const host: Pick<AddressedWritesHost, 'ql'> = {
+      get ql() { return readQl(); },
+    };
+    return readableRowsScopeForPredicateWrite.call(host, opCtx);
   }
 
   private extractSingleId(opCtx: any): string | number | bigint | null {
-    const isScalar = (v: unknown): v is string | number | bigint =>
-      v !== null && (typeof v === 'string' || typeof v === 'number' || typeof v === 'bigint');
-    const data = opCtx?.data;
-    if (data && typeof data === 'object' && !Array.isArray(data) && isScalar(data.id)) {
-      return data.id;
-    }
-    const where = opCtx?.options?.where;
-    if (where && typeof where === 'object' && 'id' in where && isScalar((where as any).id)) {
-      return (where as any).id;
-    }
-    return null;
+    // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
+    return extractSingleId(opCtx);
   }
 
   /**
@@ -7610,23 +7474,13 @@ export class SecurityPlugin implements Plugin {
    * the provenance / existence gates, the CALLER's context for the pre-image —
    * and that choice is the caller's, not this method's.
    */
-  private async readRowById(object: string, id: unknown, context: any): Promise<Record<string, unknown> | null> {
-    // Not a read at all: there is no id to look one up by. Every call site
-    // already screens this; the guard is defence, and `null` is honest here
-    // because nothing was ever asked of the store.
-    if (id == null) return null;
-    if (typeof this.ql?.findOne !== 'function') {
-      // The third collapsed fact, and it is not absence either: the probe
-      // could not run. Unreachable in a real deployment — `start()` registers
-      // no security middleware at all without a query engine, so no gate can
-      // reach this line — but a non-conforming engine double must fail closed
-      // rather than manufacture a 404 for a row nobody looked for.
-      throw new Error(
-        `[Security] Cannot verify record '${String(id)}' on '${object}': no query engine is available to read it.`,
-      );
-    }
-    const row = await this.ql.findOne(object, { where: { id }, context });
-    return row && typeof row === 'object' ? (row as Record<string, unknown>) : null;
+  private readRowById(object: string, id: unknown, context: any): Promise<Record<string, unknown> | null> {
+    // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
+    const readQl = () => this.ql;
+    const host: Pick<AddressedWritesHost, 'ql'> = {
+      get ql() { return readQl(); },
+    };
+    return readRowById.call(host, object, id, context);
   }
 
   /**

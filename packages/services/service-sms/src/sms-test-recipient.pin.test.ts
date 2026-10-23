@@ -55,11 +55,12 @@ function fakeEngine(users: UserRow[], opts: { userReadFails?: boolean } = {}) {
   };
 }
 
-async function serve(users: UserRow[], opts: { userReadFails?: boolean } = {}) {
+async function serve(users: UserRow[], opts: { userReadFails?: boolean; noEngine?: boolean } = {}) {
   const settings = new SettingsService({ env: {} });
   settings.registerManifest(smsSettingsManifest);
   const engine = fakeEngine(users, opts);
-  const services = new Map<string, unknown>([['settings', settings], ['objectql', engine]]);
+  const services = new Map<string, unknown>([['settings', settings]]);
+  if (!opts.noEngine) services.set('objectql', engine);
   const readyHooks: Array<() => Promise<void> | void> = [];
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -177,5 +178,51 @@ describe('served sms/test — the recipient', () => {
 
     expect(result).toMatchObject({ ok: false, severity: 'error' });
     expect(twilio).not.toHaveBeenCalled();
+  });
+});
+
+// Every recipient refusal is admin copy: the settings page shows it beside the
+// Send test SMS button. It names what the admin does there, never a request
+// field or an endpoint — the `to` override is API-caller detail.
+describe('served sms/test — the recipient refusals are admin copy', () => {
+  const adminCopy = (message: unknown) => {
+    expect(typeof message).toBe('string');
+    const text = message as string;
+    expect(text).toContain('nothing was sent');
+    expect(text).toContain('Send test SMS');
+    expect(text).not.toContain('/api/');
+    expect(text).not.toMatch(/request body/i);
+    expect(text).not.toMatch(/pass "to"/i);
+  };
+
+  it.each([
+    ['an account with no phone number', [{ id: ADMIN_ID, phone_number: null }], {},
+      'Your account has no phone number', 'signed in as an admin whose account has a phone number'],
+    ['a failed account read', [{ id: ADMIN_ID, phone_number: ADMIN_PHONE }], { userReadFails: true },
+      'Could not read your account\'s phone number', 'once your account can be read'],
+    ['no data engine', [{ id: ADMIN_ID, phone_number: ADMIN_PHONE }], { noEngine: true },
+      'No data engine is available', 'when the data service is up'],
+  ] as const)('%s', async (_name, users, opts, opening, remedy) => {
+    const { twilio, pressSendTest } = await serve([...users], opts);
+
+    const answer = await pressSendTest({ ...TWILIO_DRAFT });
+
+    expect(answer.status).toBe(400);
+    expect(answer.body?.error?.code).toBe('SETTINGS_ACTION_FAILED');
+    const message = answer.body?.error?.details?.message;
+    expect(message).toMatch(new RegExp(`^${opening}`));
+    expect(message).toContain(remedy);
+    adminCopy(message);
+    expect(twilio).not.toHaveBeenCalled();
+  });
+
+  it('no signed-in user (in-process call)', async () => {
+    const { settings } = await serve([{ id: ADMIN_ID, phone_number: ADMIN_PHONE }]);
+
+    const result = await settings.runAction('sms', 'test', { ...TWILIO_DRAFT }, {});
+
+    expect(result.message).toMatch(/^No recipient — nothing was sent\./);
+    expect(result.message).toContain('Sign in as an admin whose account has a phone number');
+    adminCopy(result.message);
   });
 });

@@ -6,6 +6,7 @@ import {
   renderSkillMarkdown,
   OBJECTSTACK_SKILL_NAME,
   OBJECTSTACK_SKILL_DESCRIPTION,
+  OBJECTSTACK_MCP_SERVER_NAME,
 } from './skill-md.js';
 
 /** Pull the YAML frontmatter block (between the first two `---` lines). */
@@ -31,6 +32,16 @@ describe('renderSkillMarkdown', () => {
     const md = renderSkillMarkdown({ mcpUrl: 'https://acme.objectos.app/api/v1/mcp' });
     expect(md).toContain('https://acme.objectos.app/api/v1/mcp');
     expect(md).not.toContain('<YOUR_ENV_MCP_URL>');
+  });
+
+  it('names the MCP server in its connect command by the one exported constant', () => {
+    // `os dev`'s boot banner reads the same constant (packages/cli
+    // dev-mcp-connect-hint-origin.test.ts pins that half), so one endpoint is
+    // never registered under two names.
+    expect(OBJECTSTACK_MCP_SERVER_NAME).toBe('objectstack');
+    const md = renderSkillMarkdown({ mcpUrl: 'https://acme.objectos.app/api/v1/mcp' });
+    const names = [...md.matchAll(/claude mcp add --transport http (\S+) /g)].map((m) => m[1]);
+    expect(names).toEqual([OBJECTSTACK_MCP_SERVER_NAME]);
   });
 
   it('falls back to a clearly-marked placeholder when no URL is given', () => {

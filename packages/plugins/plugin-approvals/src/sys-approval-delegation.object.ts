@@ -94,13 +94,20 @@ export const SysApprovalDelegation = ObjectSchema.create({
     // `lookupFilters` is the picker's candidate query, and the engine resolves
     // `{current_user_id}` against the caller on every read. Presentation only
     // — the guard stays the enforcement, and what a write may store is
-    // unchanged. Pinned in `sys-approval-delegation-delegator-picker.test.ts`.
+    // unchanged. Since that one value is always the acting user, the field
+    // also defaults to it: `defaultValue: 'current_user'` is the spec's
+    // runtime token for a `sys_user` lookup (`DEFAULT_VALUE_TOKENS`), so a new
+    // delegation opens with the Delegator already filled instead of at an
+    // empty picker. Pinned in `sys-approval-delegation-delegator-picker.test.ts`.
     delegator_id: Field.lookup('sys_user', {
       label: 'Delegator',
       required: true,
+      defaultValue: 'current_user',
       lookupFilters: [{ field: 'id', operator: 'eq', value: '{current_user_id}' }],
       group: 'Delegation',
-      description: 'The user going out of office; their individually-routed approver slots are rerouted while active.',
+      description:
+        'The user going out of office. You can delegate only your own approvals, so this is always you: '
+        + 'it starts as you and offers no one else. Their individually-routed approver slots are rerouted while active.',
     }),
 
     delegate_id: Field.lookup('sys_user', {

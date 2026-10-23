@@ -327,6 +327,9 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
     expect(runtimeGatedTypes()).toContain('view');
     expect(stackKeyForType('view')).toBe('views');
     expect(runtimeAuthoringRulesFor('view').map((r) => r.name)).toEqual([
+      // #24798 — the expression rule runs ONE pass on a view write: the bulk
+      // `confirmText` template slots, warnings only in 18.x.
+      'validateStackExpressions',
       // #8793 — filter comparands, not predicates; registered ahead of the
       // family and dispatched for `view` because list-view filter rules are
       // one of the three shapes it judges.
@@ -533,6 +536,7 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
     expect(result.advisories, JSON.stringify(result.advisories)).toEqual([]);
     // "clean" and "nothing ran" must stay distinguishable.
     expect(result.rulesRun).toEqual([
+      'validateStackExpressions', // #24798 — its bulk `confirmText` pass alone, clean here
       'validatePresetComparands', // #8793 — dispatched for `view`, clean here
       'validateReferenceIntegrity', // #9313 — its two list-view field members, clean here
       'validateVisibilityPredicates',
@@ -627,6 +631,7 @@ describe('the publish gate judges a schema-bound form at its own layer (#7815)',
     expect(result.advisories, JSON.stringify(result.advisories)).toEqual([]);
     // "clean" and "nothing ran" must stay distinguishable.
     expect(result.rulesRun).toEqual([
+      'validateStackExpressions', // #24798 — its bulk `confirmText` pass alone, clean here
       'validatePresetComparands', // #8793 — dispatched for `view`, clean here
       'validateReferenceIntegrity', // #9313 — its two list-view field members, clean here
       'validateVisibilityPredicates',

@@ -210,11 +210,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       topic: {
         label: "主题",
-        help: "通知主题,'*' 表示所有主题。"
+        help: "通知发送时使用的主题:流程中通知步骤指定的主题,或平台功能发出的主题,例如 approval.requested、collab.mention。填 * 表示所有主题。没有任何发送方使用的主题不会匹配任何通知。"
       },
       channel: {
         label: "通道",
-        help: "通道 ID(inbox/email/push/…),'*' 表示所有通道。"
+        help: "通道:inbox(站内收件箱,始终可用)、email(配置邮件服务后可用)、sms(配置短信服务后可用),或已安装插件添加的通道 ID。填 * 表示所有通道。没有任何通道使用的 ID 不会匹配任何通知。"
       },
       enabled: {
         label: "启用",

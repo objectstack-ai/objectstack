@@ -1212,7 +1212,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // composites spell out their two live sub-rows (`enabled`, `position`;
       // `mode` / `formView` were retired), four new row labels authored in all
       // three locales.
-      expect(translated.length, `${locale} positive control`).toBe(677);
+      // 678 since #25330: the dataset form's dimensions repeater offers
+      // `nullLabel` once its liveness verdict went live — one row label,
+      // authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(678);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

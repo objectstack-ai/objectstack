@@ -804,3 +804,45 @@ describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
     });
   });
 });
+
+describe('DatasourceAdminServicePlugin: objects bound external are read from the engine registry (#25277)', () => {
+  /**
+   * The `objectql` service's object registry, the one the metadata save door
+   * writes through to. The metadata service's `listObjects()` (a boot-time copy)
+   * is left empty on purpose: an object saved at runtime is in the registry only.
+   */
+  const objectql = (objects: unknown[]) => ({ registry: { getAllObjects: () => objects } });
+  const ORDERS = { name: 'wh_orders', datasource: 'wh', external: { remoteName: 'orders' } };
+
+  it('refuses creating a managed datasource that a runtime-saved object binds external — nothing persisted', async () => {
+    const { service, registry } = await boot({ services: { objectql: objectql([ORDERS]) } });
+
+    await expect(
+      service.createDatasource({ name: 'wh', driver: 'postgres', config: { database: 'analytics' } }),
+    ).rejects.toThrow(/Object 'wh_orders' declares `external` on datasource 'wh', whose `schemaMode` is 'managed'/);
+    expect(registry.get('datasource')?.has('wh') ?? false).toBe(false);
+  });
+
+  it('refuses flipping a federated datasource to managed under that object — the row keeps its schemaMode', async () => {
+    const { service, registry } = await boot({ services: { objectql: objectql([ORDERS]) } });
+    await service.createDatasource({
+      name: 'wh',
+      driver: 'postgres',
+      schemaMode: 'external',
+      config: { database: 'analytics' },
+      external: {},
+    });
+
+    await expect(service.updateDatasource('wh', { schemaMode: 'managed' })).rejects.toThrow(/'wh_orders'/);
+    expect((registry.get('datasource')?.get('wh') as { schemaMode?: string }).schemaMode).toBe('external');
+  });
+
+  it('control: an object on the datasource with no external binding does not block it', async () => {
+    const { service, registry } = await boot({
+      services: { objectql: objectql([{ name: 'wh_local', datasource: 'wh' }]) },
+    });
+
+    await service.createDatasource({ name: 'wh', driver: 'postgres', config: { database: 'analytics' } });
+    expect(registry.get('datasource')?.has('wh')).toBe(true);
+  });
+});

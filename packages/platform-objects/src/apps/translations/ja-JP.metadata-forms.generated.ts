@@ -2039,6 +2039,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "dimensions.dateGranularity": {
         label: "日付の粒度"
       },
+      "dimensions.nullLabel": {
+        label: "空値ラベル"
+      },
       measures: {
         label: "メジャー",
         helpText: "各メジャー：名前、集計関数、フィールド（count の場合は省略可）、表示形式/通貨"

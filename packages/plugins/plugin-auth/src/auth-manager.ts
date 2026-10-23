@@ -20,17 +20,12 @@ import {
 } from '@objectstack/spec/system';
 import {
   assertAudienceConfig,
-  classifyCreationMethod,
-  decideAudienceAdmission,
   isHumanUserRow,
   resolveAudience,
   resolveEmailVerificationRequirement,
-  AUDIENCE_CONFIG_ERROR,
-  type AudienceCreationClass,
   type ResolvedAudience,
   type VerificationDeclarant,
 } from './audience-posture.js';
-import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
 import {
   PLATFORM_IDP_PROVIDER_ID,
   type LinkingAuthContext,
@@ -119,14 +114,12 @@ import { resolveClientAddress } from './client-address.js';
 import { vendorClientAddressOptions, withVendorClientAddress } from './client-address-vendor.js';
 import { clientAddressStateEntries, readRequestClientAddress } from './request-client-address.js';
 import {
-  reconcileMembership,
   type MembershipPolicy,
   type ReconcileOutcome,
 } from './reconcile-membership.js';
 import type { TenancyService } from './tenancy-service.js';
 import { OtpSendGuard, assertOtpCooldownSeconds } from './otp-send-guard.js';
 import type { CounterStore } from './rate-limit-storage.js';
-import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
 import {
   isLastLocalCredentialHolder,
   LAST_LOCAL_CREDENTIAL_CODE,
@@ -230,6 +223,25 @@ import {
   reportJwtSigningFailure,
   type PluginAssemblyHost,
 } from './auth-manager-plugin-assembly.js';
+// [#25224 cut 7] The database and the secret handed to better-auth; the
+// methods of the same names below hand each body the members it reads
+// (`DatabaseSecretHost`).
+import {
+  createDatabaseConfig,
+  generateSecret,
+  resolveAuthSecret,
+  type DatabaseSecretHost,
+} from './auth-manager-database-secret.js';
+// [#25224 cut 8] The audience gate, the membership reconciler's assembly and
+// the self-registration grant's landing; the methods of the same names below
+// hand each body the members it reads (`MembershipAdmissionHost`).
+import {
+  landSelfRegistrationGrant,
+  reportUngrantedSelfRegistrant,
+  settleMembership,
+  validateAudienceAdmission,
+  type MembershipAdmissionHost,
+} from './auth-manager-membership-admission.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -4667,71 +4679,14 @@ export class AuthManager {
    * silently.  We therefore wrap the ObjectQL adapter in a factory function
    * so it is correctly recognised as a `DBAdapterInstance`.
    */
-  private async createDatabaseConfig(): Promise<any> {
-    // Use ObjectQL adapter factory if dataEngine is provided
-    if (this.config.dataEngine) {
-      // createObjectQLAdapterFactory returns an AdapterFactory
-      // (options => DBAdapter) which better-auth invokes via getBaseAdapter().
-      // The factory is created by better-auth's createAdapterFactory and
-      // automatically applies modelName/fields transformations declared in
-      // the betterAuth config above.
-      return createObjectQLAdapterFactory(this.config.dataEngine, {
-        // ADR-0093 D7 — the adapter is the one place that sees the created
-        // user's id INSIDE the creating endpoint call; staging it here lets the
-        // session seam recognise that user without reading the row back.
-        onRecordCreated: async (objectName, row) => {
-          if (objectName !== 'sys_user') return;
-          const { tryGetCurrentAuthEndpointContext } = await import('@better-auth/core/context');
-          this.stageUserCreatedInRequest(tryGetCurrentAuthEndpointContext(), row?.id);
-        },
-      });
-    }
-
-    // Fallback warning if no dataEngine is provided
-    console.warn(
-      '⚠️  WARNING: No dataEngine provided to AuthManager! ' +
-      'Using in-memory storage. This is NOT suitable for production. ' +
-      'Please provide a dataEngine instance (e.g., ObjectQL) in AuthManagerOptions.'
-    );
-
-    // ⛔ NOT `undefined`, and ⛔ do not "simplify" it back to that.
-    //
-    // Handing better-auth no `database` makes it build its own in-memory store
-    // in `getBaseAdapter`, and that store is keyed by the schema KEY while
-    // every read resolves by `modelName`. Re-measured 2026-10-21 for #25096 on
-    // better-auth 1.7.12, unchanged since the 1.7.2 reading
-    // (`db/adapter-base.mjs` builds the store by schema KEY;
-    // `@better-auth/memory-adapter` throws on the lookup, naming the model):
-    //
-    //   getAuthTables(options) -> { oauthResource: { modelName: 'sys_oauth_resource' }, … }
-    //   its memoryDB           -> { oauthResource: [] }            // keyed by KEY
-    //   the adapter then asks  -> 'sys_oauth_resource'             // resolved by modelName
-    //   => Error: Model sys_oauth_resource not found
-    //
-    // So on that path EVERY model this package renames is unreachable —
-    // `user`/`sys_user` included. It stayed invisible for as long as nothing
-    // touched a renamed model during boot; the RFC 8707 resource seed does,
-    // from the oauth-provider plugin's `init`, where the throw surfaces as an
-    // UNHANDLED REJECTION rather than a failed request.
-    //
-    // Keying the store by `modelName` is what the adapter actually reads, so
-    // this fixes the dev/test fallback instead of working around it. Production
-    // never reaches this branch — it returns the ObjectQL factory above.
-    //
-    // The import is dynamic on purpose (the rest of better-auth is loaded the
-    // same way here); `createAuthInstance` awaits this method, and better-auth
-    // then calls the returned factory SYNCHRONOUSLY, so the module has to be
-    // resolved before we hand it over, not inside it.
-    const [{ memoryAdapter }, { getAuthTables }] = await Promise.all([
-      import('better-auth/adapters/memory'),
-      import('@better-auth/core/db'),
-    ]);
-    return (options: any) => {
-      const tables = getAuthTables(options) as Record<string, { modelName?: string }>;
-      const db: Record<string, unknown[]> = {};
-      for (const [key, table] of Object.entries(tables)) db[table?.modelName ?? key] = [];
-      return memoryAdapter(db)(options);
+  private createDatabaseConfig(): Promise<any> {
+    // [#25224 cut 7] The body moved to `auth-manager-database-secret.ts` (see `DatabaseSecretHost`).
+    const readConfig = () => this.config;
+    const host: Pick<DatabaseSecretHost, 'config' | 'stageUserCreatedInRequest'> = {
+      get config() { return readConfig(); },
+      stageUserCreatedInRequest: (...a) => this.stageUserCreatedInRequest(...a),
     };
+    return createDatabaseConfig.call(host);
   }
 
   /**
@@ -4739,36 +4694,22 @@ export class AuthManager {
    */
   /** The auth secret, resolved once — see {@link resolvedAuthSecret}. */
   private resolveAuthSecret(): string {
-    if (!this.resolvedAuthSecret) {
-      this.resolvedAuthSecret = this.config.secret || this.generateSecret();
-    }
-    return this.resolvedAuthSecret;
+    // [#25224 cut 7] The body moved to `auth-manager-database-secret.ts` (see `DatabaseSecretHost`).
+    const readConfig = () => this.config;
+    const readResolvedAuthSecret = () => this.resolvedAuthSecret;
+    const writeResolvedAuthSecret = (v: AuthManager['resolvedAuthSecret']) => { this.resolvedAuthSecret = v; };
+    const host: Pick<DatabaseSecretHost, 'config' | 'generateSecret' | 'resolvedAuthSecret'> = {
+      get config() { return readConfig(); },
+      generateSecret: (...a) => this.generateSecret(...a),
+      get resolvedAuthSecret() { return readResolvedAuthSecret(); },
+      set resolvedAuthSecret(v) { writeResolvedAuthSecret(v); },
+    };
+    return resolveAuthSecret.call(host);
   }
 
   private generateSecret(): string {
-    const envSecret = readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true });
-    if (envSecret) return envSecret;
-
-    // No secret configured. In production this is FATAL: a predictable
-    // `dev-secret-<timestamp>` makes session tokens forgeable (session
-    // forgery). Refuse to boot rather than run insecurely.
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error(
-        '[auth] OS_AUTH_SECRET is required in production but is not set. ' +
-        'Refusing to boot with a temporary development secret — session tokens ' +
-        'would be forgeable. Set OS_AUTH_SECRET to a strong random value.'
-      );
-    }
-
-    // Development / test only: fall back to an ephemeral secret, loudly.
-    const fallbackSecret = 'dev-secret-' + Date.now();
-    console.warn(
-      '⚠️  WARNING: No OS_AUTH_SECRET environment variable set! ' +
-      'Using a temporary development secret. ' +
-      'This is NOT secure for production use. ' +
-      'Please set OS_AUTH_SECRET in your environment variables.'
-    );
-    return fallbackSecret;
+    // [#25224 cut 7] The body moved to `auth-manager-database-secret.ts`; it reads no member of this class.
+    return generateSecret();
   }
 
   /**
@@ -4958,29 +4899,14 @@ export class AuthManager {
    * "policy says there will never be one" and skip a pointless re-read;
    * `undefined` means the reconciler could not be consulted at all.
    */
-  private async settleMembership(userId: unknown): Promise<ReconcileOutcome | undefined> {
-    try {
-      const result = await reconcileMembership(
-        this.config.dataEngine,
-        typeof userId === 'string' && userId ? userId : undefined,
-        {
-          // #5152 — read through the accessor, not `this.config` directly: it is
-          // the single source the backfill path reads too.
-          policy: this.getMembershipPolicy(),
-          resolveTargetOrg: async () => {
-            const tenancy = this.config.getTenancy?.();
-            // Single-org → default org; multi-org → none (invite/JIT own it).
-            return tenancy ? await tenancy.defaultOrgId() : null;
-          },
-          logger: this.config.logger,
-        },
-      );
-      return result.outcome;
-    } catch {
-      // reconcileMembership never throws, but guard regardless — membership
-      // bookkeeping must never break user creation or session creation.
-      return undefined;
-    }
+  private settleMembership(userId: unknown): Promise<ReconcileOutcome | undefined> {
+    // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
+    const readConfig = () => this.config;
+    const host: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy'> = {
+      get config() { return readConfig(); },
+      getMembershipPolicy: (...a) => this.getMembershipPolicy(...a),
+    };
+    return settleMembership.call(host, userId);
   }
 
   /**
@@ -5217,123 +5143,28 @@ export class AuthManager {
    * of an already-parsed value, not a re-derived I/O probe, so it does not
    * reopen what #11767 closed.
    */
-  private async validateAudienceAdmission(
+  private validateAudienceAdmission(
     data: {
       user?: Record<string, unknown>;
       source?: { action?: string; method?: string; oauth?: { providerId?: string } };
     },
     ctx?: unknown,
   ): Promise<{ error: string; errorDescription?: string } | undefined> {
-    try {
-      // link-account / provider sign-in concern an EXISTING user's identity,
-      // not audience admission — the posture judges only who may COME INTO
-      // EXISTENCE.
-      if (data?.source?.action !== 'create-user') return undefined;
-      const audience = this.getAudience();
-      const email = typeof data?.user?.email === 'string' ? (data.user.email as string) : undefined;
-      // [#14157] A creation the deployment's own boot command staged is the
-      // OPERATOR class — the vendor's `source.method` cannot carry that,
-      // because the seed reaches better-auth through the same `signUpEmail`
-      // API a person's sign-up does. See `stageOperatorProvisioning` for why
-      // this is a declared ticket and not a wider bootstrap probe.
-      // [#14373] …and why email alone no longer decides it: the ticket's
-      // random value must also match, read off the SAME endpoint context the
-      // `disableSignUp` before-hook already reads `ctx.body.email` from
-      // (`getCurrentAuthEndpointContext()` — one context per request, shared
-      // across the before/after hooks and this validateUserInfo callback).
-      const provisioningTicket = (ctx as { body?: Record<string, unknown> } | undefined)?.body?.[
-        AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD
-      ];
-      const creationClass: AudienceCreationClass = this.isOperatorProvisioning(email, provisioningTicket)
-        ? 'operator'
-        : classifyCreationMethod(data?.source, {
-            enterpriseOAuthProviderIds: this.enterpriseOAuthProviderIds(),
-          });
-      let isBootstrap = false;
-      let hasPendingInvitation = false;
-      if (creationClass === 'self-serve') {
-        // Only the gated class pays for the probes.
-        isBootstrap = await this.isBootstrapCreation();
-        if (!isBootstrap && email) hasPendingInvitation = await this.hasPendingInvitationFor(email);
-      }
-      const verdict = decideAudienceAdmission({
-        audience,
-        creationClass,
-        email,
-        hasPendingInvitation,
-        isBootstrap,
-      });
-      if (!verdict.admit) {
-        if (verdict.code === AUDIENCE_CONFIG_ERROR) {
-          // Config-unusable refusals are the operator's bug, not policy —
-          // report at error level with the offending value in the line
-          // (#5205: never let "your posture is not a posture" read as
-          // "policy said no").
-          this.audienceLogError(`[audience] refusing self-registration: ${verdict.message}`, {
-            method: data?.source?.method,
-          });
-        } else {
-          this.config.logger?.info?.('[audience] self-registration refused by posture', {
-            code: verdict.code,
-            method: data?.source?.method,
-            posture: audience.posture,
-          });
-        }
-        return { error: verdict.code, errorDescription: verdict.message };
-      }
-      // [#12751] Walled deployments: an ADMITTED creation of the declared
-      // platform owner through an operator provisioning path (operator class,
-      // or the bootstrap carve-out) is stamped email-verified at creation —
-      // maintainer ruling 2026-08-28, 「运营方创建即视为已验证」. The decision
-      // (and the per-path argument) lives in `walled-owner-operator-stamp.ts`;
-      // this seam only STAGES it, because the admission gate is the one place
-      // that holds the vendor's own `source.method` signal AND the bootstrap
-      // probe. Consumed once by the composed `user.create.before` hook, so the
-      // row is BORN verified; an email UPDATE can never traverse that seam,
-      // which is what keeps a later change-to-owner-address from inheriting
-      // the stamp.
-      if (
-        email &&
-        shouldStampOwnerVerifiedAtCreation({ email, creationClass, isBootstrap })
-      ) {
-        this.stageOwnerVerifiedStamp(email);
-      }
-      if (verdict.grantPermissionSet) {
-        const setName = audience.selfRegistrationPermissionSet;
-        if (!setName) {
-          // Unreachable past entry validation; keep the fail-closed floor —
-          // admitting without the declared grant would be ADR-0078's
-          // "declared but inert" at runtime.
-          const message =
-            `audience posture '${audience.posture}' permits self-registration but declares no ` +
-            'selfRegistrationPermissionSet — self-registration is refused until the configuration is fixed.';
-          this.audienceLogError(`[audience] ${message}`);
-          return { error: AUDIENCE_CONFIG_ERROR, errorDescription: message };
-        }
-        const resolvable = await this.selfRegistrationSetResolvable(setName);
-        if (!resolvable) {
-          const message =
-            `the declared self-registration permission set '${setName}' cannot be resolved ` +
-            '(not in the security catalog, switched off in sys_metadata_activation, or the store ' +
-            'is unavailable) — ' +
-            'self-registration is refused rather than admitting an ungranted user. ' +
-            'Declare or switch on the set, or point selfRegistrationPermissionSet at an existing one.';
-          this.audienceLogError(`[audience] ${message}`);
-          return { error: AUDIENCE_CONFIG_ERROR, errorDescription: message };
-        }
-        if (email) this.stageSelfRegistrationGrant(email, setName);
-      }
-      return undefined;
-    } catch (error) {
-      // Fail CLOSED: an admission question this gate cannot answer must not
-      // admit. Operator/provider classes never reach I/O, so they cannot land
-      // here.
-      const message = 'audience admission could not be evaluated — self-registration refused.';
-      this.audienceLogError(`[audience] ${message}`, {
-        error: (error as Error)?.message ?? String(error),
-      });
-      return { error: AUDIENCE_CONFIG_ERROR, errorDescription: message };
-    }
+    // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
+    const readConfig = () => this.config;
+    const host: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'> = {
+      audienceLogError: (...a) => this.audienceLogError(...a),
+      get config() { return readConfig(); },
+      enterpriseOAuthProviderIds: (...a) => this.enterpriseOAuthProviderIds(...a),
+      getAudience: (...a) => this.getAudience(...a),
+      hasPendingInvitationFor: (...a) => this.hasPendingInvitationFor(...a),
+      isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
+      isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
+      selfRegistrationSetResolvable: (...a) => this.selfRegistrationSetResolvable(...a),
+      stageOwnerVerifiedStamp: (...a) => this.stageOwnerVerifiedStamp(...a),
+      stageSelfRegistrationGrant: (...a) => this.stageSelfRegistrationGrant(...a),
+    };
+    return validateAudienceAdmission.call(host, data, ctx);
   }
 
   /**
@@ -5953,29 +5784,18 @@ export class AuthManager {
    * the self-registrant's one declared set, so a second membership (or a
    * replayed claim) writes no second grant.
    */
-  private async landSelfRegistrationGrant(
+  private landSelfRegistrationGrant(
     engine: unknown,
     userId: string,
     setName: string,
     organizationId: string,
   ): Promise<void> {
-    const sys = withSystemReadContext(engine as never) as any;
-    const existing: any[] = await sys.find('sys_user_permission_set', {
-      where: { user_id: userId, [GRANT_SET_NAME_FIELD]: setName },
-      limit: 1,
-    });
-    if (existing.length > 0) return;
-    const id = `ups_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-    await sys.insert(
-      'sys_user_permission_set',
-      { id, user_id: userId, [GRANT_SET_NAME_FIELD]: setName, organization_id: organizationId },
-      { context: { isSystem: true } },
-    );
-    this.config.logger?.info?.('[audience] granted the declared self-registration permission set', {
-      userId,
-      permissionSet: setName,
-      organizationId,
-    });
+    // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
+    const readConfig = () => this.config;
+    const host: Pick<MembershipAdmissionHost, 'config'> = {
+      get config() { return readConfig(); },
+    };
+    return landSelfRegistrationGrant.call(host, engine, userId, setName, organizationId);
   }
 
   /**
@@ -6117,12 +5937,11 @@ export class AuthManager {
   }
 
   private reportUngrantedSelfRegistrant(userId: string, setName: string, cause: string): void {
-    this.audienceLogError(
-      `[audience] a self-registrant was ADMITTED but the declared permission set '${setName}' was NOT granted ` +
-      `(user ${userId}) — the account works and everything looks normal, but it holds only baseline access, ` +
-      `and nothing retries this. Fix: verify the set exists and is active for the target organization, then grant it ` +
-      `manually (sys_user_permission_set) or have the user re-created. Cause: ${cause}`,
-    );
+    // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
+    const host: Pick<MembershipAdmissionHost, 'audienceLogError'> = {
+      audienceLogError: (...a) => this.audienceLogError(...a),
+    };
+    return reportUngrantedSelfRegistrant.call(host, userId, setName, cause);
   }
 
   /**

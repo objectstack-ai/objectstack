@@ -25,7 +25,6 @@ export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_approval_delegation.fields.created_at.label": "1f02d416befb595b",
   "objects.sys_approval_delegation.fields.delegate_id.help": "9cfc641f7b0b04f9",
   "objects.sys_approval_delegation.fields.delegate_id.label": "afd6d8733dc5bc14",
-  "objects.sys_approval_delegation.fields.delegator_id.help": "c4686c5c9f24e0be",
   "objects.sys_approval_delegation.fields.delegator_id.label": "f76b1f95f2fdabff",
   "objects.sys_approval_delegation.fields.display_title.help": "2831a1ffde72b425",
   "objects.sys_approval_delegation.fields.display_title.label": "70f7aadecce647a5",
