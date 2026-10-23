@@ -40,7 +40,7 @@ import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -100,7 +100,9 @@ async function bootEngine(): Promise<ObjectQL> {
   engine.registry.registerObject(sysPermissionSet as never, '@objectstack/plugin-security');
   engine.registry.registerObject(sysUserPermissionSet as never, '@objectstack/plugin-security');
   await engine.syncSchemas();
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less catalogue row below exists only on a store built
+  // before 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is it.
+  await relaxTenantColumns(engine, ['sys_permission_set']);
   const bound = await bindTestSecurityCatalog(engine, { permissions: [{ name: 'member_default' }] });
   // Alice carries a stored language; Bob carries none.
   await engine.insert('sys_user', { id: 'usr_alice', email: EXISTING, name: 'Alice', locale: 'ja-JP' }, SYSTEM);
