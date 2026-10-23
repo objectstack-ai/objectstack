@@ -125,7 +125,7 @@ only narrows, so it cannot make a `private` row visible. On `public_read` and
 ## External principals — no external org-wide default
 
 There is one org-wide default, `sharingModel`. An external (portal or
-partner) principal — an organization member holding the `external` role —
+partner) principal — an organization member whose membership is `external` —
 reaches rows through **explicit grants only**: the authorization kernel's
 `EXTERNAL` rung (ADR-0095), never derived from an org-wide default. For an
 external, every object's org-wide default is owner-only; it reads and writes
