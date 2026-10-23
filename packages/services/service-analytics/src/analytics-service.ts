@@ -3157,16 +3157,27 @@ export class AnalyticsService implements IAnalyticsService {
     if (result.fields?.length && describableDims.length) {
       const dimByName = new Map(describableDims.map((d) => [d.name, d]));
       const dimByField = new Map(describableDims.filter((d) => !!d.field).map((d) => [d.field as string, d]));
+      const measureNames = new Set((dataset.measures ?? []).map((m) => m.name));
       for (const f of result.fields) {
-        if (f.label != null) continue;
         // Result fields may be keyed by the dataset dimension NAME or the
         // underlying cube FIELD depending on strategy — match either.
         const d = dimByName.get(f.name) ?? dimByField.get(f.name);
         if (!d) continue;
         // [#6761] Same resolver, same locale, same "write nothing on a miss"
         // rule as the measure enrichment above.
-        const label = resolveI18nLabel(d.label, requestLocale);
-        if (label !== undefined) f.label = label;
+        if (f.label == null) {
+          const label = resolveI18nLabel(d.label, requestLocale);
+          if (label !== undefined) f.label = label;
+        }
+        // The null bucket's display name (`DatasetDimension.nullLabel`), read
+        // whether or not the header was already set, and never onto a measure
+        // column whose name happens to match a dimension's field. Written only
+        // when declared and resolvable, so an answer over a dimension without
+        // one is byte-identical to before.
+        if (f.nullLabel == null && !measureNames.has(f.name.replace(/__compare$/, ''))) {
+          const nullLabel = resolveI18nLabel(d.nullLabel, requestLocale);
+          if (nullLabel !== undefined) f.nullLabel = nullLabel;
+        }
       }
     }
   }

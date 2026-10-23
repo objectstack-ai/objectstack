@@ -286,6 +286,24 @@ export const SysUser = ObjectSchema.create({
           required: false,
           defaultValue: true,
         },
+        // [#25338] Optional: grant one permission set in the same step, so a
+        // new user does not sign in to a screen of refusals. INLINE, not
+        // field-backed: the grant object lives in plugin-security, whose
+        // metadata the console need not have loaded on this list, and an
+        // unresolvable field-backed param makes the dialog refuse the whole
+        // action. The grant column is a text field anyway (its picker is a
+        // widget hint params do not inherit), so nothing is lost.
+        // The route writes the grant under the administrator's OWN context in
+        // the same transaction as the account: the delegated-administration
+        // gate and the catalog name check judge it as they judge Setup's
+        // grant form, and a refusal creates no user.
+        {
+          name: 'permissionSet',
+          type: 'text',
+          label: 'Permission Set',
+          required: false,
+          helpText: 'Optional. Grants this permission set to the new user, so they can open their apps on first sign-in.',
+        },
       ],
       resultDialog: {
         title: 'User Created',
@@ -301,6 +319,7 @@ export const SysUser = ObjectSchema.create({
           // phone-based users, temporaryPassword only when the server minted one.
           { path: 'user.email', label: 'Email', format: 'text' },
           { path: 'user.phoneNumber', label: 'Phone Number', format: 'text' },
+          { path: 'permissionSet', label: 'Permission Set', format: 'text' },
           { path: 'temporaryPassword', label: 'Temporary Password', format: 'secret' },
         ],
       },

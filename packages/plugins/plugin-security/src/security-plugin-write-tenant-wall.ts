@@ -1,65 +1,79 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#25223 cut 5] Step 3.7's Layer 0 tenant write wall of `SecurityPlugin`,
- * composed once for one write, moved out of `security-plugin.ts` whole: the
- * ADR-0123 D2 scope pre-test that refuses a write with no active organization,
- * the parts every row is held to (ADR-0095 D1, and the delegator's own wall
- * under ADR-0090 D10), and the judgements that read them — the payload half,
- * and the stored-image seam with its landing refusals (#24784, #24821).
+ * [#25223 cuts 5 and 6] Step 3.7's Layer 0 tenant write wall of
+ * `SecurityPlugin`, moved out of `security-plugin.ts`:
  *
- * A MOVE, not a redesign. The function below is the body of the
+ * - `composeWriteTenantWall` (cut 5), the wall composed once for one write:
+ *   the ADR-0123 D2 scope pre-test that refuses a write with no active
+ *   organization, the parts every row is held to (ADR-0095 D1, and the
+ *   delegator's own wall under ADR-0090 D10), and the judgements that read
+ *   them — the payload half, and the stored-image seam with its landing
+ *   refusals (#24784, #24821).
+ * - `organizationWallRefusal` (cut 6), that scope pre-test itself: which
+ *   principal the no-active-organization wall refuses. `canWriteObject` asks
+ *   it too, so the two doors share one spelling of the wall. The two
+ *   module-level declarations only these bodies read moved with it:
+ *   `callerHasOrganizationScope`, and `carriesActiveOrganization`, which the
+ *   cut-5 body reads too.
+ * - `writeWallVerdict` (cut 6), the wall's verdict on each row of a write
+ *   PREVIEW (#25062), which the engine asks through `registerWriteWallVerdict`.
+ *
+ * A MOVE, not a redesign. Each function below is the body of the
  * `SecurityPlugin` method of the same name as it stood, re-indented one level
  * and otherwise unedited: the same pre-test, ordered ahead of the forge guard,
- * the same refusals with the same spellings, the same seam conditions. Nothing
- * here logs or throws, as before: the middleware logs and throws each refusal
- * (`raiseWriteWallRefusal`), and the write preview (`writeWallVerdict`) answers
- * it as a row's verdict. Both stay in the class and still call the method.
+ * the same refusals with the same spellings, the same seam conditions, the
+ * same preview answers. The two module-level declarations are as they stood,
+ * docblocks included; `carriesActiveOrganization` is again declared without
+ * `export`, as before cut 5. Nothing here logs or throws on a refusal, as
+ * before: the middleware logs and throws each one (`raiseWriteWallRefusal`),
+ * and the write preview answers it as a row's verdict.
  *
- * ## How the moved body reaches the class
+ * ## How the moved bodies reach the class
  *
- * The shape cuts 1 to 4 used (`security-plugin-object-inputs.ts`, whose header
- * carries the reasoning). The class keeps the method — the published
- * `dist/*.d.ts` lists its name, docblock and position — and its body is one
- * literal of exactly the {@link WriteTenantWallHost} members it reads, plus a
- * `.call`. A method is handed over as a closure that calls it on the plugin at
- * call time, so a test double or spy set on the plugin is still the one the
- * body reaches: the pre-test is still `organizationWallRefusal`, the one
- * verdict `canWriteObject` asks too, and the caller's Layer 0 is still the
- * read side's, through `computeWriteTenantWall` and
- * `computeWriteTenantCheckFilter`. The method was async and the function still
- * is; the method now returns the function's promise.
+ * The shape cuts 1 to 5 used (`security-plugin-object-inputs.ts`, whose header
+ * carries the reasoning). The class keeps every method — the published
+ * `dist/*.d.ts` lists each one's name, docblock and position, and
+ * `writeWallVerdict`'s full signature, because it is public — and each body is
+ * one literal of exactly the {@link WriteTenantWallHost} members that method
+ * reads, plus a `.call`. A method is handed over as a closure that calls it on
+ * the plugin at call time, so a test double or spy set on the plugin is still
+ * the one the body reaches: the wall's pre-test is still the plugin's
+ * `organizationWallRefusal`, the caller's Layer 0 is still the read side's,
+ * through `computeWriteTenantWall` and `computeWriteTenantCheckFilter`, and the
+ * preview still reaches the prologue (`resolveOperationPrincipals`) and the
+ * wall (`composeWriteTenantWall`) through the plugin. Each method was async and
+ * each function still is; each method now returns its function's promise.
  *
- * The two fields the body reads go as GETTERS, by the rule cut 1 set:
+ * The two fields the bodies read go as GETTERS, by the rule cut 1 set:
  * `tenancyPosture` is not declared `readonly` (`start()` resolves it after
  * construction), and `orgScopingEnabled` is the class's own getter over it.
  * Each read happens when the body makes it, as before. That includes the
- * reads inside the judgements the body returns: the developer messages of
- * `denyOrganizationRemoval` and of `judgeLanding`'s two refusals read
- * `tenancyPosture` when the middleware or the preview calls them, through the
- * host, so they read the plugin's value at that time.
+ * reads inside the judgements `composeWriteTenantWall` returns: the developer
+ * messages of `denyOrganizationRemoval` and of `judgeLanding`'s two refusals
+ * read `tenancyPosture` when the middleware or the preview calls them, through
+ * the host, so they read the plugin's value at that time.
  *
  * ## What stays in `security-plugin.ts`, and how it is read
  *
- * `WriteTenantWall` and `WriteWallRefusal` keep their one declaration there,
- * where the method's signature and `raiseWriteWallRefusal` read them; this
- * module names both through the class's own signature (below).
- * `carriesActiveOrganization` stays there too, because
- * `callerHasOrganizationScope` reads it, and is exported and imported here by
- * value. It is read only inside the function body, at call time, never while
- * either module evaluates, so the two-way import is safe under ESM, and the
- * published bundle holds one module. `matchesFilterCondition` is imported from
- * `@objectstack/formula`, `postureUsesUnionScope` from
- * `@objectstack/spec/security` and `PermissionDeniedError` from `errors.js`, as
- * `security-plugin.ts` imported them; `security-plugin.ts` no longer reads
- * `matchesFilterCondition`.
+ * `WriteTenantWall`, `WriteWallRefusal` and `WriteWallRowVerdict` keep their
+ * one declaration there, where the method signatures, `raiseWriteWallRefusal`
+ * and `start()` read them; this module names all three through the class's own
+ * signatures (below). `isTenantWallDenial` stays there too, because
+ * `tenant-layer.ts` names it as living in that file, and is exported and
+ * imported here by value. It is read only inside a function body, at call
+ * time, never while either module evaluates, so the two-way import is safe
+ * under ESM, and the published bundle holds one module. `matchesFilterCondition`
+ * is imported from `@objectstack/formula`, `postureUsesUnionScope` and
+ * `TenancyPosture` from `@objectstack/spec/security` and `PermissionDeniedError`
+ * from `errors.js`, as `security-plugin.ts` imported them.
  *
  * Nothing re-exports this module, so the published surface does not move.
  */
 
 import type { SecurityPlugin } from './security-plugin.js';
-import { carriesActiveOrganization } from './security-plugin.js';
-import type { PermissionSet } from '@objectstack/spec/security';
+import { isTenantWallDenial } from './security-plugin.js';
+import type { PermissionSet, TenancyPosture } from '@objectstack/spec/security';
 import { postureUsesUnionScope } from '@objectstack/spec/security';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { PermissionDeniedError } from './errors.js';
@@ -79,8 +93,60 @@ type WriteTenantWall = Awaited<ReturnType<SecurityPlugin['composeWriteTenantWall
 type WriteWallRefusal = NonNullable<WriteTenantWall['preTest']>;
 
 /**
- * The `SecurityPlugin` members the function below reads — every one of them,
- * and no other; the function's `this` is the `Pick` of the members it reads.
+ * The preview's verdict on one row, as the class declares it: the
+ * `WriteWallRowVerdict` type stays in `security-plugin.ts`, and the moved body
+ * names it exactly as it did.
+ */
+type WriteWallRowVerdict = NonNullable<Awaited<ReturnType<SecurityPlugin['writeWallVerdict']>>>[number];
+
+/**
+ * [ADR-0123 D2] Does this execution context carry ANY organization scope the
+ * tenant wall could enforce with?
+ *
+ * The answer is posture-shaped, and that is the whole reason this is a function
+ * rather than an `if (!ctx.tenantId)` at the call site: under `isolated` the
+ * scope is the ACTIVE organization (`tenantId`), under `group` it is the
+ * caller's MEMBERSHIP SET (`accessible_org_ids`) and the active organization no
+ * longer bounds anything (ADR-0105 D2). Asking only about `tenantId` would
+ * refuse every `group` caller who is legitimately scoped by membership; asking
+ * only about the set would let an `isolated` caller through on a set the
+ * `isolated` wall never reads.
+ *
+ * This is a cheap PRE-TEST, never the verdict. It exists so the common paths —
+ * the `single` posture, and any caller who does have an organization — skip the
+ * layered RLS compile entirely. The verdict is always
+ * {@link isTenantWallDenial} over the Layer 0 filter, which is the one place
+ * that knows about platform-admin exemptions, non-tenant objects and phantom
+ * anchors.
+ *
+ * It answers the SCOPE question only. Under a union-scope posture a caller
+ * scoped by membership can still lack the organization a NEW row lands in —
+ * the active one ({@link carriesActiveOrganization}) — and step 3.7 judges
+ * that separately, on the stored image of an insert.
+ */
+function callerHasOrganizationScope(context: any, posture: TenancyPosture): boolean {
+  if (postureUsesUnionScope(posture)) {
+    const orgIds = context?.accessible_org_ids;
+    return Array.isArray(orgIds) && orgIds.length > 0;
+  }
+  return carriesActiveOrganization(context);
+}
+
+/**
+ * [ADR-0105 D5 · ADR-0123 D2] Does this execution context carry an ACTIVE
+ * organization (`tenantId`)? In every posture that is where a new row lands:
+ * the engine stamps an insert's organization from it. Under `isolated` it is
+ * also the whole read scope; under `group` the membership set is the read
+ * scope and the active organization stays the write target (ADR-0105 D2).
+ */
+function carriesActiveOrganization(context: any): boolean {
+  const tenantId = context?.tenantId;
+  return tenantId != null && tenantId !== '';
+}
+
+/**
+ * The `SecurityPlugin` members the functions below read — every one of them,
+ * and no other; each function's `this` is the `Pick` of the members IT reads.
  * Each is typed AS the class member (an indexed access on the class), so a
  * change to a member's signature on the class is a change here too, and naming
  * a member the class does not have is a compile error. Every field here is a
@@ -89,9 +155,11 @@ type WriteWallRefusal = NonNullable<WriteTenantWall['preTest']>;
 export interface WriteTenantWallHost {
   readonly orgScopingEnabled: SecurityPlugin['orgScopingEnabled'];
   readonly tenancyPosture: SecurityPlugin['tenancyPosture'];
+  composeWriteTenantWall: SecurityPlugin['composeWriteTenantWall'];
   computeWriteTenantCheckFilter: SecurityPlugin['computeWriteTenantCheckFilter'];
   computeWriteTenantWall: SecurityPlugin['computeWriteTenantWall'];
   organizationWallRefusal: SecurityPlugin['organizationWallRefusal'];
+  resolveOperationPrincipals: SecurityPlugin['resolveOperationPrincipals'];
 }
 
 /** The body of `SecurityPlugin#composeWriteTenantWall`; the method's docblock there is its contract. */
@@ -434,4 +502,66 @@ export async function composeWriteTenantWall(
           }
         : null,
   };
+}
+
+/** The body of `SecurityPlugin#organizationWallRefusal`; the method's docblock there is its contract. */
+export async function organizationWallRefusal(
+  this: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'orgScopingEnabled' | 'tenancyPosture'>,
+  permissionSets: PermissionSet[],
+  object: string,
+  operation: string,
+  context: any,
+  delegatorSets: PermissionSet[] | null,
+  delegatorContext: any,
+): Promise<'caller' | 'delegator' | null> {
+  if (!this.orgScopingEnabled || callerHasOrganizationScope(context, this.tenancyPosture)) return null;
+  const callerWall = await this.computeWriteTenantCheckFilter(permissionSets, object, operation, context);
+  // [ADR-0090 D10] The delegator is walled on its own context, exactly as
+  // the forge guard walls it — an on-behalf-of write may not land a row
+  // the delegator itself could not place.
+  const delegatorWall =
+    delegatorSets && !callerHasOrganizationScope(delegatorContext, this.tenancyPosture)
+      ? await this.computeWriteTenantCheckFilter(delegatorSets, object, operation, delegatorContext)
+      : null;
+  return isTenantWallDenial(callerWall)
+    ? 'caller'
+    : isTenantWallDenial(delegatorWall)
+      ? 'delegator'
+      : null;
+}
+
+/** The body of `SecurityPlugin#writeWallVerdict`; the method's docblock there is its contract. */
+export async function writeWallVerdict(
+  this: Pick<WriteTenantWallHost, 'composeWriteTenantWall' | 'resolveOperationPrincipals'>,
+  object: string,
+  operation: 'insert' | 'update',
+  context: any,
+  rows: readonly Record<string, unknown>[],
+): Promise<WriteWallRowVerdict[] | null> {
+  if (!context || typeof context !== 'object' || context.isSystem || !context.userId) return null;
+  if (operation !== 'insert' && operation !== 'update') return null;
+  let principals: Awaited<ReturnType<SecurityPlugin['resolveOperationPrincipals']>>;
+  try {
+    principals = await this.resolveOperationPrincipals(operation, object, context);
+  } catch {
+    return null;
+  }
+  const isRow = (row: unknown): row is Record<string, unknown> =>
+    !!row && typeof row === 'object' && !Array.isArray(row);
+  const wall = await this.composeWriteTenantWall(
+    object,
+    operation,
+    context,
+    rows.filter(isRow),
+    true,
+    principals,
+    { positions: context.positions ?? [], permissionSets: context.permissions ?? [] },
+  );
+  return rows.map((row): WriteWallRowVerdict => {
+    if (!isRow(row)) return { admitted: true, judgesOrganization: false };
+    const refused = wall.preTest ?? wall.judgePayload([row]) ?? wall.storedImage?.judgeLanding([row]) ?? null;
+    return refused
+      ? { admitted: false, field: refused.field, code: refused.error.code, message: refused.error.message }
+      : { admitted: true, judgesOrganization: wall.storedImage?.judgesOrganization === true };
+  });
 }

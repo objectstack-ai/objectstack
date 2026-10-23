@@ -685,7 +685,7 @@ describe('[#25107] every reader in this package that resolves a delegator asks t
   const calls = (text: string, name: string) =>
     (text.match(new RegExp(`\\b${name}\\(`, 'g')) ?? []).length - (text.match(new RegExp(`function ${name}\\(`, 'g')) ?? []).length;
 
-  it('per source file, the asks equal the resolutions — and the two files that resolve one are both counted', () => {
+  it('per source file, the asks equal the resolutions — and the three files that resolve one are all counted', () => {
     const counted: Record<string, [number, number]> = {};
     for (const file of readdirSync(SRC, { recursive: true }) as string[]) {
       if (!file.endsWith('.ts') || file.endsWith('.test.ts') || file.includes('.testkit.')) continue;
@@ -694,7 +694,7 @@ describe('[#25107] every reader in this package that resolves a delegator asks t
       if (resolutions === 0) continue;
       counted[file] = [resolutions, calls(text, 'delegatedOrganizationRefusal')];
     }
-    expect(Object.keys(counted).sort()).toEqual(['explain-engine.ts', 'security-plugin.ts']);
+    expect(Object.keys(counted).sort()).toEqual(['explain-engine.ts', 'security-plugin-operation-principals.ts', 'security-plugin.ts']);
     for (const [file, [resolutions, asks]] of Object.entries(counted)) expect(asks, file).toBe(resolutions);
   });
 });

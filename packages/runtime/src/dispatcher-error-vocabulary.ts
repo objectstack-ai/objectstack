@@ -1346,7 +1346,7 @@ export interface UnresolvedCodeHelper {
 
 export const UNRESOLVED_CODE_HELPERS: readonly UnresolvedCodeHelper[] = [
     {
-        file: 'packages/plugins/plugin-auth/src/auth-manager.ts',
+        file: 'packages/plugins/plugin-auth/src/auth-manager-email-sms-delivery.ts',
         helper: 'deliverPhoneOtp',
         param: 'code',
         shape: 'objlithelper',
@@ -1356,8 +1356,9 @@ export const UNRESOLVED_CODE_HELPERS: readonly UnresolvedCodeHelper[] = [
             'The `code` here is an SMS ONE-TIME PASSWORD, not an error code. `deliverPhoneOtp(phone, code)` ' +
             'renders it into the notification-template payload `{ code, appName, minutes }` and into the ' +
             "provider's `templateParams: { code }` — the digits a user types back in. It never reaches an " +
-            'error envelope in any field. Its two in-file callers are better-auth `sendOTP` hooks that pass ' +
-            'the library\'s generated value, so nothing reduces and nothing should: this is the shape of ' +
+            'error envelope in any field. Its two callers are better-auth `sendOTP` hooks in `auth-manager.ts`, ' +
+            'which reach it through the class method of the same name and pass the library\'s generated value, ' +
+            'so nothing reduces and nothing should: this is the shape of ' +
             'false positive the object-literal position cannot filter structurally, recorded rather than ' +
             'silently excluded by a predicate drawn around it.',
     },
