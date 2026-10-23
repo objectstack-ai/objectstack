@@ -52,7 +52,6 @@ import {
   buildContextForUser,
   resolveDelegatorContext,
   delegatedOrganizationRefusal,
-  intersectFieldMasks,
   intersectDelegatedScope,
   d10NarrowingStatement,
 } from './explain-engine.js';
@@ -197,6 +196,35 @@ import {
   readRowById,
   type AddressedWritesHost,
 } from './security-plugin-addressed-writes.js';
+// [#25223 cut 9] The row-level read scope: the scope the service serves to
+// the doors that compile their own statement, and the same scope for an
+// on-behalf-of caller; the methods of the same names below hand each body the
+// members it reads (`ReadFilterHost`).
+import {
+  computeDelegatedReadFilter,
+  getReadFilter,
+  type ReadFilterHost,
+} from './security-plugin-read-filter.js';
+// [#25223 cut 9] The field readers: the derivation every field projection
+// shares, the readable projection and the posture a caller's gates read; the
+// methods of the same names below hand each body the members it reads
+// (`FieldReadersHost`).
+import {
+  computeReadableFields,
+  resolveCallerPosture,
+  resolveProjectionFieldMask,
+  type FieldReadersHost,
+} from './security-plugin-field-readers.js';
+// [#25223 cut 9] The object-level admissions: read, read over resolved sets,
+// write and export; the methods of the same names below hand each body the
+// members it reads (`ObjectAdmissionHost`).
+import {
+  canExport,
+  canReadObject,
+  canWriteObject,
+  objectReadAdmission,
+  type ObjectAdmissionHost,
+} from './security-plugin-object-admission.js';
 import {
   isPlatformOwnershipFloorPolicy,
   masterGateCoversOperation,
@@ -519,10 +547,6 @@ interface ObjectSecurityMeta {
    */
   unresolvedCause?: UnresolvedPostureCause;
 }
-
-const EMPTY_REQUIRED_PERMISSIONS: NormalizedRequiredPermissions = Object.freeze({
-  all: [], read: [], create: [], update: [], delete: [],
-}) as NormalizedRequiredPermissions;
 
 /**
  * [#20995] A context that carries NO principal: no position, no named
@@ -5868,89 +5892,21 @@ export class SecurityPlugin implements Plugin {
    * answers `$in: []`. ⛔ Never return a spread copy; a copy still matches zero
    * rows, but it is no longer the sentinel.
    */
-  async getReadFilter(
+  getReadFilter(
     object: string,
     context?: any,
   ): Promise<Record<string, unknown> | undefined> {
-    // System operations bypass scoping (mirrors the middleware's isSystem skip).
-    if (context?.isSystem) return undefined;
-    // [#21908] ADR-0096 D5 strict mode — the middleware's principal-less
-    // refusal, mirrored: zero rows, read off the same predicate, before any
-    // layer resolves. This used to answer the sharing predicate alone.
-    if (isPrincipalLessContext(context)) return RLS_DENY_FILTER;
-    // [ADR-0090 D10 / ADR-0139 D5.1 as amended] A DELEGATED (on-behalf-of)
-    // context is scoped to the intersection of its own leg and its delegator's,
-    // composed as the engine middleware chain composes a delegated find
-    // ({@link computeDelegatedReadFilter}). This path used to answer the deny
-    // sentinel for every such context, because the intersection was threaded
-    // through the chain only; the engine's `ReadableIds` composition asks this
-    // method with the delegated context as it stands, so the intersection
-    // reaches here now. Fails CLOSED on every throw: a delegated read is never
-    // scoped wider than its delegator's own, and never served with a layer
-    // dropped.
-    if (context?.onBehalfOf?.userId) {
-      try {
-        return await this.computeDelegatedReadFilter(object, context);
-      } catch (e) {
-        this.logger.error?.(
-          `[security] getReadFilter failed for object '${object}' (principal ${context?.userId ?? 'unknown'} ` +
-            `on behalf of ${context.onBehalfOf.userId}) — denying (fail-closed)`,
-          e instanceof Error ? e : new Error(String(e)),
-        );
-        return RLS_DENY_FILTER;
-      }
-    }
-    // [#4467] The OWD/sharing predicate is resolved for EVERY non-system caller,
-    // ahead of the RLS branches below, because it is a SEPARATE middleware in
-    // the chain this method mirrors: none of the RLS stand-downs below is a
-    // reason to drop it. A resolution failure denies outright — running the
-    // analytics raw-SQL path with a dropped owner predicate is the leak.
-    let sharingFilter: Record<string, unknown> | null;
-    try {
-      sharingFilter = await this.resolveSharingReadFilter(object, context);
-    } catch (e) {
-      this.logger.error?.(
-        `[security] getReadFilter could not resolve the sharing (OWD) read scope for object ` +
-          `'${object}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed: a path that bypasses ` +
-          `the engine middleware never runs without the owner and share scope a direct read applies)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
-      return RLS_DENY_FILTER;
-    }
-    try {
-      const permissionSets = await this.resolvePermissionSetsForContext(context);
-      // [#21079] ADR-0056 D2 — the deny baseline at the row scope. A caller who
-      // carries a principal (a principal-less one was refused above) and
-      // resolves NO permission set is refused at the middleware's object
-      // admission, so the scope that agrees with it is zero rows. Composed
-      // from the layers instead, it was the sharing predicate alone — every
-      // row of an object whose sharing model is not private. Not a failure,
-      // so nothing is logged.
-      if (permissionSets.length === 0) return RLS_DENY_FILTER;
-      const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
-      // [#5815] ADR-0055 — the SECOND thing the middleware ANDs into `ast.where`
-      // for a read: the leaf over the master, the same answer the middleware
-      // writes for a find. It stands down (null) for any object that is not
-      // controlled_by_parent, and it is internally fail-closed (the deny
-      // sentinel for an unresolvable relation, `$in: []` for a chain the
-      // registry walk refuses); a THROW propagates to the catch below, which
-      // denies — the same posture as the surrounding layers.
-      const cbpFilter = this.computeControlledByParentFilter(object, 'find', context);
-      // [#4467] RLS AND controlled-by-parent AND sharing — the same
-      // AND-composition the middlewares achieve by all writing into `ast.where`.
-      // Any layer may be absent; `andComposeLayers` returns the others, or null
-      // when none constrains.
-      return andComposeLayers(andComposeLayers(filter, cbpFilter), sharingFilter) ?? undefined;
-    } catch (e) {
-      // Fail CLOSED — a resolution failure must deny (zero rows), never expose
-      // every tenant's data through the raw-SQL analytics path.
-      this.logger.error?.(
-        `[security] getReadFilter failed for object '${object}' ` +
-          `(user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
-      return RLS_DENY_FILTER;
-    }
+    // [#25223 cut 9] The body moved to `security-plugin-read-filter.ts` (see `ReadFilterHost`).
+    const readLogger = () => this.logger;
+    const host: Pick<ReadFilterHost, 'computeControlledByParentFilter' | 'computeDelegatedReadFilter' | 'computeRlsFilter' | 'logger' | 'resolvePermissionSetsForContext' | 'resolveSharingReadFilter'> = {
+      computeControlledByParentFilter: (...a) => this.computeControlledByParentFilter(...a),
+      computeDelegatedReadFilter: (...a) => this.computeDelegatedReadFilter(...a),
+      computeRlsFilter: (...a) => this.computeRlsFilter(...a),
+      get logger() { return readLogger(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+      resolveSharingReadFilter: (...a) => this.resolveSharingReadFilter(...a),
+    };
+    return getReadFilter.call(host, object, context);
   }
 
   /**
@@ -5990,68 +5946,27 @@ export class SecurityPlugin implements Plugin {
    * middleware calls, in the middleware's spelling, and the delegator's context
    * comes from the one resolver the middleware and `canReadObject` share.
    */
-  private async computeDelegatedReadFilter(
+  private computeDelegatedReadFilter(
     object: string,
     context: any,
   ): Promise<Record<string, unknown> | undefined> {
-    const permissionSets = await this.resolvePermissionSetsForContext(context);
-    if (permissionSets.length === 0) return RLS_DENY_FILTER;
-    const del = await resolveDelegatorContext(this.ql, context);
-    if (del.kind !== 'resolved') {
-      this.logger.error?.(
-        `[security] getReadFilter received an on-behalf-of context for object '${object}' whose delegator ` +
-          `'${String(context?.onBehalfOf?.userId)}' does not exist — denying (fail-closed: a delegated read is ` +
-          `never scoped wider than its delegator's own) — with no delegator to intersect against it is not ` +
-          `scoped at all (ADR-0090 D10)`,
-      );
-      return RLS_DENY_FILTER;
-    }
-    const delegatorContext = del.context;
-    // [#25106 · ADR-0090 D10] The prologue's organization-membership refusal
-    // (`resolveOperationPrincipals`), mirrored at the same point: after the
-    // dangling-delegator refusal, before the delegator's sets resolve. On a
-    // walled posture the find path refuses every operation of a delegated
-    // context whose live active organization the delegator's own membership
-    // does not back, so the scope that agrees with it is zero rows, on every
-    // object. [#25107] The prologue's own ask ({@link delegatedOrganizationRefusal}),
-    // with the inputs it passes; under `single` the claim stands, and a context
-    // with no active organization is not this rule's (ADR-0123 D2).
-    if (delegatedOrganizationRefusal(context, delegatorContext, this.tenancyPosture) !== undefined) {
-      this.logger.warn?.(
-        `[security] getReadFilter received an on-behalf-of context for object '${object}' whose delegator is not a ` +
-          `member of the organization it runs in — denying, as the operation prologue refuses it (ADR-0090 D10, fail-closed)`,
-      );
-      return RLS_DENY_FILTER;
-    }
-    const delegatorSets = await this.resolvePermissionSetsForContext(delegatorContext);
-    if (delegatorSets.length === 0) return RLS_DENY_FILTER;
-
-    // Step 2.6's two depth stamps, from the same two evaluator calls.
-    const meta = await this.getObjectSecurityMeta(object);
-    const delegatorScope = this.permissionEvaluator.getEffectiveScope('read', object, delegatorSets, { isPrivate: meta.isPrivate });
-    const declared = this.permissionEvaluator.getDeclaredScope('read', object, permissionSets, { isPrivate: meta.isPrivate });
-    const agentLegScope = intersectDelegatedScope(declared, delegatorScope).agentLegScope;
-
-    // Layers 5 and 6 — the sibling middleware's two calls. Resolved first, as
-    // the non-delegated path resolves its one sharing layer first: a sharing
-    // outage denies before any RLS layer is composed.
-    const sharingFilter = await this.resolveSharingReadFilter(object, context, permissionSets, agentLegScope);
-    const delegatorSharingFilter = await this.resolveSharingReadFilter(
-      object,
-      { ...context, userId: delegatorContext.userId, onBehalfOf: undefined },
-      delegatorSets,
-      delegatorScope,
-    );
-
-    // Layers 1 to 4 — the security middleware's own four, in its order.
-    const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
-    const cbpFilter = this.computeControlledByParentFilter(object, 'find', context);
-    const delFilter = await this.computeRlsFilter(delegatorSets, object, 'find', delegatorContext);
-    const delCbpFilter = this.computeControlledByParentFilter(object, 'find', delegatorContext);
-
-    const securityLayers = andComposeLayers(andComposeLayers(filter, cbpFilter), andComposeLayers(delFilter, delCbpFilter));
-    const sharingLayers = andComposeLayers(sharingFilter, delegatorSharingFilter);
-    return andComposeLayers(securityLayers, sharingLayers) ?? undefined;
+    // [#25223 cut 9] The body moved to `security-plugin-read-filter.ts` (see `ReadFilterHost`).
+    const readLogger = () => this.logger;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<ReadFilterHost, 'computeControlledByParentFilter' | 'computeRlsFilter' | 'getObjectSecurityMeta' | 'logger' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'resolveSharingReadFilter' | 'tenancyPosture'> = {
+      computeControlledByParentFilter: (...a) => this.computeControlledByParentFilter(...a),
+      computeRlsFilter: (...a) => this.computeRlsFilter(...a),
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      get logger() { return readLogger(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      get ql() { return readQl(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+      resolveSharingReadFilter: (...a) => this.resolveSharingReadFilter(...a),
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return computeDelegatedReadFilter.call(host, object, context);
   }
 
   /**
@@ -6116,27 +6031,16 @@ export class SecurityPlugin implements Plugin {
     return this.computeReadableFields(object, context, { fallbackOnEmptySets: true });
   }
 
-  private async computeReadableFields(
+  private computeReadableFields(
     object: string,
     context: any,
     options: { fallbackOnEmptySets: boolean },
   ): Promise<string[] | undefined> {
-    const mask = await this.resolveProjectionFieldMask(object, context, options);
-    if (mask.kind === 'answer') return mask.fields;
-
-    // [#8993] A field this caller sees PARTIALLY MASKED is still a served
-    // column — the read path REPLACES its value rather than deleting the key —
-    // so it stays in the projection (an export header must include the column
-    // whose masked values the same caller's rows carry). Mirrors the step-4
-    // exclusion exactly: an explicit permission-set deny keeps the field
-    // deleted, hence out of the projection.
-    const partialRules = mask.readPartialMaskRules();
-
-    // Readable = every schema field NOT explicitly masked non-readable. A field
-    // with no permission entry passes through (the field allow-list only
-    // enumerates fields it names) — the exact complement of maskResults' delete
-    // set, so the export header matches list's readable columns by construction.
-    return mask.allFields.filter((f) => mask.fieldPerms[f]?.readable !== false || partialRules[f] !== undefined);
+    // [#25223 cut 9] The body moved to `security-plugin-field-readers.ts` (see `FieldReadersHost`).
+    const host: Pick<FieldReadersHost, 'resolveProjectionFieldMask'> = {
+      resolveProjectionFieldMask: (...a) => this.resolveProjectionFieldMask(...a),
+    };
+    return computeReadableFields.call(host, object, context, options);
   }
 
   /**
@@ -6204,7 +6108,7 @@ export class SecurityPlugin implements Plugin {
    * write gate each take. A case that settles the answer before any mask
    * exists comes back as `answer`.
    */
-  private async resolveProjectionFieldMask(
+  private resolveProjectionFieldMask(
     object: string,
     context: any,
     options: { fallbackOnEmptySets: boolean },
@@ -6219,84 +6123,25 @@ export class SecurityPlugin implements Plugin {
       readQueryGuardPerms: () => Record<string, { readable: boolean; editable: boolean }>;
     }
   > {
-    const objectName = String(object ?? '');
-    if (!objectName) return { kind: 'answer', fields: undefined };
-    // The field universe — the SAME source the RLS field pass uses (ObjectQL's
-    // live SchemaRegistry first, metadata artifact fallback). `null` → schema
-    // not resolvable → let the caller fall back rather than guess.
-    const fieldNameSet = await this.getObjectFieldNames(this.metadata, objectName, this.ql);
-    if (!fieldNameSet) return { kind: 'answer', fields: undefined };
-    const allFields = [...fieldNameSet];
-    // System operations bypass FLS (mirrors the middleware's isSystem skip).
-    if (context?.isSystem) return { kind: 'answer', fields: allFields };
-
-    let permissionSets = await this.resolvePermissionSetsForContext(context);
-    if (permissionSets.length === 0 && options.fallbackOnEmptySets) {
-      // [ADR-0106 D7] `resolvePermissionSetsForContext` applies the baseline
-      // only for a caller carrying `userId`, so a guest/anonymous caller lands
-      // here with nothing. Resolve the configured fallback set explicitly —
-      // the same two-step `/auth/me/permissions` performs.
-      permissionSets = await this.resolveFallbackPermissionSets(context);
-    }
-    // [#21908] ADR-0096 D5 strict mode. A principal-less context used to be
-    // settled here with the full field set, because the middleware handed it
-    // through and no field gate reached it. The middleware now refuses it
-    // before any field gate, as it refuses the read of any caller who resolves
-    // no set ([#21079]), so it is no longer a case of its own: like every
-    // caller who resolves no set, the object's masking rules and [#21063]
-    // per-field capability contract reach it (resolveCallerPosture) and it
-    // falls through to the mask below. Its object admission is not decided
-    // here — `canReadObject` / `canWriteObject` answer it `false`.
-
-    const secMeta = await this.resolveCallerPosture(objectName, permissionSets);
-    // [#3545] Posture unresolvable → expose no columns, the same fail-closed
-    // stance this method already takes on a dangling delegator below. The
-    // per-field capability contract (`fieldRequiredPermissions`) would otherwise
-    // default to empty and silently unmask every capability-gated column, and
-    // [#20995] the masking rules a caller with no set is held to are unknown
-    // ([#21063] as is that caller's field capability contract).
-    if (secMeta.unresolved) return { kind: 'answer', fields: [] };
-    const basePerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
-    let fieldPerms = this.foldFieldRequiredPermissions(basePerms, secMeta.fieldRequiredPermissions, permissionSets);
-
-    // [ADR-0090 D10] On an on-behalf-of request the projection must NOT widen
-    // past the DELEGATOR's — intersect the delegator's field mask too. A
-    // dangling delegator fails CLOSED (expose no columns), the same fail-closed
-    // stance the CRUD middleware takes on a 'missing' delegator; [#25107] and so
-    // does a delegator who is not a member of the organization the request runs
-    // in, on a walled posture, which the middleware's prologue refuses
-    // ({@link delegatedOrganizationRefusal}). [#20995] Asked
-    // only when the caller resolved a set, as the middleware asks it: a caller
-    // who resolved none reaches here only for its masking rules and [#21063]
-    // its field capability contract, and every one of them already applies to
-    // it.
-    let delBasePerms: Record<string, { readable: boolean; editable: boolean }> | null = null;
-    let delegatorSets: PermissionSet[] | null = null;
-    if (permissionSets.length > 0 && context?.onBehalfOf?.userId) {
-      const del = await resolveDelegatorContext(this.ql, context);
-      if (del.kind === 'missing') return { kind: 'answer', fields: [] };
-      if (del.kind === 'resolved') {
-        if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) {
-          return { kind: 'answer', fields: [] };
-        }
-        delegatorSets = await this.resolvePermissionSetsForContext(del.context);
-        delBasePerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
-        let delFieldPerms = this.foldFieldRequiredPermissions(delBasePerms, secMeta.fieldRequiredPermissions, delegatorSets);
-        fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
-      }
-    }
-
-    return {
-      kind: 'mask',
-      allFields,
-      fieldPerms,
-      readPartialMaskRules: () => this.computeReadPartialMaskRules(
-        secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
-      ),
-      readQueryGuardPerms: () => this.computeQueryGuardFieldPerms(
-        objectName, secMeta, permissionSets, delegatorSets,
-      ),
+    // [#25223 cut 9] The body moved to `security-plugin-field-readers.ts` (see `FieldReadersHost`).
+    const readMetadata = () => this.metadata;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<FieldReadersHost, 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveFallbackPermissionSets' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      computeQueryGuardFieldPerms: (...a) => this.computeQueryGuardFieldPerms(...a),
+      computeReadPartialMaskRules: (...a) => this.computeReadPartialMaskRules(...a),
+      foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
+      getObjectFieldNames: (...a) => this.getObjectFieldNames(...a),
+      get metadata() { return readMetadata(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      get ql() { return readQl(); },
+      resolveCallerPosture: (...a) => this.resolveCallerPosture(...a),
+      resolveFallbackPermissionSets: (...a) => this.resolveFallbackPermissionSets(...a),
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+      get tenancyPosture() { return readTenancyPosture(); },
     };
+    return resolveProjectionFieldMask.call(host, object, context, options);
   }
 
   /**
@@ -6343,25 +6188,15 @@ export class SecurityPlugin implements Plugin {
    * whose answer for this caller is the full field set minus every field it is
    * not served, as the service contract states.
    */
-  private async resolveCallerPosture(
+  private resolveCallerPosture(
     object: string,
     permissionSets: PermissionSet[],
   ): Promise<ObjectSecurityMeta> {
-    const posture = await this.getObjectSecurityMeta(object);
-    if (permissionSets.length > 0) return posture;
-    return {
-      isPrivate: false,
-      tenancyDisabled: false,
-      isBetterAuthManaged: false,
-      tenantAnchorIsPhantom: false,
-      owdOpensRowWrites: false,
-      requiredPermissions: EMPTY_REQUIRED_PERMISSIONS,
-      fieldRequiredPermissions: posture.fieldRequiredPermissions,
-      fieldMaskingRules: posture.fieldMaskingRules,
-      unresolved: posture.unresolved,
-      // [#10401] Explanation only, and present only on the refusing path.
-      unresolvedCause: posture.unresolvedCause,
+    // [#25223 cut 9] The body moved to `security-plugin-field-readers.ts` (see `FieldReadersHost`).
+    const host: Pick<FieldReadersHost, 'getObjectSecurityMeta'> = {
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
     };
+    return resolveCallerPosture.call(host, object, permissionSets);
   }
 
   /**
@@ -6413,47 +6248,19 @@ export class SecurityPlugin implements Plugin {
    * still {@link getReadFilter}'s and it is still mandatory. Nothing here may be
    * used to widen.
    */
-  async canReadObject(object: string, context?: any): Promise<boolean> {
-    const objectName = String(object ?? '');
-    if (!objectName) return false;
-    // 1. System operations bypass (mirrors the middleware's isSystem skip).
-    if (context?.isSystem) return true;
-    // 2. [#21908] ADR-0096 D5 strict mode — the middleware refuses a
-    //    principal-less context before it resolves anything, so this does too.
-    if (isPrincipalLessContext(context)) return false;
-
-    try {
-      const permissionSets = await this.resolvePermissionSetsForContext(context);
-      //    [#21079] No sets resolved → the deny baseline (ADR-0056 D2): an
-      //    empty list grants nothing, which is the middleware's step 2 answer.
-      if (permissionSets.length === 0) return false;
-
-      // [ADR-0090 D10] Resolve the delegator ONCE — arms 4 and 6 both need it,
-      // and a dangling link denies before either runs. [#25107] So does a
-      // delegator who is not a member of the organization the read runs in, on
-      // a walled posture: the middleware's prologue refuses the read there
-      // ({@link delegatedOrganizationRefusal}).
-      let delegatorSets: PermissionSet[] | null = null;
-      if (context?.onBehalfOf?.userId) {
-        const del = await resolveDelegatorContext(this.ql, context);
-        if (del.kind === 'missing') return false;
-        if (del.kind === 'resolved') {
-          if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return false;
-          delegatorSets = await this.resolvePermissionSetsForContext(del.context);
-        }
-      }
-
-      // 3–6. The posture and grant arms, over the resolved sets — the one
-      // predicate the ADR-0055 master-derived read scope asks as well.
-      return await this.objectReadAdmission(objectName, permissionSets, delegatorSets);
-    } catch (e) {
-      this.logger.error?.(
-        `[security] canReadObject could not resolve the object-level read admission for ` +
-          `'${objectName}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
-      return false;
-    }
+  canReadObject(object: string, context?: any): Promise<boolean> {
+    // [#25223 cut 9] The body moved to `security-plugin-object-admission.ts` (see `ObjectAdmissionHost`).
+    const readLogger = () => this.logger;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<ObjectAdmissionHost, 'logger' | 'objectReadAdmission' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      get logger() { return readLogger(); },
+      objectReadAdmission: (...a) => this.objectReadAdmission(...a),
+      get ql() { return readQl(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return canReadObject.call(host, object, context);
   }
 
   /**
@@ -6490,45 +6297,18 @@ export class SecurityPlugin implements Plugin {
    * ⛔ Object-level ONLY, like {@link canReadObject}: `true` never means
    * "unrestricted". A throw propagates; each asker fails closed on it.
    */
-  private async objectReadAdmission(
+  private objectReadAdmission(
     objectName: string,
     permissionSets: PermissionSet[],
     delegatorSets: PermissionSet[] | null,
   ): Promise<boolean> {
-    if (permissionSets.length === 0) return false;
-
-    const { isPrivate, unresolved, requiredPermissions } =
-      await this.getObjectSecurityMeta(objectName);
-    // 3. [#3545] Posture unresolvable → deny.
-    if (unresolved) return false;
-
-    // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
-    //    principals — a caller missing any required capability is denied
-    //    however permissive their grants are.
-    const required = requiredCapsForOperation(requiredPermissions, 'find');
-    if (required.length > 0) {
-      const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
-      if (required.some((cap) => !held.has(cap))) return false;
-      if (delegatorSets && delegatorSets.length > 0) {
-        const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
-        if (required.some((cap) => !delHeld.has(cap))) return false;
-      }
-    }
-
-    // 5. The object-level CRUD grant.
-    if (!this.permissionEvaluator.checkObjectPermission('find', objectName, permissionSets, { isPrivate })) {
-      return false;
-    }
-
-    // 6. [ADR-0090 D10] The delegator must independently grant the same read.
-    if (
-      delegatorSets &&
-      !this.permissionEvaluator.checkObjectPermission('find', objectName, delegatorSets, { isPrivate })
-    ) {
-      return false;
-    }
-
-    return true;
+    // [#25223 cut 9] The body moved to `security-plugin-object-admission.ts` (see `ObjectAdmissionHost`).
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<ObjectAdmissionHost, 'getObjectSecurityMeta' | 'permissionEvaluator'> = {
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+    };
+    return objectReadAdmission.call(host, objectName, permissionSets, delegatorSets);
   }
 
   /**
@@ -6677,172 +6457,30 @@ export class SecurityPlugin implements Plugin {
    *
    * Nothing here may be used to widen.
    */
-  async canWriteObject(
+  canWriteObject(
     object: string,
     operation: 'insert' | 'update',
     context?: any,
     data?: unknown,
   ): Promise<boolean> {
-    const objectName = String(object ?? '');
-    if (!objectName) return false;
-    // 1. System operations bypass.
-    if (context?.isSystem) return true;
-
-    try {
-      // 2-3. The middleware's two PRE-RESOLUTION caller-class refusals, called
-      //      as the middleware calls them and at the same point in its order:
-      //      after the `isSystem` bypass, BEFORE the principal-less refusal
-      //      (arm 4) and before any permission set resolves. Both answer about
-      //      the CALLER and the OBJECT, so a caller they refuse cannot reach
-      //      the write by omitting a value or naming a different row — which
-      //      is exactly the class this method exists to keep out of the
-      //      preview.
-      try {
-        // 2. [ADR-0103] Engine-owned write affordance. ⛔ Not a re-derivation:
-        //    this is the middleware's own primitive over the same registered
-        //    schema, so the `userActions` members that reopen a verb pass here
-        //    for the one reason they pass there.
-        assertEngineOwnedWriteAllowed(
-          typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(objectName) : undefined,
-          operation,
-          context,
-        );
-        // 3. [ADR-0090 D12] Delegated administration on the RBAC link tables.
-        //    The middleware hands its whole `opCtx`; a preview names no stored
-        //    row, so this hands `object`, `operation`, `context` and the rows
-        //    of `data` and NOTHING else — leaving the gate's delegate branch
-        //    refusing an id-less mutation it cannot boundary-check, pinned as a
-        //    direction in `can-write-object-admission.test.ts`.
-        //
-        //    ⭐ And the rows it supplies are SHALLOW COPIES, never the caller's
-        //    own objects. The gate stamps `granted_by` onto the rows it
-        //    materialises (its dual audit), and on an insert it materialises
-        //    the payload rows BY REFERENCE — while `validate()` hands this
-        //    method the caller's RAW payload, so passing it straight through
-        //    would let a PREVIEW write into the caller's own objects. The
-        //    decision cannot notice the copy: nothing reads `granted_by` back,
-        //    it is only ever written — so its pin reads the caller's rows
-        //    instead (`can-write-object-admission.test.ts`, the copy block).
-        if (this.delegatedAdminGate) {
-          const shallow = (row: unknown) =>
-            row && typeof row === 'object' && !Array.isArray(row)
-              ? { ...(row as Record<string, unknown>) }
-              : row;
-          await this.delegatedAdminGate.assert({
-            object: objectName,
-            operation,
-            context,
-            data: Array.isArray(data) ? data.map(shallow) : shallow(data),
-          });
-        }
-      } catch (e) {
-        // A refusal from either gate IS the admission answer — the write path's
-        // own denial, not a failure to resolve one. Anything else is a
-        // subsystem failure and belongs to the outer catch, which logs it and
-        // still denies.
-        if (e instanceof PermissionDeniedError) return false;
-        throw e;
-      }
-
-      // 4. [#21908] ADR-0096 D5 strict mode — the middleware refuses a
-      //    principal-less context at this point in its order, after its
-      //    caller-class gates and before anything resolves, so this does too.
-      if (isPrincipalLessContext(context)) return false;
-
-      const permissionSets = await this.resolvePermissionSetsForContext(context);
-      // 10. [ADR-0123 D2] The no-active-organization write wall — the
-      //     middleware's own verdict, `organizationWallRefusal`, under its step
-      //     3.7 guard: a payload is supplied and the context names a user. Its
-      //     point is last, after the field gate.
-      const organizationWallAdmits = async (
-        delegatorSets: PermissionSet[] | null,
-        delegatorContext: unknown,
-      ): Promise<boolean> =>
-        !(data && typeof data === 'object' && context?.userId
-          && (await this.organizationWallRefusal(
-            permissionSets, objectName, operation, context, delegatorSets, delegatorContext,
-          )));
-      //    [#21079] No sets resolved → the deny baseline (ADR-0056 D2): an
-      //    empty list grants no create or edit, which is the middleware's step
-      //    2 answer for a caller who carries a principal — refused there
-      //    before its field gate or its organization wall is reached, whatever
-      //    the payload.
-      if (permissionSets.length === 0) return false;
-
-      const { isPrivate, unresolved, requiredPermissions, fieldRequiredPermissions } =
-        await this.getObjectSecurityMeta(objectName);
-      // 5. [#3545] Posture unresolvable → deny.
-      if (unresolved) return false;
-
-      // [ADR-0090 D10] Resolve the delegator ONCE — the arms below need it,
-      // and a dangling link denies before any of them runs. [#25107] So does a
-      // delegator who is not a member of the organization the write runs in,
-      // on a walled posture: the middleware's prologue refuses the write there
-      // ({@link delegatedOrganizationRefusal}).
-      let delegatorSets: PermissionSet[] | null = null;
-      let delegatorContext: unknown = null;
-      if (context?.onBehalfOf?.userId) {
-        const del = await resolveDelegatorContext(this.ql, context);
-        if (del.kind === 'missing') return false;
-        if (del.kind === 'resolved') {
-          if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return false;
-          delegatorContext = del.context;
-          delegatorSets = await this.resolvePermissionSetsForContext(del.context);
-        }
-      }
-
-      // 6. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
-      //    principals.
-      const required = requiredCapsForOperation(requiredPermissions, operation);
-      if (required.length > 0) {
-        const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
-        if (required.some((cap) => !held.has(cap))) return false;
-        if (delegatorSets && delegatorSets.length > 0) {
-          const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
-          if (required.some((cap) => !delHeld.has(cap))) return false;
-        }
-      }
-
-      // 7. The object-level CRUD grant for the operation asked.
-      if (!this.permissionEvaluator.checkObjectPermission(operation, objectName, permissionSets, { isPrivate })) {
-        return false;
-      }
-
-      // 8. [ADR-0090 D10] The delegator must independently grant the same write.
-      //    [#21079] Asked over the delegator's list whatever its length, as the
-      //    middleware asks it: a delegator who resolves NO set grants nothing,
-      //    the deny baseline for the second principal too.
-      if (
-        delegatorSets &&
-        !this.permissionEvaluator.checkObjectPermission(operation, objectName, delegatorSets, { isPrivate })
-      ) {
-        return false;
-      }
-
-      // 9. The field-level-security WRITE gate — the middleware's step 2.5,
-      //    over the payload the caller supplied: the middleware runs it for an
-      //    `insert`/`update` carrying `opCtx.data`. ⛔ Not a re-derivation —
-      //    [#21063] it IS the middleware's verdict (computeForbiddenFieldWrites);
-      //    a second spelling of "which fields may this caller write" is the
-      //    drift this whole method exists to avoid.
-      if (data) {
-        const forbidden = this.computeForbiddenFieldWrites(
-          objectName, data as Record<string, any> | Record<string, any>[],
-          { fieldRequiredPermissions }, permissionSets, delegatorSets,
-        );
-        if (forbidden.length > 0) return false;
-      }
-
-      // 10. [ADR-0123 D2] At the middleware's point — see above.
-      return await organizationWallAdmits(delegatorSets, delegatorContext);
-    } catch (e) {
-      this.logger.error?.(
-        `[security] canWriteObject could not resolve the write admission for ` +
-          `'${objectName}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
-      return false;
-    }
+    // [#25223 cut 9] The body moved to `security-plugin-object-admission.ts` (see `ObjectAdmissionHost`).
+    const readDelegatedAdminGate = () => this.delegatedAdminGate;
+    const readLogger = () => this.logger;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<ObjectAdmissionHost, 'computeForbiddenFieldWrites' | 'delegatedAdminGate' | 'getObjectSecurityMeta' | 'logger' | 'organizationWallRefusal' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      computeForbiddenFieldWrites: (...a) => this.computeForbiddenFieldWrites(...a),
+      get delegatedAdminGate() { return readDelegatedAdminGate(); },
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      get logger() { return readLogger(); },
+      organizationWallRefusal: (...a) => this.organizationWallRefusal(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      get ql() { return readQl(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return canWriteObject.call(host, object, operation, context, data);
   }
 
   /**
@@ -6863,53 +6501,19 @@ export class SecurityPlugin implements Plugin {
    * a principal-less context is `false` before anything resolves (ADR-0096 D5
    * strict mode, {@link isPrincipalLessContext}), as the middleware refuses it.
    */
-  async canExport(object: string, context?: any): Promise<boolean> {
-    const objectName = String(object ?? '');
-    if (!objectName) return false;
-    // System operations bypass (mirrors the middleware's isSystem skip).
-    if (context?.isSystem) return true;
-    // [#21908] ADR-0096 D5 strict mode — the middleware refuses a
-    // principal-less context before it resolves anything, so this does too.
-    if (isPrincipalLessContext(context)) return false;
-
-    const permissionSets = await this.resolvePermissionSetsForContext(context);
-    // [#21079] No sets resolved → the deny baseline (ADR-0056 D2): an empty
-    // list grants nothing, which is the middleware's step 2 answer.
-    if (permissionSets.length === 0) return false;
-
-    const { isPrivate, unresolved } = await this.getObjectSecurityMeta(objectName);
-    // [#3545] Posture unresolvable → deny. `isPrivate` would default to `false`,
-    // which is precisely what lets a plain wildcard reach the object; a bulk
-    // egress decision must not rest on a default we could not read.
-    if (unresolved) return false;
-    if (!this.permissionEvaluator.checkObjectPermission('export', objectName, permissionSets, { isPrivate })) {
-      return false;
-    }
-
-    // [ADR-0090 D10] An on-behalf-of caller may never export past what the
-    // DELEGATOR could have exported themselves — intersect the delegator's own
-    // answer. A dangling delegator fails CLOSED, the same stance the CRUD
-    // middleware and {@link getReadableFields} take. [#21079] So does a
-    // delegator who resolves NO set: the evaluator answers that empty list's
-    // export as it answers any list, and the middleware refuses its read.
-    // [#25107] So does a delegator who is not a member of the organization the
-    // export runs in, on a walled posture: the middleware's prologue refuses
-    // the read there ({@link delegatedOrganizationRefusal}).
-    if (context?.onBehalfOf?.userId) {
-      const del = await resolveDelegatorContext(this.ql, context);
-      if (del.kind === 'missing') return false;
-      if (del.kind === 'resolved') {
-        if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return false;
-        const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
-        if (
-          !this.permissionEvaluator.checkObjectPermission('export', objectName, delegatorSets, { isPrivate })
-        ) {
-          return false;
-        }
-      }
-    }
-
-    return true;
+  canExport(object: string, context?: any): Promise<boolean> {
+    // [#25223 cut 9] The body moved to `security-plugin-object-admission.ts` (see `ObjectAdmissionHost`).
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<ObjectAdmissionHost, 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      get ql() { return readQl(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return canExport.call(host, object, context);
   }
 
   /**
