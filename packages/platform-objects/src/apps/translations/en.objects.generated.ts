@@ -131,9 +131,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       unverified: {
         label: "Unverified"
       },
-      two_factor: {
-        label: "2FA Enabled"
-      },
       banned: {
         label: "Banned"
       }
@@ -926,11 +923,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Kind",
         help: "Categorisation hint — does not change graph semantics.",
         options: {
-          company: "company",
-          division: "division",
-          department: "department",
-          office: "office",
-          cost_center: "cost_center"
+          company: "Company",
+          division: "Division",
+          department: "Department",
+          office: "Office",
+          cost_center: "Cost Center"
         }
       },
       parent_business_unit_id: {

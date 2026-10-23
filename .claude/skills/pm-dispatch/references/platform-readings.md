@@ -400,7 +400,7 @@
 - 计数答至今发生过没有,不答机制在不在:零计数只作弱先验。
 - 判 required 集为空要读 ruleset 的 required 集本身,或看队列合并是否真在等检查。
 - ⛔ 别处写下的计数值一律先复测再用。
-- 租户普查 `reach: in` 只说有租户列;D9 系统写盖章只认 `PLATFORM_OBJECT_TENANCY` 的 `tenant-scoped`。
+- 租户普查 `reach: in` 只说有租户列;D9 盖章按 schema(ADR-0131 D9/D13):有租户列且非联邦才在内。
 - MCP `issue_write create` 落库丢掉正文尾部的署名页脚块,正文其余部分完好。
 - MCP `issue_write` update 送尾部横线加页脚块则两者同被吃掉,而调用照常回 id 与 url。
 - 建卡走 REST `POST /issues`:带页脚存活,无页脚合成恰一条(+58);回读后 `PATCH` 重送逐字节存下。

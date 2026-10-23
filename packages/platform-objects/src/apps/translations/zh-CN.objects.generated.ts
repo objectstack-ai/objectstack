@@ -131,9 +131,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       unverified: {
         label: "未验证"
       },
-      two_factor: {
-        label: "已启用 2FA"
-      },
       banned: {
         label: "已封禁"
       }

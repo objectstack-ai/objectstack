@@ -469,6 +469,38 @@ Wait for the refreshed PR's CI, then merge it. That merge is still the decision 
 release, and the `release` environment approval is still the authorisation — neither
 is changed by where the refresh came from.
 
+**Then, before approving, check that no nearer `CI` run is still in flight** (#24889).
+Open the Release run's **`Full battery green at the version commit`** job, step *Read
+the full battery at or before the version commit*. It prints one line per workflow it
+reads (`CI`, `Lint & Type Check`, `Spec Shape Gate`), each naming the run it chose and
+how many first-parent commits before the version commit that run's head sits. The
+gate reads only *completed* runs and never waits (by design: `selectFullBatteryRun`
+in `scripts/ci/scheduled-full-run.mjs`), so a run still in progress is invisible to
+it. Now open **Actions → CI** on `main`: if a run on the version commit, or on any
+commit between it and the one the `CI` line names, is still in progress — normally
+the hourly `schedule` run (`cron: '0 * * * *'` in `ci.yml`), occasionally a `push`
+run — **wait for it to complete before approving**. That is about 25–30 minutes from
+the top of the hour (the 20 hourly runs up to 2026-10-23 00:20Z took 14–39 minutes,
+median 28.7, 14 of them 25–31). Green: approve. Red: do not approve. It is the reading the gate would
+have refused had it been complete, so treat it as that refusal (recovery: the
+`full-battery` job's header in `release.yml`). `CI` is the long battery, so it is the
+window that matters in practice; an in-flight `Lint & Type Check` or `Spec Shape
+Gate` run nearer than its line's run deserves the same wait.
+
+Why: 18.0.0 (version commit `06cab4849a`) was approved on a green gate that had read
+scheduled `CI` run 39412016980 on `abd5acdaf7`, **9** first-parent commits back,
+because the nearer scheduled run 39419131283 on `81120caac8`, 2 commits back, was
+still running. That run concluded **failure** at 12:30Z, minutes after the gate read
+(#24879, a stale dogfood fixture), and a later `force: true` dispatch that could see
+it was refused. The gate was right about everything it could see; the gap is only
+the window in which a nearer run is in flight, and only a human can wait it out.
+
+**This is a wait, not a merge freeze.** `main` keeps moving the whole time: the
+approval publishes the version commit's tree and nothing that landed after it, so
+runs on later commits are not what you are waiting for. The snapshot flow above
+chose against coordinated freezes, and a Version Packages PR merged behind `main` is
+already handled by `annotate-shipped` (#23818); neither changes.
+
 **After a stable `@objectstack/spec` publish, refresh the retired-after census** (#20390): run `pnpm --filter @objectstack/spec exec tsx scripts/build-retired-after-census.ts` (prefix `NODE_USE_ENV_PROXY=1` behind a proxy) and commit the rewritten `packages/spec/src/conversions/retired-after.census.json` in an ordinary PR — until it lands, the census test holds an unpublished entry's `retiredAfter` only to the range from the last censused release to the label, not to the label exactly.
 
 ## Drift guard

@@ -131,9 +131,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       unverified: {
         label: "No verificados"
       },
-      two_factor: {
-        label: "2FA habilitado"
-      },
       banned: {
         label: "Bloqueado"
       }

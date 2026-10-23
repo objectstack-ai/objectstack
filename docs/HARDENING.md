@@ -13,7 +13,7 @@ adapter layer for a production deployment.
 | -------------------------------------- | --------------------- | ------------------------------ |
 | Security response headers (CSP/XCTO/…) | **On**                | `@objectstack/runtime`         |
 | HSTS                                   | Off (opt-in)          | `securityHeaders.hsts: true`   |
-| Token-bucket rate limit                | Off (opt-in)          | `RateLimiter` primitive        |
+| Inbound rate limit (token bucket)      | Off (opt-in)          | `server.security.rateLimit`    |
 | CSRF                                   | Adapter-layer concern | `hono/secure-headers` / `hono/csrf` |
 | Auth (better-auth)                     | On                    | `@objectstack/plugin-auth`     |
 | Auth hardening (ADR-0069)              | Off (opt-in)          | Setup → Authentication         |
@@ -59,74 +59,164 @@ an upstream reverse proxy is already setting them — verify with
 
 ## Rate limiting
 
-The runtime exposes a token-bucket primitive but does **not** auto-wire
-it into the dispatcher plugin. Reason: in-memory limits behave poorly
-behind a load balancer without sticky sessions, so the decision to
-enable belongs at the adapter layer where you know your topology.
+The runtime ships an inbound rate limiter. It is built in and **off by
+default**: with no budget declared nothing is registered, so an unmetered
+deployment pays no per-request cost. Declare a budget on the stack's
+`server:` block and `objectstack serve` arms it:
 
 ```ts
-import { RateLimiter, DEFAULT_RATE_LIMITS } from '@objectstack/runtime';
+import { defineStack } from '@objectstack/spec';
 
-const auth  = new RateLimiter(DEFAULT_RATE_LIMITS.auth);   //  10 req / min / IP
-const write = new RateLimiter(DEFAULT_RATE_LIMITS.write);  //  60 req / min / IP
-const read  = new RateLimiter(DEFAULT_RATE_LIMITS.read);   // 600 req / min / IP
+export default defineStack({
+    // …
+    server: {
+        security: {
+            rateLimit: {
+                enabled: true,
+                windowMs: 60_000,      // the window, in MILLISECONDS
+                maxRequests: 300,      // requests per caller per window
+            },
+        },
+        trustProxy: true,              // ONLY behind a proxy you control (see below)
+    },
+});
 ```
 
-### Hono recipe
+What the runtime does with it:
+
+- The limiter is global middleware on the `http.server` service, so every
+  request the server routes is metered — REST data, auth, metadata and every
+  other mount. CORS preflights (`OPTIONS`) are never metered.
+- It is a token bucket: capacity `maxRequests`, refilled at
+  `maxRequests / (windowMs / 1000)` tokens per second. A caller can burst one
+  full window's worth and sustains exactly the declared rate. `enabled: true`
+  with no numbers meters 100 requests per 60 000 ms.
+- A caller over budget gets `429` with a `Retry-After` header (seconds) and
+  the standard error envelope, `error.code: "RATE_LIMIT_EXCEEDED"`. No
+  `X-RateLimit-*` headers are sent.
+- `maxRequests` or `windowMs` of `0` or less is refused at `defineStack`, with
+  the fix in the message; to turn the limiter off, set `enabled: false`. An
+  unknown key in the budget is refused too — the key and the counter store
+  are not authorable (see below).
+- It is **one bucket per caller** across all routes, not one per traffic
+  class (see [Per-class budgets](#per-class-budgets)).
+- Boot logs `Inbound rate limit armed` with the budget and the `trustProxy`
+  value — the line to look for after a deploy.
+
+Composing the kernel yourself instead of `objectstack serve`, pass the same
+two values to the dispatcher plugin:
+`createDispatcherPlugin({ rateLimit: { budget: { enabled: true, windowMs: 60_000, maxRequests: 300 }, trustProxy: false } })`.
+It needs an `http.server` service; without one it warns at start that
+nothing can be metered.
+
+### Who a caller is: the key, and `server.trustProxy`
+
+The bucket is keyed by **who**, falling back to **where** only when there is
+no who:
+
+| Request | Bucket key |
+| --- | --- |
+| Carries a valid session | `principal:<user id>` — one abusive session cannot spend another user's budget, and users behind one NAT do not throttle each other |
+| Anonymous, `server.trustProxy` unset (the default) | `ip:<transport peer address>` — the socket's own address, which a client cannot forge |
+| Anonymous, `server.trustProxy: true` | `ip:<address>` — the **leftmost** `X-Forwarded-For` entry, else `X-Real-IP`, else the peer address when neither header is present |
+| Anonymous, no address can be established | one shared `ip:unknown` bucket, with a warning logged once — it over-throttles rather than failing open |
+
+Set `server.trustProxy: true` **only** when a reverse proxy you control
+**overwrites** `X-Forwarded-For` on every inbound request (nginx:
+`proxy_set_header X-Forwarded-For $remote_addr;`). A proxy that *appends*
+(`$proxy_add_x_forwarded_for`) leaves the leftmost entry — the one read —
+whatever the client sent. Getting it wrong costs in either direction:
+
+- **Behind a proxy, left unset:** every anonymous caller has the proxy's
+  address, so all anonymous traffic shares one bucket.
+- **Set without such a proxy:** `X-Forwarded-For` is caller input. A client
+  mints a fresh bucket per request (limit bypassed) or claims a victim's
+  address and spends their budget (limit weaponised).
+
+The same value drives every consumer of the client address: the
+authentication plugin's IP allow-list (`allowed_ip_ranges`) and
+`last_login_ip` audit, and the budget of every declared endpoint
+(`apis[].rateLimit`). Composing the kernel yourself, hand it to `AuthPlugin`
+too (`trustProxy` option); `objectstack serve` does that for you.
+
+### Multi-node: the counters need a shared store
+
+The buckets live in the kernel `cache` service, resolved when the first
+request is metered, so a cache plugin that registers late is still found.
+Under `objectstack serve` the `cache` service is always on and is served by
+`@objectstack/service-cache`, whose only working adapter is **in-memory** —
+per process. On one node that is exact. On N nodes each counts on its own,
+so the effective limit is the budget **multiplied by N**, and nothing about
+the deployment looks wrong.
+
+For one limit across nodes, register a `cache` service backed by a store
+every node shares (Redis, Memcached, …) that implements the
+[`ICacheService` contract](../content/docs/kernel/contracts/cache-service.mdx)
+— see [Registering Services](../content/docs/kernel/services.mdx#registering-services).
+`CacheServicePlugin({ adapter: 'redis' })` is not that: its Redis adapter is a
+skeleton and the plugin refuses to start with it. Boot logs which store the
+limiter bound to: `inbound rate-limit buckets bound to the kernel cache
+service — enforced against ONE store across nodes iff the cache is shared`,
+or, with no `cache` service at all, a warning that it fell back to a
+per-process store. Counting is read-modify-write, so two nodes can both admit
+the last request at a window boundary — a slight over-admit, never a
+per-node limit.
+
+### Per-class budgets
+
+The built-in limiter is one budget for all traffic. Two tighter budgets
+already exist without writing middleware:
+
+- **Sign-in and other auth endpoints:** `rate_limit_max` /
+  `rate_limit_window_seconds` in **Setup → Authentication** (see
+  [Authentication hardening](#authentication-hardening-adr-0069)), counted in
+  the same `cache` service.
+- **One declared endpoint:** its own `rateLimit` in `apis[]`, metered in a
+  separate namespace, independently of the server budget.
+
+Composing the Hono adapter yourself and wanting per-class buckets on top
+(say 10/min for `/auth/*`, 60/min for writes, 600/min for reads), key them
+with the runtime's own resolver so the trust rule is the same one the
+built-in limiter applies. `RateLimiter` counts in process, so this layer is
+per node:
 
 ```ts
 import { Hono } from 'hono';
-import { secureHeaders } from 'hono/secure-headers';
 import { objectStackMiddleware } from '@objectstack/hono';
-import { RateLimiter, DEFAULT_RATE_LIMITS } from '@objectstack/runtime';
+import { RateLimiter, DEFAULT_RATE_LIMITS, resolveRateLimitKey } from '@objectstack/runtime';
 
-const app = new Hono();
-app.use('*', secureHeaders());   // CSP / X-Content-Type-Options / X-Frame-Options / …
+const TRUST_PROXY = false;   // the same value as `server.trustProxy`
 
 const buckets = {
-    auth:  new RateLimiter(DEFAULT_RATE_LIMITS.auth),
-    write: new RateLimiter(DEFAULT_RATE_LIMITS.write),
-    read:  new RateLimiter(DEFAULT_RATE_LIMITS.read),
+    auth:  new RateLimiter(DEFAULT_RATE_LIMITS.auth),    //  10 req / min
+    write: new RateLimiter(DEFAULT_RATE_LIMITS.write),   //  60 req / min
+    read:  new RateLimiter(DEFAULT_RATE_LIMITS.read),    // 600 req / min
 };
 
-// Rate-limit BEFORE the dispatcher middleware so rejected requests never reach it.
+const app = new Hono();
 app.use('/api/v1/*', async (c, next) => {
-    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+    const { key } = resolveRateLimitKey({
+        headers: c.req.header(),
+        // @hono/node-server exposes the Node request as `c.env.incoming`.
+        remoteAddress: c.env?.incoming?.socket?.remoteAddress,
+        trustProxy: TRUST_PROXY,
+    });
     const bucket = c.req.path.startsWith('/api/v1/auth/') ? 'auth'
-                 : ['POST','PUT','PATCH','DELETE'].includes(c.req.method) ? 'write'
+                 : ['POST', 'PUT', 'PATCH', 'DELETE'].includes(c.req.method) ? 'write'
                  : 'read';
-    const decision = buckets[bucket].consume(`${ip}:${bucket}`);
-    c.header('X-RateLimit-Remaining', String(decision.remaining));
+    const decision = buckets[bucket].consume(`${key}:${bucket}`);
     if (!decision.allowed) {
-        c.header('Retry-After', String(Math.ceil(decision.retryAfterMs / 1000)));
+        c.header('Retry-After', String(Math.max(1, Math.ceil(decision.retryAfterMs / 1000))));
         return c.json({ error: 'Too many requests' }, 429);
     }
     await next();
 });
-
 app.use('/api/v1/*', objectStackMiddleware(kernel));   // dispatcher last
-export default app;   // Cloudflare Workers / Bun / Deno / Node (@hono/node-server)
 ```
 
-For multi-instance deploys, replace the default `MemoryStore` with a
-Redis-backed `RateLimitStore` implementation. The interface is small —
-`get(key) / set(key, state) / prune(olderThanMs)` — so a 30-line Redis
-wrapper is enough.
-
-### Trust the proxy or don't
-
-The dispatcher's default key extractor reads `x-forwarded-for[0]`, which
-is **only safe** if your edge proxy strips client-supplied values and
-sets its own. If you can't guarantee that, override `keyFn` to use the
-socket address:
-
-```ts
-new RateLimiter(DEFAULT_RATE_LIMITS.auth, {
-    // ...
-});
-// then in your hook:
-const key = req.socket.remoteAddress;   // ignore X-Forwarded-For
-```
+This recipe has no session in hand, so it keys anonymous-style (by address)
+unless you pass `principalId` yourself. `DEFAULT_RATE_LIMITS` is reference
+material: nothing in the runtime reads it.
 
 ## CSRF
 
@@ -251,7 +341,9 @@ Run the production hardening checklist before each release:
 
 - [ ] `securityHeaders` enabled (curl any endpoint, confirm CSP/XCTO/HSTS)
 - [ ] HSTS turned on after TLS is verified
-- [ ] Rate limit wired at the adapter, with `trust proxy` configured correctly
+- [ ] `server.security.rateLimit` enabled with a sized budget; `server.trustProxy`
+      matches the topology (`true` only behind a proxy that overwrites
+      `X-Forwarded-For`); multi-node: the `cache` service is shared
 - [ ] `revokeSessionsOnPasswordReset: true`
 - [ ] CORS origin list is explicit, not `*`
 - [ ] `enforceProjectMembership: true` on scoped routes

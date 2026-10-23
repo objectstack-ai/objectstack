@@ -4,6 +4,25 @@ import { P } from '@objectstack/spec/shared';
 import type { Page } from '@objectstack/spec/ui';
 
 /**
+ * The gate on every node that shows 2FA state or 2FA controls (#25287).
+ *
+ * 2FA is either offered or not shown: `plugin-auth` resolves `twoFactor` to
+ * `false` unless a deployment turns it on, and `/api/v1/auth/config` then
+ * serves `features.twoFactor: false`. Without this gate a deployment with
+ * 2FA off shows a "Two-Factor Enabled: No" chip and a Security heading over
+ * an empty action bar — a state with no way to act on it.
+ *
+ * The right half is `featureGatePredicate('twoFactor')`, the conjunct the
+ * object's 2FA actions carry through `requiresFeature`; page components have
+ * no `requiresFeature`, so it is written out here. The `has()` guard keeps
+ * the gate CLOSED rather than faulting while the auth config has not loaded
+ * yet (the console binds `features` to `{}` until then, and on CEL a missing
+ * map key is a fault). Same `P` envelope as the alert below, for the same
+ * reason: this raw `Page` literal reaches the wire verbatim.
+ */
+const TWO_FACTOR_OFFERED = P`has(features.twoFactor) && features.twoFactor == true`;
+
+/**
  * sys_user — Record Detail Page (slotted, default for ALL sys_user records)
  *
  * **Audience**: admins browsing user records from Setup.
@@ -11,7 +30,7 @@ import type { Page } from '@objectstack/spec/ui';
  * The Account App's "Profile" entry no longer routes here — it points at
  * the `account:profile_card` Console component for a settings-form-style
  * personal profile. This page therefore optimizes for the admin
- * use case: scanning a user's signals (email/verification/2FA/role),
+ * use case: scanning a user's signals (email/verification/role),
  * reviewing related sessions/orgs/oauth/api-keys, and triggering
  * admin actions (ban / impersonate).
  *
@@ -23,9 +42,11 @@ import type { Page } from '@objectstack/spec/ui';
  *    (`update_my_profile / change_my_password / resend_verification_email
  *    / ban_user / impersonate_user / …`) still appear
  *    in the header overflow menu automatically.
- *  - `highlights` promotes the four signals worth scanning at the top:
- *    email, verification state, 2FA, platform role. Highlight fields
- *    are auto-dropped from the details grid below.
+ *  - `highlights` promotes the signals worth scanning at the top:
+ *    email, phone, verification state, platform role. Highlight fields
+ *    are auto-dropped from the details grid below. 2FA state is not one
+ *    of them: it is drawn only in the Security tab, behind the
+ *    deployment's `twoFactor` gate (see {@link TWO_FACTOR_OFFERED}).
  *  - The FIRST `tabs` item is the details grid: a `record:details` that
  *    re-groups remaining fields into sections and hides admin-internal
  *    audit columns. Banned / ban metadata is still editable from the
@@ -128,7 +149,10 @@ export const SysUserDetailPage: Page = {
     highlights: {
       type: 'record:highlights',
       properties: {
-        fields: ['email', 'phone_number', 'email_verified', 'two_factor_enabled', 'role'],
+        // No `two_factor_enabled` (#25287): a highlight field has no
+        // per-field gate, and on a deployment with 2FA off the chip read a
+        // dead "No". The state is drawn in the Security tab instead.
+        fields: ['email', 'phone_number', 'email_verified', 'role'],
       },
     },
 
@@ -170,7 +194,7 @@ export const SysUserDetailPage: Page = {
                     'email',
                     'phone_number',
                     'email_verified',
-                    'two_factor_enabled',
+                    'two_factor_enabled', // not a highlight: drawn in the Security tab, behind the 2FA gate
                     'role',
                   ],
                   sections: [
@@ -415,8 +439,14 @@ export const SysUserDetailPage: Page = {
                 },
               },
               { type: 'element:divider' },
+              // ── Two-factor block: every node carries TWO_FACTOR_OFFERED
+              // (#25287), so with 2FA off the block and its trailing divider
+              // are gone and Password flows straight into Email Verification.
+              // Per node rather than one wrapper, so the tab keeps its flat
+              // layout; a node gate that faults is withheld, not drawn.
               {
                 type: 'element:text',
+                visibleWhen: TWO_FACTOR_OFFERED,
                 properties: {
                   variant: 'h3',
                   content: {
@@ -429,6 +459,7 @@ export const SysUserDetailPage: Page = {
               },
               {
                 type: 'element:text',
+                visibleWhen: TWO_FACTOR_OFFERED,
                 properties: {
                   variant: 'caption',
                   content: {
@@ -440,14 +471,24 @@ export const SysUserDetailPage: Page = {
                 },
               },
               {
+                // The 2FA state, moved here from the highlights strip: shown
+                // only where it can be acted on.
+                type: 'record:highlights',
+                visibleWhen: TWO_FACTOR_OFFERED,
+                properties: {
+                  fields: ['two_factor_enabled'],
+                },
+              },
+              {
                 type: 'record:quick_actions',
+                visibleWhen: TWO_FACTOR_OFFERED,
                 properties: {
                   location: 'record_section',
                   align: 'start',
                   actionNames: ['enable_two_factor', 'disable_two_factor', 'generate_backup_codes'],
                 },
               },
-              { type: 'element:divider' },
+              { type: 'element:divider', visibleWhen: TWO_FACTOR_OFFERED },
               {
                 type: 'element:text',
                 properties: {

@@ -1129,7 +1129,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // case that a citation both grammars already agreed on keeps its verdict, the
   // over-firing refusal on this ledger's own colon-then-digit neighbours, and
   // the live reading with its control.
-  [BATTERY_LINE_CITATION_BINDING]: 9,
+  //
+  // 9 → 18 at #24894: the tilde-range declaration (D4), the card's own pins
+  // through this corpus's declarations (C1 to C3), and the append-only filter
+  // driven both ways on a synthetic document (E1 to E5), its ⛔ not-wider case
+  // included.
+  [BATTERY_LINE_CITATION_BINDING]: 18,
   // 40 → 42 at #18107, and the SHAPE of the battery changed under it: the 25
   // detector/resolver cases that pinned this file's own forked grammar moved
   // into `scripts/symbol-anchors.mjs`'s battery (93 → 122 there) and 27 took
@@ -1700,6 +1705,79 @@ export const NEIGHBOURING_MAP: Readonly<Record<string, string>> = Object.freeze(
 // carries none of its own. `selfTestLineCitationBinding` below is that, driven
 // live in both directions on a synthetic corpus — the citation is a finding
 // with the declaration, and is not one without it.
+//
+// ⭐ Two spellings still went through (#24894), and the fix took the same exit:
+// the core was widened, ⛔ no detector came back here. The COMMA form — a
+// path, a comma, a line spec, no space — is now a row of the shared path-
+// anchored grammar for every corpus, and the bare TILDE RANGE is the core's
+// fourth corpus declaration, `tildeRangeCitations`, which this corpus makes.
+// This ledger had accumulated 42 comma citations before a hand sweep moved
+// them to symbol anchors; nothing refused the 43rd.
+//
+// What stays LOCAL is one thing the core cannot know: which text in THIS
+// ledger is append-only. A `history[*]` row quotes what an item used to say,
+// and `FOLLOW-UPS.md` is the sweeps' decision register ("append, never
+// rewrite"); both were written before any gate read these two spellings, and
+// rewriting a record to pass a gate falsifies the record. So a finding in the
+// two NEW spellings inside that text is counted and NOT judged
+// (`appendOnlyLineCitation`). ⛔ It is a filter on the sweep's findings, keyed
+// on WHERE a finding sits — never a grammar, and never wider than the two
+// spellings: a colon-form citation in a history row is judged exactly as
+// before, because no measured population needs it excused.
+
+/* The documents of this family that are append-only as a whole. A path under
+ * `CHECKLIST_REL`, compared against a finding's `doc`. */
+const APPEND_ONLY_DOCS = Object.freeze([`${CHECKLIST_REL}/FOLLOW-UPS.md`]);
+
+/**
+ * The 1-based line ranges of every `"history"` array in one JSON document,
+ * inclusive at both ends. A character walk that tracks string state, so a
+ * bracket or the word inside a string value is payload — never a parse that
+ * would lose the line numbers the sweep reports findings against.
+ */
+function historyLineRanges(text) {
+  const ranges = [];
+  const open = [];
+  let line = 1;
+  let inString = false;
+  let escaped = false;
+  let stringStart = -1;
+  let lastString = null;
+  let key = null;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '\n') line += 1;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') { inString = false; lastString = text.slice(stringStart + 1, i); }
+      continue;
+    }
+    if (c === '"') { inString = true; stringStart = i; continue; }
+    if (c === ':') { key = lastString; continue; }
+    if (c === '[' || c === '{') { open.push({ history: c === '[' && key === 'history', start: line }); key = null; continue; }
+    if (c === ']' || c === '}') {
+      const top = open.pop();
+      if (top?.history) ranges.push([top.start, line]);
+      key = null;
+      continue;
+    }
+    if (c === ',') key = null;
+  }
+  return ranges;
+}
+
+/**
+ * Is this sweep finding one of the two #24894 spellings, sitting in text this
+ * ledger keeps append-only? `readDoc` answers a finding's `doc` with its text,
+ * so the self-test can drive the rule on a synthetic document.
+ */
+function appendOnlyLineCitation(finding, readDoc) {
+  if (finding.kind !== 'line-anchor' || !(finding.comma || finding.tildeRange)) return false;
+  if (APPEND_ONLY_DOCS.includes(finding.doc)) return true;
+  if (!finding.doc.endsWith('.json')) return false;
+  return historyLineRanges(readDoc(finding.doc)).some(([from, to]) => finding.line >= from && finding.line <= to);
+}
 
 /**
  * ⛔ NOT a grammar, and not a detector — the two things this limb used to be.
@@ -1735,13 +1813,19 @@ function selfTestLineCitationBinding() {
       && !/\bfunction\s+findLineCitations\w*\b/.test(OWN_SOURCE));
   t('D3 CONTROL for D2 — the same source read DOES find the declaration, so a green above is "no fork" and not "the read returned nothing"',
     /pathlessLineCitations:\s*true/.test(OWN_SOURCE) && /sweepCorpus\(CORPUS, ROOT\)/.test(OWN_SOURCE));
+  t('D4 the corpus DECLARES the tilde range too — this ledger wrote one, and without the declaration the shared grammar does not read it',
+    CORPUS.tildeRangeCitations === true);
 
   // ── the binding, BOTH DIRECTIONS on the SAME text ────────────────────────
   //
   // ⭐ The declaration is read off `CORPUS` rather than written as a literal,
   // so deleting it from the registration fails B1 instead of leaving a case
   // that passes on a flag nothing reads.
-  const declared = { unspannedAnchors: CORPUS.unspannedAnchors, pathlessLineCitations: CORPUS.pathlessLineCitations };
+  const declared = {
+    unspannedAnchors: CORPUS.unspannedAnchors,
+    pathlessLineCitations: CORPUS.pathlessLineCitations,
+    tildeRangeCitations: CORPUS.tildeRangeCitations,
+  };
   const cited = 'ManifestSchema id :140 and the leg ~L7246-7331';
   t('B1 ON — a path-less citation in THIS ledger’s shape is read as a line anchor by the shared grammar, through the declarations this corpus makes',
     extractAnchors(cited, declared).lineAnchors.length === 2,
@@ -1759,11 +1843,60 @@ function selfTestLineCitationBinding() {
   t('B4 the neighbours this ledger is full of stay silent under the declaration — an HTTP status, a config literal, a URL port, a clock time and JSON quoted in prose',
     extractAnchors('status:409 {maxRetries:3} http://localhost:3000/_console/ 08:00 {"scannedTypes":1}', declared).lineAnchors.length === 0);
 
+  // ── #24894: the two spellings that went through, in THIS ledger's shape ──
+  // The card's own pins, through this corpus's declarations. The grammar's
+  // full battery (every neighbour, both directions) is the core's.
+  const lineRaws = (text, opts = declared) => extractAnchors(text, opts).lineAnchors.map((l) => l.raw);
+  t('C1 the COMMA form is refused — a path, a comma and a line, and a path, a comma and a range',
+    lineRaws('see foo.ts,123 and foo.ts,123-140').join() === 'foo.ts,123,foo.ts,123-140',
+    JSON.stringify(lineRaws('see foo.ts,123 and foo.ts,123-140')));
+  t('C2 the TILDE RANGE is refused through this corpus’s declaration, and is NOT read without it',
+    lineRaws('createColumn ~7354-7368').join() === '~7354-7368'
+      && lineRaws('createColumn ~7354-7368', { ...declared, tildeRangeCitations: false }).length === 0);
+  t('C3 a COUNT after a file name and a history index are admitted — the loose comma is prose',
+    lineRaws('pinned by foo.test.ts, 12 cases; see history[1]').length === 0);
+
+  // ── #24894: append-only text is counted, not judged ──────────────────────
+  // ⭐ Driven on a synthetic document through the SAME rule the live loop
+  // uses, in both directions: the same spelling one array over IS judged.
+  const fixtureDoc = `${CHECKLIST_REL}/areas/fixture.json`;
+  const fixture = [
+    '{',                                                                 // 1
+    '  "items": [',                                                      // 2
+    '    {',                                                             // 3
+    '      "fixtures": { "knownGaps": ["createColumn ~7354-7368"] },',  // 4  judged
+    '      "history": [',                                                // 5
+    '        { "revision": 1, "change": "had foo.ts,123 [sic]" },',     // 6  quoted
+    '        { "revision": 2, "change": "cut createColumn ~7354-7368" }', // 7  quoted
+    '      ],',                                                          // 8
+    '      "verify": "then foo.ts,123 again"',                           // 9  judged
+    '    }',                                                             // 10
+    '  ]',                                                               // 11
+    '}',                                                                 // 12
+  ].join('\n');
+  const readFixture = (doc) => (doc === fixtureDoc ? fixture : '');
+  const findingAt = (line, extra) => ({ kind: 'line-anchor', doc: fixtureDoc, line, raw: 'x', comma: false, tildeRange: false, ...extra });
+  t('E1 the history array is found by its lines, and a bracket inside a string value does not end it',
+    JSON.stringify(historyLineRanges(fixture)) === '[[5,8]]', JSON.stringify(historyLineRanges(fixture)));
+  t('E2 a comma citation and a tilde range INSIDE a history row are not judged',
+    appendOnlyLineCitation(findingAt(6, { comma: true }), readFixture)
+      && appendOnlyLineCitation(findingAt(7, { tildeRange: true }), readFixture));
+  t('E3 CONTROL — the same two spellings OUTSIDE the history array ARE judged',
+    !appendOnlyLineCitation(findingAt(4, { tildeRange: true }), readFixture)
+      && !appendOnlyLineCitation(findingAt(9, { comma: true }), readFixture));
+  t('E4 FOLLOW-UPS.md is append-only as a whole, for the two new spellings only',
+    appendOnlyLineCitation({ kind: 'line-anchor', doc: APPEND_ONLY_DOCS[0], line: 1, comma: true }, readFixture)
+      && !appendOnlyLineCitation({ kind: 'line-anchor', doc: `${CHECKLIST_REL}/README.md`, line: 1, comma: true }, readFixture));
+  t('E5 ⛔ NOT wider than the two spellings — a colon-form citation in a history row is still judged',
+    !appendOnlyLineCitation(findingAt(6, {}), readFixture)
+      && !appendOnlyLineCitation({ kind: 'line-anchor', doc: APPEND_ONLY_DOCS[0], line: 1 }, readFixture));
+
   // ── the LIVE reading, so the zero above the console line prints is a
   //    reading and not an instrument that stopped ──────────────────────────
   const liveSweep = sweepCorpus(CORPUS, ROOT);
-  const liveLineAnchors = liveSweep.findings.filter((f) => f.kind === 'line-anchor');
-  t('B5 the live family carries NO line citation — the class the migration deleted has not come back',
+  const readLive = (doc) => readFileSync(join(ROOT, doc), 'utf8');
+  const liveLineAnchors = liveSweep.findings.filter((f) => f.kind === 'line-anchor' && !appendOnlyLineCitation(f, readLive));
+  t('B5 the live family carries NO judged line citation — the class the migration deleted has not come back',
     liveLineAnchors.length === 0,
     liveLineAnchors.map((f) => `${f.doc}:${f.line} ${f.raw}`).join(', '));
   t('B6 CONTROL for B5 — the same sweep over the same family DID read anchors, so the zero above is a reading and not a sweep that reached nothing',
@@ -1916,6 +2049,12 @@ function selfTestLineCitationBinding() {
 //       projection is a corpus saying its judged text is authored PROSE; this
 //       one declares none and sweeps its documents raw. That test is
 //       mechanical, and this registration passes it.
+//   `tildeRangeCitations: true`  (#24894) The third path-less spelling, a bare
+//       approximate range continuing a filename already named; this ledger
+//       carried one in an item's fixtures until a hand sweep re-pointed it.
+//       Legal here by the same registration test as the option above. The
+//       measurement of what it reads in the corpora that do NOT declare it is
+//       with the grammar, `scripts/symbol-anchors.mjs#TILDE_RANGE_CITATION`.
 //
 // The dotted `#Outer.member` form this ledger's grammar carried is now the
 // shared grammar's, and `sweepCorpus` requires EVERY segment to resolve — the
@@ -1934,6 +2073,7 @@ const CORPUS = defineCorpus({
   excludeDirs: ['runs'],
   unspannedAnchors: true,
   pathlessLineCitations: true,
+  tildeRangeCitations: true,
 });
 
 // ── The residual the binding measured (#16898) ────────────────────────
@@ -3534,8 +3674,14 @@ for (const [doc, c] of sweep.byDoc) {
   anchorCounts.set(rel, c.declaration + c.literal);
 }
 
+// The two #24894 spellings inside append-only text: counted and printed, NOT
+// judged (see `appendOnlyLineCitation`).
+let appendOnlyCitations = 0;
+const readSweptDoc = (doc) => readFileSync(join(ROOT, doc), 'utf8');
+
 for (const f of sweep.findings) {
   const rel = relToChecklist(f.doc);
+  if (appendOnlyLineCitation(f, readSweptDoc)) { appendOnlyCitations += 1; continue; }
   if (f.kind === 'unresolved-symbol') {
     const anchor = `${f.path}#${f.symbol}`;
     // On the measured residual? Then this is one of the 56 the binding
@@ -3640,7 +3786,7 @@ console.log(
     ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use;` +
     ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified), ${recipesReferenced}/${recipeTotal} recipes referenced;` +
     ` meta-URL spelling: ${metaCallsScanned} \`call\` strings scanned against ${FOLDED_META_SPELLINGS.size} folded spellings;` +
-    ` line citations: 0 survive across ${sweep.counts.docs} swept documents — \`file:line\`, a bare \`:NNN\` continuation and an \`L\` pin are all judged by \`symbol-anchors.mjs\`, through the same registration;` +
+    ` line citations: 0 survive across ${sweep.counts.docs} swept documents — \`file:line\`, the comma form \`file,line\`, a bare \`:NNN\` continuation, an \`L\` pin and a tilde range \`~NNN-MMM\` are all judged by \`symbol-anchors.mjs\`, through the same registration (${appendOnlyCitations} comma or tilde-range citation(s) in append-only text — \`history\` rows and FOLLOW-UPS.md — counted, not judged);` +
     ` symbol anchors: ${anchorsResolved}/${anchorsScanned} resolved by \`symbol-anchors.mjs\` (the ONE resolver, reached as a REGISTERED corpus) across ${sweep.counts.docs} swept documents against ${sweep.counts.citedSources} cited sources` +
     `, ${anchorsResidual} on the named #16898 residual, ${Object.keys(anchorFloors).length} file floors held;` +
     ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} line-citation-binding + ${symbolAnchorControl.checked} symbol-anchor + ${plannedStatusControl.checked} planned-status assertions).`,
