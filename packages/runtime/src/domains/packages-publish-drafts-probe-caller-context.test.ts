@@ -26,6 +26,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DatasetSchema } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { AnalyticsService } from '@objectstack/service-analytics';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
@@ -97,7 +98,11 @@ function makeDoor() {
             const rows = [{ id: 'r1' }, { id: 'r2' }];
             return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
         },
-        findOne: async () => null,
+        // The ADR-0067 pre-publish capture: never published, so no active row.
+        findOne: async (object: string, query: unknown) => {
+            assertEngineFindOnePredicate(object, query as never);
+            return null;
+        },
         // The ADR-0067 commit row the batch writes; not under test here.
         insert: async (_object: string, row: unknown) => row,
     };
@@ -153,7 +158,7 @@ describe('publish-drafts widget probes run as the publishing caller (#25484)', (
         const { probes, admissionContexts } = await publishAs(NON_READER);
 
         expect(probes?.checked?.widgets).toBe(1);
-        const failed = probes.issues.filter((i: any) => i.code === 'widget_query_failed');
+        const failed = probes.issues.filter((i: any) => i.code === 'widget_query_failed'); // adr0112-ok: D6c build-probe diagnostics code
         expect(failed).toHaveLength(1);
         expect(failed[0]).toMatchObject({
             layer: 'runtime',
