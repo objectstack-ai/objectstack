@@ -28,9 +28,10 @@ function makeEngine(tables: Record<string, any[]>) {
     find: async (object: string, opts: any) => {
       const where = opts?.where ?? {};
       const rows = (tables[object] ?? []).filter((r) =>
-        Object.entries(where).every(([k, v]) =>
-          v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(r[k]) : r[k] === v,
-        ),
+        Object.entries(where).every(([k, v]) => {
+          if (k.startsWith('$')) throw new Error(`test double: combinator ${k} is not implemented`);
+          return v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(r[k]) : r[k] === v;
+        }),
       );
       return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
     },

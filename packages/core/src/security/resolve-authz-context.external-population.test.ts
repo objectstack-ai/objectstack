@@ -23,6 +23,7 @@ function makeQl(tables: Record<string, any[]>) {
       const where = opts?.where ?? {};
       const matched = rows.filter((r) =>
         Object.entries(where).every(([k, v]) => {
+          if (k.startsWith('$')) throw new Error(`test double: combinator ${k} is not implemented`);
           if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
           if (v === null) return (r[k] ?? null) === null;
           return r[k] === v;
