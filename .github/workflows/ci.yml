@@ -738,7 +738,7 @@ jobs:
       # ones the queue and main runs of these shards write.
       - name: Choose this shard's declaration build
         run: |
-          DTS_READERS='@objectstack/cli @objectstack/metadata @objectstack/driver-sql'
+          DTS_READERS='@objectstack/cli @objectstack/metadata'
           KEEP=""
           while read -r PKG _; do
             for R in $DTS_READERS; do
@@ -803,7 +803,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core-closure-build.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run build $FILTERS --concurrency=4 --force --log-order=stream
+            pnpm turbo run build $FILTERS --concurrency=4 --log-order=stream
 
       # ⛔ A FILE-LEVEL SLICE BUILDS ITS DEPENDENCY CLOSURE HERE, IN ITS OWN
       # GUARDED STEP, so the slice leg in the next step REPLAYS it. Since #19278
