@@ -111,8 +111,8 @@ import {
     assertSameOriginOrFree,
 } from './plugin-extension-api.js';
 // [#25222] The DAG traversal's bodies: node execution, edge traversal, regions,
-// and condition and value evaluation. Each `AutomationEngine`
-// method of the same name calls its body.
+// run attempts, run variables, and condition and value evaluation. Each
+// `AutomationEngine` method of the same name calls its body.
 import {
     executeNode,
     traverseNext,
@@ -122,6 +122,9 @@ import {
     valueEnvelopeRefusals,
     evaluateValueEnvelope,
     evaluateCondition,
+    seedDeclaredVariables,
+    seedRunVariables,
+    executeWithoutRetry,
     type runUserOf,
 } from './dag-traversal.js';
 
@@ -1008,7 +1011,7 @@ export function compactStepLogForHistory(
 /**
  * Internal execution log entry — compatible with ExecutionLog from spec.
  */
-interface ExecutionLogEntry {
+export interface ExecutionLogEntry {
     id: string;
     flowName: string;
     flowVersion?: number;
@@ -1093,7 +1096,7 @@ interface ExecutionLogEntry {
  * {@link AutomationEngine.expandDeclaredLookups}'s guard on the same read — a
  * blank `recordId` would read as an attribution the row does not have.
  */
-function buildRunTrigger(
+export function buildRunTrigger(
     context: AutomationContext | undefined,
 ): { type: string; userId?: string; object?: string; recordId?: string } {
     const rawId = (context?.record as Record<string, unknown> | undefined)?.id;
@@ -11581,17 +11584,8 @@ export class AutomationEngine implements IAutomationService {
         flow: FlowParsed,
         context?: AutomationContext,
     ): Map<string, unknown> {
-        const variables = new Map<string, unknown>();
-        if (!flow.variables) return variables;
-        for (const v of flow.variables) {
-            const supplied = v.isInput ? context?.params?.[v.name] : undefined;
-            if (supplied !== undefined) {
-                variables.set(v.name, supplied);
-            } else if (v.defaultValue !== undefined) {
-                variables.set(v.name, v.defaultValue);
-            }
-        }
-        return variables;
+        // The body lives in ./dag-traversal.ts (#25222).
+        return seedDeclaredVariables(flow, context);
     }
 
     /**
@@ -11651,19 +11645,11 @@ export class AutomationEngine implements IAutomationService {
         context: AutomationContext | undefined,
         runId: string,
     ): Map<string, unknown> {
-        const variables = this.seedDeclaredVariables(flow, context);
-        if (context?.record) {
-            variables.set('$record', context.record);
-            variables.set('record', context.record);
-            for (const [k, v] of Object.entries(context.record)) {
-                if (!variables.has(k)) variables.set(k, v);
-            }
-        }
-        variables.set('previous', context?.previous ?? null);
-        variables.set('$runId', runId);
-        variables.set('$flowName', flowName);
-        variables.set('$flowLabel', flow.label ?? flowName);
-        return variables;
+        // The body lives in ./dag-traversal.ts (#25222).
+        const host: ThisParameterType<typeof seedRunVariables> = {
+            seedDeclaredVariables: (...a) => this.seedDeclaredVariables(...a),
+        };
+        return seedRunVariables.call(host, flow, flowName, context, runId);
     }
 
     /**
@@ -11676,352 +11662,25 @@ export class AutomationEngine implements IAutomationService {
      * answers for one user-visible situation is what this method's missing
      * suspend arm produced.
      */
-    private async executeWithoutRetry(
+    private executeWithoutRetry(
         flowName: string,
         context?: AutomationContext,
     ): Promise<AutomationResult> {
-        const startTime = Date.now();
-        const flow = this.flows.get(flowName);
-
-        if (!flow) {
-            return { success: false, error: `Flow '${flowName}' not found` };
-        }
-        if (!this.isFlowEnabled(flowName)) {
-            // [#9415] Classified like `execute()`'s own disabled exit, for the
-            // same reason #9378 classified this method's failure exit: a
-            // selective classification is the one a later reader mistakes for
-            // a rule.
-            //
-            // ⚠️ Defensive, and unreachable through `execute()` today — the
-            // outer guard fires first, and `retryExecution` is only entered
-            // after it passed. That is exactly why no test pins it: a test
-            // driving a disabled flow with `strategy: 'retry'` returns from the
-            // OUTER guard and would stay green with this line unclassified.
-            // Reachability is what a future change would have to establish;
-            // the spelling is already right.
-            //
-            // [ADR-0126 §7.2] Shares `execute()`'s message builder for the same
-            // parity reason: two spellings of one refusal is what #9378 was.
-            return { success: false, code: 'FLOW_DISABLED', error: this.describeDisabledFlow(flowName) };
-        }
-
-        // [#9704] The SAME environment attempt 1 runs in — seeded through the
-        // same chokepoint `execute()` uses. This method used to seed only the
-        // declared variables and `$record`, so every retry attempt ran in a
-        // strictly smaller environment than the first: `record` and its
-        // flattened fields, `previous`, `$runId`, `$flowName` and `$flowLabel`
-        // were all absent. Under strict CEL an unbound name ABORTS the
-        // predicate rather than yielding false (#4697), so a start condition or
-        // edge predicate reading `previous` (#3427) or a bare record field
-        // failed on the retry for a reason attempt 1 never hit — a flaky flow,
-        // to its author — and a pausing node on a retry attempt had no `$runId`
-        // to map its external state back to this run with (ADR-0019).
-        const runId = this.nextRunId();
-        const variables = this.seedRunVariables(flow, flowName, context, runId);
-        const startedAt = new Date().toISOString();
-        const steps: StepLogEntry[] = [];
-
-        // ADR-0049 / #1888 — establish the run's effective execution identity
-        // from flow.runAs (see execute() / resolveRunContext); threaded below.
-        // `flowRunId` is stamped here too (#3456).
-        const runContext = await this.resolveRunContext(flow, context, runId);
-
-        try {
-            const startNode = flow.nodes.find(n => n.type === 'start');
-            if (!startNode) {
-                // [#9415] Same classification as `execute()`'s start-node exit,
-                // for the reason the disabled exit above states.
-                return { success: false, code: 'FLOW_NO_START_NODE', error: 'Flow has no start node' };
-            }
-
-            // [#9889] The SAME definition-level guard attempt 1 runs under —
-            // the sixth instance of this method drifting from `execute()`
-            // (#9378, #9415, #9414, #9510, #9704 before it), and the first
-            // that skipped a GUARD rather than an exit or the environment.
-            // Without this call, a flow whose node config violates its own
-            // declared `inputSchema` under `errorHandling.strategy: 'retry'`
-            // was refused on attempt 1 (the guard throws before any node
-            // executes) and then RUN FOR REAL on attempts 2..N, because the
-            // retry handoff lives in `execute()`'s catch and every retry
-            // attempt comes back through here — a refusal that holds only
-            // until the flow is retried, i.e. `retry` as a way past
-            // authoring-time validation. The guard's verdict is a pure
-            // function of the flow definition (`_variables` is unused), so
-            // re-running it cannot refuse anything attempt 1 would have
-            // allowed; the throw lands in this method's generic failure arm
-            // below, so each refused attempt still consumes retry budget and
-            // retry accounting is unchanged. Same chokepoint discipline as
-            // `seedRunVariables` (#9704): ONE method holds the rules, both
-            // attempt paths call it — `input-schema-retry-parity.test.ts`
-            // pins the per-attempt refusal so this call cannot be dropped
-            // silently.
-            this.validateNodeInputSchemas(flow, variables);
-
-            await this.executeNode(startNode, flow, variables, runContext, steps);
-
-            const output: Record<string, unknown> = {};
-            if (flow.variables) {
-                for (const v of flow.variables) {
-                    if (v.isOutput) {
-                        output[v.name] = variables.get(v.name);
-                    }
-                }
-            }
-
-            const durationMs = Date.now() - startTime;
-            // [#16274] The SECOND initial-execution instance of the guard
-            // above in `execute()` — the retry path's own completion site, and
-            // the one where the consequence was measured worst. This method IS
-            // a retry attempt (it is only ever reached from
-            // {@link retryExecution}), so a `failed` answer here does not just
-            // mislead a caller: it is read by the loop that drives this method,
-            // which re-enters it for the next attempt. An attempt whose every
-            // node SUCCEEDED and whose only failure was its own history write
-            // therefore burned the rest of the budget re-running the flow,
-            // `1 + maxRetries` times in total, each attempt writing one more
-            // `failed` row for work that had already completed.
-            //
-            // ⚠️ Fixing `execute()` alone would NOT have closed that: a flow
-            // under `strategy: 'retry'` whose attempt 2 completes leaves
-            // through THIS exit and never crosses `execute()`'s again — the
-            // seventh instance of this method's documented drift from
-            // `execute()` (#9378, #9415, #9414, #9510, #9704, #9889 before it),
-            // and the same chokepoint discipline applies: one shape, both
-            // attempt paths.
-            //
-            // The reachable statements, the invariant and the sink ruling's (commit e238c79f0) reading
-            // are all stated at the `execute()` site; this is the same guard,
-            // not a second design.
-            let logged: ExecutionLogEntry | undefined;
-            try {
-                logged = this.recordLog({
-                    id: runId,
-                    flowName,
-                    flowVersion: flow.version,
-                    status: 'completed',
-                    startedAt,
-                    completedAt: new Date().toISOString(),
-                    durationMs,
-                    trigger: buildRunTrigger(context),
-                    steps,
-                    output,
-                }, context);
-            } catch (bookkeeping) {
-                // #4632 verdict: DURABILITY, so `error` — see the `execute()`
-                // site for why this is outside the sink ruling's (commit e238c79f0) class. The message
-                // names the ATTEMPT, because the run id an operator finds in
-                // the Runs surfaces is this attempt's own and not the failed
-                // attempt's. Said ONCE per run, not once per failed write.
-                this.logger.error(
-                    `[Automation] run '${runId}' of flow '${flowName}' COMPLETED successfully on a RETRY ` +
-                        `attempt but its run-history bookkeeping threw, so its terminal history row never ` +
-                        `landed — nothing retries it, the caller is told the run succeeded, and after the next ` +
-                        `restart this run is invisible to the Runs surfaces while the approvals sweeps read it ` +
-                        `as never-finished. The run itself is COMPLETE and must NOT be re-run or retried. Fix ` +
-                        `the history failure in this record's meta.`,
-                    undefined,
-                    describeThrownForLog(bookkeeping),
-                );
-            }
-            // [#16274] The same recomputation as the `execute()` site's: one
-            // pure function of the same steps, so the abandoned `recordLog`
-            // costs the caller no counts.
-            const summary = logged?.summary ?? summarizeRun(steps);
-
-            // #4354 — a retried run reports its own attempt's counts, not the
-            // failed one's: `retryExecution` returns THIS result on success.
-            //
-            // [#9414] …and because `retryExecution` returns THIS result, this
-            // is the exit a run that succeeded on attempt 2+ leaves through.
-            // The author's completion text has to be produced here as well, or
-            // `successMessage` would be a function of which attempt happened to
-            // work — the same route-dependent shape the fix is removing.
-            return { success: true, output, durationMs, successMessage: flow.successMessage, flowLabel: flow.label, summary };
-        } catch (err: unknown) {
-            // [#15788] The THIRD producer: an attempt that reached a refusing
-            // `end`. A flow under `errorHandling.strategy: 'retry'` is handed
-            // off to `retryExecution` and every one of its attempts leaves
-            // through this method, so a repair that stopped at `execute()`
-            // would record a refusal as a completion for exactly the flows most
-            // likely to carry one — the same route-dependent shape #9414 and
-            // #9510 each had to close on this very exit.
-            //
-            // ⚠️ The ladder stops here, and `retryExecution` needs no arm of
-            // its own for it: a refusal is `success: true`, which that loop
-            // already reads as "this attempt did not fail, stop retrying" — the
-            // true sentence about a successful evaluation that said no. ⛔ A
-            // refusal must never consume retry budget: re-running the flow
-            // would re-execute every node before the `end` in the hope of a
-            // different answer to a decision the author already made.
-            if (isRefusalSignal(err)) {
-                return this.finishRefusedRun({
-                    runId, flowName, flowVersion: flow.version,
-                    startedAt, durationMs: Date.now() - startTime,
-                    steps, flow, variables,
-                    refusalMessage: err.message, context,
-                });
-            }
-            // [#9510] A node asked to suspend the run (ADR-0019 durable pause)
-            // — here, on a RETRY attempt, the only way this method is ever
-            // reached. Tested FIRST and answered exactly as `execute()`'s own
-            // catch answers it, because it is the same event: A PAUSE IS NOT A
-            // FAILURE (`execute()`'s arm says so in those words, and ADR-0019
-            // is the contract). A restoration of a stated contract on the one
-            // path that never got it — not a new capability, and the
-            // `AutomationResult.status` vocabulary it returns is unchanged.
-            //
-            // Without this arm the signal fell through to the generic failure
-            // path below and four halves of the pause were lost at once:
-            //
-            //  1. `persistSuspendedRun` never ran, so THE CONTINUATION WAS
-            //     NEVER STORED and the run could not be resumed by anyone,
-            //     ever — the headline harm, and why the pins for this are
-            //     written against the store and a real `resume()` rather than
-            //     against the status string;
-            //  2. the run log recorded `failed` for a run that asked to pause;
-            //  3. the caller got `status: 'failed'`, with the signal
-            //     stringified into `error` (`FlowSuspendSignal` is not an
-            //     `Error`);
-            //  4. `retryExecution` reads `result.success`, so the pause counted
-            //     as one more failed attempt: the loop burned the rest of the
-            //     budget, and every further attempt re-entered the pausing node
-            //     and orphaned another suspension.
-            //
-            // ⛔ Deliberately NOT an authoring-time refusal of
-            // `errorHandling.strategy: 'retry'` combined with a pausing node.
-            // That refusal over-refuses (a pausing node can sit on a branch the
-            // retrying path never reaches), under-refuses (a pausing node
-            // behind a runtime condition is not statically decidable), and
-            // would ban the ordinary shape this defect is reached through: a
-            // flaky HTTP/connector call followed by an `approval` or `screen`
-            // node — retry is what an author reaches for on the flaky half and
-            // the approval is what the business needs on the other.
-            //
-            // Every field is THIS attempt's own run bookkeeping (`runId`,
-            // `startedAt`, `steps`, `runContext`, `startTime`), never the
-            // failed attempt's, so the continuation is keyed by the run id this
-            // method returns — the only id `resume()` can be called with.
-            if (isSuspendSignal(err)) {
-                const durationMs = Date.now() - startTime;
-                // #7639 — ONE snapshot expression feeding BOTH consumers: the
-                // continuation the run will resume from, and the `paused` log
-                // entry run-detail serves. Same object, so what an operator
-                // reads can never disagree with what the run holds.
-                const variablesSnapshot = Object.fromEntries(variables);
-                await this.persistSuspendedRun({
-                    runId,
-                    flowName,
-                    flowVersion: flow.version,
-                    nodeId: err.nodeId,
-                    nodeType: err.nodeType,
-                    variables: variablesSnapshot,
-                    steps,
-                    context: runContext,
-                    startedAt,
-                    startTime,
-                    correlation: err.correlation,
-                    screen: err.screen,
-                });
-                this.recordLog({
-                    id: runId,
-                    flowName,
-                    flowVersion: flow.version,
-                    status: 'paused',
-                    startedAt,
-                    durationMs,
-                    trigger: buildRunTrigger(context),
-                    steps,
-                    variables: variablesSnapshot,
-                }, context);
-                return {
-                    success: true,
-                    status: 'paused',
-                    runId,
-                    durationMs,
-                    screen: err.screen,
-                    flowLabel: flow.label,
-                };
-            }
-
-            const errorMessage = err instanceof Error ? err.message : String(err);
-            const durationMs = Date.now() - startTime;
-            // [#17562] The SECOND initial-execution instance of the guard above
-            // in `execute()` — this path's own failure arm, one per RETRY
-            // attempt. The reachable statements, the invariant and the sink ruling's (commit e238c79f0)
-            // reading are all stated at the `execute()` site; this is the same
-            // guard, not a second design.
-            //
-            // ⚠️ Fixing `execute()` alone would NOT have closed it, and the
-            // reachability is the opposite way round from #16274's: this method
-            // is only ever entered from {@link retryExecution}, which
-            // `execute()`'s catch reaches AFTER its own failed row. So a store
-            // that starts refusing mid-run (the first row lands, the driver's
-            // connection then drops) puts the throw in THIS arm and nowhere
-            // else, and the throw rejected out through `retryExecution` and
-            // `execute()` both — taking the remaining retry budget with it.
-            // The eighth instance of this method's documented drift from
-            // `execute()` (#9378, #9415, #9414, #9510, #9704, #9889, #16274
-            // before it), and the same chokepoint discipline applies: one
-            // shape, both attempt paths.
-            let logged: ExecutionLogEntry | undefined;
-            try {
-                logged = this.recordLog({
-                id: runId,
-                flowName,
-                flowVersion: flow.version,
-                status: 'failed',
-                startedAt,
-                completedAt: new Date().toISOString(),
-                durationMs,
-                trigger: buildRunTrigger(context),
-                steps,
-                error: errorMessage,
-            }, context);
-            } catch (bookkeeping) {
-                // #4632 verdict: DURABILITY, so `error` — see the `execute()`
-                // site for why this is outside the sink ruling's (commit e238c79f0) class and why a failure
-                // handed to the caller does not exempt it. The message names
-                // the ATTEMPT, because the run id an operator finds in the Runs
-                // surfaces is this attempt's own and not the first attempt's.
-                // Said ONCE per abandoned write.
-                this.logger.error(
-                    `[Automation] run '${runId}' of flow '${flowName}' FAILED on a RETRY attempt and its ` +
-                        `run-history bookkeeping threw, so that attempt's terminal 'failed' row never ` +
-                        `landed — nothing retries the write, and after the next restart the attempt is ` +
-                        `invisible to the Runs surfaces while the approvals sweeps read it as ` +
-                        `never-finished. Neither the retry budget nor the caller's answer is affected: the ` +
-                        `loop still runs its remaining attempts and still answers status 'failed' carrying ` +
-                        `the node's error. Fix the history failure in this record's meta.`,
-                    undefined,
-                    describeThrownForLog(bookkeeping),
-                );
-            }
-            // [#9378] The retry loop reads only `result.success` and this
-            // result never escapes `retryExecution` on its own, but it is the
-            // same ran-and-failed exit as the two above and is classified the
-            // same: a selective classification is the one a later reader
-            // mistakes for a rule.
-            //
-            // [#9414] `errorMessage: flow.errorMessage` rides along on the same
-            // argument, and note the two names are NOT the same thing here:
-            // the local `errorMessage` is the raw thrown text, `flow.errorMessage`
-            // is what the author wrote for a human to read.
-            return {
-                success: false,
-                error: errorMessage,
-                durationMs,
-                status: 'failed',
-                errorMessage: flow.errorMessage,
-                flowLabel: flow.label,
-                // [#17562] Recomputed when the guard above had to abandon
-                // `recordLog`: the same pure function of the same steps that
-                // `recordLog`'s own first statement runs, so the two spellings
-                // cannot disagree. Same shape as #15555's.
-                summary: logged?.summary ?? summarizeRun(steps),
-                // [#24914, ruling B′] As `execute()`'s failure exit, per attempt;
-                // `retryExecution` reports the LAST attempt's members with its text.
-                ...readCarriedRefusal(err),
-            };
-        }
+        // The body lives in ./dag-traversal.ts (#25222).
+        const host: ThisParameterType<typeof executeWithoutRetry> = {
+            flows: this.flows,
+            isFlowEnabled: (...a) => this.isFlowEnabled(...a),
+            describeDisabledFlow: (...a) => this.describeDisabledFlow(...a),
+            nextRunId: (...a) => this.nextRunId(...a),
+            seedRunVariables: (...a) => this.seedRunVariables(...a),
+            resolveRunContext: (...a) => this.resolveRunContext(...a),
+            validateNodeInputSchemas: (...a) => this.validateNodeInputSchemas(...a),
+            executeNode: (...a) => this.executeNode(...a),
+            recordLog: (...a) => this.recordLog(...a),
+            logger: this.logger,
+            finishRefusedRun: (...a) => this.finishRefusedRun(...a),
+            persistSuspendedRun: (...a) => this.persistSuspendedRun(...a),
+        };
+        return executeWithoutRetry.call(host, flowName, context);
     }
 }
