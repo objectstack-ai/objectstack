@@ -1051,6 +1051,11 @@ export const REMOTE_FACE_ANSWERS = {
   // Deprecated aliases: they call `this.commit` / `this.rollback`, which refuse.
   commitTransaction: 'inherited',
   rollbackTransaction: 'inherited',
+  // [#25073] Record numbers ahead of the write: `fillAutoNumberFields` and the
+  // collision re-seed, which already reach the remote database through this
+  // face's own `getNextSequenceValue`, `autoNumberValueExists` and
+  // `resyncSequenceToDataMax` (see "Autonumber on the remote face" above).
+  issueAutonumbers: 'inherited',
   // Knex-only reads.
   findWithWindowFunctions: 'refused',
   analyzeQuery: 'refused',
@@ -3383,6 +3388,16 @@ export class TursoDriver extends SqlDriver {
    * TENANT)` and decides nothing about the wall, so the two faces answer one
    * row set. An uncomposed leaf, or a composed one outside a `$in`, is refused
    * first — INTERNAL_ERROR / 500, logged at `error` once per driver.
+   *
+   * [ADR-0139 D6 as amended — the nested master chain] A composed leaf's
+   * scope may itself carry a composed leaf (a `controlled_by_parent` master
+   * that is `controlled_by_parent` too), so the scope is resolved through
+   * THIS method, with the OUTER read's options: the nested parent's semi-join
+   * and its tenant wall are compiled the same way, one level down, and the
+   * transport nests the subqueries. `replaceComposedReadableIds` returns a
+   * composed leaf unentered, so without the recursion the nested leaf reached
+   * the transport unresolved and the remote face refused it (500) where the
+   * local face answered.
    */
   private toRemoteWhere(object: string, where: unknown, options: DriverOptions | undefined): unknown {
     const misplaced = findMisplacedReadableIds(where, true);
@@ -3390,7 +3405,7 @@ export class TursoDriver extends SqlDriver {
     const resolved = replaceComposedReadableIds(where, (leaf) => remoteReadableIdsSemiJoin({
       object: leaf.object,
       table: this.remoteTableFor(leaf.object, 'ReadableIds'),
-      scope: leaf.scope === undefined ? undefined : (this.toRemoteFilter(leaf.object, leaf.scope) as FilterCondition),
+      scope: leaf.scope === undefined ? undefined : (this.toRemoteWhere(leaf.object, leaf.scope, options) as FilterCondition),
       tenant: this.remoteTenantScope(leaf.object, options),
     }));
     return this.toRemoteFilter(object, resolved);

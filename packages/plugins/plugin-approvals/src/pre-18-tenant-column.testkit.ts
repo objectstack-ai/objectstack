@@ -11,6 +11,9 @@
  * attributed them. A suite whose subject is those rows calls this after
  * `syncSchemas()` and before seeding them. Done through each table's driver
  * and its own drift apply door (`relax_not_null`), never a hand `ALTER`.
+ *
+ * Name only the tables the suite writes organization-less: a relaxed table
+ * also admits an unstamped production write, which an 18.x store refuses.
  */
 export async function relaxTenantColumns(
   engine: { getDriverForObject(object: string): unknown },
@@ -27,30 +30,4 @@ export async function relaxTenantColumns(
     ]);
     if (applied.length !== 1) throw new Error(`relaxTenantColumns: ${table}.${column} was not relaxed`);
   }
-}
-
-/**
- * {@link relaxTenantColumns} over every object of an app that carries a tenant
- * column as the engine registered it — the shape a whole pre-18 store has.
- */
-export async function relaxEveryTenantColumn(
-  engine: { getDriverForObject(object: string): unknown; getSchema(object: string): unknown },
-  objects: readonly { name: string }[],
-): Promise<void> {
-  const tenant = objects
-    .map((o) => o.name)
-    .filter((name) => {
-      const schema = engine.getSchema(name) as { fields?: Record<string, unknown>; tenancy?: { enabled?: boolean } } | undefined;
-      return !!schema?.fields?.organization_id && schema.tenancy?.enabled !== false;
-    });
-  await relaxTenantColumns(engine, tenant);
-}
-
-/** {@link relaxEveryTenantColumn} over every object the engine's registry holds. */
-export async function relaxEveryRegisteredTenantColumn(engine: {
-  getDriverForObject(object: string): unknown;
-  getSchema(object: string): unknown;
-  registry: { getAllObjects(): readonly { name: string }[] };
-}): Promise<void> {
-  await relaxEveryTenantColumn(engine, engine.registry.getAllObjects());
 }

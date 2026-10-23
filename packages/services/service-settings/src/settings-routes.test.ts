@@ -746,9 +746,10 @@ async function makeRetiredFormatStack() {
   registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
   /** The store's own rows for the four keys, read the way every resolve reads them. */
   const storedFormatRows = async () => {
-    // The admin context names no organization and this service reports no
-    // posture, so every resolve reads with the `unwalled` reach.
-    const rows = (await (svc as any).loadRows('localization', null, { kind: 'unwalled' })) as Array<{ key: string; value: unknown }>;
+    // The admin context names no organization, and this service is wired no
+    // organization source — a composition with no organization object — so
+    // every resolve reads with the `no-organization-object` reach.
+    const rows = (await (svc as any).loadRows('localization', null, { kind: 'no-organization-object' })) as Array<{ key: string; value: unknown }>;
     return Object.fromEntries(rows.filter((r) => r.key in RETIRED_FORMAT_ROWS).map((r) => [r.key, r.value]));
   };
   return { svc, http, storedFormatRows };
@@ -840,7 +841,7 @@ async function makeRetiredBrandingStack() {
   registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
   /** The store's own rows for the two keys, read the way every resolve reads them. */
   const storedRetiredRows = async () => {
-    const rows = (await (svc as any).loadRows('branding', null, { kind: 'unwalled' })) as Array<{ key: string; value: unknown }>;
+    const rows = (await (svc as any).loadRows('branding', null, { kind: 'no-organization-object' })) as Array<{ key: string; value: unknown }>;
     return Object.fromEntries(rows.filter((r) => r.key in RETIRED_BRANDING_ROWS).map((r) => [r.key, r.value]));
   };
   return { http, storedRetiredRows };

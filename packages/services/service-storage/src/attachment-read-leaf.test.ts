@@ -56,7 +56,12 @@ function boot(fixture: {
   const rows = fixture.rows ?? [];
   const objects = fixture.objects ?? ['att_case', 'att_secret', 'sys_attachment', 'sys_comment'];
   const gated = new Set(fixture.middlewareGated ?? []);
-  const reads = { preScans: [] as any[], parentReads: [] as Array<{ object: string; ids: string[] }> };
+  const reads = {
+    preScans: [] as any[],
+    parentReads: [] as Array<{ object: string; ids: string[] }>,
+    /** The context each parent read was made with, in read order. */
+    parentContexts: [] as any[],
+  };
   let mw!: Mw;
   // Only the members the read gate calls: `find` (its probe) and the three
   // classifying questions. The write verbs are not part of this gate.
@@ -74,6 +79,7 @@ function boot(fixture: {
       }
       const ids: string[] = (query?.where?.id?.$in ?? []).map(String);
       reads.parentReads.push({ object, ids });
+      reads.parentContexts.push(query?.context);
       const visible = ids.filter((id) => (fixture.visible?.[object] ?? []).includes(id)).map((id) => ({ id }));
       return typeof query?.limit === 'number' ? visible.slice(0, query.limit) : visible;
     },
@@ -164,7 +170,7 @@ describe('[ADR-0139 D4] the attachment read gate writes one ReadableIds leaf per
   });
 });
 
-describe('[ADR-0139 D5] three classes keep the bounded probe, chosen before any leaf is written', () => {
+describe('[ADR-0139 D5] two classes keep the bounded probe, chosen before any leaf is written; a delegated caller is not one', () => {
   const rows: Row[] = [
     { id: 'a1', parent_object: 'sys_comment', parent_id: 'c1' },
     { id: 'a2', parent_object: 'sys_comment', parent_id: 'c2' },
@@ -211,18 +217,21 @@ describe('[ADR-0139 D5] three classes keep the bounded probe, chosen before any 
     expect(reads.preScans[0].where).toEqual({ $and: [own, { parent_object: { $in: ['sys_comment'] } }] });
   });
 
-  it('D5.1: a delegated caller reads through the whole-read probe — no leaf at all', async () => {
-    const { mw, reads } = boot({ rows, visible: { att_case: ['k1'], sys_comment: ['c2'] } });
-    const where = await read(mw, { context: { userId: 'agent_1', onBehalfOf: { userId: 'u1' } } as any });
-    expect(leafBranches(where)).toEqual([]);
-    expect(where).toEqual({
-      $or: [
-        { parent_object: 'sys_comment', parent_id: { $in: ['c2'] } },
-        { parent_object: 'att_case', parent_id: { $in: ['k1'] } },
-      ],
-    });
-    // The whole read's window: the caller's where, unrestricted.
-    expect(reads.preScans[0].where).toEqual({});
+  it('D5.1, as amended: a delegated caller gets the leaves any caller gets; only a D5.2 parent is probed, read with the delegated envelope', async () => {
+    const onBehalfOf = { userId: 'u1' };
+    const { mw, reads } = boot({ rows, middlewareGated: ['sys_comment'], visible: { att_case: ['k1'], sys_comment: ['c2'] } });
+    const where = await read(mw, { context: { userId: 'agent_1', onBehalfOf, __readScope: 'org' } as any });
+    expect(leafBranches(where).map((b) => b.parent_object)).toEqual(['att_case', 'att_secret']);
+    expect(literalBranches(where)).toEqual([{ parent_object: 'sys_comment', parent_id: { $in: ['c2'] } }]);
+    // The same plan as a caller acting for no one.
+    const plain = boot({ rows, middlewareGated: ['sys_comment'], visible: { att_case: ['k1'], sys_comment: ['c2'] } });
+    expect(await read(plain.mw, { context: { userId: 'agent_1' } })).toEqual(where);
+    // No whole-read window: the one pre-scan is the probed parent's, and its
+    // read carries the delegation on, minus the operation-private keys.
+    expect(reads.preScans.map((q) => q.where)).toEqual([{ parent_object: { $in: ['sys_comment'] } }]);
+    expect(reads.parentReads).toEqual([{ object: 'sys_comment', ids: ['c1', 'c2'] }]);
+    expect(reads.parentContexts[0]).toMatchObject({ userId: 'agent_1', onBehalfOf });
+    expect(reads.parentContexts[0]).not.toHaveProperty('__readScope');
   });
 
   it('a restricted probe that throws denies the whole read and says so — the leaves are not served alone', async () => {

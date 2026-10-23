@@ -291,6 +291,12 @@ export * from './driver/index';
 // metadata read path's per-type redaction hook share a single security list).
 export * from './datasource-credential-redaction';
 
+// ADR-0015 §4.2's one predicate — `object.external` only on a datasource whose
+// `schemaMode` is not 'managed' (#25168). Exported for the metadata save doors
+// (#25211), which resolve the datasource a saved object names and the objects
+// a saved datasource is named by, and judge the pair here rather than copy it.
+export * from './external-binding-datasource';
+
 // External Datasource Federation — SQL↔field type compatibility (ADR-0015)
 export * from './type-compat';
 export * from './external-catalog.zod';

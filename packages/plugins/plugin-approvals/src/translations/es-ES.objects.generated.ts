@@ -362,7 +362,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Valid From",
-        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive — never by a background job."
+        help: "La regla está inactiva antes de este instante. Vacío = activa de inmediato. Se comprueba cada vez que se enruta una aprobación, por lo que la regla empieza a tiempo sin ninguna tarea programada."
       },
       valid_until: {
         label: "Valid Until",

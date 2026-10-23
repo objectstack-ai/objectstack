@@ -115,6 +115,13 @@ export const SysSession = ObjectSchema.create({
   // the audit trail those columns exist for gets a view of its own — otherwise
   // the fields would be written and still readable nowhere, which is the same
   // declared-≠-enforced gap one layer up.
+  //
+  // Both session-listing views carry `user_agent` and `last_activity_at`: two
+  // sessions of one user otherwise read identically (same user, organization
+  // and creation minute), and an administrator who cannot tell which device a
+  // row is revokes both. The device and the last request are what tell them
+  // apart. The revoked view is an audit trail ordered by `revoked_at` and is
+  // left as it was.
   listViews: {
     // [#21972] Declared FIRST on purpose: a route that names no view opens the
     // first declared list view, so a caller-scoped view (`mine`) is never
@@ -125,7 +132,7 @@ export const SysSession = ObjectSchema.create({
       name: 'all_sessions',
       label: 'All',
       data: { provider: 'object', object: 'sys_session' },
-      columns: ['user_id', 'ip_address', 'active_organization_id', 'created_at', 'expires_at'],
+      columns: ['user_id', 'user_agent', 'ip_address', 'last_activity_at', 'active_organization_id', 'created_at', 'expires_at'],
       filter: [{ field: 'revoked_at', operator: 'is_null' }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
@@ -135,7 +142,7 @@ export const SysSession = ObjectSchema.create({
       name: 'mine',
       label: 'My Sessions',
       data: { provider: 'object', object: 'sys_session' },
-      columns: ['ip_address', 'active_organization_id', 'created_at', 'expires_at'],
+      columns: ['user_agent', 'ip_address', 'last_activity_at', 'active_organization_id', 'created_at', 'expires_at'],
       filter: [
         { field: 'user_id', operator: 'equals', value: '{current_user_id}' },
         { field: 'revoked_at', operator: 'is_null' },

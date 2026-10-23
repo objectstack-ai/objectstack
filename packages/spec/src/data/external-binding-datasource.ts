@@ -27,10 +27,15 @@
  * - the object names another datasource, and that datasource's definition is
  *   visible to the door and declares `schemaMode: 'managed'` (or no
  *   `schemaMode`, which is managed by the spec default). `defineStack`'s
- *   cross-reference pass judges it for a datasource the same stack declares
- *   (`stack.zod.ts`). A datasource the door cannot see — one a host or
- *   another package registers, or one stored at runtime — gets no verdict
- *   here: absence of a definition is not evidence about its `schemaMode`.
+ *   cross-reference pass judges it for a datasource the same stack declares,
+ *   and `composeStacks`' artifact pass for one another input of the
+ *   composition declares (`stack.zod.ts`). [#25211] At runtime the metadata
+ *   save doors (`@objectstack/metadata-protocol`) judge the pair from both
+ *   sides: an object saved with `external`, against the datasource it names
+ *   (a stored row or a registered definition), and a datasource saved as
+ *   managed, against the objects that bind it with `external`; the draft
+ *   promotion judges both again. A datasource no door can see gets no
+ *   verdict: absence of a definition is not evidence about its `schemaMode`.
  *
  * Why the object's OWN `datasource`, and not the datasource a package
  * `defaultDatasource` or a `datasourceMapping` rule routes it to: ADR-0015's
@@ -40,7 +45,9 @@
  * binding is a declaration about the object, so it is the object that names
  * where its remote table lives.
  *
- * Internal to `packages/spec`: not re-exported from `data/index.ts`.
+ * [#25211] Exported from `@objectstack/spec/data` for the runtime save doors,
+ * so the rule and its message keep one copy: a door resolves what it can see
+ * and asks this function, ⛔ never a reimplementation of the judgement.
  */
 
 /** The host's primary datasource — `HOST_RESERVED_DATASOURCE_NAME` in `stack.zod.ts`, managed by construction. */

@@ -83,6 +83,7 @@ function deps(opts: {
     getFieldMask: () => ({}),
     getPartialMaskRules: async () => ({}),
     baselinePermissionSets: ['member_default'],
+    tenancyPosture: 'single',
     computeLayeredRlsFilter: async () => ({ layer0: { organization_id: 'org1' }, layer1: opts.layer1 ?? null }),
     fetchRecord: async () => (opts.record !== undefined ? opts.record : { ...RECORD }),
     sharingReadFilter: async () => null,

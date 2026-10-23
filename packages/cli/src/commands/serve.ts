@@ -4138,6 +4138,16 @@ export default class Serve extends Command {
         // have to set OS_AUTH_SECRET just to try the login/register flow.
         secret: resolveAuthSecret({ isDev }),
       });
+      const productionBoot = !isDev;
+      // [ADR-0131 D9] Whether the AuthPlugin the rule composed reached the
+      // kernel. The `try` below is broad — it wraps the import, the
+      // construction and the `kernel.use` — and its catch only warns, so a
+      // production boot whose `@objectstack/plugin-auth` is missing or broken
+      // used to boot with no AuthPlugin, and so with no organization object.
+      // The catch records that failure here; it is refused below, beside the
+      // other two compositions that reach the same state.
+      let authPluginMounted = false;
+      let authPluginLoadFailure: string | undefined;
       if (!hasAuthPlugin && tierEnabled('auth')) {
         try {
           const authPkg = '@objectstack/plugin-auth';
@@ -4307,6 +4317,7 @@ export default class Serve extends Command {
               // precedence, and no second switch for the author to keep in step.
               registerOrganizationRecordPage: !stackDeclaresOrganizationRecordPage(config, plugins),
             }));
+            authPluginMounted = true;
             trackPlugin('Auth');
 
             // ADR-0048 — the platform apps (Setup/Account) moved out of
@@ -4572,7 +4583,12 @@ export default class Serve extends Command {
           }
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          if (!Serve.isModuleNotFoundError(err)) {
+          if (productionBoot && authComposition.composes && !authPluginMounted) {
+            // Refused below, naming this error. A development boot, and a
+            // composition the rule did not compose (the host kernel, a missing
+            // secret), keep the old handling.
+            authPluginLoadFailure = msg;
+          } else if (!Serve.isModuleNotFoundError(err)) {
             console.warn(chalk.yellow(`  ⚠ AuthPlugin failed to load: ${msg}`));
           }
           // @objectstack/plugin-auth not installed — login/register endpoints unavailable
@@ -4671,7 +4687,6 @@ export default class Serve extends Command {
       // the text no longer offers it. A development boot keeps the old shape —
       // refused only when it serves — and so does programmatic embedding, which
       // never passes through this command.
-      const productionBoot = !isDev;
       if ((flags.server || productionBoot) && !(tierEnabled('auth') || hasAuthPlugin)) {
         throw new Error(
           'This stack mounts no auth, so no caller can authenticate — and anonymous access to object '
@@ -4710,6 +4725,30 @@ export default class Serve extends Command {
           + 'OS_AUTH_SECRET=$(openssl rand -hex 32). A migrate-and-exit job (OS_MIGRATE_AND_EXIT=1) needs it too.\n'
           + 'Running kernel-only (--no-server) does not avoid this: the boot still writes rows, with no owner.\n'
           + 'A local trial does not need the secret: `os dev` (or `os serve --dev`) uses a development fallback.',
+        );
+      }
+      // [ADR-0131 D9] The third composition that reaches the same state: the
+      // `auth` tier is on and a secret resolved, so the rule composed
+      // AuthPlugin, but `@objectstack/plugin-auth` failed to load — an install
+      // that is missing or broken, or a construction that threw, all caught by
+      // the broad `try` above before AuthPlugin was mounted. No AuthPlugin, so
+      // no organization object: the boot's writes would be stored ownerless on
+      // an 18.0.0-born store (nullable columns, MongoDB) and refused at NOT
+      // NULL on a fresh one. Refused here for the reason the two refusals above
+      // are, while nothing has started, and naming the load error instead of
+      // warning and booting. The catch records it on a production boot alone,
+      // and only when the rule composed AuthPlugin, so `--dev` and the host
+      // kernel keep their warn-only paths.
+      if (authPluginLoadFailure !== undefined) {
+        throw new Error(
+          'This stack enables auth and an auth secret is set, but @objectstack/plugin-auth failed to load, so '
+          + 'AuthPlugin was not composed and no caller can authenticate — anonymous access to object data is '
+          + 'always denied, so the data API would be unusable, and with no organization every row this boot '
+          + 'writes would have no owner.\n'
+          + `The load error: ${authPluginLoadFailure}\n`
+          + 'Fix the install the error names: @objectstack/plugin-auth is a dependency of @objectstack/cli, so '
+          + "reinstall the deployment's dependencies (e.g. `npm ci` or `pnpm install --frozen-lockfile`).\n"
+          + 'Running kernel-only (--no-server) does not avoid this: the boot still writes rows, with no owner.',
         );
       }
 

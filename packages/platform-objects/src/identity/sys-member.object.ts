@@ -105,6 +105,8 @@ export const SysMember = ObjectSchema.create({
       // Same gate as the other two mirrors — the org CAPABILITY, not
       // multi-org (ADR-0093 D9: single-org sessions carry an active org
       // via plugin-auth's default-org bootstrap).
+      // Hidden while cloud-managed, as on the other three mirrors.
+      visible: 'features.cloudManaged != true',
       requiresFeature: 'organization',
       // ...and the grades that reach the endpoint (ADR-0108 D1): owner,
       // admin and delegated_admin — a plain member is not offered it.

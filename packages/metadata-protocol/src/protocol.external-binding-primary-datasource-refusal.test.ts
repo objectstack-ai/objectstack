@@ -13,8 +13,11 @@
  * INVALID_METADATA`, the finding at `external`, nothing stored.
  *
  * The half that needs a named datasource's definition is not this door's
- * parse: it cannot see the datasource, so a binding that names one saves here
- * whatever that datasource declares.
+ * parse. [#25211] The save door judges it after the parse, against the
+ * datasource the object names as this door reads it
+ * (`protocol.external-binding-named-datasource-refusal.test.ts`); a datasource
+ * no layer holds gets no verdict, and this harness holds none, so a binding
+ * that names one saves here.
  */
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
@@ -41,7 +44,9 @@ function makeProtocol() {
             assertEngineDeleteDispatch(opts);
             return { deleted: 0 };
         },
-        registry: { registerItem: () => {}, registerObject: () => {} },
+        // [#25211] `getItem` for the save door's read of a named datasource:
+        // this harness holds none.
+        registry: { registerItem: () => {}, registerObject: () => {}, getItem: () => undefined },
     };
     const protocol: any = new ObjectStackProtocolImplementation(engine, () => new Map());
     return { protocol, rows };
@@ -83,7 +88,7 @@ describe('#25168 the object save door refuses an `external` binding on the prima
     });
 
     it.each([
-        ['a binding naming a datasource (this half needs only the object)', { datasource: 'lake', external: { remoteName: 'orders' } }],
+        ['a binding naming a datasource no layer holds (no verdict)', { datasource: 'lake', external: { remoteName: 'orders' } }],
         ['no binding, on the primary datasource', { datasource: 'default' }],
     ])('control — %s saves', async (_label, extra) => {
         const { protocol, rows } = makeProtocol();

@@ -7681,7 +7681,7 @@ export class SqlDriver implements IDataDriver {
       toInsert.id = nanoid(DEFAULT_ID_LENGTH);
     }
 
-    this.auditMissingTenant(object, 'create', options);
+    this.auditMissingTenant(object, 'create', options, [toInsert]);
     this.injectTenantOnInsert(object, toInsert, options);
 
     // #5495. The autonumber counter is bootstrapped from the data table exactly
@@ -8487,6 +8487,98 @@ export class SqlDriver implements IDataDriver {
       });
     }
     return reservations;
+  }
+
+  /**
+   * The reservations {@link issueAutonumbers} made, keyed by the caller's row
+   * object, so its collision call can tell a number it issued from one the
+   * caller typed — the distinction `create()` draws from its own local
+   * `reservations`. Weak, so a row the caller drops takes its entry with it.
+   */
+  private readonly issuedAutoNumbers = new WeakMap<object, AutoNumberReservation[]>();
+
+  /**
+   * [#25073] `IDataDriver.issueAutonumbers`: {@link fillAutoNumberFields} on
+   * request, ahead of the write, so the engine can compute a stored field
+   * whose `expression` reads the number before it hands the row to
+   * {@link create} / {@link bulkCreate}. Those find the slot filled and
+   * reserve nothing, so the row goes in as ONE statement carrying the number
+   * the engine computed from.
+   *
+   * After a collision it is {@link create}'s and {@link bulkCreate}'s own
+   * re-seed (#5495, #6943), split at the point where only the caller can go
+   * on: which numbers collided is decided as there
+   * ({@link collidingAutoNumberReservations}, so a duplicate on a value the
+   * caller typed is never this counter's), each stale counter is re-seeded
+   * ONCE, and every slot drawn from a stale counter is emptied — on a batch
+   * that includes rows whose own value did not collide, for the reason
+   * {@link bulkCreate} gives. The caller issues again; this method never
+   * re-issues on its own, because the caller has to recompute what reads
+   * the number. Inside a caller's transaction nothing is retried, as
+   * {@link create} retries nothing there (Postgres has aborted the handle).
+   *
+   * Inherited by `driver-sqlite-wasm` and `driver-turso`: the remote face
+   * issues through its own `getNextSequenceValue` and probes through its own
+   * `autoNumberValueExists` / `resyncSequenceToDataMax`, the overrides its
+   * `create()` already calls.
+   */
+  async issueAutonumbers(
+    object: string,
+    rows: Record<string, unknown>[],
+    options?: DriverOptions,
+    afterCollision?: unknown,
+  ): Promise<string[][]> {
+    if (afterCollision === undefined) {
+      const filled: string[][] = [];
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') {
+          filled.push([]);
+          continue;
+        }
+        // Filled as `create()` fills it: the caller's organization stamped
+        // first (numbers are issued per organization), on a view, so only
+        // the numbers land on the caller's row.
+        const view: Record<string, any> = { ...row };
+        this.injectTenantOnInsert(object, view, options);
+        const reserved = await this.fillAutoNumberFields(object, view, options);
+        for (const r of reserved) row[r.field] = view[r.field];
+        // A value kept from an earlier issue on this row is still this
+        // driver's, so it stays described beside the fresh ones (#6943).
+        const fresh = new Set(reserved.map((r) => r.field));
+        const kept = (this.issuedAutoNumbers.get(row) ?? []).filter((r) => !fresh.has(r.field));
+        this.issuedAutoNumbers.set(row, [...kept, ...reserved]);
+        filled.push(reserved.map((r) => r.field));
+      }
+      return filled;
+    }
+
+    const none = rows.map((): string[] => []);
+    if (options?.transaction !== undefined) return none;
+    const issued = rows.map((row) => (row && typeof row === 'object' ? this.issuedAutoNumbers.get(row) ?? [] : []));
+    const colliding = await this.collidingAutoNumberReservations(afterCollision, issued.flat(), options);
+    if (colliding.length === 0) return none;
+
+    const stale = new Set<string>();
+    for (const reservation of colliding) {
+      const key = this.autoNumberCounterKey(reservation);
+      if (stale.has(key)) continue;
+      stale.add(key);
+      await this.resyncSequenceToDataMax(reservation);
+    }
+    return rows.map((row, i) => {
+      const emptied: string[] = [];
+      const kept: AutoNumberReservation[] = [];
+      for (const reservation of issued[i]) {
+        if (stale.has(this.autoNumberCounterKey(reservation))) {
+          delete row[reservation.field];
+          emptied.push(reservation.field);
+        } else {
+          kept.push(reservation);
+        }
+      }
+      if (emptied.length > 0) this.issuedAutoNumbers.set(row, kept);
+      return emptied;
+    });
   }
 
   /**
@@ -10049,7 +10141,6 @@ export class SqlDriver implements IDataDriver {
    * contract's type now, pinned by `sql-driver-doors-declared-types.test.ts`.
    */
   async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
-    this.auditMissingTenant(object, 'bulkCreate', options);
     // Same client-side id assignment as create() (id/_id normalization,
     // nanoid fallback when neither is supplied) — a row missing an id must
     // not be silently inserted with a NULL primary key just because the
@@ -10066,6 +10157,7 @@ export class SqlDriver implements IDataDriver {
       }
       return toInsert;
     });
+    this.auditMissingTenant(object, 'bulkCreate', options, rows);
     for (const row of rows) {
       if (row && typeof row === 'object') this.injectTenantOnInsert(object, row, options);
     }
@@ -15993,11 +16085,24 @@ export class SqlDriver implements IDataDriver {
    * `tenantId` (ADR-0131 D8). Telling that second write to "pass tenantId"
    * prescribes the one change that would break it, so ⛔ the remedy sentence
    * never addresses the write as if it were only the first kind.
+   *
+   * [ADR-0131 8c-1] An INSERT names its organization in a second place: the
+   * row's own tenant column, the slot {@link injectTenantOnInsert} fills from
+   * `tenantId`. A `create` / `bulkCreate` whose every row already carries that
+   * column is confined to the organizations its rows name, so there is nothing
+   * to report — and that is how the elevated seed and replay inserts of a
+   * walled boot arrive (a system insert with no organization is refused above
+   * this driver, ADR-0131 D9). `insertRows` is those rows, passed by the two
+   * insert doors only; one row without the column keeps the line. ⛔ Never for
+   * update, delete or upsert: there the column is a value being written, not
+   * the statement's scope (the line says so), and an upsert's merge leg can
+   * reach a row of another organization. Diagnostics only: no write changes.
    */
   protected auditMissingTenant(
     object: string,
     op: 'create' | 'update' | 'delete' | 'bulkCreate' | 'bulkDelete' | 'updateMany' | 'deleteMany' | 'upsert',
     options?: DriverOptions,
+    insertRows?: readonly unknown[],
   ): void {
     if (process.env.OS_TENANT_AUDIT === '0') return;
     if (options?.bypassTenantAudit === true) return;
@@ -16017,6 +16122,13 @@ export class SqlDriver implements IDataDriver {
     if (!this.isMultiTenantMode()) return;
     const field = this.resolveTenantField(object);
     if (!field) return;
+    // Empty is spelled as `injectTenantOnInsert` spells it: a row it would
+    // stamp is a row that does not carry its organization.
+    const carriesTenant = (row: unknown): boolean => {
+      const value = row && typeof row === 'object' ? (row as Record<string, unknown>)[field] : undefined;
+      return value !== undefined && value !== null && value !== '';
+    };
+    if (insertRows !== undefined && insertRows.length > 0 && insertRows.every(carriesTenant)) return;
     const key = `${object}:${op}`;
     if (this.tenantAuditWarned.has(key)) return;
     this.tenantAuditWarned.add(key);

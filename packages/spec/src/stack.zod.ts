@@ -3,6 +3,7 @@
 import { z } from 'zod';
 
 import { ManifestSchema, resolveInstallModes } from './kernel/manifest.zod';
+import { InstalledPackageSourceSchema } from './kernel/package-registry.zod';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from './kernel/metadata-plugin.zod';
 import {
   UNMANAGED_INSTALL_KEY_DISPOSITIONS,
@@ -1918,6 +1919,26 @@ export type RecordStagePackageBody = z.input<typeof RecordStagePackageBodySchema
 export type RecordStagePackageBodyParsed = z.infer<typeof RecordStagePackageBodySchema>;
 
 /**
+ * The origins one artifact entry may state for its package — the subset of
+ * {@link InstalledPackageSourceSchema} a LOAD path can register.
+ *
+ * One merged artifact may carry packages of different origins: a control plane
+ * merges an environment's marketplace installs into the artifact it boots the
+ * environment from, beside the environment's own code. The entry is where the
+ * producer that merged it says which is which, so the registry row records the
+ * producer's statement instead of the load door's `code` default.
+ *
+ * `authored` is not a member: an authored package is installed from
+ * `sys_packages` through `installPackage`, never registered from an artifact,
+ * and `ObjectQL.registerApp` refuses it. No new value is declared here — this
+ * is a narrowing of the one closed origin set, so the registry stays the only
+ * declaration of what an origin means.
+ */
+export const ArtifactPackageSourceSchema = lazySchema(() => InstalledPackageSourceSchema.extract(['code', 'marketplace'])
+  .describe('Where an artifact-carried package came from: code (the deployment\'s own code) or marketplace (installed from the marketplace)'));
+export type ArtifactPackageSource = z.input<typeof ArtifactPackageSourceSchema>;
+
+/**
  * One package carried by a release artifact, in its ASSEMBLED form — the
  * element type of `packages` on {@link ObjectStackDefinitionSchema}.
  *
@@ -1932,6 +1953,14 @@ export type RecordStagePackageBodyParsed = z.infer<typeof RecordStagePackageBody
  * `{ manifest: { id, name, version, type } }` entry is. What it does NOT admit
  * is an authoring manifest whose `objects` are globs — refused here, on
  * purpose, because a glob in a compiled artifact names files nobody will read.
+ *
+ * `source` is the entry's one key beside the body: the origin the producer
+ * that assembled the artifact states for this package
+ * ({@link ArtifactPackageSourceSchema}). The load path stamps it on the
+ * package's registry row (`InstalledPackageSchema.source`); an entry that
+ * states none is registered with the load door's own statement, `code` unless
+ * the door says otherwise. It sits on the WRAPPER, not in the body, because it
+ * describes how the package reached this artifact, not the package itself.
  */
 export const ArtifactPackageSchema = lazySchema(() => strictObject({
   surface: 'an assembled artifact package entry',
@@ -1943,6 +1972,8 @@ export const ArtifactPackageSchema = lazySchema(() => strictObject({
     + 'wrap it as `{ manifest: { … } }`.',
 }, {
   manifest: AssembledPackageBodySchema.describe('The assembled package body this artifact entry carries'),
+  source: ArtifactPackageSourceSchema.optional()
+    .describe('Where this package came from, stamped on its registry row: code (the deployment\'s own code) or marketplace (installed from the marketplace). Absent: the registering door\'s own statement, `code` by default'),
 }).describe('One package carried by a release artifact, assembled (ADR-0130 D4)'));
 
 export type ArtifactPackage = z.input<typeof ArtifactPackageSchema>;
@@ -3822,6 +3853,33 @@ function collectExternalBindingDatasourceErrors(config: ObjectStackDefinition): 
     if (refusal !== undefined) errors.push(refusal.message);
   }
   return errors;
+}
+
+/**
+ * [ADR-0015 §4.2 · #25211] {@link collectExternalBindingDatasourceErrors} over
+ * a COMPOSITION: an `external` object of one input bound to a datasource
+ * another input declares managed (or with no `schemaMode`).
+ *
+ * `defineStack` resolves a binding against its own stack's `datasources`, so a
+ * pair split across two inputs reached the artifact with no verdict: each input
+ * is legal alone, and the composed artifact registers both, the object as
+ * federated and its datasource as managed. Judged here over the objects the
+ * artifact carries (step 2's merge, after the conflict strategy) and the
+ * `datasources` of every input, by the same collector, so the finding reads
+ * exactly as the per-stack one does.
+ *
+ * What this can newly refuse: a cross-input pair, and, as with the artifact
+ * pass's other rules, a same-stack pair in an input built with
+ * `strict: false`, which never reached the per-stack pass. A strict input holds
+ * no same-stack pair. A datasource name two inputs declare is judged against
+ * the later declaration (the collector keeps the last one it meets).
+ */
+function collectComposedExternalBindingDatasourceErrors(
+  stacks: readonly ObjectStackDefinition[],
+  composedObjects: ObjectStackDefinition['objects'],
+): string[] {
+  const datasources = stacks.flatMap((stack) => (Array.isArray(stack.datasources) ? stack.datasources : []));
+  return collectExternalBindingDatasourceErrors({ objects: composedObjects, datasources } as ObjectStackDefinition);
 }
 
 /**
@@ -6597,7 +6655,7 @@ function composeBuiltStacks(
   // 0. [#20367 ruling B] Every input must be a stack a producer built. The
   //    per-stack refusals run only inside `defineStack`, so an input that never
   //    passed through it is unjudged, and nothing below re-judges it (the
-  //    artifact pass in step 3b re-runs two artifact-scoped rules, not the
+  //    artifact pass in step 3b re-runs the artifact-scoped rules, not the
   //    family). FIRST, and before the single-input early return, so a lone
   //    plain object is refused as well rather than handed straight back.
   const unbuilt = stacks.flatMap((stack, i) => {
@@ -6712,12 +6770,16 @@ function composeBuiltStacks(
   //     inputs, each legal on its own: one deployment holds them both. It needs
   //     no object to resolve against, so it is not behind that pass's
   //     object-count early return.
+  //     [ADR-0015 §4.2 · #25211] …and an `external` object of one input bound
+  //     to a datasource another input declares managed: see
+  //     {@link collectComposedExternalBindingDatasourceErrors}.
   const artifactCrossRefErrors = [
     ...collectArtifactCrossReferenceErrors(
       stacks,
       objects as readonly { name: string }[] | undefined,
     ),
     ...collectComposedDefaultRecordPageErrors(stacks, opts.manifest === 'preserve'),
+    ...collectComposedExternalBindingDatasourceErrors(stacks, objects),
   ];
   if (artifactCrossRefErrors.length > 0) {
     const count = artifactCrossRefErrors.length;

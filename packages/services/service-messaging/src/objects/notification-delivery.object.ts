@@ -71,13 +71,15 @@ export const NotificationDelivery = ObjectSchema.create({
     },
     // ADR-0030 Layer 4 — the reference lives in the docblock above, not in the copy.
     description: 'Durable per-recipient × channel delivery outbox.',
-    // [ADR-0079] The record title is `display_title`, a text formula over the
-    // same two columns `titleFormat` names. With no pointer declared, the
-    // registry's designate-only pass stamped `nameField: 'id'` (the first
-    // title-eligible field), so a renderer honouring ADR-0079's order (an
-    // explicit `nameField` wins over `titleFormat`) drew the raw id as the
-    // record page's H1. `titleFormat` stays for renderers that still read it
-    // first; `notification-display-title.test.ts` holds the two to the same text.
+    // [ADR-0079] The record title is `display_title`, a text formula. With no
+    // pointer declared, the registry's designate-only pass stamped
+    // `nameField: 'id'` (the first title-eligible field), so a renderer
+    // honouring ADR-0079's order (an explicit `nameField` wins over
+    // `titleFormat`) drew the raw id as the record page's H1. `titleFormat`
+    // stays for renderers that still read it first; the formula names the
+    // recipient as a PERSON where `titleFormat` names the raw recipient, so the
+    // two no longer read the same text
+    // (`../delivery-recipient-user.integration.test.ts`).
     displayNameField: 'display_title',
     nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
     titleFormat: '{channel} → {recipient_id}',
@@ -87,13 +89,24 @@ export const NotificationDelivery = ObjectSchema.create({
         id: Field.text({ label: 'Delivery ID', required: true, readonly: true }),
 
         // [ADR-0079] The record title (`nameField` above). A formula is computed
-        // on read and has no stored column. `channel` and `recipient_id` are
-        // both required, so the expression needs no null guard.
+        // on read and has no stored column. It names the recipient as a PERSON
+        // where the recipient is a user, one hop through `recipient_user_id`:
+        // the user's `name`, or their `email` where the name is blank. An
+        // address recipient (an empty `recipient_user_id`) reads as the address
+        // itself, `recipient_id`. `channel` and `recipient_id` are both
+        // required, so the address leg needs no null guard.
+        //
+        // `recipient_user_id` is read only through the hop and `recipient_id`
+        // only bare: one formula may not read a field both ways
+        // (`traversal-bare-and-traversed`). A reference the read cannot resolve
+        // (a user this reader may not read) leaves the whole title null, as on
+        // `sys_notification_preference`; it never falls back to the raw id,
+        // which would read as an address.
         display_title: Field.formula({
             label: 'Title',
             returnType: 'text',
-            expression: F`record.channel + ' → ' + record.recipient_id`,
-            description: 'Record title: the delivery channel and its recipient (computed on read)',
+            expression: F`record.channel + ' → ' + (isBlank(trim(record.recipient_user_id.?name.orValue(''))) ? record.recipient_user_id.?email.orValue(record.recipient_id) : record.recipient_user_id.?name.orValue(''))`,
+            description: 'Record title: the delivery channel and the person it is for, or the address when the recipient is not a user (computed on read)',
         }),
 
         notification_id: Field.text({
@@ -109,10 +122,19 @@ export const NotificationDelivery = ObjectSchema.create({
             maxLength: 255,
             description: 'FK → sys_notification (L2 event)',
         }),
+        // The address the delivery is sent to — a `sys_user` id, or an email
+        // address or phone number kept verbatim — and part of the dedup key.
+        // NOT a `sys_user` reference: `RecipientResolver` keeps an email no user
+        // holds verbatim, and the email and SMS channels send to an email-shaped
+        // or phone-shaped recipient directly. The outbox writes under the system
+        // context, which skips the engine's reference check, so a lookup here
+        // would store every such address as a dangling reference. The person,
+        // where there is one, is `recipient_user_id` below.
         recipient_id: Field.text({
-            label: 'Recipient User',
+            label: 'Recipient',
             required: true,
             searchable: true,
+            description: 'The address the delivery is sent to: a user id, or an email address or phone number kept as given.',
             // [commit e4902d2b9] Referenced-column bound (route A, ruling 2026-08-24): a resolved
             // recipient is a `sys_user.id` (physical varchar(255), as above)
             // or an email-shaped value `RecipientResolver.resolveOne()` keeps
@@ -120,6 +142,22 @@ export const NotificationDelivery = ObjectSchema.create({
             // `sys_user.email` stores one in a string-family varchar(255)
             // column. 255 admits both producers.
             maxLength: 255,
+        }),
+        // [#25194] The person `recipient_id` addresses, when it is a user's
+        // id: stamped at enqueue by `MessagingService.enqueueDeliveries` from
+        // one `sys_user` read per emit, and left empty for an address no user
+        // holds. It exists for the record title (`display_title` above) and
+        // is never read to route a delivery — the channels resolve
+        // `recipient_id` themselves.
+        //
+        // `set_null` (the lookup default) on purpose: the delivery is history
+        // and outlives the user, and an emptied reference titles the row by
+        // `recipient_id` again. No `maxLength`: a reference holds the
+        // referenced row's id, whose width is the parent's id column.
+        recipient_user_id: Field.lookup('sys_user', {
+            label: 'Recipient User',
+            required: false,
+            description: 'The user the delivery is for. Empty when the recipient is an email address or phone number no user holds.',
         }),
         channel: Field.text({
             label: 'Channel',

@@ -269,6 +269,56 @@ export interface IDataDriver {
   deleteMany?(object: string, query: DriverQuery, options?: DriverOptions): Promise<number>;
 
   // ===========================================================================
+  // Record Numbers (`autonumber`, #25073)
+  // ===========================================================================
+
+  /**
+   * Issue the record numbers of rows the caller is about to insert, ahead of
+   * the write — the public form of a driver that owns its `autonumber`
+   * counter (`supports.autonumber: true`).
+   *
+   * Such a driver fills an empty `autonumber` slot inside `create()` /
+   * `bulkCreate()`, the last moment before the row is stored, so a value
+   * computed FROM the number (a stored field whose `expression` reads it) was
+   * computed before the number existed. Through this member the engine asks
+   * for the numbers after validation, computes what reads them, and hands
+   * `create()` / `bulkCreate()` a row that already carries its number: one
+   * write, no transaction, and the driver stays the one owner of the counter
+   * (ADR-0034 §3).
+   *
+   * **Issue** (no `afterCollision`): fill every `autonumber` field a row
+   * leaves empty (`undefined`, `null` or `''`) from the driver's own counter,
+   * in place, exactly as `create()` would have filled it; a field the row
+   * already carries is the caller's and is left alone. Answers, index-aligned
+   * with `rows`, the names of the fields filled on each row. A row whose
+   * number cannot be issued (an interpolated `{field}` token is empty) is
+   * refused by a throw, as `create()` refuses it.
+   *
+   * **After a collision** (`afterCollision` is the error a `create()` /
+   * `bulkCreate()` of exactly these row objects raised, after an issue call
+   * filled them): decide whether that error is a unique violation on a number
+   * this member issued to them. If it is, re-seed each counter the collision
+   * proves stale, EMPTY the slots on these rows that drew from it, and answer
+   * those field names per row; the caller then issues again and recomputes
+   * what reads the numbers. Otherwise answer an empty list for every row and
+   * change nothing: the error is the caller's to see (a duplicate on a value
+   * the caller typed; a collision inside a caller's transaction, which cannot
+   * be retried on the same handle). `rows` must be the very objects the issue
+   * call filled, because the driver may recognise its own numbers by them.
+   *
+   * Optional: a driver that leaves the number to the engine (no
+   * `supports.autonumber`) omits it, and so may a driver that owns its counter
+   * but cannot issue ahead of the write; the engine then leaves the number to
+   * `create()` and says once that a stored expression reading it cannot see it.
+   */
+  issueAutonumbers?(
+    object: string,
+    rows: Record<string, unknown>[],
+    options?: DriverOptions,
+    afterCollision?: unknown,
+  ): Promise<string[][]>;
+
+  // ===========================================================================
   // Temporal Storage Convention (ADR-0053 D-A1/D-A2, #3912)
   // ===========================================================================
   //

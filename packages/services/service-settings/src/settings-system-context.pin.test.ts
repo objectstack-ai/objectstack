@@ -22,6 +22,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objects
 import { SettingsService } from './settings-service.js';
 import { SettingsServicePlugin, buildSettingAuditWriter, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
 import { LocalCryptoProvider } from './local-crypto-provider.js';
+import { LEAN_ORGANIZATION_SOURCE } from './__tests__/settings-organization.testkit.js';
 
 type Call = { verb: 'find' | 'insert' | 'update' | 'delete'; object: string; context: unknown };
 
@@ -90,7 +91,7 @@ describe('[#21913] SettingsService engine calls carry the explicit system opt-in
     const { engine, calls, rows } = recordingEngine();
     const svc = new SettingsService();
     svc.registerManifest(MANIFEST);
-    svc.bindEngine(wrapEngineAsSettingsEngine(engine as any));
+    svc.bindEngine(wrapEngineAsSettingsEngine(engine as any), undefined, { organization: LEAN_ORGANIZATION_SOURCE });
 
     // loadRows (read path), then upsertRow's existence probe and insert branch.
     // (Its update branch already carried the opt-in before this change.)
@@ -193,12 +194,12 @@ describe('[#21908] the sys_secret store and readStoredHandle carry the explicit 
 
   it('a rotation: the secret writes, the row update and the verification read after it all pass isSystem', async () => {
     const { engine, calls } = recordingEngine();
-    const svc = new SettingsService({
-      env: {},
-      engine: wrapEngineAsSettingsEngine(engine as any),
+    const svc = new SettingsService({ env: {} });
+    svc.bindEngine(wrapEngineAsSettingsEngine(engine as any), undefined, {
       cryptoProvider: new LocalCryptoProvider(),
       secretStore: (new SettingsServicePlugin() as any).buildSecretStore(engine),
-    } as any);
+      organization: LEAN_ORGANIZATION_SOURCE,
+    });
     svc.registerManifest(SECRET_MANIFEST);
 
     await svc.set('sms', 'twilio_auth_token', 'alpha');

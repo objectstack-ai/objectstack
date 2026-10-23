@@ -66,7 +66,12 @@ import {
   PLATFORM_OWNER_EMAIL_ENV,
   resolveTenancyPosture,
 } from '@objectstack/types';
-import { normalizePlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
+import {
+  normalizePlatformAdminEmail,
+  organizationAnchorsPlatformStanding,
+  resolvePlatformAdminEmails,
+  type PlatformStandingAnchorFacts,
+} from '@objectstack/core';
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 import {
@@ -558,7 +563,7 @@ const PLATFORM_ADMIN_PERMISSION_SET_NAME = 'admin_full_access';
 async function findPlatformAdminGrantHolder(
   ql: any,
   reachUnnamed: boolean,
-  defaultOrganizationId: string | undefined,
+  anchor: PlatformStandingAnchorFacts,
 ): Promise<{
   holder: any | undefined;
   /** Leg C: an anchoring human grant that names no set yet (restricts only). */
@@ -568,11 +573,19 @@ async function findPlatformAdminGrantHolder(
 }> {
   // No owner can be named (a wall, or no Default Organization): no grant
   // anchors, so nothing is asked.
-  if (defaultOrganizationId === undefined) {
+  const { defaultOrganizationId } = anchor;
+  if (anchor.walled || defaultOrganizationId === undefined) {
     return { holder: undefined, unnamedHolder: undefined, adminGrantRowsExamined: 0, truncated: false };
   }
+  // [ADR-0131 D5] Which grant anchors is core security's one rule
+  // (`organizationAnchorsPlatformStanding`), the rule the resolver's §6b and
+  // plugin-auth's last-administrator guard ask. ⛔ Two parts are this reader's
+  // own by design: its normalizer (a grant's `organization_id` string, as read),
+  // and the system-user exclusion, which is a separate rule — the seed identity
+  // is never the human the promotion looks for.
   const isAnchorHumanHolder = (r: any) =>
-    r.organization_id === defaultOrganizationId && r.user_id !== SystemUserId.SYSTEM;
+    organizationAnchorsPlatformStanding(typeof r?.organization_id === 'string' ? r.organization_id : null, anchor)
+    && r.user_id !== SystemUserId.SYSTEM;
 
   // Counted by row IDENTITY, not by read: the two legs overlap by construction
   // (leg A's rows are a subset of leg B's population), and a number that
@@ -676,7 +689,11 @@ export async function findExistingPlatformAdmin(
   }
   // [ADR-0131 D4] By name alone: leg C (the legacy id reach) only restricts
   // and never names a holder, so this question needs no catalog row.
-  const { holder } = await findPlatformAdminGrantHolder(ql, false, await readPromotionGrantOwner(ql));
+  // A wall returned above, so the posture here is `single`.
+  const { holder } = await findPlatformAdminGrantHolder(ql, false, {
+    walled: false,
+    defaultOrganizationId: await readPromotionGrantOwner(ql),
+  });
   return holder?.user_id ? String(holder.user_id) : undefined;
 }
 
@@ -808,7 +825,7 @@ export async function bootstrapPlatformAdmin(
     unnamedHolder,
     adminGrantRowsExamined,
     truncated: adminGrantScanTruncated,
-  } = await findPlatformAdminGrantHolder(ql, true, defaultOrganizationId);
+  } = await findPlatformAdminGrantHolder(ql, true, { walled, defaultOrganizationId });
 
   // ⛔ The truncation is never silent (commit 1c83ca226). Reaching the ceiling is the one
   // way this scan still answers "no platform admin yet" while one exists, and

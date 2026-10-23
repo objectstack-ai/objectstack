@@ -62,6 +62,15 @@ export const CONSOLE_PATH = '/_console';
  */
 const PUBLIC_FORM_DOOR = '/api/v1/forms';
 
+/**
+ * The anonymous door that serves the Console's branding. The shell's inline
+ * early-branding script fetches `GET /api/v1/runtime/config` and sets
+ * `document.title` from its `branding.productName`. The shell's server-written
+ * `<title>`, description and Open Graph tags read this same door, so a link
+ * preview and the browser tab show the same name.
+ */
+const RUNTIME_CONFIG_DOOR = '/api/v1/runtime/config';
+
 /** Canonical npm package name that ships the Console SPA. */
 const CONSOLE_PACKAGE = '@objectstack/console';
 
@@ -686,6 +695,12 @@ function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
  * answered with `304`; HTML (the shell and the SPA fallback) carries neither,
  * so the browser fetches it again every time.
  *
+ * The HTML is written per request: besides the `<base>` tag, its `<title>`,
+ * description and Open Graph tags carry the runtime branding this request is
+ * served by `GET /api/v1/runtime/config` (`readRuntimeBranding`,
+ * `writeBrandedHead`), so a link preview, which runs no script, shows the
+ * product's name.
+ *
  * It also answers the path an author writes as a public form's
  * `sharing.publicLink`: `GET /forms/<slug>` redirects (302) to the Console's
  * public form page, `/_console/f/<slug>` with the request's query string, when
@@ -726,7 +741,21 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         return v === 'off' || v === '0' || v === 'false' || v === 'no' || v === 'disabled';
       };
 
-      const readIndexHtml = () => {
+      // A branding read that fails leaves the shell's head as the build shipped
+      // it, which is a smaller page, not a broken one: said once, at `warn`.
+      let reportedBrandingReadFailure = false;
+      const reportBrandingReadFailure = (cause: string) => {
+        if (reportedBrandingReadFailure) return;
+        reportedBrandingReadFailure = true;
+        ctx.logger?.warn?.(
+          `Console static: the branding read from ${RUNTIME_CONFIG_DOOR} failed (${cause}), so the console `
+          + 'document is served without its server-written title, description and Open Graph tags, and link '
+          + 'previews show a blank title. The page itself still loads and sets its title in the browser. '
+          + 'Reported once; every later console document retries the read.',
+        );
+      };
+
+      const readIndexHtml = async (c: any) => {
         const raw = fs.readFileSync(indexPath, 'utf-8');
         // Inject <base href="${CONSOLE_PATH}/"> so:
         //   1. Relative asset URLs ('./assets/...') resolve to the
@@ -746,7 +775,10 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
             `<script>window.__OBJECTUI_CAPABILITIES_DISABLED__=(window.__OBJECTUI_CAPABILITIES_DISABLED__||[]).concat('react-pages');</script>`;
           html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${capTag}`);
         }
-        return html;
+        // The title, description and Open Graph tags, written here because a
+        // link-preview crawler runs no script: the early-branding script sets
+        // the same title in the browser, from the same door.
+        return writeBrandedHead(html, await readRuntimeBranding(app, c, reportBrandingReadFailure), requestOrigin(c));
       };
 
       // The Console is the default end-user surface — root `/` redirects
@@ -797,7 +829,7 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         // injection path so all entry points stay path-portable).
         if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
           if (filePath.endsWith('.html')) {
-            return new Response(readIndexHtml(), {
+            return new Response(await readIndexHtml(c), {
               headers: { 'content-type': 'text/html; charset=utf-8' },
             });
           }
@@ -823,7 +855,7 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         }
 
         // SPA fallback
-        return new Response(readIndexHtml(), {
+        return new Response(await readIndexHtml(c), {
           headers: { 'content-type': 'text/html; charset=utf-8' },
         });
       });
@@ -1172,6 +1204,161 @@ async function anonymousFormDoorServes(app: any, c: any, slug: string): Promise<
     // The body is never read; a stream that cannot be cancelled changes nothing.
   }
   return res.status === 200;
+}
+
+/** The branding values the console document's head tags are written from. */
+interface ConsoleShellBranding {
+  /** `branding.productName`: the `<title>` and `og:title`. */
+  productName?: string;
+  /** `branding.pwaDescription`: `<meta name="description">` and `og:description`. */
+  description?: string;
+  /** `branding.logoUrl`, absolute or relative: `og:image`. */
+  logoUrl?: string;
+}
+
+/**
+ * Request headers that would change the ENCODING or the STATUS of the branding
+ * door's answer rather than its content: a compressed body, or a `304` with
+ * none, is not a JSON this read can take. They are dropped from the probe.
+ */
+const BRANDING_PROBE_DROPPED_HEADERS = ['accept-encoding', 'if-none-match', 'if-modified-since', 'range'];
+
+/**
+ * The branding the runtime serves to THIS request, read from the door the
+ * console's early-branding script reads ({@link RUNTIME_CONFIG_DOOR}).
+ *
+ * The door is asked, not copied, for the reason {@link anonymousFormDoorServes}
+ * gives: which product name a request is served is decided inside
+ * `RuntimeConfigPlugin` (a saved Branding setting, then the host's option, then
+ * `OS_PRODUCT_NAME`, per hostname on a hosted runtime, and whatever a
+ * distribution's subclass adds), and a second resolution here would drift from
+ * the one the browser tab shows. So the visitor's own request is re-addressed
+ * to the door and dispatched in-process through the same app, with the same
+ * host and cookies.
+ *
+ * `undefined` means there is nothing to write. A composition that mounts no
+ * branding door answers `404`, which is not a failure. Any other answer that
+ * is not a `200` JSON body, a thrown dispatch included, is reported through
+ * `onFailure`.
+ */
+async function readRuntimeBranding(
+  app: any,
+  c: any,
+  onFailure: (cause: string) => void,
+): Promise<ConsoleShellBranding | undefined> {
+  let res: Response;
+  try {
+    const url = new URL(RUNTIME_CONFIG_DOOR, c.req.url);
+    const headers = new Headers(c.req.raw.headers);
+    for (const name of BRANDING_PROBE_DROPPED_HEADERS) headers.delete(name);
+    headers.set('accept', 'application/json');
+    res = await app.fetch(new Request(url, { method: 'GET', headers }), c.env);
+  } catch (e: any) {
+    onFailure(`the dispatch threw: ${e?.message ?? String(e)}`);
+    return undefined;
+  }
+  if (res.status !== 200) {
+    try {
+      await res.body?.cancel();
+    } catch {
+      // The body is never read; a stream that cannot be cancelled changes nothing.
+    }
+    if (res.status !== 404) onFailure(`it answered ${res.status}`);
+    return undefined;
+  }
+  let payload: unknown;
+  try {
+    payload = await res.json();
+  } catch {
+    onFailure('it answered a body that is not JSON');
+    return undefined;
+  }
+  const branding = (payload as { branding?: unknown } | null)?.branding;
+  if (branding === null || typeof branding !== 'object') return undefined;
+  const text = (key: string): string | undefined => {
+    const value = (branding as Record<string, unknown>)[key];
+    return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+  };
+  return { productName: text('productName'), description: text('pwaDescription'), logoUrl: text('logoUrl') };
+}
+
+/**
+ * The origin the visitor addressed: the request URL's host, and its scheme
+ * unless a proxy in front stated the original one in `x-forwarded-proto` (the
+ * same header the REST discovery document's `servers[0]` reads). Only `http`
+ * and `https` are taken from that header.
+ */
+function requestOrigin(c: any): string | undefined {
+  try {
+    const url = new URL(c.req.url);
+    const forwarded = String(c.req.header('x-forwarded-proto') ?? '').split(',')[0].trim().toLowerCase();
+    const protocol = forwarded === 'http' || forwarded === 'https' ? `${forwarded}:` : url.protocol;
+    return `${protocol}//${url.host}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `value` as an absolute `http(s)` URL, a relative one resolved against `origin`. */
+function absoluteHttpUrl(value: string, origin: string | undefined): string | undefined {
+  try {
+    const url = origin === undefined ? new URL(value) : new URL(value, `${origin}/`);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Text escaped for an HTML element body or a double-quoted attribute value. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Write the console document's `<title>`, `<meta name="description">` and the
+ * `og:title`, `og:description`, `og:image` and `og:url` tags from `branding`.
+ *
+ * - The title is the name the early-branding script sets as `document.title`,
+ *   so the document and the tab agree. It replaces the build's `<title>`
+ *   element (the shell ships it empty), or is added when there is none.
+ * - A branding value that is absent writes no tag; an empty one is never
+ *   written. With no branding value at all, `og:url` is not written either and
+ *   the document is returned exactly as given.
+ * - `og:image` is the logo resolved against the request origin, and is written
+ *   only when that gives an `http(s)` URL.
+ * - The meta tags go directly after `<head>`, ahead of any the build ships,
+ *   which a crawler reads first.
+ *
+ * Every value is HTML-escaped.
+ */
+function writeBrandedHead(html: string, branding: ConsoleShellBranding | undefined, origin: string | undefined): string {
+  const productName = branding?.productName;
+  const description = branding?.description;
+  const image = branding?.logoUrl === undefined ? undefined : absoluteHttpUrl(branding.logoUrl, origin);
+  if (productName === undefined && description === undefined && image === undefined) return html;
+
+  const head = /<head(\s[^>]*)?>/i;
+  const tags: string[] = [];
+  if (productName !== undefined) {
+    const title = `<title>${escapeHtml(productName)}</title>`;
+    const existing = /<title(\s[^>]*)?>[\s\S]*?<\/title>/i;
+    if (existing.test(html)) html = html.replace(existing, () => title);
+    else tags.push(title);
+  }
+  const meta = (attribute: 'name' | 'property', key: string, value: string) =>
+    `<meta ${attribute}="${key}" content="${escapeHtml(value)}">`;
+  if (description !== undefined) tags.push(meta('name', 'description', description));
+  if (productName !== undefined) tags.push(meta('property', 'og:title', productName));
+  if (description !== undefined) tags.push(meta('property', 'og:description', description));
+  if (image !== undefined) tags.push(meta('property', 'og:image', image));
+  if (origin !== undefined) tags.push(meta('property', 'og:url', origin));
+  if (tags.length === 0) return html;
+  return html.replace(head, (m) => `${m}\n    ${tags.join('\n    ')}`);
 }
 
 const MIME_TYPES: Record<string, string> = {

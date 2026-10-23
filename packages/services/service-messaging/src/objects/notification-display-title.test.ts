@@ -2,8 +2,8 @@
 
 /**
  * The record title of the notification objects that declared a
- * `titleFormat` and no title pointer (#20044): `sys_notification_delivery`
- * and `sys_notification_receipt` (`sys_notification_subscription` is retired).
+ * `titleFormat` and no title pointer (#20044): `sys_notification_receipt`
+ * (`sys_notification_subscription` is retired).
  *
  * `sys_notification_preference` left this table when its `user_id` became a
  * `sys_user` reference (ADR-0118 D1): its title now names the PERSON one hop
@@ -11,6 +11,11 @@
  * default), so it no longer equals the `titleFormat` text this file holds the
  * others to. Its case — the raw-id title 'usr_alice · billing.invoice · email'
  * — is reversed in `../preference-user-reference.integration.test.ts`.
+ *
+ * `sys_notification_delivery` left it the same way (#25194): its title names
+ * the person one hop through `recipient_user_id`, and the address itself where
+ * the recipient is not a user. Its case — the raw-id title 'email → usr_alice'
+ * — is reversed in `../delivery-recipient-user.integration.test.ts`.
  *
  * ADR-0079 resolves a record's title as `nameField ?? displayNameField ??
  * derivation`, and an explicit `nameField` takes precedence over the
@@ -21,8 +26,9 @@
  * A renderer honouring the order therefore drew the raw id as the record
  * page's H1.
  *
- * The composite title points at `display_title`, a text formula over the
- * columns `titleFormat` names. `sys_notification_receipt`'s title is one
+ * A composite title points at `display_title`, a text formula over the
+ * columns `titleFormat` names; the `display_title` legs below hold any such
+ * object to that. `sys_notification_receipt`'s title is one
  * column (`{state}`), so its `nameField` names that column directly — the
  * describe's own migration for a single-field title. An explicit pointer is
  * honoured whatever the field's type (ADR-0079 D4); `select` is only kept out
@@ -52,7 +58,6 @@ import {
 } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveDisplayField } from '@objectstack/spec/data';
-import { NotificationDelivery } from './notification-delivery.object.js';
 import { NotificationReceipt } from './notification-receipt.object.js';
 import { installDefaultOrganization } from '../default-organization.testkit.js';
 
@@ -78,17 +83,6 @@ let seq = 0;
 const unique = (prefix: string) => `${prefix}_${++seq}`;
 
 const CASES: Case[] = [
-  {
-    schema: NotificationDelivery,
-    pointer: 'display_title',
-    row: () => ({
-      notification_id: unique('ntf'), recipient_id: 'usr_alice', channel: 'email',
-      status: 'pending', created_at: NOW, updated_at: NOW,
-    }),
-    title: 'email → usr_alice',
-    refused: ['channel', 'recipient_id'],
-    defaulted: {},
-  },
   {
     schema: NotificationReceipt,
     pointer: 'state',

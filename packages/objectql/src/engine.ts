@@ -273,7 +273,7 @@ import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
-import { ExpressionEngine, toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
+import { ExpressionEngine, analyzeRelationshipTraversals, toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import {
   isAggregatedViewContainer,
@@ -3052,6 +3052,64 @@ function planStoredExpressions(schema: any): FormulaPlanEntry[] {
   return plan;
 }
 
+/** [#25073] {@link storedExpressionsReading}'s per-source member reads, bounded like the rule validator's cache. */
+const storedExpressionReadsCache = new Map<string, ReadonlySet<string> | null>();
+const STORED_EXPRESSION_READS_CACHE_CAP = 512;
+
+/** The `record.<field>` names one plan entry reads, or `null` when the platform's member reader cannot say. */
+function storedExpressionReads(entry: FormulaPlanEntry): ReadonlySet<string> | null {
+  const expr = entry.expression as { dialect?: string; source?: unknown } | undefined;
+  if (!expr || (expr.dialect !== undefined && expr.dialect !== 'cel') || typeof expr.source !== 'string') return null;
+  const hit = storedExpressionReadsCache.get(expr.source);
+  if (hit !== undefined) return hit;
+  const analysis = analyzeRelationshipTraversals(expr.source);
+  const reads = analysis ? new Set([...analysis.bareFields, ...analysis.traversals.keys()]) : null;
+  if (storedExpressionReadsCache.size < STORED_EXPRESSION_READS_CACHE_CAP) storedExpressionReadsCache.set(expr.source, reads);
+  return reads;
+}
+
+/**
+ * [#25073] The entries of a stored-expression plan that read one of `fields`
+ * (the object's `autonumber` fields), directly or through another entry that
+ * does, in plan order: the stored fields an insert must compute again once
+ * the record number is issued, because every earlier pass ran before it
+ * existed.
+ *
+ * Reads are the platform's one member reader's (`analyzeRelationshipTraversals`,
+ * `record.x`, `record.?x`, `record['x']`, inside `has()` too), so this cannot
+ * disagree with the lint about which spellings name a field. An entry whose
+ * reads it cannot name (another dialect) counts as a reader: computing it
+ * twice costs a pass, missing it stores a stale value.
+ */
+function storedExpressionsReading(plan: FormulaPlanEntry[], fields: ReadonlySet<string>): FormulaPlanEntry[] {
+  if (plan.length === 0 || fields.size === 0) return [];
+  const moved = new Set(fields);
+  const readers = new Set<FormulaPlanEntry>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const entry of plan) {
+      if (readers.has(entry)) continue;
+      const reads = storedExpressionReads(entry);
+      if (reads !== null && ![...reads].some((name) => moved.has(name))) continue;
+      readers.add(entry);
+      moved.add(entry.name);
+      grew = true;
+    }
+  }
+  return plan.filter((entry) => readers.has(entry));
+}
+
+/** The `autonumber` fields an object declares. */
+function autonumberFieldNames(schema: any): Set<string> {
+  const names = new Set<string>();
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return names;
+  for (const [name, def] of Object.entries(fields as Record<string, any>)) {
+    if (def?.type === 'autonumber') names.add(name);
+  }
+  return names;
+}
+
 /** What {@link computeStoredExpressions} reads its permission map, fault sink and hops from. */
 interface StoredExpressionServing {
   permissionsFor: (plan: FormulaPlanEntry[], records: readonly unknown[]) => Promise<EvalPermissions | undefined>;
@@ -3085,6 +3143,37 @@ async function computeStoredExpressions(
     for (const entry of plan) values[entry.name] = row[entry.name];
     return values;
   });
+}
+
+/**
+ * [#25073] The stored fields an insert computes again once it holds a record
+ * number ({@link storedExpressionsReading}), with what computing them reads.
+ */
+interface AutonumberReaders {
+  readonly plan: FormulaPlanEntry[];
+  readonly execCtx: ExecutionContext | undefined;
+  readonly serving: StoredExpressionServing;
+  /** The {@link ObjectQL.registerInsertRecomputeListener} listeners, told per row; absent when none is registered. */
+  readonly recomputed?: (row: Record<string, unknown>, fields: string[]) => Promise<void>;
+}
+
+/**
+ * [#25073] Compute the readers again over rows that now carry their issued
+ * number, and write the values onto the rows the driver is handed — the step
+ * that makes the stored value the declared expression over the stored row.
+ * The replaced-value report is NOT made again: it judged the caller's value
+ * once, before validation and before any number existed.
+ */
+async function recomputeAutonumberReaders(
+  readers: AutonumberReaders | undefined,
+  rows: Array<Record<string, unknown>>,
+): Promise<void> {
+  if (!readers || readers.plan.length === 0 || rows.length === 0) return;
+  const computed = await computeStoredExpressions(readers.plan, rows, readers.execCtx, readers.serving);
+  rows.forEach((row, k) => Object.assign(row, computed[k]));
+  if (!readers.recomputed) return;
+  const fields = readers.plan.map((entry) => entry.name);
+  for (const row of rows) await readers.recomputed(row, fields);
 }
 
 /**
@@ -5009,6 +5098,9 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private readonly transactionUnsupportedReported = new Set<string>();
 
+  /** [#25073] Objects already reported by {@link warnAutonumberReadersUnserved}: once per engine instance. */
+  private readonly autonumberReadersUnservedReported = new Set<string>();
+
   /**
    * Objects already reported by {@link warnCascadeNotAtomic} — the `'split'`
    * verdict of {@link planCascadeAtomicity} — so a cascade that cannot be one
@@ -6401,6 +6493,39 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.debug('Registered effective object-permission resolver for current_user.can()');
   }
 
+  /** [#25073] {@link registerInsertRecomputeListener}'s listeners, by registrant id. */
+  private readonly insertRecomputeListeners = new Map<
+    string,
+    (event: { object: string; row: Record<string, unknown>; fields: string[] }) => void | Promise<void>
+  >();
+
+  /**
+   * [#25073] Be told, per row, when an insert computes stored fields again
+   * after issuing the row's record number, so a value DERIVED from those
+   * fields can be derived again before the row is written.
+   *
+   * A stored field whose `expression` reads an `autonumber` is computed once
+   * before the `beforeInsert` hooks, when the number does not exist yet, and
+   * again right after the number is issued (after validation). A
+   * `beforeInsert` hook that derived something from the field saw the first
+   * value: `plugin-pinyin-search` stamps the `__search` companion from the
+   * name field there, so a name field reading the number was searchable
+   * without it. The listener runs at the second computation, on the very
+   * row the driver is handed, with the names of the fields computed again
+   * (`fields`), and on every re-issue after a collision too. What it writes
+   * on `row` is written; a throw fails the insert, as a hook's does.
+   *
+   * Keyed by `id`, so a registrant that binds again replaces itself rather
+   * than running twice.
+   */
+  registerInsertRecomputeListener(
+    id: string,
+    fn: (event: { object: string; row: Record<string, unknown>; fields: string[] }) => void | Promise<void>,
+  ): void {
+    this.insertRecomputeListeners.set(id, fn);
+    this.logger.debug('Registered insert recompute listener', { id });
+  }
+
   /**
    * The states {@link composeReadableIdsAtBoundary} has already reported for
    * this engine. It records only that the report was made and caches no
@@ -7631,8 +7756,19 @@ export class ObjectQL implements IObjectQLEngine {
     const isTenantAuditInScope =
       resolveTenantFieldName(objectSchema) !== null &&
       !isFederated;
+    // [ADR-0131 D8 · 8c-1] The wall's exemption, declared to the driver. An
+    // exempt platform admin's predicate write reaches the driver with no
+    // `tenantId` because the wall lifted the scope on purpose, and the
+    // driver's `[tenant-audit]` line tells such a write to declare
+    // `bypassTenantAudit: true` — an option no REST caller can set. The
+    // exemption is decided once, by `computeTenantLayer0Verdict`, and arrives
+    // here as the recorded verdict; this reads it, it does not re-decide it
+    // (see {@link wallExemptedOperation}).
+    const wallExempt =
+      tenantObject && isTenantAuditInScope && !scope.writeTarget &&
+      this.wallExemptedOperation(execCtx, scope.recordedVerdict);
     const preserveAudit = (execCtx as any)?.preserveAudit === true;
-    if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit) return base;
+    if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit && !wallExempt) return base;
     const opts: any = base && typeof base === 'object' ? { ...base } : {};
     if (hasTx && opts.transaction === undefined) {
       opts.transaction = tx;
@@ -7672,6 +7808,13 @@ export class ObjectQL implements IObjectQLEngine {
       // line. It changes nothing about what any write touches.
       opts.bypassTenantAudit = true;
     }
+    if (wallExempt && opts.bypassTenantAudit === undefined) {
+      // The same fill-in-only rule as the isSystem mute above: a caller's own
+      // value wins. Diagnostics only — the driver's scope is already the
+      // verdict's (no `tenantId`), and this option silences a warning and
+      // touches nothing else; on a read it is inert.
+      opts.bypassTenantAudit = true;
+    }
     if (preserveAudit && opts.preserveAudit === undefined) {
       // Historical import (#3493): let the driver keep a supplied `updated_at`
       // instead of force-stamping now on the update path.
@@ -7699,23 +7842,7 @@ export class ObjectQL implements IObjectQLEngine {
         ? String(execCtx.tenantId)
         : undefined;
     const recorded = recordedVerdict === undefined ? undefined : TenantLayer0VerdictSchema.safeParse(recordedVerdict);
-    const verdict = recorded?.success
-      ? recorded.data
-      : computeTenantLayer0Verdict({
-          tenancyPosture: this.resolveEnginePosture(),
-          organizationId: activeOrganization,
-          accessibleOrgIds: accessibleOrganizationsOf(execCtx),
-          // Left to the driver, which resolves the tenant column from the
-          // table it actually built (`resolveTenantField`): an object with no
-          // such column is unscoped there whatever this says. `undefined` is
-          // the verdict's "assume a tenant object", as Layer 0 reads an
-          // unresolved field set.
-          objectHasOrgIdField: undefined,
-          tenancyDisabled: false,
-          // The engine holds no permission sets: no exemption is ITS to grant.
-          posturePermitsCrossTenant: false,
-          isPlatformAdmin: false,
-        });
+    const verdict = recorded?.success ? recorded.data : this.engineLayer0Verdict(execCtx, activeOrganization);
     switch (verdict.kind) {
       case 'none':
         return undefined;
@@ -7726,6 +7853,59 @@ export class ObjectQL implements IObjectQLEngine {
       case 'deny':
         return activeOrganization !== undefined ? { tenantId: activeOrganization } : undefined;
     }
+  }
+
+  /**
+   * The Layer 0 verdict over the engine's OWN facts — what {@link driverReadScope}
+   * falls back to where no wall was recorded. The one ladder,
+   * `computeTenantLayer0Verdict`, with the exemption's facts withheld.
+   */
+  private engineLayer0Verdict(
+    execCtx: ExecutionContext | undefined,
+    activeOrganization: string | undefined,
+  ): TenantLayer0Verdict {
+    return computeTenantLayer0Verdict({
+      tenancyPosture: this.resolveEnginePosture(),
+      organizationId: activeOrganization,
+      accessibleOrgIds: accessibleOrganizationsOf(execCtx),
+      // Left to the driver, which resolves the tenant column from the
+      // table it actually built (`resolveTenantField`): an object with no
+      // such column is unscoped there whatever this says. `undefined` is
+      // the verdict's "assume a tenant object", as Layer 0 reads an
+      // unresolved field set.
+      objectHasOrgIdField: undefined,
+      tenancyDisabled: false,
+      // The engine holds no permission sets: no exemption is ITS to grant.
+      posturePermitsCrossTenant: false,
+      isPlatformAdmin: false,
+    });
+  }
+
+  /**
+   * [ADR-0131 D8 · 8c-1] Did the wall's EXEMPTION lift this operation's scope?
+   * True when the recorded verdict is `none` while the same ladder over the
+   * engine's own facts — every rung but the exemption — would have walled it.
+   * That is plugin-security's own `crossedByPlatformAdmin` test (the ladder
+   * asked a second time with only the exemption withheld), with the engine's
+   * existing fallback ({@link engineLayer0Verdict}, what an unrecorded
+   * operation is scoped by) as the second asking: no rung is computed beside
+   * the one ladder, and a `single` posture answers `none` both ways, so it is
+   * no crossing. The #12974 owner bypass records `none` on READS only, where
+   * the declaration is inert.
+   *
+   * Absence is not exemption: a by-id write, a system context or a stack with
+   * no security layer records nothing, and answers false. A recorded value
+   * that does not parse answers false too — junk never lifts anything.
+   */
+  private wallExemptedOperation(execCtx: ExecutionContext | undefined, recordedVerdict: unknown): boolean {
+    if (recordedVerdict === undefined) return false;
+    const recorded = TenantLayer0VerdictSchema.safeParse(recordedVerdict);
+    if (!recorded.success || recorded.data.kind !== 'none') return false;
+    const activeOrganization =
+      execCtx?.tenantId !== undefined && execCtx.tenantId !== null && String(execCtx.tenantId) !== ''
+        ? String(execCtx.tenantId)
+        : undefined;
+    return this.engineLayer0Verdict(execCtx, activeOrganization).kind !== 'none';
   }
 
   /**
@@ -8618,9 +8798,24 @@ export class ObjectQL implements IObjectQLEngine {
    * |:---|:---|:---|:---|:---|
    * | driver-memory | `supports = {}` | **yes** | field-level `unique`, since commit 56c093c4d (ADR-0120 D1/D3 scoping) | `UNIQUE_VIOLATION` / 409 → re-seed + re-issue, here |
    * | driver-mongodb | absent (`{ batchSchemaSync: true }`) | **yes** | single-field unique index when the field declares `unique` | `E11000 duplicate key` → re-seed + re-issue, here |
-   * | driver-sql | `autonumber: true` | no | — | — |
-   * | driver-sqlite-wasm | inherited (`extends SqlDriver`, no `supports` override) | no | — | — |
-   * | driver-turso | inherited (`...super.supports`) | no | — | — |
+   * | driver-sql | `autonumber: true` | no | — | — (but see #25073 below) |
+   * | driver-sqlite-wasm | inherited (`extends SqlDriver`, no `supports` override) | no | — | — (inherited) |
+   * | driver-turso | inherited (`...super.supports`) | no | — | — (inherited) |
+   *
+   * # Numbers the DRIVER issued ahead of the write (#25073)
+   *
+   * For an object whose stored `expression` reads its record number, a driver
+   * that owns its counter issues the number through
+   * `IDataDriver.issueAutonumbers` before this method runs, and the row
+   * arrives here carrying it (`driverIssued`). The driver's own retry inside
+   * `create()` cannot answer a collision on it any more — it reserved
+   * nothing — and must not: a number re-issued there would leave the stored
+   * expression computed from the old one. So the retry is this loop's, the
+   * same loop the fallback drivers use. The member decides whether the error
+   * is a collision on its numbers (never a duplicate the caller typed, never
+   * inside a caller's transaction) and re-seeds the stale counter; this loop
+   * then issues again, recomputes the readers and writes again, under the
+   * same {@link AUTONUMBER_COLLISION_ATTEMPTS} bound.
    *
    * So the retry protects the TWO fallback backends — and it protected only one
    * of them until commit 56c093c4d, because `driver-memory` enforced no uniqueness at all
@@ -8682,7 +8877,12 @@ export class ObjectQL implements IObjectQLEngine {
     issued: IssuedAutonumber[],
     execCtx: ExecutionContext | undefined,
     driverOwnsAutonumber: boolean,
+    driverIssued: string[] = [],
+    readers?: AutonumberReaders,
   ): Promise<any> {
+    // [#25073] Who issued this row's numbers decides who judges a collision on
+    // them: the driver, through the member that issued them, or this engine.
+    const byDriver = driverIssued.length > 0;
     let attempt = 1;
     for (;;) {
       try {
@@ -8693,14 +8893,19 @@ export class ObjectQL implements IObjectQLEngine {
         // driver's error. `envelopeUniqueViolation` returns everything that is
         // not a unique violation untouched (a deadlock, a NOT NULL, an
         // unreachable store), so only the recognised conflict changes shape.
-        if (!this.isIssuedAutonumberCollision(error, issued)) {
+        // [#25073] On a driver-issued number the member answers instead, and
+        // in answering re-seeds the counter it proved stale.
+        const collided: string[] = byDriver
+          ? ((await driver.issueAutonumbers(object, [row], driverOptions, error)) as string[][] | undefined)?.[0] ?? []
+          : this.isIssuedAutonumberCollision(error, issued) ? issued.map((one) => one.field) : [];
+        if (collided.length === 0) {
           throw envelopeUniqueViolation(error, object, this.getSchema(object));
         }
         // Whatever happens next, the stale counter must not survive this call:
         // leaving it in place is what turned one collision into a storm.
         for (const one of issued) this.autonumberCounters.delete(one.counterKey);
         if (attempt >= AUTONUMBER_COLLISION_ATTEMPTS) {
-          const fields = issued.map((one) => one.field).join(', ');
+          const fields = collided.join(', ');
           throw Object.assign(
             new Error(
               `Autonumber collision on '${object}' field(s) [${fields}]: the record number was ` +
@@ -8712,19 +8917,28 @@ export class ObjectQL implements IObjectQLEngine {
         }
         attempt += 1;
         this.logger.warn('Autonumber collided — re-seeding the counter and re-issuing', {
-          object, fields: issued.map((one) => one.field), attempt,
+          object, fields: collided, attempt,
         });
-        // Clear the slots so `applyAutonumbers` treats them as empty again —
-        // leaving the burned value in place would read as an exempt writer's
-        // and be adopted rather than re-issued.
-        for (const one of issued) delete row[one.field];
-        issued = await this.applyAutonumbers(object, row, execCtx, driverOwnsAutonumber);
+        let renumbered: boolean;
+        if (byDriver) {
+          // [#25073] The member emptied the slots it proved stale; issue them again.
+          renumbered = (((await driver.issueAutonumbers(object, [row], driverOptions)) as string[][] | undefined)?.[0] ?? []).length > 0;
+        } else {
+          // Clear the slots so `applyAutonumbers` treats them as empty again —
+          // leaving the burned value in place would read as an exempt writer's
+          // and be adopted rather than re-issued.
+          for (const one of issued) delete row[one.field];
+          issued = await this.applyAutonumbers(object, row, execCtx, driverOwnsAutonumber);
+          renumbered = issued.length > 0;
+        }
+        // [#25073] A new number is a new input to every stored field that reads it.
+        await recomputeAutonumberReaders(readers, [row]);
         // Nothing left to re-issue (the field vanished from the schema
         // mid-flight) — the next failure is the caller's to see, enveloped on
         // the same terms as the exit above (#14095): this call is OUTSIDE the
         // loop's own `try`, so its rejection is a second driver-error exit and
         // not a path the branch above covers.
-        if (issued.length === 0) {
+        if (!renumbered) {
           try {
             return await driver.create(object, row, driverOptions);
           } catch (retryError) {
@@ -8747,6 +8961,31 @@ export class ObjectQL implements IObjectQLEngine {
     const column = uniqueViolationColumn(error);
     if (column === undefined) return true;
     return issued.some((one) => one.field === column);
+  }
+
+  /**
+   * [#25073] A driver that owns the record-number counter
+   * (`supports.autonumber`) but cannot issue a number ahead of the write
+   * (no `IDataDriver.issueAutonumbers`) still fills it inside `create()`, so a
+   * stored field whose `expression` reads it is stored as computed WITHOUT
+   * it, and every insert looks successful. That is a stored value that is
+   * not what its declaration says (AGENTS.md, degradation log levels: `error`),
+   * said once per object per engine instance, with the remedy.
+   */
+  private warnAutonumberReadersUnserved(object: string, plan: readonly FormulaPlanEntry[], driver: unknown): void {
+    if (this.autonumberReadersUnservedReported.has(object)) return;
+    this.autonumberReadersUnservedReported.add(object);
+    const fields = plan.map((entry) => entry.name);
+    const driverName = (driver as { name?: unknown } | null)?.name;
+    this.logger.error(
+      `Stored field(s) [${fields.join(', ')}] on '${object}' read a record number that driver ` +
+        `'${String(driverName ?? 'unknown')}' issues only inside create(), so every insert stores them computed ` +
+        'WITHOUT the number while the write reports success; an update by id recomputes them later. ' +
+        'Use a driver that implements IDataDriver.issueAutonumbers (driver-sql and the drivers built on it do), ' +
+        'or keep the record number out of the stored expression. Reported once per object.',
+      undefined,
+      { object, fields, driver: driverName },
+    );
   }
 
   /**
@@ -17228,23 +17467,62 @@ export class ObjectQL implements IObjectQLEngine {
         // have already consumed a sequence value for every good row on the
         // failed attempt, leaving gaps. Required-validation exempts autonumber
         // fields either way (they are engine-assigned), and a driver that owns
-        // autonumber assigns nothing here — so no validation rule can depend on
-        // the value, making this reorder safe. In partial mode dead rows are
-        // skipped, so they never consume a sequence value either.
+        // autonumber issues here only through `issueAutonumbers` (#25073), at
+        // this same point — so no validation rule can depend on the value,
+        // making this reorder safe. In partial mode dead rows are skipped, so
+        // they never consume a sequence value either.
         // [#6806] What each row's autonumbers were ISSUED from, so a
         // unique-violation on the write below can be attributed to a counter
         // and answered by re-seeding it. Empty for every row when the driver
         // owns autonumber, and for any row the engine numbered nothing on.
         const issuedPerRow: IssuedAutonumber[][] = new Array(rows.length).fill(null).map(() => []);
+        // [#25073] A stored field whose `expression` reads the record number
+        // was computed above, before the number existed. Where the ENGINE
+        // issues (the fallback drivers) it is computed again right after
+        // `applyAutonumbers`. Where the DRIVER owns the counter, the number
+        // used to appear only inside `create()`, too late for anything to read
+        // it, so for an object with such a field the driver is asked for it
+        // HERE, at the same point after validation, through
+        // `IDataDriver.issueAutonumbers`; the row then reaches `create()` /
+        // `bulkCreate()` carrying it, and the write stays one statement. An
+        // object no stored expression reads a number on keeps the driver's
+        // own issue-at-write path, unchanged (and its in-driver batch re-seed,
+        // #6943, which the engine cannot take over: it never re-issues a batch).
+        const autonumberReaders: AutonumberReaders | undefined = (() => {
+          const plan = storedExpressionsReading(storedExpressionPlan, autonumberFieldNames(schemaForValidation));
+          if (plan.length === 0) return undefined;
+          const listeners = [...this.insertRecomputeListeners.values()];
+          const recomputed = listeners.length === 0 ? undefined : async (row: Record<string, unknown>, fields: string[]) => {
+            for (const listener of listeners) await listener({ object, row, fields });
+          };
+          return { plan, execCtx: opCtx.context, serving: storedExpressionServing, recomputed };
+        })();
+        const issueThroughDriver = driverOwnsAutonumber && autonumberReaders !== undefined
+          && typeof (driver as any)?.issueAutonumbers === 'function';
+        if (driverOwnsAutonumber && autonumberReaders !== undefined && !issueThroughDriver) {
+          this.warnAutonumberReadersUnserved(object, autonumberReaders.plan, driver);
+        }
+        // [#25073] The fields the DRIVER issued on each row, through the member.
+        const driverIssuedPerRow: string[][] = rows.map(() => []);
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
-            issuedPerRow[i] = await this.applyAutonumbers(object, rows[i], opCtx.context, driverOwnsAutonumber);
+            if (issueThroughDriver) {
+              driverIssuedPerRow[i] = (await (driver as any).issueAutonumbers(object, [rows[i]], driverOptions))?.[0] ?? [];
+            } else {
+              issuedPerRow[i] = await this.applyAutonumbers(object, rows[i], opCtx.context, driverOwnsAutonumber);
+            }
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
           }
         }
+        // [#25073] The readers, computed again over every live row that now
+        // carries a number it did not carry when they were last computed.
+        await recomputeAutonumberReaders(
+          autonumberReaders,
+          rows.filter((_, i) => rowErrors[i] === undefined && (issuedPerRow[i].length > 0 || driverIssuedPerRow[i].length > 0)),
+        );
         // Live rows = the ones that survived per-row preparation. In
         // non-partial mode rowErrors is all-empty, so this is exactly `rows`.
         const liveIndexes: number[] = [];
@@ -17297,13 +17575,24 @@ export class ObjectQL implements IObjectQLEngine {
                   object, fields: [...new Set(batchIssued.map((one) => one.field))],
                 });
               }
+              // [#25073] The same answer for numbers the driver issued: the
+              // member re-seeds the counters it proves stale, and the batch is
+              // not re-issued, for the reason above.
+              if (liveIndexes.some((i) => driverIssuedPerRow[i].length > 0)) {
+                const emptied: string[][] = (await (driver as any).issueAutonumbers(object, liveRows, driverOptions, error)) ?? [];
+                if (emptied.some((fields) => fields.length > 0)) {
+                  this.logger.warn('Autonumber collided in a batch insert — counter re-seeded, batch not re-issued', {
+                    object, fields: [...new Set(emptied.flat())],
+                  });
+                }
+              }
               throw envelopeUniqueViolation(error, object, this.getSchema(object));
             }
           }
         } else {
           result = await this.createWithAutonumberResync(
             driver, object, liveRows[0], driverOptions, issuedPerRow[liveIndexes[0]],
-            opCtx.context, driverOwnsAutonumber,
+            opCtx.context, driverOwnsAutonumber, driverIssuedPerRow[liveIndexes[0]], autonumberReaders,
           );
         }
 

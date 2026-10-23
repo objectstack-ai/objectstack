@@ -404,6 +404,13 @@ let recordScopeEnv: Environment | undefined;
  *    faults `has() invalid argument`. `@objectstack/lint`'s
  *    `validate-visibility-predicates` masks `has(…)` spans at its own call site
  *    (#16118) and that mask stays load-bearing; no other consumer has one.
+ *    The page/view door now REPORTS the argument itself, under
+ *    `visibility-predicate-has-argument` (#25281); on every other surface
+ *    `validateExpression`'s compile pass refuses it. Neither changes what this
+ *    helper answers: a `has()` first error still masks the references behind
+ *    it here. A select whose receiver is an index or a call (`has(a[0].b)`) is
+ *    NOT in this class: the spec admits it, and {@link rewriteIndexedHas}
+ *    lowers it before this check runs (#25267).
  *
  * ⇒ A `null` from this helper is still "nothing was reported", never "the
  * source is clean". ⛔ Do not close the remaining classes by widening the regex
@@ -423,7 +430,9 @@ export function firstUndeclaredReference(
     const env = knownFields.length === 0
       ? (recordScopeEnv ??= buildScopedEnv([]))
       : buildScopedEnv(knownFields);
-    const result = env.parse(source).check?.() as
+    // #25267 — judged in the form the engine checks, so an indexed `has()`
+    // receiver is not a first error that masks every reference behind it.
+    const result = env.parse(rewriteIndexedHas(source)).check?.() as
       | { valid: boolean; error?: { message?: string } }
       | undefined;
     if (result && result.valid === false) {
@@ -862,7 +871,8 @@ export function inferCelType(source: string, knownFields: readonly string[] = []
     const env = knownFields.length === 0
       ? (recordScopeEnv ??= buildScopedEnv([]))
       : buildScopedEnv(knownFields);
-    const result = env.parse(source).check?.() as
+    // #25267 — typed in the form the engine checks (an indexed `has()` is `bool`).
+    const result = env.parse(rewriteIndexedHas(source)).check?.() as
       | { valid?: boolean; type?: unknown }
       | undefined;
     if (!result || result.valid === false) return null;
@@ -1066,7 +1076,7 @@ export function firstTypeMismatch(
     // unifier *before* the check reaches an inner date-arith overload; rewrite it
     // first (same pass the runtime uses) so the real fault surfaces (#3306).
     const env = buildTypedEnv(fieldCelTypes, scope);
-    const result = env.parse(rewriteNullableTernary(source)).check?.() as
+    const result = env.parse(rewriteNullableTernary(rewriteIndexedHas(source))).check?.() as
       | { valid?: boolean; error?: { message?: string } }
       | undefined;
     if (!result || result.valid !== false) return null;
@@ -1461,6 +1471,111 @@ function rememberNullableRewrite(source: string, rewritten: string): void {
     if (first !== undefined) nullableTernaryCache.delete(first);
   }
   nullableTernaryCache.set(source, rewritten);
+}
+
+/**
+ * #25267 — make `has()` over a selection whose receiver is not a plain name
+ * (`has(data.environments[0].storage.usedMb)`, `has(lookup(x).y)`) type-check
+ * and evaluate, as the CEL spec defines it: `has(e.f)` is a presence test on
+ * field `f` of whatever `e` evaluates to, and `e` may be any expression.
+ *
+ * cel-js 8.0.0's `has()` macro walks the selection chain back to its root and
+ * refuses the argument (`has() invalid argument`) unless that root is an
+ * identifier — so an index or a call anywhere in the chain faulted every time
+ * it was checked or run, while a page's `visibleWhen` (whose publish gate
+ * parses but does not type-check) published clean and failed open.
+ *
+ * The call is lowered to `e.?f.hasValue()`. That is the CEL spec's own
+ * definition of optional field selection (`e.?f` is `optional.of(e.f)` when
+ * `has(e.f)`, else `optional.none()`), so the two are the same test, and cel-js
+ * evaluates the receiver `e` exactly as `has()` does: an absent key on the way
+ * to the last selection still faults (`No such key`), only the last one answers
+ * `false`. `cel-has-indexed-receiver.test.ts` pins the two forms against each
+ * other over every value kind.
+ *
+ * The rewrite is:
+ *   - **narrow** — it fires ONLY on a `has()` whose argument is a `.` selection
+ *     rooted in something other than an identifier. `has(record.a.b)` is left to
+ *     cel-js, and so is every argument the spec itself refuses: a bare name
+ *     (`has(status)`) or an index as the LAST step (`has(a[0])`) still faults
+ *     `has() invalid argument`;
+ *   - **applied where cel-js type-checks** — `evaluate`, `compile` and the
+ *     checker-backed helpers ({@link firstUndeclaredReference},
+ *     {@link inferCelType}, the overload-fault probe), which are the only places
+ *     the macro's refusal can arise. The parse-only front end
+ *     ({@link parseCelToAst}) keeps the authored `has(…)` call, which parses
+ *     already, so an AST consumer that keys on a `has()` call still finds it;
+ *   - **idempotent** — the lowered form carries no `has()` call to lower again.
+ *
+ * Returns the (possibly rewritten) source; only reserializes when a rewrite
+ * actually happened. Memoized; a parse fault returns the source unchanged.
+ */
+export function rewriteIndexedHas(source: string): string {
+  if (typeof source !== 'string' || !source.trim()) return source;
+  const cached = indexedHasCache.get(source);
+  if (cached !== undefined) return cached;
+  // Cheap gate: a rewrite needs a `has(` call.
+  if (!HAS_CALL_RE.test(source)) {
+    rememberIndexedHasRewrite(source, source);
+    return source;
+  }
+  let ast: unknown;
+  try {
+    ast = (recordScopeEnv ??= buildScopedEnv([])).parse(source).ast;
+  } catch {
+    rememberIndexedHasRewrite(source, source);
+    return source;
+  }
+  let changed = false;
+  // Children first, so a `has()` nested inside a lowered receiver is lowered too.
+  const lower = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) value[i] = lower(value[i]);
+      return value;
+    }
+    if (!isCelNode(value)) return value;
+    if (Array.isArray(value.args)) lower(value.args);
+    const selection = indexedHasSelection(value);
+    if (!selection) return value;
+    changed = true;
+    return { op: 'rcall', args: ['hasValue', { op: '.?', args: selection.args }, []] };
+  };
+  const lowered = lower(ast);
+  const out = changed ? serialize(lowered as Parameters<typeof serialize>[0]) : source;
+  rememberIndexedHasRewrite(source, out);
+  return out;
+}
+
+/** A `has(` call, spaced or not, not the tail of a longer name or a member call. */
+const HAS_CALL_RE = /(^|[^\w$.])has\s*\(/;
+
+/**
+ * The argument of `node` when it is a `has()` call {@link rewriteIndexedHas}
+ * lowers — a `.` selection whose chain of `.` / `.?` steps ends in something
+ * other than an identifier — or `null`.
+ */
+function indexedHasSelection(node: CelNode): CelNode | null {
+  if (node.op !== 'call' || !Array.isArray(node.args) || node.args[0] !== 'has') return null;
+  const callArgs: unknown = node.args[1];
+  if (!Array.isArray(callArgs) || callArgs.length !== 1) return null;
+  const selection: unknown = callArgs[0];
+  if (!isCelNode(selection) || selection.op !== '.' || !Array.isArray(selection.args)) return null;
+  let root: unknown = selection.args[0];
+  while (isCelNode(root) && (root.op === '.' || root.op === '.?') && Array.isArray(root.args)) {
+    root = root.args[0];
+  }
+  return isCelNode(root) && root.op !== 'id' ? selection : null;
+}
+
+/** Bounded memo of source → indexed-`has()`-lowered source (#25267). */
+const indexedHasCache = new Map<string, string>();
+const INDEXED_HAS_CACHE_MAX = 500;
+function rememberIndexedHasRewrite(source: string, rewritten: string): void {
+  if (indexedHasCache.size >= INDEXED_HAS_CACHE_MAX) {
+    const first = indexedHasCache.keys().next().value;
+    if (first !== undefined) indexedHasCache.delete(first);
+  }
+  indexedHasCache.set(source, rewritten);
 }
 
 /** Coerce cel-js's BigInt-flavored return into spec-friendly JS values. */
@@ -1870,7 +1985,8 @@ export const celEngine: DialectEngine = {
       // #3306 — accept the null-guard idiom `cond ? <value> : null`, which cel-js's
       // ternary unifier otherwise rejects (`int`/`double`/`string` ≠ `null`). Same
       // rewrite the runtime uses, so build and eval agree on what is valid.
-      const compiled = env.parse(rewriteNullableTernary(source));
+      // #25267 — and `has()` over an indexed receiver, lowered the same way.
+      const compiled = env.parse(rewriteNullableTernary(rewriteIndexedHas(source)));
       // Surface check errors eagerly. cel-js's `check()` returns a
       // `TypeCheckResult` object (`{ valid, type?, error? }`) — NOT an array —
       // so the type fault (including `found no matching overload for 'PRIOR(dyn)'`
@@ -1942,8 +2058,10 @@ export const celEngine: DialectEngine = {
         // row against the values in hand. Non-date operands are untouched.
         // #3306 — then relax the null-guard idiom `cond ? <value> : null` so a
         // nullable numeric/string formula evaluates instead of faulting cel-js's
-        // ternary unifier. All rewrites are no-ops for sources that don't need them.
-        const evalSource = rewriteNullableTernary(rewriteTemporalEquality(source, scope));
+        // ternary unifier. #25267 — and lower `has()` over an indexed receiver,
+        // which cel-js's macro refuses, to the spec-equivalent `e.?f.hasValue()`.
+        // All rewrites are no-ops for sources that don't need them.
+        const evalSource = rewriteNullableTernary(rewriteTemporalEquality(rewriteIndexedHas(source), scope));
         try {
           const raw = runProgram(env, evalSource, scope);
           return { ok: true, value: coerce(raw) as T };

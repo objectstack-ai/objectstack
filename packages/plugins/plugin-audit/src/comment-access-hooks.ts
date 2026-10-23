@@ -1128,12 +1128,13 @@ export function installCommentAccessHooks(
  * this gate ({@link commentThreadGate}).
  *
  * That module decides up front, by name, what keeps the bounded probe (over the
- * pair): ADR-0139 D5's three classes — a delegated caller (the whole read), a
- * parent an object-scoped read middleware narrows (`sys_attachment`,
- * `sys_comment_reaction`, `sys_approval_request`, …), a federated parent — and
- * the two whole-read states it reports once: an engine that cannot classify,
- * and a security service that answers no `canReadObject` (no leaf is written
- * without it). ⛔ Never reached by catching a refusal.
+ * pair): ADR-0139 D5's two remaining classes — a parent an object-scoped read
+ * middleware narrows (`sys_attachment`, `sys_comment_reaction`,
+ * `sys_approval_request`, …), a federated parent — and the two whole-read
+ * states it reports once: an engine that cannot classify, and a security
+ * service that answers no `canReadObject` (no leaf is written without it).
+ * ⛔ Never reached by catching a refusal. A delegated caller is not one of
+ * them: it reads through the leaves (D5.1, as amended).
  *
  * ## A row the backfill has not reached keeps the probe — never a leaf
  *

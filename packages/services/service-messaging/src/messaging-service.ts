@@ -25,6 +25,7 @@ import { type InboxCaller, resolveInboxRecipient } from './inbox-caller.js';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 import { INBOX_SYSTEM_CONTEXT } from './inbox-system-context.js';
 import { assertActorReferenceResolves } from './actor-reference.js';
+import { USER_OBJECT } from './recipient-locale.js';
 import {
     assertNotificationTextKeys,
     type NotificationTextKeys,
@@ -1368,6 +1369,9 @@ export class MessagingService {
         // report a channel as both refused and enqueued — which is exactly the
         // ambiguity the once-per-channel refusal count below exists to remove.
         const mounted = new Map<string, boolean>();
+        // [#25194] Which recipients are a user's id, read once per emit: the
+        // row's `recipient_user_id`, which titles it by the person.
+        const users = await this.userRecipients(targets.map((t) => t.recipient));
         const isMounted = (id: string): boolean => {
             let answer = mounted.get(id);
             if (answer === undefined) {
@@ -1392,6 +1396,7 @@ export class MessagingService {
                     const id = await outbox.enqueue({
                         notificationId,
                         recipientId: recipient,
+                        recipientUserId: users.has(recipient) ? recipient : undefined,
                         channel,
                         topic: input.topic,
                         payload: deliveryPayload,
@@ -1417,6 +1422,43 @@ export class MessagingService {
             );
         }
         return deliveries;
+    }
+
+    /**
+     * [#25194] The recipients that are a `sys_user` id, in ONE read per emit.
+     *
+     * A resolved recipient is a user id or an address kept verbatim (an email
+     * no user holds, a phone number), and only the store can tell which: a
+     * bare spec passes through `RecipientResolver` unchecked. The answer stamps
+     * the delivery row's `recipient_user_id`, which the outbox writes past the
+     * engine's reference check (system context), so it is stamped only for an
+     * id this read found.
+     *
+     * The read is display-only: the row's title falls back to `recipient_id`
+     * without it, and no delivery is routed by it. So a failed read is a
+     * `warn` and an empty answer, never a failed emit.
+     */
+    private async userRecipients(recipients: readonly string[]): Promise<ReadonlySet<string>> {
+        const data = this.ctx.getData?.();
+        const ids = [...new Set(recipients)];
+        if (!data || ids.length === 0) return new Set();
+        try {
+            // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: a
+            // directory read on the recipients' behalf whose only use is the id.
+            const rows = await data.find(
+                USER_OBJECT,
+                { where: { id: { $in: ids } }, fields: ['id'], limit: ids.length },
+                { context: FAN_OUT_SYSTEM_CONTEXT },
+            );
+            return new Set((rows ?? []).map((r: any) => String(r?.id ?? '')).filter(Boolean));
+        } catch (err) {
+            this.ctx.logger.warn(
+                `[messaging] emit: the '${USER_OBJECT}' read for ${ids.length} recipient(s) failed ` +
+                `(${(err as Error)?.message ?? String(err)}); their delivery rows name no recipient user ` +
+                `and are titled by the raw recipient`,
+            );
+            return new Set();
+        }
     }
 
     /** Find an existing event id by its dedup key, tolerating lookup failure. */

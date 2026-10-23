@@ -2148,11 +2148,9 @@ export class AppPlugin implements Plugin {
      * Hence this seam. `sys_organization` gaining its first row is exactly the
      * event that makes the answer derivable, and it is the ownership handoff's
      * twin: `claimSeedOwnership` already re-owns seeded rows to the first admin at
-     * the analogous moment, and `claim-seed-ownership.ts` names the missing
-     * tenancy half in its own header ("the ownership twin of org-scoping's
-     * `claimOrphanOrgRows`, which back-fills `organization_id`") — that back-fill
-     * ships in the organizations runtime, which a single-tenant install
-     * does not have. This is the always-present half of the same handoff.
+     * the analogous moment. It lives here, in the runtime, because the
+     * organizations plugin is not mounted on a single-tenant install; this is
+     * the always-present half of the same handoff.
      *
      * Cheap by construction: the backfill's first act is one indexed probe of
      * `_objectstack_sequences`, and on any install with no untenanted counter it

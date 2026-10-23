@@ -1053,6 +1053,19 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
+   * [ADR-0126 §6 wall 3] Every declared rule the registry holds at this boot,
+   * each with the package that ships it, whatever its activation-ledger row
+   * says. `null` when this service reads no declarations at all — a
+   * composition with no registry source, which is no answer about any name.
+   * The access-upgrade boot report (plugin-security) compares the ledger's
+   * `sharing_rule` rows against this list.
+   */
+  async listDeclaredRules(): Promise<DeclaredSharingRule[] | null> {
+    if (!this.declaredSource) return null;
+    return this.declaredSource.list();
+  }
+
+  /**
    * [ADR-0131 D6 regime C] Reconcile a declared rule's name-keyed grants with
    * its activation-ledger row, in the request that wrote the row
    * ({@link bindSharingRuleActivationReconcile}) — not at the next boot's

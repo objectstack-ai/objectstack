@@ -61,7 +61,6 @@ export type { OrganizationsPluginOptions } from './organizations-plugin.js';
 // the service name still reads as.
 export { OrganizationsPlugin as OrgScopingPlugin } from './organizations-plugin.js';
 export type { OrganizationsPluginOptions as OrgScopingPluginOptions } from './organizations-plugin.js';
-export { claimOrphanOrgRows } from './claim-orphan-org-rows.js';
 export { claimOrgSeedOwnership } from './claim-org-seed-ownership.js';
 // ⛔ No donor-org clone is exported, and none may be re-added (cloud#1345).
 // A new organization's rows come from the APP's own seed definitions

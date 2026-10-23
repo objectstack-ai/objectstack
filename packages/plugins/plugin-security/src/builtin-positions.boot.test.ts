@@ -70,7 +70,7 @@ import { securityObjects, SECURITY_PLUGIN_ID } from './manifest.js';
 import { securityBuiltinPositions } from './builtin-positions.js';
 import { withLegacyCatalogTables } from './__tests__/legacy-catalog-objects.testkit.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const POSTURE_ENV = 'OS_TENANCY_POSTURE';
@@ -232,10 +232,9 @@ async function boot(scenario: Scenario): Promise<Booted> {
     objects: withLegacyCatalogTables([SysUser, SysAccount, SysMember, SysOrganization, ...securityObjects]),
   } as any);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, ['sys_position']);
   if (scenario.authoredPosition) {
     // How a metadata author's saved definition is hydrated: no package.
     (engine as any).registry.registerItem('position', { name: 'door_authored', label: 'Door Authored' }, 'name');

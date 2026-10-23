@@ -35,7 +35,6 @@ export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_approval_delegation.fields.reason.help": "712516f1461dff2b",
   "objects.sys_approval_delegation.fields.reason.label": "ac399f03d7f2e64d",
   "objects.sys_approval_delegation.fields.updated_at.label": "aba63dc2a9c79b8d",
-  "objects.sys_approval_delegation.fields.valid_from.help": "20b8f73a1c3976d6",
   "objects.sys_approval_delegation.fields.valid_from.label": "02eaf201e57c9eda",
   "objects.sys_approval_delegation.fields.valid_until.help": "a48ea34e65933e9d",
   "objects.sys_approval_delegation.fields.valid_until.label": "a68db5bd4fc72a13",

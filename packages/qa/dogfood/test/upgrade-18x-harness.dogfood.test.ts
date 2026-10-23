@@ -399,6 +399,26 @@ describe(`[#24884] an 18.0.0 database (fixture from ${gaManifest.ref} @ ${gaMani
     expect(rowsOf(await res.json()).map((r) => String(r?.title))).toContain(`${FIXTURE_NAMES.task} — edited`);
   }, 240_000);
 
+  // [ADR-0131 D8] Its settings rows carry their organization, and no reach
+  // reads a row written with none: they still answer, through the admin's
+  // Setup door and for a process-wide reader that names no organization (the
+  // email brand name, the anonymous runtime config), which reads as the one
+  // organization D9 derives.
+  it('[ADR-0131 D8] its settings still answer: through the Setup door, and for a reader that names no organization', async () => {
+    expect(stack, 'HEAD is booted').toBeDefined();
+    const adminTok = await stack!.signIn(FIXTURE_PEOPLE.admin.email, FIXTURE_PEOPLE.admin.password);
+    const res = await stack!.raw('/api/settings/branding', { headers: { Authorization: `Bearer ${adminTok}` } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { values: Record<string, { value: unknown; source: string }> } };
+    expect(body.data.values.workspace_name).toMatchObject({ value: FIXTURE_NAMES.workspaceName, source: 'tenant' });
+
+    const settings = stack!.kernel.getService('settings') as {
+      get(namespace: string, key: string, ctx?: object): Promise<{ value: unknown; source: string }>;
+    };
+    expect(await settings.get('branding', 'workspace_name', {})).toMatchObject({ value: FIXTURE_NAMES.workspaceName, source: 'tenant' });
+    expect(await settings.get('localization', 'timezone', {})).toMatchObject({ value: 'UTC', source: 'tenant' });
+  }, 120_000);
+
   it('every 18.0.0 row of every reshaped table is still there, with its key columns', async () => {
     await stack?.stop();
     stack = undefined;

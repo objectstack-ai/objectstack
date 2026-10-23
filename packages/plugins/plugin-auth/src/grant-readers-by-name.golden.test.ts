@@ -42,7 +42,7 @@ import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
 import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { withLegacyPermissionSetTable } from './__tests__/legacy-catalog-objects.testkit.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const POSTURE_ENV = 'OS_TENANCY_POSTURE';
@@ -135,10 +135,9 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
     objects: withLegacyPermissionSetTable([SysUser, SysAccount, SysMember, SysOrganization, SysMetadataActivation, ...securityObjects]),
   } as any);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, grants, identities) exist
-  // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
-  // NOT NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, ['sys_permission_set']);
   await plugin.start(ctx);
   vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
   registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, {

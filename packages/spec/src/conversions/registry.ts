@@ -8871,7 +8871,8 @@ const emailTemplateCategoryIsSystemRemoved: MetadataConversion = {
           category: 'auth',
           locale: 'en-US',
           subject: 'Reset your password',
-          bodyHtml: '<p>{{{resetUrl}}}</p>',
+          bodyHtml: '<p><a href="{{{resetUrl}}}">Reset</a></p>',
+          variables: [{ name: 'resetUrl', type: 'url', required: true }],
           isSystem: true,
         },
         {
@@ -8904,7 +8905,8 @@ const emailTemplateCategoryIsSystemRemoved: MetadataConversion = {
           label: 'Password Reset',
           locale: 'en-US',
           subject: 'Reset your password',
-          bodyHtml: '<p>{{{resetUrl}}}</p>',
+          bodyHtml: '<p><a href="{{{resetUrl}}}">Reset</a></p>',
+          variables: [{ name: 'resetUrl', type: 'url', required: true }],
         },
         {
           name: 'crm.welcome',

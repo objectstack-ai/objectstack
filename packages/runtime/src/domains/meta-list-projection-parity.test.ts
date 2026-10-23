@@ -167,6 +167,11 @@ const STORE: Record<string, any[]> = {
     dataset: [{ name: 'pipeline', label: 'Pipeline', object: 'opportunity' }],
     picklist: [{ name: 'industry', label: 'Industry', options: [{ label: 'Technology', value: 'technology' }] }],
     flow: [{ name: 'on_lead', label: 'On lead', type: 'autolaunched' }],
+    // [#25333] The `?include=grants` step describes each position.
+    position: [
+        { name: 'sales_rep', label: 'Sales rep', permissionSets: ['crm_sales_user'] },
+        { name: 'sales_manager', label: 'Sales manager', permissionSets: [] },
+    ],
 };
 
 /**
@@ -325,6 +330,14 @@ function protocolDouble(opts: { withoutLayered?: boolean } = {}) {
 const securityFor = (caller: Caller) => ({
     resolvePermissionSetNames: async () => caller.holdings,
     getMetadataReadableFields: async () => caller.readableFields,
+    // [#25333] The holder count is the caller's to read: a holding caller gets a number, anyone else `null`.
+    describePositionGrants: async (positions: readonly string[]) => positions.map((position) => ({
+        position,
+        holderCount: caller.holdings.length > 0 ? (position === 'sales_rep' ? 2 : 1) : null,
+        permissionSets: position === 'sales_rep'
+            ? [{ name: 'crm_sales_user', via: 'definition' }]
+            : [{ name: 'sales_manager', via: 'name' }],
+    })),
 });
 
 const i18nDouble = {
@@ -484,6 +497,8 @@ const PARAM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record
     { label: '?object=lead', param: 'object', query: { object: 'lead' } },
     { label: '?object=nope', param: 'object', query: { object: 'nope' } },
     { label: '?include=content', param: 'include', query: { include: 'content' } },
+    // [#25333] The position list's opt-in description.
+    { label: '?include=grants', param: 'include', query: { include: 'grants' } },
     { label: '?locale=zh-CN', param: 'locale', query: { locale: 'zh-CN' } },
     { label: 'Accept-Language: zh-CN', query: {}, headers: { 'accept-language': 'zh-CN' } },
     { label: '?package=crm', param: 'package', query: { package: 'crm' } },
@@ -497,6 +512,7 @@ const PARAM_AXIS = new Set(PARAM_PROBES.map((p) => p.param).filter((p): p is str
 const TYPE_CELLS: readonly string[] = [
     'app', 'apps', 'view', 'views', 'doc', 'docs', 'book', 'books', 'api', 'apis',
     'object', 'objects', 'dashboard', 'dashboards', 'page', 'action', 'dataset', 'picklist', 'flow',
+    'position', 'positions',
     // [#20408] A segment that names no metadata type: `RestServer` refuses it
     // (`refuseUnknownMetaListType`) rather than listing an empty collection.
     'totally_invented_type',
@@ -648,6 +664,14 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         expect(apps.items?.find((a: any) => a.name === 'crm')?.label).toBe('客户管理');
         expect(names((await read('/meta/api')).items)).toEqual(['crm_served']);
         expect(names((await read('/meta/apis')).items)).toEqual(['crm_served']);
+        // [#25333] `?include=grants` describes each position; without it the list is untouched.
+        const described = (await read('/meta/position', { include: 'grants' })).items;
+        expect(described?.map((p: any) => [p.name, p._holderCount, p._grantedPermissionSets])).toEqual([
+            ['sales_rep', 2, [{ name: 'crm_sales_user', via: 'definition' }]],
+            ['sales_manager', 1, [{ name: 'sales_manager', via: 'name' }]],
+        ]);
+        expect(text(await read('/meta/positions'))).not.toContain('_holderCount');
+        expect((await bootRest('non-holder').read('/meta/position', { include: 'grants' })).items?.[0]?._holderCount).toBeNull();
     });
 });
 

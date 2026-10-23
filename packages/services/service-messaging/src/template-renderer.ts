@@ -39,6 +39,41 @@ export interface RenderInput {
 
 const TOKEN = /\{\{\s*([\w.$]+)\s*\}\}/g;
 
+/** One hole the renderer substitutes: its span in the template, braces included, and the path it reads. */
+export interface TemplateHole {
+    start: number;
+    end: number;
+    text: string;
+    path: string;
+}
+
+/**
+ * Every hole {@link interpolate} and {@link renderNotification} substitute in
+ * `template`, in order. It reads the renderer's own grammar ({@link TOKEN}), so
+ * the placement judge the template object's save hooks run
+ * (`template-hole-placement.ts`) judges exactly the spans this module replaces —
+ * never text it leaves verbatim, never a span it misses.
+ */
+export function templateHoles(template: string): TemplateHole[] {
+    if (!template) return [];
+    const holes: TemplateHole[] = [];
+    for (const m of template.matchAll(TOKEN)) {
+        const start = m.index ?? 0;
+        holes.push({ start, end: start + m[0].length, text: m[0], path: m[1] });
+    }
+    return holes;
+}
+
+/**
+ * Whether a template row's `format` sends its body to the `html` face, where
+ * every hole is HTML-encoded (see {@link renderNotification}). One spelling for
+ * the renderer and the placement judge, so the rows the judge holds to the
+ * placement rule are exactly the rows rendered with that encoding.
+ */
+export function isHtmlFormat(format: unknown): boolean {
+    return format === 'html' || format === 'mjml';
+}
+
 /** How one hole's value is encoded for the face it lands in. */
 type HoleEncoder = (value: string) => string;
 
@@ -106,7 +141,13 @@ function lookup(ctx: Record<string, unknown>, path: string): unknown {
  *    template's own markup is the author's and renders as written; only the
  *    values are encoded. There is no unescaped hole form here — a template that
  *    needs a pre-rendered fragment is an email template (`sys_email_template`,
- *    named in a notify step's `template`), whose renderer has one.
+ *    named in a notify step's `template`), whose renderer has one. An `mjml`
+ *    body is not compiled: it reaches the `html` face as written.
+ *  - that encoding is right in element text and in a quoted plain-text
+ *    attribute value, and in no other place a hole can sit, so a row whose
+ *    html / mjml body puts a hole anywhere else is refused when it is saved
+ *    (ruling `6335348115` on #25082, `template-hole-placement.ts`). A row stored
+ *    before that rule keeps rendering here unchanged.
  *  - the subject and a `markdown` / `text` body are plain text: values render
  *    verbatim, because an entity in plain text is a corrupted character.
  */
@@ -124,7 +165,7 @@ export function renderNotification(
 
     if (template && (template.subject || template.body)) {
         const subject = interpolate(String(template.subject ?? ''), ctx) || String(ctx.title ?? input.topic);
-        const isHtml = template.format === 'html' || template.format === 'mjml';
+        const isHtml = isHtmlFormat(template.format);
         const renderedBody = substitute(String(template.body ?? ''), ctx, isHtml ? escapeHtml : verbatim);
         return isHtml ? { subject, html: renderedBody } : { subject, text: renderedBody };
     }

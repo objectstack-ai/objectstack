@@ -78,6 +78,15 @@ export interface InstalledManifestEntry {
      * boot-time nagging #4884 forbids.
      */
     globalUniqueAttestation?: GlobalUniqueAttestation;
+    /**
+     * [ADR-0126 §6 wall 3] The installer's confirmation of the access-class
+     * findings this upgrade created — a switch-off a vendor rename re-enables,
+     * a choice whose name the package no longer ships. Recorded for the audit:
+     * the finding set confirmed (its digest), by whom, when. It answers only
+     * the install that wrote it; the next upgrade is checked afresh, and the
+     * boot report still raises whatever stands.
+     */
+    accessUpgradeConfirmation?: { findingSet: string; confirmedBy: string; confirmedAt: string };
 }
 
 /**

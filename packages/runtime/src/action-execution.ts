@@ -383,6 +383,33 @@ function isObjectPackageDisabledRefusal(err: unknown): boolean {
 }
 
 /**
+ * [#25296] Throw the protocol's own `404 OBJECT_PACKAGE_DISABLED` when
+ * `object`'s owning package is disabled, and return otherwise. The question
+ * the REST `/actions` door asks before it reads an action's declaration: an
+ * object the data plane refuses has no action that may run, so neither its
+ * declaration gates nor its handler are reached.
+ *
+ * The read is {@link readExposureDeclaration}'s, the by-name object read the
+ * data verbs' exposure gate makes, and the refusal is the one constructor the
+ * protocol raises from it and from its data plane: ⛔ never a second copy of
+ * the package predicate or of the refusal. Any other answer of that read is
+ * not this gate's to give: an absent object is the declaration resolution's
+ * to answer, and so is an unreadable metadata plane (ADR-0110 D3), so they
+ * pass here unanswered.
+ */
+export async function refuseDisabledPackageObject(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    object: string,
+    scopeId?: string,
+): Promise<void> {
+    try {
+        await readExposureDeclaration(deps, requestContext, object, scopeId);
+    } catch (err) {
+        if (isObjectPackageDisabledRefusal(err)) throw err;
+    }
+}
+
+/**
  * ── Object-level API exposure gate (ADR-0049, #1889) ─────
  * Honour the object's `apiEnabled` / `apiMethods` declarations for external
  * traffic: throws the refusal ({@link checkApiExposure}'s `404` / `405`) when
@@ -2601,16 +2628,28 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         envId?: string;
         ec: any;
         getMeta: () => any;
+        // [#25139] The objects whose `actions[]` the name is resolved against —
+        // the MCP bridge passes the listing `list_objects` serves (the
+        // protocol's merged read). Left out, the metadata service's
+        // `listObjects()` is read, as before.
+        readObjects?: () => Promise<readonly any[]>;
+        // [#25297] The standalone `action` items the name is resolved against
+        // — the MCP bridge passes the protocol's merged `action` listing.
+        // Left out, or answering `undefined` (a host with no merged read), the
+        // metadata service's `loadMany('action')` is read, as before.
+        readActions?: () => Promise<readonly any[] | undefined>;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
     },
 ): Promise<any> {
-    const { driver, envId, ec, getMeta, callData } = wiring;
+    const { driver, envId, ec, getMeta, readObjects, readActions, callData } = wiring;
     const meta: any = await getMeta();
     const params = input?.params && typeof input.params === 'object' ? input.params : {};
     const recordId = typeof input?.recordId === 'string' && input.recordId.length > 0 ? input.recordId : undefined;
 
     // Resolve the action def by declarative name (optionally scoped).
-    const resolved = await resolveActionByName(deps, meta, name, input?.objectName);
+    const resolved = await resolveActionByName(
+        deps, meta, name, input?.objectName, await readObjects?.(), await readActions?.(),
+    );
     if (!resolved) {
         throw new Error(
             input?.objectName
@@ -2822,13 +2861,18 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
  * optionally scoped to a single object. Returns the action plus its owning
  * object name, or `null`. Throws when the name is ambiguous across objects
  * and no `objectName` was supplied (so `run_action` can ask for one).
+ *
+ * `objects` and `actions` are handed to {@link collectActionDeclarations}
+ * unchanged.
  */
 export async function resolveActionByName(deps: ActionExecutionDeps, 
     meta: any,
     name: string,
     objectName?: string,
+    objects?: readonly any[],
+    actions?: readonly any[],
 ): Promise<{ action: any; objectName: string; obj: any } | null> {
-    const decls = await collectActionDeclarations(deps, meta);
+    const decls = await collectActionDeclarations(deps, meta, objects, actions);
     if (objectName) {
         const hit = decls.find((d) => d.objectName === objectName && d.action?.name === name);
         return hit ? { action: hit.action, objectName, obj: hit.obj } : null;
@@ -2860,11 +2904,32 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
  * declaration is the one that matches what actually runs. All MCP gating
  * (`ai.exposed`, ADR-0066 D4, headless-invokability) applies downstream of
  * this collection, unchanged.
+ *
+ * [#25139] `objects` are the definitions shape 1 reads; left out, the metadata
+ * service's `listObjects()`. The MCP bridge passes the protocol's merged
+ * listing, the one `list_objects` serves: on a kernel with an `environmentId`
+ * the metadata service holds no copy of an object a package registered during
+ * the boot, so its actions were neither listed nor resolved while REST's
+ * `/actions` door ran them.
+ *
+ * [#25297] `actions` are the items shape 2 reads; left out, the metadata
+ * service's `loadMany('action')`, whose failure answers none. The MCP bridge
+ * passes the protocol's merged `action` listing, the one
+ * `GET /api/v1/meta/action` serves. `loadMany` reads the service's loaders
+ * alone: they hold the compiled artifact's actions, but not an action a
+ * package registers through the `manifest` service (during the boot or by a
+ * marketplace install) nor an environment-authored `sys_metadata` row, which
+ * live in the registry and the overlay the merged read reads. So a package's
+ * object-less action, and an authored one, were never listed nor resolved
+ * while REST's `POST /actions/global/NAME` ran them; and an artifact
+ * package's action outlived the package's disable there.
  */
 export async function collectActionDeclarations(deps: ActionExecutionDeps, 
     meta: any,
+    objects?: readonly any[],
+    actions?: readonly any[],
 ): Promise<Array<{ action: any; objectName: string; obj: any }>> {
-    const objs: any[] = (await meta?.listObjects?.()) ?? [];
+    const objs: readonly any[] = objects ?? (await meta?.listObjects?.()) ?? [];
     const objByName = new Map<string, any>();
     for (const obj of objs) {
         if (typeof obj?.name === 'string') objByName.set(obj.name, obj);
@@ -2880,11 +2945,15 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
             out.push({ action, objectName, obj });
         }
     }
-    let standalone: any[] = [];
-    try {
-        standalone = (await meta?.loadMany?.('action')) ?? [];
-    } catch {
-        standalone = []; // no standalone-item source on this metadata service
+    let standalone: readonly any[] = [];
+    if (actions) {
+        standalone = actions;
+    } else {
+        try {
+            standalone = (await meta?.loadMany?.('action')) ?? [];
+        } catch {
+            standalone = []; // no standalone-item source on this metadata service
+        }
     }
     for (const action of standalone) {
         if (!action || typeof action.name !== 'string') continue;
@@ -3078,6 +3147,11 @@ export function registeredActionHandlerProbe(_deps: ActionExecutionDeps,
  *  3. the metadata service's standalone `action` rows — the env-scoped
  *     kernels where the registry carries no copy.
  *
+ * [#25308] On a host whose `protocol` slot has a by-name read, sources 2 and 3
+ * are that read instead: the protocol's merged `action` item, which withholds
+ * a disabled package's. The two copies are read only where no such read
+ * exists (structural absence, answered as before).
+ *
  * Sources 2 and 3 are what the route was missing: a Studio-authored or
  * standalone `defineAction` declaration was invisible here, so its declared
  * `type` (and its `requiredPermissions`) were never read on the REST path
@@ -3109,6 +3183,33 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
         const owner = standaloneActionObjectName(deps, action);
         return owner === objectName || isObjectLessActionKey(owner);
     };
+
+    // [#25308] The standalone declaration is the protocol's by-name action
+    // read, in {@link readExposureDeclaration}'s shape: the execution face
+    // where the protocol has one, the item under its own name or nothing. That
+    // read withholds a disabled package's item (it answers it as absent, as
+    // `GET /api/v1/meta/action/NAME` does), so such an action resolves to no
+    // declaration and the caller's "no declaration" answer is the one a name
+    // nothing declares gets. ⛔ The registry and metadata-service copies below
+    // are not consulted when the read exists: both keep a disabled package's
+    // item, and the package question is the protocol's alone. A read that
+    // throws is the metadata plane failing to answer (ADR-0110 D3), never a
+    // cue to fall back to a copy that would run that item during the outage.
+    const protocol = await deps.resolveService(requestContext, 'protocol', envId) as ExposureDeclarationRead | undefined;
+    const byName = typeof protocol?.getMetaItemForExecution === 'function'
+        ? protocol.getMetaItemForExecution
+        : typeof protocol?.getMetaItem === 'function' ? protocol.getMetaItem : undefined;
+    if (byName) {
+        let envelope: unknown;
+        try {
+            envelope = await byName.call(protocol, { type: 'action', name: actionName });
+        } catch (err: any) {
+            return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
+        }
+        const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
+        const declared = item !== null && typeof item === 'object' && item.name === actionName && ownsRoute(item);
+        return { action: declared ? item : undefined, obj };
+    }
 
     try {
         const fromRegistry: any = ql?.registry?.getItem?.('action', actionName);

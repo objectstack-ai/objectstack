@@ -145,8 +145,11 @@ describe('API Keys: Create Key through the existing mint route', () => {
   it('reveals the raw key in a result dialog, masked', () => {
     // The route answers `{ success, data: { key, … } }`; the console unwraps
     // `data` before resolving these paths, so the path is `key`, not `data.key`.
+    // Beside it, in plain text, the expiry the key actually got
+    // (`sys-api-key-create-expiry.test.ts`).
     expect(create?.resultDialog?.fields).toEqual([
       expect.objectContaining({ path: 'key', format: 'secret' }),
+      expect.objectContaining({ path: 'expires_at', format: 'text' }),
     ]);
   });
 

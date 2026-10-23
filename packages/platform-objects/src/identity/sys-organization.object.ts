@@ -173,6 +173,8 @@ export const SysOrganization = ObjectSchema.create({
       // Same gates as the other three mirrors: the org CAPABILITY (not
       // multi-org, ADR-0093 D9) and the grades that reach the endpoint
       // (ADR-0108 D1) — owner, admin and delegated_admin.
+      // Hidden while cloud-managed, as on the other three mirrors.
+      visible: 'features.cloudManaged != true',
       requiresFeature: 'organization',
       requiresMembershipReach: 'invite_member',
       // `${result.email}`: the invitee's address from the invitation row

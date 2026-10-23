@@ -9,22 +9,25 @@
  * at its executor boundary (ADR-0139 D2) and evaluated by the driver as one
  * subquery against the parent's table (D3), so a broad comment read is served
  * every comment the caller may read, with a true total, past the 2,000-row
- * window the thread probe had; D5's classes still read through the bounded
- * probe, by name; and a row the backfill has not reached is probed by its
- * thread, never leafed.
+ * window the thread probe had — a delegated caller's included, with its
+ * delegator intersection (D5.1, as amended); D5's two remaining classes still
+ * read through the bounded probe, by name; and a row the backfill has not
+ * reached is probed by its thread, never leafed.
  *
  * The security stand-in is E5's (`parent-record-read-leaf.integration.test.ts`,
  * whose header says why it is the smallest honest one): one rule per parent
  * object, served as `getReadFilter` and by one GLOBAL engine middleware.
  *
  *  - `e7_doc`: a member reads the records it owns; the admin reads them all;
+ *    a delegated caller reads the INTERSECTION of its own leg and its
+ *    delegator's (ADR-0090 D10), whose leg withholds a few of the member's;
  *  - `e7_vault`: no member may read it; the admin may;
  *  - `e7_gated`: narrowed by an object-scoped read middleware (D5.2);
  *  - `e7_far`: bound to another datasource (D5.3).
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { ObjectKernel, findMisplacedReadableIds, refuseReadableIdsOnce } from '@objectstack/core';
+import { ObjectKernel, findMisplacedReadableIds, refuseReadableIdsOnce, resolveReadableParentIds } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
@@ -49,6 +52,8 @@ const MEMBER_A = { userId: 'u_a', tenantId: 'org_1', positions: ['org_member'] }
 const MEMBER_B = { userId: 'u_b', tenantId: 'org_1', positions: ['org_member'] };
 const ADMIN = { userId: 'u_admin', tenantId: 'org_1', positions: ['org_admin'] };
 const DELEGATED_A = { ...MEMBER_A, onBehalfOf: { userId: 'u_delegator' } };
+/** The delegator's own leg on `e7_doc` admits every record but these (by name). */
+const WITHHELD_FROM_DELEGATOR = ['a0', 'a1', 'a2'];
 
 /** Past the 2,000-row candidate window the leaf replaces. */
 const DOCS_OF_A = 2_300;
@@ -62,8 +67,10 @@ type Row = Record<string, any>;
 
 function readScopeOf(object: string, context: any): Record<string, unknown> | undefined {
   if (context?.isSystem || isAdmin(context)) return undefined;
-  if (object === DOC) return { owner: context?.userId ?? '__nobody__' };
-  return undefined;
+  if (object !== DOC) return undefined;
+  const own = { owner: context?.userId ?? '__nobody__' };
+  // ADR-0090 D10: a delegated caller's scope is its own leg AND its delegator's.
+  return context?.onBehalfOf?.userId ? { $and: [own, { name: { $nin: WITHHELD_FROM_DELEGATOR } }] } : own;
 }
 const mayReadObject = (object: string, context: any) => context?.isSystem || object !== VAULT || isAdmin(context);
 
@@ -160,6 +167,7 @@ describe('[ADR-0139 E7] the comment-thread read gate over the stamped parent pai
         if (!target || !parent) return false;
         if (isAdmin(reader)) return true;
         if (target.object === VAULT) return false;
+        if (target.object === DOC && reader?.onBehalfOf?.userId && WITHHELD_FROM_DELEGATOR.includes(parent.name)) return false;
         if (target.object === DOC || target.object === GATED) return parent.owner === reader.userId;
         return true;
       })
@@ -308,14 +316,52 @@ describe('[ADR-0139 E7] the comment-thread read gate over the stamped parent pai
     ]));
   });
 
-  it('D5: a delegated caller reads through the bounded probe — no leaf — never wider than the truth', async () => {
+  it('D5.1, as amended: a delegated caller reads through the leaf — every comment its delegator intersection admits, past the window, a true total', async () => {
     seenWhere.length = 0;
     const rows = await served(DELEGATED_A);
-    expect(JSON.stringify(seenWhere[0])).not.toMatch(/ReadableIds|__readable/i);
-    expect(rows.length).toBeLessThanOrEqual(WINDOW);
-    const expected = new Set(await truth(MEMBER_A));
-    for (const id of rows) expect(expected.has(id)).toBe(true);
+    const stampedLeaves = findOr(seenWhere[0]).flatMap((b) => (b?.$or ? b.$or : [b]));
+    const leaves = stampedLeaves.filter((b) => b?.record_id?.$in && !Array.isArray(b.record_id.$in)).map((b) => b.object_name);
+    expect(leaves).toEqual(expect.arrayContaining([DOC, VAULT]));
+    for (const probed of [GATED, FAR]) expect(leaves, probed).not.toContain(probed);
+    // D5.2 and D5.3 keep the probe, read with the delegated context.
+    expect(stampedLeaves).toEqual(expect.arrayContaining([
+      { object_name: GATED, record_id: { $in: [ids.gatedA] } },
+      { object_name: FAR, record_id: { $in: [ids.far] } },
+    ]));
+    const expected = await truth(DELEGATED_A);
+    expect(expected.length).toBeGreaterThan(WINDOW);
+    expect(rows).toEqual(expected);
     expect(await engine.count(COMMENT, {}, { context: DELEGATED_A })).toBe(rows.length);
+    // The intersection, never the principal's leg alone: exactly the comments on the records the delegator is withheld go.
+    const withheldThreads = ((await engine.find(DOC, { where: { name: { $in: WITHHELD_FROM_DELEGATOR } }, context: SYS })) as Row[])
+      .map((d) => `${DOC}:${d.id}`);
+    const onWithheld = ((await engine.find(COMMENT, { where: { thread_id: { $in: withheldThreads } }, context: SYS })) as Row[])
+      .map((r) => String(r.id))
+      .sort();
+    expect(onWithheld.length).toBeGreaterThanOrEqual(WITHHELD_FROM_DELEGATOR.length);
+    const asMember = new Set(await served(MEMBER_A));
+    expect([...asMember].filter((id) => !rows.includes(id)).sort()).toEqual(onWithheld);
+    expect(rows.every((id) => asMember.has(id))).toBe(true);
+  });
+
+  it('D5.1, as amended: parity with the probe — the leaf serves a delegated caller exactly the comments the probe’s own readability answer admits, unbounded', async () => {
+    // The probe's answer is `resolveReadableParentIds` (one caller-scoped read
+    // per parent object, through the engine middleware chain), asked for every
+    // stamped pair at rest, so no window cuts it.
+    const atRest: Row[] = await engine.find(COMMENT, { limit: 100_000, context: SYS });
+    const pairs = new Map<string, Set<string>>();
+    for (const row of atRest) {
+      if (![DOC, VAULT, GATED, FAR].includes(row.object_name) || row.record_id == null) continue;
+      if (!pairs.has(row.object_name)) pairs.set(row.object_name, new Set());
+      pairs.get(row.object_name)!.add(String(row.record_id));
+    }
+    const readable = await resolveReadableParentIds(engine as any, DELEGATED_A, pairs);
+    const admittedByProbe = atRest
+      .filter((row) => readable.get(row.object_name)?.has(String(row.record_id)) ?? false)
+      .map((r) => String(r.id))
+      .sort();
+    expect(admittedByProbe.length).toBeGreaterThan(WINDOW);
+    expect(await served(DELEGATED_A)).toEqual(admittedByProbe);
   });
 
   it('a row the backfill has not reached is probed by its thread, never leafed — then the backfill stamps it', async () => {

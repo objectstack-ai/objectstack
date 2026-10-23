@@ -632,7 +632,7 @@ export default class OrganizationOwnershipCeremony extends Command {
       printWarning(
         `${summary.unattributableRows} row(s) whose owner cannot be derived are listed by id, with why, in the plan ` +
           'file. The ceremony neither guesses their owner nor deletes them, and --apply does not certify the database ' +
-          'while one stays NULL (but on a table whose column is not the tenancy anchor): assign each its ' +
+          'while one stays NULL, except on a table whose column is not the tenancy anchor. Assign each its ' +
           'organization, or delete it by hand, before or after --apply, and re-run it.',
       );
     }
@@ -1121,7 +1121,7 @@ export default class OrganizationOwnershipCeremony extends Command {
     }
     console.log('');
     // Unattributable rows hold certification (ruling C on ADR-0131 D10 fate
-    // 4) but on a table whose column is not the tenancy anchor; `advisory`
+    // 4), except on a table whose column is not the tenancy anchor; `advisory`
     // counts those and the advisory departures, each said in its own terms.
     const unattributableHeld = report.tables.reduce((n, t) => n + (t.held?.rows ?? 0), 0);
     const unattributableReported = report.tables.reduce((n, t) => n + t.unattributable.length, 0) - unattributableHeld;

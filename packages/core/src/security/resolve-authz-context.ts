@@ -57,6 +57,7 @@ import {
   ADMIN_FULL_ACCESS,
   ADMIN_FULL_ACCESS_CAPABILITIES,
   GUEST_POSITION,
+  EVERYONE_POSITION,
   ORGANIZATION_ADMIN_GRANTS,
 } from '@objectstack/spec';
 import { SystemObjectName } from '@objectstack/spec/system';
@@ -72,6 +73,15 @@ import { isGrantActive, nextGrantValidityBoundary } from './grant-validity.js';
 import { openUserGrantsCache } from './resolve-user-grants-cache.js';
 import { openRequestGrantsMemo, withRequestGrantsMemo } from './request-grants-memo.js';
 import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from './platform-admin.js';
+import { findDefaultOrganization } from './default-organization.js';
+import { organizationAnchorsPlatformStanding } from './platform-standing-anchor.js';
+import {
+  organizationReachAdmits,
+  organizationReachRowOwner,
+  resolveOrganizationReach,
+  UNOWNED_ORGANIZATION_REACH,
+  type OrganizationReach,
+} from './organization-reach.js';
 import { derivePosture } from './posture-ladder.js';
 import { securityCatalogReaderOf, type SecurityCatalogReader } from './security-catalog.js';
 import { resolveSystemWriteOrganization, type SystemWriteOrganizationDecision } from './system-write-organization.js';
@@ -925,49 +935,43 @@ function grantOrganizationOf(row: unknown): string | null {
 }
 
 /**
- * [ADR-0131 D5] Does a stored grant ANCHOR platform-admin standing — the one
- * predicate, with the posture as its parameter, that §6b asks of every
- * `admin_full_access` grant:
- *
- *  - a walled posture (`group` / `isolated`): no grant anchors standing; it is
- *    config-derived (`OS_PLATFORM_OWNER_EMAIL`, §6b-config) and nothing else
- *    (#11663 L5);
- *  - `single`: the grant the first-user promotion writes, which is owned by the
- *    Default Organization ({@link readDefaultOrganizationId}).
- *
- * Any other organization's grant of the set confers the set, never standing. An
- * organization-less grant anchors nothing: the ownership ceremony (ADR-0131
- * D10) attributes the one an earlier release's promotion wrote to the Default
- * Organization, so the reading that took it as the anchor retired with it.
+ * [ADR-0131 D5] Does a stored grant ANCHOR platform-admin standing — what §6b
+ * asks of every `admin_full_access` grant. The rule is core security's one
+ * definition ({@link organizationAnchorsPlatformStanding}), which the
+ * last-administrator guard asks too; this file supplies the grant's
+ * organization as {@link grantOrganizationOf} normalizes it, the REQUESTED
+ * posture and the Default Organization ({@link readDefaultOrganizationId}).
+ * ⛔ The normalizer is this reader's own by design: it reads any non-blank
+ * value as an id, where the guard's reads only a string or a number.
  */
 function grantAnchorsPlatformStanding(
   grant: unknown,
   anchor: { walled: boolean; defaultOrganizationId: string | undefined },
 ): boolean {
-  if (anchor.walled || anchor.defaultOrganizationId === undefined) return false;
-  return grantOrganizationOf(grant) === anchor.defaultOrganizationId;
+  return organizationAnchorsPlatformStanding(grantOrganizationOf(grant), anchor);
 }
 
 /**
- * [ADR-0131 D3/D5] The deployment's Default Organization: the one with
- * `slug = 'default'`, else the only organization there is; `undefined` when
- * neither exists (several organizations, none of them `default`, name none).
- * The definition plugin-auth's boot invariant (`default-organization-invariant.ts`)
- * creates the organization by, read-only here — and the one plugin-security's
- * promotion resolves the owner of the grant it writes by, so the row it writes
- * is the row this resolver reads as the anchor.
+ * [ADR-0131 D3/D5] The deployment's Default Organization, as this resolver
+ * reads it: the one definition ({@link findDefaultOrganization}: `slug =
+ * 'default'`, else the only organization) over this file's own read
+ * ({@link tryFind}), so a store that cannot be reached fails loud
+ * (`AuthzStoreUnavailableError`) and one never provisioned holds none.
+ * `undefined` when none can be named. plugin-auth's boot invariant creates the
+ * organization by the same definition, and plugin-security's promotion
+ * resolves the owner of the grant it writes by it, so the row it writes is the
+ * row this resolver reads as the anchor.
  *
  * A composition that registers no organization object holds none, and is not
  * read: the engine refuses an unregistered name as "object not found".
+ *
+ * Exported for the readers that read an engine under this policy. A reader
+ * with another read policy hands its own read to `findDefaultOrganization`.
  */
-async function readDefaultOrganizationId(ql: any): Promise<string | undefined> {
+export async function readDefaultOrganizationId(ql: any): Promise<string | undefined> {
   if (!registryHoldsObject(ql, SystemObjectName.ORGANIZATION)) return undefined;
-  const idOf = (row: any): string | undefined =>
-    row?.id === undefined || row?.id === null || String(row.id) === '' ? undefined : String(row.id);
-  const bySlug = await tryFind(ql, SystemObjectName.ORGANIZATION, { slug: 'default' }, 1);
-  if (idOf(bySlug[0])) return idOf(bySlug[0]);
-  const all = await tryFind(ql, SystemObjectName.ORGANIZATION, {}, 2);
-  return all.length === 1 ? idOf(all[0]) : undefined;
+  const found = await findDefaultOrganization((where, limit) => tryFind(ql, SystemObjectName.ORGANIZATION, where, limit));
+  return found.id;
 }
 
 /**
@@ -1186,6 +1190,176 @@ async function positionBoundSetNames(
     named.set(positionName, positionSetNamesOf((await catalog.resolve('position', positionName))?.definition));
   }
   return named;
+}
+
+/**
+ * [ADR-0095 D3, ADR-0057 D4] The position names ONE principal's own rows give
+ * it in organization `tenantId`, in the order §3 and §4 of
+ * {@link resolveUserAuthzGrants} project them:
+ *
+ *  - each membership role of an active `sys_member` row (with no active
+ *    organization, every membership's), mapped to its canonical built-in name
+ *    (`owner` → `org_owner`, …);
+ *  - each active `sys_user_position` row that applies in `tenantId`
+ *    ({@link grantAppliesInTenant}: with no active organization, none does).
+ *
+ * `members` and `userPositionRows` are that principal's rows. A row outside its
+ * ADR-0091 validity window gives nothing. The built-ins the resolver adds on top
+ * (`everyone`, the derived `platform_admin`) are not here: neither is held
+ * through a row.
+ */
+function heldPositionNames(
+  members: readonly any[],
+  userPositionRows: readonly any[],
+  tenantId: string | undefined,
+  nowMs: number,
+): string[] {
+  const held: string[] = [];
+  for (const m of members) {
+    if (!isGrantActive(m, nowMs)) continue;
+    if (tenantId && (m?.organization_id ?? m?.organizationId) !== tenantId) continue;
+    if (!m.role || typeof m.role !== 'string') continue;
+    for (const raw of m.role.split(',').map((s: string) => s.trim()).filter(Boolean)) {
+      const r = mapMembershipRole(raw);
+      if (!held.includes(r)) held.push(r);
+    }
+  }
+  for (const ur of userPositionRows) {
+    if (!grantAppliesInTenant(grantOrganizationOf(ur), tenantId)) continue;
+    if (!isGrantActive(ur, nowMs)) continue;
+    const r = ur?.position;
+    if (typeof r === 'string' && r && !held.includes(r)) held.push(r);
+  }
+  return held;
+}
+
+/**
+ * [ADR-0131 D3/D4, ADR-0049] The sets each of `positions` grants through its
+ * definition, IN FORCE: a position the activation ledger switched off grants
+ * nothing, and a set it switched off is not granted. `namedByPosition` is
+ * {@link positionBoundSetNames}' answer and `disabled` the ledger's
+ * ({@link readDisabledCatalogNames}). A switched-off position is absent from
+ * the answer. §6a asks this; so does {@link readPositionGrantsInForce}.
+ *
+ * What a set confers once named (its catalog body, §6b) is not decided here: a
+ * name the catalog holds no set for is still listed, and confers nothing.
+ */
+function setsInForceByPosition(
+  positions: readonly string[],
+  namedByPosition: ReadonlyMap<string, readonly string[]>,
+  disabled: { positions: ReadonlySet<string>; permissions: ReadonlySet<string> },
+): Map<string, string[]> {
+  const inForce = new Map<string, string[]>();
+  for (const positionName of positions) {
+    if (disabled.positions.has(positionName)) continue;
+    inForce.set(
+      positionName,
+      (namedByPosition.get(positionName) ?? []).filter((setName) => !disabled.permissions.has(setName)),
+    );
+  }
+  return inForce;
+}
+
+/**
+ * [ADR-0131 D3/D4, ADR-0049] What each of `positions` grants through its
+ * DEFINITION, as the resolver enforces it for a holder — §6a and §6b's reading,
+ * one position at a time, for a surface that describes positions rather than a
+ * principal (the position catalog's list):
+ *
+ *  - `inForce` — each position the activation ledger has not switched off,
+ *    with the sets its definition names that are neither switched off nor
+ *    missing from the catalog (a name the catalog holds no set for confers
+ *    nothing, {@link catalogSetBody}), in declared order;
+ *  - `disabledPositions` — the positions switched off, which grant nothing.
+ *
+ * Only the definition's half. The position-name fold — a set that shares a held
+ * position's NAME, requested one layer down in `plugin-security` — is that
+ * layer's to report, from its own request. A read that fails throws
+ * (`AuthzStoreUnavailableError`), exactly as the resolver's does.
+ */
+export async function readPositionGrantsInForce(
+  ql: any,
+  positions: readonly string[],
+): Promise<{ inForce: Map<string, string[]>; disabledPositions: Set<string> }> {
+  const names = [...new Set(positions.filter((n) => typeof n === 'string' && n !== ''))];
+  const catalog = securityCatalogReaderOf(ql);
+  const namedByPosition = await positionBoundSetNames(catalog, names);
+  const disabled = await readDisabledCatalogNames(ql, names, [...namedByPosition.values()].flat());
+  const inForce = setsInForceByPosition(names, namedByPosition, disabled);
+  for (const [positionName, setNames] of inForce) {
+    const held: string[] = [];
+    for (const setName of setNames) {
+      if (held.includes(setName)) continue;
+      if (await catalogSetBody(catalog, setName)) held.push(setName);
+    }
+    inForce.set(positionName, held);
+  }
+  return { inForce, disabledPositions: disabled.positions };
+}
+
+/**
+ * [ADR-0095 D3, ADR-0057 D4] How many people hold each of `positions` in
+ * organization `tenantId` — the principals whose own rows give them the name by
+ * {@link heldPositionNames}, the rule {@link resolveUserAuthzGrants} projects a
+ * caller's positions by, counted over the organization's `sys_member` and
+ * `sys_user_position` rows. `everyone` is held by every active member. Holding
+ * is the assignment: a position the activation ledger switched off keeps its
+ * holders (ADR-0049) and grants them nothing ({@link readPositionGrantsInForce}).
+ *
+ * A position is ABSENT from the answer when no count is a fact about it: the
+ * derived `platform_admin` (held through a grant's standing, not a row) and
+ * `guest` (the anonymous principal), and every position when `tenantId` is
+ * absent (with no active organization no assignment row applies) or a read came
+ * back at its limit (`limit` rows; a truncated read is not a count). A read
+ * that fails throws (`AuthzStoreUnavailableError`).
+ */
+export async function countPositionHolders(
+  ql: any,
+  tenantId: string | undefined,
+  positions: readonly string[],
+  opts: { nowMs?: number; limit?: number } = {},
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (!tenantId) return counts;
+  const limit = opts.limit ?? 10000;
+  const nowMs = opts.nowMs ?? Date.now();
+  const [members, userPositionRows] = await Promise.all([
+    tryFind(ql, 'sys_member', { organization_id: tenantId }, limit),
+    tryFind(ql, 'sys_user_position', { organization_id: tenantId }, limit),
+  ]);
+  if (members.length >= limit || userPositionRows.length >= limit) return counts;
+  const userOf = (row: any): string | undefined => {
+    const id = row?.user_id ?? row?.userId;
+    return typeof id === 'string' && id !== '' ? id : undefined;
+  };
+  const membersByUser = new Map<string, any[]>();
+  const positionRowsByUser = new Map<string, any[]>();
+  for (const m of members) {
+    const id = userOf(m);
+    if (id) membersByUser.set(id, [...(membersByUser.get(id) ?? []), m]);
+  }
+  for (const ur of userPositionRows) {
+    const id = userOf(ur);
+    if (id) positionRowsByUser.set(id, [...(positionRowsByUser.get(id) ?? []), ur]);
+  }
+  const holders = new Map<string, Set<string>>();
+  const wanted = new Set(positions);
+  for (const userId of new Set([...membersByUser.keys(), ...positionRowsByUser.keys()])) {
+    const memberRows = membersByUser.get(userId) ?? [];
+    const held = heldPositionNames(memberRows, positionRowsByUser.get(userId) ?? [], tenantId, nowMs);
+    // §5b: every authenticated member holds the `everyone` audience anchor.
+    if (memberRows.some((m) => isGrantActive(m, nowMs))) held.push(EVERYONE_POSITION);
+    for (const name of held) {
+      if (!wanted.has(name)) continue;
+      if (!holders.has(name)) holders.set(name, new Set());
+      holders.get(name)!.add(userId);
+    }
+  }
+  for (const name of wanted) {
+    if (name === BUILTIN_IDENTITY_PLATFORM_ADMIN || name === GUEST_POSITION) continue;
+    counts.set(name, holders.get(name)?.size ?? 0);
+  }
+  return counts;
 }
 
 type TabVisibility = 'visible' | 'hidden' | 'default_on' | 'default_off';
@@ -1542,30 +1716,15 @@ export async function resolveUserAuthzGrants(
   // moment they do" promise covers BOTH derivations rather than one. Fail
   // closed (D2). `sys_member` declares neither bound today and `isGrantActive`
   // reads an absent bound as unbounded, so no shipped row changes answer.
-  const activeMembers = members.filter(
-    (m) =>
-      isGrantActive(m, nowMs)
-      && (!tenantId || (m.organization_id ?? m.organizationId) === tenantId),
-  );
-  for (const m of activeMembers) {
-    if (m.role && typeof m.role === 'string') {
-      for (const raw of m.role.split(',').map((s: string) => s.trim()).filter(Boolean)) {
-        const r = mapMembershipRole(raw);
-        if (!grants.positions.includes(r)) grants.positions.push(r);
-      }
-    }
-  }
-
+  //
   // 4. [ADR-0057 D4] Platform-owned RBAC role assignments (sys_user_position) — the
   //    source of truth for custom roles, decoupled from sys_member.role. A row
   //    applies only in its own organization, so with no active org none does
   //    ({@link grantAppliesInTenant}).
-  // (read in Leg 1 above)
-  for (const ur of userPositionRows) {
-    if (!grantAppliesInTenant(grantOrganizationOf(ur), tenantId)) continue;
-    if (!isGrantActive(ur, nowMs)) continue;
-    const r = ur.position;
-    if (typeof r === 'string' && r && !grants.positions.includes(r)) grants.positions.push(r);
+  // (both read in Leg 1 above; the rule is {@link heldPositionNames}, which the
+  // position catalog's holder count asks too)
+  for (const r of heldPositionNames(members, userPositionRows, tenantId, nowMs)) {
+    if (!grants.positions.includes(r)) grants.positions.push(r);
   }
 
   // 5. Fellow-org user IDs so RLS can scope identity tables to collaborators.
@@ -1710,8 +1869,8 @@ export async function resolveUserAuthzGrants(
   if (disabled.positions.size > 0) {
     grants.positions = grants.positions.filter((n) => !disabled.positions.has(n));
   }
-  for (const positionName of grants.positions) {
-    for (const setName of namedByPosition.get(positionName) ?? []) {
+  for (const setNames of setsInForceByPosition(grants.positions, namedByPosition, disabled).values()) {
+    for (const setName of setNames) {
       if (!boundSetNames.includes(setName)) boundSetNames.push(setName);
     }
   }
@@ -2384,7 +2543,9 @@ function putLocalizationEntry(ql: object, key: string, entry: LocalizationCacheE
  * Resolve workspace localization defaults (reference `timezone` / `locale` /
  * `currency`). Canonical path is the `localization` SettingsManifest (cascade:
  * platform default → global → tenant); falls back to direct tenant-scoped
- * `sys_setting` rows, then the built-ins `UTC` / `en-US`. Never throws.
+ * `sys_setting` rows of the caller's organization only (ADR-0131 D8 — see
+ * {@link localizationFallbackReach}), then the built-ins `UTC` / `en-US`.
+ * Never throws.
  *
  * The DIRECT `sys_setting` read failing outright (backend fault — table
  * missing, connection refused, etc.) is memoized for
@@ -2459,6 +2620,45 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
   return value;
 }
 
+/**
+ * [ADR-0131 D8/D9] Which `sys_setting` tenant rows the direct localization
+ * fallback in {@link resolveLocalizationContextUncached} may draw on — the
+ * reach `SettingsService` reads the same rows with, so the fallback can never
+ * answer what the service it stands in for would refuse. The rule is core
+ * security's one definition ({@link resolveOrganizationReach}); this fallback
+ * supplies its own facts:
+ *
+ *  - the wall: the REQUESTED posture ({@link resolveTenancyPosture}), as the
+ *    platform-standing anchor in this file reads it — a deployment that asked
+ *    for a wall stays walled here even while running degraded, and the
+ *    posture costs no query;
+ *  - the organization a caller that names none acts in: D9's predicate
+ *    ({@link resolveGuestOrganization}) under that same posture.
+ *
+ * A failed derivation reads nothing (`unowned`): no organization's row is read
+ * on a guess, and the built-in defaults answer. This fallback is reached only
+ * when the settings service is absent or has just failed, so it takes no
+ * inputs that service would supply.
+ *
+ * ⛔ Kept by design, not drift: the requested posture where the service reads
+ * the one in force, and a failed derivation degraded where the service
+ * propagates it — both make this fallback the stricter reader.
+ */
+async function localizationFallbackReach(ql: any, tenantId: string | undefined): Promise<OrganizationReach> {
+  try {
+    return await resolveOrganizationReach({
+      callerOrganizationId: tenantId,
+      wallStands: () => postureEnforcesWall(resolveTenancyPosture()),
+      deriveOrganization: () => resolveGuestOrganization(ql, resolveTenancyPosture()),
+    });
+  } catch {
+    // The organization could not be derived (`AuthzStoreUnavailableError`):
+    // no organization's row is read on a guess. Not the direct read's own
+    // backend fault, so it does not populate the failure memo (#10221).
+    return UNOWNED_ORGANIZATION_REACH;
+  }
+}
+
 async function resolveLocalizationContextUncached(
   input: ResolveLocalizationInput,
 ): Promise<{ value: LocalizationResult; backendFailed: boolean }> {
@@ -2523,6 +2723,10 @@ async function resolveLocalizationContextUncached(
     // Settings service unavailable → direct read. Still not a backend fault,
     // so it does not populate the memo either (#11877).
   }
+  // [ADR-0131 D8] The organization this read may draw on — the reach the
+  // settings service itself reads with (#25226): never another organization's
+  // row, and a row with no organization only where no organization can exist.
+  const reach = await localizationFallbackReach(ql, tenantId);
   // One read for all three keys instead of a query per key (`$in` on `key`).
   // Inlined (rather than the shared `tryFind`) so a genuine backend fault —
   // as opposed to a legitimate empty result — is visible to the caller above,
@@ -2532,15 +2736,23 @@ async function resolveLocalizationContextUncached(
   // query-options-erasure guard: that cast is a distinct, counted erasure
   // site, not implied by an already-`any` receiver).
   let rows: any[] = [];
-  if (ql && typeof ql.find === 'function') {
+  const organization_id = organizationReachRowOwner(reach);
+  if (organization_id !== undefined && ql && typeof ql.find === 'function') {
     try {
       let result = await ql.find('sys_setting', {
-        where: { namespace: 'localization', key: { $in: ['timezone', 'locale', 'currency'] }, scope: 'tenant' },
+        where: {
+          namespace: 'localization',
+          key: { $in: ['timezone', 'locale', 'currency'] },
+          scope: 'tenant',
+          organization_id,
+        },
         limit: 10,
         context: { isSystem: true },
       });
       if (result && (result as any).value) result = (result as any).value;
-      rows = Array.isArray(result) ? result : [];
+      // The organization is compared HERE too, not trusted to the filter —
+      // the settings service's own rule (`preferredRow`).
+      rows = (Array.isArray(result) ? result : []).filter((r) => organizationReachAdmits(reach, r?.organization_id));
     } catch {
       // THE backend fault the failure memo exists for (#10221).
       backendFailed = true;

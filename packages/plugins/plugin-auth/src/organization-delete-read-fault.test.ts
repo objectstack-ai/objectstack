@@ -46,6 +46,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
+import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -154,6 +155,21 @@ function recordAttemptedWrites(engine: ObjectQL): string[] {
   return attempted;
 }
 
+/**
+ * The first `AuthManager` method on `stack`: an `AuthManager.<method>` frame,
+ * or [#25224] a frame of a method's body moved whole into
+ * `auth-manager-actor-guards.ts`, which runs under the method's own name (a
+ * helper of that module that is no method of the class does not count).
+ */
+function firstAuthManagerMethod(stack: string): string | undefined {
+  const methods = new Set(Object.getOwnPropertyNames(AuthManager.prototype));
+  for (const match of stack.matchAll(/AuthManager\.(\w+)|at (?:async )?(?:Object\.)?(\w+) \([^)\n]*auth-manager-actor-guards\.ts:/g)) {
+    if (match[1] !== undefined) return match[1];
+    if (methods.has(match[2])) return match[2];
+  }
+  return undefined;
+}
+
 /** The current stack, deep enough to reach the request's frames (V8 keeps ten by default). */
 function deepStack(): string {
   const limit = Error.stackTraceLimit;
@@ -191,7 +207,7 @@ function failAdmissionRead(engine: ObjectQL, read: AdmissionRead) {
     const real = target[method].bind(engine);
     return vi.spyOn(target, method).mockImplementation(async (name: string, ...rest: unknown[]) => {
       const stack = deepStack();
-      const first = /AuthManager\.(\w+)/.exec(stack)?.[1];
+      const first = firstAuthManagerMethod(stack);
       if (fired < times && name === object && stack.includes('assertOrganizationDeletable') && stack.includes(frame) && first === caller) {
         fired += 1;
         throw new Error(`${object} store unavailable (injected)`);
@@ -311,5 +327,49 @@ describe('[#25059] an organization-delete read that fails refuses 503 before bet
     // Not the admission's read fault: no read failed, and the vendor decided.
     expect(text).not.toContain('SERVICE_UNAVAILABLE');
     await expectNothingChanged(engine, attempted);
+  });
+});
+
+describe('[#25364] the last-administrator guard\'s question about the Default Organization fails on a read: the same 503, not the verdict\'s 403', () => {
+  /**
+   * `TARGET` made the Default Organization (the only one), with the real
+   * last-administrator guard asked first, as `AuthPlugin` wires it.
+   */
+  async function ownerOfDefaultOrganization() {
+    const setup = await ownerOfTarget();
+    await setup.engine.delete('sys_organization', { where: { id: 'org_other' }, ...(SYSTEM as object) } as never);
+    const guard = registerLastAdminGuard(setup.engine as unknown as LastAdminGuardEngine, { packageId: 'test.25364.last-admin-guard' });
+    setup.manager.setOrganizationDeleteStandingJudge(guard.judgeOrganizationDelete);
+    return setup;
+  }
+
+  it('the guard\'s membership read fails: 503 SERVICE_UNAVAILABLE, the driver\'s words withheld, nothing attempted; CONTROL: with it back, the guard reaches its verdict, 403 PERMISSION_DENIED', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { engine, manager, cookie } = await ownerOfDefaultOrganization();
+    // The guard reads `sys_member` through `find`; the admission's own read of
+    // it is a `findOne`, so only the guard's read fails.
+    const fault = failAdmissionRead(engine, { methods: ['find'], object: 'sys_member', times: Number.POSITIVE_INFINITY });
+    const attempted = recordAttemptedWrites(engine);
+
+    const res = await post(manager, '/organization/delete', { organizationId: TARGET }, cookie);
+    engine.unregisterHooksByPackage(RECORDER);
+    fault.restore();
+
+    expect(fault.fired(), 'PREMISE: the guard\'s read really failed').toBeGreaterThan(0);
+    const text = await res.clone().text();
+    expect(res.status, text).toBe(503);
+    expect((JSON.parse(text) as { code?: string }).code).toBe('SERVICE_UNAVAILABLE');
+    expect(text).not.toContain('injected');
+    await expectNothingChanged(engine, attempted);
+
+    // CONTROL: the read back, the same door answers the verdict: this owner is
+    // the last administrator, a refusal on the merits, unchanged.
+    const again = recordAttemptedWrites(engine);
+    const verdict = await post(manager, '/organization/delete', { organizationId: TARGET }, cookie);
+    engine.unregisterHooksByPackage(RECORDER);
+    const verdictText = await verdict.clone().text();
+    expect(verdict.status, verdictText).toBe(403);
+    expect((JSON.parse(verdictText) as { code?: string }).code).toBe('PERMISSION_DENIED');
+    await expectNothingChanged(engine, again);
   });
 });

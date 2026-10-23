@@ -457,10 +457,24 @@ describe('#20139 census — exemption: export `?page=` changes chunking, never t
         const absent = await exportWith({});
         expect(absent.status).toBe(200);
         expect(JSON.parse(absent.streamed)).toHaveLength(ROWS.length);
-        for (const page of ['abc', '', ' ', '1.5', 'Infinity', '-5', '50', '5000']) {
+        for (const page of ['abc', '', ' ', '1.5', '100.5', 'Infinity', '-5', '50', '5000']) {
             const answer = await exportWith({ page });
             expect(answer.status, `?page=${JSON.stringify(page)}`).toBe(200);
             expect(answer.streamed, `?page=${JSON.stringify(page)} changed the exported rows`).toBe(absent.streamed);
+        }
+    });
+
+    it('[#25229] every chunk handed to `findData` is a whole count, whatever `page` holds', async () => {
+        // The normalizer refuses a fractional or negative window with a 400
+        // naming `limit` — a parameter an export caller never wrote. `100.5`
+        // survives the 50..5000 clamp, so only truncation at the read keeps it
+        // out; this stub `findData` records the window it was handed.
+        for (const page of ['abc', '', '1.5', '100.5', 'Infinity', '-5', '50', '5000']) {
+            const { takes } = await exportWith({ page });
+            expect(takes.length, `?page=${JSON.stringify(page)}`).toBeGreaterThan(0);
+            for (const take of takes) {
+                expect(Number.isSafeInteger(take) && take >= 0, `?page=${JSON.stringify(page)} handed findData limit ${take}`).toBe(true);
+            }
         }
     });
 

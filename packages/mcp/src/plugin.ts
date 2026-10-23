@@ -32,7 +32,7 @@ import { readEnvWithDeprecation, isMcpServerEnabled, resolveMcpStdioAutoStart } 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { IAIService, IAuthService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { MCPServerRuntime } from './mcp-server-runtime.js';
+import { MCPServerRuntime, setRuntimeObjectView } from './mcp-server-runtime.js';
 import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
@@ -42,6 +42,9 @@ import {
   GATED_ACTIONS,
   serveStoredMetadataHashes,
   serveStoredMetadataRow,
+  stdioObjectView,
+  type StdioObjectReads,
+  type StdioProtocolObjectReads,
   type StoredHashDigest,
 } from './stdio-data-bridge.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
@@ -439,6 +442,23 @@ export class MCPServerPlugin implements Plugin {
       );
     }
 
+    // [#25138] The protocol's object reads — the merged listing behind
+    // `list_objects` / `describe_object` and the by-name read behind the
+    // exposure gate — resolved at each use, never captured here: an absence
+    // read in `start()` is a verdict the rest of the boot can still
+    // contradict. `undefined` when this host registers no protocol, and the
+    // bridge then reads the metadata service, as before.
+    // [#25245] Hoisted out of the stdio branch: the `objectstack://objects`
+    // resources read the same merged view, and they are bridged below whether
+    // or not this process starts the stdio transport.
+    const protocolReads = (): StdioProtocolObjectReads | undefined => {
+      try {
+        return ctx.getService<StdioProtocolObjectReads>('protocol') ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
     // ── stdio auto-start decision (opt-in, its OWN switch) ──
     // Deliberately stricter than the HTTP-surface default (`isMcpServerEnabled`,
     // default-on): start() attaches a long-lived transport claiming the
@@ -707,6 +727,7 @@ export class MCPServerPlugin implements Plugin {
         dataBridge = createStdioDataBridge({
           engine: scopedQl,
           metadataService,
+          protocol: protocolReads,
           resolvePrincipal,
           keyedDigest: storedHashDigest,
         });
@@ -725,7 +746,11 @@ export class MCPServerPlugin implements Plugin {
       // from, captured once rather than re-read off the outer `let` inside the
       // closure — the reader must not be able to see a different service from
       // the one `bridgeResources` was registered with.
-      const gateMetadata = metadataService;
+      // [#25138] …beside the protocol's by-name read, which the gate asks
+      // first, as `bridge.get` asks it.
+      const gateReads: StdioObjectReads | undefined = metadataService
+        ? { metadataService, protocol: protocolReads }
+        : undefined;
       getRecord = async (objectName, recordId) => {
         const ec = await resolvePrincipal();
         // [#8266] The ADR-0049 exposure gate, applied BEFORE the read: the same
@@ -740,12 +765,12 @@ export class MCPServerPlugin implements Plugin {
         // leaking is the author's exposure DECLARATION.
         //
         // No metadata service ⇒ no declaration to read ⇒ open, exactly as
-        // `enforceApiExposure` itself falls open when `getObject` throws or
-        // resolves nothing. Unreachable in practice: `bridgeResources` — the
+        // `enforceApiExposure` itself falls open when the definition cannot be
+        // read or resolves nothing. Unreachable in practice: `bridgeResources` — the
         // only consumer of this reader — is called under `if (metadataService)`
         // below, so the resource is never registered without one.
-        if (gateMetadata) {
-          await enforceApiExposure(gateMetadata, objectName, GATED_ACTIONS.get, ec);
+        if (gateReads) {
+          await enforceApiExposure(gateReads, objectName, GATED_ACTIONS.get, ec);
         }
         const res = (await scopedQl.find(objectName, {
           where: { id: recordId },
@@ -772,6 +797,11 @@ export class MCPServerPlugin implements Plugin {
     }
 
     if (metadataService) {
+      // [#25245] The object resources read the view `list_objects` /
+      // `describe_object` answer from (`stdioObjectView`), never the metadata
+      // service alone: on a kernel with an `environmentId` that service holds
+      // no copy of an object a package registered during the boot.
+      setRuntimeObjectView(this.runtime, stdioObjectView({ metadataService, protocol: protocolReads }));
       this.runtime.bridgeResources(metadataService, getRecord);
       // Awaited: the prompt bridge reads `skill` metadata to project each
       // skill's instructions onto an MCP prompt (#3905), so the surface must be

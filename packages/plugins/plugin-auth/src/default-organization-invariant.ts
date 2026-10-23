@@ -21,6 +21,8 @@
  * creates it — through this function, so there is one producer of the row.
  */
 
+import { DEFAULT_ORGANIZATION_SLUG, findDefaultOrganization } from '@objectstack/core';
+
 const SYSTEM_CTX = { isSystem: true };
 
 /** The logger channel this module writes; `AuthPlugin` passes its kernel logger. */
@@ -81,23 +83,24 @@ export async function ensureDefaultOrganizationExists(
   ql: any,
   options: { logger?: InvariantLogger } = {},
 ): Promise<DefaultOrganizationInvariantResult> {
-  const read = async (where: Record<string, unknown>, limit: number) =>
+  // [ADR-0131 D3/D5] The find half is the one definition (`findDefaultOrganization`,
+  // `@objectstack/core`) over this function's own read, which PROPAGATES a
+  // failure: the reader is shared, the read policy is this producer's.
+  const read = async (where: Readonly<Record<string, unknown>>, limit: number) =>
     rowsOf(await ql.find('sys_organization', { where, limit }, { context: SYSTEM_CTX }));
 
-  const bySlug = await read({ slug: 'default' }, 1);
-  if (bySlug[0]?.id) return { organizationId: String(bySlug[0].id), created: false };
-  const existing = await read({}, 2);
-  if (existing.length === 1 && existing[0]?.id) {
-    return { organizationId: String(existing[0].id), created: false };
-  }
-  if (existing.length > 1) return { created: false, ambiguous: { organizationCount: existing.length } };
+  const found = await findDefaultOrganization(read);
+  if (found.id !== undefined) return { organizationId: found.id, created: false };
+  // The definition reads at most two rows to tell "the only one" from
+  // "several", so two is the count it measured.
+  if (found.several) return { created: false, ambiguous: { organizationCount: 2 } };
 
   const newOrgId = genId('org');
   let row: any;
   try {
     row = await ql.insert(
       'sys_organization',
-      { id: newOrgId, name: 'Default Organization', slug: 'default', logo: null, metadata: null },
+      { id: newOrgId, name: 'Default Organization', slug: DEFAULT_ORGANIZATION_SLUG, logo: null, metadata: null },
       { context: SYSTEM_CTX },
     );
   } catch (e) {

@@ -117,6 +117,16 @@ export default class PackageInstall extends Command {
         + "installing into an 'isolated'-posture runtime (ADR-0120 D5e). Recorded in the install manifest; asked once.",
       default: false,
     }),
+    // [ADR-0126 §6 wall 3] The confirmation of an upgrade's access findings —
+    // a switch-off a vendor rename re-enables, a choice whose name the
+    // package no longer ships. A TOKEN, not a boolean: the finding set's
+    // digest the runtime's refusal printed, so it confirms exactly the
+    // findings shown, and a set that changed since is refused again.
+    'confirm-access-upgrade': Flags.string({
+      description:
+        "Confirm the access findings of this upgrade with the finding-set token the runtime's refusal printed "
+        + '(ACCESS_UPGRADE_CONFIRMATION_REQUIRED). It confirms exactly those findings; a changed set is refused again.',
+    }),
   };
 
   async run(): Promise<void> {
@@ -198,6 +208,7 @@ export default class PackageInstall extends Command {
       // ---- Install ---------------------------------------------------------
       printStep(`Installing ${label} into ${runtime}...`);
       if (flags['confirm-global-uniques']) body.confirmGlobalUniques = true;
+      if (flags['confirm-access-upgrade'] !== undefined) body.confirmAccessUpgrade = flags['confirm-access-upgrade'];
       const installMode = flags['install-mode'] as InstallMode | undefined;
       if (installMode !== undefined) body.installMode = installMode;
       const res = await this.request(`${runtime}/api/v1/marketplace/install-local`, {
@@ -224,6 +235,20 @@ export default class PackageInstall extends Command {
           console.log('  Confirm them as genuinely platform-wide:');
           console.log(`    os package install ${args.package} --confirm-global-uniques`);
           console.log("  …or edit the app's metadata to `unique: 'organization'` and rebuild.");
+          this.exit(1);
+          return;
+        }
+        // [ADR-0126 §6 wall 3] The access upgrade stop: every finding, then
+        // the exact retry — the decision is the installer's, per finding.
+        if (res.body?.error?.code === 'ACCESS_UPGRADE_CONFIRMATION_REQUIRED') {
+          const details = res.body.error.details ?? {};
+          const findings: Array<{ describe?: string }> = Array.isArray(details.findings) ? details.findings : [];
+          printError("Upgrade stopped — it would change what this system's access choices cover");
+          console.log('');
+          for (const finding of findings) console.log(`  • ${finding.describe ?? JSON.stringify(finding)}`);
+          console.log('');
+          console.log('  Review each finding. To upgrade anyway, confirm exactly these findings:');
+          console.log(`    os package install ${args.package} --confirm-access-upgrade ${details.findingSet}`);
           this.exit(1);
           return;
         }

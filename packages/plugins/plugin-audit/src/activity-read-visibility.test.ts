@@ -7,7 +7,8 @@
  *  - the leaf path (ADR-0139 D4) against a stand-in engine that answers the
  *    three questions the gate classifies by — one `ReadableIds` leaf per
  *    enumerated parent object, nothing scanned, nothing asked;
- *  - D5's three classes routed to the bounded probe, by name, up front;
+ *  - D5's two remaining classes routed to the bounded probe, by name, up
+ *    front, and a delegated caller planned like any caller (D5.1, as amended);
  *  - the bounded probe itself — a failing pre-scan, a failing parent read,
  *    the scan bound, the object-level admission — against a stand-in engine
  *    that answers none of the three, so the whole read is the probe.
@@ -558,7 +559,7 @@ describe('[ADR-0139 D4] a read that names its parent objects enumerates only tho
     expect(leafOnly.calls.probes).toEqual([]);
   });
 
-  it('a delegated caller’s whole-read probe is unchanged: it scans the caller’s own where', async () => {
+  it('a delegated caller’s read naming its parents is one leaf per named parent, and nothing is scanned', async () => {
     const { mw, calls } = installClassifying({
       objects: OBJECTS,
       scan: () => [{ object_name: 'crm_o05', record_id: 'c1' }],
@@ -566,12 +567,13 @@ describe('[ADR-0139 D4] a read that names its parent objects enumerates only tho
     });
     const where = { object_name: { $in: NAMED } };
     const ctxWhere = (await read(mw, { ast: { object: 'sys_activity', where }, context: { userId: 'u_agent', onBehalfOf: { userId: 'u_d' } } as any })).where as any;
-    expect(ctxWhere.$and[1]).toEqual({ object_name: 'crm_o05', record_id: { $in: ['c1'] } });
-    expect(calls.scans.map((s) => s.where)).toEqual([where]);
+    expect(gateBranches(ctxWhere).map(leafObjectOf)).toEqual(NAMED);
+    expect(calls.scans).toEqual([]);
+    expect(calls.probes).toEqual([]);
   });
 });
 
-describe('[ADR-0139 D5] three classes keep the bounded probe, by name, chosen before any leaf is written', () => {
+describe('[ADR-0139 D5] two classes keep the bounded probe, by name, chosen before any leaf is written; a delegated caller is not one', () => {
   it('a parent an object-scoped read middleware narrows is probed — its rows only — beside the other parents’ leaves', async () => {
     const { mw, calls } = installClassifying({
       objects: ['crm_case', 'sys_attachment'],
@@ -619,17 +621,28 @@ describe('[ADR-0139 D5] three classes keep the bounded probe, by name, chosen be
     expect((await read(mw)).where).toEqual({ object_name: 'crm_case', record_id: { $in: ['c1'] } });
   });
 
-  it('a delegated caller: no leaf at all, the whole read is the probe, read with the caller’s envelope', async () => {
+  it('D5.1, as amended: a delegated caller gets the leaves any caller gets; only a D5.2 parent is probed, read with the delegated envelope', async () => {
     const onBehalfOf = { userId: 'u_delegator' };
-    const { mw, calls } = installClassifying({
-      objects: ['crm_case', 'crm_deal'],
-      scan: () => [{ object_name: 'crm_case', record_id: 'c1' }],
-      readable: { crm_case: ['c1'] },
-    });
-    const { where } = await read(mw, { context: { userId: 'u_agent', onBehalfOf } as any });
-    expect(where).toEqual({ object_name: 'crm_case', record_id: { $in: ['c1'] } });
-    expect(calls.scans[0].where).toEqual({});
+    const opts = {
+      objects: ['crm_case', 'crm_deal', 'sys_attachment'],
+      middleware: ['sys_attachment'],
+      scan: () => [{ object_name: 'sys_attachment', record_id: 'f1' }],
+      readable: { sys_attachment: ['f1'] },
+    };
+    const { mw, calls } = installClassifying(opts);
+    const { where } = await read(mw, { context: { userId: 'u_agent', onBehalfOf, __readScope: 'org' } as any });
+    const branches = branchesOf(where);
+    expect(branches.map(leafObjectOf)).toEqual(['crm_case', 'crm_deal', null]);
+    expect(branches[2]).toEqual({ object_name: 'sys_attachment', record_id: { $in: ['f1'] } });
+    // The same plan as a caller acting for no one.
+    const plain = installClassifying(opts);
+    expect(branchesOf((await read(plain.mw, { context: { userId: 'u_agent' } })).where).map(leafObjectOf)).toEqual(['crm_case', 'crm_deal', null]);
+    // No whole-read window: the one pre-scan is the probed parent's, and its
+    // read carries the delegation on, minus the operation-private keys.
+    expect(calls.scans.map((s) => s.where)).toEqual([{ object_name: { $in: ['sys_attachment'] } }]);
+    expect(calls.probes.map((p) => p.object)).toEqual(['sys_attachment']);
     expect(calls.probes[0].context).toMatchObject({ userId: 'u_agent', onBehalfOf });
+    expect(calls.probes[0].context).not.toHaveProperty('__readScope');
   });
 
   it('no object-level admission (no canReadObject, or no security service): no leaf, the whole read is the probe, said once', async () => {

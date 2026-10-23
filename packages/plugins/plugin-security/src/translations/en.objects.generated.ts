@@ -30,15 +30,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       user_id: {
         label: "User",
-        help: "Foreign key to sys_user."
+        help: "The user who receives this permission set."
       },
       permission_set: {
         label: "Permission Set",
-        help: "Machine name of the permission set this grant holds, as the security catalog names it. A name the catalog does not hold is refused. NULL only on a grant written before the column existed."
+        help: "The permission set this assignment gives the user. Pick one of the permission sets defined in Setup; a name that matches no permission set is rejected."
       },
       organization_id: {
         label: "Organization",
-        help: "Optional organization scope. NULL = applies in every org context."
+        help: "The organization this grant belongs to."
       },
       granted_by: {
         label: "Granted By",
@@ -58,11 +58,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       last_certified_at: {
         label: "Last Certified At",
-        help: "Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives \"never certified\" or \"certification stale\" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed."
+        help: "Not in use yet: kept for a future access-review feature. Nothing fills in or checks this date, so an empty value does not mean the assignment went unreviewed."
       },
       certified_by: {
         label: "Certified By",
-        help: "Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — the platform checks nothing about it and grants nothing on the strength of it."
+        help: "Not in use yet: kept for a future access-review feature. A reviewer entered here is not verified and changes nothing about what the assignment grants."
       },
       created_at: {
         label: "Created At"
@@ -92,7 +92,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       user_id: {
         label: "User",
-        help: "Foreign key to sys_user."
+        help: "The user who holds this position."
       },
       position: {
         label: "Position",
@@ -104,7 +104,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Tenant that owns this assignment; null = global (cross-tenant)."
+        help: "The organization this assignment belongs to."
       },
       granted_by: {
         label: "Granted By",
@@ -128,11 +128,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       last_certified_at: {
         label: "Last Certified At",
-        help: "Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives \"never certified\" or \"certification stale\" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed."
+        help: "Not in use yet: kept for a future access-review feature. Nothing fills in or checks this date, so an empty value does not mean the assignment went unreviewed."
       },
       certified_by: {
         label: "Certified By",
-        help: "Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — the platform checks nothing about it and grants nothing on the strength of it."
+        help: "Not in use yet: kept for a future access-review feature. A reviewer entered here is not verified and changes nothing about what the assignment grants."
       },
       created_at: {
         label: "Created At"

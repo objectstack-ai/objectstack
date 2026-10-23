@@ -176,8 +176,18 @@ export const SysSharingRule = ObjectSchema.create({
       // matched record, the other five once per rule. The list is held equal to
       // the authorable `ShareRecipientType` by `field-recipient.test.ts`, so a
       // stored row of any authorable kind is never refused at this select.
-      ['user', 'team', 'business_unit', 'position', 'unit_and_subordinates', 'field'],
+      // Each option carries its label: the bare-string shorthand would show
+      // `unit_and_subordinates` as option text, while the help text below
+      // already names the options by these labels.
       {
+        options: [
+          { value: 'user', label: 'User' },
+          { value: 'team', label: 'Team' },
+          { value: 'business_unit', label: 'Business unit' },
+          { value: 'position', label: 'Position' },
+          { value: 'unit_and_subordinates', label: 'Business unit and subordinates' },
+          { value: 'field', label: 'Field' },
+        ],
         label: 'Recipient Type',
         required: true,
         defaultValue: 'business_unit',
@@ -226,8 +236,11 @@ export const SysSharingRule = ObjectSchema.create({
       // reaches, never WHICH VERBS: delete/transfer come from ownership, the
       // ADR-0057 DEPTH scopes, and admin scope. Stored `full` rows are
       // normalised to `edit` on write and by the boot backfill.
-      ['read', 'edit'],
       {
+        options: [
+          { value: 'read', label: 'Read' },
+          { value: 'edit', label: 'Read and edit' },
+        ],
         label: 'Access Level',
         required: true,
         defaultValue: 'read',
