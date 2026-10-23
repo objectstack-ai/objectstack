@@ -12,11 +12,11 @@
  * and no other test sees until it lands: a `cut-rc` pass in pre mode makes
  * the CLI `X.Y.Z-rc.N`, and that whole string — prerelease tail included — is
  * the pin. The CLI reads its version from its own `package.json` once and
- * caches it, so the module graph is re-imported under a planted manifest read.
+ * caches it, so this file first imports the commands under a planted manifest read.
  * The in-repo placement is the control: it keeps `workspace:*`.
  */
 
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -24,12 +24,6 @@ import { fileURLToPath } from 'url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI_MANIFEST = path.resolve(HERE, '..', 'package.json');
 const PRERELEASE = '18.1.0-rc.2';
-
-type InitModule = typeof import('../src/commands/init.js');
-type CreateModule = typeof import('../src/commands/create.js');
-
-let init: InitModule;
-let create: CreateModule;
 
 /** Every `@objectstack/*` entry of a manifest, both dependency sections. */
 function objectstackDeps(pkg: {
@@ -41,28 +35,34 @@ function objectstackDeps(pkg: {
   );
 }
 
-beforeAll(async () => {
-  const realRead = fs.readFileSync;
-  const spy = vi.spyOn(fs, 'readFileSync').mockImplementation(((file: unknown, ...rest: unknown[]) =>
-    typeof file === 'string' && path.resolve(file) === CLI_MANIFEST
-      ? JSON.stringify({ name: '@objectstack/cli', version: PRERELEASE })
-      : (realRead as (...args: unknown[]) => unknown)(file, ...rest)) as typeof fs.readFileSync);
-  try {
-    vi.resetModules();
-    init = await import('../src/commands/init.js');
-    create = await import('../src/commands/create.js');
-    // Read while the planted manifest is in place; the value is cached after.
-    expect(init.getCliVersion()).toBe(PRERELEASE);
-  } finally {
-    spy.mockRestore();
-  }
-});
-
-afterAll(() => {
-  vi.resetModules();
-});
+// The first import of the command modules happens HERE, under the planted
+// manifest read, at collection time: each test file gets its own module
+// registry, so no reset is needed, and module evaluation is not charged to a
+// hook's timeout.
+const realRead = fs.readFileSync;
+const spy = vi.spyOn(fs, 'readFileSync').mockImplementation(((file: unknown, ...rest: unknown[]) =>
+  typeof file === 'string' && path.resolve(file) === CLI_MANIFEST
+    ? JSON.stringify({ name: '@objectstack/cli', version: PRERELEASE })
+    : (realRead as (...args: unknown[]) => unknown)(file, ...rest)) as typeof fs.readFileSync);
+let init: typeof import('../src/commands/init.js');
+let create: typeof import('../src/commands/create.js');
+let plantedVersion: string;
+try {
+  init = await import('../src/commands/init.js');
+  create = await import('../src/commands/create.js');
+  // Read while the planted manifest is in place; the value is cached after.
+  plantedVersion = init.getCliVersion();
+} finally {
+  spy.mockRestore();
+}
 
 describe('a prerelease CLI pins scaffolded @objectstack/* deps exactly', () => {
+  // Harness guard: without it, a manifest read that escaped the spy would
+  // measure the checkout's own release version and prove nothing about tails.
+  it('reads the planted prerelease as the CLI version', () => {
+    expect(plantedVersion).toBe(PRERELEASE);
+  });
+
   it('os init: every template, every @objectstack/* dep', () => {
     const keys = Object.keys(init.TEMPLATES);
     expect(keys.length).toBeGreaterThan(0);
