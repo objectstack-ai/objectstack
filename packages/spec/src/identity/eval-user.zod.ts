@@ -62,6 +62,14 @@ export const BUILTIN_IDENTITY_ORG_ADMIN = 'org_admin';
 export const BUILTIN_IDENTITY_ORG_MEMBER = 'org_member';
 
 /**
+ * External member of a tenant: a portal user admitted to the organization who
+ * reaches its data only through explicit grants. Source:
+ * `sys_member.role = external` (ruling of record 6355206139). Holding it
+ * withholds the `everyone` audience anchor; see `MEMBERSHIP_ROLE_EXTERNAL`.
+ */
+export const BUILTIN_IDENTITY_ORG_EXTERNAL = 'org_external';
+
+/**
  * The reserved, framework-seeded role names (ADR-0068 D2). These are a
  * normalized **projection** into `current_user.positions`; their sources of truth
  * (membership rows, the unscoped admin link) are never changed by the projection.
@@ -71,6 +79,7 @@ export const BUILTIN_IDENTITY_NAMES = [
   BUILTIN_IDENTITY_ORG_OWNER,
   BUILTIN_IDENTITY_ORG_ADMIN,
   BUILTIN_IDENTITY_ORG_MEMBER,
+  BUILTIN_IDENTITY_ORG_EXTERNAL,
 ] as const;
 
 export type BuiltinIdentityName = (typeof BUILTIN_IDENTITY_NAMES)[number];
@@ -198,15 +207,20 @@ export const BUILTIN_IDENTITY_METADATA: Record<BuiltinIdentityName, { label: str
   [BUILTIN_IDENTITY_ORG_OWNER]: { label: 'Organization Owner', description: 'Organization owner within a tenant.' },
   [BUILTIN_IDENTITY_ORG_ADMIN]: { label: 'Organization Admin', description: 'Organization administrator within a tenant.' },
   [BUILTIN_IDENTITY_ORG_MEMBER]: { label: 'Organization Member', description: 'Organization member within a tenant.' },
+  [BUILTIN_IDENTITY_ORG_EXTERNAL]: {
+    label: 'Organization External Member',
+    description: 'External member within a tenant (a portal user): sees only its own identity rows and reaches data only through explicit grants.',
+  },
 };
 
-/** Normalize a raw better-auth membership role (owner/admin/member) to its canonical
- * built-in role name (org_owner/org_admin/org_member). Unknown values pass through. */
+/** Normalize a raw better-auth membership role (owner/admin/member/external) to its canonical
+ * built-in role name (org_owner/org_admin/org_member/org_external). Unknown values pass through. */
 export function mapMembershipRole(raw: string): string {
   switch (raw.trim().toLowerCase()) {
     case 'owner': return BUILTIN_IDENTITY_ORG_OWNER;
     case 'admin': return BUILTIN_IDENTITY_ORG_ADMIN;
     case 'member': return BUILTIN_IDENTITY_ORG_MEMBER;
+    case 'external': return BUILTIN_IDENTITY_ORG_EXTERNAL;
     default: return raw.trim();
   }
 }

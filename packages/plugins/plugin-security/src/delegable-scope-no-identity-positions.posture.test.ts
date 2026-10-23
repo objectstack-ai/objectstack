@@ -5,9 +5,11 @@
  * only positions the write admits, in EVERY branch of `describeDelegableScope`:
  * the tenant-level administrator, the organization-level administrator and the
  * delegate holding a placing `adminScope`. The ADR-0068 D2 built-in identity
- * names are declared positions the security catalog lists, carry no sets, and
- * are refused by `sys_user_position.position` from every writer — so no branch
- * offers one.
+ * names are declared positions the security catalog lists, and are refused by
+ * `sys_user_position.position` from every writer — so no branch offers one.
+ * `org_external` (ruling 6355206139) is the one that names a set
+ * (`external_default`), so a delegate whose allowlist lacks it meets the
+ * delegated-administration gate's refusal first; either refusal stores nothing.
  *
  * Measured on a REAL `ObjectQL` engine over a real SQL driver with the REAL
  * `SecurityPlugin` registered on it (its declared built-in positions, the
@@ -34,6 +36,7 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { RESERVED_IDENTITY_NAMES } from './objects/reserved-identity-names.js';
 import { defaultPermissionSets } from './objects/index.js';
+import { BUILTIN_IDENTITY_ORG_EXTERNAL } from '@objectstack/spec';
 
 const SYS = { isSystem: true } as const;
 const ORG_A = 'org_a';
@@ -191,7 +194,8 @@ describe('[ADR-0090 D12 / ADR-0105 D8 × ADR-0068 D2] every branch of the delega
           expect(catalogNames).toEqual(expect.arrayContaining([...RESERVED_IDENTITY_NAMES, CONTROL]));
           for (const name of RESERVED_IDENTITY_NAMES) {
             const r = await assign(h, context, name);
-            expect([r.status, r.code], `${name}: ${r.message}`).toEqual([400, 'VALIDATION_FAILED']);
+            const gatedFirst = branch === 'delegated' && name === BUILTIN_IDENTITY_ORG_EXTERNAL;
+            expect([r.status, r.code], `${name}: ${r.message}`).toEqual(gatedFirst ? [403, 'PERMISSION_DENIED'] : [400, 'VALIDATION_FAILED']);
             expect(await storedRows(h, name), `${name} stored nothing`).toHaveLength(0);
           }
 

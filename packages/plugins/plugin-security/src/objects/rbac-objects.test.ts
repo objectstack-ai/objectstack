@@ -17,6 +17,9 @@ describe('default permission sets', () => {
     const names = defaultPermissionSets.map((p) => p.name).sort();
     expect(names).toEqual([
       'admin_full_access',
+      // [Ruling 6355206139 E4] The external member's own baseline, bound by the
+      // `org_external` identity alone — never by `everyone`.
+      'external_default',
       // [ADR-0090 D10] MCP agent capability ceilings (scope-derived; one side
       // of the agent∩user intersection). Never bound to a position/anchor.
       'mcp_agent_data_read',
