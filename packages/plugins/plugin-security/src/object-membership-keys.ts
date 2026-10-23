@@ -113,7 +113,7 @@ export type MembershipKeyOutcome =
 
 /** The members of the security plugin the declared-key read uses. */
 export interface MembershipKeyStagingHost {
-  readonly logger: { warn?: (message: string, meta?: Record<string, unknown>) => void; error?: (message: string) => void } | undefined;
+  readonly logger: { warn: (message: string, meta?: Record<string, unknown>) => void; error?: (message: string) => void } | undefined;
   readonly ql: any;
   readonly metadata: any;
   readonly rlsCompiler: Pick<RLSCompiler, 'compileFilter'>;
