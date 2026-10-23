@@ -33,28 +33,21 @@ import {
 import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
 import {
   PLATFORM_IDP_PROVIDER_ID,
-  clearUnlinkTombstone,
-  clearUserUnlinkTombstones,
-  recordUnlinkTombstone,
   type LinkingAuthContext,
   refuseImplicitAccountLink,
 } from './implicit-account-linking.js';
+import { IdpLocaleSync } from './idp-locale-claim.js';
 import type { IDataEngine } from '@objectstack/core';
-// [#10348] The ONE id-shaped platform-admin predicate (ADR-0068 D2).
-// `auth-manager` used to re-derive that standing itself, in two spellings
-// that had drifted from the declared authority and from each other; both
-// now ask the authority. Nothing in this file reads the grant tables.
 import {
   API_KEY_DEFAULT_EXPIRY_DAYS,
   API_KEY_INACTIVITY_DAYS,
   API_KEY_MAX_EXPIRY_DAYS,
   accountScopeAuthGate,
-  hasPlatformAdminStanding,
+  isCloudManaged,
   resolveUserAuthzGrants,
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { EngineQueryOptions } from '@objectstack/spec/data';
 import type {
   ApiKeyLifecyclePolicy,
   IEmailService,
@@ -81,13 +74,6 @@ import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
 import {
-  accountLockedEventFor,
-  emitAuthSessionAuditEvent,
-  loginEventFor,
-  logoutEventFor,
-  refusalCodeOf,
-  signInClientFingerprint,
-  signInFailureEventFor,
   SIGN_IN_EMAIL_PATH,
   type AuthEventAuditSurface,
 } from './auth-session-audit.js';
@@ -112,10 +98,8 @@ import {
   applyPlatformAdminImpersonation,
   VENDOR_ROLE_SCALAR_ADMIN_PATHS,
 } from './admin-impersonate-endpoint.js';
-import { judgeHeldSession } from './platform-admin-gate.js';
 import {
   carriesPrincipalSession,
-  holdPrincipalSessionExpiry,
   mintPrincipalSession,
   type PrincipalSessionAuthContext,
 } from './principal-session-mint.js';
@@ -126,29 +110,11 @@ import {
   invitationRoleCapFailure,
   isPlainMemberInvitation,
 } from './invitation-role-cap.js';
-import {
-  DEFAULT_CREATOR_ROLE,
-  REMOVE_MEMBER_DENIAL_CODE,
-  REMOVE_MEMBER_DENIAL_MESSAGE,
-  isSoleOwnerGuardTerritory,
-  removalBlockedByOwnerTarget,
-} from './remove-member-permission-guard.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { readAccountInvitation, settleImportResetDelivery } from './account-invitation-marker.js';
 import { resolveClientAddress } from './client-address.js';
 import { vendorClientAddressOptions, withVendorClientAddress } from './client-address-vendor.js';
 import { clientAddressStateEntries, readRequestClientAddress } from './request-client-address.js';
-import {
-  REVOKE_SESSION_NOT_FOUND_CODE,
-  REVOKE_SESSION_NOT_FOUND_MESSAGE,
-  revokeTargetsCallerSession,
-} from './revoke-session-match-guard.js';
-import {
-  ADMIN_REVOKE_USER_SESSION_NOT_FOUND_CODE,
-  ADMIN_REVOKE_USER_SESSION_NOT_FOUND_MESSAGE,
-  adminMayRevokeUserSessions,
-  anySessionCarriesToken,
-} from './admin-revoke-user-session-match-guard.js';
 import {
   reconcileMembership,
   type MembershipPolicy,
@@ -211,15 +177,60 @@ import {
 } from './signing-key-read-cache.js';
 import {
   ORGANIZATION_DELETE_PATH,
-  ORGANIZATION_DELETE_READ_FAULT_CODE,
-  ORGANIZATION_DELETE_REFUSAL_CODE,
-  defaultOrganizationDeleteRefusal,
   isDefaultOrganizationTarget,
-  organizationDeleteReadFaultBody,
-  organizationDeleteRefusal,
-  organizationNotEmptyBody,
   removeOrganizationAuthStructure,
 } from './organization-delete.js';
+// [#25224 cut 1] The actor and organization guards; the methods of the same
+// names below hand each body the members it reads (`ActorGuardHost`).
+import {
+  assertActorNotHeld,
+  assertAdminRevokeUserSessionIdentifiesRecord,
+  assertOrganizationDeletable,
+  assertRemoveMemberPermitted,
+  assertRevokeSessionIdentifiesRecord,
+  isPlatformAdminUserId,
+  resolveActor,
+  resolveMembershipRole,
+  type ActorGuardHost,
+} from './auth-manager-actor-guards.js';
+// [#25224 cut 2] The sign-in lockout path; the methods of the same names
+// below hand each body the members it reads (`SignInLockoutHost`).
+import {
+  assertAccountNotLocked,
+  auditRefusedSignIn,
+  findSignInAccount,
+  recordSignInOutcome,
+  resolveSignInAccountId,
+  resolveTwoFactorAccountLockout,
+  stampLastLogin,
+  type SignInLockoutHost,
+} from './auth-manager-sign-in-lockout.js';
+// [#25224 cut 3] The password, auth-gate and session policy; the methods of
+// the same names below hand each body the members it reads
+// (`PasswordSessionPolicyHost`).
+import {
+  assertPasswordComplexity,
+  assertPasswordNotReused,
+  enforceConcurrentCap,
+  enforceSessionControls,
+  parseHashes,
+  recordPasswordHistory,
+  refreshMustChangeCacheIfStale,
+  refreshOrgMfaCacheIfStale,
+  resolvePasswordChangeUserId,
+  resolveUserAuthGates,
+  stampPasswordChangedAt,
+  unlockUser,
+  type PasswordSessionPolicyHost,
+} from './auth-manager-password-session-policy.js';
+// [#25224 cut 4] The better-auth database hooks and the identity-source stamp
+// they run; the methods of the same names below hand each body the members it
+// reads (`DatabaseHooksHost`).
+import {
+  composeDatabaseHooks,
+  stampIdentitySource,
+  type DatabaseHooksHost,
+} from './auth-manager-database-hooks.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -1461,34 +1472,6 @@ async function slugGuardReadFaultApiError(object: string, cause: unknown): Promi
   return err;
 }
 
-/** [#23945] The standard ADR-0112 code a store outage answers with — the status's own name. */
-const INVITATION_ROLE_CAP_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
-
-/**
- * [#23945] The invitation role cap's answer when its one read — the issuer's
- * `sys_member` rows — cannot answer: `503 SERVICE_UNAVAILABLE`, as the slug
- * guard's read fault answers ({@link slugGuardReadFaultApiError}).
- *
- * Not the cap's `403 INVITE_ISSUER_UNVERIFIED`: that code is a verdict — the
- * store answered and established no role — while a read that threw reached no
- * verdict, so it must not wear the refusal's code. Still fail-closed: the
- * throw ends the endpoint, so no invitation row is written. Like the slug
- * guard's body (#24243), this one carries the code too, so every answer from
- * the invitation endpoint has one. The driver's own failure rides `cause`.
- */
-async function invitationRoleCapReadFaultApiError(cause: unknown): Promise<Error> {
-  const { APIError } = await import('better-auth/api');
-  const err = new APIError('SERVICE_UNAVAILABLE', {
-    message:
-      'The invitation role cap could not read `sys_member`, so the role the issuer holds was never ' +
-      'determined, and no invitation was created. This is a server-side outage, not a refusal of the ' +
-      'invitation: retry once the data store is reachable.',
-    code: INVITATION_ROLE_CAP_READ_FAULT_CODE,
-  });
-  (err as { cause?: unknown }).cause = cause;
-  return err;
-}
-
 // [#24243, ADR-0112] The organization plugin's hook refusals, one code each, so
 // a client (the console's organization and Invite User dialogs among them)
 // branches on the code and never on the prose. A registered code is typed
@@ -1930,12 +1913,18 @@ export class AuthManager {
         // implicit link is written — see `implicit-account-linking.ts`. The
         // audience gate judges only `create-user`, so the two never answer
         // the same call.
-        validateUserInfo: async (data: any, ctx: any) =>
-          (await refuseImplicitAccountLink(data, ctx, {
+        //
+        // It is also where better-auth hands over the IdP's raw profile, so
+        // the profile's `locale` claim is STAGED here, refusing nothing; the
+        // session the sign-in mints settles it (`idp-locale-claim.ts`).
+        validateUserInfo: async (data: any, ctx: any) => {
+          this.idpLocale.stage(data, ctx);
+          return (await refuseImplicitAccountLink(data, ctx, {
             requireLocalEmailVerified: this.implicitLinkRequiresLocalEmailVerified(),
             resolveContext: () => this.linkingContext(),
             logInfo: (m, meta) => this.config.logger?.info?.(m, meta),
-          })) ?? this.validateAudienceAdmission(data, ctx),
+          })) ?? this.validateAudienceAdmission(data, ctx);
+        },
       },
       account: {
         ...AUTH_ACCOUNT_CONFIG,
@@ -5096,6 +5085,25 @@ export class AuthManager {
   }
 
   /**
+   * An external sign-in's `locale` claim → `sys_user.locale`, staged by the
+   * `validateUserInfo` seam and settled on the session the sign-in mints.
+   * The rule and its record: `idp-locale-claim.ts`.
+   */
+  private readonly idpLocale = new IdpLocaleSync({
+    getEngine: () => this.getDataEngine() as never,
+    getSupportedLocales: () => {
+      try {
+        const locales = this.config.getI18n?.()?.getLocales?.();
+        return Array.isArray(locales) ? locales : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    resolveAuth: () => this.linkingContext(),
+    warn: (message, meta) => this.config.logger?.warn?.(message, meta),
+  });
+
+  /**
    * [ADR-0093 D7] The users created in each in-flight better-auth request,
    * keyed by that request's endpoint context — the object better-auth hands
    * every database hook of one endpoint call and that `objectql-adapter`'s
@@ -8029,6 +8037,10 @@ export class AuthManager {
       // SMS path can actually deliver (plugin on + deliverable SMS service),
       // so the login UI never shows a dead "sign in with code" option.
       phoneNumberOtp: ((pluginConfig as any).phoneNumber ?? false) && this.isPhoneOtpDeliverable(),
+      // The managed (cloud-hosted, SSO-only) mode, from the one accessor every
+      // judgement site reads (ruling 6341690661 on #25083, Q2 D / Q3 A). A
+      // hide-when-on flag: the console hides the doors that add people.
+      cloudManaged: isCloudManaged(),
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
     };
@@ -8170,71 +8182,12 @@ export class AuthManager {
    * hold, an expired session, a credential that does not parse or one
    * carrying a control character still answers `null`.
    */
-  private async resolveActor(
+  private resolveActor(
     ctx: any,
     options?: { failedReadThrows?: boolean },
   ): Promise<{ userId: string; activeOrgId?: string } | null> {
-    try {
-      const { getSessionFromCtx } = await import('better-auth/api');
-      const s: any = await getSessionFromCtx(ctx as any);
-      const userId = s?.user?.id ?? s?.session?.userId;
-      if (userId) {
-        return {
-          userId: String(userId),
-          activeOrgId:
-            s?.session?.activeOrganizationId ?? s?.activeOrganizationId ?? undefined,
-        };
-      }
-    } catch { /* fall through to explicit token resolution */ }
-    let failedRead: { cause: unknown } | undefined;
-    try {
-      const hdr = (k: string): string =>
-        ((ctx?.headers?.get?.(k) ?? ctx?.request?.headers?.get?.(k)) as string) || '';
-      let token: string | undefined;
-      // `session.token` stores the UNSIGNED value, but a credential reaches us
-      // in either spelling: `bearer()` hands clients the SIGNED `<token>.<sig>`
-      // in `set-auth-token` (and accepts both back), while the cookie always
-      // carries the signed form. Strip the signature on BOTH branches — the
-      // cookie branch always did, and a bearer branch that did not silently
-      // resolved nothing for the exact credential the documented API lane hands
-      // out, which is indistinguishable from "not signed in".
-      const unsigned = (v: string): string => v.split('.')[0];
-      const bm = /^Bearer\s+(.+)$/i.exec(hdr('authorization'));
-      if (bm?.[1]) token = unsigned(bm[1].trim());
-      if (!token) {
-        const cm = /(?:^|;\s*)(?:__Secure-|__Host-)?better-auth\.session_token=([^;]+)/.exec(hdr('cookie'));
-        if (cm?.[1]) token = unsigned(decodeURIComponent(cm[1]));
-      }
-      if (token) {
-        let sess: any;
-        try {
-          sess = await (ctx as any).context.adapter.findOne({
-            model: 'session',
-            where: [{ field: 'token', value: token }],
-          });
-        } catch (cause) {
-          // A token carrying a control character is none the store holds, and
-          // a read of it can fail on the request's own bytes (PostgreSQL
-          // refuses U+0000 in a text parameter): that failure stays no session.
-          const storable = !Array.from(token).some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
-          if (options?.failedReadThrows && storable) failedRead = { cause };
-          throw cause;
-        }
-        const exp = sess?.expiresAt ?? sess?.expires_at;
-        if (sess && (!exp || new Date(exp).getTime() > Date.now())) {
-          const userId = String(sess.userId ?? sess.user_id ?? '');
-          if (userId) {
-            return {
-              userId,
-              activeOrgId:
-                sess.activeOrganizationId ?? sess.active_organization_id ?? undefined,
-            };
-          }
-        }
-      }
-    } catch { /* unresolved → null */ }
-    if (failedRead) throw failedRead.cause;
-    return null;
+    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts`; it reads no member of this class.
+    return resolveActor(ctx, options);
   }
 
   /**
@@ -8278,11 +8231,12 @@ export class AuthManager {
    * (returns false) on an empty id, a missing engine, or any lookup error: this
    * backs security gates, and an unverifiable actor must never pass.
    */
-  private async isPlatformAdminUserId(userId: string): Promise<boolean> {
-    if (!userId) return false;
-    const engine = this.getDataEngine();
-    if (!engine) return false;
-    return hasPlatformAdminStanding(engine, userId);
+  private isPlatformAdminUserId(userId: string): Promise<boolean> {
+    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
+    const host: Pick<ActorGuardHost, 'getDataEngine'> = {
+      getDataEngine: (...a) => this.getDataEngine(...a),
+    };
+    return isPlatformAdminUserId.call(host, userId);
   }
 
   /**
@@ -8304,16 +8258,12 @@ export class AuthManager {
    * Thrown as a better-auth `APIError` carrying the judge's ADR-0112 body, so
    * the vendor endpoint answers `403` with the posture's own code and message.
    */
-  private async assertActorNotHeld(actor: { userId: string; activeOrgId?: string }): Promise<void> {
-    const held = judgeHeldSession({
-      authGate: await this.computeAuthGate(actor.userId, actor.activeOrgId, false),
-    });
-    if (!held) return;
-    const { APIError } = await import('better-auth/api');
-    // The judge's own record: its object literal (`judgeHeldSession`) carries
-    // the posture `code`, from the closed `AuthGateCodeSchema` vocabulary.
-    const { body } = held;
-    throw new APIError('FORBIDDEN', body);
+  private assertActorNotHeld(actor: { userId: string; activeOrgId?: string }): Promise<void> {
+    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
+    const host: Pick<ActorGuardHost, 'computeAuthGate'> = {
+      computeAuthGate: (...a) => this.computeAuthGate(...a),
+    };
+    return assertActorNotHeld.call(host, actor);
   }
 
   /**
@@ -8362,196 +8312,28 @@ export class AuthManager {
    * first (a 403), then its own record count (the same 409), both here, before
    * the first write.
    */
-  private async assertOrganizationDeletable(ctx: any): Promise<void> {
-    const engine = this.getDataEngine();
-    if (!engine) return;
-    const organizationId = typeof ctx?.body?.organizationId === 'string' ? ctx.body.organizationId : '';
-    if (!organizationId) return;
-
-    const sys = withSystemReadContext(engine);
-    const read = async <T>(object: string, run: () => Promise<T>): Promise<T> => {
-      try {
-        return await run();
-      } catch (cause) {
-        const { APIError } = await import('better-auth/api');
-        const err = new APIError('SERVICE_UNAVAILABLE', {
-          code: ORGANIZATION_DELETE_READ_FAULT_CODE,
-          ...organizationDeleteReadFaultBody(object),
-        });
-        (err as { cause?: unknown }).cause = cause;
-        throw err;
-      }
+  private assertOrganizationDeletable(ctx: any): Promise<void> {
+    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
+    const readOrgRolesMap = () => this.orgRolesMap;
+    const readOrganizationDeleteStandingJudge = () => this.organizationDeleteStandingJudge;
+    const host: Pick<ActorGuardHost, 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'> = {
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      get orgRolesMap() { return readOrgRolesMap(); },
+      get organizationDeleteStandingJudge() { return readOrganizationDeleteStandingJudge(); },
+      resolveActor: (...a) => this.resolveActor(...a),
     };
-
-    // The session read refuses on failure too, so a session the store could
-    // not read is never taken for no session; no session at all still falls
-    // through.
-    const actor = await read('sys_session', () => this.resolveActor(ctx, { failedReadThrows: true }));
-    if (!actor?.userId) return; // the vendor answers 401
-    const callerRow: any = await read('sys_member', () =>
-      sys.findOne('sys_member', { where: { organization_id: organizationId, user_id: actor.userId } }),
-    );
-    if (!callerRow) return; // the vendor answers USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION
-    let permitted: boolean;
-    try {
-      const { hasPermission } = await import('better-auth/plugins/organization');
-      permitted = await hasPermission(
-        {
-          role: callerRow.role,
-          options: (this.orgRolesMap ? { roles: this.orgRolesMap } : {}) as any,
-          permissions: { organization: ['delete'] },
-          organizationId,
-        } as any,
-        ctx,
-      );
-    } catch {
-      // Not a read: handed a roles map and no dynamic access control, the
-      // vendor's predicate reads nothing, so it throws only on the member row
-      // itself (a role that is no string, or names an inherited object
-      // member), and the vendor's identical call on that row throws too,
-      // before its first write. The vendor answers this.
-      return;
-    }
-    if (!permitted) return; // the vendor answers YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_ORGANIZATION
-    const organization: any = await read('sys_organization', () =>
-      sys.findOne('sys_organization', { where: { id: organizationId } }),
-    );
-    if (!organization) return; // the vendor answers 400
-
-    // Which of the two refusals below applies is part of the guard, so a
-    // lookup that fails deciding it refuses too, never hands the request to
-    // the vendor unasked.
-    const walled = postureEnforcesWall(resolveTenancyPosture());
-    const defaultOrganization = await read('sys_organization', () =>
-      isDefaultOrganizationTarget(engine, organization, walled),
-    );
-
-    // The Default Organization is asked the last-administrator guard's
-    // question first, HERE, before the vendor's first write, so its refusal
-    // leaves every member and invitation as it was on any driver, with or
-    // without transactions. The guard fails closed on a lookup it cannot
-    // complete, so this never passes for want of an answer. When it admits
-    // the delete, the record count below is asked before the vendor's first
-    // write too, leaving out only what the vendor removes (members and
-    // invitations): plugin-auth removes none of the Default Organization's
-    // structure, so its teams and grants count.
-    if (defaultOrganization && this.organizationDeleteStandingJudge) {
-      try {
-        await this.organizationDeleteStandingJudge(organizationId);
-      } catch (err) {
-        if ((err as { code?: unknown } | null)?.code !== 'PERMISSION_DENIED') throw err;
-        const { APIError } = await import('better-auth/api');
-        throw new APIError('FORBIDDEN', { message: (err as Error).message, code: 'PERMISSION_DENIED' });
-      }
-    }
-
-    const owned = defaultOrganization
-      ? await defaultOrganizationDeleteRefusal(engine, organizationId)
-      : await organizationDeleteRefusal(engine, organizationId);
-    if (owned && owned.length > 0) {
-      const { APIError } = await import('better-auth/api');
-      throw new APIError('CONFLICT', { code: ORGANIZATION_DELETE_REFUSAL_CODE, ...organizationNotEmptyBody(owned) });
-    }
+    return assertOrganizationDeletable.call(host, ctx);
   }
 
-  private async assertRemoveMemberPermitted(ctx: any): Promise<void> {
-    const engine = this.getDataEngine();
-    if (!engine) return;
-
-    const memberIdOrEmail =
-      typeof ctx?.body?.memberIdOrEmail === 'string' ? ctx.body.memberIdOrEmail : '';
-    if (!memberIdOrEmail) return;
-
-    try {
-      const actor = await this.resolveActor(ctx);
-      // No resolvable session → better-auth's `sessionMiddleware` issues the
-      // 401. Not ours to pre-empt.
-      if (!actor?.userId) return;
-
-      const orgId =
-        (typeof ctx?.body?.organizationId === 'string' && ctx.body.organizationId) ||
-        actor.activeOrgId;
-      // No org in play → the vendor answers NO_ACTIVE_ORGANIZATION.
-      if (!orgId) return;
-
-      const sys = withSystemReadContext(engine);
-
-      const callerRow: any = await sys.findOne('sys_member', {
-        where: { organization_id: orgId, user_id: actor.userId },
-      });
-      if (!callerRow) return; // vendor answers MEMBER_NOT_FOUND
-
-      // Resolve the target exactly the way better-auth's org adapter does:
-      // an `@` means "by email" (lower-cased), anything else is a member id.
-      let targetRow: any = null;
-      if (memberIdOrEmail.includes('@')) {
-        const user: any = await sys.findOne('sys_user', {
-          where: { email: memberIdOrEmail.toLowerCase() },
-        });
-        if (user?.id) {
-          targetRow = await sys.findOne('sys_member', {
-            where: { organization_id: orgId, user_id: user.id },
-          });
-        }
-      } else {
-        targetRow = await sys.findOne('sys_member', { where: { id: memberIdOrEmail } });
-      }
-      if (!targetRow) return; // vendor answers MEMBER_NOT_FOUND
-
-      const creatorRole =
-        (typeof ctx?.context?.orgOptions?.creatorRole === 'string' &&
-          ctx.context.orgOptions.creatorRole) ||
-        DEFAULT_CREATOR_ROLE;
-
-      // (1) The sole-owner invariant's territory — never answer over it.
-      if (
-        isSoleOwnerGuardTerritory(
-          String(actor.userId),
-          String(targetRow.user_id ?? ''),
-          callerRow.role,
-          creatorRole,
-        )
-      ) {
-        return;
-      }
-
-      // (2) The vendor's (3a) predicate: an owner target and a non-owner
-      // caller. A permission refusal — say so, with the right status.
-      if (removalBlockedByOwnerTarget(callerRow.role, targetRow.role, creatorRole)) {
-        const { APIError } = await import('better-auth/api');
-        throw new APIError('FORBIDDEN', {
-          message: REMOVE_MEMBER_DENIAL_MESSAGE,
-          code: REMOVE_MEMBER_DENIAL_CODE,
-        });
-      }
-
-      // (3) The vendor's (4): the real `member: ['delete']` check, decided by
-      // the vendor's own function so there is only ever one answer to it. Only
-      // the envelope differs — better-auth reports this one as 401.
-      const { hasPermission } = await import('better-auth/plugins/organization');
-      const permitted = await hasPermission(
-        {
-          role: callerRow.role,
-          options: (this.orgRolesMap ? { roles: this.orgRolesMap } : {}) as any,
-          permissions: { member: ['delete'] },
-          organizationId: orgId,
-        } as any,
-        ctx,
-      );
-      if (!permitted) {
-        const { APIError } = await import('better-auth/api');
-        throw new APIError('FORBIDDEN', {
-          message: REMOVE_MEMBER_DENIAL_MESSAGE,
-          code: REMOVE_MEMBER_DENIAL_CODE,
-        });
-      }
-    } catch (error) {
-      // Our own refusal must propagate; anything else is a lookup that did not
-      // complete, and per the fail-open contract above that hands the request
-      // back to better-auth unchanged.
-      const { isAPIError } = await import('better-auth/api');
-      if (isAPIError(error)) throw error;
-    }
+  private assertRemoveMemberPermitted(ctx: any): Promise<void> {
+    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
+    const readOrgRolesMap = () => this.orgRolesMap;
+    const host: Pick<ActorGuardHost, 'getDataEngine' | 'orgRolesMap' | 'resolveActor'> = {
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      get orgRolesMap() { return readOrgRolesMap(); },
+      resolveActor: (...a) => this.resolveActor(...a),
+    };
+    return assertRemoveMemberPermitted.call(host, ctx);
   }
 
   /**
@@ -8569,33 +8351,12 @@ export class AuthManager {
    * not exist"). Zero-match and foreign-token answers are byte-identical — no
    * existence oracle. Full reading: `revoke-session-match-guard.ts`.
    */
-  private async assertRevokeSessionIdentifiesRecord(ctx: any): Promise<void> {
-    const token = ctx?.body?.token;
-    if (typeof token !== 'string') return; // vendor's body schema answers 400
-
-    let admitted: boolean;
-    try {
-      const actor = await this.resolveActor(ctx);
-      // No resolvable caller → the vendor's sensitiveSessionMiddleware issues
-      // the 401. Not ours to pre-empt (and answering 404 here would grade an
-      // anonymous probe's question before its authentication).
-      if (!actor?.userId) return;
-
-      const found = await ctx.context.internalAdapter.findSession(token);
-      admitted = revokeTargetsCallerSession(found, actor.userId);
-    } catch {
-      // A lookup that did not complete hands the request back to the vendor
-      // unchanged — an engine hiccup must not invent a "not found".
-      return;
-    }
-
-    if (!admitted) {
-      const { APIError } = await import('better-auth/api');
-      throw new APIError('NOT_FOUND', {
-        message: REVOKE_SESSION_NOT_FOUND_MESSAGE,
-        code: REVOKE_SESSION_NOT_FOUND_CODE,
-      });
-    }
+  private assertRevokeSessionIdentifiesRecord(ctx: any): Promise<void> {
+    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
+    const host: Pick<ActorGuardHost, 'resolveActor'> = {
+      resolveActor: (...a) => this.resolveActor(...a),
+    };
+    return assertRevokeSessionIdentifiesRecord.call(host, ctx);
   }
 
   /**
@@ -8616,45 +8377,9 @@ export class AuthManager {
    * "could not look" into "does not exist"). Full reading:
    * `admin-revoke-user-session-match-guard.ts`.
    */
-  private async assertAdminRevokeUserSessionIdentifiesRecord(ctx: any): Promise<void> {
-    const token = ctx?.body?.sessionToken;
-    if (typeof token !== 'string') return; // vendor's body schema answers 400
-
-    let admitted: boolean;
-    try {
-      // The vendor's own session resolution — the exact call adminMiddleware
-      // makes (authoritative: a role graded off the cookie cache could admit
-      // a demoted caller the vendor is about to refuse).
-      const { getAuthoritativeSessionFromCtx } = await import('better-auth/api');
-      const s: any = await getAuthoritativeSessionFromCtx(ctx).catch(() => null);
-      // No resolvable caller → the vendor's adminMiddleware issues the 401.
-      if (!s?.user?.id) return;
-
-      // The vendor's own permission question, with the vendor's own inputs:
-      // the LIVE admin-plugin options (the object the mounted plugin retains)
-      // and its exported defaultRoles as the fallback. A caller this refuses
-      // gets the vendor's 403 — never this guard's 404.
-      const adminOptions = ((ctx?.context?.options?.plugins ?? []) as any[]).find(
-        (p: any) => p?.id === 'admin',
-      )?.options;
-      const { defaultRoles } = await import('better-auth/plugins/admin/access');
-      if (!adminMayRevokeUserSessions(s.user, adminOptions, defaultRoles as any)) return;
-
-      const found = await ctx.context.internalAdapter.findSession(token);
-      admitted = anySessionCarriesToken(found);
-    } catch {
-      // A lookup that did not complete hands the request back to the vendor
-      // unchanged — an engine hiccup must not invent a "not found".
-      return;
-    }
-
-    if (!admitted) {
-      const { APIError } = await import('better-auth/api');
-      throw new APIError('NOT_FOUND', {
-        message: ADMIN_REVOKE_USER_SESSION_NOT_FOUND_MESSAGE,
-        code: ADMIN_REVOKE_USER_SESSION_NOT_FOUND_CODE,
-      });
-    }
+  private assertAdminRevokeUserSessionIdentifiesRecord(ctx: any): Promise<void> {
+    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts`; it reads no member of this class.
+    return assertAdminRevokeUserSessionIdentifiesRecord(ctx);
   }
 
   /**
@@ -8683,28 +8408,15 @@ export class AuthManager {
    * grade among them wins — the cap must judge the authority they actually
    * hold, not whichever row came back first.
    */
-  private async resolveMembershipRole(
+  private resolveMembershipRole(
     userId: unknown,
     orgId: unknown,
   ): Promise<string | null> {
-    const uid = typeof userId === 'string' && userId !== '' ? userId : null;
-    const oid = typeof orgId === 'string' && orgId !== '' ? orgId : null;
-    if (!uid || !oid) return null;
-    const engine = this.getDataEngine();
-    if (!engine) return null;
-    let members: unknown;
-    try {
-      members = await withSystemReadContext(engine).find('sys_member', {
-        where: { user_id: uid, organization_id: oid },
-        limit: 10,
-      });
-    } catch (err) {
-      throw await invitationRoleCapReadFaultApiError(err);
-    }
-    const roles = (Array.isArray(members) ? members : [])
-      .map((m: any) => (typeof m?.role === 'string' ? m.role : ''))
-      .filter((r: string) => r.length > 0);
-    return roles.length > 0 ? roles.join(',') : null;
+    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
+    const host: Pick<ActorGuardHost, 'getDataEngine'> = {
+      getDataEngine: (...a) => this.getDataEngine(...a),
+    };
+    return resolveMembershipRole.call(host, userId, orgId);
   }
 
   /**
@@ -8720,360 +8432,21 @@ export class AuthManager {
   private composeDatabaseHooks(
     host?: BetterAuthOptions['databaseHooks'],
   ): BetterAuthOptions['databaseHooks'] {
-    // A landed link ends a standing unlink record (implicit-account-linking.ts,
-    // rule 3). While the record stands an implicit link is refused, so a link
-    // that lands here is an explicit one. Failure to clear is functional (the
-    // user sees a refusal on their next implicit sign-in and can re-link), so
-    // it is reported at `warn` and never fails the link. It runs FIRST, ahead
-    // of the identity-source stamp, so a stamp failure can never leave a
-    // landed link still refused.
-    const resolveLinkingAdapter = () => this.linkingContext();
-    const clearUnlink = async (account: any, ctx: any) => {
-      try {
-        await clearUnlinkTombstone(account, ctx, resolveLinkingAdapter);
-      } catch (e) {
-        this.config.logger?.warn?.('[auth] could not clear the unlink record after a link', {
-          error: (e as Error)?.message,
-        });
-      }
+    // [#25224 cut 4] The body moved to `auth-manager-database-hooks.ts` (see `DatabaseHooksHost`).
+    const readConfig = () => this.config;
+    const readIdpLocale = () => this.idpLocale;
+    const hookHost: Pick<DatabaseHooksHost, 'audienceLogError' | 'config' | 'idpLocale' | 'isCreatedInThisRequest' | 'linkingContext' | 'settleMembership' | 'settleSelfRegistrationGrant' | 'stampIdentitySource' | 'takeOwnerVerifiedStamp'> = {
+      audienceLogError: (...a) => this.audienceLogError(...a),
+      get config() { return readConfig(); },
+      get idpLocale() { return readIdpLocale(); },
+      isCreatedInThisRequest: (...a) => this.isCreatedInThisRequest(...a),
+      linkingContext: (...a) => this.linkingContext(...a),
+      settleMembership: (...a) => this.settleMembership(...a),
+      settleSelfRegistrationGrant: (...a) => this.settleSelfRegistrationGrant(...a),
+      stampIdentitySource: (...a) => this.stampIdentitySource(...a),
+      takeOwnerVerifiedStamp: (...a) => this.takeOwnerVerifiedStamp(...a),
     };
-    const stamp = async (account: any, ctx: any) => {
-      await clearUnlink(account, ctx);
-      await this.stampIdentitySource(account, ctx);
-    };
-    const hostAccountAfter = (host as any)?.account?.create?.after;
-    const after = hostAccountAfter
-      ? async (account: any, ctx: any) => {
-          await stamp(account, ctx);
-          return hostAccountAfter(account, ctx);
-        }
-      : stamp;
-
-    // A user's unlink is recorded so the provider cannot re-link implicitly
-    // (implicit-account-linking.ts, rule 3) — BEFORE the account row goes, so
-    // that a record which cannot be written aborts the unlink: a throw from a
-    // `delete.before` hook propagates out of better-auth's delete, the unlink
-    // answers an error and the identity stays linked. Fail closed: an unlink
-    // that answered success without its record would leave the provider free
-    // to re-link on the next sign-in. Reported at `error`, once per refusal.
-    // A host `delete.before` runs first; its `false` (abort) is honoured
-    // before anything is recorded.
-    const hostAccountDeleteBefore = (host as any)?.account?.delete?.before;
-    const accountDeleteBefore = async (account: any, ctx: any) => {
-      const result = hostAccountDeleteBefore ? await hostAccountDeleteBefore(account, ctx) : undefined;
-      if (result === false) return false;
-      try {
-        await recordUnlinkTombstone(account, ctx, resolveLinkingAdapter);
-      } catch (e) {
-        this.audienceLogError(
-          '[auth] unlink refused: its record could not be written, so the provider stays linked. ' +
-            'Without the record the provider could re-link this account implicitly on its next sign-in. ' +
-            'Check the auth store (sys_verification) is writable, then unlink again.',
-          { providerId: account?.providerId, error: (e as Error)?.message },
-        );
-        throw e;
-      }
-      return result;
-    };
-
-    // A deleted user leaves no unlink record behind (implicit-account-linking.ts).
-    // A record that outlives its user is inert — a new user never has the
-    // deleted user's id — so a failure is reported at `warn` and never fails
-    // the deletion.
-    const clearUserUnlinks = async (user: any, ctx: any) => {
-      try {
-        await clearUserUnlinkTombstones(user, ctx, resolveLinkingAdapter);
-      } catch (e) {
-        this.config.logger?.warn?.('[auth] could not clear the unlink record of a deleted user', {
-          error: (e as Error)?.message,
-        });
-      }
-    };
-    const hostUserDeleteAfter = (host as any)?.user?.delete?.after;
-    const userDeleteAfter = async (user: any, ctx: any) => {
-      const result = hostUserDeleteAfter ? await hostUserDeleteAfter(user, ctx) : undefined;
-      await clearUserUnlinks(user, ctx);
-      return result;
-    };
-
-    // ADR-0093 D9 — default active-org on session create. Without it, a user
-    // with memberships logs in with `activeOrganizationId = null`: better-auth
-    // org endpoints can't resolve an active org (single-org invite dead-end)
-    // and `{current_org_id}` nav tokens fall back to list views. Resolve the
-    // caller's sys_member row (owner-preferred, else oldest) and stamp the
-    // draft. Host hook runs first and wins; errors are swallowed so login
-    // never fails on this bookkeeping. Opt out via `autoActiveOrganization:
-    // false`.
-    const hostSessionBefore = (host as any)?.session?.create?.before;
-
-    /**
-     * The membership → active-org selection, in ONE place: owner-preferred,
-     * else the oldest row. It is called twice below and both calls must select
-     * identically — a second, "simpler" lookup after the settle would silently
-     * make a freshly-bound user's active org depend on which path found it.
-     */
-    const selectActiveOrg = async (reader: any, userId: string): Promise<string | undefined> => {
-      let row: any;
-      try {
-        row = await reader.findOne('sys_member', { where: { user_id: userId, role: 'owner' } });
-      } catch {
-        row = undefined;
-      }
-      if (!row?.organization_id) {
-        try {
-          row = await reader.findOne('sys_member', { where: { user_id: userId } });
-        } catch {
-          row = undefined;
-        }
-      }
-      return row?.organization_id;
-    };
-
-    const defaultActiveOrg = async (session: any, ctx: any) => {
-      try {
-        if (!session || session.activeOrganizationId) return;
-        const userId = session.userId;
-        if (!userId) return;
-        const engine = this.config.dataEngine;
-        if (!engine) return;
-        // sys_member is org/user-scoped in host stacks — read with the system
-        // context so the pre-session lookup (no org on the caller yet) works.
-        const reader = withSystemReadContext(engine);
-        let orgId = await selectActiveOrg(reader, userId);
-
-        // [#8247 rule 2 / #8245] SETTLE THE MEMBERSHIP, THEN LOOK AGAIN.
-        //
-        // The ADR-0093 D2 reconciler is composed into `user.create.after`, and
-        // better-auth DEFERS that past the sign-up transaction. This hook runs
-        // inside it. So a user's very FIRST session is minted BEFORE the
-        // reconciler has bound them to anything, the lookup above finds no
-        // `sys_member` row, and the session carries no active organization —
-        // for every new user, on every deployment, structurally.
-        //
-        // That first session is not a harmless intermediate. Everything it
-        // writes is tenant-less: its `login` audit row is derived from
-        // `session.activeOrganizationId` (`auth-session-audit.ts`), so it lands
-        // with a NULL tenant and the SecurityPlugin's RLS predicate hides it
-        // from every reader FOREVER — nothing back-fills a written ledger row,
-        // and the rows lost this way are exactly the ones describing account
-        // creation (#8245).
-        //
-        // So the settle is hoisted HERE, to the seam that actually needs it,
-        // rather than the ordering being left to better-auth's hook scheduling.
-        //
-        // ⛔ THIS DOES NOT WIDEN WHO GETS BOUND, and that is the property to
-        // preserve if this is ever touched: it calls the SAME reconciler with
-        // the SAME policy and the SAME target-org resolution that
-        // `user.create.after` uses (one owner — `settleMembership`), so the
-        // outcome is byte-for-byte what would have happened a moment later.
-        // `invite-only` still binds nobody; multi-org still resolves no
-        // unambiguous target and binds nobody. Those users keep minting
-        // sessions with no active organization, which is the LEGAL state the
-        // #8247 ruling declares — this removes a race, never a policy.
-        //
-        // ⛔ AND IT RUNS ONLY FOR A USER WHOSE CREATION IS IN THIS REQUEST.
-        // ADR-0093 D7: membership is decided at creation. A member-less user
-        // signing in later is not a race to close — whatever left them without
-        // a membership (the policy, or an administrator) has already decided,
-        // and a sign-in must not decide again. The creation seam
-        // (the adapter's `create`, via `onRecordCreated`) stages the new
-        // user's id in the request's endpoint context; only a session minted
-        // in that same request for that same user settles here
-        // (`isCreatedInThisRequest`).
-        //
-        // Cost is paid only where there is something to fix: a caller who
-        // already holds a membership never reaches this branch, every other
-        // sign-in stops at an in-memory lookup, and a deployment that
-        // binds nobody stops at the reconciler's own policy / target-org check
-        // without touching the store. The re-read is gated on an outcome that
-        // means a membership now EXISTS, so the common no-bind login costs no
-        // extra query at all.
-        if (!orgId && this.isCreatedInThisRequest(ctx, userId)) {
-          const outcome = await this.settleMembership(userId);
-          if (outcome === 'bound' || outcome === 'yielded') {
-            orgId = await selectActiveOrg(reader, userId);
-          }
-        }
-
-        if (!orgId) return;
-        return { data: { ...session, activeOrganizationId: orgId } };
-      } catch {
-        return; // never break session create
-      }
-    };
-    const sessionBefore =
-      this.config.autoActiveOrganization !== false
-        ? async (session: any, ctx: any) => {
-            let draft = session;
-            if (hostSessionBefore) {
-              const hostResult = await hostSessionBefore(session, ctx);
-              if (hostResult && typeof hostResult === 'object' && 'data' in hostResult) {
-                draft = (hostResult as any).data;
-              }
-              // The host hook fully handled it → keep its result shape.
-              if (draft?.activeOrganizationId) return { data: draft };
-            }
-            return (await defaultActiveOrg(draft, ctx)) ?? (draft === session ? undefined : { data: draft });
-          }
-        : hostSessionBefore;
-
-    // [#8144] The `login` / `logout` audit writers (#7675 sub-issue A). See
-    // `auth-session-audit.ts` for why these two hooks and no others, and why
-    // logout reads the endpoint path from the hook's own `ctx` argument rather
-    // than from the ambient auth context.
-    //
-    // Host hooks chain FIRST and keep their result, exactly as `sessionBefore`
-    // above does: the audit row is an observation, never a participant in what
-    // better-auth decides. Both emitters are awaited but cannot throw
-    // (`emitAuthSessionAuditEvent` swallows), so neither can turn a valid
-    // sign-in or sign-out into an error.
-    const hostSessionCreateAfter = (host as any)?.session?.create?.after;
-    const sessionCreateAfter = async (session: any, ctx: any) => {
-      const result = hostSessionCreateAfter ? await hostSessionCreateAfter(session, ctx) : undefined;
-      await emitAuthSessionAuditEvent(
-        this.config.getAuditSink?.(),
-        loginEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined),
-      );
-      return result;
-    };
-    // [#23772] A minted principal session is NEVER renewed. better-auth's
-    // `get-session` renews any session past `updateAge` to `now + expiresIn`,
-    // a short session from its first read, and on the bearer lane nothing
-    // client-side can stop it (no dont-remember cookie rides a bearer). Every
-    // renewal is one `internalAdapter.updateSession`, so the guard sits on
-    // that write — the cookie lane, the bearer lane and the in-process
-    // `getSession` alike, under secondary storage too
-    // (`principal-session-mint.ts`, `holdPrincipalSessionExpiry`). A host
-    // hook chains FIRST and its `false` (abort) is honoured; the guard then
-    // judges what the host left.
-    const hostSessionUpdateBefore = (host as any)?.session?.update?.before;
-    const sessionUpdateBefore = async (update: any, ctx: any) => {
-      let draft = update;
-      if (hostSessionUpdateBefore) {
-        const hostResult = await hostSessionUpdateBefore(update, ctx);
-        if (hostResult === false) return false;
-        if (hostResult && typeof hostResult === 'object' && 'data' in hostResult) {
-          draft = { ...draft, ...(hostResult as any).data };
-        }
-      }
-      const held = holdPrincipalSessionExpiry(draft, ctx);
-      if (held) return { data: held };
-      return draft === update ? undefined : { data: draft };
-    };
-
-    const hostSessionDeleteAfter = (host as any)?.session?.delete?.after;
-    const sessionDeleteAfter = async (session: any, ctx: any) => {
-      const result = hostSessionDeleteAfter ? await hostSessionDeleteAfter(session, ctx) : undefined;
-      await emitAuthSessionAuditEvent(
-        this.config.getAuditSink?.(),
-        logoutEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined),
-      );
-      return result;
-    };
-
-    // ADR-0093 D2 — the single owner of the membership invariant. Composed into
-    // `user.create.after`, the one seam EVERY creation path flows through
-    // (email signup, admin create-user, bulk import, SSO JIT). Host hook (e.g.
-    // the cloud's personal-org provisioning) chains FIRST and wins; the
-    // reconciler then yields to whatever membership exists, so there is never a
-    // double bind. Best-effort — never fails user creation.
-    const hostUserAfter = (host as any)?.user?.create?.after;
-    const membershipReconciler = async (user: any) => {
-      await this.settleMembership(user?.id);
-      // [#11739] The second half of an admitted SELF-registration: settle the
-      // DECLARED permission-set grant staged by the validateUserInfo gate —
-      // landed now, owned by the membership the line above bound, or held as
-      // a claim until the first membership (ADR-0131 D3). Same seam as the
-      // membership bind (the one every creation path flows through), same
-      // never-throw posture — but a failure here is reported at the
-      // durability level, because an admitted-but-ungranted self-registrant
-      // is the declared≠enforced state this card closes.
-      await this.settleSelfRegistrationGrant(user);
-    };
-    const userAfter = hostUserAfter
-      ? async (user: any, ctx: any) => {
-          const hostResult = await hostUserAfter(user, ctx);
-          await membershipReconciler(user);
-          return hostResult;
-        }
-      : async (user: any) => {
-          await membershipReconciler(user);
-        };
-
-    // [#12751] Walled owner-verified stamp, the CONSUMING half: the admission
-    // gate staged the decision (see `validateAudienceAdmission` and
-    // `walled-owner-operator-stamp.ts`); this before-hook lands it, so the
-    // declared owner's operator-provisioned row is BORN `emailVerified: true`
-    // — the same at-creation shape as a trusted-SSO insert, and the creation
-    // write then replays `bootstrapPlatformAdmin` (`shouldReplayBootstrapFor`,
-    // `create` arm), which elevates it with no further verification step.
-    // `user.create.before` is a seam only a CREATION traverses, so a later
-    // email UPDATE to the owner address structurally cannot inherit the
-    // stamp. Host hook chains FIRST and keeps its result shape, exactly as
-    // `sessionBefore` above does; a host `false` (refuse the creation) is
-    // honoured before the stamp is even consumed.
-    const hostUserBefore = (host as any)?.user?.create?.before;
-    const userBefore = async (user: any, ctx: any) => {
-      let draft = user;
-      if (hostUserBefore) {
-        const hostResult = await hostUserBefore(user, ctx);
-        if (hostResult === false) return false;
-        if (hostResult && typeof hostResult === 'object' && 'data' in hostResult) {
-          draft = { ...draft, ...(hostResult as any).data };
-        }
-      }
-      const email = typeof draft?.email === 'string' ? draft.email : '';
-      if (email && this.takeOwnerVerifiedStamp(email)) {
-        return { data: { ...draft, emailVerified: true } };
-      }
-      return draft === user ? undefined : { data: draft };
-    };
-
-    return {
-      ...(host ?? {}),
-      account: {
-        ...((host as any)?.account ?? {}),
-        create: {
-          ...((host as any)?.account?.create ?? {}),
-          after,
-        },
-        delete: {
-          ...((host as any)?.account?.delete ?? {}),
-          before: accountDeleteBefore,
-        },
-      },
-      user: {
-        ...((host as any)?.user ?? {}),
-        create: {
-          ...((host as any)?.user?.create ?? {}),
-          before: userBefore,
-          after: userAfter,
-        },
-        delete: {
-          ...((host as any)?.user?.delete ?? {}),
-          after: userDeleteAfter,
-        },
-      },
-      session: {
-        ...((host as any)?.session ?? {}),
-        create: {
-          ...((host as any)?.session?.create ?? {}),
-          // `sessionBefore` is undefined only when `autoActiveOrganization` is
-          // off AND the host supplied none — spread it in conditionally so the
-          // key is absent rather than explicitly `undefined`.
-          ...(sessionBefore ? { before: sessionBefore } : {}),
-          after: sessionCreateAfter,
-        },
-        update: {
-          ...((host as any)?.session?.update ?? {}),
-          before: sessionUpdateBefore,
-        },
-        delete: {
-          ...((host as any)?.session?.delete ?? {}),
-          after: sessionDeleteAfter,
-        },
-      },
-    } as BetterAuthOptions['databaseHooks'];
+    return composeDatabaseHooks.call(hookHost, host);
   }
 
   /**
@@ -9147,51 +8520,13 @@ export class AuthManager {
    * managed user might transiently show a password action that simply errors —
    * never a hard login failure).
    */
-  private async stampIdentitySource(account: any, _ctx?: unknown): Promise<void> {
-    try {
-      const providerId = account?.providerId ?? account?.provider_id;
-      const userId = account?.userId ?? account?.user_id;
-      if (!userId || !providerId) return;
-      const engine = this.getDataEngine();
-      if (!engine) return;
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-
-      if (providerId === 'credential') {
-        // Gained a local password → env-native. Only write if currently
-        // managed (avoids a no-op history row on every local signup).
-        const u = await engine.findOne('sys_user', {
-          where: { id: userId }, fields: ['id', 'source'], context: SYSTEM_CTX,
-        } as any);
-        if (u && u.source === 'idp_provisioned') {
-          await engine.update('sys_user', { id: userId, source: 'env_native' }, { context: SYSTEM_CTX } as any);
-        }
-        return;
-      }
-
-      // Federated link → managed, unless a local credential already exists.
-      const credentialCount = await engine.count('sys_account', {
-        where: { user_id: userId, provider_id: 'credential' },
-        context: SYSTEM_CTX,
-      } as any);
-      if (typeof credentialCount === 'number' && credentialCount > 0) return;
-      await engine.update('sys_user', { id: userId, source: 'idp_provisioned' }, { context: SYSTEM_CTX } as any);
-    } catch (e) {
-      // Provenance stamp must never break federated login — so the login still
-      // succeeds. [#12981] What it must not do is vanish: the stamp IS the
-      // managed-vs-native gate.
-      this.logDurabilityDegradation(
-        'AuthManager: the sys_user.source provenance stamp was NOT written — the account link '
-          + 'succeeded and the sign-in is fine, so nothing looks broken, but this user keeps the '
-          + 'PREVIOUS source value. A federated user still reading `env_native` is offered the '
-          + 'password / identity-edit actions that are supposed to hide for a managed identity '
-          + '(cloud ADR-0024 D4), which is how a managed user self-mints a local password that '
-          + 'bypasses enforced SSO. Remedy: make the sys_user update land (write permission on '
-          + '`source`, driver connectivity); the stamp is idempotent and the next account link '
-          + 'for this user re-runs it.',
-        e,
-        { object: 'sys_user', field: 'source' },
-      );
-    }
+  private stampIdentitySource(account: any, _ctx?: unknown): Promise<void> {
+    // [#25224 cut 4] The body moved to `auth-manager-database-hooks.ts` (see `DatabaseHooksHost`).
+    const host: Pick<DatabaseHooksHost, 'getDataEngine' | 'logDurabilityDegradation'> = {
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return stampIdentitySource.call(host, account, _ctx);
   }
 
   /**
@@ -9200,23 +8535,13 @@ export class AuthManager {
    * four classes (upper / lower / digit / symbol) present and throws
    * `PASSWORD_POLICY_VIOLATION` when fewer than `passwordMinClasses` are used.
    */
-  private async assertPasswordComplexity(password: string): Promise<void> {
-    if (!this.config.passwordRequireComplexity) return;
-    const min = Math.min(4, Math.max(1, Math.floor(Number(this.config.passwordMinClasses) || 3)));
-    const classes =
-      (/[a-z]/.test(password) ? 1 : 0) +
-      (/[A-Z]/.test(password) ? 1 : 0) +
-      (/[0-9]/.test(password) ? 1 : 0) +
-      (/[^A-Za-z0-9]/.test(password) ? 1 : 0);
-    if (classes < min) {
-      const { APIError } = await import('better-auth/api');
-      throw new APIError('BAD_REQUEST', {
-        message:
-          `Password must include at least ${min} of: uppercase, lowercase, ` +
-          'digit, symbol.',
-        code: 'PASSWORD_POLICY_VIOLATION',
-      });
-    }
+  private assertPasswordComplexity(password: string): Promise<void> {
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
+    const readConfig = () => this.config;
+    const host: Pick<PasswordSessionPolicyHost, 'config'> = {
+      get config() { return readConfig(); },
+    };
+    return assertPasswordComplexity.call(host, password);
   }
 
   /**
@@ -9304,24 +8629,19 @@ export class AuthManager {
    * zero overhead.
    */
   private refreshMustChangeCacheIfStale(): void {
-    if (this._mustChangeRefreshing) return;
-    if (Date.now() - this._mustChangeCache.at < 60_000) return;
-    const engine = this.getDataEngine();
-    if (!engine) return;
-    this._mustChangeRefreshing = true;
-    void (async () => {
-      try {
-        const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-        const n = await engine.count('sys_user', {
-          where: { must_change_password: true }, context: SYSTEM_CTX,
-        } as any);
-        this._mustChangeCache = { value: typeof n === 'number' && n > 0, at: Date.now() };
-      } catch {
-        // leave the prior value; try again after the TTL
-      } finally {
-        this._mustChangeRefreshing = false;
-      }
-    })();
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
+    const readMustChangeCache = () => this._mustChangeCache;
+    const writeMustChangeCache = (v: AuthManager['_mustChangeCache']) => { this._mustChangeCache = v; };
+    const readMustChangeRefreshing = () => this._mustChangeRefreshing;
+    const writeMustChangeRefreshing = (v: AuthManager['_mustChangeRefreshing']) => { this._mustChangeRefreshing = v; };
+    const host: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_mustChangeRefreshing' | 'getDataEngine'> = {
+      get _mustChangeCache() { return readMustChangeCache(); },
+      set _mustChangeCache(v) { writeMustChangeCache(v); },
+      get _mustChangeRefreshing() { return readMustChangeRefreshing(); },
+      set _mustChangeRefreshing(v) { writeMustChangeRefreshing(v); },
+      getDataEngine: (...a) => this.getDataEngine(...a),
+    };
+    return refreshMustChangeCacheIfStale.call(host);
   }
 
   /**
@@ -9331,25 +8651,21 @@ export class AuthManager {
    * is already on (the gate is active regardless).
    */
   private refreshOrgMfaCacheIfStale(): void {
-    if (this.config.mfaRequired === true) return;
-    if (this._orgMfaRefreshing) return;
-    if (Date.now() - this._orgMfaCache.at < 60_000) return;
-    const engine = this.getDataEngine();
-    if (!engine) return;
-    this._orgMfaRefreshing = true;
-    void (async () => {
-      try {
-        const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-        const n = await engine.count('sys_organization', {
-          where: { require_mfa: true }, context: SYSTEM_CTX,
-        } as any);
-        this._orgMfaCache = { value: typeof n === 'number' && n > 0, at: Date.now() };
-      } catch {
-        // leave the prior value; try again after the TTL
-      } finally {
-        this._orgMfaRefreshing = false;
-      }
-    })();
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
+    const readOrgMfaCache = () => this._orgMfaCache;
+    const writeOrgMfaCache = (v: AuthManager['_orgMfaCache']) => { this._orgMfaCache = v; };
+    const readOrgMfaRefreshing = () => this._orgMfaRefreshing;
+    const writeOrgMfaRefreshing = (v: AuthManager['_orgMfaRefreshing']) => { this._orgMfaRefreshing = v; };
+    const readConfig = () => this.config;
+    const host: Pick<PasswordSessionPolicyHost, '_orgMfaCache' | '_orgMfaRefreshing' | 'config' | 'getDataEngine'> = {
+      get _orgMfaCache() { return readOrgMfaCache(); },
+      set _orgMfaCache(v) { writeOrgMfaCache(v); },
+      get _orgMfaRefreshing() { return readOrgMfaRefreshing(); },
+      set _orgMfaRefreshing(v) { writeOrgMfaRefreshing(v); },
+      get config() { return readConfig(); },
+      getDataEngine: (...a) => this.getDataEngine(...a),
+    };
+    return refreshOrgMfaCacheIfStale.call(host);
   }
 
   /**
@@ -9464,98 +8780,23 @@ export class AuthManager {
     );
   }
 
-  public async resolveUserAuthGates(
+  public resolveUserAuthGates(
     userId: string,
     options: { organizationId?: string } = {},
   ): Promise<AuthGate[]> {
-    // The two lazily-refreshed caches below are kept warm by `isAuthGateActive()`
-    // on the session path; a key seam may ask without that probe running first,
-    // so this computation refreshes them itself (each is a no-op inside its TTL).
-    this.refreshOrgMfaCacheIfStale();
-    this.refreshMustChangeCacheIfStale();
-    const activeOrgId = options.organizationId;
-    const expiryDays = Math.floor(Number(this.config.passwordExpiryDays) || 0);
-    const mfaGlobal = this.config.mfaRequired === true;
-    // Per-org tightening: an org may require MFA above the global floor.
-    const orgMaybeRequires = !mfaGlobal && !!activeOrgId && this._orgMfaCache.value;
-    // #2766 V1 — an admin-issued must-change-password flag activates the gate
-    // even with every config feature off (per-user state, cached like org MFA).
-    const mustChangeMaybe = this._mustChangeCache.value;
-    if (expiryDays <= 0 && !mfaGlobal && !orgMaybeRequires && !mustChangeMaybe) {
-      return []; // no gate feature active
-    }
-    const engine = this.getDataEngine();
-    if (!engine || !userId) return [];
-    const gates: AuthGate[] = [];
-    try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const u = await engine.findOne('sys_user', {
-        where: { id: userId },
-        fields: ['password_changed_at', 'two_factor_enabled', 'mfa_required_at', 'must_change_password'],
-        context: SYSTEM_CTX,
-      } as any);
-
-      // Effective MFA requirement: global floor OR the active org's require_mfa.
-      let mfaRequired = mfaGlobal;
-      if (!mfaRequired && orgMaybeRequires) {
-        const org = await engine.findOne('sys_organization', {
-          where: { id: activeOrgId }, fields: ['require_mfa'], context: SYSTEM_CTX,
-        } as any);
-        mfaRequired = org?.require_mfa === true || org?.require_mfa === 1;
-      }
-
-      // ── Admin-issued force change (#2766 V1) ──────────────────────────
-      // [#23287, ruling C′ item 2] Its OWN code now, scope `credential`: it
-      // used to reuse `PASSWORD_EXPIRED`, which made an administrator's reset
-      // indistinguishable from natural expiry on the wire. The administrator's
-      // act carries an explicit revocation switch instead
-      // (`runAdminSetUserPassword`, `revokeSessionsAndKeys`).
-      if (u?.must_change_password === true || u?.must_change_password === 1) {
-        gates.push({
-          code: 'PASSWORD_RESET_REQUIRED',
-          message: 'You must change your password before continuing.',
-        });
-      }
-
-      // ── Password expiry ───────────────────────────────────────────────
-      if (expiryDays > 0) {
-        const changed = u?.password_changed_at;
-        // Null = never expires (existing accounts on upgrade) until next change.
-        if (changed && Date.now() - new Date(changed).getTime() > expiryDays * 86_400_000) {
-          gates.push({
-            code: 'PASSWORD_EXPIRED',
-            message: 'Your password has expired. Please change it to continue.',
-          });
-        }
-      }
-
-      // ── Enforced MFA ──────────────────────────────────────────────────
-      // A user without TOTP enrolled is blocked once their grace window
-      // elapses. The clock (`mfa_required_at`) starts the first time we see
-      // them required-but-unenrolled (stamped lazily, best-effort).
-      if (mfaRequired && !(u?.two_factor_enabled === true || u?.two_factor_enabled === 1)) {
-        const graceDays = Math.max(0, Math.floor(Number(this.config.mfaGracePeriodDays ?? 7)));
-        let requiredAt = u?.mfa_required_at;
-        if (!requiredAt) {
-          requiredAt = new Date();
-          // Best-effort: start the grace clock; never block on the write.
-          engine
-            .update('sys_user', { id: userId, mfa_required_at: requiredAt }, { context: SYSTEM_CTX } as any)
-            .catch(() => undefined);
-        }
-        const elapsedMs = Date.now() - new Date(requiredAt).getTime();
-        if (elapsedMs > graceDays * 86_400_000) {
-          gates.push({
-            code: 'MFA_REQUIRED',
-            message:
-              'Multi-factor authentication is required. Please set up an authenticator app to continue.',
-          });
-        }
-      }
-    } catch {
-      return []; // fail-open
-    }
-    return gates;
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
+    const readMustChangeCache = () => this._mustChangeCache;
+    const readOrgMfaCache = () => this._orgMfaCache;
+    const readConfig = () => this.config;
+    const host: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'> = {
+      get _mustChangeCache() { return readMustChangeCache(); },
+      get _orgMfaCache() { return readOrgMfaCache(); },
+      get config() { return readConfig(); },
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      refreshMustChangeCacheIfStale: (...a) => this.refreshMustChangeCacheIfStale(...a),
+      refreshOrgMfaCacheIfStale: (...a) => this.refreshOrgMfaCacheIfStale(...a),
+    };
+    return resolveUserAuthGates.call(host, userId, options);
   }
 
   /**
@@ -9563,33 +8804,13 @@ export class AuthManager {
    * set (sign-up / change / reset). Best-effort; never throws. Written as a Date
    * (never epoch-ms) per ADR-0074.
    */
-  private async stampPasswordChangedAt(userId: string): Promise<void> {
-    const engine = this.getDataEngine();
-    if (!engine || !userId) return;
-    try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      // #2766 V1 — a completed password change also satisfies any pending
-      // admin-issued force-change flag, so clear it in the same write.
-      await engine.update(
-        'sys_user',
-        { id: userId, password_changed_at: new Date(), must_change_password: false },
-        { context: SYSTEM_CTX } as any,
-      );
-    } catch (e) {
-      // Never break a valid password change — the new password IS set.
-      // [#12981] But this write carries two live flags, not just an audit stamp.
-      this.logDurabilityDegradation(
-        'AuthManager: password_changed_at / must_change_password were NOT written after a '
-          + 'successful password change — the new password works, so the user sees nothing wrong. '
-          + 'Two things are now stale: any admin-issued force-change flag stays SET, so '
-          + 'this user is told to change their password again on the next sign-in even though they '
-          + 'just did; and the password-age policy (ADR-0069 D1) keeps reading the OLD timestamp, '
-          + 'so a rotation deadline is computed from a password that no longer exists. Remedy: '
-          + 'make the sys_user update land; the next successful change re-stamps both.',
-        e,
-        { object: 'sys_user', fields: ['password_changed_at', 'must_change_password'] },
-      );
-    }
+  private stampPasswordChangedAt(userId: string): Promise<void> {
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
+    const host: Pick<PasswordSessionPolicyHost, 'getDataEngine' | 'logDurabilityDegradation'> = {
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return stampPasswordChangedAt.call(host, userId);
   }
 
   /**
@@ -9597,13 +8818,8 @@ export class AuthManager {
    * a string[] of hashes, tolerating null / malformed values.
    */
   private parseHashes(raw: unknown): string[] {
-    if (typeof raw !== 'string' || !raw.trim()) return [];
-    try {
-      const arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr.filter((h): h is string => typeof h === 'string' && !!h) : [];
-    } catch {
-      return [];
-    }
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts`; it reads no member of this class.
+    return parseHashes(raw);
   }
 
   /**
@@ -9629,35 +8845,12 @@ export class AuthManager {
    * correctly here fixes all three at once; a second stamp site would fix the
    * visible one and leave the control transport-dependent.
    */
-  private async resolvePasswordChangeUserId(ctx: any): Promise<string | undefined> {
-    if (ctx?.path === '/change-password') {
-      return (await this.resolveActor(ctx))?.userId;
-    }
-    if (ctx?.path === '/reset-password') {
-      const token = typeof ctx?.body?.token === 'string' ? ctx.body.token : '';
-      if (!token) return undefined;
-      try {
-        const v: any = await ctx.context.internalAdapter.findVerificationValue(`reset-password:${token}`);
-        const raw = v?.value;
-        if (!raw) return undefined;
-        if (typeof raw === 'string') {
-          const t = raw.trim();
-          if (t.startsWith('{') || t.startsWith('"')) {
-            try {
-              const o = JSON.parse(t);
-              return (typeof o === 'string' ? o : o?.userId) ?? undefined;
-            } catch {
-              return t;
-            }
-          }
-          return t;
-        }
-        return raw?.userId ?? undefined;
-      } catch {
-        return undefined;
-      }
-    }
-    return undefined;
+  private resolvePasswordChangeUserId(ctx: any): Promise<string | undefined> {
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
+    const host: Pick<PasswordSessionPolicyHost, 'resolveActor'> = {
+      resolveActor: (...a) => this.resolveActor(...a),
+    };
+    return resolvePasswordChangeUserId.call(host, ctx);
   }
 
   /**
@@ -9667,103 +8860,35 @@ export class AuthManager {
    * current hash (for the after-hook to append) when the candidate is fresh, or
    * undefined when the feature is off / nothing to compare.
    */
-  private async assertPasswordNotReused(
+  private assertPasswordNotReused(
     userId: string,
     candidate: string,
     verify?: (data: { password: string; hash: string }) => Promise<boolean>,
   ): Promise<string | undefined> {
-    const count = Math.floor(Number(this.config.passwordHistoryCount) || 0);
-    if (count <= 0 || typeof verify !== 'function') return undefined;
-    const engine = this.getDataEngine();
-    if (!engine) return undefined;
-    const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-    let account: any;
-    try {
-      account = await engine.findOne('sys_account', {
-        where: { user_id: userId, provider_id: 'credential' },
-        fields: ['id', 'password', 'previous_password_hashes'],
-        context: SYSTEM_CTX,
-      } as any);
-      // [commit d6e80b28b] Both columns are `internal: true`, so the engine's read path
-      // omits them from the row above — with no `isSystem` carve-out and in
-      // spite of the explicit projection (#7728's design). Recover them
-      // through the privileged accessor, or `compareList` below is empty and
-      // this control silently passes every reused password.
-      await recoverInternalFieldsForSystemRead(
-        engine as never,
-        'sys_account',
-        account,
-        ['password', 'previous_password_hashes'],
-      );
-    } catch {
-      return undefined; // fail-open on lookup error
-    }
-    if (!account?.id) return undefined;
-    const currentHash = typeof account.password === 'string' ? account.password : '';
-    const compareList = [currentHash, ...this.parseHashes(account.previous_password_hashes)].filter(Boolean);
-    for (const h of compareList) {
-      let match = false;
-      try { match = await verify({ password: candidate, hash: h }); } catch { match = false; }
-      if (match) {
-        const { APIError } = await import('better-auth/api');
-        throw new APIError('BAD_REQUEST', {
-          message: `For security you can't reuse one of your last ${count} passwords. Please choose a different one.`,
-          code: 'PASSWORD_REUSE',
-        });
-      }
-    }
-    return currentHash;
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
+    const readConfig = () => this.config;
+    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'parseHashes'> = {
+      get config() { return readConfig(); },
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      parseHashes: (...a) => this.parseHashes(...a),
+    };
+    return assertPasswordNotReused.call(host, userId, candidate, verify);
   }
 
   /**
    * ADR-0069 D1 — append `oldHash` to the bounded password-history ring after a
    * successful change/reset. Best-effort; never throws.
    */
-  private async recordPasswordHistory(userId: string, oldHash: string): Promise<void> {
-    const count = Math.floor(Number(this.config.passwordHistoryCount) || 0);
-    if (count <= 0 || !oldHash) return;
-    const engine = this.getDataEngine();
-    if (!engine) return;
-    try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const account = await engine.findOne('sys_account', {
-        where: { user_id: userId, provider_id: 'credential' },
-        fields: ['id', 'previous_password_hashes'],
-        context: SYSTEM_CTX,
-      } as any);
-      if (!account?.id) return;
-      // [commit d6e80b28b] As above — the flagged column is omitted from the read, so
-      // recover it before extending the ring. Without this the ring is rebuilt
-      // from an empty history on every change and never grows past one entry.
-      await recoverInternalFieldsForSystemRead(
-        engine as never,
-        'sys_account',
-        account,
-        ['previous_password_hashes'],
-      );
-      const prev = this.parseHashes(account.previous_password_hashes);
-      const next = [oldHash, ...prev.filter((h) => h !== oldHash)].slice(0, count);
-      await engine.update(
-        'sys_account',
-        { id: account.id, previous_password_hashes: JSON.stringify(next) },
-        { context: SYSTEM_CTX } as any,
-      );
-    } catch (e) {
-      // Never break a valid password change. [#12981] But a reuse ring that
-      // silently stops growing is a security control that stops enforcing.
-      this.logDurabilityDegradation(
-        'AuthManager: the password-history ring was NOT extended after a successful password '
-          + 'change — the change itself succeeded, so nothing looks wrong. The password just '
-          + 'replaced was never recorded, so `passwordHistoryCount` (ADR-0069 D1) will NOT refuse '
-          + 'it on the next change: the deployment advertises "you cannot reuse your last N '
-          + 'passwords" and, for this identity, does not enforce it. Remedy: make the sys_account '
-          + 'update land — check the write permission on `previous_password_hashes` and driver '
-          + 'connectivity. The ring is rebuilt from stored history, so it recovers on the next '
-          + 'change that lands; the passwords skipped in between stay reusable.',
-        e,
-        { object: 'sys_account', field: 'previous_password_hashes', ringSize: count },
-      );
-    }
+  private recordPasswordHistory(userId: string, oldHash: string): Promise<void> {
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
+    const readConfig = () => this.config;
+    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation' | 'parseHashes'> = {
+      get config() { return readConfig(); },
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+      parseHashes: (...a) => this.parseHashes(...a),
+    };
+    return recordPasswordHistory.call(host, userId, oldHash);
   }
 
   /**
@@ -9780,40 +8905,15 @@ export class AuthManager {
    * endpoint context `ctx` — it writes that account's `login_failed` row with
    * the refusal's own code before throwing (`auth-session-audit.ts`).
    */
-  private async assertAccountNotLocked(email: string, ctx?: unknown): Promise<void> {
-    const threshold = Number(this.config.lockoutThreshold) || 0;
-    if (threshold <= 0) return;
-    const engine = this.getDataEngine();
-    if (!engine) return;
-    let locked = false;
-    let lockedUserId: string | undefined;
-    try {
-      const u = await this.findSignInAccount(engine, email, ['locked_until']);
-      const lu = u?.locked_until as string | number | Date | null | undefined;
-      locked = !!(lu && new Date(lu).getTime() > Date.now());
-      if (locked && u) lockedUserId = u.id;
-    } catch {
-      return; // fail-open
-    }
-    if (locked) {
-      if (ctx !== undefined && lockedUserId) {
-        await emitAuthSessionAuditEvent(
-          this.config.getAuditSink?.(),
-          signInFailureEventFor(lockedUserId, {
-            path: SIGN_IN_EMAIL_PATH,
-            reason: 'ACCOUNT_LOCKED',
-            fingerprint: signInClientFingerprint(ctx),
-          }),
-        );
-      }
-      const { APIError } = await import('better-auth/api');
-      throw new APIError('FORBIDDEN', {
-        message:
-          'This account is temporarily locked after too many failed sign-in ' +
-          'attempts. Try again later or ask an administrator to unlock it.',
-        code: 'ACCOUNT_LOCKED',
-      });
-    }
+  private assertAccountNotLocked(email: string, ctx?: unknown): Promise<void> {
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const readConfig = () => this.config;
+    const host: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine'> = {
+      get config() { return readConfig(); },
+      findSignInAccount: (...a) => this.findSignInAccount(...a),
+      getDataEngine: (...a) => this.getDataEngine(...a),
+    };
+    return assertAccountNotLocked.call(host, email, ctx);
   }
 
   /**
@@ -9836,54 +8936,19 @@ export class AuthManager {
    * `account_locked` row records, so a lock that was never written is never
    * reported as one.
    */
-  private async recordSignInOutcome(
+  private recordSignInOutcome(
     email: string,
     success: boolean,
   ): Promise<{ userId: string; lockedUntil: Date; threshold: number } | undefined> {
-    const threshold = Number(this.config.lockoutThreshold) || 0;
-    if (threshold <= 0) return undefined;
-    const engine = this.getDataEngine();
-    if (!engine) return undefined;
-    try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const u = await this.findSignInAccount(engine, email, ['failed_login_count', 'locked_until']);
-      if (!u) return undefined;
-      if (success) {
-        if ((Number(u.failed_login_count) || 0) !== 0 || u.locked_until) {
-          await engine.update(
-            'sys_user',
-            { id: u.id, failed_login_count: 0, locked_until: null },
-            { context: SYSTEM_CTX } as any,
-          );
-        }
-        return undefined;
-      }
-      const next = (Number(u.failed_login_count) || 0) + 1;
-      const patch: Record<string, unknown> = { id: u.id, failed_login_count: next };
-      let lockedUntil: Date | undefined;
-      if (next >= threshold) {
-        const mins = Number(this.config.lockoutDurationMinutes) || 15;
-        lockedUntil = new Date(Date.now() + mins * 60_000);
-        patch.locked_until = lockedUntil;
-      }
-      await engine.update('sys_user', patch, { context: SYSTEM_CTX } as any);
-      return lockedUntil ? { userId: u.id, lockedUntil, threshold } : undefined;
-    } catch (e) {
-      // Never break the auth response. [#12981] But lockout accounting that
-      // silently stops accounting is brute-force protection that is OFF.
-      this.logDurabilityDegradation(
-        'AuthManager: the sign-in lockout counter was NOT written — the auth response is '
-          + 'unaffected, so nothing looks broken. This attempt was not counted, which means '
-          + 'consecutive failures do not accumulate and the account is never locked: '
-          + '`lockoutThreshold` (ADR-0069 D2) is configured and, for this identity, not enforced. '
-          + 'A brute-force run against this account meets no limit while this persists, and the '
-          + 'only notice is this line. Remedy: make the sys_user update land — check the write '
-          + 'permission on `failed_login_count` / `locked_until` and driver connectivity.',
-        e,
-        { object: 'sys_user', threshold, success },
-      );
-      return undefined;
-    }
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const readConfig = () => this.config;
+    const host: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
+      get config() { return readConfig(); },
+      findSignInAccount: (...a) => this.findSignInAccount(...a),
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return recordSignInOutcome.call(host, email, success);
   }
 
   /**
@@ -9899,35 +8964,18 @@ export class AuthManager {
    * (`auth-session-audit.ts`, account events). The password is never read.
    * Never throws — the refusal is already decided and the sink swallows.
    */
-  private async auditRefusedSignIn(
+  private auditRefusedSignIn(
     ctx: any,
     email: string,
     lockStamped: { userId: string; lockedUntil: Date; threshold: number } | undefined,
   ): Promise<void> {
-    const sink = this.config.getAuditSink?.();
-    if (!sink) return;
-    const userId = lockStamped?.userId ?? (await this.resolveSignInAccountId(email));
-    if (!userId) return;
-    const fingerprint = signInClientFingerprint(ctx);
-    await emitAuthSessionAuditEvent(
-      sink,
-      signInFailureEventFor(userId, {
-        path: SIGN_IN_EMAIL_PATH,
-        reason: refusalCodeOf(ctx?.context?.returned),
-        fingerprint,
-      }),
-    );
-    if (lockStamped) {
-      await emitAuthSessionAuditEvent(
-        sink,
-        accountLockedEventFor(lockStamped.userId, {
-          path: SIGN_IN_EMAIL_PATH,
-          lockedUntil: lockStamped.lockedUntil,
-          threshold: lockStamped.threshold,
-          fingerprint,
-        }),
-      );
-    }
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const readConfig = () => this.config;
+    const host: Pick<SignInLockoutHost, 'config' | 'resolveSignInAccountId'> = {
+      get config() { return readConfig(); },
+      resolveSignInAccountId: (...a) => this.resolveSignInAccountId(...a),
+    };
+    return auditRefusedSignIn.call(host, ctx, email, lockStamped);
   }
 
   /**
@@ -9936,23 +8984,14 @@ export class AuthManager {
    * row names the account the credential check actually judged and the lock
    * gate and counter hold.
    */
-  private async resolveSignInAccountId(email: string): Promise<string | undefined> {
-    const engine = this.getDataEngine();
-    if (!engine) return undefined;
-    try {
-      return (await this.findSignInAccount(engine, email, []))?.id;
-    } catch (e) {
-      // The refusal stands either way; what is lost is its ledger row.
-      this.logDurabilityDegradation(
-        'AuthManager: a refused sign-in was NOT recorded in sys_audit_log — the account it named '
-          + 'could not be resolved, so its `login_failed` row was not written. The refusal itself was '
-          + 'answered normally, so nothing looks broken, and the Auth preset of Setup → Audit Log is '
-          + 'missing this attempt. Remedy: make the sys_user read land — check driver connectivity.',
-        e,
-        { object: 'sys_user', action: 'login_failed' },
-      );
-      return undefined;
-    }
+  private resolveSignInAccountId(email: string): Promise<string | undefined> {
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const host: Pick<SignInLockoutHost, 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
+      findSignInAccount: (...a) => this.findSignInAccount(...a),
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return resolveSignInAccountId.call(host, email);
   }
 
   /**
@@ -9979,20 +9018,13 @@ export class AuthManager {
    * Throws what the engine throws; each caller keeps its own failure posture
    * (the gate fails open, the counter and the ledger report the lost write).
    */
-  private async findSignInAccount(
+  private findSignInAccount(
     engine: IDataEngine,
     email: string,
     fields: readonly string[],
   ): Promise<({ id: string } & Record<string, unknown>) | undefined> {
-    const query: EngineQueryOptions = {
-      where: { email: email.toLowerCase() },
-      fields: ['id', ...fields],
-      context: { isSystem: true, positions: [], permissions: [] },
-    };
-    const row = await engine.findOne('sys_user', query);
-    return row && typeof row.id === 'string' && row.id
-      ? (row as { id: string } & Record<string, unknown>)
-      : undefined;
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts`; it reads no member of this class.
+    return findSignInAccount(engine, email, fields);
   }
 
   /**
@@ -10025,14 +9057,12 @@ export class AuthManager {
    */
   private resolveTwoFactorAccountLockout():
   { enabled: boolean; maxFailedAttempts: number; durationSeconds: number } | undefined {
-    const threshold = Number(this.config.lockoutThreshold) || 0;
-    if (threshold <= 0) return undefined;
-    const minutes = Number(this.config.lockoutDurationMinutes) || 15;
-    return {
-      enabled: true,
-      maxFailedAttempts: threshold,
-      durationSeconds: minutes * 60,
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const readConfig = () => this.config;
+    const host: Pick<SignInLockoutHost, 'config'> = {
+      get config() { return readConfig(); },
     };
+    return resolveTwoFactorAccountLockout.call(host);
   }
 
   /**
@@ -10063,32 +9093,13 @@ export class AuthManager {
    * is read for — for every object and every deployment. The defect the ruling
    * named is the missing actor, and this is that actor.
    */
-  private async stampLastLogin(userId: string, ip: string | undefined): Promise<void> {
-    const engine = this.getDataEngine();
-    if (!engine || !userId) return;
-    try {
-      const SYSTEM_CTX = { isSystem: true, attributedUserId: userId, positions: [], permissions: [] };
-      const patch: Record<string, unknown> = { id: userId, last_login_at: new Date() };
-      // Cap to the column width (IPv6 textual max 45) — a malformed/oversized
-      // forwarded header must not blow up the write.
-      if (ip) patch.last_login_ip = ip.slice(0, 45);
-      await engine.update('sys_user', patch, { context: SYSTEM_CTX } as any);
-    } catch (e) {
-      // Never break the auth response. [#12981] But this write is the ONLY
-      // trace the sign-in leaves in the compliance ledger.
-      this.logDurabilityDegradation(
-        'AuthManager: the last-login stamp was NOT written — the sign-in succeeded and the user '
-          + 'holds a valid session, so nothing looks wrong. `last_login_at` / `last_login_ip` keep '
-          + 'their previous values, and because this update is what plugin-audit turns into the '
-          + 'change-trail row, this sign-in leaves NO trace in the compliance ledger at '
-          + 'all: "when did this account last sign in, and from where" now answers with a stale '
-          + 'row, and a login from a new address is exactly what that trail is read for. Remedy: '
-          + 'make the sys_user update land; the next sign-in that lands re-stamps it, but this one '
-          + 'is not recoverable.',
-        e,
-        { object: 'sys_user', fields: ['last_login_at', 'last_login_ip'] },
-      );
-    }
+  private stampLastLogin(userId: string, ip: string | undefined): Promise<void> {
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const host: Pick<SignInLockoutHost, 'getDataEngine' | 'logDurabilityDegradation'> = {
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return stampLastLogin.call(host, userId, ip);
   }
 
   /**
@@ -10104,52 +9115,13 @@ export class AuthManager {
    * with the threshold now operator-configurable (3 is a reasonable choice),
    * it is a lock admins will hit routinely.
    */
-  public async unlockUser(userId: string): Promise<boolean> {
-    const engine = this.getDataEngine();
-    if (!engine || !userId) return false;
-    const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-    const u = await engine.findOne('sys_user', {
-      where: { id: userId }, fields: ['id'], context: SYSTEM_CTX,
-    } as any);
-    if (!u?.id) return false;
-    await engine.update(
-      'sys_user',
-      { id: userId, failed_login_count: 0, locked_until: null },
-      { context: SYSTEM_CTX } as any,
-    );
-    // Best-effort and deliberately after the primary write: a user with no
-    // enrolment (or an environment where 2FA was never switched on) must still
-    // get a successful unlock, and the password-stage clear is the part the
-    // admin asked for.
-    try {
-      const enrolments = await engine.find('sys_two_factor', {
-        where: { user_id: String(userId) }, fields: ['id'], context: SYSTEM_CTX,
-      } as any);
-      for (const row of (enrolments ?? []) as Array<{ id?: string }>) {
-        if (!row?.id) continue;
-        await engine.update(
-          'sys_two_factor',
-          { id: row.id, failed_verification_count: 0, locked_until: null },
-          { context: SYSTEM_CTX } as any,
-        );
-      }
-    } catch (e) {
-      // Never turn a successful password-stage unlock into a failure — this
-      // method still returns true, because the password stage IS cleared.
-      // [#12981] That `true` is exactly why the silence had to go: it is the
-      // admin's whole answer, and it was covering a half-completed unlock.
-      this.logDurabilityDegradation(
-        'AuthManager: the SECOND-FACTOR half of an admin unlock was NOT cleared — the '
-          + 'password-stage counters were reset and this unlock reports SUCCESS to the admin, so '
-          + 'the console shows the account unlocked. `sys_two_factor.failed_verification_count` / '
-          + '`locked_until` are untouched, so a user locked at the second factor stays locked and '
-          + 'must wait out the duration with no admin escape hatch at all. Remedy: make the '
-          + 'sys_two_factor update land, then run Unlock again; it is idempotent.',
-        e,
-        { object: 'sys_two_factor', userId },
-      );
-    }
-    return true;
+  public unlockUser(userId: string): Promise<boolean> {
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
+    const host: Pick<PasswordSessionPolicyHost, 'getDataEngine' | 'logDurabilityDegradation'> = {
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return unlockUser.call(host, userId);
   }
 
   /**
@@ -10159,84 +9131,15 @@ export class AuthManager {
    * returns no session on the NEXT request; otherwise touches `last_activity_at`
    * (throttled to once a minute). Best-effort — never throws.
    */
-  private async enforceSessionControls(sessionId: string | undefined, createdAtHint: unknown): Promise<void> {
-    const idleMin = Math.floor(Number(this.config.sessionIdleTimeoutMinutes) || 0);
-    const absHrs = Math.floor(Number(this.config.sessionAbsoluteMaxHours) || 0);
-    if (idleMin <= 0 && absHrs <= 0) return;
-    const engine = this.getDataEngine();
-    if (!engine || !sessionId) return;
-    try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const srow = await engine.findOne('sys_session', {
-        where: { id: sessionId },
-        fields: ['id', 'created_at', 'last_activity_at', 'revoked_at'],
-        context: SYSTEM_CTX,
-      } as any);
-      if (!srow?.id || srow.revoked_at) return;
-      const now = Date.now();
-      let reason: string | undefined;
-      if (absHrs > 0) {
-        const created = srow.created_at ?? createdAtHint;
-        if (created && now - new Date(created as any).getTime() > absHrs * 3_600_000) reason = 'absolute_max';
-      }
-      if (!reason && idleMin > 0) {
-        const last = srow.last_activity_at ?? srow.created_at ?? createdAtHint;
-        if (last && now - new Date(last as any).getTime() > idleMin * 60_000) reason = 'idle_timeout';
-      }
-      if (reason) {
-        // [#12981] The per-call `.catch` stays — a revocation must not turn the
-        // request it rides on into a 500 — but it no longer swallows. This is
-        // the sharpest write in the file: a refused revocation leaves a session
-        // that IS over its limit fully live.
-        await engine.update(
-          'sys_session',
-          { id: sessionId, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: reason },
-          { context: SYSTEM_CTX } as any,
-        ).catch((e: unknown) => this.logDurabilityDegradation(
-          'AuthManager: a session that exceeded its configured limit was NOT revoked — the '
-            + 'revocation write was refused and the request continues normally, so nothing looks '
-            + 'wrong. The session row is unchanged, so better-auth will keep answering with it: '
-            + 'the idle / absolute session limits (ADR-0069 D4) are configured and, for this '
-            + 'session, not enforced. Remedy: make the sys_session update land — check the write '
-            + 'permission on `expires_at` / `revoked_at` / `revoke_reason`. Enforcement is '
-            + 're-attempted on this session\'s next request, so it recovers once the write can '
-            + 'land; until then the session stays usable.',
-          e,
-          { object: 'sys_session', sessionId, reason },
-        ));
-        return;
-      }
-      if (idleMin > 0) {
-        const la = srow.last_activity_at ? new Date(srow.last_activity_at as any).getTime() : 0;
-        if (now - la > 60_000) {
-          await engine.update('sys_session', { id: sessionId, last_activity_at: new Date(now) }, { context: SYSTEM_CTX } as any)
-            .catch((e: unknown) => this.logDurabilityDegradation(
-              'AuthManager: the session activity heartbeat was NOT written — the request '
-                + 'succeeds and the session stays live, so nothing looks wrong. '
-                + '`last_activity_at` keeps its older value, so the idle-timeout clock (ADR-0069 '
-                + 'D4) keeps measuring from that older instant and this session will be revoked '
-                + 'as idle EARLIER than the configured window — an active user signed out '
-                + 'mid-session for no visible reason. Remedy: make the sys_session update land; '
-                + 'the heartbeat retries on the next request past the one-minute throttle.',
-              e,
-              { object: 'sys_session', sessionId, field: 'last_activity_at' },
-            ));
-        }
-      }
-    } catch (e) {
-      // Never break a request. [#12981] But a control that silently stops
-      // running is a control the operator still believes is on.
-      this.logDurabilityDegradation(
-        'AuthManager: the per-request session controls did not run to completion — the request '
-          + 'succeeds, so nothing looks wrong. Idle and absolute session limits (ADR-0069 D4) '
-          + 'were not evaluated for this session, so a session past its limit is neither revoked '
-          + 'nor reported by the branch above. Remedy: this is the LOOKUP half failing (the '
-          + 'sys_session read), so check driver connectivity and read permission on sys_session; '
-          + 'the controls re-run on the next request.',
-        e,
-        { object: 'sys_session', sessionId, idleMinutes: idleMin, absoluteHours: absHrs },
-      );
-    }
+  private enforceSessionControls(sessionId: string | undefined, createdAtHint: unknown): Promise<void> {
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
+    const readConfig = () => this.config;
+    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation'> = {
+      get config() { return readConfig(); },
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return enforceSessionControls.call(host, sessionId, createdAtHint);
   }
 
   /**
@@ -10244,55 +9147,15 @@ export class AuthManager {
    * Keeps the newest `maxConcurrentSessions` live sessions for the user and
    * revokes the rest (oldest first). No-op when off. Best-effort.
    */
-  private async enforceConcurrentCap(userId: string): Promise<void> {
-    const cap = Math.floor(Number(this.config.maxConcurrentSessions) || 0);
-    if (cap <= 0 || !userId) return;
-    const engine = this.getDataEngine();
-    if (!engine) return;
-    try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const rows = await engine.find('sys_session', {
-        where: { user_id: userId },
-        fields: ['id', 'created_at', 'expires_at', 'revoked_at'],
-        limit: 200,
-        context: SYSTEM_CTX,
-      } as any);
-      const now = Date.now();
-      const live = (Array.isArray(rows) ? rows : [])
-        .filter((sn: any) => !sn.revoked_at && (!sn.expires_at || new Date(sn.expires_at).getTime() > now))
-        .sort((a: any, b: any) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
-      for (const sn of live.slice(cap)) {
-        // [#12981] Per-session `.catch` so one refused revocation does not
-        // abandon the rest of the sweep — but it reports instead of swallowing.
-        await engine.update(
-          'sys_session',
-          { id: sn.id, expires_at: new Date(now - 1000), revoked_at: new Date(now), revoke_reason: 'concurrent_cap' },
-          { context: SYSTEM_CTX } as any,
-        ).catch((e: unknown) => this.logDurabilityDegradation(
-          'AuthManager: a session over the concurrent-session cap was NOT revoked — the sign-in '
-            + 'that triggered the sweep succeeded, so nothing looks wrong. This older session '
-            + 'stays live, so the account holds MORE simultaneous sessions than '
-            + '`maxConcurrentSessions` (ADR-0069 D4) allows: the cap is configured and, for this '
-            + 'session, not enforced. Remedy: make the sys_session update land; the sweep re-runs '
-            + 'on this user\'s next sign-in and will try this row again.',
-          e,
-          { object: 'sys_session', sessionId: sn.id, cap, userId },
-        ));
-      }
-    } catch (e) {
-      // Never break a successful sign-in. [#12981] But a cap that silently
-      // stops sweeping is a cap the operator still believes is on.
-      this.logDurabilityDegradation(
-        'AuthManager: the concurrent-session cap sweep did not run — the sign-in succeeded, so '
-          + 'nothing looks wrong. Sessions beyond `maxConcurrentSessions` (ADR-0069 D4) were '
-          + 'neither enumerated nor revoked, so the account can hold unbounded simultaneous '
-          + 'sessions while this persists. Remedy: this is the sys_session LOOKUP half failing, '
-          + 'so check driver connectivity and read permission on sys_session; the sweep re-runs '
-          + 'on the next sign-in.',
-        e,
-        { object: 'sys_session', userId, cap },
-      );
-    }
+  private enforceConcurrentCap(userId: string): Promise<void> {
+    // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
+    const readConfig = () => this.config;
+    const host: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation'> = {
+      get config() { return readConfig(); },
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return enforceConcurrentCap.call(host, userId);
   }
 
   /**

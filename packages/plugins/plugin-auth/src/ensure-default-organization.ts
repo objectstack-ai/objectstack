@@ -82,7 +82,7 @@
  * the owner bind.
  */
 
-import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from '@objectstack/core';
+import { DEFAULT_ORGANIZATION_SLUG, findDefaultOrganization, matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from '@objectstack/core';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
@@ -333,17 +333,15 @@ export interface EnsureDefaultOrganizationResult {
 }
 
 /**
- * The Default Organization the way the `tenancy` service resolves it
- * (`resolveDefaultOrgId`): the stable `slug='default'` organization, else the
- * install's sole organization. `undefined` when there is neither — none, or
- * several with no `default` among them. Reads through {@link tryFind}, so an
- * unreadable store answers `undefined` and nothing is promoted on it.
+ * [ADR-0131 D3/D5] The Default Organization: the one definition
+ * (`findDefaultOrganization`, `@objectstack/core` — the stable `slug='default'`
+ * organization, else the install's sole organization) over {@link tryFind}.
+ * `undefined` when there is neither — none, or several with no `default` among
+ * them. The read is this module's: an unreadable store answers `undefined` and
+ * nothing is promoted on it, where the resolver's read would fail loud.
  */
 async function findDefaultOrganizationId(ql: any): Promise<string | undefined> {
-  const bySlug = await tryFind(ql, 'sys_organization', { slug: 'default' }, 1);
-  if (bySlug[0]?.id) return String(bySlug[0].id);
-  const any = await tryFind(ql, 'sys_organization', {}, 2);
-  return any.length === 1 && any[0]?.id ? String(any[0].id) : undefined;
+  return (await findDefaultOrganization((where, limit) => tryFind(ql, 'sys_organization', where, limit))).id;
 }
 
 /**
@@ -554,7 +552,7 @@ export async function ensureDefaultOrganization(
   let defaultOrgId: string | undefined;
   let defaultOrgCreated = false;
   const existingDefaultId = legacyGrantAnchorRetired
-    ? (await tryFind(ql, 'sys_organization', { slug: 'default' }, 1))
+    ? (await tryFind(ql, 'sys_organization', { slug: DEFAULT_ORGANIZATION_SLUG }, 1))
       .map((row) => (row?.id ? String(row.id) : undefined))[0]
     : await findDefaultOrganizationId(ql);
   if (existingDefaultId) {
@@ -569,7 +567,7 @@ export async function ensureDefaultOrganization(
     const orgRow = await tryInsert(ql, 'sys_organization', {
       id: newOrgId,
       name: 'Default Organization',
-      slug: 'default',
+      slug: DEFAULT_ORGANIZATION_SLUG,
       logo: null,
       metadata: null,
     });

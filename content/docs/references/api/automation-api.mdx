@@ -352,7 +352,7 @@ const result = AutomationApiErrorCode.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +341 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +342 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
 | **message** | `string` | ✅ | The inner refusal's own diagnostic text, verbatim, without the node and operation prefixes the run's failure text adds |
 
 ### Allowed Values: `FlowInnerRefusal.code`
@@ -406,6 +406,7 @@ const result = AutomationApiErrorCode.parse(data);
 * `EXTERNAL_SERVICE_ERROR`
 * `INTEGRATION_ERROR`
 * `WEBHOOK_DELIVERY_FAILED`
+* `ACCESS_UPGRADE_CONFIRMATION_REQUIRED`
 * `ACCOUNT_LOCKED`
 * `ACTION_CONFIRMATION_REQUIRED`
 * `ACTION_DISABLED`
@@ -860,7 +861,7 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Flow machine name (snake_case) |
-| **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying' \| 'refused'>` | optional | Filter by execution status |
+| **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying' \| 'refused' \| 'missed'>` | optional | Filter by execution status |
 | **limit** | `integer` | optional (default: `20`) | Maximum number of runs to return |
 | **cursor** | `never` | optional | [REMOVED] `cursor` was removed from GET /api/v1/automation/:name/runs in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it was VALIDATED at the boundary and then read by nothing: the option reached the service and the engine never looked at it, no emit site has ever written the response half `nextCursor`, and the only ordering this door has is a required but non-unique `startedAt` timestamp that nothing ever minted a resume point from — so a caller looping "until the cursor runs out" re-read the first and only window forever, with no error. Delete the key. `limit` is the real window and STAYS: it is read end to end (boundary to service to store) and bounded to 1..100, so ask for a wider window instead of a next page. Read the response `hasMore` to learn whether the window was short — it is now COMPUTED from the engine rather than the constant `false` it used to be. |
 

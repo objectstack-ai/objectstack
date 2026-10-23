@@ -49,6 +49,7 @@ import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { explainAccess, type ExplainEngineDeps } from './explain-engine.js';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+import { wireEngineSecuritySource } from './engine-security-source.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -182,6 +183,8 @@ beforeAll(async () => {
   plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The engine's security source, as `ObjectQLPlugin.init` wires it on a kernel (ADR-0139 D2).
+  wireEngineSecuritySource(engine, () => plugin);
   sharing = new SharingService({ engine: engine as never, securityService: () => security as never });
   engine.registerMiddleware(buildSharingMiddleware(sharing, ctx.logger) as never, { object: '*' });
 });
@@ -285,6 +288,7 @@ describe('the tenant layer of a by-id write explanation of a row the caller cann
     getFieldMask: () => ({}),
     getPartialMaskRules: async () => ({}),
     baselinePermissionSets: [],
+    tenancyPosture: 'single',
     computeLayeredRlsFilter: async () => ({ layer0: WALL, layer1: null }),
     fetchRecord: async () => stored,
     ...(read ? { recordAbsentToCaller: async () => read.absent } : {}),

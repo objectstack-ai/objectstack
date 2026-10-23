@@ -232,6 +232,8 @@
     "PlanUpgradeInput (interface)",
     "Plugin (interface)",
     "PluginStartupResult (type)",
+    "PositionGrantSummary (interface)",
+    "PositionGrantVia (type)",
     "PresignedDownloadDescriptor (interface)",
     "PresignedDownloadOptions (interface)",
     "PresignedUploadDescriptor (interface)",

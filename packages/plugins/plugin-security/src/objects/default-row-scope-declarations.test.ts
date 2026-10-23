@@ -52,7 +52,7 @@ import { SysPosition, SysPermissionSet, SysPositionPermissionSet } from '../__te
 import { SysUserPosition } from './sys-user-position.object.js';
 import { SysUserPermissionSet } from './sys-user-permission-set.object.js';
 import { bindTestSecurityCatalog } from '../__tests__/security-catalog.testkit.js';
-import { relaxEveryRegisteredTenantColumn } from '../pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from '../pre-18-tenant-column.testkit.js';
 
 type Policy = {
   name: string;
@@ -405,10 +405,9 @@ async function bootBaseline(declared: boolean) {
     objects: [...declarers, objects.get('sys_member')!, SysUserPermissionSet, SysUserPosition],
   } as never);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, ['sys_user_preference']);
   for (const o of [SysPosition, SysPermissionSet, SysPositionPermissionSet]) {
     if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
   }

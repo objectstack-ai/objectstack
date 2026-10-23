@@ -362,7 +362,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Valid From",
-        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive — never by a background job."
+        help: "Rule is inactive before this instant. Null = active immediately. Checked each time an approval is routed, so the rule starts on time without any scheduled job."
       },
       valid_until: {
         label: "Valid Until",

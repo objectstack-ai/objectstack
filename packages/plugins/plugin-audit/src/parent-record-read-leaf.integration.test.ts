@@ -4,8 +4,9 @@
  * [ADR-0139 E5] The parent-record read gates on the LEAF path, through a real
  * engine and a real SQL driver: one `ReadableIds` leaf per parent object, no
  * pre-scan, so a broad read of `sys_activity` or `sys_audit_log` is served
- * every row the caller may read, with a true total, on any table size — and
- * D5's three classes still read through the bounded probe, by name.
+ * every row the caller may read, with a true total, on any table size — a
+ * delegated caller's included (D5.1, as amended) — and D5's two remaining
+ * classes still read through the bounded probe, by name.
  *
  * ## Why a real engine, a real driver and the real plugin
  *
@@ -28,6 +29,11 @@
  * no parent one of D5's middleware-gated class:
  *
  *  - `e5_doc`: a member reads the records it owns; the admin reads them all;
+ *    a delegated caller (`onBehalfOf`) reads the INTERSECTION of its own leg
+ *    and its delegator's (ADR-0090 D10, as plugin-security answers both
+ *    halves for that context), and the delegator's leg withholds a few of
+ *    the member's records — so a leaf composed without the delegation would
+ *    serve rows a delegated read of `e5_doc` does not;
  *  - `e5_vault`: no member may read it (`canReadObject` false; a direct read
  *    is refused and the refusal recorded); the admin may;
  *  - every other object: every caller reads every record.
@@ -43,13 +49,13 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ObjectKernel, findMisplacedReadableIds, refuseReadableIdsOnce } from '@objectstack/core';
+import { ObjectKernel, findMisplacedReadableIds, refuseReadableIdsOnce, resolveReadableParentIds } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { LEDGER_AUDIT_CAPABILITY } from './audit-log-read-visibility.js';
-import { PARENT_GATE_SCAN_LIMIT } from './parent-record-read-gate.js';
+import { PARENT_GATE_SCAN_LIMIT, parseParentRecord } from './parent-record-read-gate.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -71,6 +77,8 @@ const MEMBER_B = { userId: 'u_b', tenantId: 'org_1', positions: ['org_member'] }
 const ADMIN = { userId: 'u_admin', tenantId: 'org_1', positions: ['org_admin'] };
 const HOLDER = { userId: 'u_holder', tenantId: 'org_1', positions: ['org_member'], systemPermissions: [LEDGER_AUDIT_CAPABILITY] };
 const DELEGATED_A = { ...MEMBER_A, onBehalfOf: { userId: 'u_delegator' } };
+/** The delegator's own leg on `e5_doc` admits every record but these (by name). */
+const WITHHELD_FROM_DELEGATOR = ['a0', 'a1', 'a2'];
 
 /** Past the 2,000-row candidate window the leaf replaces. */
 const DOCS_OF_A = 2_300;
@@ -87,8 +95,10 @@ type Row = Record<string, any>;
 /** The stand-in's one rule per parent object — the read scope a leaf is composed with. */
 function readScopeOf(object: string, context: any): Record<string, unknown> | undefined {
   if (context?.isSystem || isAdmin(context)) return undefined;
-  if (object === DOC) return { owner: context?.userId ?? '__nobody__' };
-  return undefined;
+  if (object !== DOC) return undefined;
+  const own = { owner: context?.userId ?? '__nobody__' };
+  // ADR-0090 D10: a delegated caller's scope is its own leg AND its delegator's.
+  return context?.onBehalfOf?.userId ? { $and: [own, { name: { $nin: WITHHELD_FROM_DELEGATOR } }] } : own;
 }
 const mayReadObject = (object: string, context: any) => context?.isSystem || object !== VAULT || isAdmin(context);
 
@@ -189,6 +199,7 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
         if (!parent) return false;
         if (isAdmin(reader)) return true;
         if (row.object_name === VAULT) return false;
+        if (row.object_name === DOC && reader?.onBehalfOf?.userId && WITHHELD_FROM_DELEGATOR.includes(parent.name)) return false;
         if (row.object_name === DOC || row.object_name === GATED) return parent.owner === reader.userId;
         return true;
       })
@@ -348,17 +359,57 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
     }
   });
 
-  it('D5: a delegated caller reads through the bounded probe — no leaf — and is not refused', async () => {
-    seenWhere[ACTIVITY].length = 0;
-    const rows = await served(ACTIVITY, DELEGATED_A);
-    const where = seenWhere[ACTIVITY][0] as any;
-    const branches: any[] = where?.$or ?? [where];
-    expect(branches.every((b) => Array.isArray(b?.record_id?.$in))).toBe(true);
-    // The probe's window: bounded, fail-closed, never wider than the truth.
-    expect(rows.length).toBeLessThanOrEqual(PARENT_GATE_SCAN_LIMIT);
-    const expected = new Set(await truth(ACTIVITY, MEMBER_A));
-    for (const id of rows) expect(expected.has(id)).toBe(true);
-    expect(await engine.count(ACTIVITY, {}, { context: DELEGATED_A })).toBe(rows.length);
+  it('D5.1, as amended: a delegated caller reads through the leaf — every row its delegator intersection admits, past the window, a true total', async () => {
+    for (const object of [ACTIVITY, LEDGER]) {
+      seenWhere[object].length = 0;
+      const rows = await served(object, DELEGATED_A);
+      const where = seenWhere[object][0] as any;
+      const branches: any[] = where.$or;
+      const leaves = branches.filter((b) => b?.record_id?.$in && !Array.isArray(b.record_id.$in)).map((b) => b.object_name);
+      expect(leaves, object).toEqual(expect.arrayContaining([DOC, VAULT]));
+      expect(leaves, object).not.toContain(GATED);
+      expect(leaves, object).not.toContain(FAR);
+      // D5.2 and D5.3 keep the probe, read with the delegated context.
+      expect(branches.filter((b) => Array.isArray(b?.record_id?.$in)), object).toEqual(expect.arrayContaining([
+        { object_name: GATED, record_id: { $in: [ids.gatedA] } },
+        { object_name: FAR, record_id: { $in: [ids.far] } },
+      ]));
+      const expected = await truth(object, DELEGATED_A);
+      expect(expected.length, object).toBeGreaterThan(PARENT_GATE_SCAN_LIMIT);
+      expect(rows, object).toEqual(expected);
+      expect(await engine.count(object, {}, { context: DELEGATED_A }), object).toBe(expected.length);
+    }
+    // The intersection, never the principal's leg alone: the rows about the records the delegator is withheld are not served.
+    const asMember = new Set(await served(ACTIVITY, MEMBER_A));
+    const asDelegated = new Set(await served(ACTIVITY, DELEGATED_A));
+    const withheld = [...asMember].filter((id) => !asDelegated.has(id));
+    expect(withheld).toHaveLength(WITHHELD_FROM_DELEGATOR.length);
+    expect([...asDelegated].every((id) => asMember.has(id))).toBe(true);
+  });
+
+  it('D5.1, as amended: parity with the probe — the leaf serves a delegated caller exactly the rows the probe’s own readability answer admits, unbounded', async () => {
+    // The probe's answer is `resolveReadableParentIds`: one caller-scoped read
+    // per parent object through the engine middleware chain, with the
+    // delegated context. Asked here for every parent pair at rest, so no
+    // window cuts it; the leaf must serve exactly the rows it admits.
+    const atRest: Row[] = await engine.find(ACTIVITY, { limit: 100_000, context: SYS });
+    const pairs = new Map<string, Set<string>>();
+    for (const row of atRest) {
+      const parent = parseParentRecord(row, ACTIVITY);
+      if (!parent || ![DOC, VAULT, GATED, FAR].includes(parent.object)) continue;
+      if (!pairs.has(parent.object)) pairs.set(parent.object, new Set());
+      pairs.get(parent.object)!.add(parent.recordId);
+    }
+    const readable = await resolveReadableParentIds(engine as any, DELEGATED_A, pairs);
+    const admittedByProbe = atRest
+      .filter((row) => {
+        const parent = parseParentRecord(row, ACTIVITY);
+        return parent !== null && (readable.get(parent.object)?.has(parent.recordId) ?? false);
+      })
+      .map((r) => String(r.id))
+      .sort();
+    expect(admittedByProbe.length).toBeGreaterThan(PARENT_GATE_SCAN_LIMIT);
+    expect(await served(ACTIVITY, DELEGATED_A)).toEqual(admittedByProbe);
   });
 
   it('ledger: a non-holder is served every row about a readable record and every row about no record, past the window', async () => {
@@ -400,8 +451,6 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
         memberCount: await time(() => engine.count(ACTIVITY, {}, { context: MEMBER_A })),
         adminTop20: await time(() => engine.find(ACTIVITY, { orderBy: [{ field: 'timestamp', order: 'desc' }], limit: 20, context: ADMIN })),
         adminCount: await time(() => engine.count(ACTIVITY, {}, { context: ADMIN })),
-      },
-      probeMs: {
         delegatedFind: await time(() => served(ACTIVITY, DELEGATED_A)),
         delegatedCount: await time(() => engine.count(ACTIVITY, {}, { context: DELEGATED_A })),
       },

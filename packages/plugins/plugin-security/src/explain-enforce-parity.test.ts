@@ -90,7 +90,8 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
+import { wireEngineSecuritySource } from './engine-security-source.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -327,10 +328,9 @@ async function bootRls(predicate: string, opts: { grantCrud?: boolean } = {}) {
     ],
   } as never);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, [OBJ]);
   await engine.insert(OBJ, [
     { id: 'r1', status: 'open', title: 'x', amount: 5 },
     { id: 'r2', status: 'open', title: 'open', amount: 7 },
@@ -366,6 +366,8 @@ async function bootRls(predicate: string, opts: { grantCrud?: boolean } = {}) {
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The engine's security source, as `ObjectQLPlugin.init` wires it on a kernel (ADR-0139 D2).
+  wireEngineSecuritySource(engine, () => plugin);
   // The driver logs the refused comparison it withholds from the caller.
   vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
 
@@ -476,10 +478,9 @@ async function bootPrincipal(source: PostureSource) {
     ],
   } as never);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, ['sys_permission_set']);
 
   const e = engine as unknown as { insert: (o: string, row: Record<string, unknown>, opts: never) => Promise<unknown> };
   for (const id of [ALPHA, BETA]) await e.insert('sys_organization', { id, name: id, slug: id }, SYS);
@@ -552,6 +553,8 @@ async function bootPrincipal(source: PostureSource) {
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The engine's security source, as `ObjectQLPlugin.init` wires it on a kernel (ADR-0139 D2).
+  wireEngineSecuritySource(engine, () => plugin);
   const security = services.security as { resolvePermissionSetsForContext: (c: unknown) => Promise<Array<{ name: string }>> };
   /** The posture admission hands the resolver: the `tenancy` service's, or none when it is not registered. */
   const admissionPosture = 'tenancy' in source ? source.tenancy : undefined;
@@ -660,10 +663,6 @@ async function bootSharing(opts: { faultReadFilter?: boolean; authored?: boolean
     ],
   } as never);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
   await engine.insert(LINE, [
     { id: 'l_other', name: 'owned by someone else', owner_id: 'u_somebody' },
     { id: 'l_own', name: 'owned by the control', owner_id: 'u_own' },
@@ -724,6 +723,8 @@ async function bootSharing(opts: { faultReadFilter?: boolean; authored?: boolean
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The engine's security source, as `ObjectQLPlugin.init` wires it on a kernel (ADR-0139 D2).
+  wireEngineSecuritySource(engine, () => plugin);
   sharing = new SharingService({ engine: engine as never, securityService: () => security as never });
   if (opts.faultReadFilter) {
     sharing.buildReadFilter = async () => { throw new Error('share store unavailable'); };
@@ -836,10 +837,9 @@ async function bootDelegated(posture: TenancyPosture) {
     ],
   } as never);
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, positions, grants) exist only
-  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
-  // NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, ['sys_permission_set']);
 
   const e = engine as unknown as { insert: (o: string, row: Record<string, unknown>, opts: never) => Promise<unknown> };
   for (const id of [ALPHA, BETA]) await e.insert('sys_organization', { id, name: id, slug: id }, SYS);
@@ -931,6 +931,8 @@ async function bootDelegated(posture: TenancyPosture) {
   const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The engine's security source, as `ObjectQLPlugin.init` wires it on a kernel (ADR-0139 D2).
+  wireEngineSecuritySource(engine, () => plugin);
   sharing = new SharingService({ engine: engine as never, securityService: () => security as never });
   engine.registerMiddleware(buildSharingMiddleware(sharing, ctx.logger) as never, { object: '*' });
   // The pre-image gate logs the rows it refuses.
@@ -1249,7 +1251,15 @@ function delegatedRows(posture: TenancyPosture, label: string, walled: boolean):
     [D_ORG, true, 'update', 'PARENT', 'p_org_mine', 'its own row', 'admitted'],
     [D_ORG, true, 'update', 'PARENT', 'p_beta', "its own row in another organization", walled ? REFUSED_NOT_FOUND : 'admitted'],
     [D_ORG, true, 'update', 'DETAIL', 'd_under_org', 'a detail under its own master', 'admitted'],
-    [D_ORG, true, 'update', 'DETAIL', 'd_under_theirs', "a detail under someone else's master", REFUSED_NOT_FOUND],
+    // [ADR-0139 D6] The detail follows its master's DELEGATED read: `m_theirs`
+    // is readable to the agent acting for the `org` writer (as `p_theirs` is,
+    // one row below the parent cells: refused at the write gate, not absent),
+    // so its detail is read and the update is refused by the master-edit
+    // gate, 403. Before the switch the id-list derivation scoped the agent's
+    // half of the master set at the ceiling's EFFECTIVE depth ('own'), so the
+    // detail was absent to a caller who could read its master — the drift
+    // ADR-0055 §2's equality forbids — and the update answered 404.
+    [D_ORG, true, 'update', 'DETAIL', 'd_under_theirs', "a detail under someone else's master", REFUSED_DENIED],
     [D_OWN, true, 'update', 'PARENT', 'p_own_mine', 'its own row', 'admitted'],
     [D_OWN, true, 'update', 'PARENT', 'p_theirs', 'a row it cannot read', REFUSED_NOT_FOUND],
     // The delegators themselves.

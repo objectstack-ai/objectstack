@@ -758,7 +758,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (50)...
+  → Running author-time rules (51)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -2982,6 +2982,7 @@ credentials do not apply here.
 | `--email <email>` | `OS_RUNTIME_EMAIL` | Account email on the target runtime |
 | `--password <password>` | `OS_RUNTIME_PASSWORD` | Account password on the target runtime |
 | `--confirm-global-uniques` | — | Affirm this app's installation-wide `unique` constraints are genuinely platform-wide — see below |
+| `--confirm-access-upgrade <token>` | — | Confirm an upgrade's access findings with the finding-set token the runtime's refusal printed — see below |
 | `--timeout <ms>` | `OS_CLOUD_TIMEOUT_MS` | HTTP timeout in milliseconds, default `120000`. `0` disables it |
 
 **`--confirm-global-uniques` answers a stop; it does not force one past.**
@@ -2996,6 +2997,22 @@ re-reporting the affirmed constraints, so the advisory does not become a
 recurring nag. It is deliberately not called `--force`, and deliberately not
 default-on. The other answer is to edit the app's metadata to
 `unique: 'organization'` and rebuild.
+
+**`--confirm-access-upgrade <token>` confirms exactly the findings it names.**
+Upgrading an installed package stops with `ACCESS_UPGRADE_CONFIRMATION_REQUIRED`
+when the new version would un-make an access choice made in the runtime
+(ADR-0126 §6): a permission set, position or sharing rule switched off there
+that the upgrade renames, so the new name is active again; a switch whose name
+it drops; a sharing rule name a rule authored there already holds; an object,
+field or capability a permission set or sharing rule authored there names and
+the upgrade drops; a field deny the upgraded set gains that a set authored there
+lacks. Nothing is installed. The command prints each finding and the exact
+retry, carrying the finding set's token. Review the findings first: the switch
+you meant to keep is fixed by switching the new name off too, after the upgrade.
+The token is not a standing yes — once the findings change it no longer matches
+and the upgrade stops again with the new set; the confirmation is recorded in
+the install's ledger entry. Under `group` and `isolated` only the platform
+operator reaches this check. A fresh install is never checked.
 
 A `404` means the target runtime does not mount `MarketplaceInstallLocalPlugin`
 (from `@objectstack/cloud-connection`). The endpoint is opt-in, so a runtime

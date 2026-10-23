@@ -614,6 +614,31 @@ export interface ISharingRuleService {
    * upserts/reconciles only that record's share rows.
    */
   evaluateAllForRecord(object: string, recordId: string, context: ExecutionContext): Promise<SharingRuleEvaluationResult[]>;
+
+  /**
+   * [ADR-0131 D6 regime C] The rule the application DECLARES under `name` (a
+   * stack's `sharingRules`), or `null` when it declares no rule the service
+   * serves under that name. It answers for the declaration itself: in every
+   * organization, and whether or not the activation ledger
+   * (`sys_metadata_activation`, `metadata_type: 'sharing_rule'`) has it
+   * switched off. A rule an organization authored is a `sys_sharing_rule` row
+   * and is never answered here.
+   *
+   * The catalog activation door (`POST /security/_activation/sharing_rule/:name`)
+   * reads it to confirm that the name it is asked to switch is a declaration,
+   * and records `packageId` on the ledger row it writes.
+   *
+   * **Optional, deliberately.** An implementation that serves no declared
+   * rules need not carry it. A caller MUST probe for presence and refuse
+   * fail-closed when it is absent: the activation door answers
+   * `503 SERVICE_UNAVAILABLE` rather than write a ledger row for a name
+   * nothing can confirm is declared.
+   *
+   * @param name - The declared rule's machine name
+   * @returns the declaration's `name`, plus `packageId` when a package ships
+   *   it; `null` when nothing servable is declared under `name`
+   */
+  declaredRuleNamed?(name: string): Promise<{ name: string; packageId?: string } | null>;
 }
 
 // ─────────────────────────────────────────────────────────────────────

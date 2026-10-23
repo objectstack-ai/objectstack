@@ -31,6 +31,7 @@ import { SysPlatformSetting, SysSecret, SysSetting } from '@objectstack/platform
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import { SettingsServicePlugin, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
+import { withEngineRegistry } from './__tests__/settings-organization.testkit.js';
 import { LocalCryptoProvider } from './local-crypto-provider.js';
 import { SettingsLockedError } from './settings-service.types.js';
 
@@ -151,7 +152,7 @@ async function boot() {
   const cryptoProvider = new LocalCryptoProvider();
   const svc = new SettingsService({
     env: {},
-    engine: wrapEngineAsSettingsEngine(engine as any),
+    engine: withEngineRegistry(wrapEngineAsSettingsEngine(engine as any), engine),
     cryptoProvider,
     secretStore: (new SettingsServicePlugin() as any).buildSecretStore(engine),
   });

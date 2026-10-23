@@ -112,8 +112,22 @@ export const SysApiKey = ObjectSchema.create({
       // The route reads `name` (and an optional `expires_at`) and nothing else;
       // a key named nothing is stored as "API Key", so the name is required
       // here to keep the list readable.
+      //
+      // `expires_at` is offered so the expiry is a choice the admin sees, not
+      // a date that silently appears in the list. It stays optional and has
+      // NO `defaultValue`: a param default is a literal submitted verbatim,
+      // while the default life is the deployment's Authentication API key
+      // policy, which the route applies when the field is left empty. The
+      // help text names that policy, the route refuses (never clamps) a date
+      // past the policy's maximum (`API_KEY_EXPIRY_TOO_LONG`), and the reveal
+      // below shows the expiry the key actually got. The column's `readonly`
+      // is a form flag; an action param does not inherit it.
       params: [
         { field: 'name', required: true },
+        {
+          field: 'expires_at',
+          helpText: 'Leave empty for the default lifetime set under Setup → Authentication → API keys (Default key lifetime, 90 days unless changed). A date later than the Maximum key lifetime there is refused.',
+        },
       ],
       resultDialog: {
         title: 'API key created',
@@ -121,6 +135,7 @@ export const SysApiKey = ObjectSchema.create({
         acknowledge: 'I have saved the key',
         fields: [
           { path: 'key', label: 'API Key', format: 'secret' },
+          { path: 'expires_at', label: 'Expires At', format: 'text' },
         ],
       },
     },

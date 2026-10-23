@@ -1408,8 +1408,10 @@ async function bootClaimed(
           // lowercases both the stored address and the registrant's.
           email: email.trim().toLowerCase(),
           status: 'pending',
-          // A dedicated org id so fixtures counting THEIR invitations never
-          // see these rows.
+          // A dedicated org id so fixtures counting THEIR invitations under a
+          // wall never see these rows. On `single`, which enforces no
+          // organization wall (ADR-0131 D8, D11), an organization owner's
+          // read returns them too.
           organization_id: 'org_verify_audience_gate',
           role: 'member',
           inviter_id: 'usr_verify_audience_gate',

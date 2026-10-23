@@ -43,6 +43,13 @@ export const TEMPLATE_CHANNELS = ['email', 'sms'] as const;
  * additive. `channel` is one of {@link TEMPLATE_CHANNELS}; see there for who
  * reads a row and why no other value is accepted.
  *
+ * An `html` / `mjml` body may place a hole only in element text or a quoted
+ * plain-text attribute value, the two placements the renderer's encoding is
+ * right for. A save placing one anywhere else is refused by the save hooks in
+ * `notification-template-placement.ts` (#25082), which `MessagingServicePlugin`
+ * binds on the engine. They are hooks rather than a rule here because a rule's
+ * CEL condition has no reading of HTML placement.
+ *
  * Studio-configurable (contributed to the Setup → Configuration nav). Belongs to
  * `service-messaging`.
  */

@@ -43,6 +43,18 @@
  * stdio. See {@link GATED_ACTIONS} for which verbs are gated and why that set
  * is exactly the HTTP one.
  *
+ * ## Where an object's definition is read (#25138)
+ *
+ * From the protocol, as the HTTP bridge reads it since #25120: discovery
+ * (`list_objects` / `describe_object`) from its MERGED listing, the read
+ * `GET /api/v1/meta/object` serves, and the exposure gate from its by-name
+ * read, the one `RestServer`'s own gate makes. The `metadata` service holds a
+ * copy of an object only where something put one there, and on a kernel with
+ * an `environmentId` nothing copies an object a package registers in the
+ * `SchemaRegistry` during the boot; reading that copy listed none of them,
+ * described none of them and gated none of them. See
+ * {@link readObjectDeclaration} and {@link readMergedObjects}.
+ *
  * ## Known divergences from the HTTP bridge (deliberate, filed, not security)
  *
  * `callData` prefers the `protocol` service (metadata-protocol) and falls back
@@ -110,17 +122,57 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 // there is no reason to add a second import path to the same function.
 import { recordNotFoundError } from '@objectstack/core';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
+import { metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
 import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
 
+/**
+ * [#25138] The object reads this transport asks of the `protocol` service.
+ * Every member is optional: the slot is filled by name from a host-owned
+ * registry, and a host may fill it with a partial object (the same duck-typed
+ * probe `plugin.ts` applies to `getMetaItems` for the skill read).
+ * `getMetaItemForExecution` is the server-only by-name face the REST exposure
+ * gate and the HTTP bridge's gate read: no serving decorations, and the gate
+ * reads a decision off it and serves none of it.
+ */
+export interface StdioProtocolObjectReads {
+  /** The merged listing for one metadata type, `GET /api/v1/meta/TYPE`'s read. */
+  getMetaItems?(request: { type: string }): Promise<unknown>;
+  /** The by-name read, `GET /api/v1/meta/TYPE/NAME`'s. */
+  getMetaItem?(request: { type: string; name: string }): Promise<unknown>;
+  /** The by-name read without the serving decorations. */
+  getMetaItemForExecution?(request: { type: string; name: string }): Promise<unknown>;
+}
+
+/** [#25138] Where this transport reads an object's definition from. */
+export interface StdioObjectReads {
+  /**
+   * The metadata service: the copy the gate judges on an outage of the
+   * protocol's by-name read, and every read on a host whose protocol has none.
+   */
+  metadataService: IMetadataService;
+  /**
+   * The `protocol` service, resolved at each use and `undefined` when this host
+   * registers none. Never captured once at start: an absence read there is a
+   * verdict the rest of the boot can still contradict.
+   */
+  protocol?: () => StdioProtocolObjectReads | undefined;
+}
+
 /** What {@link createStdioDataBridge} needs from the host plugin. */
 export interface StdioDataBridgeDeps {
   /** The ObjectQL engine — the `objectql` service, where RLS/FLS/permissions run. */
   engine: IDataEngine;
-  /** The metadata service behind `list_objects` / `describe_object`. */
+  /**
+   * The metadata service: `list_objects` / `describe_object` read it on a host
+   * with no merged read, and the exposure gate on an outage of the by-name
+   * read ({@link StdioObjectReads}).
+   */
   metadataService: IMetadataService;
+  /** [#25138] The `protocol` service, resolved at each use ({@link StdioObjectReads}). */
+  protocol?: () => StdioProtocolObjectReads | undefined;
   /**
    * Re-resolve the stdio identity for THIS call and throw when it no longer
    * resolves (revoked / expired / owner-less key). Per call, never cached:
@@ -141,7 +193,7 @@ export interface StdioDataBridgeDeps {
 /** The keyed-digest primitive the stored content-hash columns are served through. */
 export type StoredHashDigest = (plain: string) => Promise<string>;
 
-/** An object definition as `IMetadataService.getObject` hands it back. */
+/** An object definition, as the protocol's object reads or `IMetadataService.getObject` hand it back. */
 interface ObjectDef {
   name: string;
   label?: string;
@@ -186,9 +238,10 @@ async function findById(
  * routes exactly these six methods through `callData`, which gates on exactly
  * these six action words — `remove` reaching it as `'delete'`, the only entry
  * whose two names differ. `listObjects` / `describeObject` are deliberately
- * ABSENT: the HTTP bridge answers both straight off the metadata service
- * without touching `callData`, so gating them here would be a NEW divergence
- * pointing the other way (a schema read refused on stdio and served on HTTP).
+ * ABSENT: the HTTP bridge answers both from the protocol's merged listing
+ * (the metadata service on a host with none) without touching `callData`, so
+ * gating them here would be a NEW divergence pointing the other way (a schema
+ * read refused on stdio and served on HTTP).
  */
 export const GATED_ACTIONS = {
   query: 'query',
@@ -231,6 +284,128 @@ function exposureError(
 }
 
 /**
+ * [#25138] Whether `err` is the protocol's refusal of an object whose owning
+ * package is disabled: the one constructor `@objectstack/metadata-protocol`
+ * raises from its by-name object reads and its data plane (`code`
+ * `OBJECT_PACKAGE_DISABLED`, `status` 404, `object`). A refusal, not an outage
+ * and not an absence: {@link readObjectDeclaration} throws it, where every
+ * other read failure falls back to the copy, and {@link enforceApiExposure}
+ * answers it.
+ */
+function isObjectPackageDisabledRefusal(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED';
+}
+
+/** The protocol behind `reads`, or `undefined` when this host registers none. */
+function protocolOf(reads: StdioObjectReads): StdioProtocolObjectReads | undefined {
+  return reads.protocol?.() ?? undefined;
+}
+
+/**
+ * [#25138] The definition this transport judges and strips an object by: the
+ * object, by name, through the protocol's MERGED read — the read the HTTP
+ * bridge's gate makes since #25120 (`readExposureDeclaration`,
+ * `packages/runtime/src/action-execution.ts`) and `RestServer`'s own exposure
+ * gate makes (`enforceApiAccess`), on the execution face where the protocol has
+ * one. The metadata service's copy is read only on a host whose protocol has no
+ * by-name read: structural absence, answered as before.
+ *
+ * ── The defect this closes ────────────────────────────────────────────────
+ *
+ * The gate read `IMetadataService.getObject(object)`, and an absent copy is "no
+ * declaration", i.e. allowed. On a kernel with an `environmentId` nothing
+ * copies into that service an object a package registers in the
+ * `SchemaRegistry` during the boot, so such an object declared
+ * `apiEnabled: false` was served on this transport: measured through the
+ * `MCPServerPlugin` stdio session, `query_records` answered on that shape, and
+ * the same object was refused `404 OBJECT_API_DISABLED` by REST and by the
+ * HTTP bridge.
+ *
+ * ── Answers, by what the read returns ─────────────────────────────────────
+ *
+ * - the item under its own name → that definition;
+ * - nothing, or an item under another name → `undefined`: no declared
+ *   exposure policy, and the engine answers existence, as before;
+ * - refused `OBJECT_PACKAGE_DISABLED` → that refusal, THROWN
+ *   ({@link isObjectPackageDisabledRefusal}): a refusal, never an outage, so it
+ *   never falls back to the copy;
+ * - any other throw (the metadata store unreadable) → the metadata service's
+ *   copy, the source this gate read before. An outage of the merged read must
+ *   not WIDEN exposure: failing open at once would serve an object the copy
+ *   still declares off.
+ */
+async function readObjectDeclaration(reads: StdioObjectReads, object: string): Promise<ObjectDef | undefined> {
+  const readCopy = async () =>
+    ((await reads.metadataService.getObject(object)) ?? undefined) as ObjectDef | undefined;
+  const protocol = protocolOf(reads);
+  const byName = typeof protocol?.getMetaItemForExecution === 'function'
+    ? protocol.getMetaItemForExecution
+    : typeof protocol?.getMetaItem === 'function' ? protocol.getMetaItem : undefined;
+  if (!byName) return await readCopy();
+  let envelope: unknown;
+  try {
+    envelope = await byName.call(protocol, { type: 'object', name: object });
+  } catch (err) {
+    if (isObjectPackageDisabledRefusal(err)) throw err;
+    return await readCopy();
+  }
+  const item = (envelope as { item?: unknown } | null | undefined)?.item;
+  return item !== null && typeof item === 'object' && (item as { name?: unknown }).name === object
+    ? (item as ObjectDef)
+    : undefined;
+}
+
+/**
+ * [#25138] The objects `list_objects` and `describe_object` answer from: the
+ * protocol's MERGED listing, the read `GET /api/v1/meta/object` serves and the
+ * HTTP bridge answers both tools from since #25120 — never
+ * `IMetadataService.listObjects()` / `getObject()`, which on a kernel with an
+ * `environmentId` hold none of the objects a package registered during the
+ * boot. Measured through the `MCPServerPlugin` stdio session on that shape:
+ * `list_objects` answered `{ objects: [], totalCount: 0 }` and
+ * `describe_object` "not found" for the package's objects, while REST listed
+ * them.
+ *
+ * `undefined` = no merged read on this host (structural absence): both tools
+ * then read the metadata service, exactly as before. A throw travels to the
+ * caller, ⛔ never a fallback to the un-merged read, as on the HTTP bridge.
+ */
+async function readMergedObjects(reads: StdioObjectReads): Promise<ObjectDef[] | undefined> {
+  const protocol = protocolOf(reads);
+  if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
+  return metaItemsArray(await protocol.getMetaItems({ type: 'object' })) as ObjectDef[];
+}
+
+/**
+ * [#25245] This transport's ONE reading of which objects exist and what each
+ * declares: the protocol's merged listing ({@link readMergedObjects}), and a
+ * name from that same listing, so a name the listing omits (a disabled
+ * package's object among them) is absent on both reads. On a host with no
+ * merged read, the metadata service's `listObjects()` / `getObject()`, as
+ * before.
+ *
+ * Two consumers, so they cannot disagree: this bridge's `list_objects` /
+ * `describe_object`, and the `objectstack://objects` resources, which
+ * `plugin.ts` hands this view to `bridgeResources`. Those resources read the
+ * metadata service until #25245, so on a kernel with an `environmentId` they
+ * listed none of a package's boot-registered objects and answered `404` for
+ * each, while the tools listed and described them.
+ */
+export function stdioObjectView(reads: StdioObjectReads): McpObjectView {
+  return {
+    async listObjects() {
+      return (await readMergedObjects(reads)) ?? (((await reads.metadataService.listObjects()) ?? []) as ObjectDef[]);
+    },
+    async getObject(name) {
+      const merged = await readMergedObjects(reads);
+      return merged !== undefined
+        ? merged.find((o) => o?.name === name)
+        : (((await reads.metadataService.getObject(name)) ?? undefined) as ObjectDef | undefined);
+    },
+  };
+}
+
+/**
  * The ADR-0049 object exposure gate, applied before a data verb dispatches
  * (#8083). Throws {@link McpExposureError} when the object's own declaration
  * does not expose `action`; returns normally when it does.
@@ -260,17 +435,27 @@ function exposureError(
  *
  *  - **`isSystem` bypasses.** These flags govern API *exposure*, so an internal
  *    engine self-write is not subject to them (`callData`'s first condition).
- *  - **Unresolvable metadata FAILS OPEN.** A thrown or empty `getObject` falls
- *    back to the schema defaults (`apiEnabled` true, no whitelist), matching
- *    `callData`'s `catch { def = undefined }` and `checkApiExposure`'s
- *    `if (!def) return { allowed: true }`. The fail-open is safe for the reason
- *    ADR/#3545 records: this is surface area, and the engine's CRUD/FLS/RLS
- *    still runs on the call regardless of the outcome here.
+ *  - **Unresolvable metadata FAILS OPEN.** A definition that cannot be read
+ *    ({@link readObjectDeclaration} throwing past its own fallback to the copy)
+ *    or that resolves nothing falls back to the schema defaults (`apiEnabled`
+ *    true, no whitelist), matching `callData`'s `catch { def = undefined }` and
+ *    `checkApiExposure`'s `if (!def) return { allowed: true }`. The fail-open is
+ *    safe for the reason ADR/#3545 records: this is surface area, and the
+ *    engine's CRUD/FLS/RLS still runs on the call regardless of the outcome
+ *    here.
  *  - **The flat shape is still read.** `getObject()` returns the flags nested
  *    under `.enable`, but `checkApiExposure` falls back to a flat top level for
  *    legacy/test doubles. Reading only the nested shape here would let a flat
  *    definition be gated on HTTP and ungated on stdio — the very divergence
  *    this function closes, re-opened one shape down.
+ *  - **[#25138] A disabled package's object is REFUSED**, whatever it
+ *    declares, with the protocol's own error (`404 OBJECT_PACKAGE_DISABLED`,
+ *    thrown by its by-name read), never read as "no declaration". Every verb of
+ *    this bridge asks the engine and never the protocol, and the engine serves
+ *    a disabled package's objects: this is the posture `callData` takes on all
+ *    six of its arms since #25120, for the one of them (`aggregate`) that is
+ *    engine-only too. A nested-relation condition's target of such a package is
+ *    refused the same way: the engine would read it to lower the condition.
  *
  * [#22777] `condition` is set when `object` is not addressed but is the TARGET
  * of a nested-relation condition at that filter position
@@ -278,7 +463,7 @@ function exposureError(
  * and the way out, as the data door's does for the same condition.
  */
 export async function enforceApiExposure(
-  metadataService: IMetadataService,
+  reads: StdioObjectReads,
   object: string,
   action: string,
   context: ExecutionContext,
@@ -288,8 +473,10 @@ export async function enforceApiExposure(
 
   let def: ObjectDef | null | undefined;
   try {
-    def = (await metadataService.getObject(object)) as ObjectDef | null | undefined;
-  } catch {
+    def = await readObjectDeclaration(reads, object);
+  } catch (err) {
+    // [#25138] A refusal, never a read failure to fall open on.
+    if (isObjectPackageDisabledRefusal(err)) throw err;
     def = undefined; // fall open to the schema defaults
   }
   if (!def) return;
@@ -338,7 +525,7 @@ export async function enforceApiExposure(
  * beneath a condition is refused by the engine before anything is read.
  */
 async function enforceRelationTargetExposure(
-  metadataService: IMetadataService,
+  reads: StdioObjectReads,
   object: string,
   where: unknown,
   context: ExecutionContext,
@@ -346,12 +533,14 @@ async function enforceRelationTargetExposure(
   if (where == null) return;
   let def: ObjectDef | null | undefined;
   try {
-    def = (await metadataService.getObject(object)) as ObjectDef | null | undefined;
+    // [#25138] The field map from the definition the gate judged, so a
+    // package object's relation conditions are found where it has no copy.
+    def = await readObjectDeclaration(reads, object);
   } catch {
     def = undefined; // no field map, no site: the gate above falls open the same way
   }
   for (const site of relationConditionSites(def?.fields, where)) {
-    await enforceApiExposure(metadataService, site.target, GATED_ACTIONS.query, context, `where.${site.field}`);
+    await enforceApiExposure(reads, site.target, GATED_ACTIONS.query, context, `where.${site.field}`);
   }
 }
 
@@ -672,12 +861,17 @@ export function serveStoredMetadataRows(
  * honoured rather than re-decided.
  */
 export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge {
-  const { engine, metadataService, resolvePrincipal, keyedDigest } = deps;
+  const { engine, metadataService, protocol, resolvePrincipal, keyedDigest } = deps;
+  // [#25138] One definition source for the gate, the relation-target gate and
+  // the write-response strip, and one listing for discovery.
+  const reads: StdioObjectReads = { metadataService, protocol };
+  // [#25245] …and that listing is the view the object resources read too.
+  const objectView = stdioObjectView(reads);
 
   const bridge: McpDataBridge = {
     async listObjects(): Promise<McpObjectSummary[]> {
-      const objects = ((await metadataService.listObjects()) ?? []) as ObjectDef[];
-      return objects.map((o) => ({
+      // [#25138] The protocol's merged listing ({@link readMergedObjects}).
+      return ((await objectView.listObjects()) as ObjectDef[]).map((o) => ({
         name: o.name,
         label: o.label ?? o.name,
         fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
@@ -700,8 +894,12 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       return { objects, degraded, errors };
     },
 
+    // [#25138] Answered from the listing `list_objects` serves
+    // ({@link readMergedObjects}), so every object an agent is listed it can
+    // describe, and a name the listing omits (a disabled package's object among
+    // them) is "not found" here too, as on the HTTP bridge.
     async describeObject(name: string): Promise<unknown | null> {
-      const def = (await metadataService.getObject(name)) as ObjectDef | undefined | null;
+      const def = (await objectView.getObject(name)) as ObjectDef | undefined;
       if (!def) return null;
       const fields = def.fields ?? {};
       // The field list is an ARRAY here, not the stored map: `validate_expression`
@@ -723,9 +921,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
 
     async query(object, opts) {
       const context = await resolvePrincipal();
-      await enforceApiExposure(metadataService, object, GATED_ACTIONS.query, context);
+      await enforceApiExposure(reads, object, GATED_ACTIONS.query, context);
       // [#22777] …and each nested-relation condition's target, before the engine reads it.
-      await enforceRelationTargetExposure(metadataService, object, opts?.where, context);
+      await enforceRelationTargetExposure(reads, object, opts?.where, context);
       // [#21207] After the exposure gate, before the engine: a filter or sort
       // on a stored metadata body is refused rather than evaluated.
       const bodyRefusal = storedMetadataBodyRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
@@ -752,7 +950,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
 
     async get(object, id) {
       const context = await resolvePrincipal();
-      await enforceApiExposure(metadataService, object, GATED_ACTIONS.get, context);
+      await enforceApiExposure(reads, object, GATED_ACTIONS.get, context);
       // `null` rather than a throw: `get_record` owns the not-found wording on
       // this path and already branches on a nullish record.
       // [#21207] A stored metadata body is served as its type's projection,
@@ -766,7 +964,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
 
     async create(object, data) {
       const context = await resolvePrincipal();
-      await enforceApiExposure(metadataService, object, GATED_ACTIONS.create, context);
+      await enforceApiExposure(reads, object, GATED_ACTIONS.create, context);
       const written = (await engine.insert(object, data, { context })) as
         | Record<string, unknown>
         | undefined;
@@ -777,7 +975,10 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // of the `internal: true` guarantee (#7728) exactly as the protocol
       // ingress and the REST batch arm do. Measured before the fix: a create
       // returned `vault_secret` verbatim in `record`.
-      omitInternalFieldsFromWriteResponse(await metadataService.getObject(object), record);
+      // [#25138] By the definition the gate judged: the metadata service's copy
+      // is absent for a package's boot-registered object on an `environmentId`
+      // kernel, and with no schema the helper masks and omits nothing.
+      omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
       return { object, id: record.id, record };
     },
 
@@ -786,7 +987,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // Before the existence probe, not after: refusing on exposure vs. on a
       // miss is an observable difference, so gating second would answer "that
       // id names no row" for an object the author declared unexposed.
-      await enforceApiExposure(metadataService, object, GATED_ACTIONS.update, context);
+      await enforceApiExposure(reads, object, GATED_ACTIONS.update, context);
       const existing = await findById(engine, object, id, context);
       // The "this id names no row" refusal, raised BEFORE the write is
       // attempted — a write path that answered success for an id that matched
@@ -809,14 +1010,14 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // oracle for whether their guess matched storage. Cheap, and it makes the
       // property literally true on every verb of this bridge rather than true-
       // by-argument on one.
-      omitInternalFieldsFromWriteResponse(await metadataService.getObject(object), record);
+      omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
       return { object, id, record };
     },
 
     async remove(object, id) {
       const context = await resolvePrincipal();
       // Gated before the probe, for the reason `update` states.
-      await enforceApiExposure(metadataService, object, GATED_ACTIONS.remove, context);
+      await enforceApiExposure(reads, object, GATED_ACTIONS.remove, context);
       const existing = await findById(engine, object, id, context);
       // Same shared envelope as `update`, above.
       if (!existing) throw recordNotFoundError(object, id);
@@ -832,9 +1033,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // `aggregate` is a list-class read: an object whose whitelist excludes
       // `list` must not leak row statistics through GROUP BY either. The
       // derivation lives in the spec helpers, so that holds here for free.
-      await enforceApiExposure(metadataService, object, GATED_ACTIONS.aggregate, context);
+      await enforceApiExposure(reads, object, GATED_ACTIONS.aggregate, context);
       // [#22777] …and each nested-relation condition's target, as `query` asks it.
-      await enforceRelationTargetExposure(metadataService, object, opts?.where, context);
+      await enforceRelationTargetExposure(reads, object, opts?.where, context);
       // [#21207] A grouping, filter or aggregate member on a stored metadata
       // body computes over the stored bytes, so it is refused, not run.
       const bodyRefusal = storedMetadataBodyRefusal(object, {

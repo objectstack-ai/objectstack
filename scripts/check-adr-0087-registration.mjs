@@ -316,6 +316,17 @@
 // schema). Scanning masked text in one place and raw text in another is how a
 // checker ends up asserting two different things about one file.
 //
+// A same-named MEMBER declaration is a homonym too (#25293). Measured: retiring
+// `@objectstack/plugin-email#renderTemplate` was refused because
+// `packages/spec/src/contracts/email-service.ts` declares the method
+// `IEmailService.renderTemplate` -- the very door the retirement's TO line names --
+// and the top-level homonym test read that signature as an unresolvable mention.
+// The cure is narrower than the top-level rule on purpose: a top-level declaration
+// clears the whole file (it shadows the name), while a member declaration clears
+// only its OWN name (`memberDeclarationOffsets`), because a member shadows nothing.
+// A bare call, a value, a member access and a string literal in the same file
+// still refuse, and the self-test's MH battery pins each.
+//
 // ### What it deliberately does NOT check
 //
 // That the author named EVERY symbol their PR touched. Like `registered`, this
@@ -467,6 +478,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'SS1-SS8 (#18494 + #18493): the two directions of ONE predicate, pinned': 8,
   'P62-P68: the framed region closes at the same or a SHALLOWER heading, not': 7,
   'U1-U12 (#8299): unit pins on the runtime-interface-only primitives': 13,
+  'MH1-MH12 (#25293): a same-named MEMBER declaration is a homonym; only its own name clears': 12,
   'S1-S5: the `--audit-stock` classifier (#6350)': 7,
   'PRE1-PRE3: `.changeset/pre/` is CONSUMED stock, not pending stock': 4,
   'PRE3: `entries` stays UNFILTERED. A tree whose changesets have all moved': 4,
@@ -2790,6 +2802,99 @@ function declaresLocally(text, symbol) {
   return re.test(text);
 }
 
+// What may stand between a member's separator and its name: the modifiers a class
+// or interface member is written with. Stripped from the END of the text before
+// the name, so `readonly x:` and `private static async x(` read like `x`.
+const MEMBER_MODIFIERS_TAIL_RE =
+  /(?:\b(?:public|private|protected|static|readonly|abstract|declare|override|async|accessor|get|set)\s+|\*\s*)+$/;
+// After the name: a signature or a field. `?` / `!` may come first; a generic
+// method's `<T>` must be followed by its parameter list.
+const MEMBER_TAIL_RE = /^\s*[?!]?\s*(?:[:(;=]|<[^;{}]*?>\s*\()/;
+
+/**
+ * The offsets of every occurrence of `symbol` that is the NAME of a member
+ * declaration -- a method or property signature in an `interface` body or a type
+ * literal, or a method or field declared at the top depth of a `class` body (#25293).
+ *
+ * A member's name is a homonym, not a reference: `IEmailService.renderTemplate`
+ * names a method of the contract, and nothing in it reaches an export of the same
+ * name. Only the name's own bytes are returned, so the caller blanks THEM and
+ * still reads every other occurrence in the file -- a bare call, a value, a member
+ * ACCESS (`svc.renderTemplate(...)`, excluded by the leading dot) and every string
+ * literal stay mentions.
+ *
+ * Regions, all located on the comment- and literal-masked projection (offsets
+ * preserved, so a brace inside a string never steers the walk):
+ *
+ *   interface NAME ... { ... }   every `{` inside is a type literal, any depth
+ *   type NAME = ...              the alias RHS, likewise
+ *   class NAME ... { ... }       TOP DEPTH only -- a nested `{` is a method body,
+ *                                where `name(x);` is a CALL
+ *
+ * Inside a region the innermost open bracket must be a `{` of that region, so a
+ * parameter name (`(name: T) => R`) or a type argument (`Map<K, name>`) never
+ * counts. ⛔ A generic constraint on a function (`<T extends { name(): R }>`) and an
+ * object literal's key are NOT read: neither is the shape the card names, and the
+ * conservative direction here is to refuse (#4690).
+ *
+ * @returns {number[]} start offsets of the member-name occurrences, in file order
+ */
+export function memberDeclarationOffsets(text, symbol) {
+  const structural = maskCommentsAndLiterals(text);
+  const regions = [];
+  for (const m of structural.matchAll(new RegExp(`(?:^|[^\\w$.])interface\\s+(${IDENT})\\b`, 'g'))) {
+    const open = declarationBodyStart(structural, m.index + m[0].length);
+    const close = open === -1 ? -1 : matchBracket(structural, open);
+    if (close !== -1) regions.push({ from: open, to: close, topOnly: false });
+  }
+  for (const m of structural.matchAll(new RegExp(`(?:^|[^\\w$.])type\\s+(${IDENT})\\b`, 'g'))) {
+    const eq = aliasEqualsIndex(structural, m.index + m[0].length);
+    if (eq !== -1) regions.push({ from: eq, to: aliasRhsEnd(structural, eq), topOnly: false });
+  }
+  for (const b of classBodiesFor(structural, IDENT, 0, structural.length)) {
+    regions.push({ from: b.open, to: b.close, topOnly: true });
+  }
+
+  const out = [];
+  for (const m of structural.matchAll(new RegExp(`(?<![\\w$.])${symbol}(?![\\w$])`, 'g'))) {
+    const at = m.index;
+    if (!MEMBER_TAIL_RE.test(structural.slice(at + symbol.length))) continue;
+    const before = structural.slice(0, at).replace(MEMBER_MODIFIERS_TAIL_RE, '');
+    const prev = before.trimEnd();
+    const sep = prev.slice(-1);
+    const newlineSeparated = /\n[ \t]*$/.test(before) && !/[&|=:<([?.]$/.test(prev);
+    if (!'{;,'.includes(sep) && !newlineSeparated) continue;
+    if (regions.some((r) => at > r.from && at < r.to && innermostOpenerIsMemberBrace(structural, r, at))) {
+      out.push(at);
+    }
+  }
+  return out;
+}
+
+/**
+ * Whether the innermost bracket open at `at` (walked from region `r`'s start) is a
+ * `{` that holds members: any `{` of a type region, or the class body itself.
+ * A closer pops back to its own opener, so a stray `<` -- a comparison inside a
+ * method body, the `>` of `=>` -- cannot leave the stack wrong past its block.
+ */
+function innermostOpenerIsMemberBrace(structural, r, at) {
+  const CLOSES = { '}': '{', ')': '(', ']': '[' };
+  const stack = [];
+  // A type alias's RHS starts at its `=`, not at a brace, so its top depth holds
+  // no members; an `interface` / `class` region starts ON its body brace.
+  for (let i = r.from; i < at; i++) {
+    const c = structural[i];
+    if (c === '{' || c === '(' || c === '[' || c === '<') stack.push(c);
+    else if (c === '>' && structural[i - 1] !== '=') { if (stack[stack.length - 1] === '<') stack.pop(); }
+    else if (CLOSES[c]) {
+      while (stack.length > 0 && stack[stack.length - 1] !== CLOSES[c]) stack.pop();
+      stack.pop();
+    }
+  }
+  if (stack[stack.length - 1] !== '{') return false;
+  return r.topOnly ? stack.length === 1 : true;
+}
+
 /**
  * `z.input<typeof XSchema>` and its family: the house spelling of "this type IS
  * metadata" under Prime Directive #1. Checked on the declaration's own tail, not
@@ -3009,13 +3114,21 @@ export function metadataSurfaceReference(symbol, declPath, surfaceTexts, package
     // A file that declares the name itself is a HOMONYM, not a reference -- the
     // measured `PackagePublishResult` pair in the header is exactly this case.
     if (declaresLocally(hitText, symbol)) continue;
-    const specifiers = importSpecifiersFor(hitText, symbol);
+    // So is a same-named MEMBER declaration (#25293) -- but only its own name is
+    // cleared, never the file: a member signature beside a live code mention still
+    // refuses on the mention.
+    let codeText = hitText;
+    for (const at of memberDeclarationOffsets(hitText, symbol)) {
+      codeText = codeText.slice(0, at) + ' '.repeat(symbol.length) + codeText.slice(at + symbol.length);
+    }
+    if (!word.test(codeText)) continue;
+    const specifiers = importSpecifiersFor(codeText, symbol);
     if (specifiers.length > 0) {
       const pkgs = packages();
       if (!specifiers.some((s) => specifierNamesModule(s, hitPath, declPath, pkgs))) continue; // imported from elsewhere
       return { kind: 'import', hitPath };
     }
-    return { kind: 'mention', hitPath, line: (hitText.split(/\r?\n/).find((l) => word.test(l)) ?? '').trim() };
+    return { kind: 'mention', hitPath, line: (codeText.split(/\r?\n/).find((l) => word.test(l)) ?? '').trim() };
   }
   return null;
 }
@@ -7291,6 +7404,16 @@ function selfTest() {
         `import { mapTemplateToRow } from '${REX_PKG}';\nexport const EmailRowSchema = mapTemplateToRow({});\n`,
     },
   }))), [/predicate 2: no-metadata-surface\] is false: packages\/spec\/src\/email\/email-row\.zod\.ts \(a Zod schema\) IMPORTS `mapTemplateToRow`/]);
+  // REX-G4 / REX-R10b (#25293): the same predicate, END TO END, on a spec contract.
+  // A contract METHOD SIGNATURE of the retired export's name is a homonym; a bare
+  // call of it in the same contract file is not.
+  const REX_CONTRACT = 'packages/spec/src/contracts/email-service.ts';
+  green('REX-G4 #25293: a contract method signature of the same name clears predicate 2', run(mk(REX_FIXTURE(REX_NINE, REX_EXPORT_HALF, {
+    baseFiles: { [REX_CONTRACT]: 'export interface IEmailService {\n  mapTemplateToRow(input: unknown): Promise<unknown>;\n}\n' },
+  }))));
+  red('REX-R10b #25293: a bare call in a contract still refuses predicate 2, beside the signature', run(mk(REX_FIXTURE(REX_NINE, REX_EXPORT_HALF, {
+    baseFiles: { [REX_CONTRACT]: 'export interface IEmailService {\n  mapTemplateToRow(input: unknown): Promise<unknown>;\n}\nexport const ROW = mapTemplateToRow({});\n' },
+  }))), [/predicate 2: no-metadata-surface\] is false: packages\/spec\/src\/contracts\/email-service\.ts \(a spec contracts\/\*\* entry\) mentions `mapTemplateToRow` IN CODE/, /export const ROW = mapTemplateToRow\(\{\}\);/]);
   red('REX-R11 a member still present at HEAD is refused (predicate 1)', run(mk(REX_FIXTURE(
     [...REX_NINE, REX_MEMBERS[0]], `${REX_EXPORT_HALF}\n${REX_CANONICAL_MEMBER_LINES.split('\n')[0]}`,
     { files: { [rexPath('src/email-plugin.ts')]: REX_PLUGIN_BASE } },
@@ -8453,6 +8576,50 @@ function selfTest() {
       !specifierNamesModule('../system/metadata-persistence.zod', 'packages/spec/src/contracts/metadata-service.ts', 'packages/services/service-package/src/index.ts', PKGS),
       'U12b: THE #8277 HOMONYM -- an import of the same NAME from another module names another module',
     );
+  }
+
+  // ---- MH1-MH12 (#25293): a same-named MEMBER declaration is a homonym ---------
+  //
+  // MH1 is the measured case in miniature: the spec contract's method signature
+  // `IEmailService.renderTemplate` refused the retirement of the plugin's export
+  // of the same name. The cure clears the member's own NAME only, so every other
+  // shape below -- a call, a value, an access, a string, a parameter, a type
+  // argument -- must still refuse, and the member beside a live call refuses on
+  // the call (MH9).
+  battery('MH1-MH12 (#25293): a same-named MEMBER declaration is a homonym; only its own name clears');
+  {
+    const SYM = 'renderTemplate';
+    const ref = (text) => metadataSurfaceReference(
+      SYM, 'packages/plugins/plugin-email/src/template-engine.ts',
+      new Map([['packages/spec/src/contracts/email-service.ts', text]]), () => new Map(),
+    );
+    assert(ref('export interface IEmailService {\n  sendTemplate(input: SendTemplateInput): Promise<SendEmailResult>;\n  renderTemplate(input: RenderTemplateInput): Promise<RenderTemplateResult>;\n}\n') === null,
+      'MH1: THE #25293 CASE -- an interface METHOD SIGNATURE of the same name is a homonym, not a reference');
+    assert(ref('interface I {\n  readonly renderTemplate?: (body: string) => string;\n}\n') === null,
+      'MH2: a PROPERTY signature, with a modifier and `?`, is a homonym');
+    assert(ref('export type T = {\n  a: string,\n  renderTemplate: () => void,\n};\n') === null,
+      'MH3: a member of a TYPE LITERAL alias is a homonym');
+    assert(ref('interface I {\n  x: { renderTemplate(): void };\n}\n') === null,
+      'MH4: a member of a type literal NESTED in an interface is a homonym');
+    assert(ref('export class C {\n  renderTemplate(x: string): string {\n    return x;\n  }\n}\n') === null,
+      'MH5: a CLASS method declared at the body\'s top depth is a homonym');
+    assert(ref('export class C {\n  run(x: string) {\n    return renderTemplate(x);\n  }\n}\n')?.kind === 'mention',
+      'MH6: FLOOR -- a call INSIDE a class method body is a mention: only the body\'s top depth declares members');
+    assert(ref('export const X = renderTemplate("a");\n')?.kind === 'mention',
+      'MH7: FLOOR -- a bare call is still a mention');
+    assert(ref('interface I { a(): void }\nexport const y = svc.renderTemplate(1);\n')?.kind === 'mention',
+      'MH8: FLOOR -- a member ACCESS is still a mention: the cure reads declarations, never uses');
+    {
+      const hit = ref('interface I {\n  renderTemplate(): void;\n}\nexport const z = renderTemplate("b");\n');
+      assert(hit?.kind === 'mention' && /renderTemplate\("b"\)/.test(hit.line),
+        `MH9: FLOOR -- a member signature BESIDE a live call refuses, on the call's line (not the file-wide clear a top-level declaration gets). Got: ${JSON.stringify(hit)}`);
+    }
+    assert(ref('interface I { a: "renderTemplate" }\n')?.kind === 'mention',
+      'MH10: FLOOR -- a STRING literal is unchanged: it still refuses (strings are deliberately unmasked)');
+    assert(ref('type F = (renderTemplate: string) => void;\n')?.kind === 'mention',
+      'MH11: FLOOR -- a PARAMETER name in a function type is not a member declaration');
+    assert(ref('interface I { a: Map<string, renderTemplate> }\n')?.kind === 'mention',
+      'MH12: FLOOR -- a TYPE ARGUMENT is not a member declaration');
   }
 
   // ---- S1-S5: the `--audit-stock` classifier (#6350) ------------------------

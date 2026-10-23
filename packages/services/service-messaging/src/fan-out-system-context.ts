@@ -22,6 +22,10 @@
  * locale alone), the read that picks the language a keyed notification text is
  * rendered in, at delivery, for that recipient.
  *
+ * [#25194] And by `MessagingService.userRecipients` (`sys_user`, the id alone),
+ * the one read per emit that tells which recipients are a user, for the
+ * delivery rows' `recipient_user_id`.
+ *
  * `emit()` takes no caller context. The door in front of an emitting caller
  * has already decided whether it may notify, and every row these calls read or
  * write belongs to a RECIPIENT, not to the emitter — so no caller's grants

@@ -23,8 +23,8 @@
  * ledger through the SAME mechanism, `parent-record-read-gate.ts`: a row naming
  * a record is served exactly when the caller may read that record — one
  * `ReadableIds` leaf per parent object, composed by the engine from the
- * caller's read scope (ADR-0139 D4), and the bounded probe for D5's three
- * classes. ⛔ Nothing here derives row scope a second way. A composition or
+ * caller's read scope (ADR-0139 D4), and the bounded probe for D5's two
+ * remaining classes. ⛔ Nothing here derives row scope a second way. A composition or
  * driver refusal is the read's own failure (D3): it reaches the caller, never
  * this gate's deny-all sentinel.
  *

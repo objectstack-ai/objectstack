@@ -457,7 +457,7 @@ describe('#8266 the refusal carries the ADR-0112 envelope', () => {
   async function refusalFor(def: unknown, action: string): Promise<McpExposureError> {
     const metadataService = fakeMetadata(def) as unknown as IMetadataService;
     const context = { userId: 'u1', isSystem: false } as unknown as ExecutionContext;
-    const err = (await enforceApiExposure(metadataService, 'task', action, context).then(
+    const err = (await enforceApiExposure({ metadataService }, 'task', action, context).then(
       () => null,
       (e: unknown) => e,
     )) as McpExposureError | null;

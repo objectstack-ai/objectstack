@@ -2370,6 +2370,20 @@ describe('[ADR-0131 D2] resolveDeclaredRuleScopes', () => {
     expect(engine.calls()).toBe(3);
   });
 
+  it('a FULL page holding a row with no readable id answers unknown (null), never the partial list its kept ids would end on', async () => {
+    // The end of the walk is judged on the rows READ: 500 rows with one id
+    // filtered out is a full page, not a short one.
+    const engine = organizations(1201);
+    const find = engine.find;
+    engine.find = async (o: string, opts?: any) => {
+      const rows = await find(o, opts);
+      return opts?.where ? rows : rows.map((r: Row, i: number) => (i === 9 ? { ...r, id: undefined } : r));
+    };
+    const warns: string[] = [];
+    expect(await resolveDeclaredRuleScopes(engine, 'isolated', { warn: (m) => warns.push(m) })).toBeNull();
+    expect(warns).toEqual([expect.stringMatching(/no readable id — .*no declared rule's grant is revoked/)]);
+  });
+
   it('a read that fails on a LATER page answers unknown (null), never the partial list, and says so', async () => {
     const warns: string[] = [];
     const scopes = await resolveDeclaredRuleScopes(organizations(1201, 2), 'isolated', { warn: (m) => warns.push(m) });

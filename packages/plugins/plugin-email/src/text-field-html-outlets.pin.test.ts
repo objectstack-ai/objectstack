@@ -17,8 +17,25 @@
  *
  * The one unescaped form is the triple-braced hole, an author's explicit opt
  * out. The built-in templates use it for exactly one thing — a link the
- * platform minted, placed inside an `href` attribute — and the pin on
- * `templates/auth-templates.ts` below holds them to that.
+ * platform minted, placed inside an `href` attribute.
+ *
+ * ## Where a hole may sit — the shared judge (#25189)
+ *
+ * The escaping is right only where the placement needs exactly that encoding:
+ * element text, and a quoted plain-text attribute value. Every other
+ * placement, and an unescaped hole anywhere but a declared url variable
+ * forming a whole double-quoted `href`, is refused at authoring time by
+ * `@objectstack/lint`'s `validateEmailTemplateHolePlacements` (ruling
+ * `6335348115` on #25082). Which placement is which is `@objectstack/formula`'s
+ * `judgeMailHtmlHoles`, and the pin on `templates/auth-templates.ts` below
+ * holds the built-ins to that SAME judge, so a built-in can never sit where an
+ * author's template would be refused.
+ *
+ * That judge spells this package's hole grammar again, because the two share
+ * no module that could hold it, so the grammar is pinned here too, against the
+ * real renderer: on a grammar corpus and on every built-in body, the spans the
+ * judge finds are exactly the spans the renderer replaces, and the escaped and
+ * unescaped forms are the ones it encodes and does not.
  *
  * ## The list, and the pin on the list itself
  *
@@ -58,6 +75,8 @@ import type {
   TransportSendResult,
 } from '@objectstack/spec/contracts';
 import type { EmailTemplateDefinition } from '@objectstack/spec/system';
+
+import { judgeMailHtmlHoles, type MailHtmlHole } from '@objectstack/formula';
 
 import { renderTemplate, renderPlainTextTemplate } from './template-engine.js';
 import { EmailService, type EmailTemplateRow, type TemplateLoader } from './email-service.js';
@@ -177,6 +196,8 @@ const PERSON = 'Ada <b>Lovelace</b> & "Co" it\'s';
 const PERSON_IN_HTML = 'Ada &lt;b&gt;Lovelace&lt;/b&gt; &amp; &quot;Co&quot; it&#39;s';
 /** The fixture's markup as it would appear had a hole passed it through unescaped. */
 const PERSON_MARKUP = '<b>Lovelace</b>';
+/** That markup as an escaping hole renders it. */
+const PERSON_MARKUP_IN_HTML = '&lt;b&gt;Lovelace&lt;/b&gt;';
 /** A platform-minted link with a query string. */
 const LINK = 'https://acme.test/act?token=T1&next=%2Fhome';
 
@@ -229,6 +250,58 @@ function pinTemplateEngine(): void {
   it('the plain-text faces render every hole as typed', () => {
     expect(renderPlainTextTemplate('{{who}} / {{{who}}}', { who: PERSON })).toBe(`${PERSON} / ${PERSON}`);
   });
+
+  it('the shared placement judge reads this renderer\'s hole grammar: the same spans, the same two forms', () => {
+    const bodies = [...GRAMMAR_CORPUS, ...BUILTIN_AUTH_TEMPLATES.map((t) => t.bodyHtml ?? '')];
+    let judged = 0;
+    for (const body of bodies) {
+      const holes = judgeMailHtmlHoles(body);
+      judged += holes.length;
+      // Spans: with no data every hole renders empty, so what the renderer
+      // leaves is the body minus exactly the spans the judge found.
+      expect(renderTemplate(body, {}), body).toBe(splice(body, holes, () => ''));
+      // Forms: where no hole carries a formatter, a marked value comes out
+      // escaped from every hole the judge calls escaped, and as typed from
+      // every hole it calls unescaped.
+      if (holes.some((h) => h.text.includes('|'))) continue;
+      expect(renderTemplate(body, everyPath(PERSON_MARKUP)), body)
+        .toBe(splice(body, holes, (h) => (h.raw ? PERSON_MARKUP : PERSON_MARKUP_IN_HTML)));
+    }
+    expect(judged, 'the corpus carries holes to compare').toBeGreaterThan(200);
+  });
+}
+
+/**
+ * The grammar's edges, beside the built-ins' ordinary holes: spacing, dotted
+ * paths, formatters with and without an argument, mismatched and stacked
+ * braces, and brace pairs the renderer leaves verbatim. No `default`
+ * formatter, which renders text for a missing value.
+ */
+const GRAMMAR_CORPUS = [
+  '<p>{{a}} {{ a.b }} {{a_b.c1}}{{  spaced  }}</p>',
+  '<p>{{ x | upper }} {{ total | currency:EUR }} {{ t | currency: \'USD\' }} {{ d | date }}</p>',
+  '<p>{{{a}}} {{{a}} {{a}}} {{{{a}}}} {{{ a }}}</p>',
+  '<p>{{ not a path }} {{}} {{ | upper }} {{ x | two words }} {{a{b}} {x}</p>',
+  '<p title="{{a}}">{{ <b }}{{b}}</p><a href="{{{u}}}">{{u}}</a>',
+];
+
+/** `body` with each hole's span replaced by `by(hole)`. */
+function splice(body: string, holes: readonly MailHtmlHole[], by: (h: MailHtmlHole) => string): string {
+  let out = '';
+  let at = 0;
+  for (const h of holes) {
+    out += body.slice(at, h.start) + by(h);
+    at = h.end;
+  }
+  return out + body.slice(at);
+}
+
+/** Data under which every dotted path resolves to `value`. */
+function everyPath(value: string): Record<string, unknown> {
+  const leaf: object = new Proxy({}, {
+    get: (_target, key) => (key === Symbol.toPrimitive ? () => value : typeof key === 'string' ? leaf : undefined),
+  });
+  return leaf as Record<string, unknown>;
 }
 
 function pinEmailService(): void {
@@ -264,6 +337,17 @@ function pinEmailService(): void {
     expect(out.text).toBe(`${PERSON} wrote on ${PERSON}`);
     expect(transport.sent).toHaveLength(0);
   });
+
+  it('a stored row the authoring rule would refuse still renders and sends: it is judged at its next publish, never at send', async () => {
+    const STORED: EmailTemplateRow = { ...AUTHORED, name: 'crm.stored', body_html: '<p><a href="{{record.title}}">{{actor.name}}</a></p>' };
+    expect(judgeMailHtmlHoles(STORED.body_html).filter((h) => !h.supported).map((h) => h.placement)).toEqual(['url-attribute']);
+    const { svc, transport } = service([STORED]);
+
+    await svc.sendTemplate({ template: 'crm.stored', to: 'ada@acme.test', data: DATA });
+
+    expect(transport.sent).toHaveLength(1);
+    expect(transport.sent[0].html).toContain(PERSON_IN_HTML);
+  });
 }
 
 /** `{ 'user.name': v }` → `{ user: { name: v } }`. */
@@ -282,26 +366,32 @@ function dataFor(variables: NonNullable<EmailTemplateDefinition['variables']>): 
   return data;
 }
 
-const RAW_HOLE = /\{\{\{([^{}]*)\}\}\}/g;
+/** The variables a built-in declares with `type: 'url'` — the paths its unescaped href holes may read. */
+const urlVariablesOf = (t: EmailTemplateDefinition) =>
+  (t.variables ?? []).filter((v) => v.type === 'url').map((v) => v.name);
 
 function pinBuiltInTemplates(): void {
   it('there are built-in templates to judge (control)', () => {
     expect(BUILTIN_AUTH_TEMPLATES.length).toBeGreaterThan(0);
   });
 
+  it('the built-ins carry unescaped holes, and each is admitted by its url declaration and by nothing else (control)', () => {
+    const judged = (urlVariables: (t: EmailTemplateDefinition) => string[]) =>
+      BUILTIN_AUTH_TEMPLATES.flatMap((t) => judgeMailHtmlHoles(t.bodyHtml ?? '', { urlVariables: urlVariables(t) }))
+        .filter((h) => h.raw);
+    expect(judged(urlVariablesOf).length).toBeGreaterThan(0);
+    expect(judged(urlVariablesOf).every((h) => h.supported && h.placement === 'url-attribute')).toBe(true);
+    expect(judged(() => []).filter((h) => h.supported)).toEqual([]);
+  });
+
   for (const t of BUILTIN_AUTH_TEMPLATES) {
     const label = `${t.name} [${t.locale ?? 'en-US'}]`;
 
-    it(`${label}: every unescaped hole in the html body is a declared url variable inside an href attribute`, () => {
-      const html = t.bodyHtml ?? '';
-      const urlVariables = new Set((t.variables ?? []).filter((v) => v.type === 'url').map((v) => v.name));
-      const misplaced: string[] = [];
-      for (const m of html.matchAll(RAW_HOLE)) {
-        const at = m.index ?? 0;
-        const inHref = html.slice(at - 'href="'.length, at) === 'href="' && html[at + m[0].length] === '"';
-        if (!urlVariables.has(m[1].trim()) || !inHref) misplaced.push(m[0]);
-      }
-      expect(misplaced).toEqual([]);
+    it(`${label}: every hole in the html body sits where an author's would be admitted (the shared judge)`, () => {
+      const refused = judgeMailHtmlHoles(t.bodyHtml ?? '', { urlVariables: urlVariablesOf(t) })
+        .filter((h) => !h.supported)
+        .map((h) => `${h.text} in ${h.placement}`);
+      expect(refused).toEqual([]);
     });
 
     it(`${label}: every text variable renders escaped into the html part`, async () => {

@@ -35,10 +35,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Recipient Type",
         help: "Kind of principal that holds the grant",
         options: {
-          user: "user",
-          group: "group",
-          position: "position",
-          unit_and_subordinates: "unit_and_subordinates"
+          user: "User",
+          group: "Group",
+          position: "Position",
+          unit_and_subordinates: "Business unit and subordinates"
         }
       },
       recipient_id: {
@@ -49,8 +49,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Access Level",
         help: "What the recipient can do — read, or read and edit",
         options: {
-          read: "read",
-          edit: "edit"
+          read: "Read",
+          edit: "Read and edit"
         }
       },
       source: {
@@ -137,12 +137,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Recipient Type",
         help: "Who receives access. Picking a team, business unit or position gives access to everyone in it. \"Business unit and subordinates\" also covers every unit below the one you pick. \"Field\" shares each record with the user or users held in one of its own fields — name that field as the recipient.",
         options: {
-          user: "user",
-          team: "team",
-          business_unit: "business_unit",
-          position: "position",
-          unit_and_subordinates: "unit_and_subordinates",
-          field: "field"
+          user: "User",
+          team: "Team",
+          business_unit: "Business unit",
+          position: "Position",
+          unit_and_subordinates: "Business unit and subordinates",
+          field: "Field"
         }
       },
       recipient_id: {
@@ -153,8 +153,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Access Level",
         help: "What the recipients may do with the matching records — read them, or read and edit them.",
         options: {
-          read: "read",
-          edit: "edit"
+          read: "Read",
+          edit: "Read and edit"
         }
       },
       active: {

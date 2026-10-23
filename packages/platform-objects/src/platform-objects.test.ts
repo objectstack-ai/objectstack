@@ -688,6 +688,11 @@ describe('feature-gate lowering matrix (#2874)', () => {
   // `current_user.positions` read. The repo-wide enumeration of that family is
   // `platform-admin-affordance-standing.test.ts`; these rows pin the bytes.
   const STANDING = 'current_user.isPlatformAdmin == true';
+  // The cloud-managed mode (`features.cloudManaged`, hide-when-on) takes the
+  // doors that add people away. Each such action already names another flag
+  // through `requiresFeature`, so this gate is authored in `visible` and both
+  // lowerings compose after it.
+  const MANAGED = 'features.cloudManaged != true';
 
   const rows: Array<[string, { actions?: readonly { name?: string; visible?: unknown; params?: readonly unknown[] }[] }, string, string]> = [
     ['SysOrganization', SysOrganization, 'create_organization', MULTI_ORG],
@@ -698,11 +703,11 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysOrganization', SysOrganization, 'delete_organization', `(${OWNER}) && ${MULTI_ORG}`],
     ['SysOrganization', SysOrganization, 'set_active_organization', MULTI_ORG],
     ['SysOrganization', SysOrganization, 'leave_organization', MULTI_ORG],
-    ['SysUser', SysUser, 'invite_user', `${INVITE} && ${ORG}`],
-    ['SysUser', SysUser, 'create_user', `(${STANDING}) && features.admin == true`],
+    ['SysUser', SysUser, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
+    ['SysUser', SysUser, 'create_user', `(${STANDING} && ${MANAGED}) && features.admin == true`],
     // [#11544] Third mirror of `invite_user` — the Members tab's own copy of
     // the email-invite entry. Same gate as the sys_user / sys_invitation rows.
-    ['SysMember', SysMember, 'invite_user', `${INVITE} && ${ORG}`],
+    ['SysMember', SysMember, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     // No grade term: add-member is gated on platform-admin standing, not on a
     // membership grade, so the action carries no `requiresMembershipReach`.
     // The standing term is the authored `visible` — the ADR-0095 D3
@@ -720,7 +725,7 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysMember', SysMember, 'update_member_role', `${ADMINS} && ${ORG}`],
     ['SysMember', SysMember, 'remove_member', `${ADMINS} && ${ORG}`],
     ['SysMember', SysMember, 'transfer_ownership', `((has(record.role) && record.role != 'owner') && ${OWNER}) && ${ORG}`],
-    ['SysInvitation', SysInvitation, 'invite_user', `${INVITE} && ${ORG}`],
+    ['SysInvitation', SysInvitation, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     ['SysInvitation', SysInvitation, 'cancel_invitation', `${ADMINS} && ${ORG}`],
     ['SysInvitation', SysInvitation, 'resend_invitation', `${INVITE} && ${ORG}`],
     ['SysTeam', SysTeam, 'create_team', `${ADMINS} && ${ORG}`],
@@ -736,7 +741,7 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysUser', SysUser, 'ban_user', `(${STANDING} && has(record.banned) && record.banned != true) && features.admin == true`],
     ['SysUser', SysUser, 'unban_user', `(${STANDING} && has(record.banned) && record.banned == true) && features.admin == true`],
     ['SysUser', SysUser, 'unlock_user', `(${STANDING} && ((has(record.locked_until) && record.locked_until != null) || (has(record.two_factor_enabled) && record.two_factor_enabled == true))) && features.admin == true`],
-    ['SysUser', SysUser, 'set_user_password', `(${STANDING}) && features.admin == true`],
+    ['SysUser', SysUser, 'set_user_password', `(${STANDING} && ${MANAGED}) && features.admin == true`],
     ['SysUser', SysUser, 'impersonate_user', `(${STANDING}) && features.admin == true`],
     ['SysUser', SysUser, 'enable_two_factor', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled != true) && features.twoFactor == true'],
     ['SysUser', SysUser, 'disable_two_factor', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled == true) && features.twoFactor == true'],

@@ -52,12 +52,16 @@ export type PublicAuthFeatureSurface = 'crud' | 'login' | 'status';
 
 /**
  * Default semantics of the flag, which decide the lowered predicate:
- * - `opt-in`     — default `false`; gate with `features.X == true`.
- * - `default-on` — default `true`; gate with `features.X != false` so a
+ * - `opt-in`       — default `false`; gate with `features.X == true`.
+ * - `default-on`   — default `true`; gate with `features.X != false` so a
  *   missing/undefined flag (e.g. config not yet fetched) keeps the input
  *   visible.
+ * - `hide-when-on` — default `false`, and the flag being ON is what HIDES the
+ *   input (a mode that takes a capability away, not one that grants it); gate
+ *   with `features.X != true` so a missing/undefined flag keeps the input
+ *   visible, exactly as the flag being off does.
  */
-export type PublicAuthFeatureSemantics = 'opt-in' | 'default-on';
+export type PublicAuthFeatureSemantics = 'opt-in' | 'default-on' | 'hide-when-on';
 
 export type PublicAuthFeatureEntry = {
   surface: PublicAuthFeatureSurface;
@@ -228,6 +232,30 @@ export const PUBLIC_AUTH_FEATURES = {
       'the backend refuses. Also read by objectui LoginForm for the ' +
       'phone+password sign-in mode.',
   },
+  // The managed (cloud-hosted, SSO-only) mode — ruling 6341690661 on #25083,
+  // Q2 D (one accessor) and Q3 A (this flag, camelCase, hide-when-on).
+  cloudManaged: {
+    surface: 'crud',
+    semantics: 'hide-when-on',
+    gatedInputs: [
+      // The four mirrors of the email-invite entry (see `organization` above
+      // for why there are four): a managed environment's people arrive from
+      // the organisation through the identity provider, never by invitation.
+      'sys_user.actions.invite_user',
+      'sys_member.actions.invite_user',
+      'sys_invitation.actions.invite_user',
+      'sys_organization.actions.invite_user',
+      'sys_user.actions.create_user',
+      // Hidden in the console only: the server keeps answering it on an
+      // `env_native` row, so the break-glass admin stays editable.
+      'sys_user.actions.set_user_password',
+    ],
+    notes:
+      'Served from the one isCloudManaged() accessor in @objectstack/core. ' +
+      'Each gated input is also gated on `organization` or `admin`, so its ' +
+      '`visible` predicate carries two gates. Also read straight off ' +
+      '/auth/config by objectui (the Setup → Users copy, the password reminder).',
+  },
   phoneNumberOtp: {
     surface: 'login',
     semantics: 'opt-in',
@@ -301,13 +329,24 @@ export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tena
 export const PUBLIC_AUTH_FEATURES_NOT_ADVERTISED = ['passkeys', 'magicLink'] as const;
 
 /**
+ * The CEL comparison each semantics lowers to. A total map rather than a
+ * conditional, so a fourth semantics added to {@link PublicAuthFeatureSemantics}
+ * fails to compile here instead of silently taking another arm's operator.
+ */
+const FEATURE_GATE_OPERATORS = {
+  'opt-in': '== true',
+  'default-on': '!= false',
+  'hide-when-on': '!= true',
+} as const satisfies Record<PublicAuthFeatureSemantics, string>;
+
+/**
  * The canonical CEL gate for a flag, per its default semantics:
  * `opt-in` → `features.X == true`; `default-on` → `features.X != false`
- * (so an absent flag — e.g. config not yet fetched — fails open).
+ * (so an absent flag — e.g. config not yet fetched — fails open);
+ * `hide-when-on` → `features.X != true` (absent fails open too).
  */
 export function featureGatePredicate(name: PublicAuthFeatureName): string {
-  const op = PUBLIC_AUTH_FEATURES[name].semantics === 'opt-in' ? '== true' : '!= false';
-  return `features.${name} ${op}`;
+  return `features.${name} ${FEATURE_GATE_OPERATORS[PUBLIC_AUTH_FEATURES[name].semantics]}`;
 }
 
 /** Object shape the lowering transform operates on (post field-level parse). */

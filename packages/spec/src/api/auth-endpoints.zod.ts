@@ -239,6 +239,9 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   phoneNumberOtp: z.boolean().optional().describe(
     'Phone-number OTP sign-in and self-service password reset available — requires the phoneNumber plugin plus a deliverable SMS service',
   ),
+  cloudManaged: z.boolean().optional().describe(
+    'Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed',
+  ),
 }));
 
 /**

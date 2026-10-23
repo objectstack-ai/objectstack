@@ -908,6 +908,55 @@ const TransportFilterValueSchema = lazySchema(() => z.union([FilterArraySchema, 
 const TransportCountValueSchema = lazySchema(() => z.union([z.boolean(), z.enum(['true', 'false'])]));
 
 /**
+ * [#25269] The page window — `limit` / `offset` and every spelling that folds
+ * onto them (`top`, `$top`, `skip`, `$skip`) — as the Data API list doors
+ * enforce it: a non-negative safe integer. `0` is a window (`$top=0` asks for
+ * the total alone); a fraction, a negative, `NaN` or `Infinity` is not.
+ *
+ * ONE declaration of the bound, read by both sides: the door schemas below
+ * declare it, and `@objectstack/metadata-protocol`'s `findData` normalizer —
+ * the one statement every list door reaches — judges each window by
+ * {@link QueryPageWindowParamSchema}, built on this. A second spelling of the
+ * bound in either place is how the schemas came to admit `limit: -1` and
+ * `offset: 1.5` that the door refuses.
+ *
+ * ⛔ Not declared on `QuerySchema` itself. That schema is also the driver
+ * contract and the recursive `expand` value, and neither is judged by the
+ * normalizer: narrowing it would refuse at a schema windows no server refuses.
+ */
+export const QueryPageWindowSchema = lazySchema(() => z.number().int().nonnegative()
+  .describe('Page window — a non-negative integer (0 asks for the total alone)'));
+
+/**
+ * A page window as a transport carries it: the count itself (a JSON body), or
+ * the text a querystring carries it as (`?$top=50` arrives as `'50'`), which
+ * parses to the count. A blank string is refused, not read as absent: an
+ * absent window means every row, so reading `?$top=` that way would widen the
+ * read the caller bounded.
+ *
+ * This is the whole accept set of the `findData` window check, not a copy of
+ * it: the normalizer parses every window through this schema. The string arm
+ * converts with `Number`, exactly as the door always has, so `' 5 '` and
+ * `'1e2'` are counts here because they are counts there.
+ */
+export const QueryPageWindowParamSchema = lazySchema(() => z.union([
+  QueryPageWindowSchema,
+  z.string()
+    .refine(
+      (text) => text.trim() !== '' && QueryPageWindowSchema.safeParse(Number(text)).success,
+      'Page window must be a non-negative integer, written as digits',
+    )
+    .transform((text) => Number(text)),
+]).describe('Page window — a non-negative integer, or the digits a querystring carries it as'));
+
+export type QueryPageWindow = z.input<typeof QueryPageWindowSchema>;
+/** Post-parse shape of {@link QueryPageWindow} — the same count; named so a parse result has its ADR-0122 name. */
+export type QueryPageWindowParsed = z.infer<typeof QueryPageWindowSchema>;
+export type QueryPageWindowParam = z.input<typeof QueryPageWindowParamSchema>;
+/** Post-parse shape of {@link QueryPageWindowParam} — the count, the querystring digits converted (ADR-0122). */
+export type QueryPageWindowParamParsed = z.infer<typeof QueryPageWindowParamSchema>;
+
+/**
  * The transport query parameters — every spelling the two tables above name
  * that is not itself a QueryAST key: the `$`-prefixed forms, the plural
  * `filters`, the bare aliases (`filter` / `select` / `sort` / `skip` /
@@ -971,11 +1020,11 @@ export const QueryTransportParamsSchema = lazySchema(() => z.object({
   filters: TransportFilterValueSchema.nullable().optional()
     .describe('Transport spelling of `where` (plural of `filter`)'),
   /** OData spelling of `limit` (two hops: `$top` to `top` to `limit`). */
-  $top: z.union([z.number(), z.string()]).nullable().optional()
-    .describe('Transport spelling of `limit` (OData `$top`) — a number, or the digits a querystring carries it as'),
+  $top: z.union([QueryPageWindowSchema, z.string()]).nullable().optional()
+    .describe('Transport spelling of `limit` (OData `$top`) — a non-negative integer, or the digits a querystring carries it as'),
   /** OData spelling of `offset` (two hops: `$skip` to `skip` to `offset`). */
-  $skip: z.union([z.number(), z.string()]).nullable().optional()
-    .describe('Transport spelling of `offset` (OData `$skip`) — a number, or the digits a querystring carries it as'),
+  $skip: z.union([QueryPageWindowSchema, z.string()]).nullable().optional()
+    .describe('Transport spelling of `offset` (OData `$skip`) — a non-negative integer, or the digits a querystring carries it as'),
   /** OData spelling of `orderBy`. */
   $orderby: DataEngineSortSchema.nullable().optional()
     .describe('Transport spelling of `orderBy` (OData `$orderby`)'),
@@ -1007,8 +1056,8 @@ export const QueryTransportParamsSchema = lazySchema(() => z.object({
   sort: DataEngineSortSchema.nullable().optional()
     .describe('Transport spelling of `orderBy`'),
   /** Bare transport spelling of `offset`. */
-  skip: z.union([z.number(), z.string()]).nullable().optional()
-    .describe('Transport spelling of `offset`'),
+  skip: z.union([QueryPageWindowSchema, z.string()]).nullable().optional()
+    .describe('Transport spelling of `offset` — a non-negative integer, or the digits a querystring carries it as'),
   /** Bare transport spelling of `expand`. */
   populate: z.union([z.string(), z.array(z.string())]).nullable().optional()
     .describe('Transport spelling of `expand`'),
@@ -1129,19 +1178,21 @@ function lowerFoldedTransportValues(
     });
   };
   // `?$top=50` / `?$skip=10` arrive as digits; canonical `limit` / `offset`
-  // declare numbers. A string that is not a number is refused rather than
+  // declare a page window. A string that is not one is refused rather than
   // passed on: `$top: 'abc'` used to reach the engine as `limit: null` — an
-  // UNBOUNDED read under a 200 — and `$top: ''` as `limit: 0`.
+  // UNBOUNDED read under a 200 — and `$top: ''` as `limit: 0`. [#25269] The
+  // judge is the door's own ({@link QueryPageWindowParamSchema}), so `'-1'`
+  // and `'1.5'` are refused here exactly as `findData` refuses them; the
+  // number arm was already judged on the member that carried it.
   for (const key of ['limit', 'offset'] as const) {
     const value = bag[key];
     if (typeof value !== 'string') continue;
-    const trimmed = value.trim();
-    const n = trimmed === '' ? Number.NaN : Number(trimmed);
-    if (!Number.isFinite(n)) {
-      refuse(key, `carries ${JSON.stringify(value)}, which is not a number.`);
+    const window = QueryPageWindowParamSchema.safeParse(value);
+    if (!window.success) {
+      refuse(key, `carries ${JSON.stringify(value)}, which is not a non-negative integer.`);
       continue;
     }
-    bag[key] = n;
+    bag[key] = window.data;
   }
   for (const key of ['fields', 'searchFields'] as const) {
     if (typeof bag[key] === 'string') {
@@ -1286,6 +1337,17 @@ const describedCanonicalExpand = (): z.ZodType => {
 };
 
 /**
+ * [#25269] A canonical window member (`limit` / `offset` / `top`) declared as
+ * the page window the door enforces ({@link QueryPageWindowSchema}), with the
+ * text `QuerySchema` gives it — READ from the member, as
+ * {@link describedCanonicalExpand} does. `QuerySchema`'s own member stays a
+ * bare number: it is also the recursive `expand` value, whose windows the
+ * door does not judge.
+ */
+const describedPageWindowMember = (key: 'limit' | 'offset' | 'top'): z.ZodType =>
+  QueryPageWindowSchema.optional().describe(queryObjectFace().shape[key].description ?? '');
+
+/**
  * A query slot whose declared INPUT is the canonical AST or its transport
  * spelling, and whose OUTPUT is CONSTRUCTED: the folded bag is parsed by
  * {@link QueryAstWithCountSchema} and that parse's result is what the transform
@@ -1311,12 +1373,16 @@ const describedCanonicalExpand = (): z.ZodType => {
  * so a transport bag parses to canonical keys. The canonical members keep
  * `QuerySchema`'s own declarations verbatim — except `where`, which accepts the
  * `FilterArray` sugar on every spelling of its slot because the door serves it
- * on every spelling of its slot.
+ * on every spelling of its slot, and the page window (`limit` / `offset` /
+ * `top`), which declares the non-negative integer the door enforces.
  */
 export const QueryWithTransportSchema = lazySchema(
   () => queryObjectFace()
     .extend({
       ...(QueryTransportParamsSchema as unknown as z.ZodObject<z.ZodRawShape>).shape,
+      limit: describedPageWindowMember('limit'),
+      offset: describedPageWindowMember('offset'),
+      top: describedPageWindowMember('top'),
       expand: describedCanonicalExpand(),
       // The lowering sink the sentence below names is the one maintainer
       // ruling C on #5158 fixed. The id lives in this comment and not in the

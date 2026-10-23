@@ -30,15 +30,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       user_id: {
         label: "用户",
-        help: "指向 sys_user 的外键。"
+        help: "获得此权限集的用户。"
       },
       permission_set: {
         label: "权限集",
-        help: "此授权所持有的权限集的机器名，以安全目录中的名称为准。安全目录中不存在的名称将被拒绝。仅在此列存在之前写入的授权中为 NULL。"
+        help: "此分配授予用户的权限集。请从设置中已定义的权限集中选择；不匹配任何权限集的名称将被拒绝。"
       },
       organization_id: {
         label: "组织",
-        help: "可选的组织范围。NULL = 在所有组织上下文中都生效。"
+        help: "此授权所属的组织。"
       },
       granted_by: {
         label: "授权人",
@@ -58,11 +58,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       last_certified_at: {
         label: "最近认证时间",
-        help: "为未来的访问权限重新认证(定期复核)流程预留:届时用于记录此授予最近一次被认证的时间。当前该列是惰性的:平台不会写入它,也没有任何代码读取它——没有任何解析路径、门禁或 lint 会参考它,也没有任何地方据此推导出「从未认证」或「认证已过期」。因此为空只表示该流程尚不存在,并不表示此授予未经复核。"
+        help: "尚未启用：为将来的访问复核功能预留。目前没有任何功能会填写或检查此日期，因此为空并不表示该分配未经复核。"
       },
       certified_by: {
         label: "认证人",
-        help: "同样为未来的访问权限重新认证流程预留:届时用于记录认证此授予的复核人。当前该列是惰性的:平台既不写入也不读取它。客户端在此写入的值只是一条未经验证的备注——平台不会对它做任何校验,也不会据此授予任何权限。"
+        help: "尚未启用：为将来的访问复核功能预留。在此填写的复核人不会被验证，也不会改变该分配授予的任何权限。"
       },
       created_at: {
         label: "创建时间"
@@ -92,7 +92,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       user_id: {
         label: "用户",
-        help: "指向 sys_user 的外键。"
+        help: "担任此岗位的用户。"
       },
       position: {
         label: "岗位",
@@ -104,7 +104,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "组织",
-        help: "拥有此分配的租户；为空 = 全局（跨租户）。"
+        help: "此分配所属的组织。"
       },
       granted_by: {
         label: "授予人",
@@ -128,11 +128,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       last_certified_at: {
         label: "最近认证时间",
-        help: "为未来的访问权限重新认证(定期复核)流程预留:届时用于记录此授予最近一次被认证的时间。当前该列是惰性的:平台不会写入它,也没有任何代码读取它——没有任何解析路径、门禁或 lint 会参考它,也没有任何地方据此推导出「从未认证」或「认证已过期」。因此为空只表示该流程尚不存在,并不表示此授予未经复核。"
+        help: "尚未启用：为将来的访问复核功能预留。目前没有任何功能会填写或检查此日期，因此为空并不表示该分配未经复核。"
       },
       certified_by: {
         label: "认证人",
-        help: "同样为未来的访问权限重新认证流程预留:届时用于记录认证此授予的复核人。当前该列是惰性的:平台既不写入也不读取它。客户端在此写入的值只是一条未经验证的备注——平台不会对它做任何校验,也不会据此授予任何权限。"
+        help: "尚未启用：为将来的访问复核功能预留。在此填写的复核人不会被验证，也不会改变该分配授予的任何权限。"
       },
       created_at: {
         label: "创建时间"

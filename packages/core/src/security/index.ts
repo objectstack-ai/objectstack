@@ -207,16 +207,58 @@ export {
   // security catalog — the `sys_metadata_activation` ledger, never a catalog
   // row's `active` column — shared with the explainer and the security plugin.
   readDisabledCatalogNames,
+  // [ADR-0131 D3/D4, ADR-0095 D3] A position, described as the resolver
+  // enforces it for a holder: the sets its definition grants in force, and how
+  // many people hold it in an organization — the position catalog's list reads
+  // these, never a second copy of the rule.
+  readPositionGrantsInForce,
+  countPositionHolders,
   // [ADR-0138 D4] The guest entry's organization step, shared with the CRUD
   // gate that raises D4's located refusal — one step, two askers.
   resolveGuestOrganization,
   resolveLocalizationContext,
+  // [ADR-0131 D3/D5] The Default Organization as the resolver reads it — the
+  // anchor of `single`-posture platform standing.
+  readDefaultOrganizationId,
   type ResolvedAuthzContext,
   type ResolveAuthzInput,
   type UserAuthzGrants,
   type ResolveUserAuthzGrantsOptions,
   type ResolveLocalizationInput,
 } from './resolve-authz-context.js';
+
+// [ADR-0131 D3/D5] The ONE definition of the Default Organization (`slug =
+// 'default'`, else the only organization), over a read each reader supplies:
+// the boot invariant, the bootstrap, the tenancy service, the last-admin guard,
+// the promotion and the ownership ceremony name the row the resolver names.
+export {
+  DEFAULT_ORGANIZATION_SLUG,
+  findDefaultOrganization,
+  type DefaultOrganizationRead,
+  type DefaultOrganizationAnswer,
+} from './default-organization.js';
+
+// [ADR-0131 D5] The ONE anchor rule for platform standing: which
+// `admin_full_access` grant anchors it, with the posture and the Default
+// Organization as parameters. The resolver's §6b and plugin-auth's
+// last-administrator guard (over the simulated Default Organization) ask it.
+export {
+  organizationAnchorsPlatformStanding,
+  type PlatformStandingAnchorFacts,
+} from './platform-standing-anchor.js';
+
+// [ADR-0131 D8/D9] The ONE organization-reach rule: whose `sys_setting` rows a
+// caller may draw on. `SettingsService` and the resolver's localization
+// fallback ask it, each with its own posture source and failure policy.
+export {
+  resolveOrganizationReach,
+  organizationReachAdmits,
+  organizationReachRowOwner,
+  organizationIdOf,
+  UNOWNED_ORGANIZATION_REACH,
+  type OrganizationReach,
+  type OrganizationReachFacts,
+} from './organization-reach.js';
 
 // [ADR-0131 D9, ADR-0138 D4] The ONE "which organization does a caller with no
 // organization of its own act in?" decision. Two askers: the engine's

@@ -16,6 +16,7 @@ import {
 import { dispatchHookIsolating, dispatchHookPropagating } from './hook-dispatch.js';
 import { registerPluginByName } from './plugin-registration.js';
 import { raceWithTimeout } from './timeout-guard.js';
+import { isCloudManaged } from './stack-auth.js';
 
 /**
  * The kernel service a DEGRADED boot's conclusion is published on (#16630).
@@ -526,6 +527,12 @@ export class ObjectKernel {
         if (this.state !== 'idle') {
             throw new Error('[Kernel] Kernel already bootstrapped');
         }
+
+        // The cloud-managed fuse (ruling 6341690661 on #25083, Q2 → D): a
+        // production boot with `OS_CLOUD_MANAGED=1` and no bound control plane
+        // refuses here, before any plugin initialises — every kernel in the
+        // process reads the one memoized fact. See `isCloudManaged()`.
+        isCloudManaged();
 
         this.state = 'initializing';
         this.logger.info('Bootstrap started');

@@ -71,7 +71,20 @@
  *          A mode the package's `installModes` does not permit answers
  *          `422 INSTALL_MODE_NOT_PERMITTED`, before any write.
  *
- *   GET    /api/v1/marketplace/install-local
+ *          [ADR-0126 §6 wall 3] A managed RE-install over an installed package
+ *          asks the security plugin's access upgrade check
+ *          (`security.accessUpgradeCheck`) what the upgrade would un-make: a
+ *          switch-off a vendor rename re-enables, a switch, clone reference or
+ *          sharing rule row whose name it no longer ships, a sharing rule name
+ *          collision, a field deny a customer's set lacks. A finding answers
+ *          `409 ACCESS_UPGRADE_CONFIRMATION_REQUIRED` with `details.findings`
+ *          and the finding set's token, before any write; the same request
+ *          with `confirmAccessUpgrade: <token>` installs, and records the
+ *          confirmation in the ledger entry. A check that could not read
+ *          answers `503 SERVICE_UNAVAILABLE`. Under a wall only the operator
+ *          reaches this step (ADR-0131 D12 items 7–8).
+ *
+ *   GET   /api/v1/marketplace/install-local
  *          → lists currently installed marketplace packages. Requires an
  *            authenticated principal (anonymous → 401); `installedBy` and
  *            `storageDir` are served only to a `manage_metadata` holder
@@ -316,6 +329,107 @@ const UNRUNNABLE_REFUSAL_STATUS = 422;
  */
 const INSTALL_MODE_NOT_PERMITTED_CODE = 'INSTALL_MODE_NOT_PERMITTED';
 const INSTALL_MODE_NOT_PERMITTED_STATUS = 422;
+
+/**
+ * [ADR-0126 §6 wall 3] The refusal of an upgrade that would un-make an access
+ * choice made in this system — a switch-off a vendor rename re-enables, a
+ * switch, clone or sharing rule row whose name the package no longer ships, a
+ * declared sharing rule an organization's row already holds, a name a
+ * customer's set or rule references and the upgrade drops, a field deny the
+ * customer's sets lack. 409: the request is well formed and holds until the
+ * caller answers, as the D5e gate's does. Its own code because the caller's
+ * branch is its own: the same request with the finding set's token installs,
+ * and neither the D5e answer (per-index unique confirmations) nor a conflict
+ * (which no confirmation lifts) leads there.
+ */
+const ACCESS_UPGRADE_CONFIRMATION_REQUIRED = 'ACCESS_UPGRADE_CONFIRMATION_REQUIRED';
+const ACCESS_UPGRADE_CONFIRMATION_STATUS = 409;
+
+/**
+ * [ADR-0126 §6 wall 3] The service plugin-security registers the access
+ * upgrade check under — asked as a capability question, so this package takes
+ * no dependency on plugin-security. Without it, a re-install is not checked
+ * against the access choices it could un-make, and the door says so once per
+ * upgrade.
+ */
+const ACCESS_UPGRADE_CHECK_SERVICE = 'security.accessUpgradeCheck';
+
+/** A finding of the access upgrade check, as this door reads it (`access-upgrade-report.ts`). */
+type AccessFinding = Record<string, any>;
+
+/** The check's answer, as this door reads it (`access-upgrade-check.ts` declares it). */
+type AccessUpgradeCheckAnswer =
+    | { outcome: 'clean' }
+    | {
+        outcome: 'findings';
+        findingSet: string;
+        findings: {
+            orphans: AccessFinding[];
+            reEnablements: AccessFinding[];
+            collisions: AccessFinding[];
+            brokenReferences: AccessFinding[];
+            uncoveredDenies: AccessFinding[];
+        };
+    }
+    | { outcome: 'stopped'; stop?: string; reading: string; error?: string };
+
+/** The service, narrowed per consumer: the one verb this door calls. */
+type AccessUpgradeCheckService = {
+    check?(request: { packageId: string; manifest: unknown; previousManifest?: unknown }): Promise<AccessUpgradeCheckAnswer>;
+};
+
+/** One finding per line, for the refusal's `details.findings`: what it is and what un-made it. */
+function describeAccessFindings(report: Extract<AccessUpgradeCheckAnswer, { outcome: 'findings' }>['findings']): AccessFinding[] {
+    const out: AccessFinding[] = [];
+    const reEnabled = new Set(report.reEnablements.map((r) => `${r.type}:${r.name}`));
+    for (const r of report.reEnablements) {
+        const candidates = (r.candidates as Array<{ name: string; positions: string[] }>);
+        const through = candidates.flatMap((c) => c.positions ?? []);
+        out.push({
+            kind: 're-enablement', type: r.type, name: r.name, packageId: r.packageId, candidates,
+            describe: `${r.type} '${r.name}' is switched off in this system and the upgrade no longer ships it; `
+                + `the package ships ${candidates.map((c) => `'${c.name}'`).join(', ')} with no switch, `
+                + 'active by default — suspected to be its new name'
+                + (through.length > 0 ? `, granted through position(s) ${[...new Set(through)].map((p) => `'${p}'`).join(', ')}` : '')
+                + '.',
+        });
+    }
+    for (const o of report.orphans) {
+        if (reEnabled.has(`${o.type}:${o.name}`)) continue;
+        out.push({
+            kind: 'orphan', type: o.type, name: o.name, packageId: o.packageId, switchedOff: o.switchedOff,
+            describe: `${o.type} '${o.name}' carries a ${o.switchedOff ? 'switch-off' : 'switch'} in this system, `
+                + 'and the upgrade no longer ships it, so the switch would cover nothing.',
+        });
+    }
+    for (const col of report.collisions) {
+        out.push({
+            kind: 'collision', type: 'sharing_rule', name: col.rule, rowId: col.rowId, organizationId: col.organizationId,
+            describe: `the upgrade declares sharing rule '${col.rule}', whose name a sharing rule authored in this system `
+                + 'holds, so the declared rule would be served nowhere in that scope.',
+        });
+    }
+    for (const b of report.brokenReferences) {
+        const missing = (b.missing as Array<{ kind: string; name: string }>);
+        out.push({
+            kind: 'broken-reference', type: b.type, name: b.name,
+            ...(b.rowId !== undefined ? { rowId: b.rowId, organizationId: b.organizationId ?? null } : {}),
+            missing,
+            describe: `${b.type === 'permission' ? 'permission set' : 'sharing rule'} '${b.name}', authored in this system, `
+                + `names ${missing.map((m) => `${m.kind} '${m.name}'`).join(', ')}, which the upgrade no longer ships.`,
+        });
+    }
+    for (const u of report.uncoveredDenies) {
+        const fields = (u.fields as Array<{ field: string; denies: string }>);
+        out.push({
+            kind: 'uncovered-deny', type: 'permission', name: u.customerSet, managedSet: u.managedSet, object: u.object, fields,
+            describe: `the upgraded set '${u.managedSet}' denies ${fields.map((f) => `${f.denies} on '${f.field}'`).join(', ')}, `
+                + `and permission set '${u.customerSet}', authored in this system and granting '${u.object}', has no entry `
+                + 'for it, so the field stays open through it.',
+        });
+    }
+    return out;
+}
 
 /**
  * [ADR-0131 D6] The one verb the `unmanaged` install mode calls: the
@@ -1564,6 +1678,34 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 409);
         }
 
+        // ADR-0087 D2 — the fetched bundle is a published artifact, so it is
+        // converted forward ONCE here ({@link convertPackageBodyForward}); the
+        // converted body is what the access check compares (2c), what
+        // registers (3), what the binder binds (4c) and what the side effects
+        // replay (5). The ledger entry (4) keeps the body as installed, and
+        // rehydrate converts it again at every boot.
+        const converted = this.convertPackageBodyForward(ctx, manifest);
+
+        // 2c. [ADR-0126 §6 wall 3] ⭐ AN UPGRADE NEVER UN-MAKES AN ACCESS
+        //     CHOICE UNCONFIRMED. On a re-install over an installed package —
+        //     a fresh install has no choice of the customer's to un-make — the
+        //     security plugin's check compares the customer's switch-offs,
+        //     clones and sharing rule rows against the registry as the incoming
+        //     version would leave it, and answers what THIS upgrade would
+        //     create. Any finding stops the install `409
+        //     ACCESS_UPGRADE_CONFIRMATION_REQUIRED` until the same call carries
+        //     the finding set's token; a check that could not read answers 503.
+        //     Before any write, after the D5e gate, so a stopped install leaves
+        //     the runtime as it found it. Who can reach this step is the door's
+        //     admission's: under a wall, the operator alone (the D12 refusal
+        //     above); under `single`, a `manage_metadata` holder.
+        let accessUpgradeConfirmation: InstalledEntry['accessUpgradeConfirmation'];
+        if (conflict === 'marketplace') {
+            const access = await this.evaluateAccessUpgradeGate(ctx, manifestId, converted, previousEntry, body, userId);
+            if (access.refusal) return c.json(access.refusal.body, access.refusal.status);
+            accessUpgradeConfirmation = access.confirmation;
+        }
+
         // 3. Hot-register FIRST so a malformed inline manifest fails the
         //    install loudly rather than persisting a broken record that
         //    would also fail on every subsequent rehydrate.
@@ -1576,12 +1718,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //    running kernel held a package it did not, and the console read
         //    that answer as "the app should now appear".
         let hotLoadError: string | undefined;
-        // ADR-0087 D2 — the fetched bundle is a published artifact, so it is
-        // converted forward ONCE here ({@link convertPackageBodyForward}); the
-        // converted body is what registers, what the binder binds (4c) and
-        // what the side effects replay (5). The ledger entry (4) keeps the
-        // body as installed, and rehydrate converts it again at every boot.
-        const converted = this.convertPackageBodyForward(ctx, manifest);
         try {
             const manifestService = ctx.getService('manifest') as any;
             // Awaited: register also bridges the manifest's objects into the
@@ -1625,6 +1761,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // ceremony is not re-run for constraints already answered for, and
             // fold in whatever this install confirmed.
             ...(gate.attestation ? { globalUniqueAttestation: gate.attestation } : {}),
+            // [ADR-0126 §6 wall 3] The confirmation step 2c admitted, recorded.
+            ...(accessUpgradeConfirmation ? { accessUpgradeConfirmation } : {}),
         };
         try {
             this.ledger.write(entry);
@@ -2273,6 +2411,124 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             );
         }
         return outcomes;
+    };
+
+    /**
+     * [ADR-0126 §6 wall 3] Step 2c of {@link handleInstall}: ask the security
+     * plugin's access upgrade check what replacing the installed package with
+     * `converted` would un-make, and decide.
+     *
+     * - **No check service** (no security plugin composed): the re-install is
+     *   not checked against the access choices it could un-make. The upgrade
+     *   proceeds, and one `warn` line says no check ran.
+     * - **Stopped** (a store the comparison reads did not answer, or the check
+     *   threw): `503 SERVICE_UNAVAILABLE`, nothing written. A comparison that
+     *   did not run is never taken for "no finding".
+     * - **Clean**: the upgrade proceeds unchanged.
+     * - **Findings**: `409 ACCESS_UPGRADE_CONFIRMATION_REQUIRED`, naming each,
+     *   unless `body.confirmAccessUpgrade` is the finding set's token. A token
+     *   is the confirmation of the findings it names: one that no longer
+     *   matches (the findings changed since it was issued) is refused again
+     *   with the fresh set, and a bare `true` confirms nothing.
+     */
+    private evaluateAccessUpgradeGate = async (
+        ctx: PluginContext,
+        manifestId: string,
+        converted: unknown,
+        previousEntry: InstalledEntry | null | undefined,
+        body: any,
+        userId: string,
+    ): Promise<{
+        refusal?: { body: Record<string, unknown>; status: 409 | 503 };
+        confirmation?: InstalledEntry['accessUpgradeConfirmation'];
+    }> => {
+        let checker: AccessUpgradeCheckService | undefined;
+        try { checker = ctx.getService<AccessUpgradeCheckService>(ACCESS_UPGRADE_CHECK_SERVICE); } catch { /* not composed */ }
+        if (typeof checker?.check !== 'function') {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] upgrade of ${manifestId}: no access upgrade check ran — this composition has no `
+                + `'${ACCESS_UPGRADE_CHECK_SERVICE}' service (the security plugin), so this re-install is not checked `
+                + 'against the access choices it could un-make. Compose the security plugin to have upgrades checked.',
+            );
+            return {};
+        }
+        let answer: AccessUpgradeCheckAnswer;
+        try {
+            answer = await checker.check({
+                packageId: manifestId,
+                manifest: converted,
+                ...(previousEntry?.manifest ? { previousManifest: this.convertPackageBodyForward(ctx, previousEntry.manifest) } : {}),
+            });
+        } catch (err: any) {
+            answer = { outcome: 'stopped', reading: 'the access upgrade check', error: String(err?.message ?? err) };
+        }
+        if (answer.outcome === 'clean') return {};
+        if (answer.outcome === 'stopped') {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] upgrade of ${manifestId} refused: the access upgrade check could not read `
+                + `${answer.reading}${answer.error ? ` (${answer.error})` : ''}`,
+            );
+            return {
+                refusal: {
+                    status: 503,
+                    body: {
+                        success: false,
+                        error: {
+                            code: 'SERVICE_UNAVAILABLE',
+                            message: `Upgrading "${manifestId}" is refused: the check that compares this system's access `
+                                + `choices with the upgrade could not read ${answer.reading}, and a comparison that did not `
+                                + 'run is never taken for "no finding". Nothing was installed or written. Retry once that '
+                                + 'store answers.',
+                            details: { manifestId, reading: answer.reading, ...(answer.stop ? { stop: answer.stop } : {}) },
+                        },
+                    },
+                },
+            };
+        }
+
+        const findingSet = answer.findingSet;
+        const token = body?.confirmAccessUpgrade;
+        if (typeof token === 'string' && token === findingSet) {
+            const confirmedAt = new Date().toISOString();
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] upgrade of ${manifestId} confirmed by ${userId} over its access findings `
+                + `(${findingSet}); the boot report raises whatever still stands`,
+            );
+            return { confirmation: { findingSet, confirmedBy: userId, confirmedAt } };
+        }
+        const findings = describeAccessFindings(answer.findings);
+        const stale = token !== undefined
+            ? ' The confirmation sent does not confirm these findings: a confirmation is the finding set\'s token from '
+                + 'this refusal, it no longer matches once the findings change, and `true` confirms nothing.'
+            : '';
+        ctx.logger?.warn?.(
+            `[MarketplaceInstallLocal] upgrade of ${manifestId} stopped: ${findings.length} access finding(s) unconfirmed `
+            + `(${findingSet})`,
+        );
+        return {
+            refusal: {
+                status: ACCESS_UPGRADE_CONFIRMATION_STATUS,
+                body: {
+                    success: false,
+                    error: {
+                        code: ACCESS_UPGRADE_CONFIRMATION_REQUIRED,
+                        message: `Upgrading "${manifestId}" would change what access choices made in this system cover — `
+                            + `${findings.length} finding(s): ${findings.map((f) => f.describe).join(' ')} `
+                            + 'Nothing was installed or written. Review each finding; to upgrade anyway, send the same '
+                            + `request with "confirmAccessUpgrade": "${findingSet}".${stale}`,
+                        details: {
+                            manifestId,
+                            findingSet,
+                            findings,
+                            confirmWith: {
+                                body: { confirmAccessUpgrade: findingSet },
+                                cli: `os package install … --confirm-access-upgrade ${findingSet}`,
+                            },
+                        },
+                    },
+                },
+            },
+        };
     };
 
     /**

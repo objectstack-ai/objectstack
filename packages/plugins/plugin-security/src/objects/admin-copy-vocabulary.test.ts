@@ -39,6 +39,15 @@ const DESIGN_RECORD_VOCABULARY: ReadonlyArray<readonly [string, RegExp]> = [
   ['a review-finding id', /finding F/],
   ['an API call', /\bemit\(\)/],
   ['a runtime internal', /\bkernel\b/i],
+  // The developer notes a Setup pass met in field help: a column reference,
+  // a function name, an internal component, a storage-history note and an
+  // inert-column notice. What the field means and what to do with it is the
+  // help; where it is stored and which code reads it is the comment.
+  ['a foreign-key note', /\bforeign key to\b/i],
+  ['a function name', /\bisGrantActive\b/],
+  ['an internal component', /\bmiddleware\b|\bbetter-auth is oblivious\b|\bReaper\b/i],
+  ['a column-history note', /\bNULL only on\b/],
+  ['an inert-column notice', /\bInert today\b/i],
 ];
 
 function vocabularyIn(text: string): string[] {
@@ -95,6 +104,11 @@ describe('security objects and permission sets: admin-facing copy carries no des
     expect(vocabularyIn('Bypass rule (finding F2).')).toEqual(['a review-finding id']);
     expect(vocabularyIn('One row per emit().')).toEqual(['an API call']);
     expect(vocabularyIn('The Kernel API is additive.')).toEqual(['a runtime internal']);
+    expect(vocabularyIn('Foreign key to sys_user.id')).toEqual(['a foreign-key note']);
+    expect(vocabularyIn('Enforced at resolution time via isGrantActive.')).toEqual(['a function name']);
+    expect(vocabularyIn('Batch cadence (P3 digest middleware).')).toEqual(['an internal component']);
+    expect(vocabularyIn('NULL only on a grant written before the column existed.')).toEqual(['a column-history note']);
+    expect(vocabularyIn('Inert today: nothing reads it.')).toEqual(['an inert-column notice']);
     expect(vocabularyIn('Which positions each user holds, one row per assignment.')).toEqual([]);
   });
 
@@ -107,6 +121,17 @@ describe('security objects and permission sets: admin-facing copy carries no des
     const strings: Array<[string, string]> = [];
     for (const def of objects) copyStrings(def, def.name, strings);
     expect(offenders(strings)).toEqual([]);
+  });
+
+  // A field whose help says nothing uses it yet stays off the Setup forms and
+  // detail pages until something does; the column and its stored values stay.
+  it.each([
+    ['sys_user_permission_set', 'last_certified_at'], ['sys_user_permission_set', 'certified_by'],
+    ['sys_user_position', 'last_certified_at'], ['sys_user_position', 'certified_by'],
+  ])('%s.%s, a field nothing reads yet, is hidden from the default UI', (object, field) => {
+    const def = (Object.values(SecurityObjects) as unknown[]).filter(isObjectSchema).find((o) => o.name === object);
+    expect(def?.fields[field], `${object}.${field} is declared`).toBeDefined();
+    expect((def!.fields[field] as { hidden?: boolean }).hidden).toBe(true);
   });
 
   it('the label and description of every permission set this package ships', () => {

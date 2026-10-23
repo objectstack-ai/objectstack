@@ -529,6 +529,9 @@ export const RUN_STATUS_LIVENESS = {
   // documents it "Terminal, never resumed"; this is that sentence made
   // machine-readable for the one reader that has to act on it.
   refused:   'terminal',
+  // A scheduled due time that passed while no kernel was ticking: recorded
+  // once, never started, never resumed.
+  missed:    'terminal',
 } as const satisfies Record<ExecutionStatus, RunLiveness>;
 
 /**
