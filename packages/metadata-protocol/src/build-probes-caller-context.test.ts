@@ -41,7 +41,7 @@ function engineVisibleToSystemOnly(): ProbeEngine & { contexts: unknown[] } {
 describe('runBuildProbes — the widget plane reads as the caller (#25484)', () => {
     it('hands queryDataset the caller context and counts the rows that caller sees', async () => {
         const engine = engineVisibleToSystemOnly();
-        const analytics = { queryDataset: vi.fn(async () => ({ rows: [] })) };
+        const analytics = { queryDataset: vi.fn(async (..._args: unknown[]) => ({ rows: [] })) };
         const report = await runBuildProbes({
             engine, getItem, analytics, context: CALLER,
             published: [{ type: 'dashboard', name: 'board' }],
@@ -56,7 +56,7 @@ describe('runBuildProbes — the widget plane reads as the caller (#25484)', () 
 
     it('with no context: a context-less query and a system count, as before', async () => {
         const engine = engineVisibleToSystemOnly();
-        const analytics = { queryDataset: vi.fn(async () => ({ rows: [] })) };
+        const analytics = { queryDataset: vi.fn(async (..._args: unknown[]) => ({ rows: [] })) };
         const report = await runBuildProbes({
             engine, getItem, analytics,
             published: [{ type: 'dashboard', name: 'board' }],
