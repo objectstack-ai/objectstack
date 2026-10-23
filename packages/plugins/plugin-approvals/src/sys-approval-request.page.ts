@@ -61,7 +61,10 @@ import type { Page } from '@objectstack/spec/ui';
  *    above, so the Details tab does not draw it as a row.
  *  - `tabs` is authored: Details (`record:details`, a bare node: see the
  *    strip above) and Timeline — `sys_approval_action` as a
- *    related list keyed on `request_id`, newest first. The `tabs` slot is
+ *    related list keyed on `request_id`, newest first. Its step column is
+ *    `step_label` (the step's label, stored on every row), not `step_name`
+ *    (the node's machine id, such as `dual_signoff`), as the strip's step
+ *    chip is `current_step_label`. The `tabs` slot is
  *    authored rather than `details` because the console builds the tab strip
  *    from `tabs` when both are present; the details body therefore lives in
  *    the first tab here, and the page authors no `details` slot.
@@ -120,7 +123,7 @@ export const SysApprovalRequestDetailPage: Page = {
                 properties: {
                   objectName: 'sys_approval_action',
                   relationshipField: 'request_id',
-                  columns: ['created_at', 'action', 'actor_id', 'step_name', 'comment', 'attachments'],
+                  columns: ['created_at', 'action', 'actor_id', 'step_label', 'comment', 'attachments'],
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 50,
                   showViewAll: true,
