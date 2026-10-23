@@ -1123,12 +1123,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       create_api_key: {
         label: "キーを作成",
         description: "スクリプトや連携用のキーを作成します。キーはあなたとして、あなたのアクセス権で、現在作業中の組織で動作します。",
+        params: {
+          expires_at: {
+            helpText: "空欄のままにすると、「設定 → 認証 → API キー」のキーの既定の有効期間(変更していなければ 90 日)が使われます。そこにあるキーの最大有効期間より後の日付は拒否されます。"
+          }
+        },
         resultDialog: {
           title: "API キーを作成しました",
           description: "今すぐキーをコピーしてください。キーは一度しか表示されず、後から取得することはできません。漏えいした場合は失効させて新しいキーを作成してください。",
           acknowledge: "キーを保存しました",
           fields: {
-            key: "API キー"
+            key: "API キー",
+            expires_at: "有効期限"
           }
         }
       },

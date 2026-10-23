@@ -1123,12 +1123,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       create_api_key: {
         label: "Crear clave",
         description: "Crea una clave para un script o una integración. La clave actúa como tú, con tu acceso, en la organización en la que trabajas ahora.",
+        params: {
+          expires_at: {
+            helpText: "Déjelo vacío para usar la duración predeterminada de la clave definida en Configuración → Autenticación → Claves de API (90 días si no se ha cambiado). Una fecha posterior a la duración máxima de la clave definida allí se rechaza."
+          }
+        },
         resultDialog: {
           title: "Clave de API creada",
           description: "Copia la clave ahora: solo se muestra una vez y no se puede recuperar. Si se filtra, revócala y crea una nueva.",
           acknowledge: "He guardado la clave",
           fields: {
-            key: "Clave de API"
+            key: "Clave de API",
+            expires_at: "Caduca el"
           }
         }
       },

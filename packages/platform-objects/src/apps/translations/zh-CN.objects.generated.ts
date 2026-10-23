@@ -1123,12 +1123,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       create_api_key: {
         label: "创建密钥",
         description: "为脚本或集成创建密钥。该密钥以你的身份、按你的访问权限，在你当前所在的组织中生效。",
+        params: {
+          expires_at: {
+            helpText: "留空则使用「设置 → 身份验证 → API 密钥」中的默认密钥有效期(未修改时为 90 天)。晚于该处密钥最长有效期的日期会被拒绝。"
+          }
+        },
         resultDialog: {
           title: "API 密钥已创建",
           description: "请立即复制密钥——它只显示这一次，之后无法找回。如果泄露，请撤销它并创建新的密钥。",
           acknowledge: "我已保存密钥",
           fields: {
-            key: "API 密钥"
+            key: "API 密钥",
+            expires_at: "过期时间"
           }
         }
       },

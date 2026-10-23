@@ -1123,12 +1123,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       create_api_key: {
         label: "Create Key",
         description: "Create a key for a script or integration. The key acts as you, with your access, in the organization you are working in now.",
+        params: {
+          expires_at: {
+            helpText: "Leave empty for the default lifetime set under Setup → Authentication → API keys (Default key lifetime, 90 days unless changed). A date later than the Maximum key lifetime there is refused."
+          }
+        },
         resultDialog: {
           title: "API key created",
           description: "Copy the key now — it is shown only once and cannot be recovered. If it leaks, revoke it and create a new one.",
           acknowledge: "I have saved the key",
           fields: {
-            key: "API Key"
+            key: "API Key",
+            expires_at: "Expires At"
           }
         }
       },
