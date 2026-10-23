@@ -78,6 +78,12 @@ describe('explain — the OWD an external meets', () => {
     expect(owd?.detail).not.toContain('owner_only');
   });
 
+  it('a controlled_by_parent detail is not floored: the report reads the master-derived model', async () => {
+    const deps = { ...makeDeps([EXTERNAL_DEFAULT], false), ql: { getSchema: () => ({ name: 'board', sharingModel: 'controlled_by_parent' }) } } as any;
+    const d = await explainAccess(deps, { object: 'board', operation: 'read', context: EXTERNAL });
+    expect(layer(d, 'owd_baseline')?.detail).not.toContain('owner_only for an external principal');
+  });
+
   it('CONTROL: a member meets the object’s own model, grant or no grant', async () => {
     const d = await explainAccess(makeDeps([MEMBER_DEFAULT], false), { object: 'board', operation: 'read', context: MEMBER });
     expect(layer(d, 'owd_baseline')?.verdict).toBe('neutral');

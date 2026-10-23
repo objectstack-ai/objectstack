@@ -1039,7 +1039,9 @@ function owdForPrincipal(
   context: any,
   grantSpeaks: boolean,
 ): ReturnType<typeof describeOwd> {
-  if (owd.effect === 'private' || !isExternalAudienceContext(context) || grantSpeaks) return owd;
+  // A controlled_by_parent detail derives from its master (ADR-0055), whose
+  // own model meets the floor — plugin-sharing does not floor the detail.
+  if (owd.effect === 'private' || owd.model === 'controlled_by_parent' || !isExternalAudienceContext(context) || grantSpeaks) return owd;
   return {
     model: `${owd.model} → owner_only for an external principal (no held grant's RLS speaks for this object)`,
     declared: owd.declared,

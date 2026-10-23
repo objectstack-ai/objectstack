@@ -7,7 +7,8 @@
  * sharing rule's materialised grant) — unless plugin-security stamped that a
  * held grant's RLS speaks for the object, in which case the object's own model
  * stands and that RLS bounds the rows (Layer 1, not this service). An internal
- * principal is unchanged on every model.
+ * principal is unchanged on every model. A `controlled_by_parent` detail is
+ * not floored: its access derives from its master, which meets the floor.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -64,7 +65,7 @@ describe('the EXTERNAL OWD floor — reads', () => {
     svc = new SharingService({ engine: makeEngine(SCHEMAS, TABLES()) as any });
   });
 
-  for (const object of ['catalog', 'board', 'line', 'sys_widget']) {
+  for (const object of ['catalog', 'board', 'sys_widget']) {
     it(`${object} (${(SCHEMAS as any)[object].sharingModel ?? 'system, unset'}): an external reads its own rows and the rows shared to it`, async () => {
       const filter: any = await svc.buildReadFilter(object, { ...EXTERNAL } as any);
       expect(filter).not.toBeNull();
@@ -91,6 +92,13 @@ describe('the EXTERNAL OWD floor — reads', () => {
   it('a stamp for another object, or for the write class, does not lift it', async () => {
     expect(await svc.buildReadFilter('board', { ...EXTERNAL, [EXTERNAL_READ_GRANT_KEY]: 'catalog' } as any)).not.toBeNull();
     expect(await svc.buildReadFilter('board', { ...EXTERNAL, [EXTERNAL_WRITE_GRANT_KEY]: 'board' } as any)).not.toBeNull();
+  });
+
+  it('a controlled_by_parent detail is not floored: its rows derive from the master, which meets the floor', async () => {
+    expect(await svc.buildReadFilter('line', { ...EXTERNAL } as any)).toBeNull();
+    expect(await svc.buildWriteFilter('line', { ...EXTERNAL } as any, 'update')).toBeNull();
+    expect(await svc.checkEdit('line', 'l1', { ...EXTERNAL } as any)).toBe('abstain');
+    expect(await svc.checkDelete('line', 'l1', { ...EXTERNAL } as any)).toBe('abstain');
   });
 
   it('private stays owner ∪ shares, as for a member', async () => {

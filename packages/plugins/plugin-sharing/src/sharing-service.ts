@@ -192,6 +192,30 @@ export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public
 }
 
 /**
+ * [Ruling of record 6355206139, letter B] The org-wide default THIS principal
+ * meets on `object`: {@link effectiveSharingModel}, floored to owner_only for
+ * an EXTERNAL principal unless a held grant's RLS speaks for the object
+ * (`owdForAudience`, `@objectstack/core`).
+ *
+ * A `controlled_by_parent` detail is never floored here: its record access
+ * derives from its master (ADR-0055) — the security plugin's master read leaf
+ * and master write gate — and the master's own model already meets this floor
+ * for the same principal. Flooring the detail too would refuse an external the
+ * lines of a master shared to it.
+ */
+function owdForPrincipal(
+  schema: any,
+  context: ExecutionContext,
+  object: string,
+  opClass: 'read' | 'write',
+): 'private' | 'read' | 'public' {
+  const model = effectiveSharingModel(schema);
+  const declared = schema?.sharingModel ?? schema?.security?.sharingModel;
+  if (declared === 'controlled_by_parent') return model;
+  return owdForAudience(model, context, object, opClass);
+}
+
+/**
  * [ADR-0138 D1/D3] The anonymous principal the guest entry assembles —
  * `principalKind: 'guest'` with no user id. A system context is never one: the
  * bypass is asked first wherever this is.
@@ -550,11 +574,11 @@ export class SharingService implements ISharingService {
     if (isGuestPrincipal(context)) return { id: '__deny_all__' };
     // [Ruling of record 6355206139, letter B] The EXTERNAL rung's OWD floor:
     // for an external principal the object's org-wide default is owner_only
-    // unless a held grant's RLS speaks for the object (`owdForAudience`,
-    // `@objectstack/core`) — so a `public_read` / `public_read_write` object
+    // unless a held grant's RLS speaks for the object ({@link owdForPrincipal})
+    // — so a `public_read` / `public_read_write` object
     // answers it the rows it owns and the rows shared to it, and the OWD
     // baseline never widens it.
-    if (owdForAudience(effectiveSharingModel(schema), context, object, 'read') !== 'private') return null;
+    if (owdForPrincipal(schema, context, object, 'read') !== 'private') return null;
     if (!hasOwnerField(schema)) return null;
     // [#7858] …and an `owner_id` the REGISTRY injected into a FEDERATED object
     // is not an owner column at all: the platform provisions no storage for one,
@@ -642,7 +666,7 @@ export class SharingService implements ISharingService {
     // [Ruling of record 6355206139] The write half of the EXTERNAL OWD floor
     // (see buildReadFilter): a `public_read_write` object is not write-open to
     // an external unless a held grant's RLS speaks for it.
-    if (owdForAudience(effectiveSharingModel(schema), context, object, 'write') === 'public') return null;
+    if (owdForPrincipal(schema, context, object, 'write') === 'public') return null;
     if (!hasOwnerField(schema)) return null;
     // [#7858] The write half of the same phantom-anchor test the read filter
     // applies — the card measured BOTH gates. Fixing only the read half would
@@ -874,7 +898,7 @@ export class SharingService implements ISharingService {
       const schema = this.engine.getSchema?.(object);
       if (!schema) return 'abstain';
       // [Ruling of record 6355206139] The EXTERNAL OWD floor (buildReadFilter).
-      const model = owdForAudience(effectiveSharingModel(schema), context, object, 'write');
+      const model = owdForPrincipal(schema, context, object, 'write');
       if (model === 'public') return 'abstain';
       if (!hasOwnerField(schema)) return 'abstain';
       if (!context.userId) return 'deny';
@@ -958,7 +982,7 @@ export class SharingService implements ISharingService {
       const schema = this.engine.getSchema?.(object);
       if (!schema) return 'abstain';
       // [Ruling of record 6355206139] The EXTERNAL OWD floor (buildReadFilter).
-      if (owdForAudience(effectiveSharingModel(schema), context, object, 'write') === 'public') return 'abstain';
+      if (owdForPrincipal(schema, context, object, 'write') === 'public') return 'abstain';
       if (!hasOwnerField(schema)) return 'abstain';
       if (!context.userId) return 'deny';
 
