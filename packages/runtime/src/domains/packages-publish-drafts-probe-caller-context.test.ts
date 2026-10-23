@@ -98,6 +98,8 @@ function makeDoor() {
             return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
         },
         findOne: async () => null,
+        // The ADR-0067 commit row the batch writes; not under test here.
+        insert: async (_object: string, row: unknown) => row,
     };
     p.getServicesRegistry = () => new Map<string, unknown>([['analytics', analytics]]);
 
