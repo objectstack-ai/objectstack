@@ -13,7 +13,26 @@ export * from './auth-plugin.js';
 // mounts ObjectQL without AuthPlugin (an app's or a plugin's test kit).
 // AuthPlugin registers the same manifest from the same builder.
 export * from './identity-objects-plugin.js';
-export * from './auth-manager.js';
+// [#25224] auth-manager.ts's published names, listed by name so that a
+// module-level helper it exports for the modules split out of it is not
+// published with them. A new export of auth-manager.ts is published only by
+// adding it here.
+export {
+  DEFAULT_AUTH_BASE_PATH,
+  readMcpServerEnabledEnv,
+  resolveOidcProviderEnabled,
+  resolveDcrEnabled,
+  resolveScimEnabled,
+  assertScimAdminCoherence,
+  isOAuthEligibleBaseUrl,
+  type InvitationPlacementServiceLike,
+  readInvitationPlacementIntent,
+  type AuthManagerOptions,
+  ipMatchesRange,
+  normalizeAuthEmailLocale,
+  authEmailLocaleFromRequest,
+  AuthManager,
+} from './auth-manager.js';
 export * from './ensure-default-organization.js';
 // [ADR-0131 D3 / D10 fate 3] The Default Organization's boot invariant, for the
 // v18 organization-ownership ceremony (`os migrate organization-ownership

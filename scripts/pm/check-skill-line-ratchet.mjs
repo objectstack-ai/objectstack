@@ -1335,6 +1335,12 @@ export const CEILINGS = new Map([
   // CROSS_FILE_MOVES destination, so no `ruledRaises` record applies. Landed
   // count, headroom 0, same convention.
   ['.claude/skills/pm-dispatch/references/filing-gate.md', 64],
+  // The project layer above the seats (maintainer's word: ONE project form, the
+  // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
+  // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
+  // a generated roster board). A NEW file, so this is an added row that funds
+  // nothing; set at the landed line count, headroom 0, same convention as above.
+  ['.claude/skills/pm-dispatch/references/project-forms.md', 54],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
@@ -2133,6 +2139,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/triage-duties.md', 0],
   ['.claude/skills/pm-dispatch/references/execution-duties.md', 0],
   ['.claude/skills/pm-dispatch/references/filing-gate.md', 0],
+  ['.claude/skills/pm-dispatch/references/project-forms.md', 0],
   ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 219],
   ['.claude/skills/pm-dispatch/references/lanes/server.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/devx.md', 0],

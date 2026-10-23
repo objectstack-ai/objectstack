@@ -328,7 +328,7 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
     expect(stackKeyForType('view')).toBe('views');
     expect(runtimeAuthoringRulesFor('view').map((r) => r.name)).toEqual([
       // #24798 — the expression rule runs ONE pass on a view write: the bulk
-      // `confirmText` template slots, warnings only in 18.x.
+      // `confirmText` template slots, errors since #25205.
       'validateStackExpressions',
       // #8793 — filter comparands, not predicates; registered ahead of the
       // family and dispatched for `view` because list-view filter rules are
