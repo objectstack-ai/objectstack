@@ -303,6 +303,16 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # at the hard cap (check:pm-label-desc-cap).
   gh label create tooling             -R "$R" -c fbca04 -d "Fix lands in tooling, not a product package — enters pm:queue only with Unblocks: or a named surface" 2>/dev/null || true
   gh label create pm:epic             -R "$R" -c 5319e7 -d "Reserved by a dedicated epic PM, parent or sub-issue; other PMs never take it; never with pm:queue" 2>/dev/null || true
+  # pm:mailbox marks a project's cross-account mailbox PR (#25417): a draft PR
+  # on `mailbox/<login>` that a resident thread subscribes to, because a PR
+  # comment wakes a subscribed session and an issue comment wakes nothing
+  # (measured on #25392: 70 s from the relay, 4 s from a second account). It is
+  # never merged and closed on account handover. Named consumers: every query
+  # that enumerates open PRs for landing appends `-label:pm:mailbox`
+  # (LEDGER_EXCLUSION, scripts/pm/mailbox-open.mjs, the one opener and closer),
+  # and a subscribed thread reads it as "owes no CI". In this five-repo loop
+  # because a lane project may keep its mailbox on any board it works.
+  gh label create pm:mailbox          -R "$R" -c c5def5 -d "A project's cross-account mailbox PR — never merged, owes no CI, excluded from every ledger" 2>/dev/null || true
 done
 
 # needs:pack-smoke — the opt-in pre-merge pack smoke (#14214, derived from the
