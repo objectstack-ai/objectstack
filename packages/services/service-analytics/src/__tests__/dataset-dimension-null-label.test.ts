@@ -23,6 +23,7 @@ import { AnalyticsService } from '../analytics-service.js';
 
 const dataset = DatasetSchema.parse({
   name: 'audit_metrics',
+  label: 'Audit Metrics',
   object: 'sys_audit_log',
   include: [],
   dimensions: [
