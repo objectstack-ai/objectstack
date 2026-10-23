@@ -362,7 +362,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "生效时间",
-        help: "此刻之前规则不生效。留空 = 立即生效。在解析时通过 isGrantActive 强制——绝不依赖后台任务。"
+        help: "此刻之前规则不生效。留空 = 立即生效。每次路由审批时都会检查，因此规则会按时生效，无需任何定时任务。"
       },
       valid_until: {
         label: "失效时间",

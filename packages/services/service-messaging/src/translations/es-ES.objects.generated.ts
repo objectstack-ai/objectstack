@@ -222,7 +222,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Digest",
-        help: "Batch cadence (P3 digest middleware).",
+        help: "Agrupa estas notificaciones en un único resumen en lugar de enviar cada una al llegar: daily lo envía a medianoche, weekly el lunes a medianoche y none envía cada una de inmediato. Las notificaciones críticas siempre se envían al momento. Se aplica en una preferencia cuyo canal es * (todos los canales).",
         options: {
           none: "none",
           daily: "daily",
@@ -231,7 +231,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Quiet Hours",
-        help: "Optional { tz, start, end } window (P3 quiet-hours middleware)."
+        help: "Una franja diaria en la que las notificaciones se retienen y se entregan al terminar, por ejemplo { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Las horas son HH:MM en esa zona horaria (UTC si se omite tz) y la franja puede pasar de medianoche. Las notificaciones críticas no se retienen. Se aplica en una preferencia cuyo canal es * (todos los canales)."
       },
       created_at: {
         label: "Created At"
