@@ -1,22 +1,28 @@
 ---
 '@objectstack/core': patch
 '@objectstack/plugin-auth': patch
+'@objectstack/plugin-security': patch
 '@objectstack/service-settings': patch
 ---
 
-refactor(core, plugin-auth, service-settings): one definition each for the `admin_full_access` anchor rule and the organization-reach rule, exported from core security
+refactor(core, plugin-auth, plugin-security, service-settings): one definition each for the `admin_full_access` anchor rule and the organization-reach rule, exported from core security
 
 Clause-②: yes (widening)
 Metadata-protocol: none
 
-Two security rules were each spelled twice. A change to one copy could leave the other behind. Each now has one definition in `@objectstack/core`'s security module, and every reader calls it. No behaviour change: every reader answers exactly as before.
+Two security rules were each spelled more than once. A change to one copy could leave the other behind. Each now has one definition in `@objectstack/core`'s security module, and every reader calls it. No behaviour change: every reader answers exactly as before.
 
 - **The anchor rule (ADR-0131 D5).** New export: `organizationAnchorsPlatformStanding(grantOrganizationId, { walled, defaultOrganizationId })`, with the type `PlatformStandingAnchorFacts`. It decides which `admin_full_access` grant anchors platform-admin standing:
   - behind a wall, no grant does;
   - under `single`, the grant owned by the Default Organization does;
   - an organization-less grant never does, and neither does any grant when no Default Organization can be named.
 
-  Two readers call it. The authorization resolver passes the memoised Default Organization. The last-administrator guard in `@objectstack/plugin-auth` passes the Default Organization as the pending write would leave it. Each reader keeps its own normalizer for a grant row's organization.
+  Three readers call it:
+  - the authorization resolver passes the memoised Default Organization;
+  - the last-administrator guard in `@objectstack/plugin-auth` passes the Default Organization as the pending write would leave it;
+  - the first-user promotion's holder scan in `@objectstack/plugin-security` passes the Default Organization it promotes into, and keeps its own system-user exclusion.
+
+  Each reader keeps its own normalizer for a grant row's organization.
 - **The organization-reach rule (ADR-0131 D8/D9).** New exports:
   - `resolveOrganizationReach({ callerOrganizationId, wallStands, deriveOrganization })`;
   - `organizationReachAdmits(reach, rowOrganizationId)`;
