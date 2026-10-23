@@ -721,15 +721,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // `confirmText`, now an ADR-0032 `template` slot over `count` and the
     // def's params. On a view write `runStackExpressionPasses` runs that pass
     // alone (by construction, as for an object write), and on an object write
-    // it also judges the object's own `listViews`. Every finding is a
-    // `warning` — an advisory here, never a refusal — because every such
-    // sentence parsed before the slot was typed; its refusal, a narrowing no
-    // conversion carries, is its own change (the amended 「甲」, 6303865025).
-    // MEASURED first over the shipped corpus at `b42c621c05`: 6 bulk defs
-    // carry a `confirmText` (examples/app-showcase `project.view.ts`), none
-    // with a brace → 0 findings, against a warning for each of an unbound
-    // hole, a single-brace token, a hole holding logic and a blank sentence
-    // in `validate-expressions.test.ts`.
+    // it also judges the object's own `listViews`. #24798 shipped every
+    // finding as a `warning`, because every such sentence parsed before the
+    // slot was typed; #25205 makes each an `error`, so a view or object write
+    // carrying one is refused (a narrowing no conversion carries, shipped in
+    // 18.x as its own BREAKING minor under the amended 「甲」, 6303865025).
+    // MEASURED first over the shipped corpus at `b42c621c05` and again at
+    // `925fd0772c`: 6 bulk defs carry a `confirmText` (examples/app-showcase
+    // `project.view.ts`), none with a brace → 0 findings, against an error for
+    // each of an unbound hole, a single-brace token, a hole holding logic and
+    // a blank sentence in `validate-expressions.bulk-confirm-text.test.ts`.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object', 'view'],
     run: (stack, ctx) =>
