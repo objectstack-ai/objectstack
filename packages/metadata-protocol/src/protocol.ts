@@ -182,6 +182,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
+import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
 import { ALL_CONVERSIONS, applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel, defaultRecordPageObject } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -7468,6 +7469,11 @@ export class ObjectStackProtocolImplementation implements
         // read here per publish and passed in so the gate stays pure.
         const tenancyPostureInForce = this.tenancyPostureInForce();
 
+        // [#25234] The keys the registered membership resolver owns — a host
+        // fact of the same kind, read here per publish and passed in so the
+        // gate stays pure.
+        const rlsMembershipResolverKeys = this.rlsMembershipResolverKeys();
+
         const verdict = evaluateRuntimeAuthoringGate({
             type: singular,
             name: evt.name,
@@ -7491,6 +7497,9 @@ export class ObjectStackProtocolImplementation implements
             // [#20312] The deployment's component manifest, read per publish;
             // with it the gate compiles an html page's source (ADR-0080 §5).
             ...(sduiManifest !== undefined ? { sduiManifest } : {}),
+            // [#25234] The resolver's keys, read per publish; with them the
+            // gate judges who owns each membership key.
+            ...(rlsMembershipResolverKeys !== undefined ? { rlsMembershipResolverKeys } : {}),
         });
         if (verdict.error) throw verdict.error;
         return verdict.advisories;
@@ -7850,6 +7859,35 @@ export class ObjectStackProtocolImplementation implements
         } catch {
             return undefined;
         }
+    }
+
+    /**
+     * [#25234] The `current_user.*` keys the registered membership resolver
+     * owns (`IRlsMembershipResolver.keys`, ADR-0105 D11), `[]` when none is
+     * registered — the input the runtime publish gate judges membership-key
+     * ownership with.
+     *
+     * Read per publish, as {@link resolveSduiManifest} reads its service: a
+     * resolver registered after this protocol is assembled is seen by the next
+     * publish. `undefined` — the CLI's reading, under which no ownership is
+     * judged — when this host has no service registry, or when the registered
+     * value carries no readable `keys` list: a resolver whose keys cannot be
+     * read owns keys the gate cannot see, so it states none rather than the
+     * wrong ones.
+     */
+    private rlsMembershipResolverKeys(): readonly string[] | undefined {
+        const registry = this.getServicesRegistry?.();
+        if (!registry) return undefined;
+        let resolver: unknown;
+        try {
+            resolver = registry.get(RLS_MEMBERSHIP_RESOLVER_SERVICE);
+        } catch {
+            return undefined;
+        }
+        if (resolver === undefined || resolver === null) return [];
+        const keys = (resolver as { keys?: unknown }).keys;
+        if (!Array.isArray(keys) || !keys.every((k) => typeof k === 'string')) return undefined;
+        return keys as readonly string[];
     }
 
     /**

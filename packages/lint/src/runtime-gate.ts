@@ -74,6 +74,7 @@ import {
   type AuthoringRuleContext,
 } from './authoring-rules.js';
 import { isSystemObject } from './validate-security-posture.js';
+import { membershipKeyOwnersOf } from './validate-membership-key-declarations.js';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 
 type AnyRec = Record<string, unknown>;
@@ -1086,6 +1087,16 @@ export function runRuntimeAuthoringRules(args: {
    * the body as sent. ⛔ Positions only: no credential value reaches this gate.
    */
   restoredCredentialPaths?: readonly string[];
+  /**
+   * [#25234] The keys the host's registered membership resolver owns
+   * (`IRlsMembershipResolver.keys`), `[]` when the host has none registered.
+   * Present, the gate states the deployment's membership-key owners to the
+   * rules (`AuthoringRuleContext.membershipKeyOwners`): these keys, plus every
+   * key the WHOLE `context.objects` declares, read before the package-closure
+   * narrowing. Omitted, the rules judge as on the CLI, where any key may have
+   * an owner they cannot see.
+   */
+  rlsMembershipResolverKeys?: readonly string[];
 }): RuntimeGateResult {
   const rules = runtimeAuthoringRulesFor(args.type);
   const empty: RuntimeGateResult = { errors: [], advisories: [], rulesRun: [] };
@@ -1137,6 +1148,12 @@ export function runRuntimeAuthoringRules(args: {
             args.restoredCredentialPaths,
           ),
         }
+      : {}),
+    // [#25234] Read off the host's WHOLE collection, never the narrowed
+    // snapshot: a key declared in a package outside this write's closure is
+    // still owned. The same value in every pass, so it moves no baseline.
+    ...(args.rlsMembershipResolverKeys !== undefined
+      ? { membershipKeyOwners: membershipKeyOwnersOf(args.context?.objects, args.rlsMembershipResolverKeys) }
       : {}),
   };
   const before = new Set(runRules(rules, snapshots.baseline, ctx).map(fingerprint));
