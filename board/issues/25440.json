@@ -1,0 +1,33 @@
+{
+  "number": 25440,
+  "kind": "pull_request",
+  "title": "feat(pm): fleet-roster.mjs — regenerate the pinned fleet roster issue from seat posts, labels and pulls (#25416)",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "size/l",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T13:35:22Z",
+  "updated_at": "2026-10-23T14:16:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25440",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DVLrRBBWZz68W7Ky5Am58J5)_\n\nFixes #25416\n\nDispatched by the `domain:devx` seat 1 (#6023). The Claim on #25416 (comment 6365984076) names `claude/project-thread-fl4rtl`.\n\n## What changed\n\n- **`scripts/pm/fleet-roster.mjs`** (new). It reads GitHub and only writes when told to.\n  - `node scripts/pm/fleet-roster.mjs [--repos o/a,o/b,…] [--json]` prints the 「车队总表」 table, or the rows as JSON. The default repos are objectstack, objectui and hotcrm.\n  - There is one row per open `pm:seat` post, ordered by (repo, lane, seat, post). The columns are repo · lane · seat · account · in flight · awaiting ruling · awaiting landing · wall note · last activity · mailbox PR.\n  - A footer gives the generation time and every read that was made.\n  - `--write <n> [--board o/r] [--dry-run]` reads issue n first. It refuses (exit 4) unless the issue is an open `tracking` issue whose body is empty or already starts with the script's marker. Then it sends **one** relay stroke, an `issue_patch` of the body, through `fleet-write/dispatch.mjs`. It posts no comment, and it never creates or pins anything.\n  - `--fixture <snapshot.json>` builds the same table offline.\n- **`scripts/pm/fleet-roster.fixture.json`** (new): a three-repo snapshot that the self-test reads.\n\n## How each column is derived\n\nThe full spelling is in the docblock. In short:\n\n- **Lane, seat and repo** come from the status-board title `[PM seat] <name> — <status>`. The script reads `· seat N`, `repo:x#N` and `@ <repo>`.\n- **Account** is the login after 🟢. If that word is not a login (for example `🟢 held`), the post's assignee is used. `🟢 Routine` is shown as Routine.\n- **Project** comes from 「由 X 账户的项目负责」 in the title, then in the body. A quoted instance and the `XX` placeholder are skipped. Live, #19287's body quotes the maintainer's order containing 「由XX账户的项目负责」, which is why the skip exists.\n- **In flight** is the lane's open `pm:dispatched` cards that are assigned to the seat's account. If one account holds two seats of the same lane, the cards cannot say which seat they belong to. They are then shown once, on the lowest seat, and the other seat reads `= seat N`. Live, `os-sales` holds objectui `domain:ui` seats 1 and 4.\n- **Awaiting ruling** is the lane's open `needs-user-decision` issues. Each one goes on the seat its assignee holds, otherwise on the lowest seated seat of the lane.\n- **Awaiting landing** is an open pull on a `claude/` head that closes one of the seat's in-flight cards and carries a verdict: a `## 席位核对` record with ACCEPT, or a `## Contract review` with `VERDICT: PASS`. **`pm:mailbox` pulls are excluded**.\n- **Wall note** is a line in the post body that starts with `Wall:` or `撞墙:`. A seated seat with no wall note and no activity in the last 6 h is flagged ⚠️ 疑似撞墙.\n- **Mailbox PR** is the account's open `pm:mailbox` pull, found by the head `mailbox/<login>` or by a `Mailbox-of:` line in the body.\n\nAll reads go to repo-scoped REST. A cloud container's proxy refuses `/search/issues` (\"sessions are bound to their configured repositories\"), which I measured in this session. So the script lists issues by label and pulls by state, and filters the head prefix on the client side.\n\n## The mailbox constant\n\n#25433 (#25417) is still an open draft. `MAILBOX_LABEL` and `LEDGER_EXCLUSION` are therefore spelled locally under the same names. The comment above them says to import them from `./mailbox-open.mjs` and delete the local copies once that PR lands, as the seat directed. The fixture covers a `pm:mailbox` pull that closes a card and carries an ACCEPT record, and that pull does not count as awaiting landing.\n\n## Verification\n\n- `node scripts/pm/fleet-roster.mjs --self-test` → `✓ 68 cases in 7 batteries pass`. It pins battery names, has a floor, and uses the verdict handshake (AGENTS.md § Writing a `--self-test`).\n  - I ran two ablations, and both turned it red. In the first, lane matching ignored the `domain:*` label. In the second, the mailbox exclusion was removed.\n- `--json` on the live three repos at 2026-10-23T13:33Z gave 33 seat rows, 19 of them seated. The three seats named on the card have the right accounts:\n  - #19287 is `domain:skills` seat 2, held by `os-elon-musk`.\n  - #6023 is `domain:devx` seat 1, held by `os-elon-musk`, project `os-elon-musk`.\n  - hotcrm#1353 is `repo:hotcrm` seat 1, held by `os-elon-musk`, project `os-elon-musk`.\n- `node scripts/check-self-test-wired.mjs` → green.\n\n## Not done here, on purpose\n\n- **The self-test is not wired into `lint.yml`.** That would touch `.github/workflows/**`, which is Tier H and outside the dispatched file surface. This is the same call #25433 made.\n- **The roster issue was not created or written.** The card gives that to the seat, through the relay, and the maintainer pins it. After that, the seat runs `node scripts/pm/fleet-roster.mjs --write <n>`.\n- `git grep` finds no hand-maintained copy of the table under `.claude/` or `docs/`.\n\nNo changeset: this is scripts only and publishes nothing (`skip-changeset`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012ZoZ9L9GYfXnen4SEsptu2)_"
+}

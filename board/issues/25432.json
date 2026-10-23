@@ -1,0 +1,33 @@
+{
+  "number": 25432,
+  "kind": "pull_request",
+  "title": "docs(adr-0126): list the six sys_metadata_activation.metadata_type values written on main",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T13:19:07Z",
+  "updated_at": "2026-10-23T13:19:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25432",
+  "body": "Fixes #25252\n\n**Tier H (`docs/adr/**`): the maintainer words and merges this by hand.** The seat proposes one wording; any other wording the maintainer prefers replaces it.\n\n## What changes\n\n`docs/adr/0126-packaged-metadata-customization-model.md` line 205, the `metadata_type` row of the `sys_metadata_activation` column table:\n\n- before: `The artifact's registry type ('flow', 'permission', …)`\n- after: `The artifact's registry type ('flow', 'action', 'position', 'permission', 'sharing_rule', 'webhook'; the runtime field description is the live list)`\n\nThe six values are the ones PR #25250 wrote into the runtime field description (`packages/platform-objects/src/system/sys-metadata-activation.object.ts`, `metadata_type.description`). The card offered two shapes (list the six, or say the list is open and point at the field); this does both, so a seventh type later leaves the ADR pointing at the right place.\n\nDocs only, no behaviour change: `skip-changeset`.\n\n## Checks run locally\n\n- `pnpm check:adr-anchors` exit 0\n- `pnpm check:adr-links` exit 0\n- `pnpm check:adr-symbol-anchors` exit 0\n\nClaim: #25252 comment 6365782070.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01REMuzhz6MWRjg8uohedMnM\n"
+}

@@ -24,11 +24,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T02:28:29Z",
-  "updated_at": "2026-10-23T07:25:43Z",
+  "updated_at": "2026-10-23T12:21:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25356",
   "body": "## Finding\n\nRaised by the #25148 card thread (`session_01854Y7atqKDuWMySuBxa1SJ`) as an out-of-scope finding (class b, reaches release text). It answers that card's second \"done when\". The `domain:devx` seat files it on the thread's behalf. The prose fix is PR #25354, which is docs-only, as #25148 requires.\n\n**What happened.** `8fbbd5082` (#24584, written on 2026-10-19) set the v18 entry in `content/docs/releases/index.mdx` to \"current series: 18.0.0, released 2026-10-19\" before the cut. At the 18.0.0 version commit the field already named the newest GA. `rewriteStatusField` returns null for a field with the same version, so the script left the field as it was, date included. npm published 18.0.0 on 2026-10-20. The same class has recurred before (#15332).\n\n**Why the script behaves this way.** The script refuses on purpose to re-date a field that already has the same version. That is correct for prerelease cuts: its header records the 17.7.0 re-dating it prevents. The gap is narrower than that.\n\n## Proposed guard (the dev's reading, for triage)\n\n- **When to stamp:** only on the run that *is* the version commit of the newest GA. That run can be detected without a clock or the network: the newest GA in the committed `packages/spec/CHANGELOG.md` at `HEAD` differs from the newest GA after `changeset version`.\n- **What to do on that run:** stamp the date even when the version already matches, because on that run the date it holds is true. Every other run keeps today's behaviour.\n- **Rejected alternative:** compare the date with npm `time`. That needs the network at version time, so it cannot be the guard on the `version-pr` lane.\n- **Pins to add:** a pre-written same-version field gets re-dated on the GA version run, and is left alone on a prerelease run and on a non-version run.\n\n## Notes\n\n- This is a code change to `scripts/sync-release-index-currency.mjs` and its tests. It must not ride in a `content/docs/releases/**` PR.\n- If it lands before 18.1.0 is cut, the 18.1.0 entry gets a true date even if someone writes the field by hand ahead of the cut."

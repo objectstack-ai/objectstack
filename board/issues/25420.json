@@ -1,0 +1,37 @@
+{
+  "number": 25420,
+  "kind": "pull_request",
+  "title": "fix(plugin-approvals): a new delegation starts with the Delegator set to you, and its help says why",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T12:46:29Z",
+  "updated_at": "2026-10-23T13:40:36Z",
+  "closed_at": "2026-10-23T13:40:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T13:40:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25420",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuACdPWFJTLDcTrByFCHLzqb)_\n\nFixes #25342\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nSetup → Delegations (OOO): the Delegator of `sys_approval_delegation` only ever offers the signed-in user, because `bindDelegationWriteGuard` admits nobody else. The field still opened at \"Select…\", and a search for a colleague answered \"No options found\" with no reason.\n\n- `delegator_id` now declares `defaultValue: 'current_user'`. A new delegation starts with its one admissible Delegator filled in.\n- The field's help now says why: \"The user going out of office. You can delegate only your own approvals, so this is always you: it starts as you and offers no one else. Their individually-routed approver slots are rerouted while active.\"\n- The `lookupFilters`, the write guard and the approval-service filter are unchanged. `organization_id` is not touched; queued #25280 edits that field's help.\n\n## Why this spelling\n\nI checked how the platform defaults a person field to the current user, on `origin/main` `830a63a680`:\n\n- `packages/spec/src/data/field.zod.ts` `defaultValue` says `current_user` is legal \"on `user` or `lookup` with `reference: 'sys_user'` only\". The spec's token table is `defaultValueTokenIssue` in `packages/spec/src/data/default-value-shape.ts`, and the constant is `DEFAULT_VALUE_TOKEN_CURRENT_USER` in `default-value-tokens.ts`.\n- The engine resolves it at insert time to the acting user's id: `packages/objectql/src/engine.ts`, the `isCurrentUserDefaultToken` branch of the field-default pass. With no authenticated user it leaves the field unset.\n- The one in-repo declaration is `examples/app-showcase/src/data/objects/field-zoo.object.ts` `f_owner` (`Field.user({ defaultValue: 'current_user' })`). No other platform object defaults a lookup to the current user, so this is the first such platform field. It uses the spelling the spec, the engine and the docs (`content/docs/data-modeling/field-types.mdx`) all name.\n\n`packages/spec` is not edited.\n\n## Translations\n\n- `en` was regenerated with `node scripts/check-i18n-bundles.mjs --write`.\n- `es-ES` and `ja-JP` were byte copies of the old English help. They now carry translations, and the next extract dropped their two `source-hashes` entries.\n- `zh-CN` already had a translated help, so I updated it to the new meaning too. It has no hash entry, so nothing would have flagged it as stale.\n\n## Tests\n\n`packages/plugins/plugin-approvals/src/sys-approval-delegation-delegator-picker.test.ts` keeps every existing pin. It gains one for the default: the declaration and the registered body carry `DEFAULT_VALUE_TOKEN_CURRENT_USER`, and a full `FieldSchema.safeParse` of the field is green, so the spec admits the token on this lookup.\n\n- `pnpm --filter @objectstack/plugin-approvals test`: Test Files 94 passed (94), Tests 1215 passed (1215).\n- `pnpm --filter @objectstack/plugin-approvals typecheck`: exit 0. `check:test-typecheck` reports OK.\n- Ablation: deleting `defaultValue: 'current_user',` (`scripts/ablation-replace.mjs`, anchor x1 -> x0) turned the new pin red (`expected undefined to be 'current_user'`, 1 failed | 9 passed). The file was restored to its HEAD blob and `git diff HEAD` was empty. The test imports the object from `src/`, so no build was needed. My first attempt was a refused anchor miss, so nothing ran on it.\n- Derived gate families: run locally on this head. The PR's check-runs carry the full set.\n\n## Acceptance notes\n\n- **The console's form prefill is NOT MEASURED.** objectui answers 403 from this container, so I could not read how its create form treats a `current_user` default. The server side is pinned. If the console does not prefill from this token, that gap belongs to objectui and would hit the showcase `f_owner` field too. It is not a reason to change the spelling here.\n- Server-side writes behave as before. The engine default and the write guard's omitted-delegator stamp both name the acting user. A system write with no user still leaves the field unset, so `required` refuses it, and the existing pin holds that.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016g7nYP9wdNx1GDa5XDr7Uy\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 25453,
+  "kind": "pull_request",
+  "title": "fix(plugin-email): the Send test email refusals name what the admin does on the page, not a request body",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T14:21:44Z",
+  "updated_at": "2026-10-23T14:22:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25453",
+  "body": "Fixes #25424\n\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nSetup → Email → **Send test email** sends to the signed-in admin's own address. When it cannot, three refusals in `resolveMailTestRecipient` (`packages/plugins/plugin-email/src/email-plugin.ts`) told the admin to pass \"to\" in the request body. The mail settings page has no recipient field, so the admin could not follow that advice from the page.\n\nEach refusal now keeps its opening and its \"nothing was sent\", and names what the admin does on the page. The wording follows the SMS twin in #25421 (`resolveSmsTestRecipient`):\n\n| Case | Opening (unchanged) | New remedy |\n|---|---|---|\n| no signed-in user (in-process call) | `No recipient — nothing was sent.` | Sign in as an admin whose account has an email address, then press Send test email again. |\n| account read fails | `Could not read your account's email address …` | press Send test email again once your account can be read. |\n| account has no email, or no row | `Your account has no email address …` | Press Send test email while signed in as an admin whose account has an email address. |\n\nA `to` in the request body still wins, as before. The override is now documented only in the function's TSDoc, for API callers.\n\nNo route, response shape, status or code changes. Only the message text changes.\n\n## Landing\n\n- The landing is the file the claim names. The refusal strings and their TSDoc are the only lines touched in `email-plugin.ts`. The live-status registration (open PR #25448) and the `provider === 'log'` branch are untouched.\n- Repo-wide grep for the old strings (`pass \"to\"`, `in the request body`, `to name a recipient`, `Add an email address to your account`, `carries no signed-in`): the only hits were the three refusals themselves. No doc, pin or other package quoted them. `content/docs` has no copy of them. `packages/*/CHANGELOG.md` is release-owned and was not searched for edits.\n\n## Tests\n\n- New `describe('served mail/test — the recipient refusals are admin copy')` in `mail-test-recipient.pin.test.ts`. It drives the served `POST /api/settings/mail/test` door (real `SettingsService`, real routes, real handler). Each case asserts the following:\n  - the `400` + `SETTINGS_ACTION_FAILED` envelope;\n  - the message opening;\n  - the remedy;\n  - `nothing was sent` and `Send test email` are present;\n  - there is no `/api/`, no `request body` and no `pass \"to\"`;\n  - `sendMail` was never called.\n- The cases are: no email address, missing account row, failed account read, and the in-process call with no user.\n- `pnpm --filter @objectstack/plugin-email test`: Test Files 36 passed (36), Tests 675 passed (675). `pnpm --filter @objectstack/plugin-email typecheck` (tsc + check:test-typecheck): exit 0. Lock VERDICT command-exit 0 for both.\n- Ablation (one-shot, `scripts/ablation-replace.mjs`). The failed-read remedy was put back to the old `Pass \"to\" in the request body to name a recipient.` text, and the mutation landed (anchor 1 -> 0). Result: `a failed account read` went red with Tests 1 failed | 9 passed (10). The file was restored (blob == HEAD, `git diff HEAD` empty).\n\n## Acceptance notes\n\n- None.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016g7nYP9wdNx1GDa5XDr7Uy\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 25421,
+  "kind": "pull_request",
+  "title": "fix(service-sms, runtime): the Send test SMS refusals and the flow clone notice name admin controls, not REST recipes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T12:52:59Z",
+  "updated_at": "2026-10-23T14:08:38Z",
+  "closed_at": "2026-10-23T14:08:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T14:08:35Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25421",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuACdPWFJTLDcTrByFCHLzqb)_\n\nFixes #25345\n\nClause-②: no\nMetadata-protocol: none\n\nTwo pieces of admin copy that the console shows told the admin to call the REST API. Each one now names the control the admin uses instead. The REST detail stays in developer copy.\n\n## What changed\n\n**Send test SMS** (`packages/services/service-sms/src/sms-plugin.ts`, `resolveSmsTestRecipient`). Four refusals said `pass \"to\" in the request body`: no signed-in user, no data engine, a failed account read, and an account with no phone number. The settings page has no recipient field, so the admin could not follow that advice from the page. Each refusal still says that nothing was sent. It now says what the admin can do there: press Send test SMS while signed in as an admin whose account has a phone number, or press it again once the account can be read. A `to` in the request still wins. That override is documented in the function's TSDoc, for API callers, and not in the refusal.\n\n**Flow clone notice** (`packages/runtime/src/flow-clone.ts`, `FLOW_CLONE_NOTICE`). The old notice said to send the clone's complete definition with `status: 'obsolete'` to the automation PUT route, and it named the toggle route. The new notice keeps its first two facts unchanged: references are not re-pointed, and `draft` is not an off-switch. The remedy now names the console's two switches:\n\n> If that is not what you want, switch one of them off. A packaged original is switched off on the Packaged automation page, with its Switch \"…\" off action; that switch covers packaged flows only and does not reach the clone. To switch the clone itself off, open it in Studio, set its Enabled switch to Disabled, and publish.\n\nThe REST recipe stays in the client SDK's `automation.toggle` TSDoc (`packages/client/src/index.ts`), which this PR does not change.\n\n## Landing, and one premise corrected\n\n- **Landing:** the claim's file surface. Both producers are where the card named them. No other package is touched.\n- **The card's SMS control does not exist.** The card says to name \"the SMS settings' test recipient field (#24767)\". On `origin/main` `830a63a680`, `smsSettingsManifest` (`packages/services/service-settings/src/manifests/sms.manifest.ts`) declares no recipient field. The fix for #24767 landed as #24848, and that PR did not add a field: it made the test go to the signed-in admin's own `sys_user.phone_number`. The handler's own TSDoc says \"The served form has no recipient input\". So the refusals name the control that does exist, which is the Send test SMS button and the admin's own account number. Adding a recipient field is a `service-settings` manifest change, outside this claim.\n- **The clone controls were read from objectui `main` `2c4e5f5afd`.** `packages/app-shell/src/views/setup/PackagedAutomationPage.tsx` renders the server notice verbatim, and beside it a `Switch \"{{label}}\" off` button. That button turns off the packaged SOURCE through the packaged-flow toggle, not the clone. Studio's flow switch (`engine.studio.auto.enabled` / `disabled`, \"Disable this automation (publish to apply)\") writes the clone's `status: 'obsolete'`. The notice names each control for the flow it really switches. objectui's own `CLONE_NOTICE` in `PackagedAutomationPage.test.tsx` is fixture text, and the page renders whatever string arrives. Nothing there parses the notice.\n\n## Pins\n\n- `packages/runtime/src/domains/automation-flow-clone.test.ts`: the existing notice pin asserted `'PUT /api/v1/automation/'`. It now asserts the new remedy (`Switch \"…\" off`, `does not reach the clone`, the Studio sentence). A new case asserts that the served notice equals `FLOW_CLONE_NOTICE` and contains no `/api/`, no \"request body\" and no `PUT`/`POST`.\n- `packages/services/service-sms/src/sms-test-recipient.pin.test.ts`: a new block drives the served `POST /api/settings/sms/test` route for no phone number, a failed read and no data engine. A new `noEngine` harness option covers that last case. It also drives the in-process call with no user. Each refusal is checked for its opening sentence and its remedy, for \"nothing was sent\" and \"Send test SMS\", and for the absence of `/api/`, \"request body\" and `pass \"to\"`.\n- The grep for pins and docs that quote the old strings found the runtime pin above. It found nothing else: `packages/qa/dogfood/test/automation-flow-clone-door.dogfood.test.ts` compares against the imported constant, and no doc quotes either string.\n\n## Verification (head `f57343bda5`)\n\n- Build: `pnpm --workspace-concurrency=2 --filter '@objectstack/service-sms^...' --filter '@objectstack/runtime^...' build`, under the verify lock: `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/service-sms test`: Test Files 7 passed (7), Tests 107 passed (107). `pnpm --filter @objectstack/service-sms typecheck`: exit 0.\n- `pnpm --filter @objectstack/runtime typecheck`: exit 0, test layer OK. `pnpm --filter @objectstack/runtime test`: Test Files 438 passed (438), Tests 7023 passed, 19 skipped (7042), `VERDICT command-exit 0`.\n- Derived gate families (`dispatch-gates.mjs --commands`): 69 derived. 68 ran with exit 0. `check:dual-build-cjs-loads` is NOT MEASURED: it exited 3, PREREQUISITE NOT MET, because it needs a full-repo `dist`. It is left to CI. `--ran` reconciliation: 69 accounted, 68 run, 1 NOT-MEASURED.\n- No ablation: the diff changes message text and its pins, not a tested behaviour.\n\n## Acceptance notes\n\n- **Same pattern, out of scope:** `plugin-email`'s `mail/test` refusals (`packages/plugins/plugin-email/src/email-plugin.ts`, around lines 196, 209 and 216) still say `pass \"to\" in the request body` to the admin on Setup → Email. They are not changed here, and they are listed in the report for the seat.\n- The invalid-number refusal `Provide a valid \"to\" phone number (E.164 recommended).` is unchanged. It is reachable only when the caller names a `to`, which the served form never sends.\n- Breaking for anyone comparing either string verbatim: the route, the status, the code and the response shape are all unchanged.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016g7nYP9wdNx1GDa5XDr7Uy\n"
+}

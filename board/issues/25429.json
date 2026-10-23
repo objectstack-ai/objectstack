@@ -1,0 +1,30 @@
+{
+  "number": 25429,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-data's security rules name the risk of renaming or removing a shipped access item in a later version",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T13:17:39Z",
+  "updated_at": "2026-10-23T13:18:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25429",
+  "body": "Clause-②: no\nMetadata-protocol: none\n\n## What this does\n\nIt adds a risk note to `skills/objectstack-data/rules/security.md`, the access-control rules of the published data-modelling skill: **renaming or removing a shipped access item in a later package version can quietly undo an administrator's choice on upgrade.**\n\nAdministrators act on a package's permission sets, positions, sharing rules and capabilities by name. They switch items off, clone sets, and reference the package's objects and fields from their own sets. So in a later version:\n- a **rename** makes the old switch-off stop matching, and the renamed item arrives switched on;\n- a **removal** leaves a customer's clone or own set naming something that no longer exists;\n- an **added field deny** on a shipped set is not carried into a customer's clone.\n\nThe note asks authors to keep shipped names stable and, when such a change is genuinely needed, to say in the release notes what an administrator should re-check. It is guidance only: no gate and no behaviour change. This is the maintainer's ruling of 2026-10-23: 「这种应该写到元数据应用的开发规范中」「提示风险就行」.\n\n## Why here\n\nThis came out of objectstack-ai/cloud#3173 (ADR-0126 wall 3 on cloud's install paths). The only package on the cloud marketplace is first-party (HotCRM), so the maintainer chose a development-convention note over a runtime check or a publish gate.\n\n## The token budget\n\nThe file sat at its ratchet ceiling, so the new text is paid for by deleting restatements in the same file. No rule changes meaning. Each deletion:\n\n1. **The RBAC stack-key bullet.** The \"`permissions`, not `permissionSets`\" fact is the code sample's own comment just above it.\n2. **\"takes the set's `name`\".** This repeats the sentence above it.\n3. **The assignment payload.** It repeats the columns listed two sentences earlier.\n4. **The `view_pii` sample's comment.** It repeats the sentence directly above it.\n5. **The `viewAllRecords` corollary.** It follows from \"it never crosses the Layer 0 wall\" in the same bullet.\n6. **The callout tail.** It restates the two Layer 0 bullets and the recipe's AND-gate comment; the ADR-0095 D1 citation stays in the first bullet.\n\nThe changes were written at the tier that `dispatch-gates.mjs` mandates for `skills/**`.\n\n## Verification\n\nRun on head `3d46b7b8`:\n- `check-skills-token-ratchet`: `security.md` is 2541 / 2543 tokens; `--self-test` passes.\n- `check:doc-authoring`, `check:agent-test-spelling`, `check:role-word`, `check:skill-compatibility`, `check:skill-frame-sync`, `check:skill-identifier-liveness`, `check:pm-skill-id-lint`, `check:corpus-claim-drift` and `check-doc-route-spelling --advisory`: each exits 0.\n\n**Noticed, not touched:** the assignment paragraph still says an `organization_id` of `null` means every organization context. Since #24583 step 7, an organization-less grant confers nothing, so that clause looks stale. Fixing it changes a rule, so it is left for its own change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

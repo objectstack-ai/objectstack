@@ -1,0 +1,33 @@
+{
+  "number": 25411,
+  "kind": "issue",
+  "title": "test-budget annotations off the 10 s grid (cli audit-mail-bodies archive test: 85) make the weekly shard-timings refresh refuse its readings; only the weekly generator checks the grid",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T12:22:13Z",
+  "updated_at": "2026-10-23T13:58:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25411",
+  "body": "## Finding\n\nRaised by the #25390 card thread (`session_01V7SdBWbSZCQFPJD4ofKPPc`) as an out-of-scope finding. The `domain:devx` seat files it on that thread's behalf. Filed bare: grading and routing are triage's job. ⛔ Not a claim.\n\n**What happened.** The 2026-10-23 refresh run of `shard-timings-refresh.yml` (relay dispatch 39951977591, which opened PR #25409) refused its regression diff on `packages/cli/src/commands/migrate/audit-mail-bodies.archive.integration.test.ts:2`, which reads `test-budget: 85`. That value is off the 10 s grid. The 2026-10-19 refresh was refused the same way, by a 15 s cli file.\n\n**Why it matters.** Only the weekly generator checks the grid. So every off-grid budget that lands silently disables the next refresh's readings, and nothing at PR time says so. The dataset in #25409 is not affected.\n\n## Two producers, for triage to route\n\n1. **The file itself (S, likely `domain:cli`):** change 85 to 90, or to whatever value on the grid the measured time supports.\n2. **The missing PR-time check (tooling):** a lint or check that refuses an off-grid `test-budget:` annotation when it is written, using the same grid rule the generator applies.\n\nDedupe words: test-budget grid, shard-timings-refresh regression diff, off-grid budget."
+}

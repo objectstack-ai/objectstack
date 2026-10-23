@@ -1,0 +1,36 @@
+{
+  "number": 25426,
+  "kind": "pull_request",
+  "title": "test(runtime): judge each share-link password pair once in the messages-audience file",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T13:05:48Z",
+  "updated_at": "2026-10-23T14:04:03Z",
+  "closed_at": "2026-10-23T14:04:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T14:04:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25426",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDWJsBGQpadCH8JR2xZQ5re)_\n\nPart of #23181 (slice 7). The card stays open for later slices.\nClause-②: no\n\n## What changes\n\nOne test file: `packages/runtime/src/domains/share-links-messages-audience.test.ts`. Its `beforeAll` wraps the `ShareLinkService` instance's own password verifier in a memo keyed by the `(password, hash)` pair. This is the same memo `share-links-refusal-order.test.ts` beside it got in PR #24704. The first request that presents a pair is judged by the production verifier (scrypt at the account parameters). Every later request with that pair gets the same verdict back.\n\nWhat stays the same:\n- every request is still made, on both mounts and both routes, so every answer is still a real request's answer;\n- every row, case and assertion: 85 tests before, 85 after;\n- the service is still built with both password members at their defaults, as production builds it;\n- if `verifyPassword` stops being the member name, `beforeAll` throws instead of quietly going back to paying for every call.\n\n## Measured (local, shared box, `origin/main` `830a63a680` vs this head `6e979387cc`)\n\nEach run is `pnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2 src/domains/share-links-messages-audience.test.ts` under `os-verify-lock`. The box is shared, so the ratios are the reading to trust, not the absolute numbers.\n\n| | run 1 | run 2 | run 3 |\n|:--|--:|--:|--:|\n| per-file duration before (json reporter, the unit CI's module line reports) | 3695 ms | 3816 ms | 3580 ms |\n| per-file duration after | 891 ms | 928 ms | 864 ms |\n| vitest `Duration` before (wall incl. ~15 s import) | 19.30 s | 18.93 s | 18.89 s |\n| vitest `Duration` after | 16.80 s | 17.98 s | 17.79 s |\n\n- scrypt derivations, counted with a measurement-only preload that wraps `node:crypto.scrypt` (not part of this PR): **32 before** (30 verifier calls + 2 password mints), **6 after** (4 distinct pairs + 2 mints), the same in all three after-runs. Before, the derivations added up to 3817 ms, which is about the whole per-file duration.\n- Per-file ratio after/before: about 0.24. Applied to the card's CI reading (13.51 s, run `39298888283`), that projects to about 3.3 s, under the 10 s line. The next refresh's list is the real check.\n- The rest of the wall is module import (~15 s), and it is the same before and after. The per-file reading the card grades does not count import time.\n\n## Tests and gates (at `6e979387cc`)\n\n- `pnpm --filter @objectstack/runtime test`: Test Files 438 passed (438), Tests 7022 passed / 19 skipped; lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/runtime typecheck`: lock VERDICT command-exit 0, test layer included (`check:test-typecheck: OK`).\n- `pnpm lint`: exit 0.\n- `dispatch-gates --commands` derived 54 commands. 53 exited 0. `pnpm check:dual-build-cjs-loads` exited 3, PREREQUISITE NOT MET (it needs every package's `dist/`, and this worktree built only the runtime closure), so it is NOT MEASURED here. CI's Lint & Repo Gates runs it. `--ran`: 54 accounted, 53 run, 1 NOT-MEASURED, 0 UNRUN.\n\n## Changeset\n\n`skip-changeset`: the only change is a `*.test.ts` file. `@objectstack/runtime` ships `files: [dist, README.md, CHANGELOG.md]`, and Build Core checks that no compiled test file ends up in any dist.\n\n## Acceptance notes\n\n- The dispatch suggested importing PR #24704's memo instead of copying it. That memo is written inline in the sibling file's `beforeAll` and is not exported, so it can only be imported after being moved into a shared testkit. Doing that touches the sibling file and adds a new file, which is outside this slice's one-file surface. So the same 13 lines are copied here, and the comment names the sibling. Moving both copies into a `share-link-verifier-memo.testkit.ts` would be a small follow-up for whoever owns this lane.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01CxBKycaiUpA1yGx1XyoGqX\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CxBKycaiUpA1yGx1XyoGqX)_\n"
+}

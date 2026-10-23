@@ -2,8 +2,8 @@
   "number": 25365,
   "kind": "issue",
   "title": "chore(examples): let one example app boot under a walled posture — declare @objectstack/organizations (loaded only when OS_TENANCY_POSTURE is group or isolated), so a walled os serve can be measured without a temporary edit",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:cli",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T03:37:06Z",
-  "updated_at": "2026-10-23T03:37:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T13:15:34Z",
+  "closed_at": "2026-10-23T13:14:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25365",
   "body": "Filing gate **③**: an observation reported by three epic dev sessions (#25271, #24446 U1, #24446 U2). The maintainer asked why the example apps need the package; the answer is in this card.\n- **Who acts:** the shared queue.\n- **Dedupe:** none.\n\n## What is on `main`\n- `@objectstack/organizations` is the multi-organization runtime: the `organization_id` auto-stamp, per-organization seed replay, and the `org-scoping` service SecurityPlugin probes.\n  - `os serve` loads it only when the posture is walled (`packages/cli/src/commands/serve.ts`, `multiTenant = tenancyPosture !== 'single'`).\n  - Under a walled posture without it, the boot refuses (unless `OS_ALLOW_DEGRADED_TENANCY`).\n  - Under `single`, the default, it is never loaded.\n- It is app-declared on purpose (ADR-0132 D3, one name and two packages): the framework publishes the Apache-2.0 build, a commercial deployment resolves the same name to its own build, and the host manifest decides which.\n- No app under `examples/` declares it. So every walled R4 measurement (a production `os serve` under `isolated` and `group`) has had to add it temporarily and restore it after.\n- U2's R4 also had to set, temporarily:\n  - a membership policy (`OS_AUTH_MEMBERSHIP_POLICY`);\n  - an `OS_SECRET_KEY`;\n  - for a self-registering tenant, an audience posture with its self-registration set.\n\n## Wanted\n- Pick one, after measuring:\n  - (a) one example (the showcase, say) declares the open build, so `single` is unaffected because it is never loaded there; or\n  - (b) a dedicated walled fixture under `packages/qa/dogfood` that declares it.\n- Document the walled `os serve` recipe next to it: the env a walled production boot needs.\n\n## Acceptance\n- A walled production `os serve` of the chosen app or fixture boots under `isolated` and `group` with no temporary edit, pinned or scripted.\n- `single` boots of every example are unchanged."

@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:services",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T03:44:19Z",
-  "updated_at": "2026-10-23T03:44:19Z",
+  "updated_at": "2026-10-23T13:46:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25366",
   "body": "Filing gate **③**: a finding of the contract review of PR #25355 (#24446 U2; record 6356845701, escalation E2). It is pre-existing and outside that PR's surface.\n- **Who acts:** the shared queue.\n- **Dedupe:** none.\n\nPart of #24446. That card's U1 GO (6353222762) named the pre-write collision check as U2's. This card carries it instead, because the defect is in the install door's registration, not in the access comparison.\n\n## What is on `main` (as read at PR #25355's head `ac8ce968`)\n- **The rule:** a package may not ship a security catalog name (position, permission set, capability) that an environment-authored item already holds. Registration refuses the second holder (`objectql` `registry.ts` near `:3081` and `:5960`), and a boot that finds such a pair refuses (`refuseEnvironmentHeldSecurityCatalogNames`, `objectql/src/plugin.ts` near `:2517`; ruling A on #22307).\n- **The inline-manifest branch** of `POST /api/v1/marketplace/install-local` meets that refusal before its first write: 422.\n- **The cloud-fetched branch registers leniently.** It writes the ledger entry, and the install answers success. **The next cold boot then refuses**, so a deployment that took that upgrade cannot restart until an operator removes one of the two holders.\n- **How it is reached:** a customer clones a vendor permission set or position under a name, and a later version of that vendor's package ships the same name.\n- **Not caught by U2:** U2's access check projects the incoming manifest over the registry. The projection's catalog `list` drops a same-name entry of another holder, so the clone is replaced in the projection instead of being reported.\n\n## Wanted\n- **Measure first.** Confirm both branches on the current `main`. Name every install door that can register such a name:\n  - the marketplace door, both branches;\n  - `POST /api/v1/packages` with `overwrite` (`runtime/src/domains/packages.ts`);\n  - any other door.\n- **Fix:** every door refuses before its first write when the incoming package ships a catalog name an environment-authored item holds. The refusal is an ADR-0112 code naming each colliding name and its holder, like the inline branch. Prefer one shared pre-write check over a copy per door.\n- This is a refusal, not a confirmable finding. A confirmed install would still leave a boot that refuses.\n\n## Acceptance\n- On each door and each catalog type, an incoming name held by an environment-authored item is refused before any write, with nothing registered and no ledger entry. It is pinned with a CONTROL: no collision installs unchanged.\n- A deployment that has taken such an upgrade on today's `main` gets an operator remedy, stated in the changeset.\n- R1–R4 hold, with R4 measured under `isolated` and `group`."

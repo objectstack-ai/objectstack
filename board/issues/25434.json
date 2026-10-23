@@ -1,0 +1,33 @@
+{
+  "number": 25434,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): degraded rate-limit warning names the cache registration that boots",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T13:22:53Z",
+  "updated_at": "2026-10-23T13:57:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25434",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuACdPWFJTLDcTrByFCHLzqb)_\n\nFixes #25329\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nWith no `cache` service registered, `createLazyCounterStore` (plugin-auth `rate-limit-storage.ts`) falls back to a per-process store and warns once. That warning told a multi-node deployment to use \"Redis via @objectstack/service-cache\". `CacheServicePlugin.init` throws when `adapter: 'redis'` is set (\"Redis cache adapter is not yet implemented\"), so an operator who followed the warning got a boot failure.\n\nThe warning now names the path that boots today, and promises no bundled adapter, so it cannot go stale when one ships:\n\n> a multi-node deployment needs a shared cache — an ICacheService backed by a store every node reaches, registered as the `cache` service (ctx.registerService('cache', impl)) — or each node enforces the limit independently (ADR-0069 D2)\n\nThe ADR-0069 D2 reference and the per-caller `degradedImpact` suffix are unchanged. This is fix option (a) of the card. Option (b), implementing the Redis adapter in `service-cache`, is not taken here.\n\nEvery caller of `createLazyCounterStore` prints this text: better-auth's rate limit, the per-number OTP send budget, the SMS quotas, and the runtime's inbound and endpoint limiters.\n\n## Files\n\n- `packages/plugins/plugin-auth/src/rate-limit-storage.ts`: the warning text.\n- `packages/plugins/plugin-auth/src/rate-limit-storage.test.ts`: new pin. The warning names the `cache` registration, does not name `@objectstack/service-cache`, does not say Redis, and keeps `(ADR-0069 D2)`.\n- `packages/runtime/src/security/inbound-rate-limit.test.ts`: this pin quoted the old remedy (`/Redis via @objectstack\\/service-cache/`). It is flipped to the new one plus a negative on `@objectstack/service-cache`.\n- `packages/plugins/plugin-auth/src/otp-send-guard.ts`: a doc comment that repeated the same Redis-via-service-cache claim.\n- `.changeset/25329-rate-limit-cache-warning-remedy.md`: `@objectstack/plugin-auth` patch.\n\nOut-of-bounds files were not touched: `auth-manager.ts` and `packages/spec`. PR #25328 (docs for the same thread) is merged and edits only `content/docs/api/wire-format.mdx`, `content/docs/deployment/production-readiness.mdx` and `docs/HARDENING.md`, so it does not overlap.\n\n## Verification (head ff4e36d9cc)\n\n- Built the closure `@objectstack/runtime^...` plus `@objectstack/plugin-auth` under the verify lock: VERDICT command-exit 0. `dist/rate-limit-storage.js` carries the new text, and no file in plugin-auth `dist/` carries the old text.\n- `pnpm --filter @objectstack/plugin-auth test`: Test Files 189 passed (189), Tests 3580 passed, 10 skipped.\n- `pnpm --filter @objectstack/plugin-auth typecheck`: exit 0, check:test-typecheck OK.\n- `pnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2 src/security/inbound-rate-limit.test.ts`: 25/25 passed. Runtime reads plugin-auth through its `exports`, so this ran against the rebuilt `dist`.\n- `pnpm --filter @objectstack/runtime typecheck`: exit 0.\n- Ablation, one time, through `scripts/ablation-replace.mjs`: the src remedy was put back to \"(Redis via @objectstack/service-cache)\". The anchor went 1 to 0 and the blob changed. `src/rate-limit-storage.test.ts` went red, 1 failed / 19 passed, on the new `toContain` assertion. The file was then restored, blob equal to HEAD and `git diff HEAD` empty.\n\n## Acceptance notes\n\nThese are not filed here, because they are read-only text drift, not a reproduced defect at a public door:\n- `README.md:415` lists `@objectstack/service-cache` as \"Cache — in-memory and Redis\".\n- `content/docs/kernel/services-checklist.mdx:522` and `:543` advertise a Redis adapter in the same package.\n- `content/docs/kernel/services.mdx:130` and `content/docs/kernel/cluster.mdx:720` already say that the Redis adapter is a skeleton.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016g7nYP9wdNx1GDa5XDr7Uy\n"
+}

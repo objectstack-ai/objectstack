@@ -13,7 +13,7 @@
   "labels": [
     "area:workflow",
     "bug",
-    "domain:services",
+    "domain:server",
     "pm:on-hold",
     "priority:p3"
   ],
@@ -21,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T05:31:57Z",
-  "updated_at": "2026-09-27T06:26:27Z",
+  "updated_at": "2026-10-23T14:09:52Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

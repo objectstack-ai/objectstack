@@ -1,0 +1,37 @@
+{
+  "number": 25402,
+  "kind": "pull_request",
+  "title": "feat(analytics): carry a dataset dimension's nullLabel on its column descriptor, and name System Overview's null user bucket \"System\"",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T09:39:54Z",
+  "updated_at": "2026-10-23T11:03:24Z",
+  "closed_at": "2026-10-23T11:03:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T11:03:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25402",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoJ8yb43iqvYRAnady5tqTZG)_\n\nPart of #25330\n\nClause-②: no\nMetadata-protocol: none\n\nThe label half of #25330, landing 1 of 3 (seat-approved order). Ruled A (6358843349, maintainer 「同意」); the key itself landed in #25397 (`DatasetDimensionSchema.nullLabel`). This PR carries the key to the renderer and declares it on System Overview. The objectui consumer follows with a `.objectstack-sha` bump to this PR's merge commit, then a last objectstack PR flips the `nullLabel` liveness row to live and closes the card.\n\n## Channel: the response's column descriptor, and why\n\nMeasured, not assumed. objectui's `DatasetWidget` stores the dataset answer's `fields[]` and reads every column's display metadata from it (`headerLabel`, `buildChartSeries`). It never fetches the dataset document; its only metadata read is the base object's (`/api/v1/meta/object/NAME`, for option labels). So the null bucket's name rides the descriptor the renderer already reads, as `fields[].nullLabel`. The document channel would have added a new metadata read per widget beside it.\n\nThat descriptor is typed by `@objectstack/spec` (objectui's `DatasetResultField` is `AnalyticsResult['fields'][number]`), so the carry needs one response member. It is response-only and nothing an author writes changes, so `Clause-②: no` and `Metadata-protocol: none` hold (seat ruling on the claim, declared on #18549).\n\n## What changes\n\n- **`@objectstack/spec`:** `AnalyticsResult.fields[]` (`contracts/analytics-service.ts`) and its mirror `AnalyticsResultResponseSchema` (`api/analytics.zod.ts`) gain `nullLabel?: string`. The compile-time drift guard in `analytics.test.ts` keeps the two equal; a new case pins that the parse preserves the member (the schema strips undeclared keys).\n- **`@objectstack/service-analytics`:** `enrichResultColumns`, the column-description pass the live query and the draft-data preview share, sets `fields[].nullLabel` on a dimension column whose dataset dimension declares `nullLabel`. It resolves through `resolveI18nLabel` at the request locale, exactly like `label`, so the wire carries a string and never a locale map. It is written whether or not the header was already set, and never onto a measure column whose name matches a dimension's field. Absent ⇒ no key, so an answer over a dimension without `nullLabel` is byte-identical to before.\n- **`@objectstack/platform-objects`:** `sys_audit_log_metrics`' `user_id` dimension declares `nullLabel: { en: 'System', 'zh-CN': '系统', 'ja-JP': 'システム', 'es-ES': 'Sistema' }`, every locale the platform bundles translate the board into. An inline map is the ruled route: the translation bundles have no slot for a dimension's null label. `check:i18n` is in sync with no regeneration (the extractor does not read `nullLabel`).\n\n## Pins\n\n- `service-analytics/src/__tests__/dataset-dimension-null-label.test.ts`, on both strategies: zh-CN reads `系统`, en reads `System`, no locale reads `System`, a plain string passes as authored; a dimension without `nullLabel` and every measure column (one of them over the same `user_id` field) carry no key.\n- `platform-objects/src/apps/dashboards/system-overview-null-label.test.ts`: \"Events by User\" groups `sys_audit_log_metrics` by `user_id`, the dimension carries the map, the map names every locale `SetupAppTranslations` carries for the board, and it survives a strict `DatasetSchema` parse.\n- `spec/src/api/analytics.test.ts`: the response parse preserves `fields[].nullLabel`.\n\n**Ablation** (`scripts/ablation-replace.mjs`, under the verify lock): the write `if (nullLabel !== undefined) f.nullLabel = nullLabel;` replaced by `void nullLabel;` (anchor 1 → 0, blob changed) turns the service pin **6 failed / 2 passed**; the 2 green are the no-key controls, green by design. Restored: blob equals HEAD and `git diff HEAD` is empty. The source is imported directly by the test, so no build leg applies.\n\n## Verification\n\nAll at head `0c232759ab` (base `7c68b1082`; `origin/main` has moved one commit since, touching none of these paths).\n\n- `pnpm --filter @objectstack/{service-analytics,platform-objects,spec} run typecheck`: exit 0 (spec's runs `check:scripts-typecheck` and `check:test-typecheck` too).\n- `pnpm --filter @objectstack/service-analytics test`: Test Files 185 passed (185), Tests 4513 passed, 262 skipped.\n- `pnpm --filter @objectstack/platform-objects test`: Test Files 93 passed (93), Tests 1341 passed.\n- `pnpm --filter @objectstack/spec test`: Test Files 711 passed (711), Tests 21634 passed, 1 todo. Lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/spec check:generated`: all 14 artifacts up to date (no regeneration was needed).\n- `node scripts/pm/dispatch-gates.mjs --commands`: 93 derived families, 92 run with exit 0, reconciled with `--ran` (0 unrun). 1 NOT MEASURED: `pnpm check:dual-build-cjs-loads` exited 3, PREREQUISITE NOT MET, because it reads every package's `dist/` and this worktree built only the affected closure; CI runs it in Lint & Repo Gates.\n- `pnpm check:i18n`: exit 0, all 10 packages' bundles in sync.\n\n## Acceptance notes\n\n- **Pivot charts.** objectui's `buildChartSeries` takes one null label per chart, used for both arms of a two-dimension pivot. The objectui consumer therefore applies a declared name on a pivot only when both dimensions declare the same one. Recorded in that PR as well.\n- **Other renderers.** `DatasetReportRenderer` and `ObjectChart` in objectui still read only `chart.nullCategory`; this card's consumer is the dashboard chart. They can read the same descriptor member later. carrier: none, noted only.\n- **The flat table** renders a null dimension value as `—`, not as the chart's bucket label, and is out of scope.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016qAuAwFXMw94v5vFqTVcw2)_\n"
+}

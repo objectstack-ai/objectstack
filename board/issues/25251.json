@@ -12,7 +12,7 @@
   },
   "labels": [
     "bug",
-    "domain:services",
+    "domain:server",
     "pm:queue",
     "priority:p1",
     "security"
@@ -21,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T15:50:15Z",
-  "updated_at": "2026-10-23T01:12:14Z",
+  "updated_at": "2026-10-23T14:06:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

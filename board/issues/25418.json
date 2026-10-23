@@ -1,0 +1,37 @@
+{
+  "number": 25418,
+  "kind": "pull_request",
+  "title": "chore(examples): declare @objectstack/organizations in the showcase so a walled os serve boots without a temporary edit",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T12:37:36Z",
+  "updated_at": "2026-10-23T13:14:02Z",
+  "closed_at": "2026-10-23T13:14:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T13:14:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25418",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDWJsBGQpadCH8JR2xZQ5re)_\n\nFixes #25365\n\nClause-②: no\n\n## What changed\n\n- `examples/app-showcase/package.json` declares `@objectstack/organizations` (`workspace:*`, the open Apache-2.0 build, ADR-0132 D3: the host manifest decides which build of the name a deployment gets). The card's option (a).\n- `pnpm-lock.yaml`: the one importer link that declaration adds (+3 lines, no other churn).\n- `examples/app-showcase/README.md`: a \"Booting it walled\" section naming the env a production walled `os serve` needs.\n\nThe showcase is `private: true`, so nothing publishes: `skip-changeset`.\n\n## Mechanism, measured on `origin/main` 830a63a680\n\n- `packages/cli/src/commands/serve.ts`: `multiTenant = tenancyPosture !== 'single'`; only then is `@objectstack/organizations` imported, through `importFromHost` (resolved from the served app's own `node_modules`). Import failure under a walled posture exits 1 unless `OS_ALLOW_DEGRADED_TENANCY`. Under `single` the import is never reached. All three premises hold.\n\n## Boot readings (head 0cc7b77e12, `NODE_ENV=production`, fresh database each run, `OS_CLOUD_URL=off`)\n\nCommon env: `OS_AUTH_SECRET`, `OS_SECRET_KEY`, `OS_DATABASE_URL=file:./.objectstack/data/app.db`; walled runs add `OS_PLATFORM_OWNER_EMAIL` and `OS_AUTH_MEMBERSHIP_POLICY=invite-only`.\n\n| run | result | decisive line |\n|---|---|---|\n| `single`, dependency declared | ready, exit 0 on SIGTERM | `Tenancy: single`, `Plugins: 50 loaded`, no `Organizations`; `/auth/config` `multiOrgEnabled:false` |\n| `single`, control: package link removed from the showcase's `node_modules` | ready, exit 0 | `Plugins: 50 loaded`; plugin list byte-identical (same md5) to the row above |\n| `isolated`, README recipe verbatim (`pnpm exec objectstack serve`) | ready | `Tenancy: isolated`, `Plugins: 51 loaded`, `Organizations` in the list; `/auth/config` `degradedTenancy:false` |\n| `group`, README recipe verbatim | ready | `Tenancy: group`, `Plugins: 51 loaded`, `Organizations`; `degradedTenancy:false` |\n| `isolated`, control: package link removed | exit 1 | `FATAL: tenancy posture 'isolated' was requested but @objectstack/organizations could not be loaded` |\n| `isolated`, no membership policy | exit 1 | `FATAL: tenancy posture 'isolated' is walled, but this deployment never declared a membership policy` (the organizations plugin's own gate: the package loaded) |\n| `isolated`, no `OS_SECRET_KEY` | exit 1 | `[LocalCryptoProvider] Refusing to start in production without a stable encryption key` |\n| `isolated`, no `OS_PLATFORM_OWNER_EMAIL` | exit 1 | `tenancy posture 'isolated' requires OS_PLATFORM_OWNER_EMAIL to be set` |\n\nThe last three rows are why each variable is in the README recipe. Every other example is untouched, so its `single` boot is unchanged by construction.\n\n## Gates (local, head 0cc7b77e12)\n\n- `node scripts/pm/dispatch-gates.mjs --commands`: 47 commands; 46 exit 0, `pnpm check:dual-build-cjs-loads` exit 3 (PREREQUISITE NOT MET: needs a full build) = NOT MEASURED locally, CI runs it. `--ran` reconciliation: 47 derived, 46 run, 1 NOT-MEASURED, 0 UNRUN.\n- `pnpm --filter @objectstack/example-showcase run typecheck && … run test`: VERDICT command-exit 0, Test Files 37/37, Tests 443/443.\n- `pnpm lint`: VERDICT command-exit 0.\n\n## Acceptance notes\n\n- A walled boot of the showcase logs a non-fatal `WARN [security] audience-binding suggestion sync failed` (no organization with slug `default` and more than one organization, so the deployment-level acceptance must come from the security plugin's `acceptedDefaultPermissionSets`). Observation only; the boot is green and this card does not change it.\n- The card's third temporary setting (an audience posture with self-registration, for a self-registering tenant) is not needed to boot and is not in the recipe; this PR measured boot only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CxBKycaiUpA1yGx1XyoGqX)_\n"
+}
