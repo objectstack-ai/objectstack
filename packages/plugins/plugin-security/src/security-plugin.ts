@@ -47,6 +47,7 @@ import {
   type DeclaredSharingRuleReader,
 } from './access-upgrade-report.js';
 import { ACCESS_UPGRADE_CHECK_SERVICE, createAccessUpgradeCheck } from './access-upgrade-check.js';
+import { reportUpgradeImpact, SETTINGS_SERVICE, type SettingsManifestReader } from './upgrade-impact-report.js';
 import {
   explainAccessForAsker,
   buildContextForUser,
@@ -4756,6 +4757,30 @@ export class SecurityPlugin implements Plugin {
           ctx.logger.warn(
             '[security] the access upgrade report did not run — a switch-off, clone or sharing rule an upgrade left ' +
               'behind goes unreported for this boot',
+            { error: (e as Error)?.message },
+          );
+        }
+        // [#24447] The upgrade impact report: the same comparison for the
+        // non-access classes — flow, action and webhook switches, stored
+        // overlays and object rows, object extensions, navigation
+        // contributions and stored settings — raised the same way. It writes
+        // and refuses nothing. See `upgrade-impact-report.ts`.
+        try {
+          const optional = <T,>(name: string): T | undefined => {
+            try { return ctx.getService<T>(name) ?? undefined; } catch { return undefined; }
+          };
+          const settings = optional<Partial<SettingsManifestReader>>(SETTINGS_SERVICE);
+          const messaging = optional<Partial<AccessUpgradeNotifier>>('messaging');
+          await reportUpgradeImpact(ql as any, {
+            settings: typeof settings?.listManifests === 'function' ? (settings as SettingsManifestReader) : undefined,
+            messaging: typeof messaging?.emit === 'function' ? (messaging as AccessUpgradeNotifier) : undefined,
+            walled: postureEnforcesWall(this.tenancyPosture),
+            logger: ctx.logger,
+          });
+        } catch (e) {
+          ctx.logger.warn(
+            '[security] the upgrade impact report did not run — a switch, stored row, extension or setting an ' +
+              'upgrade left behind goes unreported for this boot',
             { error: (e as Error)?.message },
           );
         }
