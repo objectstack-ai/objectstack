@@ -34,6 +34,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { OBJECTSTACK_MCP_SERVER_NAME, renderSkillMarkdown } from '@objectstack/mcp';
 import { printMcpConnectHint } from './dev.js';
 import { AUTH_BASE_URL_ENV_NAMES, resolveAuthBaseUrl } from './serve.js';
 import { printServerReady, type ServerReadyOptions } from '../utils/format.js';
@@ -90,12 +91,12 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
    * child's banner (its own call site's expression, verbatim) and then the
    * parent's connect hint, both told the port the server ACTUALLY bound.
    */
-  const boot = (boundPort: number, name = 'hotcrm', boundProtocol: 'http' | 'https' = 'http') => {
+  const boot = (boundPort: number, boundProtocol: 'http' | 'https' = 'http') => {
     printServerReady({
       ...bannerOpts,
       externalBaseOrigin: resolveAuthBaseUrl(boundPort, boundProtocol).baseOrigin,
     });
-    printMcpConnectHint({ boundPort, name, boundProtocol });
+    printMcpConnectHint({ boundPort, boundProtocol });
     return lines.join('\n');
   };
 
@@ -111,9 +112,9 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
    * derived protocol leaked into the default, and it cannot pass by both legs
    * being broken in the same direction.
    */
-  const bootWithoutProtocolArg = (boundPort: number, name = 'hotcrm') => {
+  const bootWithoutProtocolArg = (boundPort: number) => {
     printServerReady({ ...bannerOpts, externalBaseOrigin: resolveAuthBaseUrl(boundPort).baseOrigin });
-    printMcpConnectHint({ boundPort, name });
+    printMcpConnectHint({ boundPort });
     return lines.join('\n');
   };
 
@@ -129,7 +130,7 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
       expect(output).toContain('Endpoint  https://localhost:4443/api/v1/mcp');
       expect(output).toContain('Skill     https://localhost:4443/api/v1/mcp/skill');
       expect(output).toContain(
-        'Connect   claude mcp add --transport http hotcrm https://localhost:4443/api/v1/mcp',
+        'Connect   claude mcp add --transport http objectstack https://localhost:4443/api/v1/mcp',
       );
 
       // The reported symptom, stated as the absence it is: the bound socket
@@ -162,13 +163,13 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
   // ── Acceptance 2 — the negative control ─────────────────────────────────
   describe('with OS_AUTH_URL unset, the hint still prints the LISTEN origin', () => {
     it('names the bound port on an ordinary local boot', () => {
-      const output = boot(3000, 'my-app');
+      const output = boot(3000);
 
       expect(output).toContain('MCP:       http://localhost:3000/api/v1/mcp');
       expect(output).toContain('Endpoint  http://localhost:3000/api/v1/mcp');
       expect(output).toContain('Skill     http://localhost:3000/api/v1/mcp/skill');
       expect(output).toContain(
-        'Connect   claude mcp add --transport http my-app http://localhost:3000/api/v1/mcp',
+        'Connect   claude mcp add --transport http objectstack http://localhost:3000/api/v1/mcp',
       );
       expect(mcpOrigins(output)).toEqual(['http://localhost:3000']);
     });
@@ -177,11 +178,11 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
       // The case the surrounding code exists to handle. A fix that reached for
       // a canonical origin instead of the resolver would print :3000 here, or
       // nothing at all; both are worse than the behaviour being repaired.
-      const output = boot(3001, 'my-app');
+      const output = boot(3001);
 
       expect(output).toContain('Endpoint  http://localhost:3001/api/v1/mcp');
       expect(output).toContain(
-        'Connect   claude mcp add --transport http my-app http://localhost:3001/api/v1/mcp',
+        'Connect   claude mcp add --transport http objectstack http://localhost:3001/api/v1/mcp',
       );
       expect(output).not.toContain('3000');
       expect(mcpOrigins(output)).toEqual(['http://localhost:3001']);
@@ -231,13 +232,13 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
       // Every chain variable is deleted by `beforeEach`, so the only thing
       // that can produce `https` here is the listener protocol reaching the
       // resolver's built-in tail.
-      const output = boot(3000, 'hotcrm', 'https');
+      const output = boot(3000, 'https');
 
       expect(output).toContain('MCP:       https://localhost:3000/api/v1/mcp');
       expect(output).toContain('Endpoint  https://localhost:3000/api/v1/mcp');
       expect(output).toContain('Skill     https://localhost:3000/api/v1/mcp/skill');
       expect(output).toContain(
-        'Connect   claude mcp add --transport http hotcrm https://localhost:3000/api/v1/mcp',
+        'Connect   claude mcp add --transport http objectstack https://localhost:3000/api/v1/mcp',
       );
       // The plain-http address must not appear anywhere in a TLS boot's output:
       // it is the one address a client on this port cannot reach.
@@ -246,14 +247,14 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
     });
 
     it("follows dev's auto-shifted port under TLS too", () => {
-      expect(mcpOrigins(boot(3001, 'hotcrm', 'https'))).toEqual(['https://localhost:3001']);
+      expect(mcpOrigins(boot(3001, 'https'))).toEqual(['https://localhost:3001']);
     });
 
     it('acceptance 3: `OS_AUTH_URL` still WINS over the derived https origin', () => {
       // The override direction that matters in practice: a developer
       // terminating TLS locally but reached through a tunnel on another host.
       process.env.OS_AUTH_URL = 'https://tunnel.example.com';
-      expect(mcpOrigins(boot(3000, 'hotcrm', 'https'))).toEqual(['https://tunnel.example.com']);
+      expect(mcpOrigins(boot(3000, 'https'))).toEqual(['https://tunnel.example.com']);
     });
 
     it('acceptance 3, the awkward direction: an http OS_AUTH_URL wins as well', () => {
@@ -262,17 +263,17 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
       // plain http, or in a test harness, that is a deliberate statement about
       // a different hop, and a default has no standing to overrule it.
       process.env.OS_AUTH_URL = 'http://proxied.example.com';
-      expect(mcpOrigins(boot(3000, 'hotcrm', 'https'))).toEqual(['http://proxied.example.com']);
+      expect(mcpOrigins(boot(3000, 'https'))).toEqual(['http://proxied.example.com']);
     });
 
     it('the rest of the configured chain keeps its precedence under TLS', () => {
       process.env.OS_BASE_URL = 'https://base.example.com';
-      expect(mcpOrigins(boot(3000, 'hotcrm', 'https'))).toEqual(['https://base.example.com']);
+      expect(mcpOrigins(boot(3000, 'https'))).toEqual(['https://base.example.com']);
     });
 
     it('an unusable value stays unusable — TLS does not manufacture an origin', () => {
       process.env.OS_AUTH_URL = '';
-      const output = boot(3000, 'hotcrm', 'https');
+      const output = boot(3000, 'https');
       expect(mcpOrigins(output)).toEqual([]);
       expect(output).not.toContain('claude mcp add');
       expect(output).not.toContain('https://localhost:3000');
@@ -283,10 +284,10 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
   describe('without the flags the output is byte-for-byte what it was', () => {
     it('the no-flag boot equals the boot that never passes a protocol at all', () => {
       // Leg A: the call shape this file used before `--cert`/`--key` existed.
-      const before = bootWithoutProtocolArg(3000, 'my-app');
+      const before = bootWithoutProtocolArg(3000);
       lines.length = 0;
       // Leg B: the same boot through today's call shape, no flags given.
-      const after = boot(3000, 'my-app', 'http');
+      const after = boot(3000, 'http');
 
       expect(after).toBe(before);
       // And the byte the two legs are about: still plain http, on the bound port.
@@ -296,17 +297,17 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
     it('the two legs also agree on an auto-shifted port and an ephemeral one', () => {
       for (const port of [3001, 45064]) {
         lines.length = 0;
-        const before = bootWithoutProtocolArg(port, 'my-app');
+        const before = bootWithoutProtocolArg(port);
         lines.length = 0;
-        expect(boot(port, 'my-app', 'http')).toBe(before);
+        expect(boot(port, 'http')).toBe(before);
       }
     });
 
     it('and the legs DISCRIMINATE — the https leg differs from both', () => {
       // Without this, two legs that both silently produced nothing would pass.
-      const plain = bootWithoutProtocolArg(3000, 'my-app');
+      const plain = bootWithoutProtocolArg(3000);
       lines.length = 0;
-      const tls = boot(3000, 'my-app', 'https');
+      const tls = boot(3000, 'https');
 
       expect(tls).not.toBe(plain);
       expect(mcpOrigins(plain)).toEqual(['http://localhost:3000']);
@@ -353,6 +354,29 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
       for (const name of AUTH_BASE_URL_ENV_NAMES) {
         expect(childEnvLiteral).not.toContain(name);
       }
+    });
+  });
+
+  // ── One server name for one endpoint ────────────────────────────────────
+  describe('the Connect row names the server the way the served SKILL.md does', () => {
+    /** The `<name>` of every `claude mcp add --transport http <name> <url>` in a text. */
+    const connectNames = (text: string): string[] =>
+      [...text.matchAll(/claude mcp add --transport http (\S+) /g)].map((m) => m[1]);
+
+    it('both producers print the one exported name', () => {
+      const banner = connectNames(boot(3000));
+      const skill = connectNames(renderSkillMarkdown({ mcpUrl: 'http://localhost:3000/api/v1/mcp' }));
+
+      expect(banner).toEqual([OBJECTSTACK_MCP_SERVER_NAME]);
+      expect(skill).toEqual([OBJECTSTACK_MCP_SERVER_NAME]);
+    });
+
+    it('dev reads that constant and derives no name of its own', () => {
+      // The name used to be the folder `os dev` ran in, so a `hotcrm/` checkout
+      // registered the server as `hotcrm` while the skill said `objectstack`.
+      expect(DEV_SOURCE).toContain("import { OBJECTSTACK_MCP_SERVER_NAME } from '@objectstack/mcp';");
+      expect(DEV_SOURCE).toContain('claude mcp add --transport http ${OBJECTSTACK_MCP_SERVER_NAME} ');
+      expect(DEV_SOURCE).not.toMatch(/basename\(process\.cwd\(\)\)/);
     });
   });
 });
