@@ -44,7 +44,7 @@
  * send is checked:
  *
  *  - the kernel `cache` service when one is registered — shared across nodes
- *    iff the cache is (Redis via `@objectstack/service-cache`);
+ *    iff the registered `cache` service is backed by a store every node reaches;
  *  - a host-supplied better-auth `secondaryStorage`, when the host wired one
  *    deliberately (adapted by {@link counterStoreFromKv});
  *  - otherwise a bounded per-process store — still enforced, per node, and

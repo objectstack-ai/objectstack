@@ -63,6 +63,7 @@ export const datasetForm = defineForm({
             { field: 'field', label: 'Field' },
             { field: 'type', label: 'Type' },
             { field: 'dateGranularity', label: 'Date Granularity' },
+            { field: 'nullLabel', label: 'Null Label' },
           ],
         },
       ],

@@ -19,6 +19,9 @@ import {
 } from './crypto-adapter.js';
 import {
   type SettingsActionHandler,
+  type SettingsLiveStatus,
+  type SettingsLiveStatusProvider,
+  SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,
   type SettingsEngine,
@@ -875,6 +878,8 @@ export class SettingsService {
    * holds. See {@link organizationReachOf}.
    */
   private organizationSource?: SettingsOrganizationSource;
+  /** Live-status providers by namespace — see {@link registerLiveStatus}. */
+  private readonly liveStatusProviders = new Map<string, SettingsLiveStatusProvider>();
   /** Change subscribers, optionally scoped to a namespace. */
   private readonly subscribers = new Set<{
     ns?: string;
@@ -1569,6 +1574,59 @@ export class SettingsService {
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
     reg.actions.set(actionId, handler);
+  }
+
+  /**
+   * Register (or replace) the provider that states a namespace's LIVE status
+   * on its page. See {@link SettingsLiveStatus}. The last registration wins,
+   * the same override rule as {@link registerAction}.
+   */
+  registerLiveStatus(namespace: string, provider: SettingsLiveStatusProvider): void {
+    if (!this.registry.has(namespace)) throw new UnknownNamespaceError(namespace);
+    this.liveStatusProviders.set(namespace, provider);
+  }
+
+  /**
+   * The namespace's live-status statement as an `info_banner` specifier, ready
+   * to head the page, or `undefined` when no provider is registered or the
+   * provider has nothing to state.
+   *
+   * Asked on every page read and never cached, so the statement follows a
+   * runtime swap (a transport rebuilt from this very namespace). A provider
+   * that throws is not passed over in silence: the page then says the live
+   * status could not be read, because a missing statement reads as "nothing
+   * to worry about".
+   */
+  async liveStatusOf(
+    namespace: string,
+    ctx: SettingsContext = {},
+  ): Promise<SettingsManifest['specifiers'][number] | undefined> {
+    const provider = this.liveStatusProviders.get(namespace);
+    if (!provider) return undefined;
+    let status: SettingsLiveStatus | undefined;
+    try {
+      status = await provider({ namespace, ctx });
+    } catch (err: any) {
+      this.logger?.warn?.(
+        `SettingsService: the live status of settings namespace '${namespace}' could not be read — `
+        + `the page states that instead. Cause: ${err?.message ?? err}`,
+      );
+      status = {
+        label: 'Live status unavailable',
+        bannerText: 'The server could not read what is live for these settings right now. '
+          + 'The values below are what is stored, which is not necessarily what is in use.',
+        bannerSeverity: 'error',
+      };
+    }
+    if (!status) return undefined;
+    return {
+      type: 'info_banner',
+      id: SETTINGS_LIVE_STATUS_BANNER_ID,
+      label: status.label,
+      required: false,
+      bannerText: status.bannerText,
+      bannerSeverity: status.bannerSeverity,
+    } as SettingsManifest['specifiers'][number];
   }
 
   // ---------------------------------------------------------------------

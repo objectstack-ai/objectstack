@@ -24,13 +24,21 @@
  *  4. the guard is not widened: a create or an update naming anyone else is
  *     still refused, `FORBIDDEN` / 403, and nothing is stored;
  *  5. `required` stays: a write with no acting user and no delegator is
- *     refused.
+ *     refused;
+ *  6. the field defaults to the acting user with the spec's runtime token
+ *     `current_user`, which the spec admits on a `sys_user` lookup, so a new
+ *     delegation opens with its one admissible Delegator already filled.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import type { EngineCountOptions, EngineQueryOptions } from '@objectstack/spec/data';
+import {
+  FieldSchema,
+  DEFAULT_VALUE_TOKEN_CURRENT_USER,
+  type EngineCountOptions,
+  type EngineQueryOptions,
+} from '@objectstack/spec/data';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { bindDelegationWriteGuard } from './lifecycle-hooks.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
@@ -119,6 +127,17 @@ describe('sys_approval_delegation — the Delegator picker offers only what the 
   it('the registered body keeps the declaration', () => {
     const registered = (engine.registry.getObject(OBJECT) as any).fields.delegator_id;
     expect(registered.lookupFilters).toEqual(ACTING_USER_ONLY);
+  });
+
+  it('defaults to the acting user with the spec\'s `current_user` token, and the spec admits it on this field', () => {
+    const field = delegatorField();
+    expect(field.defaultValue).toBe(DEFAULT_VALUE_TOKEN_CURRENT_USER);
+    expect((engine.registry.getObject(OBJECT) as any).fields.delegator_id.defaultValue)
+      .toBe(DEFAULT_VALUE_TOKEN_CURRENT_USER);
+    // A token on a field it cannot default is refused at parse time; a full
+    // parse of this field must be green.
+    const parsed = FieldSchema.safeParse({ name: 'delegator_id', ...field });
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
   });
 
   it.each(USERS.map((u) => [u.id]))('the picker offers %s themselves and nobody else', async (caller) => {

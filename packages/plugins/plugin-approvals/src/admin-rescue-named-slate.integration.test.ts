@@ -188,7 +188,7 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
     await engine.syncSchemas();
     // The organization-less rows below exist only on a store built before 18.x
     // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
-    await relaxTenantColumns(engine, ['sys_user', 'sys_user_permission_set', 'crm_deal', 'sys_approval_delegation']);
+    await relaxTenantColumns(engine, ['sys_user', 'sys_user_permission_set', 'crm_deal']);
     bindSecurityCatalogReader(engine, catalogServing([
       'organization_admin', 'organization_admin_no_bypass', 'admin_full_access',
     ]));
@@ -292,7 +292,7 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
   // it writes stays, and no case after it reads that slate.
   it('an administrator out of office is covered by their delegate, as any named approver is', async () => {
     await engine.insert('sys_approval_delegation', {
-      id: 'dlg_admin', delegator_id: 'u_admin', delegate_id: 'u_cover', reason: 'leave',
+      id: 'dlg_admin', delegator_id: 'u_admin', delegate_id: 'u_cover', reason: 'leave', organization_id: ORG,
       valid_from: '2026-09-01T00:00:00.000Z', valid_until: '2026-12-31T00:00:00.000Z',
       created_at: '2026-09-01T00:00:00.000Z', updated_at: '2026-09-01T00:00:00.000Z',
     }, { context: SYSTEM } as any);

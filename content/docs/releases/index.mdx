@@ -64,6 +64,16 @@ publishes to npm's `latest` tag, and the guard again fails a pull request that
 declares a major bump. See
 [how a breaking stage lands on the v18 line](/docs/releases/v18#how-a-breaking-stage-lands-on-this-line).
 
+**After 18.0.0, the level follows the metadata protocol.** The maintainer's
+2026-10-21 ruling ([#25105](https://github.com/objectstack-ai/objectstack/issues/25105))
+keeps the no-major guard and grades every changeset by what it does to the
+metadata protocol: a key, value or metadata type added, narrowed or given a new
+meaning takes `minor`, and every other change takes `patch` — a REST door, a
+driver, a boot refusal, the CLI or the Console — breaking or not. A
+non-protocol breaking change keeps its `**BREAKING**` banner and its ADR-0087
+disposition. 18.1.0 is the first release cut under the rule: a minor carrying
+82 changesets declared breaking, 37 of them graded `patch`.
+
 What that means when you read a version number:
 
 - A **major** release may remove or change schemas in `@objectstack/spec`,
@@ -74,7 +84,9 @@ What that means when you read a version number:
   `sys_position.permissions`; `15.1.0` removed `tenancy.strategy` and
   `tenancy.crossTenantAccess` — all in minor releases. As the v17 notes put it,
   17.1.0 and 17.2.0 are minors by version number, not by blast radius.
-- A **patch** release fixes bugs.
+- A **patch** release fixes bugs. On the v18 line after 18.0.0 it may also
+  carry a breaking change to anything that is not the metadata protocol: a REST
+  response, a boot refusal, a CLI exit status, a removed runtime export.
 
 ⚠️ **The version number is not the upgrade-safety signal.** Read the release
 note for the version you are moving to — each one leads with breaking changes

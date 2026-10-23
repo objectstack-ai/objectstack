@@ -355,9 +355,9 @@ itself or one the ceremony certified, and refuses any other at boot, naming the
 command.
 
 **A database the published 18.0.0 created** carries a birth marker and is certified
-with its tenant columns (`organization_id`) still nullable. `os migrate plan` lists
-them, and the ceremony, which such a database does not require, tightens them to
-`NOT NULL` when you run it.
+with its tenant columns (`organization_id`) still nullable. From 18.1.0,
+`os migrate plan` lists them, and the ceremony, which such a database does not
+require, tightens them to `NOT NULL` when you run it.
 
 **The sequence:**
 
@@ -415,20 +415,25 @@ one it is refused: `✖ FATAL: tenancy posture 'group' is walled, but this deplo
 **A production `os serve` deployment needs an auth secret.** A production
 `os serve` whose stack enables auth and which resolves no `OS_AUTH_SECRET` is
 refused before any plugin starts, so set the secret before you start such a
-deployment on 18.0. A production boot whose stack mounts no auth at all (the
-`auth` tier off and no `AuthPlugin` of its own) is refused the same way: enable
-auth and set the secret. So is a production boot that has the secret but whose
-`@objectstack/plugin-auth` fails to load (a missing or broken install), `os start`
-included: earlier 18 releases booted it without auth, silently or with one
-`⚠ AuthPlugin failed to load` warning, and the refusal now names the load error —
-reinstall the deployment's dependencies. Each of these boots has no
-organization, so every row it wrote would have no owner.
+deployment on 18.0. 18.1.0 closes the three ways round it that 18.0.0 still
+left open ([18.1.0, boot and deployment](/docs/releases/v18/18-1#boot-and-deployment)):
 
-`--no-server` does not avoid any of these refusals: a kernel-only boot runs the same
-seed and would write the same ownerless rows. Earlier 18 releases let a
-`--no-server` boot through, and their refusal text offered `--no-server` as a
-remedy; it is not one. The same holds for a migrate-and-exit job
-(`OS_MIGRATE_AND_EXIT=1`): give it `OS_AUTH_SECRET` too. A development boot
+- A production boot whose stack mounts no auth at all (the `auth` tier off and
+  no `AuthPlugin` of its own) is refused the same way: enable auth and set the
+  secret.
+- So is a production boot that has the secret but whose
+  `@objectstack/plugin-auth` fails to load (a missing or broken install),
+  `os start` included. 18.0.0 booted it without auth, silently or with one
+  `⚠ AuthPlugin failed to load` warning; 18.1.0 refuses it and names the load
+  error. Reinstall the deployment's dependencies.
+- `--no-server` avoids none of these refusals: a kernel-only boot runs the same
+  seed and would write the same ownerless rows. 18.0.0 let a `--no-server` boot
+  through, and its refusal text offered `--no-server` as a remedy; from 18.1.0
+  it is not one. The same holds for a migrate-and-exit job
+  (`OS_MIGRATE_AND_EXIT=1`): give it `OS_AUTH_SECRET` too.
+
+Each of these boots has no organization, so every row it wrote would have no
+owner. A development boot
 (`os dev`, `--dev`) and an embedded kernel are not affected, and neither is the
 cloud runtime's host kernel, whose auth is each project's. `os start` is not
 affected by the missing-secret refusal: it generates an auth secret on its first
@@ -448,12 +453,16 @@ compiled at release time.
 Read the checklist for **every release you are crossing**, not only the one you
 are landing on — and that means every **minor** inside a major as well as every
 major boundary. A minor moves the runtime without moving your metadata's protocol
-major, so `os migrate meta` has nothing to replay for it; that is exactly why the
-minor's own accept-set tightenings, default flips and authorization narrowings
-have no other channel to reach you than the page below.
+major, so most of what it changes is nothing `os migrate meta` can replay; that is
+exactly why the minor's own accept-set tightenings, default flips and
+authorization narrowings have no other channel to reach you than the page below.
+A minor can also add a conversion to the current major's step: 18.1.0 adds nine to
+the protocol-18 step, which `os migrate meta --from 17` lists for your sources
+([18.1.0, converted for you](/docs/releases/v18/18-1#converted-for-you-by-os-migrate-meta)).
 
 | Release | Where its upgrade notes live |
 | :--- | :--- |
+| v18.1.0 | [Upgrade checklist — 18.1.0](/docs/releases/v18/18-1#upgrade-checklist) |
 | v18.0.0 | [Upgrade checklist — 18.0.0](/docs/releases/v18/18-0#upgrade-checklist) · [Upgrading to 18.0](#upgrading-to-180) (the ownership ceremony) · [v18](/docs/releases/v18) |
 | v17.7.0 | [Upgrade checklist — 17.7.0](/docs/releases/v17/17-7#upgrade-checklist) |
 | v17.6.0 | [Upgrade checklist — 17.6.0](/docs/releases/v17/17-6#upgrade-checklist) |
@@ -473,7 +482,11 @@ have no other channel to reach you than the page below.
 The v17 and v18 lines are broken out per release. Each v17 minor shipped
 breaking changes under the repo's launch-window convention — which ships a
 breaking change as `minor` rather than `major`, so the version number is not the
-migration signal and the changelog entry is. Earlier majors' release pages carry
+migration signal and the changelog entry is. The v18 line after 18.0.0 grades
+by the metadata protocol instead
+([#25105](https://github.com/objectstack-ai/objectstack/issues/25105)): a
+protocol change takes `minor` and every other change takes `patch`, so an 18.x
+patch can carry a breaking change to a REST door, a boot or a CLI exit code. Earlier majors' release pages carry
 one checklist per major, which is what those rows link to.
 
 The [release notes overview](/docs/releases) summarizes what each major changed.

@@ -75,6 +75,7 @@ function makeDoor(seed: StoredDatasource[] = []) {
       secrets.delete(ref);
     },
     countBoundObjects: async () => 0,
+    listObjectsBoundTo: async () => [],
     registerPool: () => {
       ops.push('registerPool');
     },

@@ -35,6 +35,9 @@ export {
 } from './local-crypto-provider.js';
 export {
   type SettingsActionHandler,
+  type SettingsLiveStatus,
+  type SettingsLiveStatusProvider,
+  SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,
   type SettingsDiagnosticsLogger,

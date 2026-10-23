@@ -311,7 +311,10 @@ describe('degradation is announced once, with consequence and remedy (ADR-0069 D
         expect(message).toMatch(/^\[dispatcher\]/);
         expect(message).toMatch(/inbound rate-limit buckets/);
         expect(message).toMatch(/MULTIPLIED BY the number of nodes/);
-        expect(message).toMatch(/Redis via @objectstack\/service-cache/);
+        // The remedy names the path that works today (a shared ICacheService
+        // registered as `cache`), never a bundled adapter that refuses to boot.
+        expect(message).toMatch(/registerService\('cache', impl\)/);
+        expect(message).not.toMatch(/@objectstack\/service-cache/);
     });
 
     it('announces the healthy bind once instead of staying silent about it', async () => {

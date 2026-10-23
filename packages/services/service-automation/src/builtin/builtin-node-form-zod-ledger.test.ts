@@ -136,6 +136,24 @@ describe('CRUD / screen / map form ↔ Zod reconciliation (#4045)', () => {
     ).toEqual([]);
   });
 
+  it('get_record.limit: the form\'s minimum is the contract\'s refusal boundary', () => {
+    // The contract refuses a `limit` below 1 at every save door; a form whose
+    // floor sits lower offers values the save always refuses. Pin both sides
+    // at the boundary the descriptor declares, so neither moves alone.
+    const limit = formSchema('get_record').properties?.limit as
+      | { type?: string; minimum?: number }
+      | undefined;
+    expect(limit?.type).toBe('integer');
+    expect(limit?.minimum).toBe(1);
+
+    const parse = (value: number) =>
+      (GetRecordConfigSchema as unknown as { safeParse(v: unknown): { success: boolean } })
+        .safeParse({ objectName: 'account', limit: value }).success;
+    expect(parse(limit!.minimum!), 'the contract accepts the form\'s minimum').toBe(true);
+    expect(parse(limit!.minimum! - 1), 'the contract refuses one below the form\'s minimum').toBe(false);
+    expect(parse(0), 'the contract refuses 0').toBe(false);
+  });
+
   describe('assignment: pinned as un-reconcilable, with the reason on record', () => {
     // `assignment` deliberately has NO entry in builtin-node-config.zod.ts: with
     // no `assignments` wrapper, the TOP-LEVEL config keys ARE the author's

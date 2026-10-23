@@ -33,6 +33,7 @@ import {
 } from '../utils/artifact-precedence.js';
 import { artifactObjectNames } from '../utils/stack-collections.js';
 import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
+import { OBJECTSTACK_MCP_SERVER_NAME } from '@objectstack/mcp';
 // The ONE port contract, shared with `start` and with the `serve` child this
 // command spawns (#12673). ⛔ Nothing about ports is declared in this file —
 // no range, no reader, no wording; a second copy of the bound is exactly what
@@ -179,9 +180,17 @@ export function prepareDevDatabaseDirectory(
  * fixes it. A connect COMMAND has no paths-only form, so the honest output
  * here is no block at all: falling back to the bound socket would reprint, on
  * the same screen, the exact address the banner just refused to print.
+ *
+ * ## The server name is not this process's to choose
+ *
+ * ⛔ The `Connect` row names the server {@link OBJECTSTACK_MCP_SERVER_NAME},
+ * the same constant the served `SKILL.md` (`GET /api/v1/mcp/skill`) reads. It
+ * used to be the current folder's basename, so one endpoint was registered as
+ * the folder's name from the banner and as `objectstack` from the skill and
+ * the console: two entries for one server in the agent's config.
  */
 export function printMcpConnectHint(
-  opts: { boundPort: number | string; name: string; boundProtocol?: ListenerProtocol },
+  opts: { boundPort: number | string; boundProtocol?: ListenerProtocol },
 ): void {
   const { baseOrigin } = resolveAuthBaseUrl(opts.boundPort, opts.boundProtocol ?? 'http');
   if (baseOrigin === null) return;
@@ -189,7 +198,7 @@ export function printMcpConnectHint(
   console.log(chalk.cyan('  🤖 MCP server — connect a coding agent:'));
   console.log(`     Endpoint  ${baseOrigin}/api/v1/mcp`);
   console.log(`     Skill     ${baseOrigin}/api/v1/mcp/skill`);
-  console.log(chalk.dim(`     Connect   claude mcp add --transport http ${opts.name} ${baseOrigin}/api/v1/mcp`));
+  console.log(chalk.dim(`     Connect   claude mcp add --transport http ${OBJECTSTACK_MCP_SERVER_NAME} ${baseOrigin}/api/v1/mcp`));
   console.log(chalk.dim('     Disable   OS_MCP_SERVER_ENABLED=false'));
 }
 
@@ -841,7 +850,6 @@ export default class Dev extends Command {
               // prints and this block cannot name two different deployments.
               printMcpConnectHint({
                 boundPort: actual,
-                name: path.basename(process.cwd()) || 'objectstack',
                 // ⭐ From THIS process's own flags, which are the same flags it
                 // forwarded to the child — so the scheme the hint prints and the
                 // scheme the child bound cannot part company (#16804).
