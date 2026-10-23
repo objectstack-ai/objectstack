@@ -185,15 +185,13 @@ exit0 'git not on PATH'
 says 'touch: unavailable' 'without git the touch is reported unavailable, not invented'
 says "$POINTER" 'and the pointer still prints'
 
-echo "== syntax, mode, and the bash-3.2 floor's loudest constructs =="
+echo "== syntax and mode =="
+# The bash-3.2 floor itself is held repo-wide over `.claude/hooks/**` by
+# `scripts/check-bash32-floor.mjs` (`pnpm check:bash32-floor`), whose scan has no filename
+# allowlist and flags a construct's TOKEN wherever it stands; it is deliberately not re-scanned
+# here, because spelling the forbidden tokens into a grep pattern is itself a finding there.
 if bash -n "$hook" 2>/dev/null; then ok 'bash -n parses the hook'; else nope 'bash -n rejects the hook'; fi
 if [ -x "$hook" ]; then ok 'the hook is executable'; else nope 'the hook is not executable'; fi
-# Comment lines are stripped first: the header NAMES these constructs in order to forbid them.
-if grep -vE '^[[:space:]]*#' "$hook" | grep -nE '\bmapfile\b|\breadarray\b|declare -A|\$\{[A-Za-z_]+(,,|\^\^)\}|EPOCHSECONDS|&>>?|\|&' >/dev/null; then
-  nope 'a bash-4+ construct is in the hook (mapfile/readarray/declare -A/${x,,}/EPOCHSECONDS/&>/|&)'
-else
-  ok 'none of the loudest bash-4+ constructs appear in the hook'
-fi
 
 echo "== wiring: settings.json registers this hook on SessionStart =="
 if [ -f "$settings" ]; then
