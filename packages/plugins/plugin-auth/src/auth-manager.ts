@@ -8853,7 +8853,7 @@ export class AuthManager {
         // managed (avoids a no-op history row on every local signup).
         const u = await engine.findOne('sys_user', {
           where: { id: userId }, fields: ['id', 'source'], context: SYSTEM_CTX,
-        } as any);
+        });
         if (u && u.source === 'idp_provisioned') {
           await engine.update('sys_user', { id: userId, source: 'env_native' }, { context: SYSTEM_CTX } as any);
         }
@@ -8864,7 +8864,7 @@ export class AuthManager {
       const credentialCount = await engine.count('sys_account', {
         where: { user_id: userId, provider_id: 'credential' },
         context: SYSTEM_CTX,
-      } as any);
+      });
       if (typeof credentialCount === 'number' && credentialCount > 0) return;
       await engine.update('sys_user', { id: userId, source: 'idp_provisioned' }, { context: SYSTEM_CTX } as any);
     } catch (e) {
@@ -9006,7 +9006,7 @@ export class AuthManager {
         const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
         const n = await engine.count('sys_user', {
           where: { must_change_password: true }, context: SYSTEM_CTX,
-        } as any);
+        });
         this._mustChangeCache = { value: typeof n === 'number' && n > 0, at: Date.now() };
       } catch {
         // leave the prior value; try again after the TTL
@@ -9034,7 +9034,7 @@ export class AuthManager {
         const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
         const n = await engine.count('sys_organization', {
           where: { require_mfa: true }, context: SYSTEM_CTX,
-        } as any);
+        });
         this._orgMfaCache = { value: typeof n === 'number' && n > 0, at: Date.now() };
       } catch {
         // leave the prior value; try again after the TTL
@@ -9185,14 +9185,14 @@ export class AuthManager {
         where: { id: userId },
         fields: ['password_changed_at', 'two_factor_enabled', 'mfa_required_at', 'must_change_password'],
         context: SYSTEM_CTX,
-      } as any);
+      });
 
       // Effective MFA requirement: global floor OR the active org's require_mfa.
       let mfaRequired = mfaGlobal;
       if (!mfaRequired && orgMaybeRequires) {
         const org = await engine.findOne('sys_organization', {
           where: { id: activeOrgId }, fields: ['require_mfa'], context: SYSTEM_CTX,
-        } as any);
+        });
         mfaRequired = org?.require_mfa === true || org?.require_mfa === 1;
       }
 
@@ -9375,7 +9375,7 @@ export class AuthManager {
         where: { user_id: userId, provider_id: 'credential' },
         fields: ['id', 'password', 'previous_password_hashes'],
         context: SYSTEM_CTX,
-      } as any);
+      });
       // [commit d6e80b28b] Both columns are `internal: true`, so the engine's read path
       // omits them from the row above — with no `isSystem` carve-out and in
       // spite of the explicit projection (#7728's design). Recover them
@@ -9422,7 +9422,7 @@ export class AuthManager {
         where: { user_id: userId, provider_id: 'credential' },
         fields: ['id', 'previous_password_hashes'],
         context: SYSTEM_CTX,
-      } as any);
+      });
       if (!account?.id) return;
       // [commit d6e80b28b] As above — the flagged column is omitted from the read, so
       // recover it before extending the ring. Without this the ring is rebuilt
@@ -9688,7 +9688,7 @@ export class AuthManager {
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
     const u = await engine.findOne('sys_user', {
       where: { id: userId }, fields: ['id'], context: SYSTEM_CTX,
-    } as any);
+    });
     if (!u?.id) return false;
     await engine.update(
       'sys_user',
@@ -9702,7 +9702,7 @@ export class AuthManager {
     try {
       const enrolments = await engine.find('sys_two_factor', {
         where: { user_id: String(userId) }, fields: ['id'], context: SYSTEM_CTX,
-      } as any);
+      });
       for (const row of (enrolments ?? []) as Array<{ id?: string }>) {
         if (!row?.id) continue;
         await engine.update(
@@ -9749,7 +9749,7 @@ export class AuthManager {
         where: { id: sessionId },
         fields: ['id', 'created_at', 'last_activity_at', 'revoked_at'],
         context: SYSTEM_CTX,
-      } as any);
+      });
       if (!srow?.id || srow.revoked_at) return;
       const now = Date.now();
       let reason: string | undefined;
@@ -9834,7 +9834,7 @@ export class AuthManager {
         fields: ['id', 'created_at', 'expires_at', 'revoked_at'],
         limit: 200,
         context: SYSTEM_CTX,
-      } as any);
+      });
       const now = Date.now();
       const live = (Array.isArray(rows) ? rows : [])
         .filter((sn: any) => !sn.revoked_at && (!sn.expires_at || new Date(sn.expires_at).getTime() > now))
