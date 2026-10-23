@@ -75,7 +75,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** …/packages/core/src/security → repo root */
@@ -272,8 +272,8 @@ const codeLines = (file: string) =>
 const callsArbiter = (file: string) => codeLines(file).some(arbiterCall);
 
 /** Fixed-string prefilter over tracked plus untracked sources; the matcher decides. */
-function filesMentioningTheArbiter(): string[] {
-  return git(['grep', '--files-with-matches', '-z', '--untracked', '--fixed-strings', '-e', ARBITER, '--', 'packages'])
+function scanTree(): string[] {
+  return git(['grep', '--files-with-matches', '-z', '--untracked', '--fixed-strings', '-e', ARBITER, '--', ':(glob)packages/**/*.ts'])
     .filter(isScannedSource);
 }
 
@@ -306,7 +306,18 @@ function functionBody(file: string, fn: string): string[] {
   return body;
 }
 
+/** Shared by the census and its reach control; each file pays for one grep. */
+let treeMentions: string[];
+
+function filesMentioningTheArbiter(): string[] {
+  return treeMentions;
+}
+
 describe('[#22661] every read that reaches a second object asks that object its exposure, or is named', () => {
+  beforeAll(() => {
+    treeMentions = scanTree();
+  }, SCAN_TIMEOUT_MS);
+
   it(
     'every caller of the reference-target arbiter is classified, and every classified file still calls it',
     () => {

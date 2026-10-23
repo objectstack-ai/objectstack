@@ -20,7 +20,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import { GLOBAL_ACTION_OBJECT_KEY, standaloneActionOwnerKey } from './action-governance.js';
 
 /** Rung 1 exactly as `action-governance.ts` writes it. */
@@ -172,10 +172,10 @@ describe('standalone-action owner key — one spelling in @objectstack/objectql 
 const DELETED_PLUGIN_MEMBER = 'actionObjectKey';
 
 /**
- * The live spelling that replaced it. Used as the scan's reach control below —
- * it is the one symbol guaranteed to sit in both scanned roots for as long as
- * the convergence holds, and if it ever stops doing so this pin should say so
- * loudly rather than quietly stop reaching.
+ * The live spelling that replaced it. Used as the scan's reach control below:
+ * its presence in ObjectQL, CLI and runtime under `packages/` checks cross-package
+ * reach. If those sites disappear, this pin should say so loudly rather than
+ * quietly stop reaching.
  */
 const CANONICAL_HELPER = 'standaloneActionOwnerKey';
 
@@ -252,8 +252,8 @@ const PACKAGE_ROOT = findUp((dir) => {
  * that ci.yml's `crosspkg:` filter would then have to carry. Anchoring off the
  * manifest keeps this pin's declared radius inside roots that already exist.
  *
- * The arithmetic is not trusted on faith — the reach test below fails on any
- * wrong root, because no wrong root can see both scanned trees.
+ * The reach test checks this root by requiring files in ObjectQL, CLI and
+ * runtime under `packages/`.
  */
 const REPO_ROOT = resolve(PACKAGE_ROOT, '../..');
 
@@ -263,12 +263,15 @@ const SCANNED_ROOTS: readonly string[] = ['packages'];
 /** Spelled once so the declared glob and the scan stay in correspondence. */
 const SCANNED_EXTENSION = '.ts';
 
+/** Match the judged extension in git itself, before any file bytes are read. */
+const SCANNED_PATHSPECS = SCANNED_ROOTS.map((root) => `:(glob)${root}/**/*${SCANNED_EXTENSION}`);
+
 /**
- * Generous on purpose. The scan is one `git grep` and a handful of file reads —
- * tens of milliseconds — so this is not a budget, it is headroom against a
- * merge-queue runner doing a full monorepo build at the same time. A pin that
- * times out before its assertion runs reports nothing, and reporting nothing is
- * indistinguishable from finding nothing.
+ * The scan hook's budget includes headroom for a merge-queue runner doing a
+ * full monorepo build at the same time. One extension-scoped `git grep` feeds
+ * the shared result used by both tree assertions. A pin that times out before
+ * its assertion runs reports nothing, and reporting nothing is indistinguishable
+ * from finding nothing.
  */
 const SCAN_TIMEOUT_MS = 60_000;
 
@@ -290,27 +293,39 @@ function git(args: string[]): string[] {
     return stdout.split('\0').filter((entry) => entry.length > 0);
 }
 
-/**
- * Every scanned file that so much as mentions `symbol`.
- *
- * Tracked files PLUS untracked ones with ignored paths excluded (`--untracked`)
- * — i.e. exactly the files a human authored, never build output. A file written
- * but not yet `git add`ed still reddens, which is what makes this a local-loop
- * guard rather than something you find out about in the merge queue.
- */
-function filesMentioning(symbol: string): string[] {
-    return git([
+/** The deleted member and the live spelling used by the reach control. */
+const HUNTED_SYMBOLS = [DELETED_PLUGIN_MEMBER, CANONICAL_HELPER];
+
+/** One shared scan: tracked plus untracked authored `.ts` files, ignored paths excluded. */
+function scanTree(): ReadonlyMap<string, readonly string[]> {
+    const candidates = git([
         'grep',
         '--files-with-matches',
         '-z',
         '--untracked',
         '--text',
         '--fixed-strings',
-        '-e',
-        symbol,
+        ...HUNTED_SYMBOLS.flatMap((symbol) => ['-e', symbol]),
         '--',
-        ...SCANNED_ROOTS,
-    ]).filter((file) => file.endsWith(SCANNED_EXTENSION));
+        ...SCANNED_PATHSPECS,
+    ]);
+    const mentions = new Map<string, string[]>(HUNTED_SYMBOLS.map((symbol) => [symbol, []]));
+    for (const file of candidates) {
+        const text = readFileSync(join(REPO_ROOT, file), 'utf8');
+        for (const [symbol, files] of mentions) {
+            if (text.includes(symbol)) files.push(file);
+        }
+    }
+    return mentions;
+}
+
+/** Filled once before the tree assertions, so the reach control judges the same scan. */
+let treeScan: ReadonlyMap<string, readonly string[]>;
+
+function filesMentioning(symbol: string): readonly string[] {
+    const files = treeScan.get(symbol);
+    if (!files) throw new Error(`${symbol} is not one of the tree scan's hunted symbols.`);
+    return files;
 }
 
 /** `<file>:<line>` for every mention that no rule above excuses. */
@@ -327,6 +342,10 @@ function staleMentionSites(symbol: string): string[] {
 }
 
 describe('standalone-action owner key — the deleted member is dead TREE-WIDE (#14878)', () => {
+    beforeAll(() => {
+        treeScan = scanTree();
+    }, SCAN_TIMEOUT_MS);
+
     it(
         'is named nowhere outside the release record and the two pins',
         () => {
@@ -360,7 +379,7 @@ describe('standalone-action owner key — the deleted member is dead TREE-WIDE (
     );
 
     it(
-        'the scan reaches both roots and can see the name it hunts',
+        'the scan reaches across packages/ and can see the name it hunts',
         () => {
             // Anti-vacuity, at both stages a tree scan can go silently blind.
             //
