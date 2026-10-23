@@ -731,6 +731,7 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysTeam', SysTeam, 'create_team', `${ADMINS} && ${ORG}`],
     ['SysTeam', SysTeam, 'update_team', `${ADMINS} && ${ORG}`],
     ['SysTeam', SysTeam, 'remove_team', `${ADMINS} && ${ORG}`],
+    ['SysTeam', SysTeam, 'add_team_member', `${ADMINS} && ${ORG}`],
     ['SysTeamMember', SysTeamMember, 'add_team_member', `${ADMINS} && ${ORG}`],
     ['SysTeamMember', SysTeamMember, 'remove_team_member', `${ADMINS} && ${ORG}`],
     // #2874 P2b — audit gates: capability-dependent actions that previously
