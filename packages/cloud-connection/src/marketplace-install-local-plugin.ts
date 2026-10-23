@@ -43,7 +43,12 @@
  *            register throws is refused (`PLUGIN_REGISTER_FAILED`, 422); a
  *            cloud-fetched one is still installed (the lenient path) and answers
  *            `200` with `hotLoaded: false` and the register error's message as
- *            `hotLoadError` — in the ledger, loaded at the next restart.
+ *            `hotLoadError` — in the ledger, loaded at the next restart —
+ *            unless the register was refused because an environment-authored
+ *            item already holds a position, permission set or capability name
+ *            the package ships (#25366): no restart clears that, so both
+ *            branches refuse it (`PLUGIN_REGISTER_FAILED`, 422) and nothing is
+ *            registered or written.
  *
  *          `installMode: 'managed' | 'unmanaged'` (ADR-0131 D6; absent means
  *          `managed`, the key parsed against `InstallModeSchema`) chooses
@@ -214,11 +219,39 @@ import type {
 // this environment's own metadata), and the client-facing sentence rule.
 import { unmanagedInstallPostureRefusal, isWritablePackage, clientFacingFailureText, captureUninstallDeclared } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
+// [#25366] The code the registry's security-catalog refusal carries, compared
+// rather than `instanceof`-tested: the engine keeps the class unexported so a
+// consumer holding the other build realm's copy cannot misread it.
+import { NAMESPACE_CONFLICT_CODE } from '@objectstack/objectql';
 
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
+
+/**
+ * [#25366] Whether a `manifest.register` failure is the registry's security
+ * catalog refusal (`SecurityCatalogNameConflictError`, ADR-0048 §3.4 narrowed;
+ * `security-catalog-namespace.ts` in `@objectstack/objectql`) naming an
+ * environment-authored holder for at least one of the names the package ships.
+ *
+ * That refusal is the ONE pre-write check for the rule: the registry's package
+ * door raises it ahead of every mutation it makes, for every door that installs
+ * a package, so this door asks it rather than keeping a second reading of who
+ * holds a name. The error is recognised by its code plus its `conflicts` list —
+ * the namespace gate shares the code and carries no list.
+ *
+ * An environment holder is the one a restart never clears: the environment's
+ * item is loaded from `sys_metadata` at every boot, and a load of the package
+ * — the next install, or this ledger entry at the next rehydrate — meets it
+ * again. A holder that is another package or a built-in is not judged here.
+ */
+function refusesEnvironmentHeldCatalogName(err: unknown): boolean {
+    if ((err as { code?: unknown } | null)?.code !== NAMESPACE_CONFLICT_CODE) return false;
+    const conflicts = (err as { conflicts?: unknown }).conflicts;
+    return Array.isArray(conflicts)
+        && conflicts.some((c) => (c as { existingHolder?: { kind?: unknown } } | null)?.existingHolder?.kind === 'environment');
+}
 
 /**
  * [#21490] The one `protocol` verb this plugin calls: the runner of the
@@ -1736,6 +1769,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 return c.json({
                     success: false,
                     error: { code: 'PLUGIN_REGISTER_FAILED', message: `Failed to register imported manifest: ${registerError}` },
+                }, 422);
+            }
+            // [#25366] …EXCEPT the security catalog's one-name-one-holder refusal
+            // naming an ENVIRONMENT-authored item (a customer's clone of a vendor
+            // permission set or position, under a name this version now ships).
+            // No restart heals it: the next load of this ledger entry meets the
+            // same environment item and is refused the same way (see
+            // {@link refusesEnvironmentHeldCatalogName}), so the lenient answer
+            // ("loads at the next restart") would be false. The registry's
+            // package door refused before any of its own writes, and nothing of
+            // this door's is written yet, so the cloud branch refuses exactly as
+            // the inline branch does — `422 PLUGIN_REGISTER_FAILED`, the
+            // registry's sentence naming each colliding name and its holder —
+            // and the installer renames one of the two items and retries.
+            if (refusesEnvironmentHeldCatalogName(err)) {
+                return c.json({
+                    success: false,
+                    error: { code: 'PLUGIN_REGISTER_FAILED', message: `Package '${manifestId}' cannot be installed: ${registerError}` },
                 }, 422);
             }
             // [#22695] The lenient path stays lenient — whether it should is a
