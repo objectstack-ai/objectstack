@@ -61,32 +61,50 @@ on:
   # Treated as `full` by the selection script for the same reason `schedule` is.
   workflow_dispatch:
 
-# Superseded runs on the same PR/branch waste runners and delay feedback;
-# cancel them. Push runs to main group by commit ref as well, so an in-flight
-# main run is cancelled only by a newer main push.
+# Superseded runs on the same PR waste runners and delay feedback; cancel them.
+# A push to `main` is the opposite case, and gets a group of its OWN (#25373).
 #
-# ⭐ `github.event_name` IS LOAD-BEARING IN THIS KEY, and it is the whole
-# reason the hourly run above can finish (#16467). On a `schedule` event
-# `github.event.pull_request.number` is empty and `github.ref` is
-# `refs/heads/main` — BYTE-IDENTICAL to what a push to `main` produces. Without
-# the event name in the key the hourly run and the next merge share one group,
-# `cancel-in-progress: true` applies, and the next merge kills the hourly run.
-# That is not a hypothetical: this card's own measurement is that 36 of the
-# last 60 push runs on `main` were already cancelled that way, at a merge
-# cadence that would censor most hours.
+# ⭐ `github.event.after` IS LOAD-BEARING IN THIS KEY. A push run is the ONLY
+# run that saves the Turbo cache seed ("Save Turbo cache (main only)", gated on
+# `github.event_name == 'push'`) that every PR shard, Build Core and the queue
+# build restore, and it is the only run that tests its own merge's `--affected`
+# set (see `on.schedule` above). The save steps sit at the END of a ~28 min
+# run, and main merges land every ~9–16 min. Under the old shared key
+# `ci-CI-push-refs/heads/main` the next merge cancelled it: 32 of 40 push runs
+# on 2026-10-23 01:03Z–11:03Z, so the seed was written 8 times in 40 merges and
+# PR shards rebuilt their closures cold (3–6 min each instead of 0–1.7).
+# `cancel-in-progress: false` alone does NOT fix it: GitHub keeps ONE pending
+# run per group and cancels it when a third arrives; replayed on the same 40
+# arrivals, 18 still die. So the push segment is the pushed commit.
+# `github.event.after` is set on a push and absent on `schedule`,
+# `workflow_dispatch` and `merge_group`, which still fall through to
+# `github.ref`; on `pull_request` the PR number wins before it is reached. Two
+# push runs never share a group, so every one runs to completion and saves. The
+# seed key carries `github.sha`, so two overlapping main runs never write the
+# same key.
 #
-# ⛔ Do not "simplify" this back to two segments. `scripts/ci/scheduled-full-
-# run.mjs --check-concurrency` evaluates this expression against a push-shaped
-# and a schedule-shaped context and reds when the two groups are equal, so the
-# collision cannot come back silently.
+# ⭐ `github.event_name` IS LOAD-BEARING TOO (#16467). A `schedule` and a
+# `workflow_dispatch` run on `main` both fall through to `refs/heads/main`;
+# without the event name they share one group and an on-demand run cancels the
+# hourly one (and, under any key that drops `github.event.after`, the next
+# merge cancels both, which is how 36 of 60 hourly-era push runs died).
 #
-# `cancel-in-progress` stays `true` for every event including `schedule`: two
-# hourly runs overlapping means one of them is over an hour old, and an hour-old
+# ⛔ Do not "simplify" either segment away. `scripts/ci/scheduled-full-run.mjs
+# --check-concurrency` evaluates this expression against push, schedule,
+# dispatch, PR and queue contexts on two different commits. It reds when two
+# pushes share a group, when a push shares one with a schedule or dispatch run,
+# or when two schedule, dispatch or same-PR runs stop sharing one (a run-unique
+# key such as `github.sha` or `github.run_id` would switch cancellation off for
+# those events too).
+#
+# `cancel-in-progress` stays `true`: with a per-commit push group it never
+# fires on a push, and for everything else it is the policy. Two hourly runs
+# overlapping means one of them is over an hour old, and an hour-old
 # measurement of `main` is strictly the worse of the two. Test Core's wall clock
 # is well inside the cadence (~39 shard-minutes across six shards), so this is
 # the exceptional path, not the normal one.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}
   cancel-in-progress: true
 
 # ── THE TWO SPEEDS (#22998) ──────────────────────────────────────────────────
