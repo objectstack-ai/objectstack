@@ -133,12 +133,13 @@ export const TASK_REOPEN_REFUSAL =
  *
  * `throw new Error('<sentence>')` from a sandboxed body is the business-refusal
  * shape: the write is aborted (`onError: 'abort'`) and the sentence travels to
- * the caller as a 4xx — on `/data`, and through a script action's `ctx.api`
- * write on `/actions` too (`packages/runtime/src/sandbox/
- * nested-hook-refusal-is-a-rejection.test.ts`). `showcase_reopen_task`
- * (`src/ui/actions/index.ts`) is the script action that reaches it, and the
- * platform checklist item `records-forms.script-action-hook-refusal-toast`
- * drives that action in the console.
+ * the caller as a 4xx — on `/data`, and on `/actions` too, whether the write is
+ * an action's declared `operation: 'update'` or a script action's `ctx.api`
+ * write (`packages/runtime/src/sandbox/nested-hook-refusal-is-a-rejection.test.ts`).
+ * `showcase_reopen_task` (`src/ui/actions/index.ts`) is the action whose
+ * declared write reaches it, and the platform checklist item
+ * `records-forms.script-action-hook-refusal-toast` drives that action in the
+ * console.
  *
  * The condition is the two-root transition form (same lesson as
  * {@link AuditTaskCompletionHook}): only the write that flips `done` from true
