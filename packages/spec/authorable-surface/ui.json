@@ -411,6 +411,7 @@
     "ui/DatasetDimension:field",
     "ui/DatasetDimension:label",
     "ui/DatasetDimension:name",
+    "ui/DatasetDimension:nullLabel",
     "ui/DatasetDimension:type",
     "ui/DatasetMeasure:aggregate",
     "ui/DatasetMeasure:currency",
