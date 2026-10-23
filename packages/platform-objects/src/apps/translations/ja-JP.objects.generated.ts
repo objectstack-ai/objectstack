@@ -131,9 +131,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       unverified: {
         label: "未確認"
       },
-      two_factor: {
-        label: "2FA 有効"
-      },
       banned: {
         label: "利用停止"
       }

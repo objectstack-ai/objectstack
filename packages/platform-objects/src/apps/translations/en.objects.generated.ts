@@ -131,9 +131,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       unverified: {
         label: "Unverified"
       },
-      two_factor: {
-        label: "2FA Enabled"
-      },
       banned: {
         label: "Banned"
       }
