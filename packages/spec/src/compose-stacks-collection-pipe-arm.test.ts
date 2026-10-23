@@ -256,6 +256,7 @@ describe('MAIN — the preprocess-wrapped collection key is IN the refusal set',
       'highlightFields',
       'listViews',
       'searchableFields',
+      'membershipKeys',
       'actions',
     ]);
   });
@@ -312,6 +313,7 @@ describe("TODAY-INVARIANCE — the fix moves no key on today's ObjectSchema", ()
       'highlightFields',
       'listViews',
       'searchableFields',
+      'membershipKeys',
       'actions',
     ]);
   });

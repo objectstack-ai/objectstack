@@ -810,7 +810,8 @@ export const MembershipKeyNameSchema = lazySchema(() => SnakeCaseIdentifierSchem
   },
 ).describe('The membership key name: policies read the set as `current_user.KEY`'));
 
-export type MembershipKeyName = z.infer<typeof MembershipKeyNameSchema>;
+export type MembershipKeyName = z.input<typeof MembershipKeyNameSchema>;
+export type MembershipKeyNameParsed = z.infer<typeof MembershipKeyNameSchema>;
 
 /**
  * One declarative membership key on the roster object. See the module docblock
@@ -897,7 +898,7 @@ export const MembershipKeySchema = lazySchema(() => strictObject(
 }));
 
 export type MembershipKey = z.input<typeof MembershipKeySchema>;
-export type MembershipKeyParsed = z.output<typeof MembershipKeySchema>;
+export type MembershipKeyParsed = z.infer<typeof MembershipKeySchema>;
 
 /**
  * `ObjectSchema.membershipKeys`: the membership keys this roster object
@@ -919,6 +920,7 @@ export const MembershipKeysSchema = lazySchema(() => z.record(z.string(), Member
 ));
 
 export type MembershipKeys = z.input<typeof MembershipKeysSchema>;
+export type MembershipKeysParsed = z.infer<typeof MembershipKeysSchema>;
 
 // RLSAuditEventSchema / RLSAuditConfigSchema / RLSConfigSchema were REMOVED
 // per ADR-0056 D8 "design+enforce or remove": the global RLSConfig

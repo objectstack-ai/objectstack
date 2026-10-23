@@ -33,6 +33,7 @@
     "FieldPermission": "security/FieldPermission",
     "FieldPermissionSchema": "security/FieldPermission",
     "MembershipKey": "security/MembershipKey",
+    "MembershipKeyName": "security/MembershipKeyName",
     "MembershipKeyNameSchema": "security/MembershipKeyName",
     "MembershipKeySchema": "security/MembershipKey",
     "MembershipKeys": "security/MembershipKeys",
