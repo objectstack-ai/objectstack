@@ -609,8 +609,9 @@ const FILTER_OPERAND_DESCRIPTION =
  * `filter` values may carry operator objects (`{"$ne": null}`), and each
  * operand is a CEL value envelope, a query placeholder or a literal
  * ({@link flowFilterSlotSchema}); an envelope that evaluates to nothing
- * REFUSES the node rather than widening the query (#3810). `limit > 1` selects
- * `find` (a `records` list); otherwise `findOne` (a single `record`).
+ * REFUSES the node rather than widening the query (#3810). `limit` is a
+ * positive integer: `limit > 1` selects `find` (a `records` list); otherwise
+ * `findOne` (a single `record`).
  */
 export const GetRecordConfigSchema = lazySchema(() => strictObject({
   surface: 'this get_record node config',
@@ -624,9 +625,16 @@ export const GetRecordConfigSchema = lazySchema(() => strictObject({
   /** Field projection — only these fields are read (default: all). */
   fields: z.array(z.string()).optional()
     .describe('Field projection — only these fields are read (default: all)'),
-  /** Max records; >1 returns a `records` list, otherwise a single `record`. */
-  limit: z.number().optional()
-    .describe('Max records to return; >1 switches to a multi-record query'),
+  /**
+   * Max records — a positive integer; >1 returns a `records` list, otherwise a
+   * single `record`. The executor hands it to `data.find` as the query's LIMIT
+   * as written, outside the Data API's page-window normalizer, so a fraction or
+   * a count below 1 is refused here, at every door that parses a flow (#25302).
+   * Not the Data API's `QueryPageWindowSchema`: `0` is a window there (the
+   * total alone), while this node always reads at least one row.
+   */
+  limit: z.number().int().positive().optional()
+    .describe('Max records to return — a positive integer; >1 switches to a multi-record query'),
   /** Flow variable the result is bound to — never a `$` name: those are the engine's (#22502). */
   outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
     .describe('Flow variable the result is bound to — a name without a leading `$` (the `$` names are the flow engine\'s own), read as `{{ name }}`'),
