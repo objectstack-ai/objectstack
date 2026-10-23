@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#25235] END-TO-END, the card's two acceptance cases: the REAL ScheduleTrigger
-// and the REAL AutomationEngine across two "kernels" that share what a kernel
+// [#25235] END-TO-END, in process (so not a nightly-tier `.e2e` file), the
+// card's two acceptance cases: the REAL ScheduleTrigger and the REAL
+// AutomationEngine across two "kernels" that share what a kernel
 // shares with the next one — the database. Here that is three things: the
 // `sys_job` rows (a job table double with DbJobAdapter's arming semantics:
 // `schedule()` arms, `cancel()` disarms, a fire refreshes last-alive, and

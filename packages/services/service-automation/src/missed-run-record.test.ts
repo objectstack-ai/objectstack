@@ -5,7 +5,7 @@
 // The trigger decides which due times fell in the silence; this method judges
 // each against the dispatch ledger and writes the run-history entry. The
 // two-kernel acceptance cases live with the trigger
-// (`trigger-schedule/src/missed-run-record.e2e.test.ts`).
+// (`trigger-schedule/src/missed-run-two-kernels.test.ts`).
 
 import { describe, it, expect } from 'vitest';
 import { AutomationEngine, TERMINAL_RUN_STATUSES, missedRunId } from './engine.js';
