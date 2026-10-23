@@ -144,18 +144,10 @@ import {
   buildTwoFactorPluginSchema,
   buildOauthProviderPluginSchema,
   buildDeviceAuthorizationPluginSchema,
-  buildJwtPluginSchema,
   buildAdminPluginSchema,
   buildPhoneNumberPluginSchema,
 } from './auth-schema-config.js';
 import {
-  createHostUsableJwksReader,
-  probeEd25519Support,
-  protectGetSessionJwtHook,
-  resolveJwtSigningAlgorithm,
-} from './jwt-key-algorithm.js';
-import {
-  createSigningKeyReader,
   retireHeldKeyrings,
   UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS,
 } from './signing-key-read-cache.js';
@@ -227,6 +219,14 @@ import {
   storedRecipientLocale,
   type EmailSmsDeliveryHost,
 } from './auth-manager-email-sms-delivery.js';
+// [#25224 cut 6] The plugin assembly helpers; the methods of the same names
+// below hand each body the members it reads (`PluginAssemblyHost`).
+import {
+  addOptionalPlugin,
+  buildJwtPlugin,
+  reportJwtSigningFailure,
+  type PluginAssemblyHost,
+} from './auth-manager-plugin-assembly.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -3175,24 +3175,17 @@ export class AuthManager {
    * `build` may return one plugin or an array that must land atomically
    * (e.g. jwt + oauthProvider): on failure NOTHING from the unit is pushed.
    */
-  private async addOptionalPlugin(
+  private addOptionalPlugin(
     plugins: any[],
     feature: string,
     build: () => Promise<any | any[]>,
   ): Promise<void> {
-    try {
-      const built = await build();
-      for (const p of Array.isArray(built) ? built : [built]) plugins.push(p);
-    } catch (err: any) {
-      const message = err?.message ?? String(err);
-      this.degradedFeatures.set(feature, message);
-      console.error(
-        `[AuthManager] Optional auth feature "${feature}" failed to initialize and is DISABLED ` +
-        `for this process — its endpoints will 404. Core email/password + session auth is unaffected. ` +
-        `Fix the underlying error (often a better-auth version mismatch) and restart. Cause: ${message}`,
-        err,
-      );
-    }
+    // [#25224 cut 6] The body moved to `auth-manager-plugin-assembly.ts` (see `PluginAssemblyHost`).
+    const readDegradedFeatures = () => this.degradedFeatures;
+    const host: Pick<PluginAssemblyHost, 'degradedFeatures'> = {
+      get degradedFeatures() { return readDegradedFeatures(); },
+    };
+    return addOptionalPlugin.call(host, plugins, feature, build);
   }
 
   /**
@@ -3239,60 +3232,18 @@ export class AuthManager {
    * read discards it, so it no longer pays the key read and the signature
    * (#24061; see `protectGetSessionJwtHook`).
    */
-  private async buildJwtPlugin(jwt: (options: any) => any): Promise<any> {
-    if (!this.ed25519ProbeResult) this.ed25519ProbeResult = probeEd25519Support();
-    const { keyPairConfig, ed25519Supported } = await resolveJwtSigningAlgorithm(
-      () => this.ed25519ProbeResult!,
-    );
-
-    if (!ed25519Supported) {
-      // Functional, not durability: the deployment is fully operational on
-      // ES256. Worth one line because it changes what /jwks publishes and what
-      // `alg` issued tokens carry, which an operator debugging a relying party
-      // otherwise cannot correlate to anything.
-      console.warn(
-        `[AuthManager] This host's WebCrypto has no Ed25519 (crypto.subtle.generateKey({name:'Ed25519'}) fails), ` +
-          `so JWTs are signed with ${keyPairConfig.alg} instead of better-auth's default EdDSA. ` +
-          `Any existing EdDSA key in sys_jwks is hidden from the JWKS on this host — it cannot be imported here — ` +
-          `and a fresh ${keyPairConfig.alg} key is minted on first use. The rows are not deleted.`,
-      );
-    }
-
-    const jwtPlugin = jwt({
-      schema: buildJwtPluginSchema(),
-      jwks: { keyPairConfig },
-      // [#24061] The keyring read goes through `createSigningKeyReader` on
-      // every host: it holds the rows across requests only while no
-      // `sys_jwks` write has passed this engine's middleware since they were
-      // read, and never past `SIGNING_KEY_CACHE_TTL_MS` — both halves of the
-      // cross-request caching rule (see `signing-key-read-cache.ts`). A miss
-      // reads exactly what it read before: better-auth's stock read, or, on a
-      // host without Ed25519, the host-usable keyring that hides keys this
-      // host cannot import (#3585).
-      adapter: {
-        getJwks: createSigningKeyReader({
-          engine: this.config.dataEngine,
-          read: ed25519Supported ? undefined : createHostUsableJwksReader(),
-        }),
-      },
-    });
-
-    const protectedHook = protectGetSessionJwtHook(jwtPlugin, (error) =>
-      this.reportJwtSigningFailure(error, keyPairConfig.alg),
-    );
-    if (!protectedHook) {
-      // The guard could not attach — better-auth moved or renamed the hook.
-      // Say so rather than shipping a build that looks protected and is not.
-      console.error(
-        '[AuthManager] Could not attach the JWT signing guard to better-auth\'s /get-session hook ' +
-          '(its `hooks.after` shape changed). A JWT signing failure will now 500 every /get-session ' +
-          'instead of degrading to a missing set-auth-jwt header, and every in-process session read ' +
-          'signs a JWT it discards (two sys_jwks reads per authenticated request). Re-check ' +
-          'the better-auth version in better-auth-schema-parity.test.ts.',
-      );
-    }
-
-    return jwtPlugin;
+  private buildJwtPlugin(jwt: (options: any) => any): Promise<any> {
+    // [#25224 cut 6] The body moved to `auth-manager-plugin-assembly.ts` (see `PluginAssemblyHost`).
+    const readConfig = () => this.config;
+    const readEd25519ProbeResult = () => this.ed25519ProbeResult;
+    const writeEd25519ProbeResult = (v: AuthManager['ed25519ProbeResult']) => { this.ed25519ProbeResult = v; };
+    const host: Pick<PluginAssemblyHost, 'config' | 'ed25519ProbeResult' | 'reportJwtSigningFailure'> = {
+      get config() { return readConfig(); },
+      get ed25519ProbeResult() { return readEd25519ProbeResult(); },
+      set ed25519ProbeResult(v) { writeEd25519ProbeResult(v); },
+      reportJwtSigningFailure: (...a) => this.reportJwtSigningFailure(...a),
+    };
+    return buildJwtPlugin.call(host, jwt);
   }
 
   /**
@@ -3306,19 +3257,16 @@ export class AuthManager {
    * delivering, and the operator has to act.
    */
   private reportJwtSigningFailure(error: unknown, alg: string): void {
-    const message = (error as any)?.message ?? String(error);
-    this.degradedFeatures.set('jwtSigning', message);
-    if (this.jwtSigningFailureReported) return;
-    this.jwtSigningFailureReported = true;
-    console.error(
-      `[AuthManager] JWT signing failed with alg "${alg}", so /get-session responses carry no ` +
-        `set-auth-jwt header and OIDC/MCP token issuance will not work. The session itself is valid — ` +
-        `sign-in and cookie auth are unaffected. Common causes: this host's WebCrypto cannot use the ` +
-        `algorithm of the key in sys_jwks, or OS_AUTH_SECRET changed since the key was encrypted. ` +
-        `Set OS_OIDC_PROVIDER_ENABLED=false if this deployment does not need to act as an IdP. ` +
-        `Cause: ${message}`,
-      error,
-    );
+    // [#25224 cut 6] The body moved to `auth-manager-plugin-assembly.ts` (see `PluginAssemblyHost`).
+    const readDegradedFeatures = () => this.degradedFeatures;
+    const readJwtSigningFailureReported = () => this.jwtSigningFailureReported;
+    const writeJwtSigningFailureReported = (v: AuthManager['jwtSigningFailureReported']) => { this.jwtSigningFailureReported = v; };
+    const host: Pick<PluginAssemblyHost, 'degradedFeatures' | 'jwtSigningFailureReported'> = {
+      get degradedFeatures() { return readDegradedFeatures(); },
+      get jwtSigningFailureReported() { return readJwtSigningFailureReported(); },
+      set jwtSigningFailureReported(v) { writeJwtSigningFailureReported(v); },
+    };
+    return reportJwtSigningFailure.call(host, error, alg);
   }
 
   /**
