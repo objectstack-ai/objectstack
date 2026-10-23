@@ -837,8 +837,15 @@ new AuthPlugin({
 
 `sys_member.role` is better-auth's own column and the one place ObjectStack
 keeps that vocabulary (ADR-0090 D3's single boundary exception). It holds
-exactly four values — `owner`, `admin`, `delegated_admin`, `member` — and your
-stack cannot add to them.
+exactly five values — `owner`, `admin`, `delegated_admin`, `member`, `external` — and
+your stack cannot add to them.
+
+`external` is for a portal user (a supplier's or a customer's person) who joins
+the organization without joining its staff. It is held alone, never beside
+another tier. Its holder reads only its own identity rows, does not receive the
+member defaults (`member_default` or an app's `isDefault` set), is never placed
+in a business unit, and reaches application data only through the positions and
+permission sets granted to it explicitly.
 
 That is deliberate (ADR-0108). A membership tier answers *what is your standing
 in this organization*, which decides what you can **reach**: `delegated_admin`,
