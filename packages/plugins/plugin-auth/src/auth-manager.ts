@@ -9126,10 +9126,12 @@ export class AuthManager {
 
   /**
    * ADR-0069 D4 — idle / absolute session enforcement, run per request from
-   * `customSession`. No-op when both are off. Revokes (expires in place +
-   * stamps revoked_at/revoke_reason) when a limit is exceeded so better-auth
-   * returns no session on the NEXT request; otherwise touches `last_activity_at`
-   * (throttled to once a minute). Best-effort — never throws.
+   * `customSession`. Revokes (expires in place + stamps
+   * revoked_at/revoke_reason) when a limit is exceeded so better-auth returns
+   * no session on the NEXT request; otherwise touches `last_activity_at`
+   * (throttled to once a minute). [#25343] The touch runs on every deployment,
+   * limits or not; with both off, a per-process 60-second memo per session
+   * skips the `sys_session` read too. Best-effort — never throws.
    */
   private enforceSessionControls(sessionId: string | undefined, createdAtHint: unknown): Promise<void> {
     // [#25224 cut 3] The body moved to `auth-manager-password-session-policy.ts` (see `PasswordSessionPolicyHost`).
