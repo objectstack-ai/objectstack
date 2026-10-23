@@ -144,10 +144,6 @@ import {
   buildPhoneNumberPluginSchema,
 } from './auth-schema-config.js';
 import {
-  retireHeldKeyrings,
-  UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS,
-} from './signing-key-read-cache.js';
-import {
   ORGANIZATION_DELETE_PATH,
   isDefaultOrganizationTarget,
   removeOrganizationAuthStructure,
@@ -242,6 +238,14 @@ import {
   validateAudienceAdmission,
   type MembershipAdmissionHost,
 } from './auth-manager-membership-admission.js';
+// [#25224 cut 9] The MCP access-token verifier and its forced keyring re-read;
+// the methods of the same names below hand each body the members it reads
+// (`McpAccessTokenHost`).
+import {
+  rereadKeyringForUnknownKey,
+  verifyMcpAccessToken,
+  type McpAccessTokenHost,
+} from './auth-manager-mcp-access-token.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -1462,7 +1466,7 @@ async function invitationPlacementReadFaultApiError(cause: unknown): Promise<Err
  * the embedded authorization server and read back by
  * {@link AuthManager.verifyMcpAccessToken} — one spelling for both ends.
  */
-const OAUTH_ORGANIZATION_CLAIM = 'organization_id';
+export const OAUTH_ORGANIZATION_CLAIM = 'organization_id';
 
 /**
  * [#24166] The organization an OAuth consent binds: the consenting session's
@@ -1478,18 +1482,6 @@ const OAUTH_ORGANIZATION_CLAIM = 'organization_id';
 function consentOrganizationOf(session: Record<string, unknown> | null | undefined): string | undefined {
   const organizationId = session?.activeOrganizationId;
   return typeof organizationId === 'string' && organizationId ? organizationId : undefined;
-}
-
-/**
- * [#24186] The key set the MCP access-token verifier checks signatures
- * against: the document better-auth's `getJwks` endpoint answers, which is
- * what `/jwks` publishes — public members only, read through the signer's
- * keyring reader (`signing-key-read-cache.ts`). `undefined` when the instance
- * carries no jwt plugin or the answer is not a key set.
- */
-async function readPublishedJwks(api: unknown): Promise<JSONWebKeySet | undefined> {
-  const jwks = await (api as { getJwks?: () => Promise<unknown> } | null | undefined)?.getJwks?.();
-  return jwks && Array.isArray((jwks as { keys?: unknown }).keys) ? (jwks as JSONWebKeySet) : undefined;
 }
 
 export class AuthManager {
@@ -7225,81 +7217,18 @@ export class AuthManager {
    * organization (`vetOrganizationClaim`, `@objectstack/core`), as the
    * `IAuthService` contract states.
    */
-  async verifyMcpAccessToken(
+  verifyMcpAccessToken(
     token: string,
   ): Promise<{ userId: string; scopes: string[]; clientId?: string; organizationId?: string } | null> {
-    try {
-      if (!token || token.split('.').length !== 3) return null; // not a JWS compact token
-      if (!this.isMcpOAuthEnabled()) return null;
-
-      const { createLocalJWKSet, jwtVerify, errors } = await import('jose');
-
-      const api = await this.getApi();
-      const jwks = await readPublishedJwks(api);
-      if (!jwks) return null;
-      const expected = { issuer: this.getAuthIssuer(), audience: this.getMcpResourceUrl() };
-      const verifyAgainst = async (keys: JSONWebKeySet) =>
-        (await jwtVerify(token, createLocalJWKSet(keys), expected)).payload;
-
-      let payload: Awaited<ReturnType<typeof verifyAgainst>>;
-      try {
-        payload = await verifyAgainst(jwks);
-      } catch (error) {
-        // Only "no key in the set matches this token" earns the fresh read: a
-        // key minted where this process could not see it. Every other failure
-        // is the token's own, and a re-read could not change it.
-        if (!(error instanceof errors.JWKSNoMatchingKey)) throw error;
-        const fresh = await this.rereadKeyringForUnknownKey(api);
-        if (!fresh) return null;
-        payload = await verifyAgainst(fresh);
-      }
-
-      const subject = typeof payload.sub === 'string' && payload.sub ? payload.sub : undefined;
-      if (!subject) return null;
-
-      // The two spellings of "which client is presenting this", read
-      // independently rather than through a `??` chain: a token that carries
-      // both and disagrees with itself must be refused on EITHER match, and
-      // collapsing them first would let the losing spelling smuggle the
-      // client id past the comparison below.
-      const clientIdClaim =
-        typeof (payload as any).client_id === 'string' && (payload as any).client_id
-          ? ((payload as any).client_id as string)
-          : undefined;
-      const azp =
-        typeof (payload as any).azp === 'string' && (payload as any).azp
-          ? ((payload as any).azp as string)
-          : undefined;
-      // No client identity at all → the human/machine discriminator has no
-      // input. Fail closed rather than admit an unclassifiable token.
-      if (!clientIdClaim && !azp) return null;
-      // `sub` IS the client → RFC 9068 §2.2.3.1's "no resource owner was
-      // involved" shape, i.e. a client_credentials grant. No principal.
-      if (subject === clientIdClaim || subject === azp) return null;
-
-      const scopes =
-        typeof payload.scope === 'string'
-          ? payload.scope.split(' ').filter(Boolean)
-          : [];
-      // The bound organization, when the token carries one. A claim that is
-      // PRESENT but is not a non-empty string is no organization this
-      // authorization server mints, so the token is refused rather than read
-      // as "no organization": the check that cannot run must not pass.
-      const organizationClaim = (payload as Record<string, unknown>)[OAUTH_ORGANIZATION_CLAIM];
-      if (
-        organizationClaim !== undefined
-        && (typeof organizationClaim !== 'string' || !organizationClaim)
-      ) return null;
-      const organizationId = organizationClaim as string | undefined;
-      return {
-        userId: subject,
-        scopes,
-        ...(azp ? { clientId: azp } : {}),
-        ...(organizationId ? { organizationId } : {}),
-      };
-    } catch {
-      return null; // unknown/expired/wrong-audience/garbage → no principal
-    }
+    // [#25224 cut 9] The body moved to `auth-manager-mcp-access-token.ts` (see `McpAccessTokenHost`).
+    const host: Pick<McpAccessTokenHost, 'getApi' | 'getAuthIssuer' | 'getMcpResourceUrl' | 'isMcpOAuthEnabled' | 'rereadKeyringForUnknownKey'> = {
+      getApi: (...a) => this.getApi(...a),
+      getAuthIssuer: (...a) => this.getAuthIssuer(...a),
+      getMcpResourceUrl: (...a) => this.getMcpResourceUrl(...a),
+      isMcpOAuthEnabled: (...a) => this.isMcpOAuthEnabled(...a),
+      rereadKeyringForUnknownKey: (...a) => this.rereadKeyringForUnknownKey(...a),
+    };
+    return verifyMcpAccessToken.call(host, token);
   }
 
   /**
@@ -7319,24 +7248,16 @@ export class AuthManager {
    * not read again on every token.
    */
   private rereadKeyringForUnknownKey(api: unknown): Promise<JSONWebKeySet | undefined> {
-    const last = this.unknownKeyReread;
-    if (last?.pending) return last.pending;
-    const now = Date.now();
-    if (last && now - last.startedAtMs < UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS) {
-      return Promise.resolve(undefined);
-    }
-    retireHeldKeyrings(this.config.dataEngine);
-    const pending = readPublishedJwks(api);
-    const reread: { readonly startedAtMs: number; pending?: Promise<JSONWebKeySet | undefined> } = {
-      startedAtMs: now,
-      pending,
+    // [#25224 cut 9] The body moved to `auth-manager-mcp-access-token.ts` (see `McpAccessTokenHost`).
+    const readConfig = () => this.config;
+    const readUnknownKeyReread = () => this.unknownKeyReread;
+    const writeUnknownKeyReread = (v: AuthManager['unknownKeyReread']) => { this.unknownKeyReread = v; };
+    const host: Pick<McpAccessTokenHost, 'config' | 'unknownKeyReread'> = {
+      get config() { return readConfig(); },
+      get unknownKeyReread() { return readUnknownKeyReread(); },
+      set unknownKeyReread(v) { writeUnknownKeyReread(v); },
     };
-    this.unknownKeyReread = reread;
-    const settle = () => {
-      reread.pending = undefined;
-    };
-    pending.then(settle, settle);
-    return pending;
+    return rereadKeyringForUnknownKey.call(host, api);
   }
 
   // ---------------------------------------------------------------------------

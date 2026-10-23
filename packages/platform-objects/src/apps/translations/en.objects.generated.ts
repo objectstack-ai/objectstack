@@ -526,7 +526,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     description: "Organizations for multi-tenant grouping",
     fields: {
       name: {
-        label: "Name"
+        label: "Name",
+        help: "The organization's own name. The product name the console shows is a different setting, set in Settings → Branding."
       },
       slug: {
         label: "Slug",
@@ -545,7 +546,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "Timezone",
-        help: "IANA time zone (e.g. UTC, Asia/Shanghai) date boundaries are computed in for this organization — the root default every business unit without a zone of its own inherits. Unset means UTC."
+        help: "IANA time zone (e.g. UTC, Asia/Shanghai), kept as the root default for business units without a zone of their own. It does not change any date calculation today: formulas, reports and displayed dates use Settings → Localization → Default timezone."
       },
       parent_organization_id: {
         label: "Parent Organization",

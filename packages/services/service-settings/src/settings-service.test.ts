@@ -53,10 +53,21 @@ describe('SettingsService — registry', () => {
 describe('SettingsService — resolver precedence', () => {
   it('returns default when nothing set', async () => {
     const svc = new SettingsService({ env: {} });
+    svc.registerManifest(localizationSettingsManifest);
+    const r = await svc.get('localization', 'timezone');
+    expect(r.source).toBe('default');
+    expect(r.value).toBe('UTC');
+    expect(r.locked).toBe(false);
+  });
+
+  it('returns no value, as the default, for a key that declares none', async () => {
+    // [#25347] `branding.workspace_name` declares no default: an unsaved name
+    // is the deployment's own, which this service does not know.
+    const svc = new SettingsService({ env: {} });
     svc.registerManifest(brandingSettingsManifest);
     const r = await svc.get('branding', 'workspace_name');
     expect(r.source).toBe('default');
-    expect(r.value).toBe('ObjectStack');
+    expect(r.value).toBeNull();
     expect(r.locked).toBe(false);
   });
 
@@ -344,7 +355,8 @@ describe('SettingsService — resetNamespace / built-in reset action', () => {
     expect(cleared).toBe(1);
     const r = await svc.get('branding', 'workspace_name');
     expect(r.source).toBe('default');
-    expect(r.value).toBe('ObjectStack');
+    // No manifest default (#25347): reset leaves the key unset.
+    expect(r.value).toBeNull();
   });
 
   it('leaves env-locked keys untouched', async () => {

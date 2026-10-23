@@ -1026,10 +1026,13 @@ describe('ADR-0126 §4/§5 — the row this line writes', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('#10243 — the process-local `flowEnabled` map is retired', () => {
-    const engineSource = readFileSync(
-        fileURLToPath(new URL('./engine.ts', import.meta.url)),
-        'utf8',
-    );
+    // [#25222] The engine's source is `engine.ts` plus every module a method's
+    // body moved to: a grep-level pin reads them all, or a moved body is a place
+    // the retired mechanism could come back unseen.
+    const ENGINE_SOURCES = ['./engine.ts', './flow-registration-checks.ts'];
+    const engineSource = ENGINE_SOURCES.map((path) =>
+        readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'),
+    ).join('\n');
 
     it('the identifier no longer exists as engine STATE', () => {
         // A grep-level pin, because the thing being asserted is the absence of
@@ -1049,7 +1052,8 @@ describe('#10243 — the process-local `flowEnabled` map is retired', () => {
         expect(writes.length).toBeGreaterThan(0);
 
         const writingMethods = engineSource
-            .split(/\n    (?=[a-zA-Z]|\/\*\*)/)
+            // A class member, or a moved body's top-level declaration.
+            .split(/\n    (?=[a-zA-Z]|\/\*\*)|\n(?=export function |\/\*\*)/)
             .filter((chunk) => /this\.flowLedgerDisabled\.(add|delete)\(/.test(chunk));
         for (const chunk of writingMethods) {
             expect(
