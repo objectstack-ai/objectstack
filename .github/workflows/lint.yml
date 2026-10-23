@@ -5785,7 +5785,14 @@ jobs:
           TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
-        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...' --summarize --log-file=.turbo/remote-cache/typecheck-workspace.json
+
+      # ci.yml Build Core's "Turbo remote cache (#21186)" comment, ASSERTED
+      # paragraph (#25374). A gate of this lane, so the lane verdict carries its red.
+      - name: The Turbo remote cache was on for the workspace build
+        id: turbo-remote-cache-was-on
+        continue-on-error: true
+        run: node scripts/ci/assert-turbo-remote-cache.mjs --site 'Type Check · workspace' --log .turbo/remote-cache/typecheck-workspace.json
 
       # CLI transcripts in content/docs are bound to the registries they quote
       # (#15373). `content/docs` teaches with pasted CLI output, and some of those
@@ -6041,7 +6048,14 @@ jobs:
           TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
-        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...' --summarize --log-file=.turbo/remote-cache/typecheck-debt.json
+
+      # ci.yml Build Core's "Turbo remote cache (#21186)" comment, ASSERTED
+      # paragraph (#25374). A gate of this lane, so the lane verdict carries its red.
+      - name: The Turbo remote cache was on for the workspace build
+        id: turbo-remote-cache-was-on
+        continue-on-error: true
+        run: node scripts/ci/assert-turbo-remote-cache.mjs --site 'Type Check · debt ledger' --log .turbo/remote-cache/typecheck-debt.json
 
       # The MEASURED half of the coverage gate (#5278). The cheap structural
       # check near the top of this job asserts that a package without a
@@ -6242,7 +6256,14 @@ jobs:
           TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
-        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...' --summarize --log-file=.turbo/remote-cache/typecheck-consumers.json
+
+      # ci.yml Build Core's "Turbo remote cache (#21186)" comment, ASSERTED
+      # paragraph (#25374). A gate of this lane, so the lane verdict carries its red.
+      - name: The Turbo remote cache was on for the workspace build
+        id: turbo-remote-cache-was-on
+        continue-on-error: true
+        run: node scripts/ci/assert-turbo-remote-cache.mjs --site 'Type Check · consumer gates' --log .turbo/remote-cache/typecheck-consumers.json
 
       # The nested-package build. ⚠️ NOT redundant with "Build workspace
       # packages" above, and the reason is the glob: the bare `./packages/*`

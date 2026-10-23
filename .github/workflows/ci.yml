@@ -736,9 +736,11 @@ jobs:
       # builds it there.
       #
       # Its own guarded step, for the reason the slice step below gives: a
-      # guarded SITE is (file, job, step). No `--summarize`: `.turbo/runs/`
-      # stays the test step's alone, and that is what the drift check and the
-      # timings capture read. The four TURBO_* lines are Build Core's,
+      # guarded SITE is (file, job, step). `.turbo/runs/` stays the test step's
+      # alone, because that is what the drift check and the timings capture
+      # read: the `--summarize` here is for the remote-cache assertion after
+      # this step (#25374), which moves the summary it read out to
+      # $RUNNER_TEMP before the tests run. The four TURBO_* lines are Build Core's,
       # verbatim; its "Turbo remote cache (#21186)" comment holds the write
       # rule, the signing and the PINS. ⛔ An empty FILTERS must exit here:
       # `turbo run build` with no filter builds the whole workspace.
@@ -764,7 +766,16 @@ jobs:
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core-closure-build.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run build $FILTERS --concurrency=4 --log-order=stream
+            pnpm turbo run build $FILTERS --concurrency=4 --log-order=stream \
+              --summarize --log-file=.turbo/remote-cache/test-core-closure.json
+
+      # Build Core's "Turbo remote cache (#21186)" comment, ASSERTED paragraph.
+      # `--if-ran`: an empty shard exits the step above before turbo runs.
+      - name: The Turbo remote cache was on for this shard's closure build
+        run: |
+          node scripts/ci/assert-turbo-remote-cache.mjs --site 'Test Core (${{ matrix.shard }}/6) closure' \
+            --log .turbo/remote-cache/test-core-closure.json --if-ran \
+            --move-summary-to "$RUNNER_TEMP/turbo-remote-cache"
 
       # ⛔ A FILE-LEVEL SLICE BUILDS ITS DEPENDENCY CLOSURE HERE, IN ITS OWN
       # GUARDED STEP, so the slice leg in the next step REPLAYS it. Since #19278
@@ -2544,6 +2555,12 @@ jobs:
       - name: check-dts-emitted self-test
         run: node scripts/check-dts-emitted.mjs --self-test
 
+      # The remote-cache assertion after the build below, and after every
+      # carrier that runs it (Test Core's closure, lint.yml's three Type Check
+      # lanes), is one script; its self-test runs here, once.
+      - name: assert-turbo-remote-cache self-test
+        run: node scripts/ci/assert-turbo-remote-cache.mjs --self-test
+
       # ── Turbo remote cache (#21186) ─────────────────────────────────────
       # Vercel's managed Turborepo remote cache. objectstack-ai/cloud's
       # test.yml builds this repo at its pinned SHA with the same command and
@@ -2579,6 +2596,16 @@ jobs:
       # unset: remote caching is off and the build is unchanged; the summary
       # then reads `Remote caching disabled (remote cache requested — …)`.
       #
+      # ASSERTED (#25374). The step after this one reads that prelude line
+      # from turbo's structured log (`--log-file`, repo-relative or turbo
+      # ignores it) and the hit counts from `--summarize`, prints both into the
+      # job's step summary, and reds a run that WRITES the remote (the
+      # `remote:rw` branch above) when the cache is off; a read-only run only
+      # warns. Neither flag enters a task hash (83 of 83 identical with and
+      # without, `--dry=json`, turbo 2.11.5). The carriers that assert are this
+      # step, Test Core's closure and lint.yml's three Type Check lanes; the
+      # verdict table is the script header's.
+      #
       # PINS, for every step that carries these four lines (#22077). Each
       # carrier points back here.
       #   - BUILD TASKS ONLY. #19086's lesson: a step that writes artifacts from
@@ -2608,7 +2635,10 @@ jobs:
           TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
-        run: pnpm build
+        run: pnpm build --summarize --log-file=.turbo/remote-cache/build-core.json
+
+      - name: The Turbo remote cache was on for the build
+        run: node scripts/ci/assert-turbo-remote-cache.mjs --site 'Build Core' --log .turbo/remote-cache/build-core.json
 
       # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
       # per package, immediately after that package's `tsup`, and is the LAST
