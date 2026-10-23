@@ -118,8 +118,7 @@
 - S 机械 `medium`;M `high`(默认);L/XL/`security`/p1/契约复核/四轴分析 `xhigh`;`max` 凭维护者点名。
 - 解析顺序、pin 语义与允许名单回退陷阱以 os-dev 定义 frontmatter 注释为权威。
 - 分诊 suggestion 行是输入不是决定,不采纳给理由。
-- 派发词 ⛔ 默认不整段粘贴 issue 正文:让 dev 自己读全文与全部评论并自查正文完整性。
-- 派发词只带增量,构造细则与条款原文见 `references/dispatch-runbook.md`。
+- 派发词只带增量,⛔ 不整段贴卡正文;dev 自读全文与评论、自查完整(`dispatch-runbook.md`)。
 - 派发词引卡片的精确断言(schema 臂、判据、原文)一律逐字,⛔ 不释义转述。
 - 三分区:裁决(不可重裁)/ PM 机制假设(须实测,鼓励证伪)/ PM 建议的路线(可选,实测优先)。
 - 凡我觉得可以这样的一律降到第三区;⛔ 不把假设写成裁决。
@@ -127,7 +126,9 @@
 - ⛔ 不砍卡类特有约束:ADR 类 draft-only、tier 推导引用、棘轮实况、释义纪律。
 - 无条件条款只住角色文件,冲突时它胜、错了修那里,⛔ 不靠派发词临时覆盖。
 - 终报要求随派发词带一句:只收机器可核字段(gates / line_budget / deviations / files_changed)。
-- 派发令恒带 `Writes:` 行:只走 REST 代理、写预算(端点清单)、`mcp_calls` 计数,dev 两数都报。
+- 派发令恒带 `Writes:` 行:PR 只经中继 `pr_create`;评论/标签/正文只经中继写工具;两数都报。
+- ⛔ GitHub MCP 写:`create_pull_request`、`update_pull_request`、`issue_write`、`add_issue_comment` 等。
+- 多仓项目线程不加载仓 `settings.json` deny,此行即唯一防线;两数 = 写预算与 `mcp_calls`。
 - 清单、路径、行号在派发那一刻从树上取,⛔ 不从卡片/上次派发/记忆抄。
 - 门禁清单取 `dispatch-gates --commands --repo 仓` 逐条跑,退出码先落盘,`--ran` 对账;被拒即手推。
 - 点名单是线索不是规格,dev 对实际改动重取补跑;行级断言转述前必须自己重验。
