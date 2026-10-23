@@ -1607,7 +1607,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1617,7 +1617,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_mark_done on showcase_task (ui/actions/index.ts — script action, registered body, NO declared params, no requiredPermissions): the clean 409 probe",
+          "showcase_mark_done on showcase_task (ui/actions/index.ts — a declared record write: operation 'update' with patch { done: true, progress: 100 } and no body, which the action route performs as the caller; NO declared params, no requiredPermissions): the clean 409 probe",
           "showcase_action_param_gallery on showcase_field_zoo (ui/actions/index.ts — script action with a required param p_text): the param-ordering discriminator — the ONLY stock action whose param contract can produce a contrasting 400, because enforceActionParams (action-execution.ts) returns null outright for an action with no declared params",
           "showcase_zoo_perm_missing on showcase_field_zoo (predicate-matrix.action.ts — requiredPermissions: ['showcase.restricted_ops'], granted to nobody): the 403-oracle probe",
           "showcase_portfolio_snapshot (ui/actions/index.ts — object-less/global, and the ONLY stock action with ai.exposed: true): the live MCP-door probe; its activation flip spells the object segment `global` (/actions/_activation/global/showcase_portfolio_snapshot)"
@@ -1639,7 +1639,7 @@
       ],
       "acceptance": [
         {
-          "clause": "the REST door refuses a disabled packaged action 409 ACTION_DISABLED and dispatches NOTHING: status 409, code ACTION_DISABLED (registered in the ADR-0112 ledger, error-code-ledger.zod.ts), message = the engine's own describeDisabledAction sentence naming the ledger — and no side effect lands (the mark_done body's done/progress write never ran)",
+          "clause": "the REST door refuses a disabled packaged action 409 ACTION_DISABLED and dispatches NOTHING: status 409, code ACTION_DISABLED (registered in the ADR-0112 ledger, error-code-ledger.zod.ts), message = the engine's own describeDisabledAction sentence naming the ledger — and no side effect lands (mark_done's declared done/progress write never ran)",
           "oracle": "api",
           "verify": "step-3 trace: 409 + code ACTION_DISABLED + the disabled-action sentence; follow-up reads show no task mutated",
           "evidence": "the trace + the control re-reads"
@@ -1748,6 +1748,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated on ' → 'boot the showcase on its own port and DB, on '. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-23",
+          "change": "fixtures.requires[0] and acceptance[0] respelled for #25468: showcase_mark_done is no longer a script action with a registered body; it declares its write (operation 'update', patch { done: true, progress: 100 }), which the action route performs as the caller. Its type stays 'script', the schema default, and it still declares no params and no requiredPermissions, so it is still the clean 409 probe: the activation consult runs ahead of the declarative branch in packages/runtime/src/domains/actions.ts (read at base aa2dbab7b; measured on a dogfood boot of the change: disabled with a nonexistent recordId answers 409 ACTION_DISABLED). No clause changed",
+          "ref": "#25468"
         }
       ]
     },
