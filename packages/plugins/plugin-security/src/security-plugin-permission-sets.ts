@@ -88,6 +88,8 @@ import { isGuestEnvelope, POSITION_NAME_FOLD_EVENT } from './security-plugin.js'
 import type { PermissionSet } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 import { readDisabledCatalogNames } from '@objectstack/core';
+import { BUILTIN_IDENTITY_ORG_EXTERNAL } from '@objectstack/spec';
+import { EXTERNAL_DEFAULT_PERMISSION_SET } from './objects/default-permission-sets.js';
 
 /**
  * The `SecurityPlugin` members the functions below read — every one of them,
@@ -155,9 +157,17 @@ export async function resolvePermissionSetsForContextUnmemoized(
   // the agent's ceiling is EXACTLY the restricted set, and composing the
   // platform baseline into it is precisely the widening D10 forbids. The two
   // branches produce arrays only so the code below reads once.
+  // [Ruling 6355206139, letter B, stage 1, E4] An EXTERNAL member (`org_external`,
+  // projected from `sys_member.role = external` in the active organization) is
+  // not handed the deployment's member baseline — `member_default`'s
+  // fellow-member directory scope, an app's `isDefault` set — here any more
+  // than through the `everyone` anchor it does not hold. Its floor is its own
+  // anchor-safe set: its own identity rows, and data only through explicit grants.
   const baseline: string[] = isAgent
     ? [MCP_AGENT_PERMISSION_SET_RESTRICTED]
-    : this.baselinePermissionSets;
+    : positions.includes(BUILTIN_IDENTITY_ORG_EXTERNAL)
+      ? [EXTERNAL_DEFAULT_PERMISSION_SET]
+      : this.baselinePermissionSets;
   // [ADR-0090 D5] Baseline is ADDITIVE, always (for humans): the baseline
   // set(s) apply to every authenticated request IN ADDITION to whatever else
   // resolved. The former "only when the user has nothing else" conditional

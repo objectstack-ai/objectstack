@@ -90,6 +90,33 @@ export const MEMBERSHIP_ROLE_MEMBER = 'member';
 export const MEMBERSHIP_ROLE_DELEGATED_ADMIN = 'delegated_admin';
 
 /**
+ * The membership grade of an organization's EXTERNAL population — portal
+ * users (a supplier's, a customer's) admitted through the organization invite
+ * beside the people who work there (ruling of record 6355206139, letter B).
+ *
+ * Like every membership role it decides what its holder REACHES, never what
+ * it may do (ADR-0108), and what it reaches is less than `member`:
+ *
+ *  - **no organization endpoint** — better-auth registers it with no
+ *    statement at all, and the member directory doors (`list-members`,
+ *    `get-full-organization`) answer its holder its own membership only;
+ *  - **no baseline beyond its own rows** — `mapMembershipRole` projects it to
+ *    `org_external`, the resolver then withholds the `everyone` audience
+ *    anchor, and the holder's baseline is the external self-service set (its
+ *    own identity rows, never the member directory); the deployment's default
+ *    sets do not reach it. Data comes only through explicit grants: positions,
+ *    permission sets and sharing;
+ *  - **exclusive** — a role value carrying it beside another role is refused
+ *    at write, so no holder is both a member and an external;
+ *  - **outside the department tree** — a holder is a member of the
+ *    organization but never placed in its business units.
+ *
+ * Any issuer that reaches the invitation endpoint may confer it: it confers
+ * less than a plain member (`invitation-role-grant.ts`).
+ */
+export const MEMBERSHIP_ROLE_EXTERNAL = 'external';
+
+/**
  * The membership roles — the WHOLE vocabulary, in display order (ADR-0108).
  *
  * Not "the built-ins, plus whatever an app adds": there is no second source.
@@ -101,6 +128,7 @@ export const BUILTIN_MEMBERSHIP_ROLES = [
   MEMBERSHIP_ROLE_ADMIN,
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
   MEMBERSHIP_ROLE_MEMBER,
+  MEMBERSHIP_ROLE_EXTERNAL,
 ] as const;
 
 export type BuiltinMembershipRole = (typeof BUILTIN_MEMBERSHIP_ROLES)[number];
@@ -118,4 +146,5 @@ export const BUILTIN_MEMBERSHIP_ROLE_OPTIONS: readonly Readonly<{ label: string;
   { label: 'Admin', value: MEMBERSHIP_ROLE_ADMIN },
   { label: 'Delegated Admin', value: MEMBERSHIP_ROLE_DELEGATED_ADMIN },
   { label: 'Member', value: MEMBERSHIP_ROLE_MEMBER },
+  { label: 'External', value: MEMBERSHIP_ROLE_EXTERNAL },
 ] as const;

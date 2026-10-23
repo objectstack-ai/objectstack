@@ -146,7 +146,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理员",
               delegated_admin: "受托管理员",
-              member: "成员"
+              member: "成员",
+              external: "外部成员"
             }
           }
         }
@@ -582,7 +583,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理员",
               delegated_admin: "受托管理员",
-              member: "成员"
+              member: "成员",
+              external: "外部成员"
             }
           }
         }
@@ -643,7 +645,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           owner: "所有者",
           admin: "管理员",
           delegated_admin: "受托管理员",
-          member: "成员"
+          member: "成员",
+          external: "外部成员"
         }
       }
     },
@@ -667,7 +670,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理员",
               delegated_admin: "受托管理员",
-              member: "成员"
+              member: "成员",
+              external: "外部成员"
             }
           }
         }
@@ -721,7 +725,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           owner: "所有者",
           admin: "管理员",
           delegated_admin: "受托管理员",
-          member: "成员"
+          member: "成员",
+          external: "外部成员"
         }
       },
       status: {
@@ -795,7 +800,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理员",
               delegated_admin: "受托管理员",
-              member: "成员"
+              member: "成员",
+              external: "外部成员"
             }
           }
         }

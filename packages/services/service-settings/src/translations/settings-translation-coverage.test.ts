@@ -11,8 +11,10 @@
  *
  * This test pins each shipped non-English locale to full coverage of every
  * manifest's structural strings — namespace title/description, each group
- * title, each field label, and each `info_banner`'s title and text (keyed by
- * the banner's `id` under `settings.<namespace>.banners`). Dropdown *option* labels are intentionally
+ * title, each field label, each `info_banner`'s title and text (keyed by
+ * the banner's `id` under `settings.<namespace>.banners`), and each
+ * `action_button`'s label (keyed by the button's `id` under
+ * `settings.<namespace>.actions`). Dropdown *option* labels are intentionally
  * excluded: several must not be "translated" (the `timezone` option "UTC" is a
  * code; each `locale` option names its language in that language), and
  * option-level parity is filled per-locale on a best-effort basis.
@@ -56,6 +58,14 @@ function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifes
       }
       if (tr?.banners?.[s.id]?.title == null) missing.push(`banner:${s.id}.title`);
       if (tr?.banners?.[s.id]?.text == null) missing.push(`banner:${s.id}.text`);
+    } else if (s.type === 'action_button') {
+      // Same as a banner: an action button is addressed by its `id`, and one
+      // without an id has no place in the bundle for its label.
+      if (!s.id) {
+        missing.push('action without an id');
+        continue;
+      }
+      if (tr?.actions?.[s.id]?.label == null) missing.push(`action:${s.id}`);
     } else if (s.key) {
       if (tr?.keys?.[s.key]?.label == null) missing.push(`key:${s.key}`);
     }
@@ -64,7 +74,7 @@ function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifes
 }
 
 /**
- * The other direction: copy for a group, key or banner no manifest declares.
+ * The other direction: copy for a group, key, banner or action no manifest declares.
  * Such an entry renders nowhere, so it survives every review as dead text. The four
  * Localization format keys retired by #21958 are the case that named it.
  */
@@ -80,11 +90,14 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
     const groups = new Set<string>();
     const keys = new Set<string>();
     const banners = new Set<string>();
+    const actions = new Set<string>();
     for (const s of m.specifiers) {
       if (s.type === 'group') {
         if (s.id) groups.add(s.id);
       } else if (s.type === 'info_banner') {
         if (s.id) banners.add(s.id);
+      } else if (s.type === 'action_button') {
+        if (s.id) actions.add(s.id);
       } else if (s.key) {
         keys.add(s.key);
       }
@@ -92,6 +105,7 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
     for (const g of Object.keys(tr?.groups ?? {})) if (!groups.has(g)) extra.push(`${ns}.group:${g}`);
     for (const k of Object.keys(tr?.keys ?? {})) if (!keys.has(k)) extra.push(`${ns}.key:${k}`);
     for (const b of Object.keys(tr?.banners ?? {})) if (!banners.has(b)) extra.push(`${ns}.banner:${b}`);
+    for (const a of Object.keys(tr?.actions ?? {})) if (!actions.has(a)) extra.push(`${ns}.action:${a}`);
   }
   return extra;
 }
@@ -103,7 +117,7 @@ describe('settings translation coverage', () => {
 
   for (const [locale, data] of LOCALES) {
     for (const m of manifests) {
-      it(`${locale} covers settings.${m.namespace} (title / groups / keys / banners)`, () => {
+      it(`${locale} covers settings.${m.namespace} (title / groups / keys / banners / actions)`, () => {
         const missing = missingFor(data, m);
         expect(missing, `${locale} missing for ${m.namespace}: ${missing.join(', ')}`).toEqual([]);
       });
@@ -111,7 +125,7 @@ describe('settings translation coverage', () => {
   }
 
   for (const [locale, data] of [['en', en], ...LOCALES] as typeof LOCALES) {
-    it(`${locale} carries no copy for a group, key or banner no manifest declares`, () => {
+    it(`${locale} carries no copy for a group, key, banner or action no manifest declares`, () => {
       const extra = undeclaredIn(data);
       expect(extra, `${locale} has undeclared settings copy: ${extra.join(', ')}`).toEqual([]);
     });

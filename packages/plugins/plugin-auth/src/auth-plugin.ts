@@ -67,6 +67,7 @@ import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
+import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
@@ -1661,6 +1662,12 @@ export class AuthPlugin implements Plugin {
         registerMemberRoleCanonicalization(engine, {
           packageId: 'com.objectstack.plugin-auth.member-role-canonical',
           logger: ctx.logger,
+        });
+        // [Ruling 6355206139 E5/E6] The `external` role is held alone, and its
+        // holder is never placed in the organization's business units — at
+        // priority 6, judging the canonical spelling the hook above wrote.
+        registerExternalMembershipGuard(engine, {
+          packageId: 'com.objectstack.plugin-auth.external-membership',
         });
         registerIdentityWriteGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.identity-write-guard',

@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The platform's built-in positions — the four identity names (ADR-0068 D2) and
- * the two audience anchors (ADR-0090 D5/D9) — declared ONCE, as position
- * metadata this plugin owns.
+ * The platform's built-in positions — the identity names (ADR-0068 D2, plus
+ * `org_external`, ruling 6355206139) and the two audience anchors (ADR-0090
+ * D5/D9) — declared ONCE, as position metadata this plugin owns.
  *
  * ## One list, one home
  *
- * {@link securityBuiltinPositions} is the only place the six are listed.
+ * {@link securityBuiltinPositions} is the only place the built-ins are listed.
  * `SecurityPlugin.init` declares them to the engine registry
  * ({@link registerBuiltinPositions}), under this plugin's package id, so the
  * security catalog read (`createSecurityCatalogReader`, `@objectstack/core`)
@@ -32,7 +32,7 @@
  * with this plugin as the owning package — the provenance the manifest stamps
  * on the platform's permission sets.
  *
- * That provenance is also what keeps the six un-repurposable at the metadata
+ * That provenance is also what keeps the built-ins un-repurposable at the metadata
  * door: a packaged item of a type with no organization overlay (`position`) is
  * refused an in-place `PUT /api/v1/meta/position/:name` there, as the
  * platform's packaged permission sets are.
@@ -56,23 +56,40 @@
  * the high-privilege check, so a boot that composes the plugin for its
  * declarations only holds it too, and again at `kernel:ready`, once the stack's
  * declared capabilities that check reads are in, with the accepted package
- * defaults; no other built-in names a set.
+ * defaults.
+ *
+ * ## The other binding: `org_external`'s own baseline
+ *
+ * [Ruling 6355206139, letter B, stage 1, E1/E4] A holder of the `external`
+ * organization role projects to `org_external` and does NOT hold `everyone`
+ * (`resolveUserAuthzGrants`, `@objectstack/core`), so none of the deployment's
+ * defaults above reach it. What does is the one set its identity position
+ * names, statically — `external_default`, its own identity rows and nothing of
+ * the member directory. No other built-in names a set.
  */
 
 import {
   AUDIENCE_ANCHOR_POSITIONS,
   BUILTIN_IDENTITY_METADATA,
   BUILTIN_IDENTITY_NAMES,
+  BUILTIN_IDENTITY_ORG_EXTERNAL,
   EVERYONE_POSITION,
   GUEST_POSITION,
 } from '@objectstack/spec';
+import { EXTERNAL_DEFAULT_PERMISSION_SET } from './objects/default-permission-sets.js';
 
-/** One built-in position declaration: identity and display only (module doc). */
+/** One built-in position declaration: identity and display, and `org_external`'s static binding (module doc). */
 export interface BuiltinPositionDeclaration {
   readonly name: string;
   readonly label: string;
   readonly description: string;
+  readonly permissionSets?: readonly string[];
 }
+
+/** [Ruling 6355206139 E4] The static bindings a built-in identity carries — `org_external`'s alone (module doc). */
+const BUILTIN_IDENTITY_BINDINGS: Readonly<Record<string, readonly string[]>> = {
+  [BUILTIN_IDENTITY_ORG_EXTERNAL]: Object.freeze([EXTERNAL_DEFAULT_PERMISSION_SET]),
+};
 
 /**
  * [ADR-0090 D5/D9] The display text of the two audience anchors. `everyone` —
@@ -104,11 +121,17 @@ const AUDIENCE_ANCHOR_METADATA: Readonly<Record<(typeof AUDIENCE_ANCHOR_POSITION
 };
 
 /**
- * The six built-in positions, identity names first, then the audience anchors —
+ * The built-in positions, identity names first, then the audience anchors —
  * the order the built-in seeder has always written them in.
  */
 export const securityBuiltinPositions: readonly BuiltinPositionDeclaration[] = Object.freeze([
-  ...BUILTIN_IDENTITY_NAMES.map((name) => Object.freeze({ name, ...BUILTIN_IDENTITY_METADATA[name] })),
+  ...BUILTIN_IDENTITY_NAMES.map((name) =>
+    Object.freeze({
+      name,
+      ...BUILTIN_IDENTITY_METADATA[name],
+      ...(BUILTIN_IDENTITY_BINDINGS[name] ? { permissionSets: BUILTIN_IDENTITY_BINDINGS[name] } : {}),
+    }),
+  ),
   ...AUDIENCE_ANCHOR_POSITIONS.map((name) => Object.freeze({ name, ...AUDIENCE_ANCHOR_METADATA[name] })),
 ]);
 
@@ -123,7 +146,7 @@ export interface BuiltinPositionRegistry {
 }
 
 /**
- * Declare the six built-in positions to the engine registry, owned by
+ * Declare the built-in positions to the engine registry, owned by
  * `packageId` (the plugin passes its own `SECURITY_PLUGIN_ID`). Each
  * registration gets a fresh copy: the registry stamps provenance onto the
  * object it is handed, and the list above is shared.
@@ -135,7 +158,12 @@ export function registerBuiltinPositions(registry: unknown, packageId: string): 
   const target = registry as Partial<BuiltinPositionRegistry> | null | undefined;
   if (!target || typeof target.registerItem !== 'function') return 0;
   for (const declaration of securityBuiltinPositions) {
-    target.registerItem('position', { ...declaration }, 'name', packageId);
+    target.registerItem(
+      'position',
+      { ...declaration, ...(declaration.permissionSets ? { permissionSets: [...declaration.permissionSets] } : {}) },
+      'name',
+      packageId,
+    );
   }
   return securityBuiltinPositions.length;
 }

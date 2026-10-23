@@ -59,7 +59,7 @@ const DECLARED_ADMIN_GROUP: string[] = Object.entries(SysUser.fields as Record<s
 const PEER_DIRECTORY_FIELDS = ['name', 'email', 'image', 'banned'];
 
 const ADMIN_SETS = [ADMIN_FULL_ACCESS, ...ORGANIZATION_ADMIN_GRANTS];
-const WITHHOLDING_SETS = ['member_default', 'viewer_readonly'];
+const WITHHOLDING_SETS = ['member_default', 'viewer_readonly', 'external_default'];
 
 const setByName = (name: string): PermissionSet => {
   const set = defaultPermissionSets.find((s) => s.name === name);

@@ -301,6 +301,9 @@ import {
     runUpdateManyLoop,
     updateManyData,
 } from './protocol-batch-data.js';
+// [#25467 cut 2] The metadata diagnostics sweep (`getMetaDiagnostics`); the method of
+// the same name below hands the body the members it reads (`MetaDiagnosticsHost`).
+import { getMetaDiagnostics } from './protocol-meta-diagnostics.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -2301,7 +2304,7 @@ function viewIdentityPatch(overlay: Record<string, unknown>, baseline: unknown):
  * registry's listings: per name, and the ones probed for every name. See
  * `ObjectStackProtocolImplementation.shippingPackagesOf`.
  */
-type ShippingPackages = {
+export type ShippingPackages = {
     readonly byName: ReadonlyMap<string, ReadonlySet<string>>;
     readonly anyName: ReadonlySet<string>;
 };
@@ -9254,7 +9257,7 @@ export class ObjectStackProtocolImplementation implements
      * skip silently (they cannot be validated and should not appear
      * as "valid" either — they are simply opaque to this report).
      */
-    async getMetaDiagnostics(request: {
+    getMetaDiagnostics(request: {
         type?: string;
         severity?: 'error' | 'warning';
         packageId?: string;
@@ -9273,177 +9276,15 @@ export class ObjectStackProtocolImplementation implements
          */
         stats: Record<string, { count: number; locked: number; packages: string[] }>;
     }> {
-        const includeWarnings = request.severity === 'warning';
-        const targetTypes = request.type
-            ? [request.type]
-            : DEFAULT_METADATA_TYPE_REGISTRY
-                .filter((e) => getMetadataTypeSchema(e.type))
-                .map((e) => e.type);
-
-        const entries: Array<{ type: string; name: string; diagnostics: MetadataDiagnostics }> = [];
-        const stats: Record<string, { count: number; locked: number; packages: string[] }> = {};
-        let scannedItems = 0;
-
-        for (const t of targetTypes) {
-            let listed: any;
-            try {
-                listed = await this.getMetaItems({
-                    type: t,
-                    packageId: request.packageId,
-                } as any);
-            } catch (error) {
-                // [#8855] TWO different failures used to leave through this
-                // `continue`, and only one of them is benign.
-                //
-                // BENIGN, and the reason the comment named — it is real, which
-                // is why this `catch` is narrowed rather than deleted: the type
-                // is not listable in THIS kernel scope. Skipping it is the
-                // truth, and a scope that cannot enumerate one type must not
-                // fail the whole governance sweep.
-                //
-                // NOT BENIGN: the read already ran the platform's single
-                // discrimination — `getMetaItems` classifies by error TYPE
-                // through {@link rethrowUnlessMetadataStoreUnprovisioned},
-                // returns normally for the one benign driver reason
-                // (`isMissingTableError`: `sys_metadata` not provisioned yet,
-                // so `items: []` IS the truth), and throws
-                // {@link metadataStoreUnavailableError} — a 503 — for every
-                // other read failure. That 503 says "whether rows exist is
-                // UNKNOWN". Swallowing it here put the emptiness straight back
-                // one layer up, and then published it as a NUMBER:
-                //
-                //   * `stats[t]` was never written, so the type is ABSENT from
-                //     the response — not zero, absent — byte-shaped like an
-                //     environment that declares none of it, and the Studio
-                //     directory tile the field exists to feed simply loses it;
-                //   * `total` counts entries that FAILED validation, and a
-                //     store nobody can read contributes none — so a diagnostics
-                //     endpoint whose whole job is reporting problems answered
-                //     `0 problems` precisely when it could not read anything.
-                //
-                // ADR-0110 D3 is the rule: a miss and an outage are different
-                // facts with opposite dispositions ("nothing to fix" vs "the
-                // backend is down, retry"), and a consumer must never read one
-                // as the other. #5108 restored it in `DatabaseLoader`, #5532 in
-                // `getMetaItems` itself — this is the same rule one layer up,
-                // on the consumer that turns the read into a published count.
-                //
-                // Classification is by the envelope the PRODUCER already built,
-                // not by a second reading of the driver error. Re-running
-                // `isMissingTableError` / `rethrowUnlessMetadataStoreUnprovisioned`
-                // on what arrives here would re-wrap an already-shaped 503 in
-                // another one and displace the driver error riding as `cause` —
-                // the object `logWithheldServerFault` prints for the operator
-                // (#5437). The original is rethrown UNCHANGED, so the envelope
-                // that reaches the REST boundary is the one #5532 shaped.
-                //
-                // The test is `status === 503` rather than the narrower
-                // `code === 'SERVICE_UNAVAILABLE'` on purpose, and in the
-                // direction `rethrowUnlessMetadataStoreUnprovisioned`'s own doc
-                // argues: a false "benign" silently mis-answers a question
-                // nobody can re-ask, while a false "real" costs one 503 the
-                // caller can retry.
-                if ((error as { status?: unknown } | null | undefined)?.status === 503) throw error;
-                // [#8924] TWO error classes leave through this catch — the 503
-                // above and the 400 below — under ONE rule: an error the
-                // producer already stamped with a status is a CLASSIFIED
-                // VERDICT, and this sweep may not overrule a verdict into
-                // silence. Everything else is a genuine listing failure nobody
-                // classified, and for those the benign skip below is the ruled
-                // disposition (maintainer, 2026-08-20, option 1).
-                //
-                //  * 503 (#8855, above): the store outage — "whether rows
-                //    exist is UNKNOWN". Swallowing it published an outage as
-                //    "0 problems".
-                //  * 400 (#8924, here): the request-classification refusal
-                //    `canonicalizeMetaRequestType` raises INSIDE `getMetaItems`
-                //    (`status: 400`, `code: 'INVALID_REQUEST'`) for an
-                //    unrecognised spelling of a DECLARED type (`fieldes`,
-                //    `viewes`, `capabilitys`, …). Only the `request.type` arm
-                //    can produce it — the full-sweep arm's `targetTypes` come
-                //    canonical out of the registry — so rethrowing it cannot
-                //    fail a whole-corpus sweep. Swallowing it answered
-                //    `200 {"scannedTypes":1,"stats":{}}` — "scanned 1 type,
-                //    no issues" — to a spelling every sibling `/meta` door
-                //    refuses with a 400 that names both accepted spellings
-                //    (measured: 27 such spellings on a booted kernel, while
-                //    objectui's DiagnosticsPage paints that payload as "All
-                //    clear"). The producer classified the caller's mistake;
-                //    the caller gets to hear it. Declared = enforced.
-                //
-                // What still takes the `continue`: a listing failure with no
-                // status, or any status that is not one of the two verdicts
-                // above (the registry listing is not a guarded read, so its
-                // failures arrive unclassified). That skip is genuine — a
-                // kernel scope that cannot enumerate one type must not fail
-                // the whole governance sweep — and measured to have NO
-                // producer in kernel scope today (six booted scopes, zero
-                // skips), which is exactly why it stays a guard rather than
-                // becoming a payload field (`skippedTypes` was considered and
-                // ruled out as motiveless).
-                //
-                // By `status` and not by `code`, mirroring the 503 test above
-                // and its direction argument: a false "real" is loud and
-                // correctable at the caller; a false "benign" silently
-                // mis-answers a question nobody re-asks.
-                if ((error as { status?: unknown } | null | undefined)?.status === 400) throw error;
-                continue;
-            }
-            const items: any[] = Array.isArray(listed?.items)
-                ? listed.items
-                : Array.isArray(listed)
-                    ? listed
-                    : [];
-            const pkgSet = new Set<string>();
-            let lockedCount = 0;
-            let shipping: ShippingPackages | undefined;
-            for (const item of items) {
-                scannedItems += 1;
-                const pkg = (item?._packageId ?? null) as string | null;
-                if (pkg) pkgSet.add(pkg);
-                // [#21694] Counted from the envelope's own derivation
-                // ({@link servedLockState}), never from the declared `_lock`
-                // alone: a packaged base the write doors refuse reads locked on
-                // its item envelope, so the per-type tile counts it too. The
-                // derivation reads the registry only — no store read per item.
-                // [#21738] Its lock is the one item-lock resolution
-                // ({@link resolveItemLock}) over the item's artifact layer —
-                // [#21803] every installed package that ships the name, from
-                // the address the list's own merge used (ADR-0048 package
-                // scope) — and the document the list serves for it.
-                const itemName = typeof item?.name === 'string' ? item.name : '';
-                shipping ??= this.shippingPackagesOf(t);
-                const itemLock = resolveItemLock({
-                    artifact: this.artifactLockLayerAt({
-                        type: t,
-                        name: itemName,
-                        packageId: request.packageId ?? (item?._packageId as string | undefined),
-                    }, shipping),
-                    overlay: item,
-                });
-                const served = this.servedLockState(t, itemName, item, this.isArtifactBacked(t, itemName), itemLock);
-                if (served.lock !== 'none') lockedCount += 1;
-                const diag: MetadataDiagnostics | undefined =
-                    item?._diagnostics ?? computeMetadataDiagnostics(t, item);
-                if (!diag) continue;
-                if (diag.valid && !includeWarnings) continue;
-                if (diag.valid && includeWarnings && !diag.warnings?.length) continue;
-                entries.push({
-                    type: t,
-                    name: typeof item?.name === 'string' ? item.name : '<unknown>',
-                    diagnostics: diag,
-                });
-            }
-            stats[t] = { count: items.length, locked: lockedCount, packages: [...pkgSet].sort() };
-        }
-
-        return {
-            entries,
-            total: entries.length,
-            scannedTypes: targetTypes.length,
-            scannedItems,
-            stats,
+        // [#25467 cut 2] The body moved to `protocol-meta-diagnostics.ts` (see `MetaDiagnosticsHost`).
+        const host: ThisParameterType<typeof getMetaDiagnostics> = {
+            artifactLockLayerAt: (...a) => this.artifactLockLayerAt(...a),
+            getMetaItems: (...a) => this.getMetaItems(...a),
+            isArtifactBacked: (...a) => this.isArtifactBacked(...a),
+            servedLockState: (...a) => this.servedLockState(...a),
+            shippingPackagesOf: (...a) => this.shippingPackagesOf(...a),
         };
+        return getMetaDiagnostics.call(host, request);
     }
 
     /**

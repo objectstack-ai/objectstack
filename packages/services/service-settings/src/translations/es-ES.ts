@@ -510,6 +510,7 @@ export const esES: PlatformTranslationData = {
       actions: {
         test: { label: 'Probar conexión' },
         test_embedder: { label: 'Probar embedder' },
+        reset: { label: 'Restablecer a los valores predeterminados del entorno' },
       },
       banners: {
         log_prompts_warning: { title: 'Los prompts pueden contener PII',
