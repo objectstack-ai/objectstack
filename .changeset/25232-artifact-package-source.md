@@ -6,7 +6,7 @@
 
 feat(spec,core,objectql): one package entry of a release artifact may state its own `source`, and the registry records it
 
-Clause-②: yes (widening)
+Clause-②: yes
 Metadata-protocol: added
 
 `ArtifactPackageSchema` (one `packages[]` entry of an assembled release artifact) gains an optional `source: 'code' | 'marketplace'` beside `manifest`. The values are the new `ArtifactPackageSourceSchema`, the subset of `InstalledPackageSourceSchema` a load path can register; `authored` and any other value are refused at the entry gate as `INVALID_ARTIFACT_PACKAGE_ENTRY` (422).
