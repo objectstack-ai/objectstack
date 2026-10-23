@@ -325,6 +325,7 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import { SystemObjectName, SystemUserId } from '@objectstack/spec/system';
 import { isMissingTableError, resolveTenancyPosture } from '@objectstack/types';
 import {
+  DEFAULT_ORGANIZATION_SLUG,
   findDefaultOrganization,
   isGrantActive,
   matchesConfiguredPlatformAdmin,
@@ -921,6 +922,59 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
 
 function touchesAny(data: Record<string, unknown>, keys: readonly string[]): boolean {
   return keys.some((k) => k in data);
+}
+
+/**
+ * [ADR-0131 D5] Under `single` the Default Organization is the organization
+ * slugged `default`, else the only one, and its `admin_full_access` grant
+ * confers platform administrator standing. So re-slugging ANOTHER organization
+ * to `default` makes it the Default Organization: on a store holding several
+ * organizations, none slugged `default`, an organization owner who re-slugs
+ * their own takes the anchor, and every holder of a grant it owns becomes a
+ * platform administrator. The break-glass halves never see that, because it
+ * takes standing from nobody.
+ *
+ * This refuses it: a slug changed TO `default` is admitted only on the
+ * organization that is already the Default Organization (the sole one,
+ * re-slugged to the name the boot gives it). Under a wall no grant anchors and
+ * a slug is just a slug, so nothing is read. A slug change to any other value
+ * is not this rule's (the update half judges moving the anchor AWAY).
+ *
+ * Judged at the engine, on `beforeUpdate`, because every door that can change a
+ * slug is an engine update: better-auth's `organization/update` (its adapter
+ * writes through the engine, and the refusal reaches the caller as 403
+ * `PERMISSION_DENIED`), a seed, a plugin, the data API. A read that throws
+ * propagates to the hook, which fails closed.
+ */
+async function refuseDefaultOrganizationSlugCapture(
+  engine: Pick<LastAdminGuardEngine, 'find'>,
+  organizationIds: ReadonlySet<string>,
+  slug: unknown,
+): Promise<void> {
+  if (slug !== DEFAULT_ORGANIZATION_SLUG || organizationIds.size === 0) return;
+  const posture = resolveTenancyPosture();
+  if (postureEnforcesWall(posture)) return;
+  const { id, several } = await findDefaultOrganization((where, limit) =>
+    engine.find(SystemObjectName.ORGANIZATION, { where: { ...where }, limit, fields: ['id'] }, SYSTEM_READ),
+  );
+  if (id !== undefined && organizationIds.size === 1 && organizationIds.has(id)) return;
+  const named = [...organizationIds].map((o) => `'${o}'`).join(', ');
+  const standing =
+    id !== undefined
+      ? `This deployment's Default Organization is '${id}'.`
+      : several
+        ? 'This deployment holds several organizations and none of them is the Default Organization.'
+        : 'This deployment names no Default Organization.';
+  throw refuse(
+    `Refusing this organization update: under the '${posture}' tenancy posture the slug ` +
+      `'${DEFAULT_ORGANIZATION_SLUG}' names the Default Organization, whose '${ADMIN_FULL_ACCESS}' grant ` +
+      'confers platform administrator standing (ADR-0131 D5), so only the Default Organization may take ' +
+      `it, and re-slugging ${named} to it would make that organization the Default Organization. ` +
+      `${standing} Keep another slug. To name a Default Organization, hold one organization (the sole ` +
+      `organization is the Default Organization and may then take the slug '${DEFAULT_ORGANIZATION_SLUG}'), ` +
+      'or declare a walled tenancy posture (OS_TENANCY_POSTURE=group or isolated), where a slug anchors nothing.',
+    SystemObjectName.ORGANIZATION,
+  );
 }
 
 /**
@@ -1856,6 +1910,35 @@ export function registerLastAdminGuard(
     await enforceStanding('organization-update', SystemObjectName.ORGANIZATION, ctx.input, data);
   };
 
+  /**
+   * [ADR-0131 D5] The capture half: a slug changed TO `default` on an
+   * organization that is not the Default Organization
+   * ({@link refuseDefaultOrganizationSlugCapture}). A payload naming another
+   * slug, or none, costs no reads. Fails closed like every half: the rows a
+   * predicate write addresses, or the Default Organization itself, that cannot
+   * be read refuse the write.
+   */
+  const guardOrganizationDefaultSlug = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== SystemObjectName.ORGANIZATION) return;
+    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
+    if (data.slug !== DEFAULT_ORGANIZATION_SLUG) return;
+    try {
+      const ids = await resolveTargetIds('organization-update', SystemObjectName.ORGANIZATION, ctx.input?.id, ctx.input?.options, data);
+      await refuseDefaultOrganizationSlugCapture(engine, ids, data.slug);
+    } catch (err) {
+      if (isRefusal(err)) throw err;
+      const reason = (err as Error)?.message ?? String(err);
+      throw refuse(
+        `Refusing this organization update: the organizations it addresses, or the Default Organization, ` +
+          `could not be read (${reason}), so whether the slug '${DEFAULT_ORGANIZATION_SLUG}' would make ` +
+          'another organization the Default Organization is unknown (ADR-0131 D5). Retry once ' +
+          `'${SystemObjectName.ORGANIZATION}' is readable again.`,
+        SystemObjectName.ORGANIZATION,
+      );
+    }
+  };
+
   const guardOrganizationDelete = async (rawCtx: unknown): Promise<void> => {
     const ctx = ctxOf(rawCtx);
     if (ctx.object !== SystemObjectName.ORGANIZATION) return;
@@ -1952,6 +2035,11 @@ export function registerLastAdminGuard(
     priority: 20,
     packageId,
   });
+  engine.registerHook('beforeUpdate', guardOrganizationDefaultSlug, {
+    object: SystemObjectName.ORGANIZATION,
+    priority: 20,
+    packageId,
+  });
   engine.registerHook('beforeDelete', guardOrganizationDelete, {
     object: SystemObjectName.ORGANIZATION,
     priority: 20,
@@ -1962,7 +2050,8 @@ export function registerLastAdminGuard(
     '[LastAdminGuard] last-administrator guard registered on sys_user (ban + delete, and the ' +
       'email/email_verified pair the deployment-config anchor derives from), sys_member and ' +
       'sys_user_permission_set (standing revocation), sys_organization (creating, re-slugging ' +
-      'or removing the Default Organization the grant anchor reads) and sys_metadata_activation ' +
+      'or removing the Default Organization the grant anchor reads, and re-slugging another ' +
+      "organization to 'default') and sys_metadata_activation " +
       '(switching admin_full_access off) — ADR-0135 D5.2',
   );
 

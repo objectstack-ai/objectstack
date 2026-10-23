@@ -21,7 +21,9 @@
  * Then the two retirements the memo owes (#21868 is the failure designed
  * against), read over HTTP as the standing `get-session` reports:
  *  - the Default Organization deleted and a new one created;
- *  - `default` moved from one organization to another, both directions.
+ *  - `default` moved off the Default Organization (its grant stops anchoring)
+ *    and the organization made the only one again (it anchors again); moving
+ *    `default` onto another organization is refused (ADR-0131 D5).
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -241,19 +243,28 @@ describe('[#24523 / #21868] a sys_organization write retires the memoised Defaul
     expect(await standing()).toEqual({ standing: true, organizationReads: 0 });
   });
 
-  it('⭐ `default` moved to another organization: the old one\'s grant stops anchoring, the new one\'s starts', async () => {
+  it('⭐ `default` moved off the Default Organization: its grant stops anchoring, and anchors again once it is the only one', async () => {
     const [from] = await find('sys_organization', { slug: 'default' });
     const to = await engine.insert('sys_organization', { name: 'Second', slug: 'second' }, { context: SYS });
     expect(await standing()).toEqual({ standing: true, organizationReads: 1 });
     expect(await standing()).toEqual({ standing: true, organizationReads: 0 });
 
     await engine.update('sys_organization', { id: from.id, slug: 'first' }, { context: SYS });
-    await engine.update('sys_organization', { id: to.id, slug: 'default' }, { context: SYS });
-    // The granting direction: a memo still answering `from` would keep conferring standing.
-    expect(await standing()).toEqual({ standing: false, organizationReads: 1 });
+    // The withdrawing direction: a memo still answering `from` would keep conferring standing.
+    expect((await standing()).standing).toBe(false);
 
-    const grant = await adminGrant();
-    await engine.update('sys_user_permission_set', { id: grant.id, organization_id: to.id }, { context: SYS });
+    // [ADR-0131 D5] `default` cannot be moved ONTO another organization: that
+    // is the platform-admin anchor captured, and the last-administrator guard
+    // refuses it for every context.
+    const refused = await engine.update('sys_organization', { id: to.id, slug: 'default' }, { context: SYS }).then(() => null, (e: any) => e);
+    expect(refused?.code).toBe('PERMISSION_DENIED');
+    expect(refused?.status).toBe(403);
+
+    // The conferring direction: `to` deleted, `from` is the only organization,
+    // so the Default Organization again. A memo still answering "none" would
+    // withhold standing here.
+    await engine.delete('sys_organization', { where: { id: to.id }, context: SYS });
+    expect((await standing()).standing).toBe(true);
     expect(await standing()).toEqual({ standing: true, organizationReads: 0 });
   });
 });

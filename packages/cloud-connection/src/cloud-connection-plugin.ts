@@ -141,6 +141,7 @@ import {
     userAuthGateSourceOf,
     apiKeyLifecyclePolicySourceOf,
     classifyAdmissionTenancyPosture,
+    resolveControlPlaneApiKey,
     type TenancyPostureSource,
 } from '@objectstack/core';
 import type { AuthSessionApi, IAuthService, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -313,7 +314,7 @@ export class CloudConnectionPlugin implements Plugin {
             // them between config load and kernel boot — preserves the
             // behavior of the original app-level wiring.
             const cloudUrl = (this.cfg.controlPlaneUrl ?? process.env.OS_CLOUD_URL ?? '').trim().replace(/\/+$/, '');
-            const cloudApiKey = (this.cfg.controlPlaneApiKey ?? process.env.OS_CLOUD_API_KEY ?? '').trim();
+            const cloudApiKey = resolveControlPlaneApiKey(this.cfg.controlPlaneApiKey);
             const deviceClientId = (this.cfg.deviceClientId ?? process.env.OS_CLI_CLIENT_ID ?? 'objectstack-cli').trim();
             const deviceScope = 'openid profile email';
 

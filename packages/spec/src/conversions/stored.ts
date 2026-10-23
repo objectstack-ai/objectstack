@@ -73,6 +73,11 @@ const STORED_ONLY_COLLECTIONS: Readonly<Record<string, string>> = {
  * and, with it, every shape protocol 18 refuses that no conversion covers
  * (`refused-shapes.ts`: a `controlled_by_parent` object without exactly one
  * required master, a view bound to the retired view-level API source).
+ *
+ * [#25279] `knownDatasources` rides along with it: a stored object row arrives
+ * alone, so the pass hands down the datasource each row names, as the save
+ * door resolves it, and the listing judges an `external` binding on a stored
+ * or registered managed datasource as that door does.
  */
 export type StoredConversionOptions = Omit<ApplyConversionsOptions, 'includeRetired'>;
 
