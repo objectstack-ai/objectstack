@@ -51,9 +51,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | arg | 含义 | 默认 |
 |---|---|---|
 | `triage` | 以分诊座位身份运行(只扫/分类/路由,永不认领) | — |
-| `<domain>`(如 `spec`、`skills`) | 以该 `domain:*` 车道的执行座位身份运行;承办该车道的项目即「车道项目」 | — |
+| `<domain>`(如 `spec`、`skills`) | 以该 `domain:*` 车道的执行座位身份运行;承办它的是坐该席的车队项目 | — |
 | `epic:#<n>` | 以父单 #n 的 epic PM 身份运行(见 `references/seat-lifecycle.md` 〈Epic 子树车道〉) | — |
-| `director` | 以总监席身份运行(人工召唤;所在项目即「总监项目」;三职与章程见 `references/lanes/director.md`) | — |
+| `director` | 以总监席身份运行(人工召唤,任一车队项目可召;三职与章程见 `references/lanes/director.md`) | — |
 | `coordinator` | 以协调者身份运行(项目会话:开席位线程与卡线程、跨车道调度;接口见 `references/coordinator.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
@@ -68,7 +68,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - fire = 一次唤醒;fire 到达时上一轮未清空的接续处理,⛔ 不重开、不重排。
 - 批 = 一个上下文里读完的 ≤5 张同族卡,是质量单位,⛔ 不是预算。
 - 班 = 一个会话的任期,只以交接或惰性回收结束。
-- 席位两形:Routine 席与项目席(会话是车道项目的线程);细则见 `references/seat-lifecycle.md`。
+- 席位两形:Routine 席与项目席(会话是车队项目的线程);细则见 `references/seat-lifecycle.md`。
 - 项目席唤醒 = PR 订阅事件 + 每项目一个巡查 routine;⛔ 无自绑 cron、无 `send_later` 链。
 - 探针先行:fire 的第一动作是一次最便宜的车道盘点查询,⛔ 在它之前不读任何长文本。
 - 队列空 + 无在飞 + 无待复核 + 决策箱无新答复 ⇒ 自退。
