@@ -4243,3 +4243,144 @@ describe('runtime authoring gate on OBJECT writes — a validations[] predicate 
         }
     });
 });
+
+// #25205 — a list-view bulk action's `confirmText` is an ADR-0032 `template`
+// slot over a closed scope (`count` and the def's params by name, #24798). A
+// hole over an unbound root, a single-brace token, a hole holding logic and a
+// blank sentence are refused at the runtime save door, as `os build` refuses
+// them. #24798 shipped them as advisories (the door admitted the save and
+// listed the finding); the amended 「甲」 (record 6303865025) ships the refusal
+// in 18.x. Pinned through the REAL `saveMetaItem`:
+//
+//  (a) the active save is refused — 422 `INVALID_METADATA`, the door's own
+//      envelope — naming the slot, and nothing lands; the draft promotion is
+//      refused the same way;
+//  (b) the door's finding IS the build's;
+//  (c) control: the HotCRM sentence saves, and the row lands;
+//  (d) the parse is not narrowed: a stored view carrying such a sentence (a
+//      blank one included) keeps loading, and its next save is judged.
+//
+// ⚠️ As above: this package reaches `@objectstack/lint` through its built
+// `dist/`, so a rule edit is invisible here until
+// `pnpm --filter @objectstack/lint build` has run.
+describe('runtime authoring gate on VIEW writes — a bulk confirmText template hole (#25205)', () => {
+    const NAME = 'crm_account';
+    const UNBOUND = 'Move {{count}} account(s) to {{ owner }}?';
+    const HOTCRM = 'Update tier on {{count}} account(s) to {{tier}}?';
+    const view = (confirmText: string) => ({
+        name: NAME,
+        object: NAME,
+        list: {
+            type: 'grid',
+            columns: ['name'],
+            bulkActionDefs: [{
+                name: 'update_tier',
+                label: 'Update Tier',
+                operation: 'update',
+                params: [{ name: 'tier', type: 'select', options: [{ label: 'Gold', value: 'gold' }] }],
+                confirmText,
+            }],
+        },
+    });
+    const account = { name: NAME, label: 'Account', fields: { name: { type: 'text', label: 'Name' } } };
+
+    function viewProtocol() {
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'object' ? [account] : []);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        return { protocol, rows };
+    }
+    const saveView = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'view', name: NAME, item, ...extra });
+    const activeViewRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'view' && r.state === 'active');
+    const confirmIssues = (issues: any[] | undefined) =>
+        (issues ?? []).filter((i: any) => String(i.where).includes('confirmText'));
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    for (const [label, text] of [
+        ['a hole over an unbound root', UNBOUND],
+        ['a single-brace token', 'Update {count} account(s)?'],
+        ['a hole holding logic', '{{ count * 2 }} account(s)?'],
+        ['a blank sentence', ''],
+    ] as const) {
+        it(`(a) REFUSES an active save of ${label}; nothing stored`, async () => {
+            const { protocol, rows } = viewProtocol();
+
+            const err = await saveView(protocol, view(text)).catch((e: any) => e);
+
+            expect(err, 'the save resolved — the door still admits the sentence').toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            const issues = confirmIssues(err.issues);
+            expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+            expect(issues[0]).toMatchObject({ rule: EXPRESSION_INVALID, severity: 'error' });
+            expect(activeViewRows(rows)).toEqual([]);
+        });
+    }
+
+    it('(a) gates the draft → active promotion of the same view', async () => {
+        const { protocol, rows } = viewProtocol();
+        await expect(saveView(protocol, view(UNBOUND), { mode: 'draft' })).resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'view', name: NAME }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(confirmIssues(err.issues)).toHaveLength(1);
+        expect(activeViewRows(rows)).toEqual([]);
+    });
+
+    it('(b) the door and `os build` give the SAME finding', async () => {
+        const { protocol } = viewProtocol();
+        const err = await saveView(protocol, view(UNBOUND)).catch((e: any) => e);
+        const atDoor = confirmIssues(err?.issues);
+
+        const stack = { objects: [account], views: [view(UNBOUND)] };
+        const atBuild = confirmIssues(runAuthoringRules('build', { normalized: stack, parsed: stack })
+            .filter((f) => f.severity === 'error'));
+
+        expect(atBuild).toHaveLength(1);
+        expect(atDoor).toHaveLength(1);
+        for (const k of ['rule', 'where', 'message'] as const) {
+            expect(atDoor[0][k], `door and build disagree on '${k}'`).toBe(atBuild[0]![k]);
+        }
+    });
+
+    it('(c) CONTROL — the HotCRM sentence saves, and the row lands', async () => {
+        const { protocol, rows } = viewProtocol();
+
+        const res = await saveView(protocol, view(HOTCRM));
+
+        expect(res).toMatchObject({ success: true });
+        expect(confirmIssues(res.advisories)).toEqual([]);
+        expect(activeViewRows(rows)).toHaveLength(1);
+    });
+
+    for (const [label, text] of [['an unbound hole', UNBOUND], ['a blank sentence', '']] as const) {
+        it(`(d) a stored view with ${label} keeps loading; its next save is refused, the row untouched`, async () => {
+            const { protocol, rows } = viewProtocol();
+            // Stored before the crossing, seeded straight into the store because
+            // the save door now refuses this body.
+            const stored = view(text);
+            rows.set(keyOf({ type: 'view', name: NAME, organization_id: null, state: 'active' }), {
+                id: 'r_seed', type: 'view', name: NAME, organization_id: null, state: 'active',
+                metadata: JSON.stringify(stored),
+            });
+
+            // The boot path runs no authoring rule, and the parse still accepts the text.
+            await expect(protocol.loadMetaFromDb()).resolves.toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
+
+            const err = await saveView(protocol, stored).catch((e: any) => e);
+            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect(JSON.parse(activeViewRows(rows)[0]!.metadata)).toEqual(stored);
+        });
+    }
+});
