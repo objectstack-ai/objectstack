@@ -1,0 +1,530 @@
+---
+title: 18.1.0
+description: "Release notes and upgrade checklist for 18.1.0, the first minor of the v18 line: a minor that carries breaking changes. ADR-0131 finishes (an organization-less row confers nothing), a production os serve with no organization object is refused, nine metadata narrowings with automatic conversions, one federation rule at every datasource door, and an unreadable SQLite file is refused instead of replaced."
+---
+
+<Callout type="warn">
+**How this page was compiled.** From the 18.1.0 changesets on `main` at
+`b2c0752900` (2026-10-23), before the 18.1.0 cut, through a rehearsed
+`pnpm run version` in a throwaway clone: 73 packages move to 18.1.0, and their
+`## 18.1.0` sections hold **227 distinct entries**. The five sections below use
+the grouping the GitHub Release body uses, and the counts are that grouping's:
+**73** need you to act, **9** are converted for you, **41** add capabilities,
+**0** declare a semantic change, and **104** are other fixes. Nothing here was
+read off a published 18.1.0 package or walked on an upgrade yet: every refusal
+is described as its changeset describes it. Anything that lands on `main` before
+the cut is in the CHANGELOG and not on this page.
+</Callout>
+
+## Highlights — 18.1.0
+
+- ⚠️ **A minor that breaks.** 18.1.0 is a minor version, and 82 of its
+  changesets are declared breaking. Under the level rule the maintainer ruled
+  on 2026-10-21 (#25105, "ruling A"), the v18 line takes no further major: a
+  change to the metadata protocol takes `minor`, and every other change takes
+  `patch`, breaking or not. A non-protocol breaking change keeps its
+  **BREAKING** banner and its ADR-0087 disposition. A `^18.0.0` range resolves
+  18.1.0 by itself. Read [the version number](#the-version-number-is-not-the-signal)
+  before you let it.
+- **ADR-0131's last steps: an organization-less row confers nothing.** A grant row
+  with no organization applies nowhere (`94842ba`, #24872), a settings or
+  localization row with no organization answers no organization's read
+  (`279fdcf`, #25226; `d196748`, #25301), the first organization no longer
+  adopts orphaned rows (`e3190b9`, #25246), and a table the SQL and Turso
+  drivers create carries its tenant column `NOT NULL` (`5e9b100`, #24940). On a
+  database 18.0.0 created or the ownership ceremony certified, none of these
+  rows exists.
+- **A production `os serve` with no organization object is refused.**
+  `--no-server` no longer gets round it (`ab488d9`, #25155), and neither does a
+  `@objectstack/plugin-auth` that fails to load (`b2e964f`, #25231).
+- **Nine metadata narrowings come with a conversion** that `os migrate meta`
+  and the stored-row loaders apply: the `addRecord` block, `user` fields that
+  reference another object, `has()` in `visibleWhen`, the `Field.select`
+  shorthand, turso `encryptionKey`, the docs-viewer keys, `external` on a
+  managed datasource, and `sys_notification_subscription`.
+- **One federation rule at every datasource door.** An object's `external`
+  binding on a managed datasource is refused at parse, at `defineStack`, at the
+  metadata save doors, at `composeStacks`, at the datasource admin API and by
+  Sync, as ADR-0015 §4.2 declares (`fe0ec2b`, `bda53bb`, `b9c7a8f`, `72a302a`).
+- **A SQLite file the driver cannot read is refused, never replaced.** A
+  corrupt or non-SQLite file fails `connect()` naming the file, where a
+  development boot used to move it aside and start empty (`7f99616`,
+  `d6a5fa3`, `27dc53b`, `4d99158`).
+- **A disabled package is disabled on every door.** REST actions and the MCP
+  bridges, stdio and `/mcp`, read objects and actions from the same merged
+  view the Data API serves (`258f4e6`, `eee2f0d`, `8010b64`, `a1e51d6`,
+  `fb7501b`, `882372d`, `72fad92`).
+- **better-auth 1.7.3 → 1.7.12**, for the security fixes published since
+  (`03966ce`, #25109). Sign-ins begun before the upgrade must be started
+  again.
+- **A cloud-managed environment closes its local sign-up doors.** This applies
+  only to a process started with `OS_CLOUD_MANAGED=1`, which ObjectStack Cloud
+  sets on its hosted containers (`c6bdcac`, #25399). It ships as `patch` and
+  is breaking: see [Cloud-managed environments](#cloud-managed-environments-os_cloud_managed1).
+  Self-hosted deployments are unchanged.
+
+---
+
+## What's new in 18.1.0
+
+### The version number is not the signal
+
+Every `@objectstack/*` package still versions in lockstep. Since ruling A, the
+level of a release says whether **the metadata protocol** moved, and nothing
+else:
+
+| Kind of change | Level |
+| :--- | :--- |
+| Added to the metadata protocol: a new authorable key, accepted value or metadata type | `minor` |
+| Narrowed or retired: a key removed or tombstoned, a value refused, a requirement tightened | `minor` |
+| Semantic: the meaning or default of an authorable key changes | `minor` |
+| Everything else: REST, drivers, services, the CLI, the Console, `feat:` and `fix!:` alike | `patch` |
+
+So a **patch** release can break a REST client, a boot or a deployment
+script, and 18.1.0 carries 37 changesets graded `patch` that say **BREAKING**,
+beside 45 graded `minor` ones. Pin exact `@objectstack/*` versions, and read the
+release notes for every version you cross. Each entry in a CHANGELOG states its
+kind on its own `Metadata-protocol:` line, and the GitHub Release body groups the
+entries under the same five headings this page uses.
+
+### Breaking changes you must act on
+
+The 73 entries that are breaking and have no ADR-0087 conversion, and one boot
+refusal (`db1c7cc`) that its changeset declares as an addition. Each line names
+the one fix; the CHANGELOG entry carries the full FROM → TO.
+
+#### Boot and deployment
+
+- **A production `os serve` that composes no organization object is refused,
+  `--server` or not** (`ab488d9`, #25155). In 18.0.0, a production
+  `os serve --no-server` booted when auth was on with no secret, or when the
+  stack mounted no auth at all, and wrote rows with no owner. Now it is refused
+  like the server boot, and a migrate-and-exit job (`OS_MIGRATE_AND_EXIT=1`)
+  is too. Fix: set `OS_AUTH_SECRET`, and enable auth on a stack that mounts
+  none. A development boot (`os dev`, `--dev`) and an embedded kernel are not
+  affected.
+- **A production `os serve` whose `@objectstack/plugin-auth` fails to load is
+  refused, naming the load error** (`b2e964f`, #25231), `os start` included.
+  18.0.0 booted it without auth, silently or with one
+  `⚠ AuthPlugin failed to load` warning. Fix: reinstall the deployment's
+  dependencies (`npm ci`, `pnpm install --frozen-lockfile`).
+- **CORS reads one admission rule at every door** (`02e6d73`, #24873). A
+  loopback origin beside an origin list is admitted on a development boot only,
+  and an all-host pattern with credentials on fails the boot, as `'*'` already
+  did. A comma-separated `cors.origin` string passed to `createHonoApp` now
+  admits each origin it lists, where it admitted none. Fix: name your origins in
+  `OS_CORS_ORIGIN` or `cors.origin`, including any loopback origin a non-development
+  deployment is reached from, or set `OS_CORS_CREDENTIALS=false`.
+- **`OS_CLOUD_MANAGED=1` without `OS_CLOUD_API_KEY` refuses a production boot**
+  (`db1c7cc`, #25306), and any value of `OS_CLOUD_MANAGED` other than `1` or empty
+  is refused. A runtime that binds its control plane only through
+  `CloudConnectionPlugin`'s `controlPlaneApiKey` option is refused too: set
+  `OS_CLOUD_API_KEY`.
+- **better-auth 1.7.12** (`03966ce`, #25109). A Magic Link, OAuth, social, SAML
+  or account-linking flow begun on 18.0.0 fails after the upgrade and must be
+  started again. An OIDC SSO provider whose configured issuer differs from its
+  discovery document's `issuer`, even by a trailing slash, is refused with
+  `issuer_mismatch`. A PKCE mismatch at `POST /api/v1/auth/oauth2/token` answers
+  `400 invalid_grant`, not `401`. Fix: tell users to restart pending sign-ins,
+  and set each OIDC provider's issuer to the exact string its discovery document
+  publishes.
+- **`os migrate apply` exits `1` when it applied nothing because a confirmation
+  was missing** (`62bc129`, #25004), as every other `os migrate` subcommand with
+  a `--yes` gate does. Fix: a script that means to apply passes `--yes`; one
+  that only wants to know runs `os migrate plan`.
+
+#### Organization ownership (ADR-0131)
+
+On a database that 18.0.0 created, or that `os migrate organization-ownership`
+certified, none of the rows these entries stop reading exists. They reach you
+only if an embedding writes rows with no organization, or a database skipped
+the ceremony.
+
+- **A grant applies only in its own organization** (`94842ba`, #24872). A
+  `sys_user_position` or `sys_user_permission_set` row with no organization
+  applies nowhere, and under `single` only the Default Organization's
+  `admin_full_access` grant anchors platform-admin standing (`abc25a3`,
+  #25141). Fix: an embedding that composes `@objectstack/plugin-security`
+  without plugin-auth registers the organization object.
+- **Settings and localization read the caller's organization only**
+  (`279fdcf`, #25226; `d196748`, #25301; `9d60b42`, #25350). A tenant- or
+  user-scope `sys_setting` row with no organization no longer answers every
+  organization. Fix: run `os migrate organization-ownership --out PLAN`, then
+  save each reported value again from inside its organization. A value meant for
+  every organization belongs on a key declared at scope `global`. A host that
+  binds its own engine states its organization source at `bindEngine`.
+- **The first organization no longer adopts organization-less rows:
+  `claimOrphanOrgRows` is retired** (`e3190b9`, #25246). Fix: on a walled
+  store an earlier release created, run the ownership ceremony.
+- **A table the driver creates carries its tenant column `NOT NULL`**
+  (`5e9b100`, #24940), so a write that names no organization is refused at the
+  database. Fix: carry the organization on the write
+  (`{ ...row, organization_id }` or `context.tenantId`), or declare an object
+  whose rows belong to no organization with `systemFields: { tenant: false }`.
+- **Deleting an organization that still owns records is refused with `409`
+  and a per-table count** (`688052e`, #25016). An empty one is deleted whole,
+  with its teams and organization-admin grants. Fix: delete or move its records
+  first.
+- **The Default Organization does not move by slug** (`09e07c2`, #25286;
+  `8dfd126`, #25265). Under `single`, re-slugging another organization to
+  `default` is refused `403`, and creating a second organization is refused
+  when it would leave nobody who can administer. Fix: keep the slug, and move an
+  `admin_full_access` grant into the Default Organization instead.
+
+#### Metadata the build and the save doors now refuse
+
+Each is an error at `os validate`, `os build`, `os lint` and the matching save
+door (`422 INVALID_METADATA`), where 18.0.0 accepted it.
+
+- **An HTML email template body with a hole where the mail renderer's encoding
+  does not suit it** (`9127f23`, #25212), and the same for an html or mjml
+  `sys_notification_template` body (`284e048`, #25258). Fix: move the hole into
+  element text or a quoted plain-text attribute. For a link, declare the
+  variable `type: 'url'` and write it triple-braced as the whole double-quoted
+  `href`.
+- **A `validations[]` rule whose predicate reads `parent`** (`c5915b2`,
+  #25052). Fix: put it on the field's `readonlyWhen` / `requiredWhen`, where
+  `parent` is bound, or use a lifecycle hook.
+- **A page component whose `properties` is present but not an object**
+  (`c0ae356`, #25067), and **a props CEL slot over the platform's parse bounds**
+  (`31f0f27`, #25088). Fix: write `properties` as an object, and shrink the
+  predicate (an `||` chain becomes one `in [...]` test).
+- **The retired list-view `filterableFields`, named** (`b42c621`, #24878). Fix:
+  delete it; a curated filter bar is `userFilters`.
+- **A `controlled_by_parent` object whose one required `master_detail` is
+  `readonly: true` or `system: true`** (`02ad31a`, #25181), and every write that
+  sets such a reference (`0148071`, #25256). Fix: declare the reference as an
+  ordinary required field, or give the object its own `sharingModel`.
+- **A stack that declares a webhook while `requires` lacks `'webhooks'` or
+  `'realtime'`** (`baedcec`, #25057), refused by `defineStack` with
+  `STACK_WEBHOOK_CAPABILITY_REQUIRED`. Fix: add both tokens.
+- **A flow `get_record` node's `limit` that is not a whole number of at least
+  1** (`303aef0`, #25357).
+- **A `controlled_by_parent` detail whose master the engine cannot compose a
+  read over refuses the boot** (`504d8b3`, #25166), where it booted and failed
+  at read time.
+- **`rollbackMetaItem` and `revertCommit` refuse a version the save door
+  refuses** (`69913f8`, #25312), instead of writing it back live.
+
+#### Datasources and drivers
+
+- **An object's `external` binding on a managed datasource is refused from
+  either side of the pair** at the metadata save doors and `composeStacks`
+  (`bda53bb`, #25257), and the datasource admin API refuses to make a datasource
+  managed while objects bind it (`b9c7a8f`, #25431). Sync (remote tables, object
+  draft, import, catalog refresh) refuses a managed datasource with `400`
+  (`72a302a`, #25167). Fix: declare the source `schemaMode: 'external'` (or
+  `'validate-only'`) first, then bind objects; to make it managed, remove
+  `external` from the objects first.
+- **A SQLite file that is not a readable SQLite database fails `connect()`,
+  naming the file** (`7f99616`, #25006; `d6a5fa3`, #25080), on the wasm driver
+  too (`27dc53b`, #25200). A development boot no longer moves it aside and
+  starts empty, and a read-only boot no longer opens an empty in-memory database
+  over a file it cannot open or create (`4d99158`, #25007). Fix: restore from a
+  backup, or move the file aside yourself; an absent file is created empty.
+- **On PostgreSQL, `introspectSchema` reads each table in its own schema**, and
+  refuses a `search_path` that reaches one table name in two schemas (`74fcec1`,
+  #24920). Fix: point the connection at one schema.
+
+#### Security: master-detail writes and delegation
+
+- **A `controlled_by_parent` detail's update, delete and batch create ask for
+  edit access on every master involved** (`b289090`, #25042; `f46ef4d`,
+  #25066; `3782b2d`, #25090), and an update no longer empties a detail's
+  master reference. Fix: grant the caller edit access on the master, and move a
+  detail by writing another master's id, never `null`.
+- **On a walled posture, a delegated (on-behalf-of) operation runs only in an
+  organization the delegator belongs to** (`2e242bb`, #25101; `331613c`,
+  #25150; `5801a4f`, #25288). Fix: code that builds an `ExecutionContext` with
+  `onBehalfOf` by hand sets `tenantId` to such an organization, or leaves it
+  unset.
+- **Deleting a business unit that still has child units is refused**
+  (`4b8f597`, #24984). Fix: re-parent or delete the children first.
+
+#### REST, MCP and API clients
+
+- **A disabled package's actions are refused on REST** (`258f4e6`, #25305:
+  `404 OBJECT_PACKAGE_DISABLED` on `POST /api/v1/actions/OBJECT/NAME`; `eee2f0d`,
+  #25318: the "no declaration" `404` on `.../global/NAME`), and **the MCP
+  bridges read the merged view**, so `list_objects`, `describe_object`,
+  `list_actions`, `run_action` and the `objectstack://objects` resources agree
+  with `GET /api/v1/meta/object`, and an object declared `apiEnabled: false` is
+  refused by every data verb (`8010b64`, `72fad92`, `a1e51d6`, `fb7501b`,
+  `882372d`). Fix: nothing if the declarations say what you mean; otherwise set
+  `enable.apiEnabled`, or re-enable the package.
+- **The Data API refuses a malformed or negative page window with `400`**
+  naming the parameter (`17f3c65`, #25260), and the published list-query
+  schemas declare it a non-negative integer (`5f30f00`, #25300). Fix: send a
+  whole count of zero or more, or leave it out.
+- **`GET {base}/docs`, the OpenAPI HTML viewer page, is retired**
+  (`1b3b65e`, #25124). `GET {base}/openapi.json` stays: point your own viewer
+  at it.
+- **The `/meta` read doors no longer serve a webhook's `secret` or `headers`**
+  (`e939357`, #25036).
+- **The CSV export marks a text cell its consumer would interpret** with one
+  leading apostrophe, and the CSV import reverses it (`c4b49c3`, #25130). A
+  program that reads the export some other way strips that apostrophe itself.
+- **OAuth application registration takes `web` or `native` only**
+  (`5872450`, #25038; `ba244f1`, #25099). Another type is refused
+  `400 INVALID_REQUEST`, where it was registered as `web`.
+- **`POST /api/v1/packages/:id/adopt-orphans` refuses a read-only package**
+  with `422 WRITABLE_PACKAGE_REQUIRED` (`4cef6e2`, #24861). Adopt into a package
+  you own.
+- **A cloud-fetched marketplace install whose package ships a position,
+  permission set or capability name an environment-authored item holds is
+  refused** before any write (`8d9e8b9`, #25435), as the file-import install
+  already was.
+- **A marketplace upgrade that would un-make an access choice is refused until
+  it is confirmed** (`448374d`, #25355). Re-send the request with
+  `"confirmAccessUpgrade": "<findingSet>"`, or run
+  `os package install <package> --confirm-access-upgrade <findingSet>`; the
+  token confirms exactly the findings it names.
+
+#### Messaging, settings and Cloud Connection
+
+- **`sys_notification_template` refuses a row for a channel other than `email`
+  or `sms`** (`d68aab6`, #25028), and an html or mjml body escapes every hole's
+  value for markup (`a39389e`, #25076). Fix: delete or re-channel the row; move
+  markup a payload carried into the template body.
+- **A notification preference's User is a `sys_user` reference**, and the
+  default for every user is an empty User instead of `'*'` (`e282f32`,
+  #25178). The boot rewrites the old `'*'` rows and reports a collision it
+  cannot resolve.
+- **A settings value that misses the format of its `email`, `url`, `phone` or
+  `color` type is refused**, saved or set as an `OS_*` override (`3b3830c`,
+  #25022). Fix: correct the value, or unset the variable.
+- **Branding drives the console's name, logo and colour under `single`**,
+  `theme_mode` and `support_email` are retired, and under `group` and
+  `isolated` the Branding namespace is not offered (`78ab647`, #24959). On a
+  walled deployment `OS_BRANDING_WORKSPACE_NAME` no longer names sign-in emails
+  and the authenticator entry: set `OS_APP_NAME` instead.
+- **Cloud Connection follows one rule** (`c71d03a`, #25143; `ae58b26`,
+  #25110). Its page and its connect and disconnect requests require
+  `manage_platform_settings`, so an organization administrator holding only
+  Setup Access loses them. A runtime holding the environment service key is
+  platform-managed: it serves no Cloud Connection page and refuses to
+  disconnect.
+
+#### Cloud-managed environments (`OS_CLOUD_MANAGED=1`)
+
+`c6bdcac` (#25399) is graded `patch`, because no metadata moves, and is
+**BREAKING** for a process started with `OS_CLOUD_MANAGED=1`. Under that mode,
+every audience posture but `invite_only` is refused, email sign-up is off,
+member invitations (resends included), admin create-user and import-users
+answer `409 RESOURCE_CONFLICT`, an admin password set on an identity-provider
+account is refused, and only a platform administrator may set a first password.
+People are invited from the organization in the cloud console and arrive on
+their first sign-in; keep a local password only for the break-glass
+administrator. **A self-hosted deployment, which does not set the variable, is
+unchanged.**
+
+#### Code against the published packages
+
+| Removed | Use instead |
+| :--- | :--- |
+| `GLOBAL_TENANT` from `@objectstack/objectql` (`df8bb40`) | `GLOBAL_TENANT` from `@objectstack/driver-sql`, or the literal `'__global__'` |
+| `PLATFORM_OBJECT_TENANCY`, `classifyPlatformObjectTenancy`, `isPlatformObjectOutOfTenantAuditScope`, `tenantScopedPlatformObjects` (`3a440b0`, #25210) | `resolveTenantFieldName(schema)` on the registered schema: non-null means in tenant scope |
+| `renderNotification` from `@objectstack/service-messaging` (`1f78b64`, #25285) | a `sys_notification_template` row, rendered by the channel at delivery |
+| Under `strictReadonlyWrites`, a write whose value a stored `expression` replaces (`03c12a5`, #25086) | leave the field out, or send the computed value; it is now refused |
+
+### Converted for you by `os migrate meta`
+
+Nine narrowings carry an ADR-0087 conversion on the protocol-18 step. A live
+author is refused at parse, with the prescription. Stored rows and built
+artifacts are converted where they load, and `os migrate meta --from 17` lists
+the edits for your sources (`--write` applies the ones it can trace to one
+literal). `os migrate meta --stored` lists and rewrites a deployment's stored
+rows.
+
+| Change | ADR-0087 id | The fix |
+| :--- | :--- | :--- |
+| A list's `addRecord`: `enabled` is required, `position` defaults to `top`, `mode` and `formView` are retired (`fde7456`, #24970) | `add-record-mode-form-view-removed`, `add-record-enabled-defaulted` | write `enabled: true` (or `false`) and delete `mode` / `formView`. A stored block that omitted `enabled` drew no Add button; converted, it draws one |
+| A `user` field whose `reference` is not `sys_user` (`2069b81`, #25074) | `user-field-foreign-reference-refused` | change it to a `lookup` on that object, and choose its `deleteBehavior` |
+| A `visibleWhen` that hands `has()` anything but a field selection (`f5b6b3f`, #25313) | `visibility-predicate-has-argument-refused` | `has(record.status)` or `'status' in record`; `size(record.items) > 0` for a list |
+| The `Field.select` string shorthand keeps every character it does not document transforming, so `'no-overlay'` is refused (`386f60f`, #25122) | `field-select-shorthand-keeps-written-value` | write the option explicitly with the value you store |
+| turso `encryptionKey` is removed: it never encrypted anything (`2354058`, #25153; `28c9a2c`, #25045) | `turso-config-encryption-key-removed`, `turso-config-local-encryption-key-refused` | delete it. Beside a local file the conversion keeps it, so the row fails at driver construction until you delete it by hand |
+| The docs-viewer keys `ApiDocumentationConfig.ui`, `openApi.uiPath`, `openApi.uiFramework` (`14e7239`, #25180) | `api-docs-viewer-keys-retired` | delete them; `ApiTestingUiConfigSchema` and `ApiTestingUiType` are no longer exported |
+| An object's `external` binding on a managed datasource (`fe0ec2b`, #25192) | `object-external-binding-managed-datasource-refused` | bind it to a datasource declared `schemaMode: 'external'` |
+| `sys_notification_subscription` retires (`63085c3`, #25024) | `sys-notification-subscription-retired` | delete references to it; mute a topic with `sys_notification_preference`. The table stays in place; drop it by hand if you want |
+
+### New capabilities in 18.1.0
+
+- **`os db orphans`** reports the detail rows whose required master-detail
+  master does not exist, and deletes them only behind `--delete`, after a
+  pre-delete export (`157ebd0`, #25039).
+- **`os migrate plan` lists the tenant columns still nullable** and names the
+  voluntary ownership ceremony that tightens them (`6251f59`, #25179), and
+  `os migrate apply` on an empty database writes the birth marker, so a fresh
+  install's first `os serve` starts (`19484af`, #24875).
+- **Package upgrades report what they un-make.** At boot an administrator is
+  told when a package upgrade renamed, removed or collided with an access item
+  the customer switched off, cloned or authored (`54df640`, #25311), and the
+  marketplace door asks for confirmation (above).
+- **Setup → Positions says who holds each position and what it grants**,
+  through `GET /meta/position?include=grants` (`27b3f1f`, #25369). Create User
+  can grant a permission set in the same step (`3306cad`, #25381), and Create Key
+  offers the key's expiry (`c898bd8`, #25371).
+- **Notifications in each recipient's language.** `EmitInput.keyedText` carries
+  catalog keys rendered per recipient at delivery (`58cd58f`, #25014), and every
+  approval notification uses it.
+- **Translations** for `page:tabs` item labels (`30d21f6`, #25005), form view
+  titles (`eddffc3`, #25035) and approval step labels (`b9a79ef`, #24943).
+- **Flows.** `ExecutionStatus` gains `missed`, for a scheduled due time that
+  passed while no kernel was ticking (`d12e650`, #25363), and a failed run
+  carries the refusal its write node met as `userMessage` / `innerRefusal`
+  (`045858f`, #25037; `9cfc575`, #25147).
+- **A bulk action's `confirmText` is a `template` slot** over `count` and the
+  action's params (`925fd07`, #24947), and **a dataset dimension may name its
+  null bucket with `nullLabel`** (`7c68b10`, #25397), which the Console draws.
+- **A release artifact's package entry may state its own `source`**
+  (`b964ea1`, #25359), so marketplace installs merged into an artifact list as
+  `marketplace`.
+- **Sign-up no longer reveals an existing account** under the `open` and
+  `email_domain` postures while mail is really delivered (`2aaee3b`, #25145).
+  `IEmailService.isConfigured()` answers whether it is (`fccbd9d`, #25125).
+- **`GET /api/v1/auth/config` serves `features.cloudManaged`** (`f4112a7`,
+  #25309), and the Console hides the six doors that add people while it is on.
+
+### Semantic changes in 18.1.0
+
+No changeset in 18.1.0 declares `Metadata-protocol: semantic`. A change of
+meaning that also breaks is listed with the breaking changes above.
+
+### Notable fixes in 18.1.0
+
+- **Upgrade and migrate.** `os migrate plan` and `apply` name the command each
+  held drop waits for, never `--allow-destructive` (`5f11cec`, #24954; `1a1f5c3`,
+  #25029), and stop offering it for a unique index the existing rows already
+  violate (`8c73398`, #25217). An organization-scoped unique index keys the plain
+  organization column (`d5d8146`, #24893).
+- **Writes.** `update()` on PostgreSQL and MySQL stores webhook deliveries for
+  record updates again (`eee65af`, #24906). An explicit `organization_id` the
+  wall admits is stored as sent (`2b1382a`, #25048; `5050442`, #25094). A
+  stored expression that reads an `autonumber` stores the numbered value
+  (`c8f4c43`, #25218).
+- **Auth.** SSO domain verification accepts the TXT record it tells the
+  operator to publish (`425c743`, #25161). An impersonation session is not held
+  by the target's forced password reset (`c2d4072`, #24762). The vendored auth
+  library keys on the client address the server established (`ad8cf92`, #24871;
+  `2941a19`, #24931). The Magic Link mail states its real five-minute lifetime
+  (`d609f60`, #25238).
+- **Approvals and messaging.** Every step of a multi-step approval names the
+  submitter (`28ff8a9`, #24860), the inbox and record panel name flow, step and
+  object in the reader's language (`ba69b16`, #24977), and a digest heading is
+  rendered in its recipient's language (`c24203f`, #25170).
+- **Datasources.** A missing database client (`pg`, `mysql2`,
+  `better-sqlite3`) or optional driver package is refused with its install line
+  (`ea08ce5`, #24933; `b811c73`, #24971).
+- **Webhooks.** A declared webhook the deployment can never deliver, and a
+  delivery the outbox could not record, are reported at `error` with the fix
+  (`19e5338`, #24946; `3fbef41`, #24862).
+- **Setup.** Passwords typed into action dialogs are masked (`7035682`,
+  #24867), forms show option labels instead of machine values (`bdf762c`,
+  #25370), and the scaffolds ship a starter test so a new project's `npm test`
+  passes (`6bc8cc6`, #25236; `9c431ba`, #25196).
+
+The other fixes are in the per-package CHANGELOGs.
+
+### New in Console (Studio) — objectui pins in 18.1.0
+
+18.0.0 bundled objectui at `616df6598b42`. 18.1.0 bundles it at the pin
+committed at the cut, `1d178e06ac5e` when this page was compiled, through six
+refreshes, each with its own `@objectstack/console` changeset: 91 entries that
+objectui declared, five of them `minor`.
+
+- **Approvals.** An approver who is not an administrator sees the whole
+  approval request page again, and the Approvals Inbox opens a request on the
+  page the platform serves for it.
+- **Setup.** Positions shows holders and granted permission sets; Permission
+  Sets and Positions ask before the Active switch turns an item off; Settings
+  pages block Save on a value that misses its type's format or a required value
+  left empty; Datasources offers Sync only where it can sync.
+- **Records and lists.** The record heading draws a `nameField` through its
+  widget's read face, the `/data` filter bar offers single-value relation
+  fields, selecting a cell's text no longer opens the record, and a grid grouped
+  by a date heads each group the way the cell draws it.
+- **Safety and access.** The console's menus, palette, inbox and language menu
+  ask before they drop unsaved edits; a member who can read none of an app's
+  objects lands on one page saying whom to ask; a page node or tab whose
+  `visibleWhen` faults is no longer drawn.
+- **Charts and branding.** A dataset chart draws its null bucket under its
+  `nullLabel`, a single-series bar chart uses its series colour, and the console
+  document carries the runtime branding in its `<title>` and Open Graph tags
+  (`7b047b4`, #25317).
+
+The full list is in the `@objectstack/console` CHANGELOG.
+
+### Shipped in 18.0.0, listed first in 18.1.0's CHANGELOG
+
+Eight entries are marked **Shipped in 18.0.0**: their commits landed before the
+18.0.0 version commit, so their code is in the 18.0.0 packages. Two reach an
+upgrade, and the [18.0.0 notes](/docs/releases/v18/18-0#4-what-1800-does-not-carry-yet-and-what-it-carries-unlisted)
+describe both as measured on 18.0.0: a production `os serve` with no auth
+secret is refused (`df8bb40`, #24845), and the organization-less readers of
+sharing rules, approval units and the seed loader retire (`7cacad5`, #24828).
+
+---
+
+## Upgrade checklist
+
+⚠️ For an 18.0.0 app. From 17.x, walk the
+[18.0.0 checklist](/docs/releases/v18/18-0#upgrade-checklist) first: its
+database step, the organization-ownership ceremony, is the one an 18.1.0 server
+also requires.
+
+### 18.1.0
+
+<Callout type="warn">
+**Not walked yet.** This list is compiled from the changesets before the cut.
+No app has been moved from 18.0.0 to 18.1.0 for it, and no refusal below was
+read off a published package.
+</Callout>
+
+#### 1. Move the pins
+
+Move every `@objectstack/*` dependency to `18.1.0` together, and
+`@objectstack/skills` with them, as in the
+[18.0.0 walk](/docs/releases/v18/18-0#1-move-the-pins). Pin the exact version:
+a caret range takes every later 18.x by itself, and a patch can break a
+non-protocol surface.
+
+#### 2. Before the first boot
+
+- Production `os serve` or `os start`: set `OS_AUTH_SECRET`, and do not rely on
+  `--no-server` or `OS_MIGRATE_AND_EXIT=1` to boot without it.
+- A stack that mounts no auth (`auth` tier off, `--preset minimal`) fails a
+  production boot: enable auth.
+- CORS: list every cross-origin front-end in `OS_CORS_ORIGIN`, loopback origins
+  outside development included. With credentials on, `'*'` and all-host
+  patterns fail the boot.
+- `OS_CLOUD_MANAGED=1` needs `OS_CLOUD_API_KEY`.
+- Every OIDC SSO provider's issuer matches its discovery document exactly.
+- Tell users that sign-ins begun before the upgrade must be started again.
+
+#### 3. Run the build, and fix what it refuses
+
+```bash
+os validate
+os build
+os migrate meta --from 17     # the step-18 conversions, listed for your sources
+```
+
+Fix each refusal with the line in
+[Breaking changes you must act on](#breaking-changes-you-must-act-on) and
+[Converted for you](#converted-for-you-by-os-migrate-meta). The ones an app is
+most likely to meet: `addRecord` without `enabled`, a webhook without
+`'webhooks'` and `'realtime'` in `requires`, an HTML email template hole, a
+`validations[]` rule that reads `parent`, and an `external` object on a managed
+datasource.
+
+#### 4. After the boot
+
+- Run `os migrate meta --stored` to list stored rows the step-18 conversions
+  rewrite.
+- Run `os migrate plan`. On a database 18.0.0 created, it lists the tenant
+  columns still nullable; the ownership ceremony tightens them to `NOT NULL`
+  when you choose to run it.
+- If the boot reports a notification preference collision, resolve it with
+  `os migrate duplicates` and restart.
+- Check that REST and MCP callers do not depend on a disabled package's actions
+  or on an object declared `apiEnabled: false`.

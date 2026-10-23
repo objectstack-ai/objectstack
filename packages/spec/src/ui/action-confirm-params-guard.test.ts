@@ -195,8 +195,10 @@ describe('the pair guard is scoped to ActionSchema by SCHEMA BOUNDARY', () => {
     });
 
     expect(result.success).toBe(true);
+    // [#24798] The bulk def's `confirmText` is a `template` slot: the bare
+    // string parses to its envelope, text unchanged.
     expect(result.success && result.data.confirmText)
-      .toBe('Set these labels on every selected project?');
+      .toEqual({ dialect: 'template', source: 'Set these labels on every selected project?' });
     expect(result.success && result.data.params?.length).toBe(1);
   });
 

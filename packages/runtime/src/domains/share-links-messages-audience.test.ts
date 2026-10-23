@@ -211,6 +211,36 @@ beforeAll(async () => {
   await engine.insert('audience_doc', { id: DOC, title: 'Shared doc' }, sys);
 
   const svc = new ShareLinkService({ engine: engine as any });
+  // One scrypt verification per distinct (password, hash) pair, not one per
+  // request: the refusal-order file beside this one does the same, for the
+  // same reason. The production verifier derives a key at the account
+  // parameters (scrypt N=16384, r=16) on every call, and every request below
+  // that presents a password to a password link its audience let through
+  // calls it: 30 calls, counted at `830a63a680`, plus the 2 password mints,
+  // and those derivations were nearly all of the file's test time (it read
+  // 13.51 s in CI, run 39298888283). The calls hold only 4 distinct pairs
+  // (2 password links x a wrong and the correct password), and a verdict is
+  // a pure function of its pair, so each pair is judged once by the real
+  // verifier and its verdict replayed. Every request is still made, so every
+  // answer is still a real request's, and the service is still built with
+  // both password members at their defaults, as production builds it. The
+  // memo wraps the instance's own verifier, which is not exported. If that
+  // member moves, this throws rather than leave the file paying for every
+  // call again.
+  type Verify = (plain: string, hash: string) => Promise<boolean>;
+  const productionVerify: unknown = (svc as any).verifyPassword;
+  if (typeof productionVerify !== 'function') {
+    throw new Error('ShareLinkService no longer keeps its password verifier as `verifyPassword`; re-point the memo below');
+  }
+  const verdicts = new Map<string, Map<string, Promise<boolean>>>();
+  const memoVerify: Verify = (plain, hash) => {
+    let byPlain = verdicts.get(hash);
+    if (!byPlain) verdicts.set(hash, (byPlain = new Map()));
+    let verdict = byPlain.get(plain);
+    if (!verdict) byPlain.set(plain, (verdict = (productionVerify as Verify)(plain, hash)));
+    return verdict;
+  };
+  (svc as any).verifyPassword = memoVerify;
   const creator = { isSystem: true, userId: 'usr_creator_23371' } as any;
   const mint = async (
     object: 'ai_conversations' | 'audience_doc',

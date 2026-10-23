@@ -202,11 +202,14 @@ describe('#4839 evidence — a delegation cannot rescue an IN-FLIGHT approval', 
     svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
   });
 
-  /** Declare an out-of-office delegation directly (bypassing the write guard). */
+  /**
+   * Declare an out-of-office delegation directly (bypassing the write guard),
+   * in the submitter's organization: a delegation applies only there (ADR-0131).
+   */
   const seedDelegation = (delegatorId: string, delegateId: string) => {
     engine._tables['sys_approval_delegation'] = [{
       id: 'del1', delegator_id: delegatorId, delegate_id: delegateId,
-      valid_from: null, valid_until: null, reason: 'sick leave', organization_id: null,
+      valid_from: null, valid_until: null, reason: 'sick leave', organization_id: 't1',
     }];
   };
 
