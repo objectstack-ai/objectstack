@@ -198,7 +198,7 @@ sending both is `400 CONFLICTING_MAPPING`.
 | | inline `mapping` | `mappingName` |
 |:---|:---|:---|
 | Shape | A flat `{ "<source column>": "<field>" }` rename (or a `sourceField`/`targetField` array) | A registered `mapping` artifact |
-| Transforms | None — rename only | The `fieldMapping` pipeline |
+| Transforms | Per entry of the array form: `transform` (`trim`, `uppercase`, `lowercase`; `none` and `lookup` copy the cell), `defaultValue` for a blank cell, `required`. The flat record is a rename only | The `fieldMapping` pipeline |
 | Unmapped columns | **Pass through** to the write path under their own header | **Dropped.** The artifact is a strict projection: only mapped targets survive |
 | Lives | In the one request | In a package or in metadata, reusable |
 
@@ -218,7 +218,8 @@ These are whole-request failures — nothing is written, and there is no per-row
 | 400 | `MAPPING_TARGET_MISMATCH` | The artifact's `targetObject` is not the object in the URL. |
 | 400 | `MAPPING_FORMAT_UNSUPPORTED` | The artifact declares `sourceFormat: 'xml'` or `'sql'`; the endpoint accepts csv, json and xlsx payloads only. |
 | 400 | `MAPPING_FORMAT_MISMATCH` | The declared `sourceFormat` contradicts the payload actually sent. A `csv` mapping does apply to an `xlsx` payload — those rows are tabular in the same way — but a `json` mapping does not. |
-| 400 | `UNSUPPORTED_TRANSFORM` | Some entry declares `javascript`, or a transform name the pipeline does not implement. |
+| 400 | `UNSUPPORTED_TRANSFORM` | Some artifact entry declares `javascript`, or a transform name the pipeline does not implement; or an inline entry declares `date_format` (it carries no format to apply) or a name outside `none`, `lookup`, `trim`, `uppercase`, `lowercase`. |
+| 400 | `MISSING_REQUIRED_FIELD` | An inline entry is marked `required: true` and some row leaves its column blank after its `defaultValue`. The error names the column and the rows; it applies to the dry run and the commit alike. |
 | 400 | `CONFLICTING_MAPPING` | Both `mappingName` and an inline `mapping` were supplied. |
 | 400 | `INVALID_REQUEST` | No recognizable payload, or `writeMode` resolved to update/upsert with no `matchFields` from either the request or the artifact. |
 | 413 | `PAYLOAD_TOO_LARGE` | More than 5,000 rows on the synchronous route. |

@@ -6,8 +6,11 @@
  * pipeline to parsed rows.
  *
  * Seam with the inline request `mapping`:
- *   • inline  = a plain `{ sourceColumn: targetField }` RENAME for one-off,
- *     wizard-driven imports — unmapped columns pass through untouched.
+ *   • inline  = a `{ sourceColumn: targetField }` rename (or a
+ *     `FieldMappingEntry[]` whose entries may add `transform`
+ *     trim/uppercase/lowercase, `defaultValue` and `required`, applied in
+ *     `import-prepare.ts`) for one-off, wizard-driven imports — unmapped
+ *     columns pass through untouched.
  *   • artifact = a reusable, governed ETL projection for recurring /
  *     programmatic imports — the output row contains ONLY the mapped
  *     targets (a strict projection; source files from external systems
