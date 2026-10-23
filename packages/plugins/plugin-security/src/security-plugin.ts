@@ -144,10 +144,28 @@ import {
   controlledByParentChainRefusal,
   type CbpReadFilterHost,
 } from './security-plugin-cbp-read-filter.js';
-// [#25223 cut 5] Step 3.7's Layer 0 tenant write wall, composed once per write
-// (ADR-0123 D2, ADR-0095 D1); the method of the same name below hands the body
-// the members it reads (`WriteTenantWallHost`).
-import { composeWriteTenantWall, type WriteTenantWallHost } from './security-plugin-write-tenant-wall.js';
+// [#25223 cuts 5 and 6] Step 3.7's Layer 0 tenant write wall, composed once per
+// write (ADR-0123 D2, ADR-0095 D1), its no-active-organization pre-test and its
+// verdict for the write preview; the methods of the same names below hand each
+// body the members it reads (`WriteTenantWallHost`).
+import {
+  composeWriteTenantWall,
+  organizationWallRefusal,
+  writeWallVerdict,
+  type WriteTenantWallHost,
+} from './security-plugin-write-tenant-wall.js';
+// [#25223 cut 6] The context prologue of the engine middleware (ADR-0096 D5,
+// ADR-0090 D10) and its guest organization refusal (ADR-0138 D4); the methods
+// of the same names below hand each body the members it reads
+// (`OperationPrincipalsHost`). `principalLessDenial`, the strict-mode refusal
+// only the prologue throws, moved with it; it is imported type-only so that
+// `isPrincipalLessContext`'s docblock still links to it.
+import {
+  refuseGuestWithoutOrganization,
+  resolveOperationPrincipals,
+  type OperationPrincipalsHost,
+  type principalLessDenial,
+} from './security-plugin-operation-principals.js';
 import {
   isPlatformOwnershipFloorPolicy,
   masterGateCoversOperation,
@@ -167,7 +185,6 @@ import {
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
-  postureUsesUnionScope,
   type ObjectAccessScope,
   type TenancyPosture,
 } from '@objectstack/spec/security';
@@ -198,9 +215,6 @@ import {
   PermissionDeniedError,
   MaskedValueWriteError,
 } from './errors.js';
-// [ADR-0138 D4] The guest entry's organization step, and the located refusal
-// the CRUD gate raises where it refuses.
-import { GuestOrganizationUnresolvedError, resolveGuestOrganization } from '@objectstack/core';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
@@ -231,7 +245,7 @@ import { registerBuiltinCapabilities } from './builtin-capabilities.js';
  * the organization refusal (D4) and the owner-anchor stamp's guest branch (D1)
  * all ask it here.
  */
-function isGuestEnvelope(context: unknown): boolean {
+export function isGuestEnvelope(context: unknown): boolean {
   const c = context as { principalKind?: unknown; userId?: unknown } | null | undefined;
   return c?.principalKind === 'guest' && !c?.userId;
 }
@@ -514,29 +528,10 @@ const EMPTY_REQUIRED_PERMISSIONS: NormalizedRequiredPermissions = Object.freeze(
  * strict mode the empty list has NO exception left. ⛔ No door, probe or layer
  * carries a spelling of "no sets means no restriction".
  */
-function isPrincipalLessContext(context: any): boolean {
+export function isPrincipalLessContext(context: any): boolean {
   const positions = context?.positions ?? [];
   const explicitPermissionSets = context?.permissions ?? [];
   return positions.length === 0 && explicitPermissionSets.length === 0 && !context?.userId;
-}
-
-/**
- * [#21908] ADR-0096 D5 strict mode — the refusal the engine middleware throws
- * for a principal-less, non-system context ({@link isPrincipalLessContext}):
- * `PermissionDeniedError`, `403 PERMISSION_DENIED`, the engine's one deny
- * vocabulary. ⛔ Not the doors' anonymous pair (`401 UNAUTHENTICATED`): every
- * HTTP door answers that one first, so what reaches this line is in-process
- * plumbing, for which "authenticate" is a false remedy. The text names the two
- * that are true.
- */
-function principalLessDenial(operation: string, object: string): PermissionDeniedError {
-  return new PermissionDeniedError(
-    `[Security] Access denied: operation '${operation}' on object '${object}' was called with a ` +
-      `context that carries no principal (no user, no position, no permission set) and is not a ` +
-      `system context. Pass the caller's execution context, or, for platform plumbing whose own ` +
-      `door already authorized the caller, the explicit system opt-in (isSystem: true).`,
-    { operation, object },
-  );
 }
 
 /**
@@ -739,51 +734,6 @@ interface CbpRelation {
 const AUTHORED_ROW_WRITE_PROBE_CONTEXT = { isSystem: true, positions: [], permissions: [] } as const;
 
 /**
- * [ADR-0123 D2] Does this execution context carry ANY organization scope the
- * tenant wall could enforce with?
- *
- * The answer is posture-shaped, and that is the whole reason this is a function
- * rather than an `if (!ctx.tenantId)` at the call site: under `isolated` the
- * scope is the ACTIVE organization (`tenantId`), under `group` it is the
- * caller's MEMBERSHIP SET (`accessible_org_ids`) and the active organization no
- * longer bounds anything (ADR-0105 D2). Asking only about `tenantId` would
- * refuse every `group` caller who is legitimately scoped by membership; asking
- * only about the set would let an `isolated` caller through on a set the
- * `isolated` wall never reads.
- *
- * This is a cheap PRE-TEST, never the verdict. It exists so the common paths —
- * the `single` posture, and any caller who does have an organization — skip the
- * layered RLS compile entirely. The verdict is always
- * {@link isTenantWallDenial} over the Layer 0 filter, which is the one place
- * that knows about platform-admin exemptions, non-tenant objects and phantom
- * anchors.
- *
- * It answers the SCOPE question only. Under a union-scope posture a caller
- * scoped by membership can still lack the organization a NEW row lands in —
- * the active one ({@link carriesActiveOrganization}) — and step 3.7 judges
- * that separately, on the stored image of an insert.
- */
-function callerHasOrganizationScope(context: any, posture: TenancyPosture): boolean {
-  if (postureUsesUnionScope(posture)) {
-    const orgIds = context?.accessible_org_ids;
-    return Array.isArray(orgIds) && orgIds.length > 0;
-  }
-  return carriesActiveOrganization(context);
-}
-
-/**
- * [ADR-0105 D5 · ADR-0123 D2] Does this execution context carry an ACTIVE
- * organization (`tenantId`)? In every posture that is where a new row lands:
- * the engine stamps an insert's organization from it. Under `isolated` it is
- * also the whole read scope; under `group` the membership set is the read
- * scope and the active organization stays the write target (ADR-0105 D2).
- */
-export function carriesActiveOrganization(context: any): boolean {
-  const tenantId = context?.tenantId;
-  return tenantId != null && tenantId !== '';
-}
-
-/**
  * [#21771] Ruling A's read question, judged on the answer of a caller-context
  * by-id read: is the row ABSENT to this caller?
  *
@@ -913,7 +863,7 @@ export function copyOfCallerPredicate(where: unknown): unknown {
  * `organization_id $in […]`) or `null`, which no reference check can confuse
  * with it.
  */
-function isTenantWallDenial(filter: Record<string, unknown> | null | undefined): boolean {
+export function isTenantWallDenial(filter: Record<string, unknown> | null | undefined): boolean {
   return filter === RLS_DENY_FILTER;
 }
 
@@ -8468,7 +8418,7 @@ export class SecurityPlugin implements Plugin {
    * {@link canWriteObject} asks this same method, so the two doors share one
    * spelling of the wall. It is handed no row, stored or written.
    */
-  private async organizationWallRefusal(
+  private organizationWallRefusal(
     permissionSets: PermissionSet[],
     object: string,
     operation: string,
@@ -8476,20 +8426,15 @@ export class SecurityPlugin implements Plugin {
     delegatorSets: PermissionSet[] | null,
     delegatorContext: any,
   ): Promise<'caller' | 'delegator' | null> {
-    if (!this.orgScopingEnabled || callerHasOrganizationScope(context, this.tenancyPosture)) return null;
-    const callerWall = await this.computeWriteTenantCheckFilter(permissionSets, object, operation, context);
-    // [ADR-0090 D10] The delegator is walled on its own context, exactly as
-    // the forge guard walls it — an on-behalf-of write may not land a row
-    // the delegator itself could not place.
-    const delegatorWall =
-      delegatorSets && !callerHasOrganizationScope(delegatorContext, this.tenancyPosture)
-        ? await this.computeWriteTenantCheckFilter(delegatorSets, object, operation, delegatorContext)
-        : null;
-    return isTenantWallDenial(callerWall)
-      ? 'caller'
-      : isTenantWallDenial(delegatorWall)
-        ? 'delegator'
-        : null;
+    // [#25223 cut 6] The body moved to `security-plugin-write-tenant-wall.ts` (see `WriteTenantWallHost`).
+    const readOrgScopingEnabled = () => this.orgScopingEnabled;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'orgScopingEnabled' | 'tenancyPosture'> = {
+      computeWriteTenantCheckFilter: (...a) => this.computeWriteTenantCheckFilter(...a),
+      get orgScopingEnabled() { return readOrgScopingEnabled(); },
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return organizationWallRefusal.call(host, permissionSets, object, operation, context, delegatorSets, delegatorContext);
   }
 
   /**
@@ -8577,38 +8522,18 @@ export class SecurityPlugin implements Plugin {
    * organization a `beforeInsert` / `beforeUpdate` hook writes is judged by
    * the write's stored-image half alone — the preview's named limit.
    */
-  async writeWallVerdict(
+  writeWallVerdict(
     object: string,
     operation: 'insert' | 'update',
     context: any,
     rows: readonly Record<string, unknown>[],
   ): Promise<WriteWallRowVerdict[] | null> {
-    if (!context || typeof context !== 'object' || context.isSystem || !context.userId) return null;
-    if (operation !== 'insert' && operation !== 'update') return null;
-    let principals: Awaited<ReturnType<SecurityPlugin['resolveOperationPrincipals']>>;
-    try {
-      principals = await this.resolveOperationPrincipals(operation, object, context);
-    } catch {
-      return null;
-    }
-    const isRow = (row: unknown): row is Record<string, unknown> =>
-      !!row && typeof row === 'object' && !Array.isArray(row);
-    const wall = await this.composeWriteTenantWall(
-      object,
-      operation,
-      context,
-      rows.filter(isRow),
-      true,
-      principals,
-      { positions: context.positions ?? [], permissionSets: context.permissions ?? [] },
-    );
-    return rows.map((row): WriteWallRowVerdict => {
-      if (!isRow(row)) return { admitted: true, judgesOrganization: false };
-      const refused = wall.preTest ?? wall.judgePayload([row]) ?? wall.storedImage?.judgeLanding([row]) ?? null;
-      return refused
-        ? { admitted: false, field: refused.field, code: refused.error.code, message: refused.error.message }
-        : { admitted: true, judgesOrganization: wall.storedImage?.judgesOrganization === true };
-    });
+    // [#25223 cut 6] The body moved to `security-plugin-write-tenant-wall.ts` (see `WriteTenantWallHost`).
+    const host: Pick<WriteTenantWallHost, 'composeWriteTenantWall' | 'resolveOperationPrincipals'> = {
+      composeWriteTenantWall: (...a) => this.composeWriteTenantWall(...a),
+      resolveOperationPrincipals: (...a) => this.resolveOperationPrincipals(...a),
+    };
+    return writeWallVerdict.call(host, object, operation, context, rows);
   }
 
   /**
@@ -8950,65 +8875,23 @@ export class SecurityPlugin implements Plugin {
    *   refusal where it is made. A context with no active organization is not
    *   this rule's: its answers stay with ADR-0123 D2.
    */
-  private async resolveOperationPrincipals(
+  private resolveOperationPrincipals(
     operation: string,
     object: string,
     context: any,
   ): Promise<{ permissionSets: PermissionSet[]; delegatorSets: PermissionSet[] | null; delegatorContext: any }> {
-    if (isPrincipalLessContext(context)) {
-      throw principalLessDenial(operation, object);
-    }
-    await this.refuseGuestWithoutOrganization(context, operation, object);
-
-    let permissionSets: PermissionSet[] = [];
-    try {
-      permissionSets = await this.resolvePermissionSetsForContext(context);
-    } catch (e) {
-      this.logger.error?.(
-        `[security] permission resolution failed for operation '${operation}' on ` +
-        `object '${object}' (user ${context?.userId ?? 'unknown'}) — ` +
-        `denying request (fail-closed)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
-      throw new PermissionDeniedError(
-        `[Security] Access denied: permission subsystem unavailable for ` +
-        `operation '${operation}' on object '${object}'`,
-      );
-    }
-
-    let delegatorSets: PermissionSet[] | null = null;
-    let delegatorContext: any = null;
-    if (permissionSets.length > 0 && context?.onBehalfOf?.userId) {
-      const del = await resolveDelegatorContext(this.ql, context);
-      if (del.kind === 'missing') {
-        throw new PermissionDeniedError(
-          `[Security] Access denied: on-behalf-of principal names delegator ` +
-            `'${del.userId}', who does not exist — refusing to act (ADR-0090 D10 fail-closed)`,
-          { operation, object },
-        );
-      }
-      if (del.kind === 'resolved') {
-        const liveOrganization = delegatedOrganizationRefusal(context, del.context, this.tenancyPosture);
-        if (liveOrganization !== undefined) {
-          this.logger.warn?.(
-            `[Security] on-behalf-of ${operation} '${object}' REFUSED — the delegator is not a member of the ` +
-              `organization the request runs in (ADR-0090 D10, fail-closed)`,
-          );
-          throw new PermissionDeniedError(
-            `[Security] Access denied: on-behalf-of principal acts in organization '${liveOrganization}', which ` +
-              `delegator '${String(context.onBehalfOf.userId)}' is not a member of — refusing to act (ADR-0090 D10 fail-closed)`,
-            { operation, object },
-            `[ADR-0090 D10] tenancy posture '${this.tenancyPosture}' walls organizations, and a delegated operation is ` +
-              `bounded by the delegator's scope: it runs in the live principal's active organization, which the ` +
-              `delegator's own membership must back. Build the on-behalf-of context in an organization the delegator ` +
-              `is a member of. System contexts and the single posture are unaffected.`,
-          );
-        }
-        delegatorContext = del.context;
-        delegatorSets = await this.resolvePermissionSetsForContext(delegatorContext);
-      }
-    }
-    return { permissionSets, delegatorSets, delegatorContext };
+    // [#25223 cut 6] The body moved to `security-plugin-operation-principals.ts` (see `OperationPrincipalsHost`).
+    const readLogger = () => this.logger;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<OperationPrincipalsHost, 'logger' | 'ql' | 'refuseGuestWithoutOrganization' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      get logger() { return readLogger(); },
+      get ql() { return readQl(); },
+      refuseGuestWithoutOrganization: (...a) => this.refuseGuestWithoutOrganization(...a),
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return resolveOperationPrincipals.call(host, operation, object, context);
   }
 
   /**
@@ -9035,30 +8918,18 @@ export class SecurityPlugin implements Plugin {
    * organization object) leaves the guest to the gate as it is — denied while
    * it holds no set (D3 item 2).
    */
-  private async refuseGuestWithoutOrganization(context: any, operation: string, object: string): Promise<void> {
-    // A system context never reaches here: both callers of
-    // {@link resolveOperationPrincipals} return before it for one (the
-    // middleware's system short-circuit, and `checkControlledByParentWrite`'s
-    // first exit), so this rule reads no elevation of its own.
-    if (!isGuestEnvelope(context)) return;
-    const tenantId = context?.tenantId;
-    if (typeof tenantId === 'string' && tenantId !== '') return;
-    const decision = await resolveGuestOrganization(this.ql, this.tenancyPosture);
-    if (decision.kind !== 'refuse') return;
-    if (!this.guestOrganizationRefusalWarned.has(decision.reason)) {
-      this.guestOrganizationRefusalWarned.add(decision.reason);
-      this.logger.warn?.(
-        `[security] an anonymous request reached '${operation}' on '${object}' and was refused: this deployment ` +
-          `resolves no organization for the guest (${decision.reason}, tenancy posture '${this.tenancyPosture}'` +
-          `${decision.organizationCount !== undefined ? `, ${decision.organizationCount} organization(s)` : ''}). ` +
-          `ADR-0138 D4 derives the guest's organization only on a single-organization deployment, and no site ` +
-          `binding (D5) exists yet to name one per request, so every anonymous data operation here answers ` +
-          `501 NOT_IMPLEMENTED. Serve the endpoint to signed-in callers (authRequired: true), or run it on a ` +
-          `single-organization deployment. Reported once per reason.`,
-        { operation, object, reason: decision.reason },
-      );
-    }
-    throw new GuestOrganizationUnresolvedError(decision.reason);
+  private refuseGuestWithoutOrganization(context: any, operation: string, object: string): Promise<void> {
+    // [#25223 cut 6] The body moved to `security-plugin-operation-principals.ts` (see `OperationPrincipalsHost`).
+    const readLogger = () => this.logger;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<OperationPrincipalsHost, 'guestOrganizationRefusalWarned' | 'logger' | 'ql' | 'tenancyPosture'> = {
+      guestOrganizationRefusalWarned: this.guestOrganizationRefusalWarned,
+      get logger() { return readLogger(); },
+      get ql() { return readQl(); },
+      get tenancyPosture() { return readTenancyPosture(); },
+    };
+    return refuseGuestWithoutOrganization.call(host, context, operation, object);
   }
 
   /**
