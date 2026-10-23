@@ -706,7 +706,11 @@ export const SysUser = ObjectSchema.create({
       name: 'all_users',
       label: 'All Users',
       data: { provider: 'object', object: 'sys_user' },
-      columns: ['name', 'email', 'phone_number', 'email_verified', 'source', 'two_factor_enabled', 'created_at'],
+      // No `two_factor_enabled` column here or in `me` (#25287): a list column
+      // has no feature gate, and on a deployment with 2FA off (the default)
+      // it read a dead "No" on every row. The state is shown on the user's
+      // own record page, in the Security tab, behind the `twoFactor` gate.
+      columns: ['name', 'email', 'phone_number', 'email_verified', 'source', 'created_at'],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
@@ -723,7 +727,7 @@ export const SysUser = ObjectSchema.create({
       name: 'me',
       label: 'My Profile',
       data: { provider: 'object', object: 'sys_user' },
-      columns: ['name', 'email', 'phone_number', 'email_verified', 'two_factor_enabled', 'updated_at'],
+      columns: ['name', 'email', 'phone_number', 'email_verified', 'updated_at'],
       filter: [{ field: 'id', operator: 'equals', value: '{current_user_id}' }],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 1 },
@@ -738,16 +742,9 @@ export const SysUser = ObjectSchema.create({
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
-    two_factor: {
-      type: 'grid',
-      name: 'two_factor',
-      label: '2FA Enabled',
-      data: { provider: 'object', object: 'sys_user' },
-      columns: ['name', 'email', 'two_factor_enabled', 'updated_at'],
-      filter: [{ field: 'two_factor_enabled', operator: 'equals', value: true }],
-      sort: [{ field: 'name', order: 'asc' }],
-      pagination: { pageSize: 50 },
-    },
+    // No "2FA Enabled" view (#25287): a list view has no feature gate, so on
+    // a deployment with 2FA off it was a tab that could only ever be empty.
+    // Retired rather than gated — gating it would need a new authorable key.
     banned: {
       type: 'grid',
       name: 'banned',
