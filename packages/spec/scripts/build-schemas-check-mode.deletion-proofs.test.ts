@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 190 — spawns the real producer once per single-cause fixture: every case runs the real schema generator (build-schemas.ts --check) in its own sandbox git tree, one fixture per cause; apportioned 2026-10-23 when #25372 split build-schemas-check-mode.test.ts: the pre-split file's slowest CI reading (983.3 s, run 38798542648) x this file's share of one local whole-file run (127.1 of 828.2 s), x 1.25, rounded up; re-measure once CI has read this file on its own
+// test-budget: 490 — spawns the real producer once per single-cause fixture: every case runs the real schema generator (build-schemas.ts --check) in its own sandbox git tree, one fixture per cause; measured 2026-10-23 on its first CI reading after #25372 split build-schemas-check-mode.test.ts (run 39963105499, Test Core, head dce4c6406): 386.75 s x 1.25, rounded up; one reading only, its wall tracks the run's load, so re-measure once the window has more
 //
 // A deleted manifest key must prove itself (#4725); check (c) dates a tombstone by its
 // exact key (#5898); proof 4 reads the refusal text (#18865).
