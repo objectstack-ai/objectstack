@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SysUser } from '@objectstack/platform-objects/identity';
+import { validationFailure } from '@objectstack/types';
 import {
   runAdminCreateUser,
   runAdminSetUserPassword,
@@ -1188,7 +1189,6 @@ describe('create-user: an optional permission set, granted under the caller\'s o
   });
 
   it('a name the catalog does not hold: 400 VALIDATION_FAILED with its fields, and the account rolls back', async () => {
-    const { validationFailure } = await import('@objectstack/types');
     const g = makeGrantSeam();
     const m = makeDeps({ createGrant: g.seam });
     const fields = [{ field: 'permission_set', code: 'reference_not_found', message: 'no such set' }];
