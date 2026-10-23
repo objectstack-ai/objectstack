@@ -13,7 +13,7 @@ Metadata-protocol: none
 
 - **Audience posture.** FROM: any posture booted and patched. TO: under the managed mode every posture but `invite_only` (the default) is refused at construction and on every merged config patch, with a message naming the posture and the fix.
 - **Email sign-up.** FROM: open unless `disableSignUp` or SSO-only was set. TO: forced off under the managed mode, and `getPublicConfig()` advertises `disableSignUp: true`. The bootstrap owner's first sign-up still enters, as it does under SSO-only.
-- **Invitations.** FROM: `organization/invite-member` created an invitation, and with `resend: true` extended a pending one and sent its e-mail again. TO: `409` on both, refused at the route before better-auth reads the body, so no invitation row is written or extended and no e-mail leaves.
+- **Invitations.** FROM: `organization/invite-member` created an invitation, and with `resend: true` extended a pending one and sent its e-mail again. TO: `409` on both, refused in the route's `before` hook, ahead of better-auth's body validation, session and permission checks and handler, so no invitation row is written or extended and no e-mail leaves.
 - **Admin create-user and import-users.** FROM: created or imported users. TO: `409` after the administrator check (a caller without it still gets `403`), and no user is written.
 - **Admin set-user-password.** FROM: set a password on any user. TO: refuses a target whose `source` is `idp_provisioned` with `409`; a local (`env_native`) target is still answered.
 - **Set-initial-password.** FROM: any signed-in user without a credential could set one. TO: only a caller with platform-admin standing may; any other signed-in caller gets `409`, and an anonymous caller still gets `401`.
