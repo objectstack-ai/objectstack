@@ -29,6 +29,7 @@ import {
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { composeHumanBaselinePermissionSets, PLATFORM_BASELINE_PERMISSION_SET } from './app-default-permission-set.js';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
+import { assertFlowSystemIdentityWriteAllowed } from './flow-system-identity-write-refusal.js';
 import {
   INVITATION_PLACEMENT_SERVICE,
   createInvitationPlacementService,
@@ -2576,6 +2577,16 @@ export class SecurityPlugin implements Plugin {
       ) {
         this.epoch.bump('write');
       }
+
+      // [#25251, ruling B] One system context stops short of the bypass: a
+      // flow run's (`isSystem` with a `flowRunId`). Its writes to the four
+      // identity-assignment objects are refused here, because the gates that
+      // judge those writes — the ADR-0090 D12 delegated-administration gate
+      // below, and the identity write guard that keeps invitations and
+      // memberships on the organization endpoints — all stand down for
+      // `isSystem`. Every other system write, and every read, passes on to the
+      // bypass unchanged. See `flow-system-identity-write-refusal.ts`.
+      assertFlowSystemIdentityWriteAllowed(opCtx);
 
       // System operations bypass security
       if (opCtx.context?.isSystem) {

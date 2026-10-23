@@ -48,7 +48,11 @@
  *
  * System/boot writes carry `isSystem` and short-circuit the security
  * middleware before this gate (seeders, publish materializer, better-auth
- * reconciliation are unaffected).
+ * reconciliation are unaffected). One system context stops short of that
+ * bypass: a flow run's (`isSystem` with a `flowRunId`), whose writes to these
+ * tables, `sys_invitation` included, are refused outright
+ * (`flow-system-identity-write-refusal.ts`) — a `runAs: 'user'` run is judged
+ * here instead, as the user it acts for.
  */
 
 import { isGrantActive, securityCatalogReaderOf, type SecurityCatalogReader } from '@objectstack/core';
@@ -171,7 +175,12 @@ const GOVERNED_OBJECTS = new Set([
   // site is what matters (AGENTS.md Prime Directive #10).
   'sys_member',
 ]);
-const GOVERNED_OPERATIONS = new Set(['insert', 'update', 'delete', 'transfer', 'restore', 'purge']);
+/**
+ * The verbs this gate governs. Exported because the flow-origin system refusal
+ * (`flow-system-identity-write-refusal.ts`) judges the same set: a verb added
+ * here is refused there too.
+ */
+export const GOVERNED_OPERATIONS: ReadonlySet<string> = new Set(['insert', 'update', 'delete', 'transfer', 'restore', 'purge']);
 const ANCHOR_POSITIONS = new Set(['everyone', 'guest']);
 
 /**
@@ -191,7 +200,9 @@ const ANCHOR_POSITIONS = new Set(['everyone', 'guest']);
  * System writers never reach this gate (`isSystem` short-circuits the security
  * middleware first) and keep the id or null they wrote: invitation placement
  * writes its issuer, the organization-admin reconcile the attributed human or
- * null, the platform-admin promotion null (ADR-0118 D1 — never a sentinel).
+ * null, the platform-admin promotion null (ADR-0118 D1 — never a sentinel). A
+ * flow run's system context writes no row here at all: it is refused ahead of
+ * the bypass (`flow-system-identity-write-refusal.ts`).
  */
 const GRANTED_BY_OBJECTS = new Set(['sys_user_position', 'sys_user_permission_set']);
 
