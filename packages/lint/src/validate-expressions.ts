@@ -103,7 +103,12 @@ import {
   flowNodeTextSlotSources,
   textSlotTemplateRefusal,
   structuralConditionRefusal,
+  closedScopeTemplateRefusal,
+  templateSlotSource,
 } from '@objectstack/spec/automation';
+// [#24798] A bulk action's `confirmText` is a `template` slot over the closed
+// scope the spec declares for it — judged below by the same template judge.
+import { bulkConfirmTemplateRoots } from '@objectstack/spec/ui';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `FlowValueSlotSchema` (the
@@ -1994,6 +1999,12 @@ export interface StackExpressionOptions {
    *    while an object write carries no top-level actions, so the door locates
    *    the same predicate at `object '…' · action …`.
    *
+   * [#24798] A sixth judges an object write too: the bulk `confirmText`
+   * pass over the object's own `listViews` (`bulkConfirmTextIssues`), warnings
+   * only. On a `view` write that pass is the ONLY one, over the
+   * written view's `list` and `listViews` — every other pass reads a
+   * collection a view write does not carry.
+   *
    * The passes over the stack's OTHER collections — flows, the top-level
    * `actions`, sharing rules and hooks — read an empty list on an object
    * write. None of them is the object's own body, the object write's snapshot
@@ -2030,6 +2041,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // an empty list under it, so the claim holds by construction rather than by
   // the shape of the snapshot the gate happens to build today.
   const objectWrite = options.runtimeWriteType === 'object';
+  // [#24798] On a `view` write exactly ONE pass judges — the bulk `confirmText`
+  // pass over the written view's own list containers ({@link bulkConfirmTextIssues});
+  // every other pass reads a collection a view write does not carry, so it
+  // returns before them by construction rather than by snapshot shape.
+  if (options.runtimeWriteType === 'view') return bulkConfirmTextIssues(stack, { views: true, objects: false });
   const objects = recordsOf(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
@@ -3447,5 +3463,123 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     issues.push(...kept);
   }
 
+  // [#24798] The bulk `confirmText` template slots: an object's own
+  // `listViews` on every run (an object write included — they are the
+  // object's own body), a view's list containers off an object write.
+  issues.push(...bulkConfirmTextIssues(stack, { views: !objectWrite, objects: true }));
+
+  return issues;
+}
+
+/**
+ * Why a finding on a bulk `confirmText` is a warning, said once at the end of
+ * each: `confirmText` was a plain string before it became a `template` slot,
+ * so every one of these sentences parsed — refusing it is a narrowing no
+ * conversion carries. This change ships the advisory; the refusal is its own
+ * change, not this one, and the sentence promises no release for it.
+ */
+const BULK_CONFIRM_TEXT_WARNING_ONLY =
+  'A warning, not a refusal: this text parsed before `confirmText` became a template slot.';
+
+/** The slot as {@link closedScopeTemplateRefusal}'s sentences name it. */
+const BULK_CONFIRM_TEXT_SLOT = "A bulk action's `confirmText`";
+
+/** A blank sentence — `trim()`'s whitespace set is exactly `\s`. */
+const BLANK_TEXT = /^\s*$/;
+
+/** The label segment for a named list view (`listViews.<key>`). */
+const LIST_VIEWS_LABEL = 'listViews';
+
+/**
+ * [#24798, ruling B] Judge every bulk action def's `confirmText` — the
+ * ADR-0032 `template` slot `ui/bulk-action.zod.ts` declares over a CLOSED
+ * scope, `bulkConfirmTemplateRoots(def)` (`count` and the def's params by
+ * name). The same two steps the flow text slots take above, in the same
+ * order, through the same judge: a single-brace token or a hole over an
+ * unbound root is named by `closedScopeTemplateRefusal` (the template judge's
+ * closed-scope entry), and a text carrying neither is compiled as the
+ * `template` it is (`validateExpression('template', …)`), which names a hole
+ * holding logic or an unknown formatter. A blank sentence is named too.
+ *
+ * ⚠️ Every finding is a `warning` here, never an `error`: each of these
+ * texts parsed before the slot was typed, so a refusal is a narrowing no
+ * ADR-0087 conversion carries. Under the amended 「甲」 (record 6303865025)
+ * such a refusal ships in 18.x as a BREAKING minor, as its own change (the
+ * `validatePagePredicateBounds` precedent: advisory first, refusal after);
+ * this pass is the advisory. The containers walked: a view's `list` and each
+ * `listViews.<key>`, a standalone list view (the flattened overlay or the
+ * ViewItem record), and an object's `listViews.<key>`.
+ */
+function bulkConfirmTextIssues(
+  stack: AnyRec,
+  { views: judgeViews, objects: judgeObjects }: { views: boolean; objects: boolean },
+): ExprIssue[] {
+  const issues: ExprIssue[] = [];
+  // Every metadata read below is a literal read off a receiver the #5017
+  // meta-test tables (`stack`, `obj`, `bulkDef`, and `viewEntry`, a union of
+  // shapes): a `.length` or a label string spelling `listViews.` would read
+  // as one more receiver to it, so the loops index by hand and the label is
+  // joined from LIST_VIEWS_LABEL.
+  const judgeContainer = (container: unknown, at: string): void => {
+    if (!container || typeof container !== 'object') return;
+    const listed = (container as AnyRec).bulkActionDefs;
+    if (!Array.isArray(listed)) return;
+    let di = -1;
+    for (const bulkDef of listed as AnyRec[]) {
+      di += 1;
+      if (!bulkDef || typeof bulkDef !== 'object' || bulkDef.confirmText === undefined) continue;
+      const confirmSource = templateSlotSource(bulkDef.confirmText);
+      if (confirmSource === undefined) continue; // neither a string nor a template envelope: the parse refuses its shape
+      const label = typeof bulkDef.name === 'string' ? ` '${bulkDef.name}'` : '';
+      const where = `${at} · bulkActionDefs[${di}]${label} confirmText`;
+      const warn = (message: string, quoted: string): void => {
+        issues.push({ where, message: `${message} ${BULK_CONFIRM_TEXT_WARNING_ONLY}`, source: quoted, severity: 'warning' });
+      };
+      if (BLANK_TEXT.test(confirmSource)) {
+        warn(
+          `${BULK_CONFIRM_TEXT_SLOT} is blank, so the confirm step shows an empty sentence where the default one names `
+            + 'the record count: write the sentence, or remove the key to show the default.',
+          confirmSource,
+        );
+        continue;
+      }
+      const refusal = closedScopeTemplateRefusal(confirmSource, { slot: BULK_CONFIRM_TEXT_SLOT, roots: bulkConfirmTemplateRoots(bulkDef) });
+      if (refusal !== undefined) {
+        warn(refusal, confirmSource);
+        continue;
+      }
+      for (const e of validateExpression('template', confirmSource).errors) warn(e.message, e.source);
+    }
+  };
+  const judgeListViews = (named: unknown, owner: string): void => {
+    if (!named || typeof named !== 'object' || Array.isArray(named)) return;
+    for (const [key, lv] of Object.entries(named as AnyRec)) judgeContainer(lv, `${owner} · ${LIST_VIEWS_LABEL}.${key}`);
+  };
+  if (judgeViews) {
+    let vi = -1;
+    for (const viewEntry of recordsOf(stack.views)) {
+      vi += 1;
+      const viewName = typeof viewEntry.name === 'string' ? viewEntry.name : typeof viewEntry.object === 'string' ? viewEntry.object : `#${vi}`;
+      // The two standalone shapes `PUT /api/v1/meta/view` carries and the
+      // publish gate snapshots as `views: [item]` — recognised as the list-view
+      // field rules recognise them (`validate-list-view-field-refs.ts`): the
+      // flattened list overlay (the `ListView` at the top level) and the
+      // ViewItem record (one level down, in `config`). Without them a view
+      // write would run this pass over nothing.
+      if (viewEntry.viewKind === 'list') {
+        const record = viewEntry.config !== null && typeof viewEntry.config === 'object' && !Array.isArray(viewEntry.config);
+        judgeContainer(record ? viewEntry.config : viewEntry, `view '${viewName}' (${record ? 'ViewItem record' : 'flattened list overlay'})`);
+      }
+      judgeContainer(viewEntry.list, `view '${viewName}' · list`);
+      judgeListViews(viewEntry.listViews, `view '${viewName}'`);
+    }
+  }
+  if (judgeObjects) {
+    let oi = -1;
+    for (const obj of recordsOf(stack.objects)) {
+      oi += 1;
+      judgeListViews(obj.listViews, `object '${typeof obj.name === 'string' ? obj.name : `#${oi}`}'`);
+    }
+  }
   return issues;
 }

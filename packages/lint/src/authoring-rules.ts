@@ -716,8 +716,22 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // entry-level change: it rides the object crossing above. MEASURED first:
     // 0 in-repo producers reference either family table, against 45 files
     // that reference an ordinary platform table.
+    //
+    // [#24798, ruling B] `view` joins, for ONE pass: a bulk action def's
+    // `confirmText`, now an ADR-0032 `template` slot over `count` and the
+    // def's params. On a view write `runStackExpressionPasses` runs that pass
+    // alone (by construction, as for an object write), and on an object write
+    // it also judges the object's own `listViews`. Every finding is a
+    // `warning` — an advisory here, never a refusal — because every such
+    // sentence parsed before the slot was typed; its refusal, a narrowing no
+    // conversion carries, is its own change (the amended 「甲」, 6303865025).
+    // MEASURED first over the shipped corpus at `b42c621c05`: 6 bulk defs
+    // carry a `confirmText` (examples/app-showcase `project.view.ts`), none
+    // with a brace → 0 findings, against a warning for each of an unbound
+    // hole, a single-brace token, a hole holding logic and a blank sentence
+    // in `validate-expressions.test.ts`.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'action', 'hook', 'object'],
+    runtimeTypes: ['flow', 'action', 'hook', 'object', 'view'],
     run: (stack, ctx) =>
       runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
         severity: i.severity ?? 'error',
