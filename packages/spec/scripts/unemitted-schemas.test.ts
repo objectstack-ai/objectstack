@@ -8,7 +8,7 @@
  * extracted for the same reason `def-key-collisions` (#5832) and `zod-graph`
  * (#5317) were: the only other way to assert on it is to run the whole
  * generator, and the end-to-end cases that do (in
- * `build-schemas-check-mode.test.ts`) cost a spawn each.
+ * `build-schemas-check-mode.manifest.test.ts`) cost a spawn each.
  *
  * The properties that matter, and why each one is a test rather than a comment:
  *

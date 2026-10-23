@@ -1262,8 +1262,12 @@ describe('AuthManager', () => {
       const orgPlugin = await bootOrgPlugin({ additionalOrgRoles: ['sales_rep'] } as never);
 
       const roles = orgPlugin._opts.roles;
-      expect(Object.keys(roles).sort()).toEqual(['admin', 'delegated_admin', 'member', 'owner']);
+      expect(Object.keys(roles).sort()).toEqual(['admin', 'delegated_admin', 'external', 'member', 'owner']);
       expect(roles.sales_rep).toBeUndefined();
+      // [Ruling 6355206139] `external` holds no organization statement at all.
+      for (const [resource, actions] of Object.entries(roles.external.statements)) {
+        expect(actions, resource).toEqual([]);
+      }
     });
 
     /**

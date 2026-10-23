@@ -60,11 +60,33 @@ export const Project = ObjectSchema.create({
         { label: 'Red', value: 'red', color: '#EF4444' },
       ],
     }),
-    budget: Field.currency({ label: 'Budget', min: 0 }),
-    spent: Field.currency({ label: 'Spent', min: 0, defaultValue: 0 }),
+    // Money in one fixed currency, as on `showcase_account.annual_revenue`: with
+    // no currency code a currency field reads as a bare number (`200,000.00`)
+    // beside that column's `US$12,000,000.00`. `spent` declares the same
+    // currency as `budget`, so `budget_remaining` subtracts two amounts in one
+    // currency.
+    budget: Field.currency({
+      label: 'Budget',
+      min: 0,
+      currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },
+    }),
+    spent: Field.currency({
+      label: 'Spent',
+      min: 0,
+      defaultValue: 0,
+      currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },
+    }),
+    // A money result (#22727): `returnType: 'currency'` with the formula's own
+    // `currencyConfig` renders it as its sources render, not as a plain number
+    // (`200,000`). This pair is what `inferFormulaReturn` stamps for this
+    // expression over two USD amounts. `scale: 2` rounds the computed result
+    // to cents, so a float subtraction never returns a long fraction.
     budget_remaining: Field.formula({
       label: 'Budget Remaining',
       expression: cel`(record.budget == null ? 0 : record.budget) - (record.spent == null ? 0 : record.spent)`,
+      returnType: 'currency',
+      currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },
+      scale: 2,
     }),
     start_date: Field.date({ label: 'Start Date' }),
     end_date: Field.date({ label: 'Target End Date' }),

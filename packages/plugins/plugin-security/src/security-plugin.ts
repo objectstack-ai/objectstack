@@ -29,6 +29,7 @@ import {
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { composeHumanBaselinePermissionSets, PLATFORM_BASELINE_PERMISSION_SET } from './app-default-permission-set.js';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
+import { assertFlowSystemIdentityWriteAllowed } from './flow-system-identity-write-refusal.js';
 import {
   INVITATION_PLACEMENT_SERVICE,
   createInvitationPlacementService,
@@ -47,16 +48,12 @@ import {
   type DeclaredSharingRuleReader,
 } from './access-upgrade-report.js';
 import { ACCESS_UPGRADE_CHECK_SERVICE, createAccessUpgradeCheck } from './access-upgrade-check.js';
+import { reportUpgradeImpact, SETTINGS_SERVICE, type SettingsManifestReader } from './upgrade-impact-report.js';
 import {
-  explainAccessForAsker,
-  buildContextForUser,
-  resolveDelegatorContext,
-  delegatedOrganizationRefusal,
   intersectDelegatedScope,
-  d10NarrowingStatement,
 } from './explain-engine.js';
 import { jsonColumnCheckRefusalCarriedBy, storedFormCheckJudge } from './rls-check-stored-form.js';
-import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
+import type { ExplainDecision } from '@objectstack/spec/security';
 import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 
 import { applyManagedWriteDenies } from './managed-object-write-denies.js';
@@ -66,18 +63,12 @@ import { registerPackagedPermissionSetLockGate } from './packaged-permission-set
 import { registerSecurityCatalogEcho, echoStoredSecurityCatalogOverlays } from './security-catalog-echo.js';
 import {
   reconcileAudienceBindingSuggestions,
-  listAudienceBindingSuggestions,
-  confirmAudienceBindingSuggestion,
-  dismissAudienceBindingSuggestion,
-  readAcceptedEveryoneSets,
   readAcceptedDefaultPermissionSetsOption,
   refuseAcceptedDefaultsWithoutWall,
   type DeploymentAcceptance,
-  type SuggestionDeps,
-  type SuggestionListFilter,
 } from './suggested-audience-bindings.js';
 import { cleanupPackagePermissions } from './cleanup-package-permissions.js';
-import { readDeclared, readDeclaredCapabilityContext } from './declared-capability-context.js';
+import { readDeclared } from './declared-capability-context.js';
 import { RLSCompiler, RLS_DENY_FILTER, compiledPolicyNameOf, policyDeclaresClause } from './rls-compiler.js';
 import {
   andComposeLayers,
@@ -86,7 +77,7 @@ import {
 import {
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readPositionGrantsInForce, countPositionHolders } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readPositionGrantsInForce, countPositionHolders } from '@objectstack/core';
 // [#25223 cut 1] The leaf readers (policy collection, unresolved-posture
 // probes, field masks, field-name tables); the methods of the same names below
 // hand each body the members it reads (`ObjectInputsHost`).
@@ -172,6 +163,7 @@ import {
   stageRlsMembership,
   type RlsFilterHost,
 } from './security-plugin-rls-filter.js';
+import { resolverCollisionMessage, resolverCollisionsOf } from './object-membership-keys.js';
 // [#25223 cut 8] The permission-set resolution for an execution context: the
 // resolution itself, the deactivated folded-set drop, the position-name fold
 // report and the memo's key; the methods of the same names below hand each
@@ -225,13 +217,65 @@ import {
   objectReadAdmission,
   type ObjectAdmissionHost,
 } from './security-plugin-object-admission.js';
+// [#25223 cut 10] The `everyone` anchor's declarations: the anchor's
+// definition a started kernel derives, and the built-in positions `init()`
+// declares; the methods of the same names below hand each body the members it
+// reads (`EveryoneAnchorHost`).
+import {
+  declareBuiltinPositions,
+  declareEveryone,
+  type EveryoneAnchorHost,
+} from './security-plugin-everyone-anchor.js';
+// [#25223 cut 10] The `security/explain` answer for a caller; the method of
+// the same name below hands the body the members it reads
+// (`ExplainAccessHost`).
+import {
+  explainAccessForCaller,
+  type ExplainAccessHost,
+} from './security-plugin-explain-access.js';
+// [#25223 cut 10] The record-sharing verdicts: the read filter, the edit gate,
+// the write-depth stash, the tri-state write verdict, the pre-image floor
+// decision and the delegator's own floor knobs; the methods of the same names
+// below hand each body the members it reads (`SharingVerdictsHost`).
+import {
+  delegatorOwnWriteFloorOptions,
+  resolvePreImageFloorDrop,
+  resolveSharingCanEdit,
+  resolveSharingReadFilter,
+  resolveSharingWriteVerdict,
+  resolveWriteScopeForSharing,
+  type SharingVerdictsHost,
+} from './security-plugin-sharing-verdicts.js';
+// [#25223 cut 10] The authored-row write verdict and its probe scope; the
+// method of the same name below hands the body the members it reads
+// (`AuthoredRowWriteHost`).
+import {
+  checkAuthoredRowWrite,
+  type AuthoredRowWriteHost,
+} from './security-plugin-authored-row-write.js';
+// [#25223 cut 11] The `security` service registration `start()` runs; the
+// block in `start()` that calls it hands it the members it reads
+// (`SecurityServiceHost`).
+import {
+  registerSecurityService,
+  type SecurityServiceHost,
+} from './security-plugin-security-service.js';
+// [#25223 cut 11] The seed-ownership claim on `app:seeded`, and the two
+// `seed-settlement` readers it shares with the promotion-time pass in
+// `start()`; the method of the same name below hands the claim the members it
+// reads (`SeedClaimHost`).
+import {
+  claimSeedOwnershipOnSettle,
+  readSeededRecordIds,
+  readSeedSettlementSnapshot,
+  type SeedClaimHost,
+} from './security-plugin-seed-claim.js';
 import {
   isPlatformOwnershipFloorPolicy,
   masterGateCoversOperation,
   masterGovernsRowWrites,
   owdDeclaresOpenRowWrites,
   owdOpenWritesCoversOperation,
-  type OwnershipFloorAlternate,
 } from './platform-ownership-policies.js';
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
 import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
@@ -244,22 +288,17 @@ import {
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
-  type ObjectAccessScope,
   type TenancyPosture,
 } from '@objectstack/spec/security';
 import {
   RLS_MEMBERSHIP_RESOLVER_SERVICE,
   type IRlsMembershipResolver,
-  type ISecurityService,
   type SharingWriteVerdict,
   type AuthoredRowWriteVerdict,
   type AuthoredRowWriteOperation,
   type ControlledByParentWriteDenialLeg,
   type ControlledByParentWriteOutcome,
-  type DelegationNarrowing,
   type PositionGrantSummary,
-  SEED_SETTLEMENT_SERVICE,
-  type ISeedSettlementService,
   type SeedSettlementSnapshot,
 } from '@objectstack/spec/contracts';
 import {
@@ -274,8 +313,7 @@ import {
   MaskedValueWriteError,
 } from './errors.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
-import { bootstrapPlatformAdmin, findExistingPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
-import { claimSeedOwnership } from './claim-seed-ownership.js';
+import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import { createPlatformAdminService } from './platform-admin-service.js';
 import {
   backfillOrgAdminGrants,
@@ -292,7 +330,6 @@ import {
   securityPluginManifestHeader,
   SECURITY_PLUGIN_ID,
 } from './manifest.js';
-import { declareEveryoneBaseline, registerBuiltinPositions } from './builtin-positions.js';
 import { GUEST_POSITION } from '@objectstack/spec';
 import { registerBuiltinCapabilities } from './builtin-capabilities.js';
 
@@ -758,36 +795,6 @@ interface CbpRelation {
 }
 
 /**
- * [#7281] The scope `checkAuthoredRowWrite`'s probe read runs under.
- *
- * The method asks ONE question — "does the declared, app-authored widener admit
- * this row for this operation?" — and that question is about the row and the
- * declaration, never about what the CALLER may see. Resolving it under the
- * caller's own context folded a READ decision into a WRITE question: on a
- * `private`-OWD object `plugin-sharing`'s read filter scopes every re-read to
- * owner-match OR shares, so a cross-owner row was invisible to the probe and
- * the verdict was `abstain` for a row the declaration names by predicate. The
- * by-id widener surface was therefore structurally dead on `private` — the
- * posture #5493 built it for (maintainer ruling, 2026-08-10: reading 2).
- *
- * Elevating the READ does not widen the ANSWER, because the predicate carries
- * the whole of the question and travels in the `where`, not in the scope:
- * `{ id } AND layer0(tenant wall) AND layer1(app-authored policies)`. Both
- * layers are computed from the CALLER's permission sets and the CALLER's
- * tenant BEFORE the read (see {@link SecurityPlugin.checkAuthoredRowWrite}), so
- * a row in another tenant, a row no authored policy matches, and a caller
- * holding no authored policy at all are all still `abstain` — measured, not
- * asserted (`authored-row-write-verdict.test.ts`, and the real-stack pin
- * `packages/qa/dogfood/test/authored-row-write-scope.dogfood.test.ts`).
- *
- * Principal-less on purpose: it carries no `userId`, so nothing downstream can
- * mistake it for the caller acting with more authority than they hold. It is
- * SPREAD at the single call site rather than passed by reference, so no
- * middleware can stamp state onto a shared object.
- */
-const AUTHORED_ROW_WRITE_PROBE_CONTEXT = { isSystem: true, positions: [], permissions: [] } as const;
-
-/**
  * [#21771] Ruling A's read question, judged on the answer of a caller-context
  * by-id read: is the row ABSENT to this caller?
  *
@@ -807,7 +814,7 @@ const AUTHORED_ROW_WRITE_PROBE_CONTEXT = { isSystem: true, positions: [], permis
  * one question one way. The three-way classification itself is
  * {@link readUnlessRefused}, which the predicate write's read question asks too.
  */
-async function absentUnderCallerRead(read: () => Promise<unknown>): Promise<boolean> {
+export async function absentUnderCallerRead(read: () => Promise<unknown>): Promise<boolean> {
   const answer = await readUnlessRefused(read);
   return !answer.refused && answer.value == null;
 }
@@ -824,7 +831,7 @@ async function absentUnderCallerRead(read: () => Promise<unknown>): Promise<bool
  * explaining itself keeps the write path's notion, so its explanation shows
  * what its own doors do.
  */
-async function unreadableUnderCallerRead(read: () => Promise<unknown>): Promise<boolean> {
+export async function unreadableUnderCallerRead(read: () => Promise<unknown>): Promise<boolean> {
   const answer = await readUnlessRefused(read);
   return answer.refused || answer.value == null;
 }
@@ -1245,47 +1252,6 @@ export function writeCheckPolicies(
   return applicable.filter(
     (p) => policyDeclaresClause(p, 'using') && (opts.keepOwnershipFloor || !isPlatformOwnershipFloorPolicy(p)),
   );
-}
-
-/**
- * "Has this boot's own seed data finished landing?", asked through the
- * published `seed-settlement` contract rather than by sniffing the runtime's
- * internal `seed-datasets` service — that array's presence says a seed source
- * EXISTS, never whether it has SETTLED, and the gap between those two facts is
- * the whole defect. `undefined` means no seed pipeline registered on this
- * kernel, which by `kernel:ready` is a fact and not a not-yet (every source is
- * declared in Phase 2 `start()`). Read per use, never cached.
- */
-function readSeedSettlementSnapshot(ctx: PluginContext): SeedSettlementSnapshot | undefined {
-  try {
-    const svc = (ctx as any).getService?.(SEED_SETTLEMENT_SERVICE) as
-      | ISeedSettlementService
-      | undefined;
-    if (!svc || typeof svc.snapshot !== 'function') return undefined;
-    return svc.snapshot();
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * [#23354] "Which rows did this process's boot seed write?", through the same
- * published contract as {@link readSeedSettlementSnapshot} — the seed loader's
- * own report of the rows it landed on, so the seed-ownership claim hands over
- * the seed's rows and leaves every other unowned row unowned (ADR-0138 D1).
- * `undefined` when no host publishes it; the claim then re-owns no NULL-owner
- * row and its pass report says so. Bound per pass; the tally is read per call.
- */
-function readSeededRecordIds(ctx: PluginContext): ((objectName: string) => readonly string[]) | undefined {
-  try {
-    const svc = (ctx as any).getService?.(SEED_SETTLEMENT_SERVICE) as
-      | ISeedSettlementService
-      | undefined;
-    if (!svc || typeof svc.seededRecordIds !== 'function') return undefined;
-    return (objectName: string) => svc.seededRecordIds!(objectName);
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -1866,38 +1832,17 @@ export class SecurityPlugin implements Plugin {
    * the seed reported landing on it ({@link readSeededRecordIds}): a guest's or
    * a public form's unowned row keeps no owner on every boot (ADR-0138 D1).
    */
-  private async claimSeedOwnershipOnSettle(
+  private claimSeedOwnershipOnSettle(
     ctx: PluginContext,
     payload?: { appId?: string; overBudget?: boolean },
   ): Promise<void> {
-    let ql: IObjectQLEngine | undefined;
-    try {
-      ql = ctx.getService<IObjectQLEngine>('objectql');
-    } catch {
-      return;
-    }
-    if (!ql) return;
-    try {
-      const adminUserId =
-        this.claimTargetAdminUserId ??
-        (await findExistingPlatformAdmin(ql, this.bootstrapPermissionSets));
-      if (!adminUserId) return;
-      await claimSeedOwnership(ql, adminUserId, {
-        logger: ctx.logger,
-        seedSettlement: readSeedSettlementSnapshot(ctx),
-        seededRecordIds: readSeededRecordIds(ctx),
-      });
-    } catch (e) {
-      // Best-effort, exactly like the promotion-time call: a failed claim
-      // leaves the rows unowned and the next run claims them, because the
-      // predicate is still true of them. It must not break the boot — `trigger`
-      // dispatch PROPAGATES, and a seed that landed must not fail on this.
-      ctx.logger.warn('[security] seed-settle ownership claim failed', {
-        appId: payload?.appId,
-        overBudget: payload?.overBudget,
-        error: (e as Error).message,
-      });
-    }
+    // [#25223 cut 11] The body moved to `security-plugin-seed-claim.ts` (see `SeedClaimHost`).
+    const readClaimTargetAdminUserId = () => this.claimTargetAdminUserId;
+    const host: Pick<SeedClaimHost, 'bootstrapPermissionSets' | 'claimTargetAdminUserId'> = {
+      bootstrapPermissionSets: this.bootstrapPermissionSets,
+      get claimTargetAdminUserId() { return readClaimTargetAdminUserId(); },
+    };
+    return claimSeedOwnershipOnSettle.call(host, ctx, payload);
   }
 
   async start(ctx: PluginContext): Promise<void> {
@@ -2163,6 +2108,13 @@ export class SecurityPlugin implements Plugin {
       ctx.logger.info('[security] rls-membership-resolver registered', {
         keys: this.rlsMembershipResolver.keys,
       });
+      // [#25234 ruling A] One namespace: a key the resolver owns that an object
+      // also declares (`membershipKeys`) resolves from neither source. Said at
+      // boot, naming both owners, for the objects registered by now; a request
+      // that meets a collision registered later says it again.
+      for (const { key, objects } of resolverCollisionsOf(this.ql, this.rlsMembershipResolver)) {
+        ctx.logger.error(resolverCollisionMessage(key, objects));
+      }
     }
 
     if (this.orgScopingEnabled) {
@@ -2259,300 +2211,38 @@ export class SecurityPlugin implements Plugin {
     // to enforce tenant/RLS on every base + joined object. We register the
     // service only once the metadata/ql/dbLoader handles are wired (above), so
     // a degraded start never exposes a half-initialised resolver.
-    try {
-      // [ADR-0090 D5/D9] Suggested audience bindings — shared deps for the
-      // list/accept/dismiss surface: the posture the deployment authority is
-      // judged under, and the re-derivation an accept or a revoke runs.
-      const suggestionDeps: SuggestionDeps = {
-        ql,
-        metadata,
-        posture: () => this.tenancyPosture,
-        rederiveEveryone: () => this.declareEveryone(ctx.logger),
+    // [#25223 cut 11] The registration moved to `security-plugin-security-service.ts` (see `SecurityServiceHost`).
+    {
+      const readDelegatedAdminGate = () => this.delegatedAdminGate;
+      const readLogger = () => this.logger;
+      const readPermissionEvaluator = () => this.permissionEvaluator;
+      const readQl = () => this.ql;
+      const readTenancyPosture = () => this.tenancyPosture;
+      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
         acceptedDefaultPermissionSets: this.acceptedDefaultPermissionSets,
-        logger: ctx.logger,
+        canExport: (...a) => this.canExport(...a),
+        canReadObject: (...a) => this.canReadObject(...a),
+        checkAuthoredRowWrite: (...a) => this.checkAuthoredRowWrite(...a),
+        checkControlledByParentWrite: (...a) => this.checkControlledByParentWrite(...a),
+        declareEveryone: (...a) => this.declareEveryone(...a),
+        get delegatedAdminGate() { return readDelegatedAdminGate(); },
+        describePositionGrants: (...a) => this.describePositionGrants(...a),
+        explainAccessForCaller: (...a) => this.explainAccessForCaller(...a),
+        getEffectiveObjectPermissions: (...a) => this.getEffectiveObjectPermissions(...a),
+        getMetadataReadableFields: (...a) => this.getMetadataReadableFields(...a),
+        getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+        getQueryableFields: (...a) => this.getQueryableFields(...a),
+        getReadFilter: (...a) => this.getReadFilter(...a),
+        getReadableFields: (...a) => this.getReadableFields(...a),
+        getWritableFields: (...a) => this.getWritableFields(...a),
+        get logger() { return readLogger(); },
+        ownershipFloorAlternates: this.ownershipFloorAlternates,
+        get permissionEvaluator() { return readPermissionEvaluator(); },
+        get ql() { return readQl(); },
+        resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+        get tenancyPosture() { return readTenancyPosture(); },
       };
-      // Typed against the published contract so the registered surface cannot
-      // drift from what cross-package consumers are promised: a renamed method,
-      // a dropped one, or a changed return type fails THIS build rather than
-      // silently degrading a consumer's feature detection at runtime.
-      const securityService: ISecurityService = {
-        getReadFilter: (object: string, context?: any) => this.getReadFilter(object, context),
-        // The OBJECT-level half of the same read. `getReadFilter` answers
-        // "which rows" and answers `undefined` for a caller with NO grant at
-        // all, so a door holding only the filter cannot tell "unrestricted"
-        // from "not permitted" — which is how the analytics raw-SQL path served
-        // a row count for an object whose `/data` door answers 403. Exposed
-        // here so every door that bypasses the middleware asks BOTH halves.
-        canReadObject: (object: string, context?: any) => this.canReadObject(object, context),
-        // [#3547] Readable-field projection for a context — the authoritative
-        // column set for a read-derived export (`export ⊆ list`, #3391).
-        // Same field mask as the read middleware (no drift). The REST export
-        // route uses it to project columns instead of inferring readability
-        // from already-masked data rows. See getReadableFields.
-        getReadableFields: (object: string, context?: any) => this.getReadableFields(object, context),
-        // [#18386] Its write-side twin: the fields step 2.5 would not refuse.
-        // The import template narrows its columns by it. See getWritableFields.
-        getWritableFields: (object: string, context?: any) => this.getWritableFields(object, context),
-        // [#20935] Its query-side twin: the fields steps 2.5b and 2.9 would not
-        // refuse as a group key, an aggregate input, a filter or a sort key. A
-        // field served MASKED is readable and NOT queryable, so a door that
-        // compiles its own statement (the analytics raw-SQL path) asks this as
-        // well as the read projection. See getQueryableFields.
-        getQueryableFields: (object: string, context?: any) => this.getQueryableFields(object, context),
-        // [#3544] User-level export axis. `export ⊆ list`, so a bulk export
-        // reaches the middleware as a plain `find` and `allowExport` would never
-        // be consulted — the REST export route asks HERE before it streams.
-        canExport: (object: string, context?: any) => this.canExport(object, context),
-        // [ADR-0111 D2] Super-user WRITE bypass probe — the management-authority
-        // primitive behind `ISharingService.canManageShares`. Explicit
-        // `modifyAllRecords` only (NOT the effective write scope, whose
-        // unmatched-object case fails open to 'org'); fails CLOSED on
-        // resolution errors, principal-less contexts, and on-behalf-of
-        // contexts (no D10 delegator intersection on this path).
-        hasWriteBypass: async (object: string, context?: any): Promise<boolean> => {
-          if (context?.isSystem) return true;
-          if (!context?.userId) return false;
-          if (context?.onBehalfOf?.userId) return false;
-          try {
-            const meta = await this.getObjectSecurityMeta(object);
-            const sets = await this.resolvePermissionSetsForContext(context);
-            return this.permissionEvaluator.hasSuperuserWriteBypass(object, sets, { isPrivate: meta.isPrivate });
-          } catch (e) {
-            this.logger.warn?.(
-              `[security] hasWriteBypass failed for object '${object}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
-              e instanceof Error ? e : new Error(String(e)),
-            );
-            return false;
-          }
-        },
-        // [ADR-0111 D1 DEPTH] Effective WRITE scope — the DEPTH primitive behind
-        // canManageShares' hierarchy-manager branch. Same evaluator the CRUD
-        // write path uses; fails CLOSED to 'own' on error / principal-less /
-        // on-behalf-of. Returns 'org' for system and for Modify-All holders —
-        // AND for the fail-open unmatched-object case, which is why the sharing
-        // gate treats 'org' from here as non-authoritative on its own.
-        resolveWriteScope: async (object: string, context?: any): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'> => {
-          if (context?.isSystem) return 'org';
-          if (!context?.userId || context?.onBehalfOf?.userId) return 'own';
-          try {
-            const meta = await this.getObjectSecurityMeta(object);
-            const sets = await this.resolvePermissionSetsForContext(context);
-            return this.permissionEvaluator.getEffectiveScope('write', object, sets, { isPrivate: meta.isPrivate });
-          } catch (e) {
-            this.logger.warn?.(
-              `[security] resolveWriteScope failed for object '${object}' (user ${context?.userId ?? 'unknown'}) — narrowing to 'own' (fail-closed)`,
-              e instanceof Error ? e : new Error(String(e)),
-            );
-            return 'own';
-          }
-        },
-        // [ADR-0090 D10 — maintainer ruling 2026-09-08, consequence 2] The
-        // delegated-read diagnostic. NOT an enforcement path: it decides
-        // nothing, narrows nothing, and never throws outward. It answers the
-        // one question a transport serving a delegated read owes its caller —
-        // "is this count a fact about the object, or about the ceiling?" —
-        // because the caller is an AI that will otherwise report `total: 0` as
-        // an answer (the measured failure on #16549).
-        //
-        // Resolved from the SAME two evaluator calls the CRUD middleware makes
-        // when it stashes `__readScope` (step 2.6), folded by the SAME
-        // `intersectDelegatedScope`. That is what stops it becoming a phantom
-        // check: it cannot report a narrowing the query did not have, and it
-        // cannot miss one the query did.
-        describeDelegationNarrowing: async (object: string, context?: any): Promise<DelegationNarrowing> => {
-          const none: DelegationNarrowing = { narrowed: false };
-          if (context?.isSystem) return none;
-          const delegatorId = context?.onBehalfOf?.userId;
-          if (!context?.userId || !delegatorId) return none;
-          try {
-            const del = await resolveDelegatorContext(this.ql, context);
-            // A dangling delegator is a fail-CLOSED DENIAL upstream, not a
-            // narrowing — the read never returns rows for this to describe.
-            if (del.kind !== 'resolved') return none;
-            // [#25107] Nor is a delegator who is not a member of the
-            // organization the read runs in, on a walled posture: the prologue
-            // refuses the read ({@link delegatedOrganizationRefusal}).
-            if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return none;
-            const meta = await this.getObjectSecurityMeta(object);
-            const sets = await this.resolvePermissionSetsForContext(context);
-            const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
-            const delegatorScope = this.permissionEvaluator.getEffectiveScope('read', object, delegatorSets, { isPrivate: meta.isPrivate });
-            const declared = this.permissionEvaluator.getDeclaredScope('read', object, sets, { isPrivate: meta.isPrivate });
-            const folded = intersectDelegatedScope(declared, delegatorScope);
-            if (!folded.narrowedByCeiling) return none;
-            return {
-              narrowed: true,
-              statement: d10NarrowingStatement({
-                object,
-                delegatorId: String(delegatorId),
-                effectiveScope: folded.agentLegScope,
-                delegatorScope,
-              }),
-              effectiveScope: folded.agentLegScope as ObjectAccessScope,
-              delegatorScope,
-            };
-          } catch (e) {
-            // ⛔ A diagnostic must never fail a read. Silence is the only safe
-            // direction: it degrades to exactly the behaviour that shipped
-            // before this method existed.
-            this.logger.warn?.(
-              `[security] describeDelegationNarrowing failed for object '${object}' — reporting no narrowing`,
-              e instanceof Error ? e : new Error(String(e)),
-            );
-            return none;
-          }
-        },
-        // [#5493 / ADR-0105 D3] Authored-row-write evidence: does an
-        // APP-AUTHORED (non-floor) RLS policy admit this row for this write,
-        // with the platform's `created_by` ownership floor taken out by
-        // provenance? The composed RLS answer cannot stand in for it — the
-        // floor admits every row's CREATOR, so a caller deferring to "composed
-        // RLS admits" hands transferred records back to their former creators
-        // (#5493 probe E-A). Verdict-shaped and fail-closed to `abstain`; see
-        // the method for why a null Layer 1 is an abstention.
-        checkAuthoredRowWrite: (
-          object: string,
-          recordId: string,
-          operation: AuthoredRowWriteOperation,
-          context?: any,
-        ) => this.checkAuthoredRowWrite(object, recordId, operation, context),
-        // [ADR-0055] The master-detail write check's answer for a by-id update
-        // of one record — the write path's own composition, served for a gate
-        // outside it (the `sys_attachment` and `sys_comment` parent gates)
-        // that must judge a `controlled_by_parent` parent as its own update is
-        // judged. Served on the typed literal, so the compiler holds it to the
-        // contract's signature and outcome type.
-        checkControlledByParentWrite: (object: string, recordId: string, context?: any) =>
-          this.checkControlledByParentWrite(object, recordId, context),
-        // [ADR-0046 §6.7] Effective permission-set NAMES for a caller — the
-        // primitive the REST read layer needs to evaluate a permission-set-
-        // gated book/doc audience ({ permissionSet: '…' }). Same resolution
-        // as the middleware (positions expanded, additive baseline), so the
-        // docs gate can never drift from data-plane enforcement. Throws on
-        // resolution failure — callers must fail CLOSED (ADR-0049).
-        resolvePermissionSetNames: async (context?: any): Promise<string[]> => {
-          const sets = await this.resolvePermissionSetsForContext(context);
-          return sets.map((s) => s.name);
-        },
-        // [#7616] The same resolution, returned WHOLE — `objects`, `fields`,
-        // `systemPermissions`, `tabPermissions`, in resolution order. The names
-        // above answer an AUDIENCE question; a consumer that must MERGE the
-        // caller's grants (the object/field map `/auth/me/permissions` serves,
-        // the capability + tab surface `/me/apps` filters its app list with)
-        // cannot reach any of those four columns from a name, so both endpoints
-        // re-implement this resolution locally instead — one rule in three
-        // copies, which has already drifted from the enforcement path three
-        // times (#7608, #7555, #6334), each divergence found only after it
-        // reached a user.
-        //
-        // Exposed HERE, on the registered literal, and not merely as a public
-        // class member: `plugin-hono-server` must never take a runtime
-        // dependency on this plugin (it is optional in the stacks those
-        // endpoints serve — the `!evaluator` degraded branches are exactly its
-        // absence), so the service locator is the only seam that can carry the
-        // delegation. A method the class declares but the literal does not
-        // expose is unreachable across that seam, which is the precise failure
-        // this addition exists to prevent.
-        //
-        // The class method stays private on purpose: this literal is the
-        // supported surface, and routing every cross-package caller through it
-        // is what keeps the published contract and the enforcement path the
-        // same code rather than two that agree today.
-        resolvePermissionSetsForContext: (context?: any): Promise<PermissionSet[]> =>
-          this.resolvePermissionSetsForContext(context),
-        // [#18783] The EFFECTIVE object-permission map — the `objects` slot of
-        // `/auth/me/permissions`, from the same function that endpoint uses
-        // (`buildEffectiveObjectPermissions`). Exposed on the literal for the
-        // reason above: a cross-package consumer can only reach it here.
-        getEffectiveObjectPermissions: (context?: any) => this.getEffectiveObjectPermissions(context),
-        // [ADR-0131 D3/D4] Positions described as the resolver enforces them —
-        // holders and the sets in force — for the position catalog's list.
-        describePositionGrants: (positions: readonly string[], context?: any) =>
-          this.describePositionGrants(positions, context),
-        // [ADR-0090 D6] First-class access explanation. Same code paths as
-        // the middleware (resolution/evaluator/RLS compiler) — explained by
-        // construction. Explaining ANOTHER user requires `manage_users`.
-        explain: (request, callerContext?: any) =>
-          this.explainAccessForCaller(
-            { ...request, operation: String(request.operation) },
-            callerContext,
-          ),
-        // [ADR-0090 D12 / ADR-0105 D8] What the CALLER may delegate — the read
-        // half of the delegated-admin gate. A scoped-invitation form narrows
-        // its unit/position pickers with this instead of listing the whole
-        // tree and letting the user discover the boundary by refusal. Purely
-        // self-scoped (the caller's own resolved sets are the only input), so
-        // it discloses nothing beyond the authority they already hold.
-        describeDelegableScope: async (callerContext?: any) => {
-          const sets = await this.resolvePermissionSetsForContext(callerContext);
-          // No gate wired (degraded start) → no delegable authority, and the
-          // consumer renders an empty picker rather than a permissive one.
-          if (!this.delegatedAdminGate) {
-            return {
-              isTenantAdmin: false,
-              scopes: [],
-              placeableBusinessUnitIds: [],
-              assignablePositions: [],
-            };
-          }
-          // The caller's context, not just their sets: the gate resolves every
-          // business-unit anchor inside the organization this names, so the
-          // report can never offer another organization's units.
-          return this.delegatedAdminGate.describeDelegableScope(sets, callerContext);
-        },
-        // [ADR-0090 D5/D9] Install-time suggestion surface: packages suggest a
-        // set for `everyone`; a `manage_metadata` holder accepts it once for
-        // the deployment (the `everyone` definition is re-derived) or dismisses.
-        listAudienceBindingSuggestions: (callerContext?: any, filter?: SuggestionListFilter) =>
-          listAudienceBindingSuggestions(suggestionDeps, callerContext, filter),
-        confirmAudienceBindingSuggestion: (callerContext: any, id: string) =>
-          confirmAudienceBindingSuggestion(suggestionDeps, callerContext, id),
-        dismissAudienceBindingSuggestion: (callerContext: any, id: string) =>
-          dismissAudienceBindingSuggestion(suggestionDeps, callerContext, id),
-      };
-      // [ADR-0106 D7] The metadata-plane readable-field query, registered as an
-      // EXTENSION of the published contract rather than inside the typed
-      // literal above (consumers already feature-detect, which is exactly why a
-      // partial surface degrades instead of lying). `Object.assign` keeps the
-      // literal type-checked against the contract while the extension stays
-      // visible as an extension.
-      const registeredSecurityService = Object.assign(securityService, {
-        getMetadataReadableFields: (object: string, context?: any) =>
-          this.getMetadataReadableFields(object, context),
-        // [#21729] The ownership-floor alternate seam — how a plugin that
-        // installs a tighter row gate stops the platform's `created_by` floor
-        // pre-empting it, registered beside that gate and nowhere else. Same
-        // extension pattern as the one above (the contract lives in
-        // `packages/spec`; a contributor feature-detects the method). Keyed by
-        // the contributing plugin: a second call replaces the first, an empty
-        // list withdraws. Throws on a contribution the seam refuses — see
-        // `ownership-floor-alternates.ts` for the rules.
-        contributeOwnershipFloorAlternates: (
-          plugin: string,
-          alternates: readonly OwnershipFloorAlternate[],
-        ): void => {
-          this.ownershipFloorAlternates.contribute(plugin, alternates);
-          ctx.logger.info(
-            `[security] ownership-floor alternates from '${plugin}': ` +
-              (alternates.length === 0
-                ? 'withdrawn'
-                : alternates.map((a) => `${a.object}.${a.operation} (${a.name})`).join(', ')),
-          );
-        },
-      });
-      ctx.registerService('security', registeredSecurityService);
-      // The member list is READ OFF the registered object, never typed by hand:
-      // a hand-kept list fell behind the served surface (five served members
-      // never appeared in it), and a boot log that is silent about a member
-      // reads as that member's absence.
-      ctx.logger.info(
-        `[security] registered "security" service (${Object.keys(registeredSecurityService).sort().join(', ')}) ` +
-          '— ADR-0021 D-C / ADR-0055 / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7',
-      );
-    } catch (e) {
-      ctx.logger.warn?.('[security] failed to register "security" service', {
-        error: (e as Error).message,
-      });
+      registerSecurityService.call(host, ctx, ql, metadata);
     }
 
     // Register security middleware
@@ -2600,6 +2290,16 @@ export class SecurityPlugin implements Plugin {
       ) {
         this.epoch.bump('write');
       }
+
+      // [#25251, ruling B] One system context stops short of the bypass: a
+      // flow run's (`isSystem` with a `flowRunId`). Its writes to the four
+      // identity-assignment objects are refused here, because the gates that
+      // judge those writes — the ADR-0090 D12 delegated-administration gate
+      // below, and the identity write guard that keeps invitations and
+      // memberships on the organization endpoints — all stand down for
+      // `isSystem`. Every other system write, and every read, passes on to the
+      // bypass unchanged. See `flow-system-identity-write-refusal.ts`.
+      assertFlowSystemIdentityWriteAllowed(opCtx);
 
       // System operations bypass security
       if (opCtx.context?.isSystem) {
@@ -4759,6 +4459,30 @@ export class SecurityPlugin implements Plugin {
             { error: (e as Error)?.message },
           );
         }
+        // [#24447] The upgrade impact report: the same comparison for the
+        // non-access classes — flow, action and webhook switches, stored
+        // overlays and object rows, object extensions, navigation
+        // contributions and stored settings — raised the same way. It writes
+        // and refuses nothing. See `upgrade-impact-report.ts`.
+        try {
+          const optional = <T,>(name: string): T | undefined => {
+            try { return ctx.getService<T>(name) ?? undefined; } catch { return undefined; }
+          };
+          const settings = optional<Partial<SettingsManifestReader>>(SETTINGS_SERVICE);
+          const messaging = optional<Partial<AccessUpgradeNotifier>>('messaging');
+          await reportUpgradeImpact(ql as any, {
+            settings: typeof settings?.listManifests === 'function' ? (settings as SettingsManifestReader) : undefined,
+            messaging: typeof messaging?.emit === 'function' ? (messaging as AccessUpgradeNotifier) : undefined,
+            walled: postureEnforcesWall(this.tenancyPosture),
+            logger: ctx.logger,
+          });
+        } catch (e) {
+          ctx.logger.warn(
+            '[security] the upgrade impact report did not run — a switch, stored row, extension or setting an ' +
+              'upgrade left behind goes unreported for this boot',
+            { error: (e as Error)?.message },
+          );
+        }
       });
     }
 
@@ -4909,40 +4633,19 @@ export class SecurityPlugin implements Plugin {
    * could not read the record keeps the baseline alone and says so at `error`.
    * The grants caches retire on the metadata epoch, as for any declaration.
    */
-  private async declareEveryone(logger: PluginContext['logger']): Promise<void> {
-    const ql = this.ql;
-    try {
-      const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
-      const sets = this.everyoneBaseline(anchorContext, (set, offending) => {
-        logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set, offending });
-      });
-      try {
-        const derived = await readAcceptedEveryoneSets(ql, this.metadata, this.deploymentAcceptance());
-        for (const name of derived.accepted) if (!sets.includes(name)) sets.push(name);
-        for (const w of derived.withheld) {
-          const line = w.source === 'host-configuration'
-            ? `[security] the everyone anchor does not carry the set '${w.set}' the security plugin's ` +
-              `\`acceptedDefaultPermissionSets\` option declares: ${w.reason}. It grants nothing while that holds; ` +
-              'remove the name from the option, or serve the set again as an isDefault set some package declares.'
-            : `[security] the everyone anchor does not carry the accepted set '${w.set}' (package '${w.packageId}'): ` +
-              `${w.reason}. Its acceptance stays recorded and grants nothing until the set is served again as ` +
-              'accepted; a manage_metadata holder can revoke it in Setup.';
-          if (w.forbidden) logger.error(line, undefined, { set: w.set, package: w.packageId });
-          else logger.warn(line, { set: w.set, package: w.packageId });
-        }
-      } catch (e) {
-        logger.error(
-          '[security] the accepted package defaults for the everyone anchor could NOT be read — every signed-in ' +
-            'member holds the baseline alone until the next derivation (boot, accept, revoke, uninstall or package ' +
-            'publish) reads them. Remedy: restore read access to sys_audience_binding_suggestion and restart.',
-          e as Error,
-        );
-      }
-      if (sets.length > 0) declareEveryoneBaseline((ql as { registry?: unknown })?.registry, SECURITY_PLUGIN_ID, sets);
-      this.epoch.bump('metadata');
-    } catch (e) {
-      logger.warn('[security] everyone-anchor declaration failed (non-fatal)', { error: (e as Error).message });
-    }
+  private declareEveryone(logger: PluginContext['logger']): Promise<void> {
+    // [#25223 cut 10] The body moved to `security-plugin-everyone-anchor.ts` (see `EveryoneAnchorHost`).
+    const readEpoch = () => this.epoch;
+    const readMetadata = () => this.metadata;
+    const readQl = () => this.ql;
+    const host: Pick<EveryoneAnchorHost, 'deploymentAcceptance' | 'epoch' | 'everyoneBaseline' | 'metadata' | 'ql'> = {
+      deploymentAcceptance: (...a) => this.deploymentAcceptance(...a),
+      get epoch() { return readEpoch(); },
+      everyoneBaseline: (...a) => this.everyoneBaseline(...a),
+      get metadata() { return readMetadata(); },
+      get ql() { return readQl(); },
+    };
+    return declareEveryone.call(host, logger);
   }
 
   /**
@@ -4992,24 +4695,11 @@ export class SecurityPlugin implements Plugin {
    * {@link declareEveryone} reports what it withholds.
    */
   private declareBuiltinPositions(ctx: PluginContext): void {
-    let ql: { registry?: unknown } | undefined;
-    try {
-      ql = ctx.getService<{ registry?: unknown }>('objectql');
-    } catch {
-      return; // No engine: `start()` reports it, and nothing can be declared.
-    }
-    if (!ql) return;
-    if (registerBuiltinPositions(ql.registry, SECURITY_PLUGIN_ID) === 0) {
-      ctx.logger.warn(
-        '[security] the built-in positions (platform_admin, org_owner, org_admin, org_member, everyone, guest) '
-          + 'were NOT declared as position metadata: the ObjectQL engine exposes no registry that can register '
-          + 'them. The security catalog read and GET /api/v1/meta/position will not list them, and the '
-          + '`everyone` baseline sets are granted through no position.',
-      );
-      return;
-    }
-    const baseline = this.everyoneBaseline(undefined);
-    if (baseline.length > 0) declareEveryoneBaseline(ql.registry, SECURITY_PLUGIN_ID, baseline);
+    // [#25223 cut 10] The body moved to `security-plugin-everyone-anchor.ts` (see `EveryoneAnchorHost`).
+    const host: Pick<EveryoneAnchorHost, 'everyoneBaseline'> = {
+      everyoneBaseline: (...a) => this.everyoneBaseline(...a),
+    };
+    declareBuiltinPositions.call(host, ctx);
   }
 
   async destroy(): Promise<void> {
@@ -5058,318 +4748,36 @@ export class SecurityPlugin implements Plugin {
    * 4xx) is answered so too; a caller explaining itself keeps the write path's
    * notion (no row), so its explanation shows what its own doors do.
    */
-  async explainAccessForCaller(
+  explainAccessForCaller(
     request: { object: string; operation: string; userId?: string; recordId?: string },
     callerContext?: any,
   ): Promise<ExplainDecision> {
-    const operation = String(request?.operation ?? 'read') as ExplainOperation;
-    const object = String(request?.object ?? '');
-    if (!object) throw new Error('[Security] explain: request.object is required');
-    const recordId = request?.recordId != null && request.recordId !== '' ? String(request.recordId) : undefined;
-
-    let targetContext = callerContext ?? {};
-    if (request.userId && request.userId !== callerContext?.userId) {
-      const callerIsSystem = callerContext?.isSystem === true;
-      if (!callerIsSystem) {
-        const callerSets = await this.resolvePermissionSetsForContext(callerContext).catch(() => []);
-        const held = this.permissionEvaluator.getSystemPermissions(callerSets);
-        if (!held.has('manage_users')) {
-          // [ADR-0090 D12, amended 2026-10-17] An organization administrator
-          // may explain a member of the organization it administers — the
-          // members whose assignments it creates and removes. Then [D12]
-          // delegated administrators may explain principals inside their
-          // delegation boundary. Both fail closed on any error, and both read
-          // the organization the caller's sets were resolved in, never another.
-          const organizationLevel = this.delegatedAdminGate
-            ? await this.delegatedAdminGate
-                .organizationAdminCoversUser(callerSets, request.userId, callerContext)
-                .catch(() => false)
-            : false;
-          const delegated = organizationLevel || (this.delegatedAdminGate
-            ? await this.delegatedAdminGate
-                .scopesCoverUser(callerSets, request.userId, callerContext)
-                .catch(() => false)
-            : false);
-          if (!delegated) {
-            throw new PermissionDeniedError(
-              `[Security] Access denied: explaining another user's access requires the 'manage_users' ` +
-                `capability, organization administration of an organization that user is a member of, ` +
-                `or a delegated adminScope covering that user (ADR-0090 D6/D12).`,
-              { object, operation, targetUserId: request.userId },
-            );
-          }
-        }
-      }
-      // [#20515] Resolved in the CALLER's organization — the one the explain
-      // right above was checked in. Grants scoped to any other organization do
-      // not apply there, and with no active organization only global grants do.
-      const callerTenantId = typeof callerContext?.tenantId === 'string' && callerContext.tenantId !== ''
-        ? callerContext.tenantId
-        : undefined;
-      // [#20580] ...but only while the explained user could be resolved in it.
-      // Explaining them in the caller's organization is a CLAIM on it made for
-      // them, and enforcement vets a claim before it resolves anything:
-      // under a walled posture a member removed from that organization, whose
-      // session still names it, has the claim dropped and resolves with NO
-      // active organization — so none of that organization's grants apply.
-      // `vetOrganizationClaim` is that check (the session arm of
-      // `resolveAuthzContext`), asked of the same membership set; the explainer
-      // spells no membership rule of its own.
-      const nowMs = Date.now();
-      let explained = await buildContextForUser(this.ql, request.userId, nowMs, callerTenantId);
-      const explainedTenantId = vetOrganizationClaim(callerTenantId, explained.accessible_org_ids ?? [], this.tenancyPosture);
-      if (explainedTenantId !== callerTenantId) {
-        explained = await buildContextForUser(this.ql, request.userId, nowMs, explainedTenantId);
-      }
-      // [#20604] ...and the organization the user is resolved in is the one
-      // their requests run in: enforcement's context for them carries it as
-      // `tenantId`, which the tenant wall, the organization-scoped
-      // permission-set catalogue and the engine all read. `buildContextForUser`
-      // returns none of its own, so it is set here from the SAME vetted value,
-      // as `resolveDelegatorContext` sets a delegator's. Without it a current
-      // member was explained with NO organization: denied a tenant object
-      // their own find reads under `isolated`, and without a permission set
-      // their organization authored.
-      if (explainedTenantId !== undefined) explained.tenantId = explainedTenantId;
-      targetContext = explained;
-    }
-
-    // [C2 / ADR-0095] The optional `sharing` service backs the record-grained
-    // sharing attribution. Resolved lazily; absent (no plugin-sharing) → the
-    // record path still works, the sharing layer simply reports not_evaluated.
-    const sharing = recordId ? (this.resolveKernelService?.('sharing') as any) : undefined;
-
-    // [#19963] A record-grained WRITE verdict is computed from the by-id write
-    // path's own inputs, so `record.visible` for `update` / `delete` is the
-    // answer the by-id PATCH / DELETE gives:
-    //  - Layer 1 carries the pre-image gate's floor decision (step 2.7,
-    //    {@link resolvePreImageFloorDrop}).
-    //  - [ADR-0055] It also carries step 2.7's coverage vouch,
-    //    `masterGateCoversThisWrite`, on step 2.7's own condition (not on behalf
-    //    of anyone), for an `update` and a `delete` alike: explain asks the
-    //    master gate for every by-id write of a record that exists
-    //    ({@link checkControlledByParentWrite}, wired below), so a
-    //    `controlled_by_parent` record's ownership floor (`owner_only_writes`,
-    //    `owner_only_deletes`) is handed over to that check here exactly as the
-    //    write path hands it over.
-    //  - plugin-sharing's per-record gate is asked with `__writeScope` stamped
-    //    as the middleware stamps it (step 2.6), always overwritten, so an
-    //    `org` / unit writer is not judged owner-only.
-    //  - [#5493 / ADR-0105 D3] A refusal of that gate is deferred as the
-    //    middleware defers it: to an app-authored row-level policy that admits
-    //    the row for the gate's verb (`probeAuthoredRowWrite`, wired below).
-    // [#19986] The READ verdict's twin: plugin-sharing's read filter is asked
-    // with `__readScope` stamped as step 2.6 stamps it for a find, so
-    // `record.visible` for `read` is what the caller's find returns.
-    // [#24646] On the on-behalf-of path the per-record WRITE gate is asked as
-    // the by-id write asks it ({@link delegatedWriteGate}): once for the
-    // delegated principal at its agent-leg depth, then, if that admits, once
-    // for the delegator at the delegator's own depth. The delegator's own
-    // write filter, which step 2.7 ANDs into the pre-image re-read, is composed
-    // by the engine, as the gate composes it: once with the floor standing
-    // (`computeRlsFilter`), once as the delegator's own record composition
-    // (`computeLayeredRlsFilter` below, asked with the delegator's context, so
-    // its floor decision is the delegator's own). The floor decision still
-    // excludes the delegated context itself, as the gate's does. The delegated
-    // READ depths are not modelled on explain's record
-    // path: the read filter is asked with the delegated context as it stands.
-    const actsOnBehalfOf = (c: any): boolean => !!c?.onBehalfOf?.userId;
-    const recordWriteFloorOptions = async (
-      sets: PermissionSet[],
-      o: string,
-      engineOp: string,
-      c: any,
-    ): Promise<RlsFilterOptions | undefined> => {
-      // [#22550] `engineOp` here is the operation explain composes the verb's
-      // row-level security for (`rlsOperationForVerb`, the 2.7 gate's own
-      // mapping), so a transfer arrives as `update` and meets the floor
-      // decision and the vouch step 2.7 makes for it, on the mapped verb.
-      if (!recordId || (engineOp !== 'update' && engineOp !== 'delete')) return undefined;
-      // Fail toward the floor: an unanswerable decision keeps it standing,
-      // which is what the gate's own verdict does on a failed probe.
-      const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
-        engineOp, o, recordId, c, sets, actsOnBehalfOf(c),
-      ).catch(() => false);
-      // Step 2.7's vouch is `!delegatorSets` for every verb it runs on; the
-      // floor itself comes off only where `masterGateCoversOperation` says the
-      // master gate covers the verb (`update`, `delete`).
-      const masterGateCoversThisWrite = !actsOnBehalfOf(c);
-      return { dropPlatformOwnershipFloor, masterGateCoversThisWrite };
+    // [#25223 cut 10] The body moved to `security-plugin-explain-access.ts` (see `ExplainAccessHost`).
+    const readDelegatedAdminGate = () => this.delegatedAdminGate;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readResolveKernelService = () => this.resolveKernelService;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveWriteScopeForSharing' | 'tenancyPosture'> = {
+      baselinePermissionSets: this.baselinePermissionSets,
+      checkControlledByParentWrite: (...a) => this.checkControlledByParentWrite(...a),
+      computeLayeredRlsFilter: (...a) => this.computeLayeredRlsFilter(...a),
+      computeReadPartialMaskRules: (...a) => this.computeReadPartialMaskRules(...a),
+      computeRlsFilter: (...a) => this.computeRlsFilter(...a),
+      get delegatedAdminGate() { return readDelegatedAdminGate(); },
+      foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      get ql() { return readQl(); },
+      readRowById: (...a) => this.readRowById(...a),
+      get resolveKernelService() { return readResolveKernelService(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+      resolvePreImageFloorDrop: (...a) => this.resolvePreImageFloorDrop(...a),
+      resolveSharingReadFilter: (...a) => this.resolveSharingReadFilter(...a),
+      resolveWriteScopeForSharing: (...a) => this.resolveWriteScopeForSharing(...a),
+      get tenancyPosture() { return readTenancyPosture(); },
     };
-    const withWriteScope = async (o: string, c: any): Promise<any> =>
-      actsOnBehalfOf(c) ? c : { ...c, __writeScope: await this.resolveWriteScopeForSharing(o, c) };
-    /**
-     * [#24646 / ADR-0090 D10] The two contexts the by-id write path hands
-     * plugin-sharing's per-record gate for an on-behalf-of principal, built as
-     * the write path builds them:
-     *
-     * - `agent`: the delegated context with step 2.6's two stamps, the
-     *   agent-leg write depth ({@link intersectDelegatedScope} of the ceiling's
-     *   DECLARED depth and the delegator's effective one) as `__writeScope`, and
-     *   the delegator's effective depth as `__delegatorWriteScope`;
-     * - `delegator`: what the sharing middleware's second gate call hands the
-     *   service, that same context as the delegator (`userId` the delegator's,
-     *   no delegation link) at the delegator's depth.
-     *
-     * A delegation link naming no user (`missing`) answers `null`: the write
-     * path refuses such a principal before any gate runs, and so does every
-     * gate built on this. [#25107] So does a delegator who is not a member of
-     * the organization the write runs in, on a walled posture: the prologue
-     * refuses it there ({@link delegatedOrganizationRefusal}).
-     */
-    const delegatedWriteContexts = async (o: string, c: any): Promise<{ agent: any; delegator: any } | null> => {
-      const del = await resolveDelegatorContext(this.ql, c);
-      if (del.kind !== 'resolved') return null;
-      if (delegatedOrganizationRefusal(c, del.context, this.tenancyPosture) !== undefined) return null;
-      const [sets, delegatorSets, meta] = await Promise.all([
-        this.resolvePermissionSetsForContext(c),
-        this.resolvePermissionSetsForContext(del.context),
-        this.getObjectSecurityMeta(o),
-      ]);
-      const delegatorScope = this.permissionEvaluator.getEffectiveScope('write', o, delegatorSets, { isPrivate: meta.isPrivate });
-      const declared = this.permissionEvaluator.getDeclaredScope('write', o, sets, { isPrivate: meta.isPrivate });
-      const agent = {
-        ...c,
-        __writeScope: intersectDelegatedScope(declared, delegatorScope).agentLegScope,
-        __delegatorWriteScope: delegatorScope,
-      };
-      return { agent, delegator: { ...agent, userId: c.onBehalfOf.userId, onBehalfOf: undefined, __writeScope: delegatorScope } };
-    };
-    /**
-     * [#24646] A per-record write gate of the sharing service, asked as the
-     * by-id write asks it: for an ordinary principal once, at its own write
-     * depth; for an on-behalf-of principal as the agent and then, only if that
-     * admits, as the delegator — the sharing middleware's two calls, in its
-     * order ({@link delegatedWriteContexts}).
-     */
-    const delegatedWriteGate = (gate: (o: string, rid: string, c: any) => Promise<boolean>) =>
-      async (o: string, rid: string, c: any): Promise<boolean> => {
-        if (!actsOnBehalfOf(c)) return gate(o, rid, await withWriteScope(o, c));
-        const legs = await delegatedWriteContexts(o, c);
-        if (!legs) return false;
-        if (!(await gate(o, rid, legs.agent))) return false;
-        return gate(o, rid, legs.delegator);
-      };
-    // {@link resolveSharingReadFilter} IS the read-depth stamp step 2.6 makes
-    // (the same two inputs to the same evaluator call); the analytics path
-    // already asks it. The caller's own key is cleared first, so the depth
-    // is always the computed one — never one the context brought — even
-    // where resolution fails and the helper stamps nothing (`own`, the safe
-    // direction).
-    const readFilterWithReadScope = (o: string, c: any): Promise<unknown | null> =>
-      this.resolveSharingReadFilter(o, { ...c, __readScope: undefined });
-
-    return explainAccessForAsker(
-      {
-        ql: this.ql,
-        resolveSets: (c: any) => this.resolvePermissionSetsForContext(c),
-        evaluator: this.permissionEvaluator,
-        getObjectSecurityMeta: (o: string) => this.getObjectSecurityMeta(o),
-        requiredCaps: (meta: any, engineOp: string) => requiredCapsForOperation(meta, engineOp),
-        computeRlsFilter: (sets, o, engineOp, c) => this.computeRlsFilter(sets as any, o, engineOp, c),
-        getFieldMask: (sets, o, fieldRequired) => {
-          let fp = this.permissionEvaluator.getFieldPermissions(o, sets as any);
-          fp = this.foldFieldRequiredPermissions(fp, fieldRequired, sets as any);
-          return fp as any;
-        },
-        // [#9127] The partial-mask dimension of the SAME field-mask decision,
-        // read straight off the enforcement composition (`maskResults`' own
-        // `partialRules` argument) rather than re-derived — explain reports the
-        // three states, it does not compute them.
-        getPartialMaskRules: async (sets, o, delSets) => {
-          const meta = await this.getObjectSecurityMeta(o);
-          const basePerms = this.permissionEvaluator.getFieldPermissions(o, sets as any);
-          const delBasePerms = delSets
-            ? this.permissionEvaluator.getFieldPermissions(o, delSets as any)
-            : null;
-          return this.computeReadPartialMaskRules(meta, sets as any, delSets as any, basePerms, delBasePerms);
-        },
-        baselinePermissionSets: this.baselinePermissionSets,
-        // [#25107] The prologue's posture, for its organization-membership
-        // refusal of a delegated context ({@link delegatedOrganizationRefusal}).
-        tenancyPosture: this.tenancyPosture,
-        // ── record-grained deps (only consulted when recordId is present) ──
-        computeLayeredRlsFilter: async (sets, o, engineOp, c) =>
-          this.computeLayeredRlsFilter(
-            sets as any, o, engineOp, c, await recordWriteFloorOptions(sets as any, o, engineOp, c),
-          ),
-        fetchRecord: async (o: string, rid: string) => {
-          try {
-            const finder = this.ql?.findOne
-              ? this.ql.findOne(o, { where: { id: rid }, context: { isSystem: true } })
-              : this.ql?.find?.(o, { where: { id: rid }, limit: 1, context: { isSystem: true } });
-            const res = await finder;
-            const row = Array.isArray(res) ? res[0] : res;
-            return row ?? null;
-          } catch {
-            return null;
-          }
-        },
-        ...(sharing && typeof sharing.buildReadFilter === 'function'
-          ? {
-              sharingReadFilter: (o: string, c: any) =>
-                actsOnBehalfOf(c) ? sharing.buildReadFilter(o, c) : readFilterWithReadScope(o, c),
-            }
-          : {}),
-        ...(sharing && typeof sharing.listShares === 'function'
-          // [ADR-0111 D5] listShares is now management-gated in the sharing
-          // service, but explain's own caller authorization already ran
-          // (explaining ANOTHER user requires `manage_users` — D12). Read the
-          // stored rows under system context so the record story keeps its
-          // share attribution when the EXPLAINED principal isn't a share
-          // manager — the exact behaviour this binding had before the gate.
-          ? { listRecordShares: (o: string, rid: string) => sharing.listShares(o, rid, { isSystem: true }) }
-          : {}),
-        ...(sharing && typeof sharing.canEdit === 'function'
-          ? { canEditRecord: delegatedWriteGate((o, rid, c) => sharing.canEdit(o, rid, c)) }
-          : {}),
-        // [ADR-0111 D3] The narrower delete gate — an edit share opens update
-        // but not delete, so a delete explanation must consult this.
-        ...(sharing && typeof sharing.canDelete === 'function'
-          ? { canDeleteRecord: delegatedWriteGate((o, rid, c) => sharing.canDelete(o, rid, c)) }
-          : {}),
-        // [#5493 / ADR-0105 D3] The by-id write gate's deferral, asked through
-        // the sharing service's own probe, the member its middleware asks
-        // after the gate above refuses, with the context that gate is asked
-        // with. The probe passes through to {@link checkAuthoredRowWrite} and
-        // abstains on every failure; a sharing service without it defers
-        // nothing, so explain reports the gate's refusal as before. [#24646] An
-        // on-behalf-of principal's probe carries the agent leg's stamps, as the
-        // middleware's own context does when it asks.
-        ...(sharing && typeof sharing.probeAuthoredRowWrite === 'function'
-          ? {
-              probeAuthoredRowWrite: async (o: string, rid: string, op: AuthoredRowWriteOperation, c: any) => {
-                if (!actsOnBehalfOf(c)) return sharing.probeAuthoredRowWrite(o, rid, op, await withWriteScope(o, c));
-                const legs = await delegatedWriteContexts(o, c);
-                return legs ? sharing.probeAuthoredRowWrite(o, rid, op, legs.agent) : 'abstain';
-              },
-            }
-          : {}),
-        // [#21771] The by-id write path's read question, asked the same way:
-        // the caller-context by-id read, every data middleware included.
-        recordAbsentToCaller: (o: string, rid: string, c: any) =>
-          absentUnderCallerRead(() => this.readRowById(o, rid, c)),
-        // [ADR-0055] The master-detail write check a by-id update, delete or
-        // transfer meets at step 2.8, served as
-        // `ISecurityService.checkControlledByParentWrite` and asked with the
-        // EXPLAINED context. The update's answer is each of those verbs' answer
-        // (the check judges EDIT of the master whatever the record's verb). Its
-        // presence is what licenses the `masterGateCoversThisWrite` vouch
-        // above: the two go together.
-        checkControlledByParentWrite: (o: string, rid: string, c: any) =>
-          this.checkControlledByParentWrite(o, rid, c),
-      },
-      { object, operation, context: targetContext, recordId },
-      // The asker: the caller, whose read of the record decides whether this
-      // explanation discloses that the record exists. On a self-explanation it
-      // is the explained context itself, and the engine asks it the write
-      // path's question; explaining another user, the engine asks `cannotRead`,
-      // the same read with a refusal counted as "cannot read" (ruling C).
-      {
-        context: callerContext,
-        cannotRead: (o: string, rid: string) => unreadableUnderCallerRead(() => this.readRowById(o, rid, callerContext)),
-      },
-    );
+    return explainAccessForCaller.call(host, request, callerContext);
   }
 
   /**
@@ -5398,7 +4806,7 @@ export class SecurityPlugin implements Plugin {
    * resolution failure so the caller can fail closed — a dropped sharing
    * predicate is exactly the leak this fixes.
    */
-  private async resolveSharingReadFilter(
+  private resolveSharingReadFilter(
     object: string,
     context: any,
     resolvedSets?: PermissionSet[],
@@ -5411,41 +4819,16 @@ export class SecurityPlugin implements Plugin {
      */
     depth?: string,
   ): Promise<Record<string, unknown> | null> {
-    const sharing = this.resolveKernelService?.('sharing') as
-      | { buildReadFilter?: (o: string, c: any) => Promise<unknown | null> }
-      | undefined;
-    if (!sharing || typeof sharing.buildReadFilter !== 'function') return null;
-    // Mirror the middleware's ADR-0057 D1 depth stash. `getEffectiveScope`
-    // needs the resolved sets and the object's posture — the same two inputs
-    // the middleware feeds it — so the owner-match widens identically here.
-    // [#5386] `resolvedSets` lets an in-middleware caller (the
-    // controlled_by_parent derivation) pass the sets it already resolved for
-    // THIS identity, instead of re-resolving them from the context.
-    let readScope: string | undefined = depth;
-    if (readScope === undefined) {
-      try {
-        const permissionSets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context));
-        if (permissionSets.length > 0) {
-          const meta = await this.getObjectSecurityMeta(object);
-          readScope = this.permissionEvaluator.getEffectiveScope(
-            'read',
-            object,
-            permissionSets,
-            { isPrivate: meta.isPrivate },
-          );
-        }
-      } catch {
-        // Depth is a WIDENING input: failing to resolve it leaves the owner-match
-        // at its narrowest ('own'), which is the safe direction. The sharing call
-        // below still runs — and its own failure still denies.
-        readScope = undefined;
-      }
-    }
-    const filter = await sharing.buildReadFilter(object, {
-      ...context,
-      ...(readScope ? { __readScope: readScope } : {}),
-    });
-    return (filter ?? null) as Record<string, unknown> | null;
+    // [#25223 cut 10] The body moved to `security-plugin-sharing-verdicts.ts` (see `SharingVerdictsHost`).
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readResolveKernelService = () => this.resolveKernelService;
+    const host: Pick<SharingVerdictsHost, 'getObjectSecurityMeta' | 'permissionEvaluator' | 'resolveKernelService' | 'resolvePermissionSetsForContext'> = {
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      get resolveKernelService() { return readResolveKernelService(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+    };
+    return resolveSharingReadFilter.call(host, object, context, resolvedSets, depth);
   }
 
   /**
@@ -5465,31 +4848,21 @@ export class SecurityPlugin implements Plugin {
    * `canEdit` answers all of those itself. FAILS CLOSED (`false`) when the probe
    * throws: a dropped record-share gate is the leak, not the denial.
    */
-  private async resolveSharingCanEdit(
+  private resolveSharingCanEdit(
     object: string,
     recordId: string,
     context: any,
     resolvedSets?: PermissionSet[],
   ): Promise<boolean> {
-    const sharing = this.resolveKernelService?.('sharing') as
-      | { canEdit?: (o: string, id: string, c: any) => Promise<boolean> }
-      | undefined;
-    if (!sharing || typeof sharing.canEdit !== 'function') return true;
-    const writeScope = await this.resolveWriteScopeForSharing(object, context, resolvedSets);
-    try {
-      return (
-        (await sharing.canEdit(object, recordId, { ...context, __writeScope: writeScope })) === true
-      );
-    } catch (e) {
-      this.logger.error?.(
-        `[security] controlled_by_parent write gate could not resolve the sharing (OWD) edit ` +
-          `check for '${object}' record '${recordId}' (user ${context?.userId ?? 'unknown'}) — ` +
-          `denying (fail-closed: a child is writable only where its master is, so a master check that ` +
-          `cannot be resolved refuses)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
-      return false;
-    }
+    // [#25223 cut 10] The body moved to `security-plugin-sharing-verdicts.ts` (see `SharingVerdictsHost`).
+    const readLogger = () => this.logger;
+    const readResolveKernelService = () => this.resolveKernelService;
+    const host: Pick<SharingVerdictsHost, 'logger' | 'resolveKernelService' | 'resolveWriteScopeForSharing'> = {
+      get logger() { return readLogger(); },
+      get resolveKernelService() { return readResolveKernelService(); },
+      resolveWriteScopeForSharing: (...a) => this.resolveWriteScopeForSharing(...a),
+    };
+    return resolveSharingCanEdit.call(host, object, recordId, context, resolvedSets);
   }
 
   /**
@@ -5510,24 +4883,19 @@ export class SecurityPlugin implements Plugin {
    * {@link resolveSharingWriteVerdict} cannot drift on it: they are two forms of
    * one question and must feed the service the same depth.
    */
-  private async resolveWriteScopeForSharing(
+  private resolveWriteScopeForSharing(
     object: string,
     context: any,
     resolvedSets?: PermissionSet[],
   ): Promise<string | undefined> {
-    try {
-      const permissionSets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context));
-      if (permissionSets.length === 0) return undefined;
-      const meta = await this.getObjectSecurityMeta(object);
-      return this.permissionEvaluator.getEffectiveScope(
-        'write',
-        object,
-        permissionSets,
-        { isPrivate: meta.isPrivate },
-      );
-    } catch {
-      return undefined;
-    }
+    // [#25223 cut 10] The body moved to `security-plugin-sharing-verdicts.ts` (see `SharingVerdictsHost`).
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<SharingVerdictsHost, 'getObjectSecurityMeta' | 'permissionEvaluator' | 'resolvePermissionSetsForContext'> = {
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+    };
+    return resolveWriteScopeForSharing.call(host, object, context, resolvedSets);
   }
 
   /**
@@ -5560,36 +4928,22 @@ export class SecurityPlugin implements Plugin {
    *    on an unresolvable lookup (#6428); this covers the call failing outright.
    *    Both leave the floor standing, which is the non-widening direction.
    */
-  private async resolveSharingWriteVerdict(
+  private resolveSharingWriteVerdict(
     rlsOperation: string,
     object: string,
     recordId: string,
     context: any,
     resolvedSets?: PermissionSet[],
   ): Promise<SharingWriteVerdict> {
-    const method = rlsOperation === 'delete' ? 'checkDelete' : 'checkEdit';
-    const sharing = this.resolveKernelService?.('sharing') as
-      | Record<string, ((o: string, id: string, c: any) => Promise<SharingWriteVerdict>) | undefined>
-      | undefined;
-    const probe = sharing?.[method];
-    if (typeof probe !== 'function') return 'abstain';
-    const writeScope = await this.resolveWriteScopeForSharing(object, context, resolvedSets);
-    try {
-      const verdict = await probe.call(sharing, object, recordId, {
-        ...context,
-        __writeScope: writeScope,
-      });
-      return verdict === 'allow' || verdict === 'deny' ? verdict : 'abstain';
-    } catch (e) {
-      this.logger.error?.(
-        `[security] the row-level write gate could not resolve the sharing (${method}) verdict ` +
-          `for '${object}' record '${recordId}' (user ${context?.userId ?? 'unknown'}) — keeping ` +
-          `the platform ownership floor (fail-closed: only a resolved sharing allow, from Modify All Data ` +
-          `or an edit-level share, may replace that floor)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
-      return 'deny';
-    }
+    // [#25223 cut 10] The body moved to `security-plugin-sharing-verdicts.ts` (see `SharingVerdictsHost`).
+    const readLogger = () => this.logger;
+    const readResolveKernelService = () => this.resolveKernelService;
+    const host: Pick<SharingVerdictsHost, 'logger' | 'resolveKernelService' | 'resolveWriteScopeForSharing'> = {
+      get logger() { return readLogger(); },
+      get resolveKernelService() { return readResolveKernelService(); },
+      resolveWriteScopeForSharing: (...a) => this.resolveWriteScopeForSharing(...a),
+    };
+    return resolveSharingWriteVerdict.call(host, rlsOperation, object, recordId, context, resolvedSets);
   }
 
   /**
@@ -5618,7 +4972,7 @@ export class SecurityPlugin implements Plugin {
    *    floor-standing filter it also ANDs the delegator's own composition,
    *    asked here AS the delegator ({@link delegatorOwnWriteFloorOptions}).
    */
-  private async resolvePreImageFloorDrop(
+  private resolvePreImageFloorDrop(
     rlsOperation: string,
     object: string,
     recordId: string,
@@ -5626,19 +4980,12 @@ export class SecurityPlugin implements Plugin {
     permissionSets: PermissionSet[],
     delegated: boolean,
   ): Promise<boolean> {
-    if (delegated) return false;
-    const floorApplies = this.collectRLSPolicies(
-      permissionSets,
-      object,
-      rlsOperation,
-      (context?.positions ?? []) as string[],
-      context,
-    ).some(isPlatformOwnershipFloorPolicy);
-    if (!floorApplies) return false;
-    return (
-      (await this.resolveSharingWriteVerdict(rlsOperation, object, recordId, context, permissionSets)) ===
-      'allow'
-    );
+    // [#25223 cut 10] The body moved to `security-plugin-sharing-verdicts.ts` (see `SharingVerdictsHost`).
+    const host: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'resolveSharingWriteVerdict'> = {
+      collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
+      resolveSharingWriteVerdict: (...a) => this.resolveSharingWriteVerdict(...a),
+    };
+    return resolvePreImageFloorDrop.call(host, rlsOperation, object, recordId, context, permissionSets, delegated);
   }
 
   /**
@@ -5664,7 +5011,7 @@ export class SecurityPlugin implements Plugin {
    * composition makes, passed rather than assumed, because coverage is a fact
    * about the call site ({@link RlsFilterOptions.masterGateCoversThisWrite}).
    */
-  private async delegatorOwnWriteFloorOptions(
+  private delegatorOwnWriteFloorOptions(
     rlsOperation: string,
     object: string,
     recordId: string,
@@ -5672,15 +5019,11 @@ export class SecurityPlugin implements Plugin {
     delegatorSets: PermissionSet[],
     masterGateCoversThisWrite: boolean,
   ): Promise<RlsFilterOptions> {
-    const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
-      rlsOperation,
-      object,
-      recordId,
-      delegatorContext,
-      delegatorSets,
-      false,
-    );
-    return { dropPlatformOwnershipFloor, masterGateCoversThisWrite };
+    // [#25223 cut 10] The body moved to `security-plugin-sharing-verdicts.ts` (see `SharingVerdictsHost`).
+    const host: Pick<SharingVerdictsHost, 'resolvePreImageFloorDrop'> = {
+      resolvePreImageFloorDrop: (...a) => this.resolvePreImageFloorDrop(...a),
+    };
+    return delegatorOwnWriteFloorOptions.call(host, rlsOperation, object, recordId, delegatorContext, delegatorSets, masterGateCoversThisWrite);
   }
 
   /**
@@ -5751,90 +5094,23 @@ export class SecurityPlugin implements Plugin {
    * correct; reviving the by-id widener on `private` end-to-end is a separate
    * contract question about the pre-image gate's own read scope.
    */
-  async checkAuthoredRowWrite(
+  checkAuthoredRowWrite(
     object: string,
     recordId: string,
     operation: AuthoredRowWriteOperation,
     context?: any,
   ): Promise<AuthoredRowWriteVerdict> {
-    try {
-      if (!object || recordId == null || recordId === '') return 'abstain';
-      if (operation !== 'update' && operation !== 'delete') return 'abstain';
-      if (!this.ql) return 'abstain';
-      // No principal, or a delegated identity this path cannot intersect —
-      // both are "cannot measure", which is `abstain` (never `admit`).
-      if (!context?.userId) return 'abstain';
-      if (context?.onBehalfOf?.userId) return 'abstain';
-
-      const permissionSets = await this.resolvePermissionSetsForContext(context);
-      if (permissionSets.length === 0) return 'abstain';
-
-      // Cheap provenance pre-check: if the caller holds NO app-authored policy
-      // applicable to (object, operation), there is nothing that could admit by
-      // declaration — answer without spending a database round-trip. This is
-      // the same collection the compiler consumes, filtered by the same
-      // provenance predicate, so the two cannot disagree about what "authored"
-      // means.
-      //
-      // [#8059] The pre-check asks for an authored policy that ADMITS ROWS —
-      // one carrying a `using` scope predicate. A `check`-only policy declares
-      // no row scope at all (ADR-0058 D4: post-image validation), so it can
-      // admit nothing, and the verdict for a caller holding only check-only
-      // policies is `abstain` — which is the verdict this method already
-      // returned before #8059 and must keep returning after it. It got there
-      // by a route the fix removes: a check-only policy compiles to no `using`
-      // filter, so Layer 1 was null and the `layer1 == null → abstain` rule
-      // below fired. Site 1 now DERIVES a Layer 1 from the caller's select
-      // narrowing in exactly that case, so without this clause the derived
-      // readable-set scope would start answering `admit` — and `admit` is what
-      // the by-id widener uses to WIDEN. That is precisely the masquerade the
-      // doc comment above promises cannot happen (#5493 / #7281), so the
-      // promise is now kept by an explicit test rather than by the accident of
-      // a null Layer 1. Nothing narrows here: `abstain` changes nothing on its
-      // own, and the pre-image gate still refuses on its own terms.
-      const authored = this.collectRLSPolicies(
-        permissionSets,
-        object,
-        operation,
-        (context?.positions ?? []) as string[],
-        context,
-      ).filter((p) => !isPlatformOwnershipFloorPolicy(p) && policyDeclaresClause(p, 'using'));
-      if (authored.length === 0) return 'abstain';
-
-      const { layer0, layer1 } = await this.computeLayeredRlsFilter(
-        permissionSets,
-        object,
-        operation,
-        context,
-        { dropPlatformOwnershipFloor: true },
-      );
-      // See the doc above: a null Layer 1 means no authored predicate is
-      // gating this write, which is an abstention and not an admission.
-      if (layer1 == null) return 'abstain';
-
-      const parts = [{ id: recordId }, ...(layer0 ? [layer0] : []), layer1];
-      // [#7281] The predicate is the question; the scope is not. Read ELEVATED
-      // (see AUTHORED_ROW_WRITE_PROBE_CONTEXT) so the answer is decided by
-      // `{id} AND layer0 AND layer1` alone, and projected to `id` so the probe
-      // can only ever learn EXISTENCE — no column of a row the caller may not
-      // read is materialised, let alone returned. The verdict remains evidence,
-      // never authorization: the by-id write pre-image gate still resolves the
-      // write under the caller's own context.
-      const row = await this.ql.findOne(object, {
-        where: { $and: parts },
-        fields: ['id'],
-        context: { ...AUTHORED_ROW_WRITE_PROBE_CONTEXT },
-      });
-      return row ? 'admit' : 'abstain';
-    } catch (e) {
-      this.logger.warn?.(
-        `[security] checkAuthoredRowWrite could not resolve an authored-policy verdict for ` +
-          `'${object}' record '${recordId}' (${operation}, user ${context?.userId ?? 'unknown'}) — ` +
-          `abstaining (fail-closed: a verdict that cannot be resolved never lifts the sharing refusal)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
-      return 'abstain';
-    }
+    // [#25223 cut 10] The body moved to `security-plugin-authored-row-write.ts` (see `AuthoredRowWriteHost`).
+    const readLogger = () => this.logger;
+    const readQl = () => this.ql;
+    const host: Pick<AuthoredRowWriteHost, 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'logger' | 'ql' | 'resolvePermissionSetsForContext'> = {
+      collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
+      computeLayeredRlsFilter: (...a) => this.computeLayeredRlsFilter(...a),
+      get logger() { return readLogger(); },
+      get ql() { return readQl(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+    };
+    return checkAuthoredRowWrite.call(host, object, recordId, operation, context);
   }
 
   /**
@@ -7359,16 +6635,42 @@ export class SecurityPlugin implements Plugin {
    * clause it sits in; with the write-side call missing, a `check` reading a
    * resolver key resolved only when the request happened to read first
    * (commit 1d73d45c1).
+   *
+   * [#25234 ruling A] Handed the policies about to compile (and their
+   * object), it also stages the DECLARED membership keys they read
+   * (`ObjectSchema.membershipKeys`, see `object-membership-keys.ts`): per key,
+   * lazily, memoized per request, each through the platform's own Layer 0
+   * system read of the roster object, bounded at `MEMBERSHIP_KEY_MAX_VALUES`
+   * with every miss failing closed. A key both the resolver and a declaration
+   * claim resolves from neither. Called with the context alone, it stages the
+   * resolver's keys only, as before.
    */
-  private stageRlsMembership(context: any): Promise<void> {
+  private stageRlsMembership(
+    context: any,
+    policies?: readonly RowLevelSecurityPolicy[],
+    object?: string,
+  ): Promise<void> {
     // [#25223 cut 7] The body moved to `security-plugin-rls-filter.ts` (see `RlsFilterHost`).
     const readLogger = () => this.logger;
+    const readMetadata = () => this.metadata;
+    const readQl = () => this.ql;
+    const readRlsCompiler = () => this.rlsCompiler;
     const readRlsMembershipResolver = () => this.rlsMembershipResolver;
-    const host: Pick<RlsFilterHost, 'logger' | 'rlsMembershipResolver'> = {
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<RlsFilterHost, 'datetimeFieldNamesCache' | 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'ql' | 'rlsCompiler' | 'rlsMembershipResolver' | 'tenancyDisabledCache' | 'tenancyPosture'> = {
+      datetimeFieldNamesCache: this.datetimeFieldNamesCache,
+      getObjectFieldNames: (...a) => this.getObjectFieldNames(...a),
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get logger() { return readLogger(); },
+      get metadata() { return readMetadata(); },
+      numberComparandFieldsCache: this.numberComparandFieldsCache,
+      get ql() { return readQl(); },
+      get rlsCompiler() { return readRlsCompiler(); },
       get rlsMembershipResolver() { return readRlsMembershipResolver(); },
+      tenancyDisabledCache: this.tenancyDisabledCache,
+      get tenancyPosture() { return readTenancyPosture(); },
     };
-    return stageRlsMembership.call(host, context);
+    return stageRlsMembership.call(host, context, policies, object);
   }
 
   private async computeWriteTenantCheckFilter(

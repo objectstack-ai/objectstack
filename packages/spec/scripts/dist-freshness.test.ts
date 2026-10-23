@@ -377,7 +377,7 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
 // `scripts/` — so `__dirname` lands there — and symlinks the read-only inputs.
 // No test-only seam is added to the gate: a seam is itself a place where the
 // gate can differ from what CI runs (the same argument
-// `build-schemas-check-mode.test.ts` makes for the same reason).
+// `build-schemas-check-mode.fixture.ts` makes for the same reason).
 //
 // ## Why the fixture dist is a set of trivial `.d.ts` files
 //

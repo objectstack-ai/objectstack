@@ -49,7 +49,7 @@
 // same file. Running the mutated copies in place would be both destructive and
 // flaky, so each variant is written into a temp tree that COPIES `scripts/` and
 // symlinks the read-only inputs (`src/`, `node_modules/`, `package.json`) —
-// the same discipline `build-schemas-check-mode.test.ts` uses, and for the same
+// the same discipline `build-schemas-check-mode.fixture.ts` uses, and for the same
 // reason: no test-only seam is added to the gate, because a seam is a place
 // where the gate can differ from what CI runs.
 

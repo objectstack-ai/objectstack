@@ -93,7 +93,13 @@ const CALLERS: Record<string, Classification> = {
   },
   'packages/plugins/plugin-security/src/security-plugin.ts': {
     kind: 'not-a-door',
-    reason: 'the provider: it implements the admission and binds it into the security service it registers; it serves no rows',
+    reason:
+      'the provider: it implements the admission, hands it to its service registration, and asks it itself only to '
+      + 'decide whether `describePositionGrants` may count a position\'s holders; it serves no rows',
+  },
+  'packages/plugins/plugin-security/src/security-plugin-security-service.ts': {
+    kind: 'not-a-door',
+    reason: 'the provider\'s service registration: it binds the admission into the `security` service the plugin registers; it serves no rows',
   },
   'packages/objectql/src/engine.ts': {
     kind: 'not-a-door',

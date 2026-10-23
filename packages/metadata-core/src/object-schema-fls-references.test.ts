@@ -138,6 +138,32 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
         expect(wordy.defaultRowScope).toEqual(readable);
     });
 
+    it('drops a membership key whose columns or filter read the denied field WHOLE, and keeps the others (#25234)', () => {
+        // Each key is a rule entry: deleting only its `valueField` would serve a
+        // declaration that reads as a different set.
+        const readable = { userField: 'title', valueField: 'id' };
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith(),
+            membershipKeys: {
+                by_value: { userField: 'title', valueField: 'secret_score' },
+                by_filter: { ...readable, filter: 'secret_score > 0' },
+                kept_ids: readable,
+            },
+        });
+        expect(served.membershipKeys).toEqual({ kept_ids: readable });
+
+        // Every key reading the denied field: the map goes, not an empty one.
+        const none = mask({ name: 'thing', fields: fieldsWith(), membershipKeys: { by_value: { userField: 'title', valueField: 'secret_score' } } });
+        expect(none).not.toHaveProperty('membershipKeys');
+
+        // A key NAME is the set's name, never a field reference, and a denied field
+        // named like a member (`filter`) is a schema word in a classified position:
+        // neither costs the key anything.
+        const named = mask({ name: 'thing', fields: { ...fieldsWith(), filter: { type: 'text' } }, membershipKeys: { secret_score: readable } });
+        expect(named.membershipKeys).toEqual({ secret_score: readable });
+    });
+
     it('scrubs the nested policy blocks: tenancy, lifecycle, publicSharing, external, userActions', () => {
         const served = mask({
             name: 'thing',

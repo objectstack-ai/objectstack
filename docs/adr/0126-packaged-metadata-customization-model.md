@@ -202,7 +202,7 @@ activation record for packaged metadata artifacts. It is declared in
 
 | Column | Type | Meaning |
 |:--|:--|:--|
-| `metadata_type` | string | The artifact's registry type (`'flow'`, `'permission'`, …) |
+| `metadata_type` | string | The artifact's registry type (`'flow'`, `'action'`, `'position'`, `'permission'`, `'sharing_rule'`, `'webhook'`; the runtime field description is the live list) |
 | `name` | string | The packaged artifact's machine name |
 | `package_id` | string | The package that ships the base artifact |
 | `organization_id` | string, **nullable — reserved** | NULL today (install-level row, §5); the per-org dimension is an additive column later, never a redesign |

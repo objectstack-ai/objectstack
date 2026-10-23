@@ -153,7 +153,7 @@ export const MemberSchema = lazySchema(() => z.object({
    * because the wire shape mirrors better-auth's own column, not because the
    * set is open.
    */
-  role: z.string().describe('Member role (owner, admin, delegated_admin, member — ADR-0108 closed vocabulary)'),
+  role: z.string().describe('Member role (owner, admin, delegated_admin, member, external — ADR-0108 closed vocabulary)'),
   
   /**
    * Member creation timestamp
@@ -232,7 +232,7 @@ export const InvitationSchema = lazySchema(() => z.object({
    * `owner`, `admin`, `delegated_admin`, `member`. A name outside it is
    * refused at the door (`ROLE_NOT_FOUND`) before any invitation row exists.
    */
-  role: z.string().describe('Role to assign upon acceptance (owner, admin, delegated_admin, member — ADR-0108 closed vocabulary)'),
+  role: z.string().describe('Role to assign upon acceptance (owner, admin, delegated_admin, member, external — ADR-0108 closed vocabulary)'),
   
   /**
    * Invitation status

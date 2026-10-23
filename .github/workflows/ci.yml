@@ -61,32 +61,50 @@ on:
   # Treated as `full` by the selection script for the same reason `schedule` is.
   workflow_dispatch:
 
-# Superseded runs on the same PR/branch waste runners and delay feedback;
-# cancel them. Push runs to main group by commit ref as well, so an in-flight
-# main run is cancelled only by a newer main push.
+# Superseded runs on the same PR waste runners and delay feedback; cancel them.
+# A push to `main` is the opposite case, and gets a group of its OWN (#25373).
 #
-# ⭐ `github.event_name` IS LOAD-BEARING IN THIS KEY, and it is the whole
-# reason the hourly run above can finish (#16467). On a `schedule` event
-# `github.event.pull_request.number` is empty and `github.ref` is
-# `refs/heads/main` — BYTE-IDENTICAL to what a push to `main` produces. Without
-# the event name in the key the hourly run and the next merge share one group,
-# `cancel-in-progress: true` applies, and the next merge kills the hourly run.
-# That is not a hypothetical: this card's own measurement is that 36 of the
-# last 60 push runs on `main` were already cancelled that way, at a merge
-# cadence that would censor most hours.
+# ⭐ `github.event.after` IS LOAD-BEARING IN THIS KEY. A push run is the only
+# run that tests ITS OWN merge: Test Core computes `--affected` against
+# `github.event.before` (see `on.schedule` above), so a push run that does not
+# finish leaves that merge's diff with no Test Core verdict on `main` until the
+# next hourly run. Main merges land every ~9–16 min and a push run takes ~27,
+# so under the old shared key `ci-CI-push-refs/heads/main` the next merge
+# cancelled it: 31 of 40 push runs on 2026-10-23 01:03Z–11:03Z, most of them
+# inside "Run this shard's tests". (The Turbo seed is NOT what was lost: the
+# "Save Turbo cache (main only)" steps are `if: always()` and run on a
+# cancelled job too.) `cancel-in-progress: false` alone does NOT fix it:
+# GitHub keeps ONE pending run per group and cancels it when a third arrives;
+# replayed on the same 40 arrivals, 18 still die. So the push segment is the
+# pushed commit. `github.event.after` is set on a push and absent on
+# `schedule`, `workflow_dispatch` and `merge_group`, which still fall through
+# to `github.ref`; on `pull_request` the PR number wins before it is reached.
+# Two push runs never share a group, so every one runs to completion. The seed
+# key carries `github.sha`, so two overlapping main runs never write the same
+# key.
 #
-# ⛔ Do not "simplify" this back to two segments. `scripts/ci/scheduled-full-
-# run.mjs --check-concurrency` evaluates this expression against a push-shaped
-# and a schedule-shaped context and reds when the two groups are equal, so the
-# collision cannot come back silently.
+# ⭐ `github.event_name` IS LOAD-BEARING TOO (#16467). A `schedule` and a
+# `workflow_dispatch` run on `main` both fall through to `refs/heads/main`;
+# without the event name they share one group and an on-demand run cancels the
+# hourly one (and, under any key that drops `github.event.after`, the next
+# merge cancels both, which is how 36 of 60 hourly-era push runs died).
 #
-# `cancel-in-progress` stays `true` for every event including `schedule`: two
-# hourly runs overlapping means one of them is over an hour old, and an hour-old
+# ⛔ Do not "simplify" either segment away. `scripts/ci/scheduled-full-run.mjs
+# --check-concurrency` evaluates this expression against push, schedule,
+# dispatch, PR and queue contexts on two different commits. It reds when two
+# pushes share a group, when a push shares one with a schedule or dispatch run,
+# or when two schedule, dispatch or same-PR runs stop sharing one (a run-unique
+# key such as `github.sha` or `github.run_id` would switch cancellation off for
+# those events too).
+#
+# `cancel-in-progress` stays `true`: with a per-commit push group it never
+# fires on a push, and for everything else it is the policy. Two hourly runs
+# overlapping means one of them is over an hour old, and an hour-old
 # measurement of `main` is strictly the worse of the two. Test Core's wall clock
 # is well inside the cadence (~39 shard-minutes across six shards), so this is
 # the exceptional path, not the normal one.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}
   cancel-in-progress: true
 
 # ── THE TWO SPEEDS (#22998) ──────────────────────────────────────────────────
@@ -275,6 +293,7 @@ jobs:
               - 'scripts/check-dual-build-cjs-loads.mjs'
               - 'scripts/check-lean-entry-closure.mjs'
               - 'scripts/check-sourcemap-no-sources-content.mjs'
+              - 'scripts/ci/assert-turbo-remote-cache.mjs'
               - 'scripts/population-floor.mjs'
             # Build inputs of the vendored Console SPA — see the Console Pin Gate
             # job at the bottom of this file. `.objectui-sha` is a ROOT DOTFILE, so
@@ -713,6 +732,45 @@ jobs:
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
 
+      # ⭐ A SHARD WHOSE TESTS READ NO `.d.ts` BUILDS ITS CLOSURE WITHOUT THEM
+      # (#25375). vitest loads JavaScript, so on most shards every declaration
+      # the closure emits -- spec's 6 GB-heap pass, cli's type-checking `tsc`
+      # -- is written and never read. `OS_SKIP_DTS=1` goes to $GITHUB_ENV, so
+      # both closure builds below, the test step and the shard's main seed all
+      # hash in one namespace (turbo.json `globalEnv`).
+      #
+      # ⛔ EXCEPT a shard carrying a package in DTS_READERS, whose tests compile
+      # against BUILT declarations and go red without them (TS7016). Measured
+      # on 830a63a, the whole Test Core list under `OS_SKIP_DTS=1`: red only in
+      #   @objectstack/cli       published-subpath-console/-hook-body.pin (its
+      #                          own dist/*.d.ts), scaffold-emission-typechecks,
+      #                          scaffold-test-script-passes (spec's .d.ts)
+      #   @objectstack/metadata  typescript-serializer-annotation (spec's .d.ts)
+      # A new test that reads a built `.d.ts` reds the same loud way on a
+      # skipping shard: add its package here. Every other package's counts
+      # matched the DTS-on run but one: spec's root-entry-type-nameability
+      # pin skips (by its own design) and runs in lint.yml's built-dist step.
+      #
+      # Local cold closure, 65 packages, 4 cores, `--force`: 5m59s with
+      # declarations, 1m24s without. The cost is replay: a skipping shard
+      # cannot replay Build Core's DTS-on remote artifacts, only the DTS-off
+      # ones the queue and main runs of these shards write.
+      - name: Choose this shard's declaration build
+        run: |
+          DTS_READERS='@objectstack/cli @objectstack/metadata'
+          KEEP=""
+          while read -r PKG _; do
+            for R in $DTS_READERS; do
+              [ "$PKG" = "$R" ] && KEEP="$KEEP $PKG"
+            done
+          done < "$RUNNER_TEMP/shard-packages.txt"
+          if [ -n "$KEEP" ]; then
+            echo "Declarations kept: this shard tests$KEEP, which read built .d.ts."
+          else
+            echo "OS_SKIP_DTS=1" >> "$GITHUB_ENV"
+            echo "Declarations skipped: OS_SKIP_DTS=1 for the rest of this shard."
+          fi
+
       # ⛔ THIS SHARD'S `^build` CLOSURE IS BUILT HERE, ON THE TURBO REMOTE
       # CACHE (#22077), so `Run this shard's tests` REPLAYS it from the local
       # cache instead of building it. Before this step the closure was built
@@ -728,7 +786,7 @@ jobs:
       # 3d9188502e, turbo 2.11.5, all six shards of the local partition: this
       # plan equals the test plan's build tasks, 32 to 63 per shard, with
       # identical hashes, 0 differing and 0 extra, and every one of them has
-      # Build Core's hash. A `test` task that `dependsOn: ["build"]` (cli and
+      # Build Core's hash -- unless the step above set OS_SKIP_DTS (#25375). A `test` task that `dependsOn: ["build"]` (cli and
       # metadata in turbo.json) also needs its OWN package's build. This filter
       # leaves that out on purpose, so a shard never builds a package its tests
       # do not need; the test step builds it as before. Today that is
@@ -736,9 +794,11 @@ jobs:
       # builds it there.
       #
       # Its own guarded step, for the reason the slice step below gives: a
-      # guarded SITE is (file, job, step). No `--summarize`: `.turbo/runs/`
-      # stays the test step's alone, and that is what the drift check and the
-      # timings capture read. The four TURBO_* lines are Build Core's,
+      # guarded SITE is (file, job, step). `.turbo/runs/` stays the test step's
+      # alone, because that is what the drift check and the timings capture
+      # read: the `--summarize` here is for the remote-cache assertion after
+      # this step (#25374), which moves the summary it read out to
+      # $RUNNER_TEMP before the tests run. The four TURBO_* lines are Build Core's,
       # verbatim; its "Turbo remote cache (#21186)" comment holds the write
       # rule, the signing and the PINS. ⛔ An empty FILTERS must exit here:
       # `turbo run build` with no filter builds the whole workspace.
@@ -764,7 +824,16 @@ jobs:
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core-closure-build.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run build $FILTERS --concurrency=4 --log-order=stream
+            pnpm turbo run build $FILTERS --concurrency=4 --log-order=stream \
+              --summarize --log-file=.turbo/remote-cache/test-core-closure.json
+
+      # Build Core's "Turbo remote cache (#21186)" comment, ASSERTED paragraph.
+      # `--if-ran`: an empty shard exits the step above before turbo runs.
+      - name: The Turbo remote cache was on for this shard's closure build
+        run: |
+          node scripts/ci/assert-turbo-remote-cache.mjs --site 'Test Core (${{ matrix.shard }}/6) closure' \
+            --log .turbo/remote-cache/test-core-closure.json --if-ran \
+            --move-summary-to "$RUNNER_TEMP/turbo-remote-cache"
 
       # ⛔ A FILE-LEVEL SLICE BUILDS ITS DEPENDENCY CLOSURE HERE, IN ITS OWN
       # GUARDED STEP, so the slice leg in the next step REPLAYS it. Since #19278
@@ -2544,6 +2613,12 @@ jobs:
       - name: check-dts-emitted self-test
         run: node scripts/check-dts-emitted.mjs --self-test
 
+      # The remote-cache assertion after the build below, and after every
+      # carrier that runs it (Test Core's closure, lint.yml's three Type Check
+      # lanes), is one script; its self-test runs here, once.
+      - name: assert-turbo-remote-cache self-test
+        run: node scripts/ci/assert-turbo-remote-cache.mjs --self-test
+
       # ── Turbo remote cache (#21186) ─────────────────────────────────────
       # Vercel's managed Turborepo remote cache. objectstack-ai/cloud's
       # test.yml builds this repo at its pinned SHA with the same command and
@@ -2579,6 +2654,16 @@ jobs:
       # unset: remote caching is off and the build is unchanged; the summary
       # then reads `Remote caching disabled (remote cache requested — …)`.
       #
+      # ASSERTED (#25374). The step after this one reads that prelude line
+      # from turbo's structured log (`--log-file`, repo-relative or turbo
+      # ignores it) and the hit counts from `--summarize`, prints both into the
+      # job's step summary, and reds a run that WRITES the remote (the
+      # `remote:rw` branch above) when the cache is off; a read-only run only
+      # warns. Neither flag enters a task hash (83 of 83 identical with and
+      # without, `--dry=json`, turbo 2.11.5). The carriers that assert are this
+      # step, Test Core's closure and lint.yml's three Type Check lanes; the
+      # verdict table is the script header's.
+      #
       # PINS, for every step that carries these four lines (#22077). Each
       # carrier points back here.
       #   - BUILD TASKS ONLY. #19086's lesson: a step that writes artifacts from
@@ -2608,7 +2693,10 @@ jobs:
           TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
-        run: pnpm build
+        run: pnpm build --summarize --log-file=.turbo/remote-cache/build-core.json
+
+      - name: The Turbo remote cache was on for the build
+        run: node scripts/ci/assert-turbo-remote-cache.mjs --site 'Build Core' --log .turbo/remote-cache/build-core.json
 
       # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
       # per package, immediately after that package's `tsup`, and is the LAST

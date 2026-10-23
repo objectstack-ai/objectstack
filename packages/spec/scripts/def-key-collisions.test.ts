@@ -241,8 +241,8 @@ describe('formatDefKeyCollisions', () => {
 // ─────────────────────────────────────────────────────────────────────────
 //
 // The green side of this guard has plenty of witnesses: every `gen:schema`,
-// every `check:authorable-surface`, and `build-schemas-check-mode.test.ts`'s
-// whole suite run the unmutated script. The RED side has none — and a gate
+// every `check:authorable-surface`, and the `build-schemas-check-mode.*.test.ts`
+// files' whole suite run the unmutated script. The RED side has none — and a gate
 // that has never been observed failing is not known to be a gate (#5168's
 // finding, applied here). So this one case puts the deleted limb back: it
 // re-declares `HttpMethodSchema` alongside the renamed `HttpMethodSubsetSchema`
@@ -257,7 +257,7 @@ describe('formatDefKeyCollisions', () => {
 // guard. The assertions below therefore also check the run reached the
 // generation summary first.
 //
-// Sandbox discipline copied from `build-schemas-check-mode.test.ts` and
+// Sandbox discipline copied from `build-schemas-check-mode.fixture.ts` and
 // `openapi-self-consistency.test.ts`: the script resolves `OUT_DIR` and every
 // artifact path from its own `__dirname`, so running a mutated copy in place
 // would rewrite the package's real (gitignored) `json-schema/` while a

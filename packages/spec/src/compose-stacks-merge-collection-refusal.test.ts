@@ -69,6 +69,7 @@ const COLLECTION_KEYS_IN_SHAPE_ORDER = [
   'highlightFields',
   'listViews',
   'searchableFields',
+  'membershipKeys',
   'actions',
 ] as const;
 
@@ -138,6 +139,7 @@ describe("composeStacks objectConflict: 'merge' — a collection both objects de
     ['activityMilestones', [{ name: 'm_a' }], [{ name: 'm_b' }]],
     ['requiredPermissions', ['crm.read'], ['billing.read']],
     ['attachedOnRead', { viewer: { can_act: 'boolean' } }, { viewer: { can_act: 'boolean', is_submitter: 'boolean' } }],
+    ['membershipKeys', { mine_ids: { userField: 'owner', valueField: 'title' } }, { mine_ids: { userField: 'owner', valueField: 'body' } }],
   ] as const)("refuses two objects declaring different '%s'", (key, left, right) => {
     const a = defineStack({ manifest: mf('com.example.a'), objects: [obj('shared', { [key]: left })] }, { strict: false });
     const b = defineStack({ manifest: mf('com.example.b'), objects: [obj('shared', { [key]: right })] }, { strict: false });

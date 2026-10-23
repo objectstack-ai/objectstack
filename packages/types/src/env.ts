@@ -508,6 +508,45 @@ export function resolvePlatformOwnerEmail(): string | undefined {
 }
 
 /**
+ * [#25413] The env variable naming the PLATFORM OWNER's organization — the
+ * organization a walled deployment raises its deployment-level reports in,
+ * beside {@link PLATFORM_OWNER_EMAIL_ENV}, which names the owner account.
+ *
+ * Exported as a constant so every message that names it quotes exactly one
+ * spelling (plugin-security's `upgrade-report-delivery.ts`).
+ */
+export const PLATFORM_OWNER_ORGANIZATION_ENV = 'OS_PLATFORM_OWNER_ORGANIZATION';
+
+/**
+ * [#25413] Resolve the env-declared platform owner organization —
+ * `OS_PLATFORM_OWNER_ORGANIZATION`: an organization id or slug.
+ *
+ * Read only under a WALLED tenancy posture (`group` / `isolated`). There a
+ * deployment-level notification has no organization of its own: the
+ * notification family is organization-owned (ADR-0131: no NULL
+ * `organization_id`), and a walled system write that names none is refused
+ * (D9). Naming the owner's organization gives the boot upgrade reports an
+ * in-app channel in it, addressed to the {@link PLATFORM_OWNER_EMAIL_ENV}
+ * operators. `single` never consults it: the Default Organization is that
+ * posture's answer.
+ *
+ * Returns the operator's value trimmed, or `undefined` when unset/blank.
+ * Resolving it to an organization (id first, then slug) is the CONSUMER's job,
+ * and so is saying loudly when it names none — this resolver echoes what the
+ * operator typed so that message can quote it verbatim.
+ *
+ * Reads `process.env` live on each call, through `globalThis` like the other
+ * resolvers here (this package targets non-Node runtimes too).
+ */
+export function resolvePlatformOwnerOrganization(): string | undefined {
+  const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env?.[PLATFORM_OWNER_ORGANIZATION_ENV];
+  if (raw == null) return undefined;
+  const trimmed = String(raw).trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
+/**
  * Escape hatch for the degraded-tenancy boot guard (ADR-0093 D5).
  *
  * When `OS_MULTI_ORG_ENABLED=true` but the `@objectstack/organizations`

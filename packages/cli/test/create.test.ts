@@ -120,13 +120,14 @@ describe('os create: the sweep covers every shipped template', () => {
 });
 
 describe.each(TEMPLATE_KEYS)('os create %s — the standalone (default) emission', (key) => {
-  it('declares every @objectstack dependency as a published range pinned to this CLI', () => {
+  it('declares every @objectstack dependency at the exact version of this CLI', () => {
     const deps = objectstackDeps(pkgJson(key, 'standalone'));
     expect(Object.keys(deps).length).toBeGreaterThan(0);
     for (const [name, spec] of Object.entries(deps)) {
-      expect(spec, `${key}: ${name}`).toBe(`^${getCliVersion()}`);
-      // A published range, spelled the way npm/pnpm/yarn/bun all resolve it.
-      expect(spec, `${key}: ${name}`).toMatch(/^\^\d+\.\d+\.\d+/);
+      expect(spec, `${key}: ${name}`).toBe(getCliVersion());
+      // A published version with no range operator: a breaking change may ship
+      // in a minor or a patch on the v18 line, so the docs prescribe exact pins.
+      expect(spec, `${key}: ${name}`).toMatch(/^\d+\.\d+\.\d+/);
     }
   });
 

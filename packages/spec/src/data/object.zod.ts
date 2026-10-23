@@ -33,9 +33,10 @@ import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
 // The ADR-0015 §4.2 binding predicate, shared with `defineStack`'s
 // cross-reference pass and the v18 stored-row listing. Internal to the spec.
 import { externalBindingDatasourceRefusal } from './external-binding-datasource';
-// The object's default row scope: the RLS policy shape without `object`. No
-// cycle: `security/rls.zod` imports only zod and `shared/`.
-import { DefaultRowScopeSchema } from '../security/rls.zod';
+// The object's default row scope (the RLS policy shape without `object`) and the
+// roster object's declarative membership keys. No cycle: `security/rls.zod`
+// imports only zod, `shared/` and the resolver contract's constants.
+import { DefaultRowScopeSchema, MembershipKeysSchema } from '../security/rls.zod';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write
@@ -3069,6 +3070,44 @@ const ObjectSchemaBase = strictObject(
   ),
 
   /**
+   * Declarative membership keys (ADR-0105 D11's metadata twin, #25234 ruling
+   * A): the `current_user.KEY` sets this ROSTER object defines, by name
+   * ({@link MembershipKeysSchema}). `current_user.KEY` is the distinct non-null
+   * values of `valueField` on this object's rows whose `userField` is the
+   * caller and on which `filter` holds, so a permission set's policy can read
+   * `supplier in current_user.portal_supplier_ids` with no stamp on every
+   * record.
+   *
+   * The describe states the CONTRACT the reader meets (Prime Directive #10):
+   * the one reader is plugin-security's request staging
+   * (`stageRlsMembership`, beside the registered code resolver), resolving a
+   * key lazily, once per request, as the platform's own system read inside
+   * the caller's organization wall and never through the caller's audience,
+   * posture or row policies; at most `MEMBERSHIP_KEY_MAX_VALUES` (1,000) values,
+   * and a larger set, a failed read or an unstaged key fails closed. Keys are
+   * audience-neutral. A key the registered resolver also owns resolves from
+   * neither. The liveness row is `live` (#25234 PR 2).
+   *
+   * One key on two objects is refused by `defineStack` and `composeStacks`;
+   * the field-type, filter and policy-comparison refusals are the authoring
+   * rules' (a later card), judged on the merged object.
+   */
+  membershipKeys: MembershipKeysSchema.optional().describe(
+    'Membership keys this object defines, by name: each makes `current_user.KEY` the set of `valueField` '
+    + 'values on this object\'s rows whose `userField` is the signed-in user and on which the optional `filter` '
+    + 'holds, for a row-level security policy to read with `in` (e.g. `supplier in '
+    + 'current_user.portal_supplier_ids`, declared on a supplier-contact object as `portal_supplier_ids: { '
+    + 'userField: \'user\', valueField: \'supplier\', filter: \'active == true\' }`). Declare a key on the '
+    + 'one object whose rows define it; a key name is one request-wide name, so declaring it on two objects is '
+    + 'refused, and the kernel\'s own names (`id`, `organization_id`, `positions`, `org_user_ids`, '
+    + '`accessible_org_ids`, `email`) are refused. The set is read once per request, only when a policy reads '
+    + 'the key, as a system read inside the caller\'s organization and regardless of what the caller may read on '
+    + 'this object, so the caller needs no read on it; it holds at most 1,000 values, and a larger set, a failed '
+    + 'read, a `filter` that does not compile for this object, or a key a registered membership resolver also '
+    + 'owns makes every policy reading it match no rows. Whoever can write this object\'s rows can grant the key.',
+  ),
+
+  /**
    * RETIRED (#23268, ADR-0049 enforce-or-remove; ruling of record 6159300530,
    * letter A). ADR-0090 D11 declared a second, external org-wide default for
    * portal / partner principals. Nothing ever read it on the row path: no
@@ -4081,6 +4120,12 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
       '`fieldGroups` cannot be contributed through an object extension — the merge does ' +
       'not carry them. Add the fields here and declare the groups on the owning object, ' +
       'or assign a Page for the layout.',
+    // A membership key belongs to the package that owns the roster object, so a
+    // key cannot reach into another package's object (the ruled refusal 10).
+    membershipKeys:
+      '`membershipKeys` cannot be contributed through an object extension: a membership key is ' +
+      'declared by the package that owns the roster object whose rows define it. Declare the key on ' +
+      'an object your own stack defines, or ask the owning package to declare it.',
   },
 }, {
   /** The target object name (FQN) to extend */

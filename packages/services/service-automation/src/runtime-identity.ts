@@ -210,7 +210,11 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
  *    PLUS the trigger's `userId` / `tenantId` when the trigger resolved them
  *    (#5494; after an approval decision `userId` is the decider, the run's
  *    elevation unchanged) — the security middleware short-circuits on `isSystem`, so the
- *    run reads/writes with full access, bypassing RLS; the `actor` label and
+ *    run reads/writes with full access, bypassing RLS — save its writes to the
+ *    identity-assignment objects (`sys_user_position`, `sys_user_permission_set`,
+ *    `sys_invitation`, `sys_member`), which plugin-security refuses for a system
+ *    context that carries a `flowRunId` (#25251), so assigning authority from a
+ *    flow takes `runAs:'user'` and the delegated-administration gate; the `actor` label and
  *    the carried-through acting user keep those writes attributable in the
  *    audit log and in the rows' own `created_by`/`updated_by` stamps
  *    (ADR-0014 D2, #4366), and the carried org lets the driver's tenant

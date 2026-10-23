@@ -86,17 +86,21 @@ on:
 # non-required check on a queue build costs runners and blocks nothing, and
 # check-links.yml's own header already refuses it for that reason.
 
-# Same policy as ci.yml: superseded runs on the same PR/branch waste runners
-# and delay feedback; cancel them. Push runs to main group by commit ref, so an
-# in-flight main run is cancelled only by a newer main push.
+# Same policy as ci.yml: superseded runs on the same PR waste runners and delay
+# feedback; cancel them. A push to `main` gets a group of its own, keyed by the
+# pushed commit (`github.event.after`, #25373), so no merge ever cancels the
+# previous merge's run and every merge gets its own lint and typecheck verdict
+# on `main` (27 of 40 push runs were cancelled by their successor on
+# 2026-10-23).
 #
 # ⭐ `github.event_name` is in the key for the reason ci.yml's concurrency block
-# states in full (#16467): on a `schedule` event the remaining two segments are
-# byte-identical to a push to `main`, so without it the next merge cancels the
-# hourly full run. `scripts/ci/scheduled-full-run.mjs --check-concurrency`
-# evaluates THIS expression too and reds if the two groups ever collapse again.
+# states in full (#16467): `schedule` and `workflow_dispatch` both fall through
+# to `refs/heads/main`, so without it an on-demand run cancels the hourly one.
+# `scripts/ci/scheduled-full-run.mjs --check-concurrency` evaluates THIS
+# expression too and reds if two pushes, or a push and a schedule run, share a
+# group, or if two schedule, dispatch or same-PR runs stop sharing one.
 concurrency:
-  group: lint-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: lint-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}
   cancel-in-progress: true
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5785,7 +5789,14 @@ jobs:
           TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
-        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...' --summarize --log-file=.turbo/remote-cache/typecheck-workspace.json
+
+      # ci.yml Build Core's "Turbo remote cache (#21186)" comment, ASSERTED
+      # paragraph (#25374). A gate of this lane, so the lane verdict carries its red.
+      - name: The Turbo remote cache was on for the workspace build
+        id: turbo-remote-cache-was-on
+        continue-on-error: true
+        run: node scripts/ci/assert-turbo-remote-cache.mjs --site 'Type Check · workspace' --log .turbo/remote-cache/typecheck-workspace.json
 
       # CLI transcripts in content/docs are bound to the registries they quote
       # (#15373). `content/docs` teaches with pasted CLI output, and some of those
@@ -6041,7 +6052,14 @@ jobs:
           TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
-        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...' --summarize --log-file=.turbo/remote-cache/typecheck-debt.json
+
+      # ci.yml Build Core's "Turbo remote cache (#21186)" comment, ASSERTED
+      # paragraph (#25374). A gate of this lane, so the lane verdict carries its red.
+      - name: The Turbo remote cache was on for the workspace build
+        id: turbo-remote-cache-was-on
+        continue-on-error: true
+        run: node scripts/ci/assert-turbo-remote-cache.mjs --site 'Type Check · debt ledger' --log .turbo/remote-cache/typecheck-debt.json
 
       # The MEASURED half of the coverage gate (#5278). The cheap structural
       # check near the top of this job asserts that a package without a
@@ -6242,7 +6260,14 @@ jobs:
           TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
-        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...' --summarize --log-file=.turbo/remote-cache/typecheck-consumers.json
+
+      # ci.yml Build Core's "Turbo remote cache (#21186)" comment, ASSERTED
+      # paragraph (#25374). A gate of this lane, so the lane verdict carries its red.
+      - name: The Turbo remote cache was on for the workspace build
+        id: turbo-remote-cache-was-on
+        continue-on-error: true
+        run: node scripts/ci/assert-turbo-remote-cache.mjs --site 'Type Check · consumer gates' --log .turbo/remote-cache/typecheck-consumers.json
 
       # The nested-package build. ⚠️ NOT redundant with "Build workspace
       # packages" above, and the reason is the glob: the bare `./packages/*`

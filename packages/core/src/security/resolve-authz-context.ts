@@ -54,6 +54,7 @@ import { isMissingTableError, resolveTenancyPosture } from '@objectstack/types';
 import {
   mapMembershipRole,
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
+  BUILTIN_IDENTITY_ORG_EXTERNAL,
   ADMIN_FULL_ACCESS,
   ADMIN_FULL_ACCESS_CAPABILITIES,
   GUEST_POSITION,
@@ -1234,6 +1235,25 @@ function heldPositionNames(
 }
 
 /**
+ * [ruling of record 6355206139, E1] Does a principal holding `held` belong to
+ * the organization's EXTERNAL population — does it hold `org_external`, the
+ * projection of `sys_member.role = external`? Its holder is not given the
+ * `everyone` audience anchor (§5b), so the deployment's default sets bound
+ * there never reach it; what reaches it is what its own identity position
+ * names and its explicit grants.
+ *
+ * Read off the projected names, never the raw role: the role is read once, by
+ * {@link heldPositionNames}, and `org_external` is a reserved identity name no
+ * `sys_user_position` row can spell. With no active organization every
+ * membership projects, so one external membership withholds the anchor — the
+ * fail-closed reading, since that population's reach is then not decided by
+ * any one organization.
+ */
+function holdsExternalIdentity(held: readonly string[]): boolean {
+  return held.includes(BUILTIN_IDENTITY_ORG_EXTERNAL);
+}
+
+/**
  * [ADR-0131 D3/D4, ADR-0049] The sets each of `positions` grants through its
  * definition, IN FORCE: a position the activation ledger switched off grants
  * nothing, and a set it switched off is not granted. `namedByPosition` is
@@ -1302,7 +1322,8 @@ export async function readPositionGrantsInForce(
  * organization `tenantId` — the principals whose own rows give them the name by
  * {@link heldPositionNames}, the rule {@link resolveUserAuthzGrants} projects a
  * caller's positions by, counted over the organization's `sys_member` and
- * `sys_user_position` rows. `everyone` is held by every active member. Holding
+ * `sys_user_position` rows. `everyone` is held by every active member but an
+ * external one ({@link holdsExternalIdentity}). Holding
  * is the assignment: a position the activation ledger switched off keeps its
  * holders (ADR-0049) and grants them nothing ({@link readPositionGrantsInForce}).
  *
@@ -1347,8 +1368,9 @@ export async function countPositionHolders(
   for (const userId of new Set([...membersByUser.keys(), ...positionRowsByUser.keys()])) {
     const memberRows = membersByUser.get(userId) ?? [];
     const held = heldPositionNames(memberRows, positionRowsByUser.get(userId) ?? [], tenantId, nowMs);
-    // §5b: every authenticated member holds the `everyone` audience anchor.
-    if (memberRows.some((m) => isGrantActive(m, nowMs))) held.push(EVERYONE_POSITION);
+    // §5b: every authenticated member holds the `everyone` audience anchor —
+    // an external one excepted (ruling of record 6355206139, E1).
+    if (memberRows.some((m) => isGrantActive(m, nowMs)) && !holdsExternalIdentity(held)) held.push(EVERYONE_POSITION);
     for (const name of held) {
       if (!wanted.has(name)) continue;
       if (!holders.has(name)) holders.set(name, new Set());
@@ -1787,7 +1809,14 @@ export async function resolveUserAuthzGrants(
   //     holds the built-in `everyone` position, so sets bound to it resolve
   //     below exactly like any other position-bound grant — ADDITIVE, with no
   //     "only when the user has nothing else" cliff.
-  if (!grants.positions.includes('everyone')) grants.positions.push('everyone');
+  //
+  //     [ruling of record 6355206139, E1] …except the EXTERNAL population: a
+  //     principal holding `org_external` (§3's projection of
+  //     `sys_member.role = external`) does not hold the anchor, so neither the
+  //     platform baseline nor an app's `isDefault` set nor an accepted package
+  //     default bound to it reaches the holder. Its baseline is what its own
+  //     identity position names (§6a); everything else is an explicit grant.
+  if (!holdsExternalIdentity(grants.positions) && !grants.positions.includes('everyone')) grants.positions.push('everyone');
 
   // [#10757 leg 4] The Default Organization read (§6) and the activation-ledger
   // read (§6a) are ONE wave. They used to be two serial round trips, because the

@@ -3051,6 +3051,96 @@ function collectComposedDefaultRecordPageErrors(
 }
 
 /**
+ * [#25234 ruling A, refusal 3] One membership key declared on two objects.
+ *
+ * `current_user.KEY` is one request-wide name (`ExecutionContext.rlsMembership`
+ * is a single bag), and `ObjectSchema.membershipKeys` gives the key its meaning
+ * from the declaring object's rows. Two objects declaring one key would give it
+ * two meanings with no author choosing between them, so the second declaration
+ * is refused. One object cannot declare a key twice (the map is keyed by name);
+ * this is the cross-object half.
+ *
+ * Counted by distinct object NAME, so two entries for one object are the
+ * duplicate {@link collectDuplicateEntryErrors} (or the composition's object
+ * conflict strategy) already answers, and are not reported a second time.
+ * {@link collectComposedMembershipKeyErrors} reuses the reading over the objects
+ * a composition brings together.
+ */
+function duplicateMembershipKeyFindings(
+  entries: Iterable<{ readonly object: unknown; readonly origin: string }>,
+  scope: string,
+): string[] {
+  // key → declaring object name → the positions that declare it there.
+  const byKey = new Map<string, Map<string, string[]>>();
+  for (const { object, origin } of entries) {
+    if (!isRecord(object) || typeof object.name !== 'string') continue;
+    const keys = object.membershipKeys;
+    if (!isRecord(keys)) continue;
+    for (const key of Object.keys(keys)) {
+      const owners = byKey.get(key) ?? new Map<string, string[]>();
+      const origins = owners.get(object.name) ?? [];
+      origins.push(origin);
+      owners.set(object.name, origins);
+      byKey.set(key, owners);
+    }
+  }
+
+  const errors: string[] = [];
+  for (const [key, owners] of byKey) {
+    if (owners.size < 2) continue;
+    const named = [...owners].map(([object, origins]) => `'${object}' (${joinDeclarationOrigins(origins)})`);
+    errors.push(
+      `Membership key '${key}' is declared on ${owners.size === 2 ? 'two' : owners.size} objects in ${scope}: ` +
+        `${joinDeclarationOrigins(named)}. Declare it on exactly one object, the roster whose rows define it, ` +
+        `and rename the others. \`current_user.${key}\` is one request-wide name, so two declarations would ` +
+        `give it two meanings.`,
+    );
+  }
+  return errors;
+}
+
+/** The one-stack door: {@link duplicateMembershipKeyFindings} over `stack.objects`. */
+function collectDuplicateMembershipKeyErrors(config: ObjectStackDefinition): string[] {
+  const objects: unknown = config.objects;
+  if (!Array.isArray(objects)) return [];
+  return duplicateMembershipKeyFindings(
+    objects.map((object, i) => ({ object, origin: `stack.objects[${i}]` })),
+    '`objects`',
+  );
+}
+
+/**
+ * The composition door: {@link duplicateMembershipKeyFindings} over the
+ * objects the composed artifact carries (after the object conflict strategy,
+ * so an object `'override'` replaced no longer counts, and one `'merge'`
+ * combined counts once). Each input passed the one-stack door alone; the key
+ * namespace is the deployment's, so two inputs declaring one key on two
+ * objects is refused here, under every manifest strategy. Each object is
+ * labelled with the input stacks that define it.
+ */
+function collectComposedMembershipKeyErrors(
+  stacks: readonly ObjectStackDefinition[],
+  composedObjects: readonly unknown[] | undefined,
+): string[] {
+  if (!Array.isArray(composedObjects)) return [];
+  const definedBy = new Map<string, string[]>();
+  for (const [i, stack] of stacks.entries()) {
+    for (const name of collectObjectNames(stack)) {
+      definedBy.set(name, [...(definedBy.get(name) ?? []), stackLabel(stack, i)]);
+    }
+  }
+  return duplicateMembershipKeyFindings(
+    composedObjects.map((object) => ({
+      object,
+      origin: joinDeclarationOrigins(
+        definedBy.get(isRecord(object) && typeof object.name === 'string' ? object.name : '') ?? ['the composition'],
+      ),
+    })),
+    'the composed stacks',
+  );
+}
+
+/**
  * [ADR-0112 · #15963] The envelope every refusal `defineStack` raises shares:
  * `status: 422` — an unprocessable authored entity, not a server fault, the
  * reading {@link StackCrossReferenceError} took from its two precedents — ONE
@@ -3914,6 +4004,9 @@ function validateCrossReferences(
   // Same placement: two default record pages for one object are two defaults
   // whether or not this stack defines that object (#23015).
   errors.push(...collectDuplicateDefaultRecordPageErrors(config));
+  // Same placement: one membership key on two objects is one request-wide name
+  // with two meanings, whatever else the stack declares (#25234).
+  errors.push(...collectDuplicateMembershipKeyErrors(config));
   // Same placement, same reason: a global `operation: 'update'` action is
   // wrong whether or not the stack declares any objects.
   errors.push(...collectGlobalUpdateActionErrors(config));
@@ -6773,12 +6866,15 @@ function composeBuiltStacks(
   //     [ADR-0015 §4.2 · #25211] …and an `external` object of one input bound
   //     to a datasource another input declares managed: see
   //     {@link collectComposedExternalBindingDatasourceErrors}.
+  //     [#25234] …and one membership key declared on two objects of the
+  //     composed artifact: see {@link collectComposedMembershipKeyErrors}.
   const artifactCrossRefErrors = [
     ...collectArtifactCrossReferenceErrors(
       stacks,
       objects as readonly { name: string }[] | undefined,
     ),
     ...collectComposedDefaultRecordPageErrors(stacks, opts.manifest === 'preserve'),
+    ...collectComposedMembershipKeyErrors(stacks, objects as readonly unknown[] | undefined),
     ...collectComposedExternalBindingDatasourceErrors(stacks, objects),
   ];
   if (artifactCrossRefErrors.length > 0) {

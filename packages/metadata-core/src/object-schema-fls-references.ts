@@ -756,6 +756,11 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // but arity, dropped whole when it mentions a denied field. It is server
     // policy the caller cannot evaluate, and its text describes the field.
     defaultRowScope: ruleEntry,
+    // [#25234] Declarative membership keys: each entry names a user column, a
+    // value column and an optional CEL `filter` over this object's record, so a
+    // rule entry per key (keyed by the key name, never a field), dropped whole
+    // when it mentions a denied field: server policy the caller cannot evaluate.
+    membershipKeys: recordOf(ruleEntry),
     // Blocks.
     userActions: block({ create: crudFlag, import: crudFlag, edit: crudFlag, delete: crudFlag, exportCsv: keep }),
     external: block({

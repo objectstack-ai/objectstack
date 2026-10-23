@@ -720,7 +720,7 @@ export const SHAPES = [
   // `APIError.from` copies `record.code` onto the body it constructs, so the
   // record IS the stamp. When that record is a MEMBER EXPRESSION on a binding
   // this file imports — `BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`,
-  // better-auth's own documented idiom, live in `auth-manager.ts` — the member
+  // better-auth's own documented idiom, live in `auth-manager-before-hook.ts` — the member
   // NAME is the code: a vendor code table built by `defineErrorCodes` maps each
   // KEY to `{ code: <that key>, message }`, and the repo's own restated records
   // (`admin-impersonate-endpoint.ts`'s `USER_NOT_FOUND`) carry the same shape.
@@ -1615,7 +1615,7 @@ export const INLINE_LITERAL_EXPRESSION_CENSUS = Object.freeze({
  *
  * ⭐ Read `newSites: 0` with `siteWhenDeregistered: 1` beside it, or it reads as
  * "nothing here". The one live member expression on this tree —
- * `BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` in `auth-manager.ts`
+ * `BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` in `auth-manager-before-hook.ts`
  * — IS registered, by #15587, which is why the widening derives no site today.
  * What was missing was never the registration; it was anything that would have
  * REQUIRED it. `siteWhenDeregistered` is the controlled measurement of exactly
@@ -1657,7 +1657,9 @@ export const APIERROR_ARGUMENT_POSITION_CENSUS = Object.freeze({
   memberOutsideTheValueSpace: 0,
   /** The live one, named — a count with no subject cannot be re-derived. */
   liveMember: 'BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL',
-  liveMemberFile: 'packages/plugins/plugin-auth/src/auth-manager.ts',
+  // [#25224 cut 13] The member moved, unedited, with `createAuthInstance`'s
+  // `hooks.before` body; the counts above stay the reading at `measuredOn`.
+  liveMemberFile: 'packages/plugins/plugin-auth/src/auth-manager-before-hook.ts',
   /** Sites, verdict rows and unresolved entries this widening adds TODAY. */
   newSites: 0,
   newVerdictRows: 0,
@@ -2731,7 +2733,7 @@ export function bindingNames(pattern, depth = 0) {
  *      shapes. `import type` is excluded: a type binding cannot be the object
  *      of a value member expression.
  *   ② `const <pattern> = await import('<spec>')` (and the `require` and
- *      non-awaited spellings) — the DYNAMIC form, which is how `auth-manager.ts`
+ *      non-awaited spellings) — the DYNAMIC form, which is how `auth-manager-before-hook.ts`
  *      binds `BASE_ERROR_CODES` and therefore the spelling the card is about.
  *   ③ `const [<patterns>] = await Promise.all([ import(…), … ])` — the batched
  *      dynamic form, live in `admin-impersonate-endpoint.ts`. Confirmed by

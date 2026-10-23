@@ -23,6 +23,8 @@ import {
   stampSearchPinyinEnabled,
   SCHEDULED_WORK_DISABLED_REASON,
   SCHEDULED_WORK_ENV,
+  PLATFORM_OWNER_ORGANIZATION_ENV,
+  resolvePlatformOwnerOrganization,
 } from './env.js';
 
 describe('readEnvWithDeprecation', () => {
@@ -692,5 +694,31 @@ describe('scheduledWorkDisabledReason (#21110 — a host-injected OFF carries it
       expect(Object.keys(policy)).not.toContain('hostDisabledReason');
       expect(scheduledWorkDisabledReason(policy)).toBe(SCHEDULED_WORK_DISABLED_REASON);
     });
+  });
+});
+
+describe('resolvePlatformOwnerOrganization (#25413)', () => {
+  const original = process.env[PLATFORM_OWNER_ORGANIZATION_ENV];
+  afterEach(() => {
+    if (original === undefined) delete process.env[PLATFORM_OWNER_ORGANIZATION_ENV];
+    else process.env[PLATFORM_OWNER_ORGANIZATION_ENV] = original;
+  });
+
+  it('is spelled OS_PLATFORM_OWNER_ORGANIZATION', () => {
+    expect(PLATFORM_OWNER_ORGANIZATION_ENV).toBe('OS_PLATFORM_OWNER_ORGANIZATION');
+  });
+
+  it('unset and blank answer undefined (the control)', () => {
+    delete process.env[PLATFORM_OWNER_ORGANIZATION_ENV];
+    expect(resolvePlatformOwnerOrganization()).toBeUndefined();
+    process.env[PLATFORM_OWNER_ORGANIZATION_ENV] = '   ';
+    expect(resolvePlatformOwnerOrganization()).toBeUndefined();
+  });
+
+  it('echoes an id or a slug trimmed, read live on each call', () => {
+    process.env[PLATFORM_OWNER_ORGANIZATION_ENV] = '  org_platform ';
+    expect(resolvePlatformOwnerOrganization()).toBe('org_platform');
+    process.env[PLATFORM_OWNER_ORGANIZATION_ENV] = 'platform-ops';
+    expect(resolvePlatformOwnerOrganization()).toBe('platform-ops');
   });
 });

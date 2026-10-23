@@ -718,7 +718,28 @@ export class EmailServicePlugin implements Plugin {
                 } catch (err: any) {
                   return { ok: false, severity: 'error', message: `Failed to build SMTP transport: ${err?.message ?? String(err)}` };
                 }
-              } else if (provider !== 'log') {
+              } else if (provider === 'log') {
+                // "None (log only — no real delivery)" on the form tests the
+                // form's choice, as every other provider does: a one-shot
+                // LogTransport, never the live service. Testing `svc` here
+                // delivered a real mail over a live SMTP while the form said
+                // nothing would be. A live LogTransport already IS the form's
+                // choice, so that case keeps the saved-`log` answer below.
+                if (!(svc.options.transport instanceof LogTransport)) {
+                  target = new EmailService({
+                    transport: new LogTransport(ctx.logger),
+                    defaultFrom: merged.from_email
+                      ? {
+                          address: String(merged.from_email),
+                          name: merged.from_name ? String(merged.from_name) : undefined,
+                        }
+                      : undefined,
+                    // Same sys_email audit trail as the smtp test above.
+                    ...(svc.options.persistence ? { persistence: svc.options.persistence } : {}),
+                    logger: ctx.logger,
+                  });
+                }
+              } else {
                 // A provider with no transport behind it — a value stored while
                 // the settings page still offered SendGrid / Amazon SES (#5094).
                 // Refuse before asking for an API key: nothing here can use one.
@@ -788,6 +809,18 @@ export class EmailServicePlugin implements Plugin {
                     severity: 'warning',
                     message: 'No delivery transport is active — the message was only logged and recorded in sys_email. '
                       + 'Configure an SMTP host (or an API provider) and save before testing.',
+                  };
+                }
+                // The form's unsaved "None (log only)": the same severity and
+                // the same words for what happened, plus the live transport the
+                // test did not use and what saving the form will do.
+                if (target !== svc && target.options.transport instanceof LogTransport) {
+                  return {
+                    ok: false,
+                    severity: 'warning',
+                    message: 'Nothing was delivered — the provider on the form is "None (log only)", so the test message '
+                      + 'was only logged and recorded in sys_email; no mail left this machine. The live transport was '
+                      + `not used (${describeLiveMailTransport(svc).label}); save the form to stop delivery.`,
                   };
                 }
                 return {
@@ -1249,8 +1282,12 @@ export class EmailServicePlugin implements Plugin {
    *  - `provider = 'smtp'` builds a real {@link SmtpTransport} from
    *    `smtp_host` / `smtp_port` / `smtp_secure` / `smtp_user` /
    *    `smtp_password` and swaps it in (ADR-0012 — SMTP ships in core).
-   *  - `provider = 'log'` keeps the LogTransport. The from-address is
-   *    still applied.
+   *  - `provider = 'log'` installs the LogTransport, replacing whatever was
+   *    live — a boot-built SMTP (`OS_EMAIL_SMTP_*` / `providerOptions`) or a
+   *    host-supplied transport included, as every other selected provider
+   *    replaces it. The page offers it as "None (log only — no real
+   *    delivery)", so saving it stops delivery. The from-address is still
+   *    applied.
    *  - `provider = 'resend' | 'postmark'` rebuilds the transport using
    *    `api_key` from settings.
    *  - anything else — including `sendgrid` / `ses`, which the settings page
@@ -1384,9 +1421,25 @@ export class EmailServicePlugin implements Plugin {
     }
 
     if (provider === 'log') {
+      // "None (log only — no real delivery)" is a stop, and it stops: the
+      // LogTransport replaces whatever was live, exactly as a saved SMTP host
+      // or API key replaces it. Keeping the previous transport here (a
+      // leftover from when `smtp` and `log` were both transport no-ops) went
+      // on delivering over a boot-built SMTP while the page label and this
+      // line both said nothing was delivered.
+      const replaced = this.service.options.transport instanceof LogTransport
+        ? undefined
+        : describeLiveMailTransport(this.service).label;
+      if (replaced) {
+        this.service.setTransport(new LogTransport(ctx.logger));
+        this.liveSmtp = undefined;
+      }
       ctx.logger.info(
         `EmailServicePlugin: mail settings applied (provider=log, from=${appliedFrom ?? '∅'}); `
-        + 'transport unchanged — messages are logged and recorded in sys_email, never delivered.',
+        + (replaced
+          ? `the LogTransport now replaces the previous live transport (was: "${replaced}") — `
+          : 'the LogTransport stays live — ')
+        + 'messages are logged and recorded in sys_email, never delivered.',
       );
       return;
     }

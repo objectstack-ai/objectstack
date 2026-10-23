@@ -681,6 +681,7 @@
     "data/Object:lifecycle",
     "data/Object:listViews",
     "data/Object:managedBy",
+    "data/Object:membershipKeys",
     "data/Object:name",
     "data/Object:nameField",
     "data/Object:ownership",

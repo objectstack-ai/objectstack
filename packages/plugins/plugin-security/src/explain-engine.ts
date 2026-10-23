@@ -59,6 +59,11 @@ import { superuserBypassBitForOperation } from './permission-evaluator.js';
 import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { ExplainObjectNotFoundError } from './errors.js';
 import { RLS_DENY_FILTER, compiledObjectDefaultRowScopeOf, compiledPolicyNameOf } from './rls-compiler.js';
+import {
+  describeMembershipKeyDeclaration,
+  membershipKeyOutcomesFor,
+  type MembershipKeyOutcome,
+} from './object-membership-keys.js';
 import { andComposeLayers } from './tenant-layer.js';
 import { declaredComparisonColumns } from './declared-comparison-columns.js';
 import {
@@ -1200,6 +1205,86 @@ function objectDefaultRowScopeSource(
 }
 
 /**
+ * [#25234 ruling A, rider 3] The permission sets that let their holders create
+ * or edit rows of the roster object `object`: whoever can write a roster row
+ * can grant the membership key it defines. Read from the security catalog, the
+ * definitions the resolver grants, and judged by the evaluator the object gate
+ * asks. `undefined` when the catalog cannot be read: the sentence then names
+ * the object alone.
+ */
+async function rosterWriteHolders(deps: ExplainEngineDeps, object: string): Promise<string[] | undefined> {
+  try {
+    const catalog = securityCatalogReaderOf(deps.ql);
+    if (!catalog) return undefined;
+    const meta = await deps.getObjectSecurityMeta(object);
+    const holders = new Set<string>();
+    for (const entry of await catalog.list('permission')) {
+      const set = entry.definition as unknown as PermissionSet;
+      const name = (set as { name?: unknown }).name;
+      if (typeof name !== 'string') continue;
+      const writes = ['insert', 'update'].some((op) =>
+        deps.evaluator.checkObjectPermission(op, object, [set], { isPrivate: meta.isPrivate }),
+      );
+      if (writes) holders.add(name);
+    }
+    return [...holders].sort();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * [#25234 ruling A] The sentences explain adds where the applicable policies
+ * read a declared membership key: per key, its declaration (the roster object
+ * X, `valueField`, `userField`, the filter), what it resolved to for this
+ * principal or why it did not, and who can grant it (rider 3). Empty when no
+ * policy read one, so every other report is unchanged.
+ */
+async function membershipKeySource(deps: ExplainEngineDeps, outcomes: readonly MembershipKeyOutcome[]): Promise<string> {
+  let out = '';
+  for (const o of outcomes) {
+    out += ` Membership key ${describeMembershipKeyDeclaration(o)}: ` + (o.status === 'resolved'
+      ? `resolved to ${o.values.length} value(s) for this principal` +
+        (o.values.length === 0 ? ', so every policy reading it matches no rows.' : '.')
+      : `did not resolve (${o.reason}: ${o.detail}), so every policy reading it matches no rows.`);
+    if (o.object) {
+      const holders = await rosterWriteHolders(deps, o.object);
+      out += ` Whoever can write '${o.object}' can grant this key` +
+        (holders === undefined ? '.' : holders.length > 0 ? `: holders of [${holders.join(', ')}].` : ': no permission set grants that write.');
+    }
+  }
+  return out;
+}
+
+/**
+ * [#25234 ruling A] The roster row that links this record to a resolved key:
+ * the first of the record's values that the key's set holds, and the roster
+ * row the staging read found it on. "Alice reads PO-42 because her
+ * `srm_supplier_contact` row C-17 links her to supplier S-1."
+ */
+function membershipKeyLinkOf(
+  record: Record<string, unknown>,
+  outcomes: readonly MembershipKeyOutcome[],
+): { key: string; sentence: string } | undefined {
+  for (const o of outcomes) {
+    if (o.status !== 'resolved') continue;
+    for (const [field, raw] of Object.entries(record)) {
+      for (const value of Array.isArray(raw) ? raw : [raw]) {
+        if (typeof value !== 'string' || !o.rosterRowOf.has(value)) continue;
+        const row = o.rosterRowOf.get(value);
+        return {
+          key: o.key,
+          sentence:
+            ` Membership key '${o.key}': the principal's '${o.object}' row${row ? ` '${row}'` : ''} links them to ` +
+            `'${value}' (its '${o.valueField}'), which this record's '${field}' holds.`,
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
  * [#20431] The names of the policies in a compiled row filter whose own filter
  * `refuses` — the attribution the RLS write check logs for the same refusal.
  * The composed filter is one policy's filter, `{ $or: [...] }` of them, or (the
@@ -1992,6 +2077,12 @@ async function applyRecordAttribution(
       // [#24164 ruling E′] An object's default row scope is named as itself,
       // reached through the object's declaration rather than a held set.
       const [objectDefault] = objectDefaultRowScopesOf([layer1, delegatorWriteFilter].filter(Boolean) as Record<string, unknown>[]);
+      // [#25234 ruling A] A predicate that reads a declared membership key is
+      // reached through the key: `via: 'membership:KEY'`, and the detail names
+      // the roster row that links this record to the principal.
+      const membershipKeys = await membershipKeyOutcomesFor(context, object);
+      const membershipLink = !excluded ? membershipKeyLinkOf(record as Record<string, unknown>, membershipKeys) : undefined;
+      const membershipVia = membershipLink?.key ?? membershipKeys[0]?.key;
       rlsLayer.record = {
         outcome: excluded ? 'excluded' : 'admitted',
         rowFilter: recordLayer1,
@@ -2005,7 +2096,13 @@ async function applyRecordAttribution(
                 predicate: recordLayer1,
                 effect: excluded ? 'excludes' : 'admits',
               }
-            : { kind: 'rls_policy', name: 'business_rls', predicate: recordLayer1, effect: excluded ? 'excludes' : 'admits' },
+            : {
+                kind: 'rls_policy',
+                name: 'business_rls',
+                ...(membershipVia ? { via: `membership:${membershipVia}` } : {}),
+                predicate: recordLayer1,
+                effect: excluded ? 'excludes' : 'admits',
+              },
         ],
         detail: (deny
           ? 'Business RLS composes to DENY ALL for this principal.'
@@ -2016,7 +2113,8 @@ async function applyRecordAttribution(
             ? ` On this on-behalf-of ${engineOp}, the predicate is the principal's business RLS AND the delegator's ` +
               'own write filter, as the by-id write composes them (ADR-0090 D10).'
             : '') +
-          (objectDefault ? objectDefaultRowScopeSource(object, [objectDefault]) : ''),
+          (objectDefault ? objectDefaultRowScopeSource(object, [objectDefault]) : '') +
+          (membershipLink?.sentence ?? ''),
       };
     }
   }
@@ -2707,16 +2805,20 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   // [#24164 ruling E′] Where the narrowing is an object's declared default row
   // scope, say so: its source is the object, not a set the principal holds.
   const objectDefaults = objectDefaultRowScopesOf(filterParts);
+  // [#25234 ruling A] The declared membership keys this object's policies read,
+  // as the composition above staged them on this context.
+  const membershipKeys = await membershipKeyOutcomesFor(context, object);
   layers.push({
     layer: 'rls',
     verdict: denyAll ? 'denies' : readFilter ? 'narrows' : 'not_applicable',
-    detail: denyAll
+    detail: (denyAll
       ? 'Row-level security composes to DENY ALL for this principal.'
       : readFilter
         ? 'Row-level security narrows the row set (see readFilter for the composed predicate)' +
           (delegatorFilter ? ' — intersection of agent + delegator filters (D10).' : '.') +
           (objectDefaults.length > 0 ? objectDefaultRowScopeSource(object, objectDefaults) : '')
-        : 'No RLS policy applies.',
+        : 'No RLS policy applies.') +
+      (membershipKeys.length > 0 ? await membershipKeySource(deps, membershipKeys) : ''),
     contributors: [],
   });
 

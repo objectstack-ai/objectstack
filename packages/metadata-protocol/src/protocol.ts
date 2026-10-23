@@ -11,7 +11,7 @@ import {
     elevatedFlowAnonymousEndpointsMessage,
     type AnonymousFlowDoorCandidate,
 } from '@objectstack/spec/api';
-import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError, relationConditionSites } from '@objectstack/core';
+import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, resolveTenancyPosture, resolveThrownHttpError, sandboxBusinessMessage } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
@@ -163,13 +163,11 @@ import { isAppPackageIdKey } from '@objectstack/spec/api';
 import { MetadataAuthoringSurfaceSchema, type MetadataAuthoringSurface } from '@objectstack/spec/api';
 import { storedDraftChanges } from './draft-changes.js';
 import {
-    parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
-    AggregationFunction, DateGranularity, resolveSearchFieldResolution,
-    SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
+    parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES,
+    resolveSearchFieldResolution,
     isVirtualSearchField,
     type SearchFieldMeta,
-    canServeApiOperation, apiExposureDenialReason, effectiveOperationsArray, resolveEffectiveApiMethods,
-    classifyDottedFilterHead,
+    canServeApiOperation,
     foldQueryAliasSlots,
     QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
     QueryPageWindowParamSchema,
@@ -280,6 +278,54 @@ import type {
     StoredMigrationTodo,
 } from './stored-migration.js';
 import { collectDecisionModeReview } from './stored-migration.js';
+// [#25467 cut 1] The bulk data writes (`batchData`, the `*ManyData` verbs, their
+// loops and response builders); the methods of the same names below hand each
+// body the members it reads (`BatchDataHost`).
+import {
+    batchData,
+    buildBatchDataResponse,
+    buildDeleteManyResponse,
+    buildRolledBackBatchResponse,
+    buildUpdateManyResponse,
+    createManyData,
+    deleteManyData,
+    insertManyData,
+    locateBatchCause,
+    reconcileStoppedBatch,
+    runAtomicBatch,
+    runAtomicBatchData,
+    runBatchDataLoop,
+    runDeleteManyLoop,
+    runUpdateManyLoop,
+    updateManyData,
+} from './protocol-batch-data.js';
+// [#25467 cut 2] The metadata diagnostics sweep (`getMetaDiagnostics`); the method of
+// the same name below hands the body the members it reads (`MetaDiagnosticsHost`).
+import { getMetaDiagnostics } from './protocol-meta-diagnostics.js';
+// [#25467 cut 3] The query validation (`assertObjectRegistered`, the `assert*FieldsExist`
+// family, the `refuseInternal*` walks, `servedExpand`); the methods of the same names
+// below hand each body the members it reads (`QueryValidationHost`).
+import {
+    assertAggregationFieldsExist,
+    assertExpandTargetsExist,
+    assertFilterFieldsExist,
+    assertGroupByFieldsExist,
+    assertNoInternalFieldEvaluated,
+    assertObjectRegistered,
+    assertProjectionFieldsExist,
+    assertQueryParamsAreFields,
+    assertSearchFieldsAreSearchable,
+    assertSortFieldsExist,
+    groupByFieldNames,
+    orderByFieldNames,
+    refuseInternalInExpand,
+    refuseInternalInFilter,
+    refuseInternalNames,
+    refuseUnservedRelationTarget,
+    resolveQueryFields,
+    servedExpand,
+    servesExpansionTarget,
+} from './protocol-query-validation.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -357,21 +403,6 @@ const TYPE_TO_FORM: Readonly<Record<string, FormView>> = METADATA_FORM_REGISTRY;
  * spelling-tolerant lookup this comment has rejected since #4432, and it would
  * still persist the row under the plural `type`.
  */
-/**
- * [#20802] The nested-relation spelling of a dotted relation path, as the
- * dotted filter refusal names it: `'owner.region'` → `{ "owner": { "region":
- * VALUE } }` — the form the engine serves at `where`. A path deeper than one
- * relation is given the generic one-level shape. The engine door
- * (`@objectstack/objectql`'s `nestedRelationRoute`) words it the same:
- * `query-expression-conformance.test.ts` holds the two doors' routes equal.
- */
-function nestedRelationRoute(dotted: string): string {
-    const [head, ...rest] = dotted.split('.');
-    return rest.length === 1
-        ? `{ "${head}": { "${rest[0]}": VALUE } }`
-        : `{ "${head}": { "FIELD": VALUE } }, one level deep`;
-}
-
 function canonicalMetaType(type: string): string {
     return canonicalMetaUrlType(type);
 }
@@ -496,21 +527,6 @@ function stripServedSystemColumns<T>(type: string, item: T): T {
     return canonicalMetaType(type) === 'object' ? stripInjectedSystemColumns(item) : item;
 }
 
-// [#5488] `PUBLISH_DRAFTS_NAMESPACE_REMEDY` stood here (#5206 step 2): the
-// "so where do I declare the namespace, from here?" sentence appended to the
-// ADR-0121 D2 gate's own message on this path. It is retired with
-// `gateApiDraftsForPublish`, the only thing that ever appended it — this path
-// no longer reports endpoint violations, because it can no longer receive an
-// `api` draft to violate anything.
-
-/**
- * [#3770] One-shot flag for the "engine has no schema registry" warning emitted
- * by {@link ObjectStackProtocolImplementation.assertObjectRegistered}. The
- * condition is a property of how the host constructed the engine, so it is
- * constant for the process — warn once, not once per request.
- */
-let warnedNoRegistryForDataGate = false;
-
 /**
  * [#7557, #24097] The ONE refusal for an object whose owning package is
  * disabled, raised by every API reader of that object: the data plane
@@ -518,7 +534,7 @@ let warnedNoRegistryForDataGate = false;
  * by-name `/meta` reads (`getMetaItem`, `getMetaItemLayered`). One constructor,
  * so the two halves of the answer cannot drift apart in code, status or text.
  */
-function objectPackageDisabledError(object: string): Error {
+export function objectPackageDisabledError(object: string): Error {
     const disabled: any = new Error(
         `Object '${object}' belongs to a disabled package and is not being served. `
         + 'Re-enable the package to restore access.',
@@ -535,7 +551,7 @@ function objectPackageDisabledError(object: string): Error {
  * `isPackageDisabled` but not this, and a host whose registry cannot answer
  * must not have every read refused.
  */
-function isObjectOfDisabledPackage(registry: any, name: string): boolean {
+export function isObjectOfDisabledPackage(registry: any, name: string): boolean {
     return typeof registry?.isObjectPackageDisabled === 'function'
         && registry.isObjectPackageDisabled(name) === true;
 }
@@ -1773,7 +1789,7 @@ export { recordNotFoundError };
  * and this file preserves it rather than widening a shipped response shape as
  * a rider; the assertion below is the one place it is written down.
  */
-function byIdUpdateRecord(result: Record<string, any> | number | null): Record<string, any> {
+export function byIdUpdateRecord(result: Record<string, any> | number | null): Record<string, any> {
     if (typeof result === 'number') {
         throw new Error(
             `A by-id update resolved an affected-row count (${result}) instead of a record. ` +
@@ -2058,7 +2074,7 @@ export function graftFoldedFormSections(authored: unknown, parsed: unknown): unk
 const STORABLE_VIEW_MAX_ROUNDS = 8;
 
 /** A JSON object — not an array, not `null`. */
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
+export function isPlainRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -2280,7 +2296,7 @@ function viewIdentityPatch(overlay: Record<string, unknown>, baseline: unknown):
  * registry's listings: per name, and the ones probed for every name. See
  * `ObjectStackProtocolImplementation.shippingPackagesOf`.
  */
-type ShippingPackages = {
+export type ShippingPackages = {
     readonly byName: ReadonlyMap<string, ReadonlySet<string>>;
     readonly anyName: ReadonlySet<string>;
 };
@@ -3477,48 +3493,6 @@ const CLONE_STRIP_FIELDS: readonly string[] = [
 ];
 
 /**
- * [#3455] Collapse a batch's per-row `DroppedFieldsEvent`s into one event per
- * `(object, reason)` with the UNION of dropped field names.
- *
- * Used by both bulk-create surfaces at BATCH level. `createManyData`'s
- * `{ object, records, count }` response has no per-row slot to hang a
- * `droppedFields` on — a union is the only view that response can represent,
- * which is the whole reason this collapse exists. `insertManyData` has a
- * per-row slot and reports here anyway: the slot is real, a per-row answer is
- * not (its docblock states why), so it reports the union where the union is
- * true. (Since #14147 that strip is the ENGINE's, which reports one event per
- * CALL for it, so the aggregation is over the runtime-owned per-row events.)
- *
- * ⚠️ So read a name in a merged event as "AT LEAST ONE row dropped this field",
- * never "every row dropped the same set". Maintainer ruling C (#14147) put the
- * static-`readonly` strip INSIDE `engine.insert`, AFTER the `beforeInsert`
- * hooks, where it exempts keys a hook itself assigned — recorded PER ROW and
- * indexed per row at the call: `packages/objectql/src/engine.ts` hands
- * `stripReadonlyFields` the option `hookWrittenKeys: rowHookWrittenKeys[i]`,
- * and that option's only power is to turn a STRIP into a KEEP. A hook that
- * stamps a protected key on some rows and not others therefore makes those rows
- * drop DIFFERENT sets, so the union is faithful to the BATCH without being
- * faithful to any one row.
- *
- * Returns `[]` when nothing was dropped so callers can spread
- * `...(x.length ? { droppedFields: x } : {})` and keep the omit-when-empty shape.
- * The paths that DO keep row precision — `updateManyData` and `batchData` —
- * earn it mechanically rather than by inference: each row is its own
- * `engine.update` / `engine.insert` call, so that call's events are that row's.
- */
-function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEvent[] {
-    if (events.length === 0) return [];
-    const byKey = new Map<string, { object: string; reason: DroppedFieldsEvent['reason']; fields: Set<string> }>();
-    for (const ev of events) {
-        const key = `${ev.object}|${ev.reason}`;
-        let bucket = byKey.get(key);
-        if (!bucket) { bucket = { object: ev.object, reason: ev.reason, fields: new Set() }; byKey.set(key, bucket); }
-        for (const f of ev.fields) bucket.fields.add(f);
-    }
-    return Array.from(byKey.values()).map((b) => ({ object: b.object, fields: Array.from(b.fields), reason: b.reason }));
-}
-
-/**
  * One row of a bulk-write result — exactly the `BatchOperationResult` the spec
  * declares (`BatchOperationResultSchema`, spec/api/batch.zod.ts). Aliased to
  * the spec type so tsc pins every batch loop in this file to the wire contract:
@@ -3532,7 +3506,7 @@ function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEve
  * marking (#4620) is structured with it: `ROLLED_BACK` / `NOT_ATTEMPTED` are
  * `ApiError.code` values, not message-string prefixes.
  */
-type BatchDataRowResult = BatchOperationResult;
+export type BatchDataRowResult = BatchOperationResult;
 
 /**
  * Map a thrown per-row batch error into the wire's `ApiError` (#4793).
@@ -3648,7 +3622,7 @@ type BatchDataRowResult = BatchOperationResult;
  * ⛔ `httpStatus` is NOT stamped for it. That limb carries only a status the
  * producer declared (above), and this body declared none.
  */
-function toRowApiError(err: any, fallback: string): ApiError {
+export function toRowApiError(err: any, fallback: string): ApiError {
     const thrown = isEngineDuplicateRecordEnvelope(err)
         ? 'UNIQUE_VIOLATION'
         : typeof err?.code === 'string' && ErrorCode.safeParse(err.code).success
@@ -3680,20 +3654,6 @@ function toRowApiError(err: any, fallback: string): ApiError {
 function isEngineDuplicateRecordEnvelope(err: unknown): boolean {
     const e = err as { code?: unknown; name?: unknown } | null | undefined;
     return e?.code === 'DUPLICATE_RECORD' && e?.name === 'DuplicateRecordError';
-}
-
-/**
- * [#8502] The stable sentence a failed batch row says when nothing may be
- * quoted — the operation, named, and no interpolation of any kind.
- *
- * One vocabulary for all three loops, so a caller reconciling a mixed batch is
- * not reading three phrasings of one condition. Deliberately says where the
- * reason IS (the server log), because the row itself is the caller's only
- * channel here: a batch row rides response DATA on a 200, so there is no `cause`
- * for a boundary to print and no 5xx withhold anywhere above it.
- */
-function rowOperationFailureFallback(operation: string): string {
-    return `The ${operation} of this record failed. The reason is in the server log.`;
 }
 
 /**
@@ -4290,7 +4250,7 @@ function specValidationFindings(
  * caller error, so it carries VALIDATION_FAILED / 400 rather than falling
  * through {@link toRowApiError}'s unclassified-throw default (#4793).
  */
-function rowRequiredIdError(operation: 'update' | 'delete'): Error {
+export function rowRequiredIdError(operation: 'update' | 'delete'): Error {
     const err = new Error(`Record id is required for ${operation}`) as Error & { code?: string; status?: number };
     err.code = 'VALIDATION_FAILED';
     err.status = 400;
@@ -4481,7 +4441,7 @@ function metadataItemNotFoundError(type: string, name: string): Error {
 }
 
 /** What one pass of the `batchData` record loop produced (ADR-0119 D4). */
-type BatchDataLoopOutcome = { results: BatchDataRowResult[]; succeeded: number; failed: number };
+export type BatchDataLoopOutcome = { results: BatchDataRowResult[]; succeeded: number; failed: number };
 
 /**
  * The canonical `QueryAST` surface (`spec/data/query.zod.ts`), enumerated.
@@ -4509,17 +4469,6 @@ const QUERY_AST_KEYS: Readonly<Record<keyof QueryAST, true>> = {
     joins: true, aggregations: true, groupBy: true, having: true,
     windowFunctions: true, distinct: true, expand: true,
 };
-
-/**
- * [#4254] The two aggregation vocabularies, read off the SPEC's own enums so a
- * function or granularity added there is admitted here without a second edit —
- * the same both-directions pinning `QUERY_AST_KEYS` gets from `keyof QueryAST`.
- * They exist because the in-memory aggregation path answers an unknown member
- * with a silent placeholder (`null` result / raw-value buckets) rather than an
- * error, so the ingress must be the layer that refuses one.
- */
-const AGGREGATION_FUNCTIONS: ReadonlySet<string> = new Set(AggregationFunction.options);
-const DATE_GRANULARITIES: ReadonlySet<string> = new Set(DateGranularity.options);
 
 /**
  * [#4134] Every query-parameter name `findData` consumes itself, consulted
@@ -4564,7 +4513,7 @@ const RESERVED_LIST_QUERY_PARAMS: ReadonlySet<string> = new Set([
  * succeed, so it does not create the second de-facto contract Prime Directive
  * #12 warns about.
  */
-const QUERY_PARAM_NEAR_MISS: Readonly<Record<string, string>> = {
+export const QUERY_PARAM_NEAR_MISS: Readonly<Record<string, string>> = {
     // page-size dialects (the #4134 repro: `?pageSize=5` → 200 + empty list)
     pagesize: 'top', persize: 'top', perpage: 'top', pagelimit: 'top',
     rowsperpage: 'top', pagecount: 'top', size: 'top', take: 'top',
@@ -4590,7 +4539,7 @@ const QUERY_PARAM_NEAR_MISS: Readonly<Record<string, string>> = {
  * `$sort` that the unsupported-`$` guard rejects would just hand the caller a
  * second 400.
  */
-const ODATA_SPELLING: Readonly<Record<string, string>> = {
+export const ODATA_SPELLING: Readonly<Record<string, string>> = {
     top: '$top', skip: '$skip', sort: '$orderby', search: '$search',
     filter: '$filter', select: '$select', expand: '$expand',
 };
@@ -4888,42 +4837,6 @@ function unusableFilterError(param: string, detail: string): Error {
 }
 
 /**
- * [#6994] Field types whose value NO driver materialises, so no driver can
- * ORDER BY them.
- *
- * `formula` is the whole set today, and deliberately not a synonym for
- * "computed": the three computed types diverge exactly here.
- *
- * | type | column | sortable |
- * |---|---|---|
- * | `formula` | none — `SqlDriver.createColumn` returns early; `driver-turso`'s transport skips it with the same `Virtual — no column` note | **no** |
- * | `summary` | an engine-maintained numeric column — `table.decimal` on tables created since #16318, `table.float` on earlier ones | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
- * | `autonumber` | `table.string`, engine-assigned | yes |
- *
- * So the spec's own `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`)
- * is the WRITE contract — "never client-written" — and is the wrong set to
- * gate a sort with: it would refuse the two types that sort correctly.
- *
- * This is a local set rather than a shared spec constant because the same fact
- * is currently spelled in five places, none of them in `packages/spec`:
- * `driver-sql`'s `fieldHasColumn` and `createColumn`, `driver-turso`'s
- * `remote-transport`, `objectql`'s `planFormulaProjection` and
- * `search-companion`, and `plugin-audit`'s `VIRTUAL_FIELD_TYPES`.
- * Consolidating them is a cross-package change and is filed separately; adding
- * a sixth local spelling here — with that ledger written down — keeps this fix
- * inside one package rather than opening a spec-wide edit for one string.
- *
- * One deliberate divergence from `fieldHasColumn`: that helper short-circuits
- * on `multiple` (a `multiple` field is a JSON column whatever its type), so it
- * would answer "has a column" for a `multiple` formula. This set does not,
- * because the questions differ — `fieldHasColumn` asks whether DDL emits a
- * column, this asks whether there is a persisted VALUE to order by, and a
- * formula's value is computed on read and never written, so that JSON column
- * is always empty. Ordering by it degrades exactly as the bare case does.
- */
-const UNMATERIALIZED_SORT_TYPES: ReadonlySet<string> = new Set(['formula']);
-
-/**
  * [#4226] A sort the normalizer cannot turn into a usable `SortNode[]`, or one
  * that names a field the object does not have — or, since #4256, a dotted path
  * (`account.company_name`) that would have to cross into a related record no
@@ -4940,7 +4853,7 @@ const UNMATERIALIZED_SORT_TYPES: ReadonlySet<string> = new Set(['formula']);
  * perfectly ordinary-looking 200 over it. The rows are all there and all real —
  * which is exactly why nobody notices.
  */
-function invalidSortError(
+export function invalidSortError(
     param: string,
     detail: string,
     opts?: { hint?: string, extra?: Record<string, unknown> },
@@ -4998,39 +4911,6 @@ function invalidSortDirectionKeyError(param: string, field: string): Error {
             extra: { field, key: 'direction' },
         },
     );
-}
-
-/**
- * [#4254] An aggregation-axis value (`groupBy` / `aggregations`) whose SHAPE
- * the spec's `QueryAST` cannot read — a non-array, an entry that names no
- * field, a function or granularity outside the spec enums, a missing alias.
- *
- * Carries `INVALID_QUERY` — the standard-catalog code (`errors.zod.ts`,
- * "Malformed query syntax") that had sat in the catalog with no emitter since
- * it was written, exactly as `INVALID_SORT` had before #4226. Shape mistakes
- * get their own code because they are not about any FIELD: `INVALID_FIELD` on
- * these axes is reserved for a well-formed entry naming a column the object
- * does not have.
- *
- * The message spells out what the dropped/misread value used to do, because
- * that is the part the caller cannot infer: every one of these shapes was
- * silently ignored (rows returned ungrouped) or silently mis-answered
- * (`null` aggregates, one raw-value bucket per row) with an ordinary 200.
- */
-function invalidQueryError(
-    param: string,
-    detail: string,
-    opts?: { hint?: string, extra?: Record<string, unknown> },
-): Error {
-    const err: any = new Error(
-        `Query parameter '${param}' ${detail}.`
-        + (opts?.hint ?? ''),
-    );
-    err.status = 400;
-    err.code = 'INVALID_QUERY';
-    err.param = param;
-    Object.assign(err, opts?.extra ?? {});
-    return err;
 }
 
 /**
@@ -5132,7 +5012,7 @@ function normalizeSortNodes(value: unknown, param: string): Array<{ field: strin
 }
 
 /** Fold a parameter name to its near-miss lookup key. */
-function nearMissKey(name: string): string {
+export function nearMissKey(name: string): string {
     return name.toLowerCase().replace(/[_-]/g, '');
 }
 
@@ -5155,23 +5035,6 @@ function editDistance(a: string, b: string, max: number): number {
 }
 
 /**
- * [#4134] Actionable tail for an unknown list query parameter: the canonical
- * spelling when the caller used a known dialect (`pageSize` → `$top`), else the
- * closest real field name when it reads like a typo (`stauts` → `status`).
- * Returns `''` when nothing is close enough to be worth guessing.
- */
-function suggestQueryParam(param: string, knownFields: readonly string[]): string {
-    const canonical = QUERY_PARAM_NEAR_MISS[nearMissKey(param)];
-    if (canonical) {
-        const odata = ODATA_SPELLING[canonical];
-        return ` Did you mean the '${canonical}' query parameter`
-            + (odata ? ` (OData spelling '${odata}')` : '')
-            + '?';
-    }
-    return suggestFieldName(param, knownFields);
-}
-
-/**
  * [#4226] The field-typo half of {@link suggestQueryParam}, on its own.
  *
  * The `sort` / `select` / `expand` axes name a field DIRECTLY, so the
@@ -5179,7 +5042,7 @@ function suggestQueryParam(param: string, knownFields: readonly string[]): strin
  * it would answer `?sort=order` with "did you mean the 'sort' query parameter",
  * which is the parameter the caller already used.
  */
-function suggestFieldName(name: string, knownFields: readonly string[]): string {
+export function suggestFieldName(name: string, knownFields: readonly string[]): string {
     const folded = nearMissKey(name);
     // Only worth guessing for names long enough that a small distance is
     // meaningful — at 3 chars everything is within 2 edits of everything.
@@ -5210,63 +5073,7 @@ function suggestFieldName(name: string, knownFields: readonly string[]): string 
  * as input vocabulary by that same driver, so a `$nor` arriving on the wire is
  * not a combinator this layer should silently descend into.
  */
-const FILTER_LOGICAL_KEYS: ReadonlySet<string> = new Set(['$and', '$or', '$not']);
-
-/**
- * [#7534] Every key of a `FilterCondition` that NAMES A FIELD, structure
- * discarded — whether a predicate sits under an `$or` changes nothing about
- * whether its column exists.
- *
- * Two rules, and both are deliberately conservative in the direction that
- * cannot invent a rejection:
- *
- * - **A `$`-prefixed key is never a field.** `$and`/`$or`/`$not` are recursed
- *   into; any OTHER `$` key is skipped WITHOUT descending. An unrecognised
- *   combinator therefore leaves the fields beneath it ungated — a hole, not a
- *   false 400 — which is the right failure direction for a gate whose whole
- *   purpose is to stop wrong answers, not to invent new ones.
- * - **A field key's VALUE is not descended into.** It is either an operator bag
- *   (`{$gte: 18}`) or a nested-relation condition (`{owner: {region: 'NA'}}`),
- *   and the latter's keys belong to a DIFFERENT object whose field map this
- *   gate has not resolved. Judging them against THIS object's fields would
- *   refuse legitimate relation filters. The head segment — `owner` — is a field
- *   of this object and IS judged, which is the same reach
- *   {@link ObjectStackProtocolImplementation.assertQueryParamsAreFields} has on
- *   a dotted path (`owner_id.name`).
- *
- * `depth` is a cheap backstop against a self-referential `where`. JSON cannot
- * produce one, but `POST /data/:object/query` is not the only door — the RPC
- * dispatcher and in-process callers hand over live objects — and a gate that
- * can hang the read path is worse than the defect it closes.
- *
- * [#21544] ⛔ This answers the ingress gate's question — does each named KEY
- * exist — and its failure direction (a hole, never a false 400) is right only
- * for that question. It is NOT what the stored-metadata family's evaluate
- * refusals read: a filter can read a column without naming it as a key (a
- * cross-field comparand), and a hole there is a leak, not a missing 400. That
- * question has its own collector, {@link collectStoredMetadataFilterFields}.
- */
-function collectFilterFieldKeys(
-    where: unknown,
-    out: string[] = [],
-    depth = 0,
-): string[] {
-    if (depth > 32) return out;
-    if (!where || typeof where !== 'object' || Array.isArray(where)) return out;
-    for (const [key, value] of Object.entries(where as Record<string, unknown>)) {
-        if (key.startsWith('$')) {
-            if (!FILTER_LOGICAL_KEYS.has(key)) continue;
-            if (Array.isArray(value)) {
-                for (const arm of value) collectFilterFieldKeys(arm, out, depth + 1);
-            } else {
-                collectFilterFieldKeys(value, out, depth + 1);
-            }
-            continue;
-        }
-        out.push(key);
-    }
-    return out;
-}
+export const FILTER_LOGICAL_KEYS: ReadonlySet<string> = new Set(['$and', '$or', '$not']);
 
 /**
  * [#21544] The stored-metadata family's ONE filter-field collector: every column
@@ -5345,41 +5152,6 @@ function headSegment(name: string): string {
 }
 
 /**
- * [#22646] How deep the data door's `internal: true` walk follows nested
- * relation conditions and `expand` levels — a backstop against a
- * self-referential in-process value, well above anything the engine executes
- * (one nested-relation hop; `expand` stops at its own depth cap).
- */
-const INTERNAL_FIELD_WALK_DEPTH = 8;
-
-/**
- * [#22661] The operation an `$expand` entry's TARGET object is judged as, by
- * the spec's one exposure decision (`canServeApiOperation`, ADR-0049): `get`.
- *
- * An expansion replaces an id the caller already holds with the record it
- * names, which is the read `GET /data/{target}/{id}` performs, and that route
- * is judged `get`. It never enumerates the target: the engine's sub-read is
- * bounded to `id $in` the source rows' own values, so a nested `where` can only
- * narrow records the caller could fetch by id. `list` would refuse an object
- * that serves exactly those records by id; it is not the read this is. The
- * dataset door's dimension-label pass asks the same operation of the same
- * target (`@objectstack/service-analytics`), so a lookup renders its name, or
- * its stored id, alike on both doors.
- */
-const EXPANSION_TARGET_OPERATION = 'get';
-
-/**
- * [#22737] The operation a NESTED-RELATION condition's TARGET object is judged
- * as, by the same decision: `list`. Not {@link EXPANSION_TARGET_OPERATION}'s
- * `get`, because the read is not the same one: a condition is a PREDICATE over
- * the target. The engine runs `find(target, { where: condition })` across the
- * whole object, bounded by a match cap rather than by ids the source rows hold
- * (`ObjectQL.lowerRelationConditions`), which is the read
- * `GET /data/{target}?filter=…` performs, and that route is judged `list`.
- */
-const RELATION_CONDITION_TARGET_OPERATION = 'list';
-
-/**
  * The walk {@link collectStoredMetadataFilterFields} runs over one filter
  * condition. A node is visited as a CONDITION (its non-`$` keys are columns)
  * or as a COMPARAND (the value under a column key, where only a `$field`
@@ -5387,7 +5159,7 @@ const RELATION_CONDITION_TARGET_OPERATION = 'list';
  * live object reached once as a comparand and once as a condition must be read
  * both ways.
  */
-function collectFilterReads(root: unknown, out: Set<string>): void {
+export function collectFilterReads(root: unknown, out: Set<string>): void {
     const seenAsCondition = new WeakSet<object>();
     const seenAsComparand = new WeakSet<object>();
     const pending: Array<{ node: unknown; condition: boolean }> = [{ node: root, condition: true }];
@@ -9289,7 +9061,7 @@ export class ObjectStackProtocolImplementation implements
      * skip silently (they cannot be validated and should not appear
      * as "valid" either — they are simply opaque to this report).
      */
-    async getMetaDiagnostics(request: {
+    getMetaDiagnostics(request: {
         type?: string;
         severity?: 'error' | 'warning';
         packageId?: string;
@@ -9308,177 +9080,15 @@ export class ObjectStackProtocolImplementation implements
          */
         stats: Record<string, { count: number; locked: number; packages: string[] }>;
     }> {
-        const includeWarnings = request.severity === 'warning';
-        const targetTypes = request.type
-            ? [request.type]
-            : DEFAULT_METADATA_TYPE_REGISTRY
-                .filter((e) => getMetadataTypeSchema(e.type))
-                .map((e) => e.type);
-
-        const entries: Array<{ type: string; name: string; diagnostics: MetadataDiagnostics }> = [];
-        const stats: Record<string, { count: number; locked: number; packages: string[] }> = {};
-        let scannedItems = 0;
-
-        for (const t of targetTypes) {
-            let listed: any;
-            try {
-                listed = await this.getMetaItems({
-                    type: t,
-                    packageId: request.packageId,
-                } as any);
-            } catch (error) {
-                // [#8855] TWO different failures used to leave through this
-                // `continue`, and only one of them is benign.
-                //
-                // BENIGN, and the reason the comment named — it is real, which
-                // is why this `catch` is narrowed rather than deleted: the type
-                // is not listable in THIS kernel scope. Skipping it is the
-                // truth, and a scope that cannot enumerate one type must not
-                // fail the whole governance sweep.
-                //
-                // NOT BENIGN: the read already ran the platform's single
-                // discrimination — `getMetaItems` classifies by error TYPE
-                // through {@link rethrowUnlessMetadataStoreUnprovisioned},
-                // returns normally for the one benign driver reason
-                // (`isMissingTableError`: `sys_metadata` not provisioned yet,
-                // so `items: []` IS the truth), and throws
-                // {@link metadataStoreUnavailableError} — a 503 — for every
-                // other read failure. That 503 says "whether rows exist is
-                // UNKNOWN". Swallowing it here put the emptiness straight back
-                // one layer up, and then published it as a NUMBER:
-                //
-                //   * `stats[t]` was never written, so the type is ABSENT from
-                //     the response — not zero, absent — byte-shaped like an
-                //     environment that declares none of it, and the Studio
-                //     directory tile the field exists to feed simply loses it;
-                //   * `total` counts entries that FAILED validation, and a
-                //     store nobody can read contributes none — so a diagnostics
-                //     endpoint whose whole job is reporting problems answered
-                //     `0 problems` precisely when it could not read anything.
-                //
-                // ADR-0110 D3 is the rule: a miss and an outage are different
-                // facts with opposite dispositions ("nothing to fix" vs "the
-                // backend is down, retry"), and a consumer must never read one
-                // as the other. #5108 restored it in `DatabaseLoader`, #5532 in
-                // `getMetaItems` itself — this is the same rule one layer up,
-                // on the consumer that turns the read into a published count.
-                //
-                // Classification is by the envelope the PRODUCER already built,
-                // not by a second reading of the driver error. Re-running
-                // `isMissingTableError` / `rethrowUnlessMetadataStoreUnprovisioned`
-                // on what arrives here would re-wrap an already-shaped 503 in
-                // another one and displace the driver error riding as `cause` —
-                // the object `logWithheldServerFault` prints for the operator
-                // (#5437). The original is rethrown UNCHANGED, so the envelope
-                // that reaches the REST boundary is the one #5532 shaped.
-                //
-                // The test is `status === 503` rather than the narrower
-                // `code === 'SERVICE_UNAVAILABLE'` on purpose, and in the
-                // direction `rethrowUnlessMetadataStoreUnprovisioned`'s own doc
-                // argues: a false "benign" silently mis-answers a question
-                // nobody can re-ask, while a false "real" costs one 503 the
-                // caller can retry.
-                if ((error as { status?: unknown } | null | undefined)?.status === 503) throw error;
-                // [#8924] TWO error classes leave through this catch — the 503
-                // above and the 400 below — under ONE rule: an error the
-                // producer already stamped with a status is a CLASSIFIED
-                // VERDICT, and this sweep may not overrule a verdict into
-                // silence. Everything else is a genuine listing failure nobody
-                // classified, and for those the benign skip below is the ruled
-                // disposition (maintainer, 2026-08-20, option 1).
-                //
-                //  * 503 (#8855, above): the store outage — "whether rows
-                //    exist is UNKNOWN". Swallowing it published an outage as
-                //    "0 problems".
-                //  * 400 (#8924, here): the request-classification refusal
-                //    `canonicalizeMetaRequestType` raises INSIDE `getMetaItems`
-                //    (`status: 400`, `code: 'INVALID_REQUEST'`) for an
-                //    unrecognised spelling of a DECLARED type (`fieldes`,
-                //    `viewes`, `capabilitys`, …). Only the `request.type` arm
-                //    can produce it — the full-sweep arm's `targetTypes` come
-                //    canonical out of the registry — so rethrowing it cannot
-                //    fail a whole-corpus sweep. Swallowing it answered
-                //    `200 {"scannedTypes":1,"stats":{}}` — "scanned 1 type,
-                //    no issues" — to a spelling every sibling `/meta` door
-                //    refuses with a 400 that names both accepted spellings
-                //    (measured: 27 such spellings on a booted kernel, while
-                //    objectui's DiagnosticsPage paints that payload as "All
-                //    clear"). The producer classified the caller's mistake;
-                //    the caller gets to hear it. Declared = enforced.
-                //
-                // What still takes the `continue`: a listing failure with no
-                // status, or any status that is not one of the two verdicts
-                // above (the registry listing is not a guarded read, so its
-                // failures arrive unclassified). That skip is genuine — a
-                // kernel scope that cannot enumerate one type must not fail
-                // the whole governance sweep — and measured to have NO
-                // producer in kernel scope today (six booted scopes, zero
-                // skips), which is exactly why it stays a guard rather than
-                // becoming a payload field (`skippedTypes` was considered and
-                // ruled out as motiveless).
-                //
-                // By `status` and not by `code`, mirroring the 503 test above
-                // and its direction argument: a false "real" is loud and
-                // correctable at the caller; a false "benign" silently
-                // mis-answers a question nobody re-asks.
-                if ((error as { status?: unknown } | null | undefined)?.status === 400) throw error;
-                continue;
-            }
-            const items: any[] = Array.isArray(listed?.items)
-                ? listed.items
-                : Array.isArray(listed)
-                    ? listed
-                    : [];
-            const pkgSet = new Set<string>();
-            let lockedCount = 0;
-            let shipping: ShippingPackages | undefined;
-            for (const item of items) {
-                scannedItems += 1;
-                const pkg = (item?._packageId ?? null) as string | null;
-                if (pkg) pkgSet.add(pkg);
-                // [#21694] Counted from the envelope's own derivation
-                // ({@link servedLockState}), never from the declared `_lock`
-                // alone: a packaged base the write doors refuse reads locked on
-                // its item envelope, so the per-type tile counts it too. The
-                // derivation reads the registry only — no store read per item.
-                // [#21738] Its lock is the one item-lock resolution
-                // ({@link resolveItemLock}) over the item's artifact layer —
-                // [#21803] every installed package that ships the name, from
-                // the address the list's own merge used (ADR-0048 package
-                // scope) — and the document the list serves for it.
-                const itemName = typeof item?.name === 'string' ? item.name : '';
-                shipping ??= this.shippingPackagesOf(t);
-                const itemLock = resolveItemLock({
-                    artifact: this.artifactLockLayerAt({
-                        type: t,
-                        name: itemName,
-                        packageId: request.packageId ?? (item?._packageId as string | undefined),
-                    }, shipping),
-                    overlay: item,
-                });
-                const served = this.servedLockState(t, itemName, item, this.isArtifactBacked(t, itemName), itemLock);
-                if (served.lock !== 'none') lockedCount += 1;
-                const diag: MetadataDiagnostics | undefined =
-                    item?._diagnostics ?? computeMetadataDiagnostics(t, item);
-                if (!diag) continue;
-                if (diag.valid && !includeWarnings) continue;
-                if (diag.valid && includeWarnings && !diag.warnings?.length) continue;
-                entries.push({
-                    type: t,
-                    name: typeof item?.name === 'string' ? item.name : '<unknown>',
-                    diagnostics: diag,
-                });
-            }
-            stats[t] = { count: items.length, locked: lockedCount, packages: [...pkgSet].sort() };
-        }
-
-        return {
-            entries,
-            total: entries.length,
-            scannedTypes: targetTypes.length,
-            scannedItems,
-            stats,
+        // [#25467 cut 2] The body moved to `protocol-meta-diagnostics.ts` (see `MetaDiagnosticsHost`).
+        const host: ThisParameterType<typeof getMetaDiagnostics> = {
+            artifactLockLayerAt: (...a) => this.artifactLockLayerAt(...a),
+            getMetaItems: (...a) => this.getMetaItems(...a),
+            isArtifactBacked: (...a) => this.isArtifactBacked(...a),
+            servedLockState: (...a) => this.servedLockState(...a),
+            shippingPackagesOf: (...a) => this.shippingPackagesOf(...a),
         };
+        return getMetaDiagnostics.call(host, request);
     }
 
     /**
@@ -13053,48 +12663,12 @@ export class ObjectStackProtocolImplementation implements
      *   #3545 recorded for `loadObjectItems`.
      */
     private assertObjectRegistered(object: string): void {
-        const registry: any = this.engine?.registry;
-        if (!registry || typeof registry.getObject !== 'function') {
-            if (!warnedNoRegistryForDataGate) {
-                warnedNoRegistryForDataGate = true;
-                console.warn(
-                    '[Protocol] engine exposes no schema registry — the data-plane object-existence '
-                    + 'gate is INACTIVE for this process; unregistered object names reach the '
-                    + 'driver as raw table names.',
-                );
-            }
-            return;
-        }
-        if (registry.getObject(object)) {
-            // [#7557] Registered is not the same as SERVING. A disabled package
-            // keeps its objects registered on purpose — disable is reversible
-            // and destroys no data, and the schema stays resolvable for the
-            // machinery that needs it (the runtime authoring gate resolves its
-            // object universe through `listItems('object')`, migrations and
-            // cross-package references through `getObject`). What must stop is
-            // the API serving its rows, which until now it did: nav and views
-            // dropped on disable while `GET /data/<object>` still answered 200
-            // with every row.
-            //
-            // Refused LOUDLY rather than by silent absence. The 404 status
-            // matches the closest sibling in this codebase — `OBJECT_API_DISABLED`
-            // for `enable.apiEnabled: false` (rest-server.ts) — so "this object
-            // exists but is switched off" keeps ONE status across both switches,
-            // and it keeps the data plane consistent with the metadata listing,
-            // which now drops the object too (`getMetaItems`). The distinct code
-            // is what makes it loud: a bare `OBJECT_NOT_FOUND` sends a caller —
-            // an AI agent especially — hunting for a typo or re-creating an
-            // object that is merely switched off, while this one names the cause
-            // and therefore the fix (re-enable the package).
-            //
-            // [#24097] The by-name `/meta` reads raise the same refusal, from
-            // the same constructor ({@link objectPackageDisabledError}).
-            if (isObjectOfDisabledPackage(registry, object)) throw objectPackageDisabledError(object);
-            return;
-        }
-        // The one envelope, shared with the engine's in-process verbs, which
-        // refuse an unresolved name the same way (`objectNotFoundError`).
-        throw objectNotFoundError(object);
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof assertObjectRegistered> = {
+            get engine() { return readEngine(); },
+        };
+        return assertObjectRegistered.call(host, object);
     }
 
     /**
@@ -13125,21 +12699,12 @@ export class ObjectStackProtocolImplementation implements
      *   is missing, so this stays quiet rather than warning twice per process.
      */
     private resolveQueryFields(object: string): { known: ReadonlySet<string>, declared: readonly string[], fields: any, schema: any } | null {
-        const schema: any = this.engine?.registry?.getObject?.(object);
-        const declared = schema?.fields;
-        if (!declared || typeof declared !== 'object') return null;
-        // A legacy ARRAY field map is not checkable: `Object.keys` on it yields
-        // '0', '1', '2' …, so every gate below would reject every real field
-        // name. Skipping is the same call the no-field-map case makes — there
-        // is nothing here to answer "does this field exist" with.
-        if (Array.isArray(declared)) return null;
-        const fieldNames = Object.keys(declared);
-        if (fieldNames.length === 0) return null;
-        const known = new Set(fieldNames);
-        known.add('id');
-        known.add('created_at');
-        known.add('updated_at');
-        return { known, declared: fieldNames, fields: declared, schema };
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof resolveQueryFields> = {
+            get engine() { return readEngine(); },
+        };
+        return resolveQueryFields.call(host, object);
     }
 
     /**
@@ -13153,24 +12718,11 @@ export class ObjectStackProtocolImplementation implements
      * `engine.find()` validates projections.
      */
     private assertQueryParamsAreFields(object: string, params: readonly string[]): void {
-        const gate = this.resolveQueryFields(object);
-        if (!gate) return;
-        const unknown = params.filter((p) => !gate.known.has(String(p).split('.')[0]));
-        if (unknown.length === 0) return;
-        const first = unknown[0];
-        const err: any = new Error(
-            `Unknown field '${first}' on object '${object}'`
-            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
-            + '. Query parameters that are not reserved are read as field filters, so an '
-            + 'unknown name can only match zero records.'
-            + suggestQueryParam(first, gate.declared),
-        );
-        err.code = 'INVALID_FIELD';
-        err.status = 400;
-        err.field = first;
-        err.fields = unknown;
-        err.object = object;
-        throw err;
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof assertQueryParamsAreFields> = {
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+        };
+        return assertQueryParamsAreFields.call(host, object, params);
     }
 
     /**
@@ -13256,185 +12808,11 @@ export class ObjectStackProtocolImplementation implements
      * axis' #7095.
      */
     private assertFilterFieldsExist(object: string, where: unknown, param: string): void {
-        if (!where || typeof where !== 'object') return;
-        const names = collectFilterFieldKeys(where);
-        if (names.length === 0) return;
-        const gate = this.resolveQueryFields(object);
-        if (!gate) return;
-        // Head segment only, exactly as the bare-key door judges `owner_id.name`.
-        const unknown = names.filter((f) => !gate.known.has(f.split('.')[0]));
-        if (unknown.length > 0) {
-            const first = unknown[0];
-            const err: any = new Error(
-                `Query parameter '${param}' filters on '${first}', which is not a field on object `
-                + `'${object}'`
-                + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
-                + '. A filter on a field that does not exist can only match zero records, so the '
-                + 'query was refused instead of answered with an empty list.'
-                + suggestFieldName(first, gate.declared),
-            );
-            err.code = 'INVALID_FIELD';
-            err.status = 400;
-            err.field = first;
-            err.fields = unknown;
-            err.object = object;
-            err.param = param;
-            throw err;
-        }
-
-        // [#8371] The DOTTED verdict — second in precedence, mirroring the
-        // sort axis' `unknown` > `dotted` > unmaterializable ladder exactly
-        // (identity errors first, then shape, then type). A dotted key with a
-        // REAL head cleared the check above precisely BECAUSE the head is
-        // declared, then reached a driver that answers it with zero rows —
-        // measured on ALL THREE drivers (the #8371 table): a relation head
-        // stores the related record's scalar id (Mongo's dotted paths traverse
-        // embedded documents, not references), a virtual head materialises no
-        // column anywhere, a scalar head has nothing beneath it. Every answer
-        // was a silent 200 + empty list — and the virtual case answered one
-        // unserviceable intent two ways by spelling ({ is_open: true } refused
-        // below since #8296, { 'is_open.x': true } rode through).
-        //
-        // Judged by the ONE classification both doors share
-        // ({@link classifyDottedFilterHead}, `@objectstack/spec/data`), never a
-        // ladder minted here — the same one-source move the #8296 verdict below
-        // makes with `isVirtualSearchField`. ⛔ A structured/JSON head
-        // (`address.city`) answers `null` there and stays DELIBERATELY
-        // unjudged: the drivers genuinely disagree on it (live on memory and
-        // mongodb, silently empty on sql), so a refusal would delete a working
-        // capability — the carve-out the #8371 ruling names. Array-valued,
-        // file and unknown heads answer `null` for the same fail-open reason
-        // the collector documents: a hole, never a false 400.
-        //
-        // The nested-relation OBJECT form `{ owner: { region: 'NA' } }` is NOT
-        // this shape and keeps working: the collector never descends into a
-        // field key's value, so only the head `owner` is judged — undotted,
-        // real, and passed. The refusal targets the DOTTED-STRING spelling
-        // alone.
-        const dotted = names.filter(
-            (f) => f.includes('.') && classifyDottedFilterHead(gate.fields[f.split('.')[0]]) !== null,
-        );
-        if (dotted.length > 0) {
-            const first = dotted[0];
-            const head = first.split('.')[0];
-            const headDef = gate.fields[head];
-            const headClass = classifyDottedFilterHead(headDef);
-            const headType = String(headDef?.type ?? '');
-            // [#20802] The relation head names the route the engine now
-            // SERVES — the condition nested beneath the relation field — in the
-            // engine door's words (`@objectstack/objectql`'s
-            // `assertFilterIsMaterializable`). One vocabulary across the doors.
-            const body = headClass === 'relation'
-                ? `filters on '${first}', which follows the relationship '${head}' into another `
-                  + `object as a dotted path, and '${head}' stores the related record's id, not an `
-                  + 'embedded document — to filter on the related record\'s fields, nest the condition '
-                  + `beneath the relation field: ${nestedRelationRoute(first)}`
-                : headClass === 'virtual'
-                    ? `filters on '${first}', a dotted path whose head '${head}' is a virtual `
-                      + `'${headType}' field on object '${object}' — its value is computed on read, `
-                      + 'so no driver materialises a column for the path to reach into'
-                    : `filters on '${first}', a dotted path into '${head}', a '${headType}' field `
-                      + `on object '${object}' that stores a single scalar value — there is nothing `
-                      + 'beneath it for a path to reach';
-            const err: any = new Error(
-                `Query parameter '${param}' ${body}`
-                + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : '')
-                + '. No backend serves the path, so the predicate can only match zero records: the '
-                + 'query was refused instead of answered with an empty list.'
-                // Deliberately the same remedy, in the same words, as this
-                // axis' #8296 virtual refusal below and the SORT axis' dotted
-                // refusal (#4256/#6924), with only the verb naming this axis.
-                // One vocabulary across the doors.
-                + ` Denormalise the value onto '${object}' (a stored field, written when the source`
-                + ' changes) and filter that.',
-            );
-            err.code = 'INVALID_FIELD';
-            err.status = 400;
-            err.field = first;
-            err.fields = dotted;
-            err.object = object;
-            err.param = param;
-            throw err;
-        }
-
-        // [#8296] The unmaterializable verdict — third in precedence since
-        // #8371 slotted the dotted verdict above it, exactly where the sort
-        // axis keeps its own third verdict. A name that is a REAL field
-        // of this object and still cannot be filtered on, because its TYPE
-        // materialises no column. It is the FILTER axis finally growing the
-        // verdict its two neighbours already have — {@link
-        // assertSortFieldsExist} splits `unknown` from unmaterializable
-        // (#6994) and {@link assertSearchFieldsAreSearchable} splits `unknown`
-        // from `virtual` (#6674) — and it was the last axis on which a
-        // declaration the platform cannot honour still answered 200.
-        //
-        // Measured on a real `ObjectQL` + this protocol, base cb43296ef
-        // (`is_open` a `formula` over the stored `status` column):
-        //
-        // ```
-        // where { is_open: true }          -> 0 rows, NO ERROR
-        // where { is_open: false }         -> 0 rows, NO ERROR
-        // CONTROL where { status: 'open' } -> 4 rows
-        // CONTROL where { subtask_total: 5 } -> 1 row   (`summary` HAS a column)
-        // ```
-        //
-        // BOTH directions are wrong and the `false` one is the dangerous one:
-        // the same predicate against a STORED boolean returns every row, so a
-        // filter meaning "not yet done" silently becomes "no records at all".
-        // The response is indistinguishable from an empty table, and the
-        // formula READS correctly in that very same response (`applyFormulaPlan`
-        // hydrates it), so the field is visibly populated and simultaneously
-        // unfilterable.
-        //
-        // Judged by the same `@objectstack/spec/data` predicate the SEARCH axis
-        // uses ({@link isVirtualSearchField} / `SEARCH_VIRTUAL_TYPES`) rather
-        // than a list minted here, so this gate and the drivers cannot disagree
-        // about which types have a column. `summary` and `autonumber` are NOT
-        // in it and must not be: both get real stored columns and filter
-        // correctly — a gate widened to the spec's `COMPUTED_VALUE_TYPES` (the
-        // WRITE contract) would refuse two working types.
-        //
-        // PRECEDENCE — `unknown` > `dotted` (#8371) > this, the sort axis'
-        // ladder verdict for verdict: identity errors before shape errors
-        // before type errors. DOTTED names are excluded HERE because the
-        // dotted verdict above already judged them — a dotted path whose head
-        // is a formula field keeps the dotted answer, exactly as it does on
-        // the sort axis (it is wrong about the shape too, and the shape is
-        // what the caller wrote).
-        const virtual = names.filter((f) => !f.includes('.') && isVirtualSearchField(gate.fields[f]));
-        if (virtual.length === 0) return;
-        const virtualFirst = virtual[0];
-        const virtualType = String(gate.fields[virtualFirst]?.type ?? 'formula');
-        const err: any = new Error(
-            `Query parameter '${param}' filters on '${virtualFirst}', a virtual '${virtualType}' `
-            + `field on object '${object}'`
-            + (virtual.length > 1 ? ` (also: ${virtual.slice(1).join(', ')})` : '')
-            + '. Its value is computed on read and never stored, so no driver materializes a '
-            + 'column to filter on: the predicate reaches the driver, matches nothing, and the '
-            + 'query answers an empty list under a 200 — in BOTH directions, so a false test '
-            + 'returns no records where the same test against a stored boolean returns every '
-            + 'record.'
-            // Deliberately the same remedy, in the same words, as the SORT
-            // axis' formula refusal (#6994), with only the verb changed to
-            // name this axis. One vocabulary across the doors: an author
-            // refused on two axes must not be sent two different ways.
-            // [commit e5eeb499c] The SEARCH axis (#6673) agrees in SUBSTANCE and words it
-            // its own way — "Mirror the computed value onto a stored text
-            // field on '<object>' and search that instead." Same prescription,
-            // narrowed to the column type that axis can scan; claiming
-            // word-identity with it was false. `query-expression-conformance
-            // .test.ts` pins both halves — each door's exact sentence, and the
-            // substance all three axes share.
-            + ` Denormalise the value onto '${object}' (a stored field, written when the source`
-            + ' changes) and filter that.',
-        );
-        err.code = 'INVALID_FIELD';
-        err.status = 400;
-        err.field = virtualFirst;
-        err.fields = virtual;
-        err.object = object;
-        err.param = param;
-        throw err;
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof assertFilterFieldsExist> = {
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+        };
+        return assertFilterFieldsExist.call(host, object, where, param);
     }
 
     /**
@@ -13550,104 +12928,11 @@ export class ObjectStackProtocolImplementation implements
      * inherit the other two.
      */
     private assertSortFieldsExist(object: string, orderBy: ReadonlyArray<{ field: string }>, param: string): void {
-        if (orderBy.length === 0) return;
-        const gate = this.resolveQueryFields(object);
-        if (!gate) return;
-        const names = orderBy.map((s) => String(s.field));
-        const unknown = names.filter((f) => !gate.known.has(f.split('.')[0]));
-        if (unknown.length > 0) {
-            const first = unknown[0];
-            const hint = first.includes(':')
-                ? ` The list route spells a direction with a space or a leading '-'`
-                  + ` ('sort=${first.split(':')[0]} desc', 'sort=-${first.split(':')[0]}');`
-                  + " 'field:direction' is the export route's spelling."
-                : suggestFieldName(first, gate.declared);
-            throw invalidSortError(
-                param,
-                `sorts by '${first}', which is not a field on object '${object}'`
-                + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : ''),
-                { hint, extra: { field: first, fields: unknown, object } },
-            );
-        }
-        const dotted = names.filter((f) => f.includes('.'));
-        if (dotted.length > 0) {
-            const first = dotted[0];
-            const head = first.split('.')[0];
-            const headDef: any = gate.fields[head];
-            const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
-            throw invalidSortError(
-                param,
-                (crossesRelation
-                    ? `sorts by '${first}', which follows the relationship '${head}' into another object — `
-                      + `sort reaches only columns of '${object}' itself`
-                    : `sorts by '${first}', a dotted path — sort reaches only whole columns of '${object}', `
-                      + "not values inside them")
-                + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
-                {
-                    hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
-                        + ' source changes) and sort by that. Not a formula field: it is virtual,'
-                        + ' no driver materialises a column for one, and ORDER BY on it is silently'
-                        + ' dropped.',
-                    extra: { field: first, fields: dotted, object },
-                },
-            );
-        }
-
-        // [#6994] The third verdict on this axis: a name that is a REAL,
-        // non-dotted field of this object and still cannot be ordered by,
-        // because its TYPE materialises no column ({@link
-        // UNMATERIALIZED_SORT_TYPES} — `formula`, today the whole set).
-        //
-        // This is the shape the doc comment above already describes and this
-        // gate already let through: being in `gate.known` is what carried it
-        // past the unknown check, being undotted is what carried it past the
-        // check just above. Re-measured on this branch's base (real `SqlDriver`
-        // over better-sqlite3, real `ObjectQL`, real protocol on top):
-        //
-        // ```
-        // FORMULA  orderBy sort_key asc  -> ["C","A","E","B","D"]  5 rows, 200
-        //   its sort_key values          -> ["C","A","E","B","D"]
-        // FORMULA  orderBy sort_key desc -> ["C","A","E","B","D"]  asc === desc
-        // RAW SQL  order by sort_key     -> sqlite: no such column: sort_key
-        // ```
-        //
-        // The response literally carries the values it was asked to sort by,
-        // out of order, under a 200 — so the answer contradicts the request in
-        // plain view and still reports success.
-        //
-        // PRECEDENCE — `unknown` > `dotted` > this. It is last for the same
-        // reason the expand gate reports `unknown` before `not-a-reference`:
-        // identity errors first, then shape, then type. The two above are
-        // therefore unchanged verdict-for-verdict, and a dotted path whose head
-        // is a formula field keeps the dotted answer (it is wrong about the
-        // shape too, and the shape is what the caller wrote).
-        const unmaterialized = names.filter(
-            (f) => UNMATERIALIZED_SORT_TYPES.has(String(gate.fields[f]?.type ?? '')),
-        );
-        if (unmaterialized.length === 0) return;
-        const virtualFirst = unmaterialized[0];
-        const virtualType = String(gate.fields[virtualFirst]?.type);
-        throw invalidSortError(
-            param,
-            `sorts by '${virtualFirst}', a ${virtualType} field on '${object}' — a ${virtualType} `
-            + 'value is computed on read, so no driver materialises a column to order by'
-            + (unmaterialized.length > 1 ? ` (also: ${unmaterialized.slice(1).join(', ')})` : ''),
-            {
-                // Deliberately the same remedy, in the same words, as the
-                // dotted refusal above: one vocabulary across the doors, so an
-                // author refused twice is not sent two different ways.
-                // [commit e5eeb499c] #6673's SEARCH-axis correction agrees in SUBSTANCE,
-                // in its own words ("Mirror the computed value onto a stored
-                // text field on '<object>' and search that instead") — the
-                // same prescription with a TEXT target, not the same sentence.
-                // Pinned as such in `query-expression-conformance.test.ts`.
-                hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
-                    + ' source changes) and sort by that. A formula field is virtual: with no'
-                    + ' column behind it the ORDER BY reaches the driver, finds nothing, and is'
-                    + ' dropped — the arbitrary order this refusal replaces.',
-                extra: { field: virtualFirst, fields: unmaterialized, object },
-            },
-        );
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof assertSortFieldsExist> = {
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+        };
+        return assertSortFieldsExist.call(host, object, orderBy, param);
     }
 
     /**
@@ -13738,105 +13023,11 @@ export class ObjectStackProtocolImplementation implements
      * question from its names and is answered first — see below.
      */
     private assertProjectionFieldsExist(object: string, fields: unknown, param: string): void {
-        if (!Array.isArray(fields) || fields.length === 0) return;
-        // [#4196] A non-string entry is the retired nested-select object form
-        // (`{ field, fields, alias }`). It is checked BEFORE the field map,
-        // because it is wrong about the shape rather than about this object —
-        // and a registry-less host, which returns no gate below, would
-        // otherwise let it through to a driver that cannot read it. Until now
-        // it reached `.map(String)` and was refused as the unknown field
-        // `"[object Object]"`: a 400 naming something the caller never wrote.
-        const badShape = fields.findIndex((f) => typeof f !== 'string');
-        if (badShape !== -1) {
-            const entry = fields[badShape];
-            // Only the shape that used to be legal earns the retirement clause.
-            const retiredForm = typeof entry === 'object' && entry !== null && !Array.isArray(entry);
-            const err: any = new Error(
-                `'${param}' entry #${badShape + 1} on object '${object}' is not a field name.`
-                + (retiredForm
-                    ? ' The nested-select object form `{ field, fields, alias }` was removed in '
-                      + '@objectstack/spec 17 — no engine or driver ever read it.'
-                    : '')
-                // [#7532] The dotted-path half of this prescription is GONE.
-                // It pointed at a spelling this same gate now refuses — and
-                // before that refusal it pointed at a spelling no driver
-                // resolves, which answered with every field. Naming it here
-                // sent the author from one refusal straight into the widening
-                // defect, the same dead end #6924 removed from the SORT axis'
-                // hint. `expand` is the one door for related data on this axis.
-                + " Select related records with `expand` (`expand=owner`, or `{ expand: { owner: "
-                + "{ object: 'user', fields: ['name'] } } }` to choose its columns).",
-            );
-            err.code = 'INVALID_FIELD';
-            err.status = 400;
-            err.object = object;
-            err.param = param;
-            throw err;
-        }
-        const gate = this.resolveQueryFields(object);
-        if (!gate) return;
-        const names = fields as string[];
-        const unknown = names.filter((f) => !gate.known.has(f.split('.')[0]));
-        if (unknown.length > 0) {
-            const first = unknown[0];
-            const unknownErr: any = new Error(
-                `Unknown field '${first}' on object '${object}'`
-                + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
-                + `. '${param}' chooses which fields to return; dropping an unknown one silently `
-                + 'answered a NARROWER projection with a WIDER one — a projection naming no known '
-                + 'field fell all the way back to every field.'
-                + suggestFieldName(first, gate.declared),
-            );
-            unknownErr.code = 'INVALID_FIELD';
-            unknownErr.status = 400;
-            unknownErr.field = first;
-            unknownErr.fields = unknown;
-            unknownErr.object = object;
-            unknownErr.param = param;
-            throw unknownErr;
-        }
-        // [#7532] The DOTTED verdict — the leg the head-segment check above
-        // does not cover, and the one that made this axis fail in the very
-        // direction its own docblock warns about.
-        //
-        // Ordered `unknown` > `dotted`, the same precedence
-        // {@link assertSortFieldsExist} applies, so the two axes agree about
-        // which complaint a caller hears first when an entry is both.
-        //
-        // It sits AFTER the `gate` early-return for the same reason the sort
-        // axis' dotted verdict does: the relation-vs-not split below reads
-        // `gate.fields`, and a registry-less host has no field map to read.
-        const dotted = names.filter((f) => f.includes('.'));
-        if (dotted.length === 0) return;
-        const first = dotted[0];
-        const head = first.split('.')[0];
-        const headDef: any = gate.fields[head];
-        const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
-        const dottedErr: any = new Error(
-            (crossesRelation
-                ? `Field '${first}' on object '${object}' follows the relationship '${head}' into `
-                  + `another object — '${param}' reaches only columns of '${object}' itself`
-                : `Field '${first}' on object '${object}' is a dotted path — '${param}' reaches only `
-                  + `whole columns of '${object}', not values inside them`)
-            + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : '')
-            + '. No driver resolves it: the path reaches the driver as a column name, matches no '
-            + 'column, and the projection falls back to EVERY field — a narrower request answered '
-            + 'with a wider response, which is the same failure the unknown-name refusal above '
-            + 'exists to stop.'
-            + (crossesRelation
-                ? ` Read the related record with 'expand' (\`expand=${head}\`, or `
-                  + `\`{ expand: { ${head}: { object: '<target>', fields: ['<column>'] } } }\` to `
-                  + `choose its columns), or denormalise the value onto '${object}' (a stored `
-                  + 'field, written when the source changes) and name that.'
-                : ` Name the whole column ('${head}') and read into its value in the caller.`),
-        );
-        dottedErr.code = 'INVALID_FIELD';
-        dottedErr.status = 400;
-        dottedErr.field = first;
-        dottedErr.fields = dotted;
-        dottedErr.object = object;
-        dottedErr.param = param;
-        throw dottedErr;
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof assertProjectionFieldsExist> = {
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+        };
+        return assertProjectionFieldsExist.call(host, object, fields, param);
     }
 
     /**
@@ -13862,59 +13053,11 @@ export class ObjectStackProtocolImplementation implements
      * here and expanded there.
      */
     private assertExpandTargetsExist(object: string, names: readonly string[]): void {
-        if (names.length === 0) return;
-        const gate = this.resolveQueryFields(object);
-        if (!gate) return;
-        const unknown: string[] = [];
-        const notRelations: string[] = [];
-        const targetless: string[] = [];
-        for (const raw of names) {
-            const name = String(raw);
-            const def: any = gate.fields[name.split('.')[0]];
-            if (!def) { unknown.push(name); continue; }
-            if (!REFERENCE_VALUE_TYPES.has(def.type)) { notRelations.push(name); continue; }
-            // A reference-typed field that names no target object leaves
-            // `expandRelatedRecords` nothing to batch-load. That is an
-            // authoring bug on the OBJECT, not on the request, and saying "not
-            // a relationship" about a declared lookup would send the caller
-            // looking in the wrong place.
-            //
-            // `referenceTargetOf` — not a raw `def.reference` read — because
-            // some reference types carry their target in the TYPE (`user` ⇒
-            // `sys_user`) rather than in an author-written `reference`. The
-            // engine's expand loop resolves the target through the same
-            // function, which is what keeps this gate from refusing a field
-            // expansion would have delivered (cloud#983).
-            if (!referenceTargetOf(def)) targetless.push(name);
-        }
-        const [offenders, reason] =
-            unknown.length > 0 ? [unknown, 'unknown' as const]
-            : notRelations.length > 0 ? [notRelations, 'not-a-reference' as const]
-            : [targetless, 'targetless' as const];
-        if (offenders.length === 0) return;
-        const first = offenders[0];
-        const err: any = new Error(
-            (reason === 'unknown'
-                ? `Unknown field '${first}' on object '${object}'`
-                : reason === 'not-a-reference'
-                    ? `Field '${first}' on object '${object}' is not a relationship`
-                    : `Field '${first}' on object '${object}' declares no target object`)
-            + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
-            + '. \'expand\' resolves a reference field into the related record, so '
-            + (reason === 'unknown'
-                ? 'a name the object does not declare can never be expanded.'
-                : reason === 'not-a-reference'
-                    ? `only ${[...REFERENCE_VALUE_TYPES].join(' / ')} fields can be expanded.`
-                    : "the field's `reference` must name the object it points at.")
-            + (reason === 'unknown' ? suggestFieldName(first, gate.declared) : ''),
-        );
-        err.code = 'INVALID_FIELD';
-        err.status = 400;
-        err.field = first;
-        err.fields = offenders;
-        err.object = object;
-        err.param = 'expand';
-        throw err;
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof assertExpandTargetsExist> = {
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+        };
+        return assertExpandTargetsExist.call(host, object, names);
     }
 
     /**
@@ -13985,175 +13128,11 @@ export class ObjectStackProtocolImplementation implements
      * alone does not.
      */
     private assertSearchFieldsAreSearchable(object: string, requested: unknown, param: string): void {
-        // Shape first, BEFORE the field-map tiering below — same order as the
-        // projection gate (#4196): a registry-less host, which skips the name
-        // checks, still must not carry an unreadable override to an engine
-        // that would ignore it and scan the default set.
-        let names: readonly string[];
-        if (typeof requested === 'string') {
-            names = requested.split(',').map((s) => s.trim()).filter(Boolean);
-        } else if (Array.isArray(requested)) {
-            const badShape = requested.findIndex((f) => typeof f !== 'string');
-            if (badShape !== -1) {
-                const err: any = new Error(
-                    `'${param}' entry #${badShape + 1} on object '${object}' is not a field name. `
-                    + `'${param}' narrows which columns 'search' scans, as a comma-separated string `
-                    + 'or an array of field names.',
-                );
-                err.code = 'INVALID_FIELD';
-                err.status = 400;
-                err.object = object;
-                err.param = param;
-                throw err;
-            }
-            names = requested;
-        } else {
-            const err: any = new Error(
-                `'${param}' on object '${object}' must be a comma-separated string or an array of `
-                + `field names, received ${requested === null ? 'null' : typeof requested}. It narrows `
-                + "which columns 'search' scans; a value the server cannot read would have been "
-                + 'ignored, leaving the search over the DEFAULT columns instead.',
-            );
-            err.code = 'INVALID_FIELD';
-            err.status = 400;
-            err.object = object;
-            err.param = param;
-            throw err;
-        }
-        // An empty override is ABSENT — the engine falls through to the
-        // allowed set for it, which for a caller who named nothing is the
-        // answer they asked for, not a widened one.
-        if (names.length === 0) return;
-        const gate = this.resolveQueryFields(object);
-        if (!gate) return;
-        // [#22646] A field declared `internal: true` is never a search target,
-        // refused FIRST and regardless of whether it resolves into the scanned
-        // set: a non-hidden internal text column (an auth digest, a token)
-        // enters the auto-default, so `$searchFields` naming one would be
-        // ACCEPTED here and a `$search` over it would confirm a guessed prefix
-        // of a withheld credential. The engine already drops internal fields
-        // from the auto-default set it scans (a withhold), but an EXPLICIT
-        // narrowing to one has to be a loud 400 rather than a silent widening
-        // back to the default set — the #4254 posture. Judged by the ONE flag
-        // reader (`@objectstack/core`'s cross-package twin of
-        // `collectInternalReadFields`), the same reader the evaluate refusal uses.
-        const internalSet = new Set(collectInternalWriteResponseFields(gate.schema));
-        const internalNamed = names.filter((n) => internalSet.has(n));
-        if (internalNamed.length > 0) {
-            const first = internalNamed[0] as string;
-            const err: any = new Error(
-                `Field '${first}' on object '${object}' is declared \`internal: true\` and cannot be searched`
-                + (internalNamed.length > 1 ? ` (also: ${internalNamed.slice(1).join(', ')})` : '')
-                + `. Its value is never returned on a generic data exit, so '${param}' may not name it — a `
-                + 'search over it would confirm a guessed value by whether the row comes back. Search '
-                + 'another column instead.',
-            );
-            err.code = 'INVALID_FIELD';
-            err.status = 400;
-            err.httpStatus = 400;
-            err.field = first;
-            err.fields = internalNamed;
-            err.object = object;
-            err.param = param;
-            throw err;
-        }
-        const { allowed, source } = resolveSearchFieldResolution({
-            fields: gate.fields,
-            searchableFields: gate.schema?.searchableFields,
-            // [ADR-0079] Same precedence the engine's search expansion applies:
-            // `nameField` is canonical, `displayNameField` the honored alias.
-            displayField: gate.schema?.nameField ?? gate.schema?.displayNameField,
-        });
-        const allowedSet = new Set(allowed);
-        // A name in the object's own `searchableFields` that names no field is
-        // a STALE DECLARATION — a bug on the OBJECT, not on the request. It
-        // matters because clients echo the declaration verbatim (objectui's
-        // list search sends `$searchFields: schema.searchableFields`), so
-        // calling it "unknown" would send the caller hunting a typo they
-        // never made. Same split the expand axis draws for a lookup whose
-        // `reference` was never authored.
-        const declaredSet = new Set<string>(Array.isArray(gate.schema?.searchableFields) ? gate.schema.searchableFields : []);
-        const unknown = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && !declaredSet.has(n));
-        const staleDeclared = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && declaredSet.has(n));
-        // [#6674] A VIRTUAL field is its own rejection, split out of
-        // `unsearchable` before the source branch below rather than after it,
-        // because BOTH of that branch's messages are wrong for it. The declared
-        // one ("a field outside it cannot be a search target until it is added
-        // there") is false — it may already BE in the list, which is exactly the
-        // shape this closes; the auto one prescribes "declare `searchableFields`
-        // to choose the searchable set explicitly", which for a formula field is
-        // an instruction to author the refused declaration. The fix is neither:
-        // the value has no column anywhere, so it must be mirrored onto a stored
-        // one. Judged by the same `@objectstack/spec/data` predicate the
-        // resolution applies, so gate and engine cannot disagree about which
-        // types have a column.
-        const virtual = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && isVirtualSearchField(gate.fields[n]));
-        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && !isVirtualSearchField(gate.fields[n]));
-        const [offenders, reason] =
-            unknown.length > 0 ? [unknown, 'unknown' as const]
-            : staleDeclared.length > 0 ? [staleDeclared, 'stale-declared' as const]
-            : virtual.length > 0 ? [virtual, 'virtual' as const]
-            : [unsearchable, 'unsearchable' as const];
-        if (offenders.length === 0) return;
-        const first = offenders[0];
-        let detail: string;
-        if (reason === 'stale-declared') {
-            detail = `Field '${first}' on object '${object}' is declared in 'searchableFields' but `
-                + 'does not exist'
-                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
-                + '. The declaration is stale — searching it can never match, and the engine '
-                + "silently skipped it. Fix the object's 'searchableFields' to name real fields.";
-        } else if (reason === 'virtual') {
-            const vtype = gate.fields[first]?.type ?? 'formula';
-            detail = `Field '${first}' on object '${object}' is a virtual '${vtype}' field and cannot be searched`
-                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
-                + `. Its value is computed on read and never stored, so no driver materializes a `
-                + `column for 'search' to scan and the entry can never match — measured as 0 rows, `
-                + 'with no error, on both the in-memory and the SQL backends.'
-                + (declaredSet.has(first)
-                    ? ` The object's 'searchableFields' declares it, which is what made the entry `
-                      + 'look like coverage; remove it there as well.'
-                    : '')
-                + ` Mirror the computed value onto a stored text field on '${object}' and search that instead.`;
-        } else if (reason === 'unknown') {
-            // A dotted path is a special unknown: plausible vocabulary from the
-            // select/sort axes, but search scans this object's own columns.
-            const dottedHint = first.includes('.') && gate.known.has(first.split('.')[0])
-                ? " 'search' scans this object's own columns; a related record's column cannot be a search target."
-                : suggestFieldName(first, gate.declared);
-            detail = `Unknown field '${first}' on object '${object}'`
-                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
-                + `. '${param}' narrows which columns 'search' scans, so a name the object does not `
-                + 'declare cannot narrow anything — and the engine used to drop it and scan the '
-                + 'default columns instead, answering a NARROWER search with a WIDER one.'
-                + dottedHint;
-        } else if (source === 'declared') {
-            detail = `Field '${first}' on object '${object}' is not searchable`
-                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
-                + `. The object declares 'searchableFields' (${allowed.join(', ')}), which is the set `
-                + "'search' scans — a field outside it cannot be a search target until it is added there.";
-        } else {
-            const meta = gate.fields[first];
-            const why = !meta || SEARCH_AUTO_EXCLUDED_FIELDS.has(first)
-                ? 'a system/audit column, which the default never includes'
-                : meta.hidden
-                    ? 'hidden'
-                    : `type '${meta.type}'`;
-            detail = `Field '${first}' on object '${object}' is not searchable`
-                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
-                + `. With no 'searchableFields' declared, 'search' scans the text-like columns `
-                + `(${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')}), and '${first}' is `
-                + why
-                + ". Declare 'searchableFields' on the object to choose the searchable set explicitly.";
-        }
-        const err: any = new Error(detail);
-        err.code = 'INVALID_FIELD';
-        err.status = 400;
-        err.field = first;
-        err.fields = offenders;
-        err.object = object;
-        err.param = param;
-        throw err;
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof assertSearchFieldsAreSearchable> = {
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+        };
+        return assertSearchFieldsAreSearchable.call(host, object, requested, param);
     }
 
     /**
@@ -14180,83 +13159,11 @@ export class ObjectStackProtocolImplementation implements
      * only ever produce the null bucket.
      */
     private assertGroupByFieldsExist(object: string, groupBy: unknown): void {
-        if (groupBy === undefined || groupBy === null) return;
-        if (!Array.isArray(groupBy)) {
-            throw invalidQueryError(
-                'groupBy',
-                `must be an array of grouping targets (a field name, or { field, dateGranularity } `
-                + `for date bucketing), received ${typeof groupBy}`,
-                {
-                    hint: ' A value the server cannot read used to be ignored — the rows came back '
-                        + 'UNGROUPED, looking exactly like a query that never asked for grouping. '
-                        + `Send e.g. { "groupBy": ["status"] } in the 'POST /data/:object/query' body.`,
-                    extra: { object },
-                },
-            );
-        }
-        if (groupBy.length === 0) return;
-        const fieldsToCheck: string[] = [];
-        for (let i = 0; i < groupBy.length; i++) {
-            const entry = groupBy[i];
-            if (typeof entry === 'string') {
-                fieldsToCheck.push(entry);
-                continue;
-            }
-            if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
-                throw invalidQueryError(
-                    'groupBy',
-                    `entry #${i + 1} on object '${object}' is not a grouping target — expected a `
-                    + `field name or { field, dateGranularity }, received `
-                    + `${entry === null ? 'null' : Array.isArray(entry) ? 'an array' : typeof entry}`,
-                    { extra: { object } },
-                );
-            }
-            if (typeof entry.field !== 'string' || entry.field.length === 0) {
-                throw invalidQueryError(
-                    'groupBy',
-                    `entry #${i + 1} on object '${object}' names no field — the structured form is `
-                    + `{ field, dateGranularity?, alias? }`,
-                    { extra: { object } },
-                );
-            }
-            if (entry.dateGranularity !== undefined && !DATE_GRANULARITIES.has(entry.dateGranularity)) {
-                throw invalidQueryError(
-                    'groupBy',
-                    `entry #${i + 1} on object '${object}' buckets by '${String(entry.dateGranularity)}', `
-                    + `which is not a date granularity (${[...DATE_GRANULARITIES].join(' / ')})`,
-                    {
-                        hint: ' An unknown granularity used to fall through to one bucket per raw '
-                            + 'value — date bucketing that silently never bucketed.',
-                        extra: { object },
-                    },
-                );
-            }
-            fieldsToCheck.push(entry.field);
-        }
-        const gate = this.resolveQueryFields(object);
-        if (!gate) return;
-        const unknown = fieldsToCheck.filter((f) => !gate.known.has(f));
-        if (unknown.length === 0) return;
-        const first = unknown[0];
-        const dottedHint = first.includes('.') && gate.known.has(first.split('.')[0])
-            ? " Grouping runs over this object's own columns; a related record's column cannot be a "
-              + 'grouping target.'
-            : suggestFieldName(first, gate.declared);
-        const err: any = new Error(
-            `Unknown field '${first}' on object '${object}'`
-            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
-            + `. 'groupBy' buckets rows by a column's values, so an unknown column puts every row `
-            + 'in ONE bucket keyed null — a result indistinguishable from a column that really '
-            + 'holds a single value.'
-            + dottedHint,
-        );
-        err.code = 'INVALID_FIELD';
-        err.status = 400;
-        err.field = first;
-        err.fields = unknown;
-        err.object = object;
-        err.param = 'groupBy';
-        throw err;
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof assertGroupByFieldsExist> = {
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+        };
+        return assertGroupByFieldsExist.call(host, object, groupBy);
     }
 
     /**
@@ -14295,121 +13202,12 @@ export class ObjectStackProtocolImplementation implements
      * unknown aggregated field keeps its own.
      */
     private assertAggregationFieldsExist(object: string, aggregations: unknown): void {
-        if (aggregations === undefined || aggregations === null) return;
-        if (!Array.isArray(aggregations)) {
-            throw invalidQueryError(
-                'aggregations',
-                `must be an array of { function, field?, alias } entries, received `
-                + `${typeof aggregations}`,
-                {
-                    hint: ' A value the server cannot read used to be ignored — the rows came back '
-                        + 'raw and unaggregated. Send e.g. { "aggregations": [{ "function": "sum", '
-                        + `"field": "amount", "alias": "total" }] } in the 'POST /data/:object/query' body.`,
-                    extra: { object },
-                },
-            );
-        }
-        if (aggregations.length === 0) return;
-        const fieldsToCheck: string[] = [];
-        for (let i = 0; i < aggregations.length; i++) {
-            const entry = aggregations[i];
-            if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
-                throw invalidQueryError(
-                    'aggregations',
-                    `entry #${i + 1} on object '${object}' is not an aggregation — expected `
-                    + `{ function, field?, alias }, received `
-                    + `${entry === null ? 'null' : Array.isArray(entry) ? 'an array' : typeof entry}`,
-                    { extra: { object } },
-                );
-            }
-            if (typeof entry.function !== 'string' || !AGGREGATION_FUNCTIONS.has(entry.function)) {
-                throw invalidQueryError(
-                    'aggregations',
-                    `entry #${i + 1} on object '${object}' uses `
-                    + (typeof entry.function === 'string'
-                        ? `'${entry.function}', which is not an aggregation function`
-                        : 'no aggregation function')
-                    + ` (${[...AGGREGATION_FUNCTIONS].join(' / ')})`,
-                    {
-                        hint: ' An unknown function used to compute null for every group while the '
-                            + 'response looked served.',
-                        extra: { object },
-                    },
-                );
-            }
-            if (typeof entry.alias !== 'string' || entry.alias.length === 0) {
-                throw invalidQueryError(
-                    'aggregations',
-                    `entry #${i + 1} on object '${object}' has no 'alias' — the alias names the `
-                    + `result column (without one it came back keyed "undefined")`,
-                    { extra: { object } },
-                );
-            }
-            if (entry.field === undefined || entry.field === null) {
-                if (entry.function !== 'count') {
-                    throw invalidQueryError(
-                        'aggregations',
-                        `entry '${entry.alias}' on object '${object}' applies '${entry.function}' to no `
-                        + `field. Only 'count' may omit the field (count(*), every row); '${entry.function}' `
-                        + 'needs a column to compute over — without one it answered null while looking served',
-                        { extra: { object } },
-                    );
-                }
-                continue;
-            }
-            if (typeof entry.field !== 'string') {
-                throw invalidQueryError(
-                    'aggregations',
-                    `entry '${entry.alias}' on object '${object}' has a non-string 'field' `
-                    + `(received ${typeof entry.field})`,
-                    { extra: { object } },
-                );
-            }
-            if (entry.field === '*') {
-                if (entry.function !== 'count') {
-                    throw invalidQueryError(
-                        'aggregations',
-                        `entry '${entry.alias}' on object '${object}' applies '${entry.function}' to '*'. `
-                        + `'*' is the count-all sentinel and only 'count' reads it`,
-                        { extra: { object } },
-                    );
-                }
-                continue;
-            }
-            fieldsToCheck.push(entry.field);
-        }
-        const gate = this.resolveQueryFields(object);
-        if (!gate) return;
-        const unknown = fieldsToCheck.filter((f) => !gate.known.has(f));
-        if (unknown.length === 0) {
-            // [#20148] The filter keys, entry by entry, through `where`'s own
-            // gate — see this method's doc. A filter that is not a plain object
-            // names no key here and is left to the engine's shape gate.
-            aggregations.forEach((entry, i) => {
-                this.assertFilterFieldsExist(object, entry.filter, `aggregations[${i}].filter`);
-            });
-            return;
-        }
-        const first = unknown[0];
-        const dottedHint = first.includes('.') && gate.known.has(first.split('.')[0])
-            ? " Aggregation runs over this object's own columns; a related record's column cannot "
-              + 'be aggregated.'
-            : suggestFieldName(first, gate.declared);
-        const err: any = new Error(
-            `Unknown field '${first}' on object '${object}'`
-            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
-            + `. An aggregation computes over a column's values, so an unknown column could only `
-            + 'aggregate blanks — sum answered 0 and avg/min/max answered null, each '
-            + 'indistinguishable from the same result over real data.'
-            + dottedHint,
-        );
-        err.code = 'INVALID_FIELD';
-        err.status = 400;
-        err.field = first;
-        err.fields = unknown;
-        err.object = object;
-        err.param = 'aggregations';
-        throw err;
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof assertAggregationFieldsExist> = {
+            assertFilterFieldsExist: (...a) => this.assertFilterFieldsExist(...a),
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+        };
+        return assertAggregationFieldsExist.call(host, object, aggregations);
     }
 
     /**
@@ -14475,26 +13273,16 @@ export class ObjectStackProtocolImplementation implements
      * batch the expansion re-keys by id with no `limit`, so it changes no answer.
      */
     private assertNoInternalFieldEvaluated(object: string, options: Record<string, any>): void {
-        const gate = this.resolveQueryFields(object);
-        if (!gate) return;
-        const internal = new Set(collectInternalWriteResponseFields(gate.schema));
-        // where + the `filter` alias a direct bag may still carry, each with its
-        // nested-relation conditions.
-        this.refuseInternalInFilter(object, options.where, 'filter', 0);
-        this.refuseInternalInFilter(object, options.filter, 'filter', 0);
-        this.refuseInternalNames(object, this.orderByFieldNames(options.orderBy), internal, 'sort');
-        this.refuseInternalNames(object, this.groupByFieldNames(options.groupBy), internal, 'groupBy');
-        if (Array.isArray(options.aggregations)) {
-            options.aggregations.forEach((agg: any, i: number) => {
-                const field = agg?.field;
-                if (typeof field === 'string' && field !== '*') {
-                    this.refuseInternalNames(object, [field], internal, `aggregations[${i}].field`);
-                }
-                this.refuseInternalInFilter(object, agg?.filter, `aggregations[${i}].filter`, 0);
-            });
-        }
-        // The whole expand tree, every level against its own target.
-        this.refuseInternalInExpand(object, options.expand, 'expand', 0);
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof assertNoInternalFieldEvaluated> = {
+            groupByFieldNames: (...a) => this.groupByFieldNames(...a),
+            orderByFieldNames: (...a) => this.orderByFieldNames(...a),
+            refuseInternalInExpand: (...a) => this.refuseInternalInExpand(...a),
+            refuseInternalInFilter: (...a) => this.refuseInternalInFilter(...a),
+            refuseInternalNames: (...a) => this.refuseInternalNames(...a),
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+        };
+        return assertNoInternalFieldEvaluated.call(host, object, options);
     }
 
     /**
@@ -14505,22 +13293,14 @@ export class ObjectStackProtocolImplementation implements
      * by the relation field at each hop (`filter.owner_id`).
      */
     private refuseInternalInFilter(object: string, where: unknown, param: string, depth: number): void {
-        if (where == null || depth > INTERNAL_FIELD_WALK_DEPTH) return;
-        const gate = this.resolveQueryFields(object);
-        if (!gate) return;
-        const condition = isFilterAST(where) ? parseFilterAST(where) : where;
-        const internal = new Set(collectInternalWriteResponseFields(gate.schema));
-        if (internal.size > 0) {
-            const reads = new Set<string>();
-            collectFilterReads(condition, reads);
-            this.refuseInternalNames(object, [...reads], internal, param);
-        }
-        for (const site of relationConditionSites(gate.fields, condition)) {
-            const position = `${param}.${site.field}`;
-            // [#22737] The target's exposure before anything of it is judged.
-            this.refuseUnservedRelationTarget(site.target, position);
-            this.refuseInternalInFilter(site.target, site.condition, position, depth + 1);
-        }
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof refuseInternalInFilter> = {
+            refuseInternalInFilter: (...a) => this.refuseInternalInFilter(...a),
+            refuseInternalNames: (...a) => this.refuseInternalNames(...a),
+            refuseUnservedRelationTarget: (...a) => this.refuseUnservedRelationTarget(...a),
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+        };
+        return refuseInternalInFilter.call(host, object, where, param, depth);
     }
 
     /**
@@ -14538,25 +13318,12 @@ export class ObjectStackProtocolImplementation implements
      * refusal at this hop names it: it is the lookup's declared target.
      */
     private refuseUnservedRelationTarget(target: string, param: string): void {
-        const enable = this.engine?.registry?.getObject?.(target)?.enable;
-        const reason = apiExposureDenialReason(enable, RELATION_CONDITION_TARGET_OPERATION);
-        if (reason === null) return;
-        const consequence = `, so the condition on it at '${param}' was not evaluated and the query was not run. `
-            + 'Filter on the lookup\'s stored id instead, or remove the condition.';
-        const err: any = new Error(reason === 'api-disabled'
-            ? `Object '${target}' is not exposed via the API${consequence}`
-            : `API operation '${RELATION_CONDITION_TARGET_OPERATION}' is not allowed on object '${target}'${consequence}`);
-        if (reason === 'api-disabled') {
-            err.code = 'OBJECT_API_DISABLED';
-            err.status = 404;
-        } else {
-            err.code = 'OBJECT_API_METHOD_NOT_ALLOWED';
-            err.status = 405;
-            err.allowed = effectiveOperationsArray(resolveEffectiveApiMethods(enable));
-        }
-        err.object = target;
-        err.param = param;
-        throw err;
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof refuseUnservedRelationTarget> = {
+            get engine() { return readEngine(); },
+        };
+        return refuseUnservedRelationTarget.call(host, target, param);
     }
 
     /**
@@ -14565,25 +13332,15 @@ export class ObjectStackProtocolImplementation implements
      * target object, then the entry's own `expand` with the target as source.
      */
     private refuseInternalInExpand(source: string, expand: unknown, prefix: string, depth: number): void {
-        if (!isPlainRecord(expand) || depth > INTERNAL_FIELD_WALK_DEPTH) return;
-        const gate = this.resolveQueryFields(source);
-        if (!gate) return;
-        for (const [rel, entry] of Object.entries(expand)) {
-            if (!isPlainRecord(entry)) continue;
-            const sourceField = gate.fields?.[rel];
-            const target = sourceField != null && REFERENCE_VALUE_TYPES.has(sourceField.type)
-                ? referenceTargetOf(sourceField)
-                : undefined;
-            if (!target) continue;
-            const path = `${prefix}['${rel}']`;
-            this.refuseInternalInFilter(target, entry.where, `${path}.filter`, 0);
-            const targetGate = this.resolveQueryFields(target);
-            if (targetGate) {
-                const targetInternal = new Set(collectInternalWriteResponseFields(targetGate.schema));
-                this.refuseInternalNames(target, this.orderByFieldNames(entry.orderBy), targetInternal, `${path}.sort`);
-            }
-            this.refuseInternalInExpand(target, entry.expand, `${path}.expand`, depth + 1);
-        }
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof refuseInternalInExpand> = {
+            orderByFieldNames: (...a) => this.orderByFieldNames(...a),
+            refuseInternalInExpand: (...a) => this.refuseInternalInExpand(...a),
+            refuseInternalInFilter: (...a) => this.refuseInternalInFilter(...a),
+            refuseInternalNames: (...a) => this.refuseInternalNames(...a),
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+        };
+        return refuseInternalInExpand.call(host, source, expand, prefix, depth);
     }
 
     /**
@@ -14621,78 +13378,41 @@ export class ObjectStackProtocolImplementation implements
      * backstop an entry is dropped rather than passed unjudged.
      */
     private servedExpand(source: string, expand: Record<string, any>, depth: number): Record<string, any> {
-        const gate = this.resolveQueryFields(source);
-        let served: Record<string, any> | undefined;
-        for (const [rel, entry] of Object.entries(expand)) {
-            const def = gate?.fields?.[rel];
-            const target = def != null && REFERENCE_VALUE_TYPES.has(def.type) ? referenceTargetOf(def) : undefined;
-            if (!target) continue;
-            if (depth >= INTERNAL_FIELD_WALK_DEPTH || !this.servesExpansionTarget(target)) {
-                served ??= { ...expand };
-                delete served[rel];
-                continue;
-            }
-            if (isPlainRecord(entry) && isPlainRecord(entry.expand)) {
-                const nested = this.servedExpand(target, entry.expand, depth + 1);
-                if (nested !== entry.expand) {
-                    served ??= { ...expand };
-                    const { expand: _withheld, ...rest } = entry;
-                    served[rel] = Object.keys(nested).length > 0 ? { ...rest, expand: nested } : rest;
-                }
-            }
-        }
-        return served ?? expand;
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const host: ThisParameterType<typeof servedExpand> = {
+            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
+            servedExpand: (...a) => this.servedExpand(...a),
+            servesExpansionTarget: (...a) => this.servesExpansionTarget(...a),
+        };
+        return servedExpand.call(host, source, expand, depth);
     }
 
     /** [#22661] Does the target's declared exposure serve an expansion read of it? */
     private servesExpansionTarget(target: string): boolean {
-        const schema: any = this.engine?.registry?.getObject?.(target);
-        return canServeApiOperation(schema?.enable, EXPANSION_TARGET_OPERATION);
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof servesExpansionTarget> = {
+            get engine() { return readEngine(); },
+        };
+        return servesExpansionTarget.call(host, target);
     }
 
     /** Field heads an `orderBy` names (string or `{ field }`), dotted head only. */
     private orderByFieldNames(orderBy: unknown): string[] {
-        if (!Array.isArray(orderBy)) return [];
-        return orderBy
-            .map((e) => (typeof e === 'string' ? e : (e as { field?: unknown })?.field))
-            .filter((f): f is string => typeof f === 'string' && f.length > 0)
-            .map((f) => f.split('.')[0] as string);
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        return orderByFieldNames(orderBy);
     }
 
     /** Field heads a `groupBy` names (string or `{ field }`), dotted head only. */
     private groupByFieldNames(groupBy: unknown): string[] {
-        if (!Array.isArray(groupBy)) return [];
-        return groupBy
-            .map((e) => (typeof e === 'string' ? e : (e as { field?: unknown })?.field))
-            .filter((f): f is string => typeof f === 'string' && f.length > 0)
-            .map((f) => f.split('.')[0] as string);
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        return groupByFieldNames(groupBy);
     }
 
     /** Refuse when any of `names` is an internal field of `object`. */
     private refuseInternalNames(object: string, names: readonly string[], internal: ReadonlySet<string>, param: string): void {
-        const hit = names.filter((n) => internal.has(n));
-        if (hit.length === 0) return;
-        const first = hit[0] as string;
-        const verb = param.endsWith('sort') ? 'sort' : param === 'groupBy' ? 'group' : param.includes('filter') ? 'filter' : 'query';
-        const err: any = new Error(
-            `Cannot ${verb} '${object}' by '${first}' (${param}): the query was not run. The ${first} field `
-            + 'is declared `internal: true`, so its value is never returned on a generic data exit — the engine '
-            + 'omits it from every row. '
-            + (verb === 'sort'
-                ? 'A sort on it orders by that withheld value'
-                : verb === 'group'
-                    ? 'A group key would be the withheld value, served as the key'
-                    : 'A filter on it confirms a guessed value by whether the row comes back')
-            + ', so it is refused rather than evaluated. Use another field.',
-        );
-        err.code = 'INVALID_FIELD';
-        err.status = 400;
-        err.httpStatus = 400;
-        err.field = first;
-        err.fields = hit;
-        err.object = object;
-        err.param = param;
-        throw err;
+        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        return refuseInternalNames(object, names, internal, param);
     }
 
     async findData(request: { object: string, query?: any, context?: any }) {
@@ -16693,41 +15413,17 @@ export class ObjectStackProtocolImplementation implements
     // Batch Operations
     // ==========================================
 
-    async batchData(request: { object: string, request: BatchUpdateRequest, context?: any }): Promise<BatchUpdateResponse> {
-        const { object, request: batchReq, context } = request;
-        this.assertObjectRegistered(object); // [#3770]
-        const { operation, records, options } = batchReq;
-
-        // [#3043 → #14147] The batch endpoint is an external ingress, and it
-        // used to strip forged read-only columns on create HERE; that strip is
-        // `engine.insert`'s since the 2026-09-03 ruling, reported back per row
-        // through `onFieldsDropped`. [#3455] It DOES resolve an execution
-        // context (threaded by REST); thread it to every engine call so RLS/FLS,
-        // `readonlyWhen` AND the create-side readonly strip run under the
-        // caller, so a system caller is correctly exempt (the pre-#3455 code
-        // hard-coded the strip context to `undefined`, treating every batch
-        // create as non-system).
-        const batchSchema = this.engine.registry?.getObject(object);
-
-        // ADR-0119 D4 — `atomic` is REAL or REFUSED, never silent best-effort.
-        // This flag used to only `break` the loop: every write before the
-        // failure stayed COMMITTED while the response called itself atomic and
-        // reported those rows `success: true`. Same class as #4346 — a
-        // write-path guarantee declared but not enforced, silent and
-        // destructive exactly when it matters.
-        //
-        // Opt-in is an explicit `=== true`. `BatchOptionsSchema` declared
-        // `.default(true)` while no enforcement site ever delivered atomicity
-        // (REST forwards the original body, so the parsed default never reached
-        // this loop), so treating "absent" as atomic would silently flip every
-        // existing caller's failure semantics. The declaration is aligned to
-        // the enforced value instead; see the schema's note.
-        if (options?.atomic === true) {
-            return await this.runAtomicBatchData({ object, operation, records, options, batchSchema, context });
-        }
-
-        const outcome = await this.runBatchDataLoop({ object, operation, records, options, batchSchema, context, atomic: false });
-        return this.buildBatchDataResponse(operation, records, options, outcome);
+    batchData(request: { object: string, request: BatchUpdateRequest, context?: any }): Promise<BatchUpdateResponse> {
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof batchData> = {
+            assertObjectRegistered: (...a) => this.assertObjectRegistered(...a),
+            buildBatchDataResponse: (...a) => this.buildBatchDataResponse(...a),
+            get engine() { return readEngine(); },
+            runAtomicBatchData: (...a) => this.runAtomicBatchData(...a),
+            runBatchDataLoop: (...a) => this.runBatchDataLoop(...a),
+        };
+        return batchData.call(host, request);
     }
 
     /**
@@ -16736,7 +15432,7 @@ export class ObjectStackProtocolImplementation implements
      * prior write — and the response says so, rather than reporting rows that
      * no longer exist as successes.
      */
-    private async runAtomicBatchData(args: {
+    private runAtomicBatchData(args: {
         object: string;
         operation: BatchUpdateRequest['operation'];
         records: BatchUpdateRequest['records'];
@@ -16744,14 +15440,14 @@ export class ObjectStackProtocolImplementation implements
         batchSchema: any;
         context: any;
     }): Promise<BatchUpdateResponse> {
-        const { object, operation, records, options, batchSchema, context } = args;
-        return await this.runAtomicBatch({
-            object,
-            context,
-            runLoop: (trxCtx) => this.runBatchDataLoop({ object, operation, records, options, batchSchema, context: trxCtx, atomic: true }),
-            onCommit: (outcome) => this.buildBatchDataResponse(operation, records, options, outcome),
-            onRollback: (outcome) => this.buildRolledBackBatchResponse(operation, records, outcome),
-        });
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const host: ThisParameterType<typeof runAtomicBatchData> = {
+            buildBatchDataResponse: (...a) => this.buildBatchDataResponse(...a),
+            buildRolledBackBatchResponse: (...a) => this.buildRolledBackBatchResponse(...a),
+            runAtomicBatch: (...a) => this.runAtomicBatch(...a),
+            runBatchDataLoop: (...a) => this.runBatchDataLoop(...a),
+        };
+        return runAtomicBatchData.call(host, args);
     }
 
     /**
@@ -16772,67 +15468,19 @@ export class ObjectStackProtocolImplementation implements
      * fail-closed capability gate, the single `engine.transaction()`, the abort
      * sentinel, the zero-successes rollback response — lives here, once.
      */
-    private async runAtomicBatch(args: {
+    private runAtomicBatch(args: {
         object: string;
         context: any;
         runLoop: (trxCtx: any) => Promise<BatchDataLoopOutcome>;
         onCommit: (outcome: BatchDataLoopOutcome) => BatchUpdateResponse;
         onRollback: (outcome: BatchDataLoopOutcome) => BatchUpdateResponse;
     }): Promise<BatchUpdateResponse> {
-        const { object, context, runLoop, onCommit, onRollback } = args;
-
-        // Two-level probe, shared with the ADR-0119 D2 migration-journal runner
-        // as `engineCanRollBack` (#4617). `engine.transaction()` runs the
-        // callback with NO transaction and NO rollback when the default driver
-        // lacks `beginTransaction` — a declared caveat of the contract member
-        // (ADR-0119 D1), and one that would turn "atomic" back into a lie
-        // precisely where it matters. So where the driver registry is
-        // inspectable, the driver is checked too; where it is not (test
-        // doubles), the engine-level probe is all there is.
-        //
-        // Shared rather than restated: this and the runner's gate were the same
-        // condition written twice, and two copies of "can this runtime actually
-        // roll back?" drift by one clause and leave one caller believing it has
-        // atomicity it does not have.
-        const engineTx = engineCanRollBack(this.engine)
-            ? this.engine.transaction.bind(this.engine)
-            : undefined;
-
-        if (!engineTx) {
-            // REFUSE, do not degrade. A caller that asked for atomicity is
-            // exactly the caller who must not silently receive best-effort —
-            // silent degradation is how this flag came to lie in the first
-            // place. Mirrors the cross-object /batch route's refusal; the
-            // condition is generic, so it uses the standard error catalog
-            // rather than registering an ADR-0112 synonym.
-            const err: any = new Error(
-                `Atomic batch on '${object}' requires engine transaction support; this runtime cannot roll back. ` +
-                `Retry without options.atomic, or probe capabilities.transactionalBatch on /discovery first.`,
-            );
-            err.status = 501;
-            err.code = 'NOT_IMPLEMENTED';
-            throw err;
-        }
-
-        // Identity-checked sentinel: aborting the transaction is how a rollback
-        // is requested, but the abort itself is not an error to propagate.
-        const ABORT = new Error('atomic batch aborted — rolled back');
-        let aborted: BatchDataLoopOutcome | undefined;
-        try {
-            return await engineTx(async (trxCtx: any) => {
-                const outcome = await runLoop(trxCtx);
-                if (outcome.failed > 0) {
-                    aborted = outcome;
-                    throw ABORT;
-                }
-                return onCommit(outcome);
-            }, context);
-        } catch (err) {
-            if (err === ABORT && aborted) {
-                return onRollback(aborted);
-            }
-            throw err;
-        }
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof runAtomicBatch> = {
+            get engine() { return readEngine(); },
+        };
+        return runAtomicBatch.call(host, args);
     }
 
     /**
@@ -16847,7 +15495,7 @@ export class ObjectStackProtocolImplementation implements
      * fallback insert could only bury a real update failure under the
      * duplicate-key error of inserting a row just proven to exist.
      */
-    private async runBatchDataLoop(args: {
+    private runBatchDataLoop(args: {
         object: string;
         operation: BatchUpdateRequest['operation'];
         records: BatchUpdateRequest['records'];
@@ -16856,214 +15504,14 @@ export class ObjectStackProtocolImplementation implements
         context: any;
         atomic: boolean;
     }): Promise<BatchDataLoopOutcome> {
-        const { object, operation, records, options, batchSchema, context, atomic } = args;
-        const results: BatchDataRowResult[] = [];
-        let succeeded = 0;
-        let failed = 0;
-
-        // Spread form for options objects that already carry `where`/`onFieldsDropped`
-        // (`{}` spread is a safe no-op). [#14147] EVERY `engine.insert` in this
-        // loop — `create`, and both arms of `upsert` that create — builds an
-        // options object: the readonly strip they report moved into
-        // `engine.insert` and reaches this seam only through `onFieldsDropped`,
-        // so the arg form (`undefined` when there is no context) is gone from
-        // here. A create-shaped arm that passed no listener reported a silent
-        // drop — the upsert arms did exactly that until the patch round.
-        const ctxOpt = context !== undefined ? { context } : {};
-
-        // [#4793] `index` is the row's position in the REQUEST array — the
-        // correlation a caller needs for failure rows that carry no id.
-        for (const [index, record] of records.entries()) {
-            try {
-                switch (operation) {
-                    case 'create': {
-                        // [#3455/#14147] A batch-create caller sees the same
-                        // `droppedFields` a single-write create surfaces (#3431) —
-                        // read off the ENGINE's listener now that the readonly
-                        // create strip lives there, instead of reconstructed from a
-                        // before/after payload diff at this seam.
-                        const rowDropped: DroppedFieldsEvent[] = [];
-                        const created = await this.engine.insert(object, record.data || record, {
-                            ...ctxOpt,
-                            onFieldsDropped: (e: DroppedFieldsEvent) => { rowDropped.push(e); },
-                        } as any);
-                        omitInternalFieldsFromWriteResponse(batchSchema, created); // [#7823]
-                        const ev = mergeDroppedFieldEvents(rowDropped);
-                        results.push({ id: created.id, success: true, data: created, index, ...(ev.length > 0 ? { droppedFields: ev } : {}) });
-                        succeeded++;
-                        break;
-                    }
-                    case 'update': {
-                        if (!record.id) throw rowRequiredIdError('update');
-                        // [#5088] Same existence gate as `updateMany` and the
-                        // single-record PATCH — a row naming no record must not
-                        // enter the write pipeline, where #4770's stored ⊕
-                        // payload merge has no stored side and #4775 blames the
-                        // hook for the resulting gap.
-                        await this.assertRecordExists(object, record.id);
-                        // [#3455] Collect the engine's LEGAL write strips per row.
-                        const dropped: DroppedFieldsEvent[] = [];
-                        const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any));
-                        omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
-                        results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
-                        succeeded++;
-                        break;
-                    }
-                    case 'upsert': {
-                        if (record.id) {
-                            // [#5099] The update-or-insert fork asks EXISTENCE,
-                            // not visibility. `findOne` under the CALLER's
-                            // context is the read RLS/sharing narrows (#3455),
-                            // so an existing row outside the caller's scope
-                            // answered null, took the insert arm, and either
-                            // duplicate-keyed — an authorization/update
-                            // scenario reported as a key collision — or, on a
-                            // store without a unique id constraint, wrote a
-                            // second row. Same probe as the update branch above
-                            // and the single-record path (#4620): it asks the
-                            // database a fact, and whether the caller may WRITE
-                            // the row it proves stays #1994's decision inside
-                            // `engine.update`.
-                            //
-                            // The old fallback (update threw → blind insert)
-                            // is gone with the fork's visibility read: with
-                            // existence decided BEFORE the write, a fallback
-                            // insert could only bury a real update failure
-                            // under the duplicate-key error of inserting a row
-                            // just proven to exist — the same masking ADR-0119
-                            // D4 forbade inside the atomic arm.
-                            const existing = await this.probeRecord(object, record.id);
-                            if (existing) {
-                                const dropped: DroppedFieldsEvent[] = [];
-                                const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any));
-                                omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
-                                results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
-                            } else {
-                                // [#14147] The upsert's CREATE arm is a create face
-                                // too: same listener, same per-row `droppedFields`,
-                                // as `case 'create'` above and the update arm just up.
-                                const rowDropped: DroppedFieldsEvent[] = [];
-                                const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, {
-                                    ...ctxOpt,
-                                    onFieldsDropped: (e: DroppedFieldsEvent) => { rowDropped.push(e); },
-                                } as any);
-                                omitInternalFieldsFromWriteResponse(batchSchema, created); // [#7823]
-                                const ev = mergeDroppedFieldEvents(rowDropped);
-                                results.push({ id: created.id, success: true, data: created, index, ...(ev.length > 0 ? { droppedFields: ev } : {}) });
-                            }
-                        } else {
-                            // [#14147] Same: an id-less upsert row IS a create.
-                            const rowDropped: DroppedFieldsEvent[] = [];
-                            const created = await this.engine.insert(object, record.data || record, {
-                                ...ctxOpt,
-                                onFieldsDropped: (e: DroppedFieldsEvent) => { rowDropped.push(e); },
-                            } as any);
-                            omitInternalFieldsFromWriteResponse(batchSchema, created); // [#7823]
-                            const ev = mergeDroppedFieldEvents(rowDropped);
-                            results.push({ id: created.id, success: true, data: created, index, ...(ev.length > 0 ? { droppedFields: ev } : {}) });
-                        }
-                        succeeded++;
-                        break;
-                    }
-                    case 'delete': {
-                        if (!record.id) throw rowRequiredIdError('delete');
-                        // [#5088] `deleteManyData` learned this in #4435; this
-                        // branch — the OTHER by-id bulk delete, ten lines from
-                        // it — kept discarding the driver's return and pushing
-                        // `success: true` unconditionally, so a batch of typo'd
-                        // ids reported every one of them deleted. Same `=== false`
-                        // reading as both fixed faces: the contract's positive
-                        // not-found value (`IDataDriver.delete`), never an
-                        // inference from a falsy return, so a third-party driver
-                        // that answers with the deleted row is not turned into a
-                        // spurious 404.
-                        const deleted = await this.engine.delete(object, { where: { id: record.id }, ...ctxOpt } as any);
-                        if (deleted === false) throw recordNotFoundError(object, record.id);
-                        // [#19433] The SECOND half of this site, and the THIRD and
-                        // last of the by-id delete doors to learn it — the
-                        // single-record face (commit f9e16d856) and `deleteManyData` (#19412)
-                        // both already read the engine's answer. The paragraph
-                        // above fixed "no match"; this is "matched, and
-                        // deliberately NOT removed", where `success` was still a
-                        // LITERAL for every result that was not the contract's
-                        // `false`, so that row was reported as a deletion too.
-                        //
-                        // `sys_permission_set` was the shipped shape of it until C3
-                        // stage 8 retired that object: deleting a package-declared
-                        // set was an ADR-0005 RESET — the overlay tombstoned and the
-                        // record re-projected to the declared body instead of
-                        // vanishing — so the row MATCHED, the write ran, and the
-                        // record was still there. On a security-configuration
-                        // write this envelope told an operator a permission set was
-                        // gone while it was still being enforced.
-                        //
-                        // The defect rests on the CONTRACT, not on any shipped
-                        // handler: `IDataEngine.delete` declares
-                        // `Promise<boolean | number>` — the driver's boolean for a
-                        // by-id write, a COUNT of rows removed otherwise — and
-                        // `isDeleteResultShape` admits the number arm at the
-                        // ADR-0112 hook gate, so an `afterDelete` handler or a
-                        // non-ObjectQL engine may legally answer `0` today.
-                        //
-                        // ⛔ Not the `false` arm: that is spoken for by the 404
-                        // above, about a record this caller can still GET, and
-                        // answering it here would trade one wrong answer for a
-                        // louder one. Everything else keeps its #4435 reading, an
-                        // off-contract `undefined` from a third-party driver
-                        // included: only a POSITIVE zero is read as "not removed".
-                        //
-                        // ⛔ And the row gets NO `errors[]` entry. A surviving
-                        // record is an OUTCOME, not a fault — the single-record door
-                        // answers the same case with a bare `success: false` on a
-                        // 200 — and the two per-row codes this envelope owns
-                        // (`ROLLED_BACK`, `NOT_ATTEMPTED`) both describe a row that
-                        // never ran. Minting one for this ending is an
-                        // ERROR_CODE_LEDGER widening in `packages/spec`, and belongs
-                        // to the spec lane.
-                        //
-                        // This envelope's own consequences, measured here rather
-                        // than inherited from `deleteManyData`: the row is counted
-                        // in `failed` because `succeeded` and `failed` PARTITION
-                        // `results` (#7539, `reconcileStoppedBatch`, shared by all
-                        // three bulk faces), which makes the request-level `success`
-                        // false and, on the `atomic` arm, aborts the batch through
-                        // `runAtomicBatch`'s `failed > 0` — so an atomic batch
-                        // holding a package-declared set now rolls back instead of
-                        // committing under a response that called every row deleted.
-                        // It does NOT stop a non-atomic run: the `continueOnError`
-                        // stop belongs to the catch below and nothing was thrown, so
-                        // every remaining record is still attempted. `returnRecords:
-                        // false` keeps `success`, so the honest value survives that
-                        // projection too. Only this `case` is touched — the sibling
-                        // arms of this shared loop keep their own counters.
-                        const removed = deleted !== 0;
-                        results.push({ id: record.id, success: removed, index });
-                        if (removed) succeeded++;
-                        else failed++;
-                        break;
-                    }
-                    default:
-                        results.push({ id: record.id, success: false, index, errors: [{ code: 'VALIDATION_FAILED', message: `Unknown operation: ${operation}`, httpStatus: 400 }] });
-                        failed++;
-                }
-            } catch (err: any) {
-                // [#8502] `operation` is the request's own verb, so a mixed
-                // batch's withheld rows each name what THEY were doing.
-                results.push({ id: record.id, success: false, index, errors: [toRowApiError(err, rowOperationFailureFallback(operation))] });
-                failed++;
-                if (atomic) {
-                    // Abort on the first failure; the caller rolls back. Atomic
-                    // outranks `continueOnError` — there is nothing to continue
-                    // toward when every write so far is about to be undone.
-                    break;
-                }
-                if (!options?.continueOnError) {
-                    break;
-                }
-            }
-        }
-
-        return { results, succeeded, failed };
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof runBatchDataLoop> = {
+            assertRecordExists: (...a) => this.assertRecordExists(...a),
+            get engine() { return readEngine(); },
+            probeRecord: (...a) => this.probeRecord(...a),
+        };
+        return runBatchDataLoop.call(host, args);
     }
 
     /**
@@ -17109,28 +15557,11 @@ export class ObjectStackProtocolImplementation implements
         records: ReadonlyArray<{ id?: string }>,
         outcome: BatchDataLoopOutcome,
     ): BatchDataLoopOutcome {
-        if (outcome.results.length >= records.length) return outcome;
-
-        const cause = this.locateBatchCause(outcome.results);
-
-        const results = outcome.results.slice();
-        for (let index = results.length; index < records.length; index++) {
-            results.push({
-                // Echoed back so a caller can retry exactly the skipped rows.
-                id: records[index]?.id,
-                success: false,
-                index,
-                errors: [{
-                    code: 'NOT_ATTEMPTED' as const,
-                    message: (cause ? `${cause.clause}; the batch stopped there. ` : 'the batch stopped before this record. ')
-                        + 'Set options.continueOnError to process the remaining records.',
-                }],
-            });
-        }
-
-        // Every padded row is a non-success, so this stays a PARTITION of
-        // `results` rather than a second tally free to drift from it.
-        return { results, succeeded: outcome.succeeded, failed: results.length - outcome.succeeded };
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const host: ThisParameterType<typeof reconcileStoppedBatch> = {
+            locateBatchCause: (...a) => this.locateBatchCause(...a),
+        };
+        return reconcileStoppedBatch.call(host, records, outcome);
     }
 
     /**
@@ -17170,12 +15601,8 @@ export class ObjectStackProtocolImplementation implements
     private locateBatchCause(
         rows: ReadonlyArray<BatchDataRowResult>,
     ): { index: number; clause: string } | undefined {
-        for (let index = rows.length - 1; index >= 0; index--) {
-            const fault = rows[index]?.errors?.[0];
-            if (fault) return { index, clause: `record ${index} failed — ${fault.message}` };
-        }
-        const stalled = rows.findIndex(r => !r.success);
-        return stalled >= 0 ? { index: stalled, clause: `record ${stalled} did not succeed` } : undefined;
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        return locateBatchCause(rows);
     }
 
     /** The ordinary (committed) batch response — every row reports what it did. */
@@ -17185,19 +15612,11 @@ export class ObjectStackProtocolImplementation implements
         options: BatchUpdateRequest['options'],
         outcome: BatchDataLoopOutcome,
     ): BatchUpdateResponse {
-        const { results, succeeded, failed } = this.reconcileStoppedBatch(records, outcome); // [#7539]
-        return {
-            success: failed === 0,
-            operation,
-            total: records.length,
-            succeeded,
-            failed,
-            // [#3455] `returnRecords: false` drops the record payload (`data`)
-            // but KEEPS `errors`, `index` and `droppedFields` — the last is a
-            // small write-observability warning, not the record data the flag
-            // suppresses.
-            results: options?.returnRecords !== false ? results : results.map(r => ({ id: r.id, success: r.success, index: r.index, ...(r.errors ? { errors: r.errors } : {}), ...(r.droppedFields ? { droppedFields: r.droppedFields } : {}) })),
-        } as BatchUpdateResponse;
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const host: ThisParameterType<typeof buildBatchDataResponse> = {
+            reconcileStoppedBatch: (...a) => this.reconcileStoppedBatch(...a),
+        };
+        return buildBatchDataResponse.call(host, operation, records, options, outcome);
     }
 
     /**
@@ -17225,68 +15644,21 @@ export class ObjectStackProtocolImplementation implements
         records: ReadonlyArray<{ id?: string }>,
         outcome: BatchDataLoopOutcome,
     ): BatchUpdateResponse {
-        const attempted = outcome.results;
-        // [#19452] Same locator as the stopped-batch arm, for the same reason:
-        // `!success` stopped meaning "this row failed" when #19412 widened it.
-        // Both this builder's interpolations of the causal index read it, so
-        // neither the ROLLED_BACK message nor the NOT_ATTEMPTED one can name a
-        // row that merely survived — the two could not be fixed apart.
-        const cause = this.locateBatchCause(attempted);
-
-        const results: BatchDataRowResult[] = records.map((record, index) => {
-            const attempt = attempted[index];
-            if (!attempt) {
-                return {
-                    id: record.id, success: false, index,
-                    errors: [{ code: 'NOT_ATTEMPTED' as const, message: cause ? `atomic batch aborted by record ${cause.index}` : 'atomic batch aborted' }],
-                };
-            }
-            if (attempt.success) {
-                return {
-                    id: attempt.id ?? record.id, success: false, index,
-                    errors: [{ code: 'ROLLED_BACK' as const, message: cause ? cause.clause : 'the atomic batch rolled back' }],
-                };
-            }
-            return { id: attempt.id ?? record.id, success: false, index, errors: attempt.errors };
-        });
-
-        return {
-            success: false,
-            operation,
-            total: records.length,
-            succeeded: 0,
-            failed: records.length,
-            results,
-        } as BatchUpdateResponse;
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const host: ThisParameterType<typeof buildRolledBackBatchResponse> = {
+            locateBatchCause: (...a) => this.locateBatchCause(...a),
+        };
+        return buildRolledBackBatchResponse.call(host, operation, records, outcome);
     }
 
-    async createManyData(request: { object: string, records: any[], context?: any }): Promise<any> {
-        this.assertObjectRegistered(request.object); // [#3770]
-        // [#3455/#5503/#14147] Both create-side strips are the engine's now —
-        // runtime-owned `autonumber` (#5503) and, since #14147, static
-        // author-declared `readonly` — so ONE listener carries both, and this
-        // seam no longer diffs payloads to recover a strip it performed itself.
-        // AGGREGATED: the `{ records, count }` response has no per-row slot, so
-        // a union is the only representable view here. (`insertManyData` HAS a
-        // per-row slot and still reports at the top level — the union cannot be
-        // resolved to rows at either seam; see its own docblock.)
-        const dropped: DroppedFieldsEvent[] = [];
-        const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
-        if (request.context !== undefined) opts.context = request.context;
-        const records = await this.engine.insert(request.object, request.records, opts);
-        // [#7823] Bulk create is the same generic-data-path surface as the
-        // single-record 201 — one strip over the returned rows, at the
-        // ingress. (Today's `internal`-flagged objects grant no `bulk`
-        // apiMethod, so this face cannot reach one over REST yet; the strip is
-        // here so the flag's guarantee does not depend on that staying true.)
-        omitInternalFieldsFromWriteResponse(this.engine.registry?.getObject(request.object), records);
-        const merged = mergeDroppedFieldEvents(dropped);
-        return {
-            object: request.object,
-            records,
-            count: records.length,
-            ...(merged.length > 0 ? { droppedFields: merged } : {}),
+    createManyData(request: { object: string, records: any[], context?: any }): Promise<any> {
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof createManyData> = {
+            assertObjectRegistered: (...a) => this.assertObjectRegistered(...a),
+            get engine() { return readEngine(); },
         };
+        return createManyData.call(host, request);
     }
 
     /**
@@ -17345,72 +15717,26 @@ export class ObjectStackProtocolImplementation implements
      * channel (an `onFieldsDropped` signature that carries the row), never a
      * reconstruction at this call site.
      */
-    async insertManyData(request: { object: string, records: any[], context?: any }): Promise<{ object: string; outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }>; droppedFields?: DroppedFieldsEvent[] }> {
-        this.assertObjectRegistered(request.object); // [#3770]
-        const engineInsertMany = (this.engine as any)?.insertMany;
-        if (typeof engineInsertMany !== 'function') {
-            throw new Error('insertManyData requires an engine with insertMany: the partial-success batch insert, which reports an outcome per row so a bad row neither fails the whole batch nor makes the good rows run their beforeInsert hooks twice');
-        }
-        // [#5503/#14147] The engine's events are collected WHOLE and merged —
-        // the same handling `createManyData` gives them, and for the reason
-        // spelled out on this method: the union is reportable, a row set is not.
-        // Keeping each event also keeps its own `reason`, which the old
-        // flatten-into-a-Set-and-relabel could not.
-        const dropped: DroppedFieldsEvent[] = [];
-        const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
-        if (request.context !== undefined) opts.context = request.context;
-        // [#20922] Each `ok` outcome carries the ENGINE's per-row report
-        // (`outcomes[i].droppedFields`), recorded at its strips — a separate
-        // channel from the batch-level union below, which still names no row.
-        // Passed through as the engine answers it; ⛔ nothing here derives a
-        // row's drops from the union.
-        const outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }> = await engineInsertMany.call(
-            this.engine,
-            request.object,
-            request.records,
-            opts,
-        );
-        // [#7823] Per-outcome ingress strip — the partial-success face hands
-        // each written row back as `outcomes[i].record`, so each is the same
-        // generic-data-path surface as a single-record 201 body.
-        if (Array.isArray(outcomes)) {
-            const outcomeSchema = this.engine.registry?.getObject(request.object);
-            for (const o of outcomes) {
-                if (o?.record) omitInternalFieldsFromWriteResponse(outcomeSchema, o.record);
-            }
-        }
-        const merged = mergeDroppedFieldEvents(dropped);
-        return {
-            object: request.object,
-            outcomes,
-            ...(merged.length > 0 ? { droppedFields: merged } : {}),
+    insertManyData(request: { object: string, records: any[], context?: any }): Promise<{ object: string; outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }>; droppedFields?: DroppedFieldsEvent[] }> {
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof insertManyData> = {
+            assertObjectRegistered: (...a) => this.assertObjectRegistered(...a),
+            get engine() { return readEngine(); },
         };
+        return insertManyData.call(host, request);
     }
     
-    async updateManyData(request: UpdateManyDataRequest & { context?: any }): Promise<BatchUpdateResponse> {
-        const { object, records, options, context } = request;
-        this.assertObjectRegistered(object); // [#3770]
-
-        // [#4620] `atomic` used not to appear ANYWHERE in this method: the
-        // option was accepted, declared in `BatchOptionsSchema` with a contract
-        // that promises all-or-nothing, and never read — a caller asking for
-        // atomicity silently got best-effort with no signal at all. Same
-        // enforcement shape as `batchData` (ADR-0119 D4), same runner, so the
-        // three bulk-write surfaces cannot drift apart again. `=== true` is the
-        // deliberate opt-in from D4: absent/false keeps today's semantics
-        // exactly.
-        if (options?.atomic === true) {
-            return await this.runAtomicBatch({
-                object,
-                context,
-                runLoop: (trxCtx) => this.runUpdateManyLoop({ object, records, options, context: trxCtx, atomic: true }),
-                onCommit: (outcome) => this.buildUpdateManyResponse(records, outcome),
-                onRollback: (outcome) => this.buildRolledBackBatchResponse('update', records, outcome),
-            });
-        }
-
-        const outcome = await this.runUpdateManyLoop({ object, records, options, context, atomic: false });
-        return this.buildUpdateManyResponse(records, outcome);
+    updateManyData(request: UpdateManyDataRequest & { context?: any }): Promise<BatchUpdateResponse> {
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const host: ThisParameterType<typeof updateManyData> = {
+            assertObjectRegistered: (...a) => this.assertObjectRegistered(...a),
+            buildRolledBackBatchResponse: (...a) => this.buildRolledBackBatchResponse(...a),
+            buildUpdateManyResponse: (...a) => this.buildUpdateManyResponse(...a),
+            runAtomicBatch: (...a) => this.runAtomicBatch(...a),
+            runUpdateManyLoop: (...a) => this.runUpdateManyLoop(...a),
+        };
+        return updateManyData.call(host, request);
     }
 
     /**
@@ -17421,71 +15747,20 @@ export class ObjectStackProtocolImplementation implements
      * `atomic=false`, and which has nothing to continue toward when every write
      * so far is about to be undone.
      */
-    private async runUpdateManyLoop(args: {
+    private runUpdateManyLoop(args: {
         object: string;
         records: UpdateManyDataRequest['records'];
         options: UpdateManyDataRequest['options'];
         context: any;
         atomic: boolean;
     }): Promise<BatchDataLoopOutcome> {
-        const { object, records, options, context, atomic } = args;
-        const results: BatchDataRowResult[] = [];
-        let succeeded = 0;
-        let failed = 0;
-        // [#7823] Ingress strip over each row's `data` payload — the bulk
-        // update face is the same generic-data-path surface as the by-id
-        // PATCH body, one row at a time. Resolved once; the loop reuses it.
-        const updateManySchema = this.engine.registry?.getObject(object);
-
-        for (const [index, record] of records.entries()) {
-            try {
-                // [#3455] Two gaps the pre-#3455 loop had, both fixed per row:
-                //  1. `context` was never threaded — bulk updates ran the engine
-                //     context-less, so RLS/FLS and `readonlyWhen` evaluated without
-                //     the caller's principal. Thread it like single-write updateData.
-                //  2. `onFieldsDropped` was never wired — the same static `readonly`
-                //     (#2948) / `readonlyWhen` (#3042) strips that single-write now
-                //     surfaces (#3431) happened silently here. Collect per row.
-                //
-                // [#5100] Same guard as `runBatchDataLoop`'s update branch
-                // (#4793), same classification: an id-less row is a CALLER
-                // error — VALIDATION_FAILED/400 — not a data-state one. The
-                // REST entrance already rejects it (`UpdateManyRecordSchema`
-                // requires `id`, #3939), but that invariant lives two packages
-                // away; unguarded, an in-process caller's malformed row
-                // reached the probe and the write as `{ id: undefined }`,
-                // whose reading is up to each driver's undefined-where-key
-                // handling — at best a 404 with `undefined` interpolated into
-                // the message, at worst a where-clause with no id at all.
-                if (!record.id) throw rowRequiredIdError('update');
-                // [#5088] Third gap, the same shape: no existence gate. A row
-                // naming no record went straight into `engine.update`, so the
-                // hook pipeline ran over a payload-only record and the row came
-                // back `INTERNAL_ERROR` from #4775's condition abort — blaming
-                // the hook for a caller's stale id. Probe first, per row, so
-                // this face answers what the single-record PATCH answers.
-                await this.assertRecordExists(object, record.id);
-                const dropped: DroppedFieldsEvent[] = [];
-                const opts: any = { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
-                if (context !== undefined) opts.context = context;
-                const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, opts));
-                omitInternalFieldsFromWriteResponse(updateManySchema, updated); // [#7823]
-                results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
-                succeeded++;
-            } catch (err: any) {
-                results.push({ id: record.id, success: false, index, errors: [toRowApiError(err, rowOperationFailureFallback('update'))] });
-                failed++;
-                if (atomic) {
-                    // Abort on the first failure; the caller rolls back.
-                    break;
-                }
-                if (!options?.continueOnError) {
-                    break;
-                }
-            }
-        }
-
-        return { results, succeeded, failed };
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof runUpdateManyLoop> = {
+            assertRecordExists: (...a) => this.assertRecordExists(...a),
+            get engine() { return readEngine(); },
+        };
+        return runUpdateManyLoop.call(host, args);
     }
 
     /**
@@ -17498,19 +15773,11 @@ export class ObjectStackProtocolImplementation implements
         records: UpdateManyDataRequest['records'],
         outcome: BatchDataLoopOutcome,
     ): BatchUpdateResponse {
-        // [#7539] Same under-report as `batchData`, ten lines away — the card's
-        // "per-object bulk counters under-report whenever a row fails without
-        // `continueOnError`". Fixed through the one shared reconciler, because
-        // a second copy is how these three drifted apart before (#4620).
-        const { results, succeeded, failed } = this.reconcileStoppedBatch(records, outcome);
-        return {
-            success: failed === 0,
-            operation: 'update',
-            total: records.length,
-            succeeded,
-            failed,
-            results,
-        } as BatchUpdateResponse;
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const host: ThisParameterType<typeof buildUpdateManyResponse> = {
+            reconcileStoppedBatch: (...a) => this.reconcileStoppedBatch(...a),
+        };
+        return buildUpdateManyResponse.call(host, records, outcome);
     }
 
     // `analyticsQuery` / `getAnalyticsMeta` were retired with the degraded
@@ -17571,153 +15838,44 @@ export class ObjectStackProtocolImplementation implements
      * delivered for real now, through the shared {@link runAtomicBatch}, and
      * refused (501 `NOT_IMPLEMENTED`) on a runtime that cannot roll back.
      */
-    async deleteManyData(request: DeleteManyDataRequest & { context?: any }): Promise<BatchUpdateResponse> {
-        const { object, options, context } = request;
-        this.assertObjectRegistered(object); // [#3770]
-
-        // Fail CLOSED on anything that is not a list of scalar ids. A non-scalar
-        // entry (`{"ids":[{"$ne":null}]}`) must never reach `where.id` as an
-        // operator object — that is the same "predicate widening" this endpoint
-        // was just hardened against, one layer down.
-        const isScalarId = (v: unknown) =>
-            (typeof v === 'string' && v.length > 0) || typeof v === 'number' || typeof v === 'bigint';
-        const ids = request.ids as unknown;
-        if (!Array.isArray(ids) || ids.some((id) => !isScalarId(id))) {
-            const err: any = new Error(
-                `deleteMany on '${object}' requires 'ids' to be an array of record ids`,
-            );
-            err.code = 'VALIDATION_FAILED';
-            err.status = 400;
-            throw err;
-        }
-
-        // [#4620] `atomic` here was the same fake-atomic `batchData` carried
-        // before ADR-0119 D4 — it only `break`-ed the loop, so every row deleted
-        // before the failure stayed DELETED while the response called itself
-        // atomic. Worse than the `batchData` case, because a partial delete has
-        // no natural undo: the caller cannot reconstruct the rows from the
-        // request. Same runner, same fail-closed gate, same row marking.
-        if (options?.atomic === true) {
-            const rows = ids.map((id) => ({ id: String(id) }));
-            return await this.runAtomicBatch({
-                object,
-                context,
-                runLoop: (trxCtx) => this.runDeleteManyLoop({ object, ids, options, context: trxCtx, atomic: true }),
-                onCommit: (outcome) => this.buildDeleteManyResponse(ids, outcome),
-                onRollback: (outcome) => this.buildRolledBackBatchResponse('delete', rows, outcome),
-            });
-        }
-
-        const outcome = await this.runDeleteManyLoop({ object, ids, options, context, atomic: false });
-        return this.buildDeleteManyResponse(ids, outcome);
+    deleteManyData(request: DeleteManyDataRequest & { context?: any }): Promise<BatchUpdateResponse> {
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const host: ThisParameterType<typeof deleteManyData> = {
+            assertObjectRegistered: (...a) => this.assertObjectRegistered(...a),
+            buildDeleteManyResponse: (...a) => this.buildDeleteManyResponse(...a),
+            buildRolledBackBatchResponse: (...a) => this.buildRolledBackBatchResponse(...a),
+            runAtomicBatch: (...a) => this.runAtomicBatch(...a),
+            runDeleteManyLoop: (...a) => this.runDeleteManyLoop(...a),
+        };
+        return deleteManyData.call(host, request);
     }
 
     /**
      * The per-id loop of {@link deleteManyData}, shared by both arms (#4620) —
      * see {@link runUpdateManyLoop} for why `atomic` outranks `continueOnError`.
      */
-    private async runDeleteManyLoop(args: {
+    private runDeleteManyLoop(args: {
         object: string;
         ids: unknown[];
         options: DeleteManyDataRequest['options'];
         context: any;
         atomic: boolean;
     }): Promise<BatchDataLoopOutcome> {
-        const { object, ids, options, context, atomic } = args;
-        const results: BatchDataRowResult[] = [];
-        let succeeded = 0;
-        let failed = 0;
-        const ctxOpt = context !== undefined ? { context } : {};
-
-        for (const [index, id] of ids.entries()) {
-            try {
-                // [#4435] Per-row honesty on the bulk path. This discarded the
-                // driver's return and pushed `success: true` unconditionally, so
-                // `{"ids":["nonexistent_1"]}` answered `succeeded: 1` — a batch
-                // of typo'd ids reported every one of them deleted. A caller
-                // reconciling "which of my 200 ids were real" got a list that
-                // agreed with whatever it sent. Same `=== false` reading as the
-                // single-record path: the contract's positive not-found value,
-                // never an inference from a falsy return.
-                const deleted = await this.engine.delete(object, { where: { id }, ...ctxOpt } as any);
-                // `id` is `unknown` to this helper only because the caller's
-                // fail-closed `isScalarId` guard is what proves it scalar.
-                if (deleted === false) throw recordNotFoundError(object, id as string | number);
-                // [#19412] The SECOND half of the same site. The paragraph above
-                // fixed "no match"; this is "matched, and deliberately NOT
-                // removed" — and until now `success` was still a LITERAL for
-                // every answer that was not the contract's `false`, so that row
-                // was reported as a deletion too.
-                //
-                // `sys_permission_set` was the shipped case until C3 stage 8
-                // retired that object: a package-declared set's delete was an
-                // ADR-0005 RESET — plugin-security's write-through tombstoned the
-                // overlay and the record re-projected to the declared body
-                // instead of vanishing — so the row MATCHED, the write ran, and
-                // the record was still there. The
-                // batch envelope said `success: true` and counted it in
-                // `succeeded`, which on a security-configuration write tells an
-                // operator a permission set is gone while it is still enforced.
-                //
-                // `IDataEngine.delete` declares `Promise<boolean | number>` —
-                // the driver's boolean for a by-id write, a COUNT of rows
-                // removed otherwise — so a numeric zero is the one value that
-                // positively means "it is still there". ⛔ Not `false`: that
-                // arm is spoken for by the 404 above, about a record this caller
-                // can still GET, and answering it here would trade one wrong
-                // answer for a louder one. Everything else keeps its #4435
-                // reading, an off-contract `undefined` from a third-party driver
-                // included: only a POSITIVE zero is read as "not removed".
-                //
-                // ⛔ The row is NOT given an `errors[]` entry. A surviving record
-                // is an OUTCOME, not a fault — the single-record door answers the
-                // same case with a bare `success: false` on a 200 — and the two
-                // per-row codes this envelope owns (`ROLLED_BACK`,
-                // `NOT_ATTEMPTED`) both describe a row that never ran. Whether
-                // this ending deserves a per-row code of its own is a
-                // `packages/spec` widening (ERROR_CODE_LEDGER) and belongs to the
-                // spec lane, not here.
-                //
-                // It is counted in `failed` because that is the envelope's ONE
-                // declared reading — `succeeded` and `failed` PARTITION `results`
-                // (#7539, `reconcileStoppedBatch`) — which also makes the
-                // request-level `success` false and, on the `atomic` arm, aborts
-                // the batch through `runAtomicBatch`'s `failed > 0`. It does NOT
-                // stop a non-atomic run: the `continueOnError` stop belongs to
-                // the catch below, and nothing was thrown.
-                const removed = deleted !== 0;
-                results.push({ id: String(id), success: removed, index });
-                if (removed) succeeded++;
-                else failed++;
-            } catch (err: any) {
-                results.push({ id: String(id), success: false, index, errors: [toRowApiError(err, rowOperationFailureFallback('delete'))] });
-                failed++;
-                // Same stop semantics as `batchData`: `atomic` aborts the rest on
-                // the first failure (the caller rolls back), and without
-                // `continueOnError` a failure ends the run rather than silently
-                // ploughing on.
-                if (atomic) break;
-                if (!options?.continueOnError) break;
-            }
-        }
-
-        return { results, succeeded, failed };
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof runDeleteManyLoop> = {
+            get engine() { return readEngine(); },
+        };
+        return runDeleteManyLoop.call(host, args);
     }
 
     /** The ordinary (committed) `deleteMany` response — every id reports what it did. */
     private buildDeleteManyResponse(ids: unknown[], outcome: BatchDataLoopOutcome): BatchUpdateResponse {
-        // [#7539] Same reconciliation as the other two faces; `ids` are mapped
-        // to the `{ id }` row shape the atomic arm already hands the rollback
-        // builder, so a skipped id comes back echoed and retryable.
-        const { results, succeeded, failed } = this.reconcileStoppedBatch(ids.map((id) => ({ id: String(id) })), outcome);
-        return {
-            success: failed === 0,
-            operation: 'delete',
-            total: ids.length,
-            succeeded,
-            failed,
-            results,
-        } as BatchUpdateResponse;
+        // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
+        const host: ThisParameterType<typeof buildDeleteManyResponse> = {
+            reconcileStoppedBatch: (...a) => this.reconcileStoppedBatch(...a),
+        };
+        return buildDeleteManyResponse.call(host, ids, outcome);
     }
 
     /**
@@ -26857,7 +25015,9 @@ export class ObjectStackProtocolImplementation implements
          * [#24253] The caller's execution context: the principal the
          * `backfill` writes run as, so object permissions, RLS/FLS and record
          * hooks apply exactly as they do to that caller's own edit. Required
-         * when `backfill` names anything; nothing else here reads it.
+         * when `backfill` names anything. [#25484] The build probes read as it
+         * too: a dashboard widget is probed through `queryDataset` as this
+         * caller, the renderer's path, never as the system.
          */
         context?: unknown;
     }): Promise<{
@@ -27741,6 +25901,7 @@ export class ObjectStackProtocolImplementation implements
                     published,
                     ...(analytics && typeof analytics.queryDataset === 'function' ? { analytics } : {}),
                     organizationId: null,
+                    ...(request.context !== undefined ? { context: request.context } : {}),
                 });
             } catch {
                 probes = undefined;

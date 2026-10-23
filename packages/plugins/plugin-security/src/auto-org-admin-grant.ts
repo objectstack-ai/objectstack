@@ -272,7 +272,8 @@ function parseRoles(raw: unknown): string[] {
     .filter((s) => s.length > 0);
 }
 
-function isAdminRole(raw: unknown): boolean {
+/** An `owner` or `admin` membership grade: the roles this module turns into an organization-admin grant. */
+export function isAdminRole(raw: unknown): boolean {
   const roles = parseRoles(raw);
   return roles.includes('owner') || roles.includes('admin');
 }

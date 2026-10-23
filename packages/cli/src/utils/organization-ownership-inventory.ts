@@ -251,6 +251,9 @@ const AUTHORED = [{ column: 'managed_by', notIn: ['package', 'platform', 'system
 export const SHIPPED_PERMISSION_SET_NAMES: readonly string[] = [
   'admin_full_access', 'organization_admin', 'organization_admin_no_bypass', 'member_default', 'viewer_readonly',
   'mcp_agent_data_read', 'mcp_agent_data_write', 'mcp_agent_restricted',
+  // [#25233] Shipped since the external membership role; no install seeded it
+  // before the `platform` stamp, so the legacy adoption below never meets it.
+  'external_default',
 ];
 
 /**
