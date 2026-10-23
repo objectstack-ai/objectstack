@@ -1102,3 +1102,155 @@ describe('set-user-password: the revoke-sessions-and-keys switch (#23287)', () =
     expect((res.body.data as any).revoked).toEqual({ sessions: 0, apiKeys: 0, failed: 0, complete: false });
   });
 });
+
+// ── [#25338] create-user's optional permission set ─────────────────────────
+//
+// The grant is Setup's grant, written in the same step: a
+// `sys_user_permission_set` insert under the CALLER's own context (never the
+// system's), so the security middleware and the delegated-administration gate
+// judge it as they judge the grant form — inside one unit of work with the
+// account, so a refused grant leaves no user behind.
+describe('create-user: an optional permission set, granted under the caller\'s own context (#25338)', () => {
+  const ACTOR_CTX = { userId: 'admin-1', isSystem: false, permissions: ['admin_full_access'] };
+
+  /** A unit of work that records whether it committed or rolled back. */
+  function makeGrantSeam(context: Record<string, unknown> | null = ACTOR_CTX) {
+    const outcomes: string[] = [];
+    const resolveActorContext = vi.fn(async () => context ?? undefined);
+    const runAtomically = vi.fn(async <T,>(work: () => Promise<T>): Promise<T> => {
+      try {
+        const result = await work();
+        outcomes.push('committed');
+        return result;
+      } catch (error) {
+        outcomes.push('rolled back');
+        throw error;
+      }
+    });
+    return { seam: { resolveActorContext, runAtomically }, outcomes, resolveActorContext, runAtomically };
+  }
+
+  const grantCalls = (m: ReturnType<typeof makeDeps>) =>
+    callsOf(m.engineCreate).filter(([object]) => object === 'sys_user_permission_set');
+
+  it('no permission set asked: the seam is never read and no grant is written', async () => {
+    const g = makeGrantSeam();
+    const m = makeDeps({ createGrant: g.seam });
+    const res = await runAdminCreateUser(m.deps, makeRequest({ email: 'n@b.co', password: 'Explicit1!' }), ACTOR);
+    expect(res.status).toBe(200);
+    expect(g.resolveActorContext).not.toHaveBeenCalled();
+    expect(g.runAtomically).not.toHaveBeenCalled();
+    expect(grantCalls(m)).toHaveLength(0);
+    expect((res.body.data as any).permissionSet).toBeUndefined();
+  });
+
+  it('assigned: one grant row naming the set, written under the caller\'s context inside the unit of work', async () => {
+    const g = makeGrantSeam();
+    const m = makeDeps({ createGrant: g.seam });
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'g@b.co', password: 'Explicit1!', permissionSet: ' crm_user ' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    expect(g.outcomes).toEqual(['committed']);
+    expect(m.createUser).toHaveBeenCalledTimes(1);
+    const grants = grantCalls(m);
+    expect(grants).toHaveLength(1);
+    const [, row, opts] = grants[0] as unknown as [string, Record<string, unknown>, { context: unknown }];
+    expect(row).toEqual({ user_id: 'user-9', permission_set: 'crm_user' });
+    // The caller's own context, so the gate judges the caller: never `isSystem`.
+    expect(opts.context).toBe(ACTOR_CTX);
+    expect((res.body.data as any).permissionSet).toBe('crm_user');
+  });
+
+  it('refused without authority: 403 PERMISSION_DENIED, the account rolls back, and nothing is audited or returned', async () => {
+    const { PermissionDeniedError } = await import('@objectstack/plugin-security');
+    const g = makeGrantSeam();
+    const m = makeDeps({ createGrant: g.seam });
+    m.engineCreate.mockImplementation((async (object: string) => {
+      if (object === 'sys_user_permission_set') {
+        throw new PermissionDeniedError('[Security] Access denied: delegated insert on sys_user_permission_set rejected.');
+      }
+      return {};
+    }) as any);
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'r@b.co', permissionSet: 'admin_full_access', generatePassword: true }),
+      ACTOR,
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error?.code).toBe('PERMISSION_DENIED');
+    expect(g.outcomes).toEqual(['rolled back']);
+    expect(res.body.data).toBeUndefined();
+    expect(callsOf(m.engineCreate).filter(([object]) => object === 'sys_audit_log')).toHaveLength(0);
+  });
+
+  it('a name the catalog does not hold: 400 VALIDATION_FAILED with its fields, and the account rolls back', async () => {
+    const { validationFailure } = await import('@objectstack/types');
+    const g = makeGrantSeam();
+    const m = makeDeps({ createGrant: g.seam });
+    const fields = [{ field: 'permission_set', code: 'reference_not_found', message: 'no such set' }];
+    m.engineCreate.mockImplementation((async (object: string) => {
+      if (object === 'sys_user_permission_set') throw validationFailure('no permission set is named nope', fields);
+      return {};
+    }) as any);
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'v@b.co', password: 'Explicit1!', permissionSet: 'nope' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('VALIDATION_FAILED');
+    expect(res.body.error?.fields).toEqual(fields);
+    expect(g.outcomes).toEqual(['rolled back']);
+  });
+
+  it('a host that wires no seam refuses 501 before any account exists', async () => {
+    const m = makeDeps();
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'w@b.co', password: 'Explicit1!', permissionSet: 'crm_user' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(501);
+    expect(m.createUser).not.toHaveBeenCalled();
+  });
+
+  it('a caller whose own context does not resolve is refused 403 before any account exists', async () => {
+    const g = makeGrantSeam(null);
+    const m = makeDeps({ createGrant: g.seam });
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'u@b.co', password: 'Explicit1!', permissionSet: 'crm_user' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe('PERMISSION_DENIED');
+    expect(m.createUser).not.toHaveBeenCalled();
+    expect(g.runAtomically).not.toHaveBeenCalled();
+  });
+
+  it('a permission set that is not a string is refused 400 before any account exists', async () => {
+    const g = makeGrantSeam();
+    const m = makeDeps({ createGrant: g.seam });
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'x@b.co', password: 'Explicit1!', permissionSet: ['crm_user'] }),
+      ACTOR,
+    );
+    expect(res.status).toBe(400);
+    expect(m.createUser).not.toHaveBeenCalled();
+  });
+
+  it('the Create User dialog offers it as the grant object\'s own permission_set column, optional', () => {
+    const action = (SysUser.actions ?? []).find((a) => a.name === 'create_user');
+    const param = (action?.params ?? []).find((p) => p.name === 'permissionSet');
+    expect(param).toMatchObject({
+      field: 'permission_set',
+      objectOverride: 'sys_user_permission_set',
+      required: false,
+    });
+  });
+});

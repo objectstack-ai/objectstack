@@ -185,6 +185,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           },
           mustChangePassword: {
             label: "首次登录时必须修改密码"
+          },
+          permissionSet: {
+            label: "权限集",
+            helpText: "可选。将该权限集授予新用户，使其首次登录即可打开自己的应用。"
           }
         },
         resultDialog: {
@@ -194,6 +198,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             "user.email": "邮箱",
             "user.phoneNumber": "手机号",
+            permissionSet: "权限集",
             temporaryPassword: "临时密码"
           }
         }

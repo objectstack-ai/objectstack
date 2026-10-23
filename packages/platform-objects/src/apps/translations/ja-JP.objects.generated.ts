@@ -185,6 +185,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           mustChangePassword: {
             label: "初回サインイン時にパスワード変更を必須にする"
+          },
+          permissionSet: {
+            label: "権限セット",
+            helpText: "任意。この権限セットを新しいユーザーに付与し、初回サインインから自分のアプリを開けるようにします。"
           }
         },
         resultDialog: {
@@ -194,6 +198,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             "user.email": "メールアドレス",
             "user.phoneNumber": "電話番号",
+            permissionSet: "権限セット",
             temporaryPassword: "一時パスワード"
           }
         }
