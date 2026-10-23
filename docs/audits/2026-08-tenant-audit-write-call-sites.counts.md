@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 237 |
-| Object name statically decidable | 161 |
+| Write call sites | 238 |
+| Object name statically decidable | 162 |
 | Object name chosen at run time | 76 |
-| Against a tenancy-enabled object | 160 |
+| Against a tenancy-enabled object | 161 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 178 |
+| Threading a tenant context | 179 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 51 |
 | …and decidably tenancy-enabled | 29 |
 | Threading a decidably elevated context | 135 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 94 |
+| Threading a context of undecidable elevation | 95 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-22 at `75983184c`.
+Measured on 2026-10-23 at `a7eca5ca7`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 708 |
+| tracked non-test sources scanned | 711 |
 | engine-shaped types recognised | 87 |
 | declared objects in the registry | 117 |
-| same-named calls subtracted as non-engine | 171 |
+| same-named calls subtracted as non-engine | 172 |
 
 ## Every site
 
@@ -128,6 +128,7 @@ Measured on 2026-10-22 at `75983184c`.
 | `packages/plugins/plugin-auth/src/admin-set-user-manager.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `update` | `sys_user` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `insert` | `sys_user_permission_set` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/adopt-membership.ts` | `update` | `SystemObjectName.MEMBER` | undecidable | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/audience-gate-test-support.ts` | `insert` | `sys_invitation` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager-sign-in-lockout.ts` | `update` | `sys_user` | enabled | options unreadable | 3 |

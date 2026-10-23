@@ -287,16 +287,19 @@ export const SysUser = ObjectSchema.create({
           defaultValue: true,
         },
         // [#25338] Optional: grant one permission set in the same step, so a
-        // new user does not sign in to a screen of refusals. Field-backed on
-        // the grant object's own `permission_set` column, so it is picked
-        // from the security catalog exactly as Setup's grant form picks it.
+        // new user does not sign in to a screen of refusals. INLINE, not
+        // field-backed: the grant object lives in plugin-security, whose
+        // metadata the console need not have loaded on this list, and an
+        // unresolvable field-backed param makes the dialog refuse the whole
+        // action. The grant column is a text field anyway (its picker is a
+        // widget hint params do not inherit), so nothing is lost.
         // The route writes the grant under the administrator's OWN context in
         // the same transaction as the account: the delegated-administration
-        // gate judges it as it judges the form, and a refusal creates no user.
+        // gate and the catalog name check judge it as they judge Setup's
+        // grant form, and a refusal creates no user.
         {
           name: 'permissionSet',
-          field: 'permission_set',
-          objectOverride: 'sys_user_permission_set',
+          type: 'text',
           label: 'Permission Set',
           required: false,
           helpText: 'Optional. Grants this permission set to the new user, so they can open their apps on first sign-in.',

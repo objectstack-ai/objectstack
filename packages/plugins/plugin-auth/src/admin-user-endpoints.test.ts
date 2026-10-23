@@ -1244,13 +1244,13 @@ describe('create-user: an optional permission set, granted under the caller\'s o
     expect(m.createUser).not.toHaveBeenCalled();
   });
 
-  it('the Create User dialog offers it as the grant object\'s own permission_set column, optional', () => {
+  it('the Create User dialog offers it as an optional INLINE param, never field-backed on another package\'s object', () => {
     const action = (SysUser.actions ?? []).find((a) => a.name === 'create_user');
     const param = (action?.params ?? []).find((p) => p.name === 'permissionSet');
-    expect(param).toMatchObject({
-      field: 'permission_set',
-      objectOverride: 'sys_user_permission_set',
-      required: false,
-    });
+    expect(param).toMatchObject({ type: 'text', required: false });
+    // A field-backed param on plugin-security's object is refused by the
+    // console dialog whenever that object's metadata is not loaded.
+    expect(param).not.toHaveProperty('field');
+    expect(param).not.toHaveProperty('objectOverride');
   });
 });
