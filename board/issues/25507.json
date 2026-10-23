@@ -1,0 +1,33 @@
+{
+  "number": 25507,
+  "kind": "issue",
+  "title": "pm-dispatch: every card carries a business rationale the 分诊席 judges (clear → queue, missing → back to filer, product trade-off → decision), and a seat verifies a card's premise before dispatch (maintainer's word 2026-10-23)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T16:45:49Z",
+  "updated_at": "2026-10-23T16:51:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25507",
+  "body": "Filing gate **③**: a maintainer-direct task, the maintainer's words quoted verbatim. Filed by `domain:skills` seat 2 (seat post #19287, session `session_01REMuzhz6MWRjg8uohedMnM`, account `os-elon-musk`) on the project coordinator's relay of the maintainer's word in the Claude Code project \"Objectstack\". ⛔ Not a claim. Lane self-applied under exception 二; grade suggested M, p2; triage may regrade.\n\n**Reader (who acts):** the `domain:skills` seat, one PR on `.claude/skills/pm-dispatch/**` (Tier S) plus ratchet ceiling rows. Contract review at `CONTRACT_REVIEW_TIER`.\n\n## The maintainer's words (2026-10-23, project chat, verbatim)\n\n> 目前 issue 在派发的之前，有谁在评估合理性吗 (16:43:10Z)\n> 判断不了的是否应该转决策 (16:43:22Z)\n> 我说的是业务需求上的合理性，谁来判断 (16:44:00Z)\n> 立卡 (16:44:29Z — the answer to the coordinator's proposal below)\n\nThe coordinator's proposal he answered (16:43:30Z and 16:44:10Z, quoted as context, not as his words):\n\n> 席位派发前先用子代理核实前提。核实成立就派；不成立、但改法明确的，就改卡后再派；判断不了的，转决策，不占卡线程名额。\n\n> 立卡门加一栏「业务理由」：谁受益、什么场景、不做会怎样。分诊席按这一栏判断：理由清楚、和既定产品方向一致的，正常定级入队；理由缺失或站不住的，退回立卡人补；涉及产品取舍、方向不明的，转「待决策汇总」给你。审计类批量立的卡，抽样给你过目，不是全部。\n\n## What is true today\n\n- Nobody judges a card's business reasonableness. A card from an outside issue, an audit batch (hotcrm#2194 filed 43 at once) or a seat's own filing is taken as a valid need. Triage sets lane and grade; the seat checks the card is complete; the card thread checks technical premises.\n- The only business-level path to the maintainer is the human-ruling floor in `references/triage-duties.md` (director batch #3, #25344 comment 6356061991), whose classes include 「一张卡的去留」, product behaviour, defaults and permissions.\n- A card thread that finds a false premise stops and routes to 「待决策汇总」 — after a card-thread slot was spent.\n\n## Wanted\n\n1. **Filing gate (`references/filing-gate.md`)**: a 「业务理由」 field on every card — who benefits, in what scenario, what happens if it is not done. Seat-filed and audit-filed cards carry it too.\n2. **The 分诊席 judges it** (`references/lanes/triage.md`, `references/triage-duties.md`): rationale clear and consistent with the product direction ⇒ grade and queue as today; rationale missing or does not hold ⇒ back to the filer to complete (a comment, the card stays open); a product trade-off or unclear direction ⇒ `needs-user-decision`, to 「待决策汇总」. Audit batches: a sample goes to the maintainer, not every card. ⛔ The 分诊席 never closes a card on business grounds by itself: a card's fate stays on the human floor.\n3. **Seat verifies the premise before dispatch** (`references/dispatch-runbook.md`): before claiming, the seat has a subagent spend a few minutes checking the card's technical premise on `main`. Holds ⇒ dispatch; false but the fix to the card is clear ⇒ correct the card (a comment saying what changed), then dispatch; cannot judge ⇒ to 「待决策汇总」, no card-thread slot used.\n4. Align with the human floor and keep its text verbatim; the new lines point at it rather than restating it.\n\n## Acceptance\n\n- The files above carry the text; `pnpm check:pm-skill-ratchet`, `check:pm-skill-id-lint`, `check:skill-frame-sync`, `check:skill-frame-freshness` green; the human floor in `triage-duties.md` byte-identical to `main`.\n- Serial: `references/dispatch-runbook.md` and `triage-duties.md` are also edited by PR #25474 (card #25457) and card #25490; start from `main` after #25422 (card #25414) lands, and merge `main` before review.\n- Writes: PR only through the relay's `pr_create`; ⛔ GitHub MCP writes.\n- Tier S landing: review PASS + green checks, under the maintainer's standing word of 2026-10-23 14:14Z in the skills seat thread.\n\n## Dedupe\n\nMCP `search_issues`, objectstack, \"filing gate business rationale who benefits, triage judges requirement reasonableness, seat verifies premise before dispatch\" → 25 hits; top: #24589 (closed, triage completes self-labelled cards' filing-gate answers), #23733 (closed, seat accepts self-labelled cards, triage spot-checks), #25490 (open, stale triage lines), #24610 (closed, finding without reach:), #23478 (closed, tooling-card admission by measured cost). None adds a business-rationale field or a pre-dispatch premise check. **New.**\n\nDedupe words: `业务理由 filing gate` · `分诊席 business reasonableness` · `pre-dispatch premise check`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

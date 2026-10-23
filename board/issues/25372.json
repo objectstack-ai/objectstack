@@ -2,8 +2,8 @@
   "number": 25372,
   "kind": "issue",
   "title": "ci(test-shards): split spec's `build-schemas-check-mode.test.ts` (842 s, 92 tests, one file) into several files, so spec's `test:repo` floor stops setting the slowest Test Core shard — re-scoped from file-sharding spec's `test` task",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T04:35:07Z",
-  "updated_at": "2026-10-23T13:18:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T18:30:51Z",
+  "closed_at": "2026-10-23T18:30:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25372",
   "body": "Filing gate: ③ maintainer-directed task (CI performance programme, 2026-10-23). Reader: the `domain:spec` execution seat, dispatch step — one os-dev, one PR. Dedup: `search_issues` on objectstack-ai/objectstack, closed included, \"spec package test shard file-sharded OS_TEST_SHARD slowest shard floor\" → 28 hits; none open on this mechanism. Nearest: #23180 (open, on-hold — per-file 10 s budget for spec tests, a different lever), #22075 (closed — shard balance on full-run sums), #16473 (closed — median rule for file-sharded packages). Session: `session_01GVTBi44LAWbPWg4evKfE1T`.\n\n## One-sentence problem\n\nOn objectstack every pull request and every merge-queue build waits for the slowest `Test Core (N/6)` shard, and whenever the change reaches `@objectstack/spec` — the root of the dependency graph, so most non-trivial PRs — that shard carries spec's test task as one indivisible 1331 s block and finishes 22–27 minutes after the others started.\n\n## Evidence (file lines at objectstack commit 303aef0; run ids from the GitHub Actions API, 2026-10-22/23)\n\n- `scripts/partition-test-shards.mjs:347-349` — `FILE_SHARDED_PACKAGES` names exactly one package, `@objectstack/cli` with 3 slices; `:376` — `PREVIOUS_FILE_SHARDED_PACKAGES` is the empty map the timings generator's slice-digest matcher reads.\n- `turbo.json` `@objectstack/spec#test` (lines 163–172) declares no `OS_TEST_SHARD` in its `env`; `@objectstack/cli#test` (line 211) does, and `packages/cli/vitest.config.ts:714-721` and `:851` select the slice from it.\n- `scripts/test-shard-timings.json` (measuredAt 2026-10-13): spec `test` 1330.8 s, cli 2206 s (already split 3 ways ≈ 735 s each), objectql 700, runtime 632. Spec is therefore the largest indivisible unit in the LPT partition — the next floor.\n- Measured shard wall, tests step only: PR run 39893808670 shard 3/6 = 24.3 min against 6.3 min for the fastest shard in the same run; PR run 39891259937 shard 3/6 = 26.6 min vs 9.9; merge_group run 39894014103 shard 2/6 = 22.7 min vs 12.4. Run wall = slowest shard + ~1 min (filter + aggregator). `ci.yml:529-531` self-reports p90 22.0 min over 396 shard jobs; merge_group CI median 27.5 min (n=47), PR median 24.4 (n=37).\n- Replaying the LPT partition locally over all 76 packages with a test script: 6 bins ≈ 1937 s and 8 bins ≈ 1452 s on full-battery weights, but on an affected-only run that reaches spec the spec block alone is 1331 s whatever the bin count. Widening the shard count (a sibling card) only pays after spec is sliced.\n\n## Governing text\n\n- AGENTS.md line 42: `pnpm test` is `turbo test`; line 88 — the `test` task's input hashing and `turbo ls --affected` are what the shard legs run through, so a slice must stay a turbo-visible `test` task, not a separate script.\n- `ci.yml:468-473` and `scripts/partition-test-shards.mjs:61-62` record the standing \"6 shards is enough\" reasoning; it was written when the largest block was 1773 s and spec 1147 s. This card does not change the shard count; it removes the floor the count cannot move.\n\n## Change\n\n1. `scripts/partition-test-shards.mjs`: add `'@objectstack/spec': 2` to `FILE_SHARDED_PACKAGES`; move the map as it stood into `PREVIOUS_FILE_SHARDED_PACKAGES` exactly as the comment above line 347 prescribes (the generator's slice-digest matcher decodes the old shape); re-pin the partition self-tests that assert the slice set.\n2. `turbo.json`: declare `OS_TEST_SHARD` in `@objectstack/spec#test`'s `env` the way `@objectstack/cli#test` does, so each slice hashes separately and the cache cannot replay slice 1 for slice 2.\n3. `packages/spec/vitest.config.ts`: read `OS_TEST_SHARD` and partition the file list deterministically, mirroring `packages/cli/vitest.config.ts:714-721` / `:851`. Spec's `test:repo` project stays unsliced — the slice legs in `ci.yml` run only `test` (`ci.yml:982`), `test:repo` runs whole (`ci.yml:673`).\n4. `scripts/measure-test-shard-timings.mjs`: confirm the median rule for file-sharded packages (#16473) covers a second sliced package without edits; the Monday refresh must measure the two spec slices as two rows.\n\n## Acceptance\n\n- On the first full-battery run after landing, the slowest `Test Core (N/6)` shard's tests step ≤ 17 min (today 24–27), and the shard-timing-drift alarm (#16465 lineage) stays green.\n- The partition self-test and `check:ci-filter-parity` are green; `node scripts/partition-test-shards.mjs --explain` lists spec as two slices.\n- The PR body records the measured before/after slowest-shard minutes from its own CI runs.\n\n## Risks and pins\n\n- Spec tests that share module-level state across files would surface as order-dependent failures when split — the cli slicing met none, but the PR must run both slices green twice.\n- The next timings refresh (`shard-timings-refresh.yml`, Mondays) re-weighs the slices; until then the partition uses the old whole-package weight for spec, which over-weighs it harmlessly.\n- Mind `PREVIOUS_FILE_SHARDED_PACKAGES`: a wrong previous map makes the generator mis-match old slice digests and silently drop measurements.\n\n## Work estimate\n\nLane `domain:spec` · 1 PR (packages/spec/vitest.config.ts, turbo.json, scripts/partition-test-shards.mjs and its pins; no `.github/workflows` change expected) · precedent: the cli slicing that `FILE_SHARDED_PACKAGES` records — its landing PR and +/− lines are not reachable from this depth-50 clone; the mechanism is in-tree. `Clause-②: no` · `Metadata-protocol: none` · Tier: not governed unless `ci.yml` must move (then Tier H, maintainer approval before ready).\n\nPrior rulings read: shard, partition, shard_count → docs/adr 3 hits, AGENTS.md 0, packages/spec/src 21 (none named for this mechanism); ADR none; thread: none.\n\nRelated: #23180 (open, on-hold), #22075 (closed), #16473 (closed), #16465 (closed), #23151 (closed). Sibling card for the shard count follows this one with `Blocked-by:`.\n\n## Maintainer directive (verbatim, untranslated)\n\n> 同意，立卡\n\n— the maintainer, 2026-10-23, in reply to the director seat's offer 「(a) 我按 PM 流程把 A1–A5、B1–B3 立成卡进队列(英文卡面、带 Governing text: 与工作量列),由 os-dev 派发」. The CI performance analysis those letters index is the seat's 2026-10-23 five-line audit (objectstack ci.yml + lint.yml; the other 39 workflows; the repo-side turbo/vitest/gate configuration; objectui's 28 workflows; GitHub Actions run data for the preceding 5–55 hours). The maintainer's stated goal, verbatim: 「我希望优化的是性能和效率速度」."

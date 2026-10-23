@@ -1,0 +1,34 @@
+{
+  "number": 25491,
+  "kind": "issue",
+  "title": "/import: inline mapping entries' `transform` (uppercase / lowercase / trim …) is accepted and silently ignored",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "marchtian",
+    "id": 7553007,
+    "type": "User"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T15:49:24Z",
+  "updated_at": "2026-10-23T18:23:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25491",
+  "body": "## What happens\n\n`ImportRequestSchema.mapping` accepts the rich `FieldMappingEntry[]` form with `transform: 'trim' | 'lowercase' | 'uppercase' | 'lookup' | 'date_format' | 'none'`, `defaultValue` and `required`. `prepareImportRequest` (`packages/rest`) flattens an inline array mapping to `{ sourceField: targetField }` and drops everything else, so the request validates, the import runs, and no transform is applied.\n\n## Reproduction (spec / rest 18.0.0)\n\n```json\nPOST /api/v1/data/srm_supplier/import\n{\n  \"format\": \"csv\",\n  \"csv\": \"公司全称,国家 / 地区,统一社会信用代码\\n示例公司,中国,91000000ma0trial02\\n\",\n  \"mapping\": [\n    { \"sourceField\": \"公司全称\", \"targetField\": \"name\" },\n    { \"sourceField\": \"国家 / 地区\", \"targetField\": \"country\" },\n    { \"sourceField\": \"统一社会信用代码\", \"targetField\": \"credit_code\", \"transform\": \"uppercase\" }\n  ],\n  \"writeMode\": \"upsert\", \"matchFields\": [\"credit_code\"]\n}\n```\n\nThe row fails the object's `^[0-9A-Z]{18}$` rule because the cell is still lowercase. Same for `transform: 'lowercase'` on an `email` column: `ZHOU@X.EXAMPLE.COM` and `zhou@x.example.com` are stored as two contacts, because `matchFields: ['supplier', 'email']` compares them case-sensitively.\n\n## Expected\n\nEither apply the entry's `transform` (and `defaultValue` / `required`) per cell before coercion, or refuse the request with a clear error that inline entries only support `sourceField` / `targetField`. Accepting it and doing nothing is the worst of the three.\n\n## Impact in hotsrm\n\nLegacy supplier ledgers carry lowercase credit codes and mixed-case emails. Today the import guide tells operators to clean these columns by hand before importing (temporary measure).\n\nFound during the trial import for objectstack-ai/hotsrm#10."
+}

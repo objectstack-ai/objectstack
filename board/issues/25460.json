@@ -1,0 +1,36 @@
+{
+  "number": 25460,
+  "kind": "pull_request",
+  "title": "docs(releases): the 18.1.0 notes, and the 18.x level rule on every page that still promised strict SemVer after GA",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "marchtian",
+    "id": 7553007,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T14:57:27Z",
+  "updated_at": "2026-10-23T15:35:37Z",
+  "closed_at": "2026-10-23T15:35:36Z",
+  "closed_by": {
+    "login": "marchtian",
+    "id": 7553007,
+    "type": "User"
+  },
+  "merged_at": "2026-10-23T15:35:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25460",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiRwWtsarkLPmw9fMYiFZ3LY)_\n\nClause-②: no\nMetadata-protocol: none\n\nA docs-only PR (`content/docs/**` plus the docs-audit list). It publishes nothing from any released package, so it carries no changeset. It does not touch the Version Packages PR #24876, and it performs no release act.\n\n## Why\n\nI audited the 18.0 and 18.1 release docs against what shipped and what is pending:\n\n- **18.0.0.** `releases/v18/18-0.mdx` is still accurate. `npm view` on 2026-10-23 reads `latest` = 18.0.0 and `next` = 18.0.0-next.5. Two pages around it had drifted:\n  - **Upgrading → \"Upgrading to 18.0\"** describes three behaviours that only exist on `main` and gives them no version: #25155 (`--no-server` is no longer a way round the auth refusal), #25231 (a plugin-auth load failure is refused) and #25179 (`os migrate plan` lists nullable tenant columns). A reader on 18.0.0 is told about refusals that 18.0.0 does not make.\n  - **Versioning policy.** Backward Compatibility says \"the window closes at GA, and strict SemVer resumes from that point\", and that a PATCH has \"no behavior changes\". The releases index says \"A patch release fixes bugs.\" Ruling A (#25105, 2026-10-21) keeps the no-major guard and grades by the metadata protocol, so after 18.0.0 a non-protocol breaking change ships as `patch`. 18.1.0 is a minor that carries 82 changesets declared breaking, 37 of them graded `patch`, #25399 among them. A `^18.0.0` range takes it unattended.\n- **18.1.0.** No page existed. I rehearsed `pnpm run version` in a throwaway clone of `main` (`2581efb`). It produces 18.1.0 across 73 packages with 227 distinct CHANGELOG entries. Every content gate the publish lane runs is green on that tree. The one exception is `check-release-section-coverage`, which is advisory: \"NO heading on this page names the 18.1 series\".\n- **ADR-0087.** The registry is complete. `check-adr-0087-registration --list` shows 82 declared-breaking changesets, all 82 with a disposition and 0 residue: 9 `registered`, 7 `already-registered`, 61 `no-migration-prescription`, 4 `runtime-export-retired` and 1 `runtime-interface-only`. `check:upgrade-guide` and `check:spec-changes` both generate cleanly.\n\n## What changes\n\n- **`releases/v18/18-1.mdx` (new).** The 18.1.0 notes, compiled from the changesets, with the entries grouped by `classifyReleaseBullet` as the GitHub Release body groups them:\n  - 73 entries need action from the reader, 9 are converted, 41 are new capabilities, 0 are semantic and 104 are fixes.\n  - The page adds a Console section (pin `616df6598b42` → `1d178e06ac5e`, six refreshes, 91 objectui entries) and an upgrade checklist from 18.0.0.\n  - Two callouts say the page was compiled before the cut and has not been walked.\n  - The cloud-managed break (#25399) gets its own section, which says self-hosted deployments are unchanged.\n- **`upgrading.mdx`.**\n  - The three post-18.0.0 behaviours now say \"from 18.1.0\".\n  - The per-release table gains a 18.1.0 row.\n  - The sentence \"a minor has nothing for `os migrate meta` to replay\" now notes the nine step-18 conversions that 18.1.0 adds.\n- **`protocol/backward-compatibility.mdx`, `releases/index.mdx`, `releases/v18/index.mdx`.** These now state the post-GA level rule. The v18 index also links 18.1.0 and notes the 18.1.0 tightening of the auth-secret refusal.\n- **`releases/v18/18-0.mdx`.** It now says that a caret range takes later 18.x releases, which can break, and section 4 points at the 18.1.0 notes.\n- **`scripts/docs-audit/handwritten-docs.json`.** This regenerates with `--write` for the new page.\n\nThe \"current series\" field on the releases index is left to `sync-release-index-currency.mjs`. On the rehearsed post-version tree it stamps `18.1.0`, and `check:release-notes`, `check:release-page-status`, `check:doc-anchors` and the section-coverage check are all green.\n\n## Follow-up after the publish\n\nThese are not in this PR:\n\n- A \"Release facts, as measured\" section, filled in with `npm view` after the publish.\n- A walked 18.0.0 → 18.1.0 checklist, which replaces the \"not walked\" callouts.\n\n## Verified locally\n\n- `check:doc-anchors`, `check:docs-single-h1`, `check:docs-redirects`, `check:docs-audit-scope`, `check:release-notes`, `check:release-page-status`, `check:release-index-currency-sync`, `check:published-readme-links` and `check:nul-bytes` are all green.\n- An MDX 3 + GFM compile of the six edited pages passes.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01At7xrR4rgknXtej5ZkMJHd)_"
+}

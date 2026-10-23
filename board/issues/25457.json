@@ -1,0 +1,36 @@
+{
+  "number": 25457,
+  "kind": "issue",
+  "title": "pm-dispatch: card threads write to GitHub only through the relay (`pr_create` and the other ops), never GitHub MCP; the dispatch order carries that line verbatim; review flags a PR not authored by the fleet bot (maintainer's word 2026-10-23)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T14:46:17Z",
+  "updated_at": "2026-10-23T17:50:24Z",
+  "closed_at": "2026-10-23T17:22:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25457",
+  "body": "Filing gate **③**: a maintainer-direct task, the maintainer's words quoted verbatim. Filed by `domain:skills` seat 2 (seat post #19287, session `session_01REMuzhz6MWRjg8uohedMnM`, account `os-elon-musk`) on the project coordinator's relay of the maintainer's word. ⛔ Not a claim. Lane self-applied under exception 二; grade suggested S, p2; triage may regrade.\n\n**Reader (who acts):** the `domain:skills` seat, one PR on `.claude/skills/pm-dispatch/**` (Tier S) plus ratchet ceiling rows if needed. Contract review at `CONTRACT_REVIEW_TIER`.\n\n## The maintainer's words (2026-10-23 14:43Z, Claude Code project \"Objectstack\", verbatim)\n\n> 如何更新 skills ：在环境级（项目根会加载的那层）设置里禁掉 MCP 写，并放行中继命令。这一步要你来改配置。\n>\n> 1. 在每张卡的派发令里写明「PR 只经中继 `pr_create` 开，禁用 MCP」。\n\n## What was measured (2026-10-23)\n\n- PR #25427 (card #25412) was opened by its card thread through the GitHub MCP `create_pull_request` tool, so the PR's author is the personal login `os-elon-musk`, not `objectstack-fleet[bot]`. Every other PR this project opened went through `scripts/pm/fleet-write/dispatch.mjs` `pr_create` and is authored by the bot (e.g. #25422, #25432).\n- Cause: a Claude Code project rooted at the parent of several checkouts does not load `objectstack/.claude/settings.json` (`CLAUDE_PROJECT_DIR` unset in three readings), so the repo's deny on MCP writes and its PreToolUse guards are inert there. Each repo's `CLAUDE.md` does load. In that layout the skill text is the only line of defence.\n- `references/execution-duties.md` L130 today: 「派发令恒带 `Writes:` 行:只走 REST 代理、写预算(端点清单)、`mcp_calls` 计数,dev 两数都报。」 — it says REST relay but does not name `pr_create` or forbid the MCP write tools by name.\n\n## Wanted\n\n1. **`references/execution-duties.md` `Writes:` line:** PR only through the relay's `pr_create`; comments, labels, body edits only through the relay tools (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`); ⛔ GitHub MCP writes by name (`create_pull_request`, `update_pull_request`, `issue_write`, `add_issue_comment`, …); one clause that in a multi-repo project the repo `settings.json` deny does not load, so this line is the guard.\n2. **`references/dispatch-runbook.md` 〈卡线程〉:** the card thread's opening message (the dispatch order, per #25379) carries that `Writes:` line verbatim.\n3. **`references/contract-review.md` or `review-checklist.md`:** a PR whose author is not `objectstack-fleet[bot]` is flagged in the review record (③ note, with the author login), so the seat sees an off-relay write before landing.\n\nOut of scope: the environment-level settings the maintainer will change himself (first sentence of his message); any `scripts/**` check (a devx card if wanted).\n\n## Acceptance\n\n- The three files carry the text; line-neutral or paid in the same file; `pnpm check:pm-skill-ratchet`, `check:pm-skill-id-lint`, `check:skill-frame-sync`, `check:skill-frame-freshness` green.\n- `git grep -n 'create_pull_request' -- .claude/skills/pm-dispatch` names it only as forbidden.\n- Serial: lands after #25427 (card #25412) and #25422 (card #25414), which edit `dispatch-runbook.md`, `contract-review.md` and `execution-duties.md`'s neighbours; start from `main` after they land, or merge `main` before review.\n- Tier S landing per the current rule (review PASS + green checks; the maintainer's standing word in the seat thread of 2026-10-23 14:14Z).\n\n## Dedupe\n\nMCP `search_issues`, objectstack, \"card thread opened PR through GitHub MCP write, PR author not fleet bot, dispatch order Writes line relay only pr_create\" → 59 hits; top: #25412, #23423 (closed), #25417, #21892 (closed: label-write fell back to a personal-login write — the same identity hazard on a different path), #25415, #25416, #25379 (closed), #24145, #20791, #20063 (closed: PR assignee rule). None names the MCP write tools or the dispatch-order line. **New.**\n\nDedupe words: `GitHub MCP write ban` · `Writes: line pr_create` · `PR author not objectstack-fleet[bot]`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 25477,
+  "kind": "issue",
+  "title": "Declarative \"at most one row per parent where X\" (conditional unique) — summary-based guards miss rows in the same bulk insert",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "marchtian",
+    "id": 7553007,
+    "type": "User"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "needs-user-decision",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T15:36:59Z",
+  "updated_at": "2026-10-23T16:52:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25477",
+  "body": "## Context\n\nhotsrm needs \"each supplier has at most one primary contact\" (`srm_supplier_contact.is_primary`). It must hold for UI edits and for the spreadsheet import, metadata only.\n\n## What we tried\n\n- `indexes[].partial` is retired, and a unique index on `['supplier', 'is_primary']` would also forbid two non-primary contacts.\n- A summary on the parent (`primary_contact_count`, count with `filter: { is_primary: true }`) plus a `script` rule on the child: `record.is_primary == true && record.supplier.primary_contact_count > 0`. This catches a second primary when the first already exists, **but not two primary rows created in the same import batch**: the import runner batches creates through `createManyData` / `insertManyData`, and the parent summary is not recomputed between the rows of one batch, so both rows pass.\n\nReproduction: import `供应商,姓名,邮箱,主联系人` with two rows for a new supplier, both `是` → both created, `primary_contact_count = 2`.\n\n## Proposal\n\nOne of:\n\n1. Conditional unique index: `{ fields: ['supplier'], unique: 'organization', where: { is_primary: true } }` (partial index on SQL drivers, emulated on memory).\n2. A declarative cross-row rule type (`type: 'unique_where'` or similar) that is judged per row inside bulk writes.\n3. At minimum: evaluate child `script` rules that read a parent summary against a summary that includes earlier rows of the same batch, or document that they do not.\n\n## Workaround in hotsrm (temporary)\n\nThe summary-based guard stays (it covers single writes and later imports), and a list view \"主联系人重复\" (`primary_contact_count > 1`) surfaces the batch case for manual repair during review.\n\nLinked: objectstack-ai/hotsrm#10"
+}

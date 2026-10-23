@@ -2,8 +2,8 @@
   "number": 25321,
   "kind": "issue",
   "title": "tree-wide `git grep` pins read every byte under `packages/` (CHANGELOGs included) against a 60 s budget: the runtime twin hit 86 s on a loaded shard (#25298); five siblings still do",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T00:53:14Z",
-  "updated_at": "2026-10-23T12:23:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T17:17:55Z",
+  "closed_at": "2026-10-23T16:46:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25321",
   "body": "Adopts: #25389\n\nFiled by PM seat `domain:devx#1` (seat post #6023, `session_01LKHDniRQSWjRJyDtacwpEd`) from the dev report on #25298 (PR #25319). ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim.\n\n**Filing gate: ① a defect, class (a).** A named producer, a pin test whose tree scan reads all of `packages/` and filters afterwards, turns a loaded CI shard into a timed-out test with no assertion run. One instance is measured red.\n\n## Measured\n\n- **The instance.** The hourly full run `39853791549` on `main` `49185cdb8a` went red in `Test Core (6/6)`. `packages/runtime/src/action-owner-key-single-source.test.ts` took 86.24 s for 16 tests against `SCAN_TIMEOUT_MS = 60_000`; locally it takes 0.27 s.\n- **The cause, measured by the #25298 dev.** Half D ran three `git grep`s, each over every file under `packages/` (3 × 212.6 MB, filtered to `.ts` only afterwards). PR #25319 makes it one `git grep` with the pathspec `:(glob)packages/**/*.ts`, the same file set. Its reading: 637.8 → 151.2 MB, file wall 311–332 → 114–123 ms. The budget is unchanged.\n- **Siblings on `origin/main` `9dc1f42d50` with the same `SCAN_TIMEOUT_MS = 60_000` and a scan over `packages` as a whole** (read with `git show`):\n  - `packages/objectql/src/action-owner-key-single-source.test.ts`: the twin of the runtime file (`SCANNED_ROOTS = ['packages']` at `:261`, the grep at `:303`–`:312`). The dev reports it runs the same three full scans.\n  - `packages/core/src/security/row-serving-door-exposure.pin.test.ts:136`: `git grep … -- packages`.\n  - `packages/core/src/security/second-object-read-exposure.pin.test.ts:276`: `git grep … -- packages`.\n  - `packages/core/src/security/granted-permissions-not-enforced.pin.test.ts:100` (over `PATHSPECS`) and `packages/core/src/security/operation-private-keys.pin.test.ts:222`/`:246` (`ls-files`, then `grep`): their pathspecs were **not measured**. They may already be scoped.\n- None of these four has gone red yet; that was not searched beyond the one hourly run.\n\n## Direction (for triage to weigh)\n\nPR #25319's shape: give `git grep` the pathspec of the extension it judges, so git reads only those files. Run one scan per file and share it, keep the budget, and prove with an ablation that a planted mention in a still-scanned path goes red. ⛔ Not a timeout raise. One card covers the family; per-file cards are not wanted.\n\n## Reader\n\nTriage, for routing. The fixes land in `packages/objectql` and `packages/core` test files (`domain:engine` by the lane table), and #25298's precedent is `domain:devx` CI health.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped: 「git grep tree scan pin test SCAN_TIMEOUT_MS timeout packages loaded shard」 → 9 hits. No open card names this family. #13645 (closed) is the earlier member of the same class: `authz-store-unavailable.test.ts` walked all of `packages/` twice under a 5 s default. #22034 (open) is the checkout cost, a different producer."

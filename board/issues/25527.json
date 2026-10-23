@@ -1,0 +1,37 @@
+{
+  "number": 25527,
+  "kind": "pull_request",
+  "title": "fix(service-settings): translate the AI \"Reset to environment defaults\" button and cover action_button labels",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T19:23:10Z",
+  "updated_at": "2026-10-23T20:19:26Z",
+  "closed_at": "2026-10-23T20:19:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T20:19:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25527",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuACdPWFJTLDcTrByFCHLzqb)_\n\nFixes #25502\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nSetup → AI's **Reset to environment defaults** button rendered in English in zh-CN, ja-JP and es-ES sessions, next to its translated siblings (\"测试连接\", \"测试 Embedder\").\n\n- **The key:** `packages/services/service-settings/src/manifests/ai.manifest.ts` declares `{ type: 'action_button', id: 'reset', label: 'Reset to environment defaults' }`. The console resolves an action label as `settings.ai.actions.reset.label`. On base `dc3e5b9d7b`, none of the four bundles had that key: `ai.actions` held only `test` and `test_embedder`.\n- **Translations added** in `translations/{zh-CN,ja-JP,es-ES}.ts`. The wording follows each bundle's own word for the env source (`sourceLabels.env`):\n  - zh-CN: `重置为环境变量默认值`\n  - ja-JP: `環境変数のデフォルトにリセット`\n  - es-ES: `Restablecer a los valores predeterminados del entorno`\n- `en.ts` also gets the English entry beside `test` / `test_embedder`, so the en fallback carries every AI action.\n- **The coverage gap is closed for the whole class.** Before this change, `settings-translation-coverage.test.ts` read titles, groups, field keys and `info_banner` copy, but never `action_button` labels: a button has an `id` and no `key`, so it matched none of the branches. The test now covers action buttons in both directions:\n  - **Missing copy:** every shipped non-English locale must carry `settings.NAMESPACE.actions.ID.label` for each `action_button` in every manifest. A button with no `id` is reported, the same as a banner with no `id`.\n  - **Dead copy:** no bundle, en included, may carry `actions` copy for a button no manifest declares.\n\nLanding: the claim's file surface (service-settings translation bundles and the coverage test). The manifest is unchanged, and `packages/spec` is not touched.\n\n## Evidence\n\n- **Ablation:** I removed only the zh-CN `reset` entry through `scripts/ablation-replace.mjs`. The anchor hit once, x1 to x0, blob `47f36fc78683` to `7bd43be08bbc`. The coverage test went red with `zh-CN missing for ai: action:reset` (Tests 1 failed / 39 passed). The script restored the file (blob equals HEAD `47f36fc78683`, `git diff HEAD` empty). The test reads `src` through relative imports, so no dist rebuild was involved.\n- **Suite:** `pnpm --filter @objectstack/service-settings test` gave Test Files 60 passed (60), Tests 1000 passed (1000). `pnpm --filter @objectstack/service-settings typecheck` exited 0, and its tsconfig includes all of `src`, test files included. Both ran on head `591481a4d1`.\n- **Gates:** `node scripts/pm/dispatch-gates.mjs --commands` derived 67 commands. 66 ran and exited 0. `pnpm check:dual-build-cjs-loads` exited 3 with PREREQUISITE NOT MET: it needs a full `pnpm build`, so it was not measured locally and is left to CI. Reconciling with `--ran` accounted for all 67 (66 run, 1 not measured).\n\n## Acceptance notes\n\n- With action buttons covered, no other action key is missing in a non-English locale: mail, sms, storage, knowledge and ai are all green.\n- `en.ts` has no `sms` namespace at all. en is not a gated locale, and the English label falls back to the manifest literal. This is noted, not changed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016g7nYP9wdNx1GDa5XDr7Uy\n"
+}

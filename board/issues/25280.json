@@ -2,8 +2,8 @@
   "number": 25280,
   "kind": "issue",
   "title": "plugin-approvals: an approval delegation with no organization still applies across every tenant (the retired NULL-means-global reading, ADR-0131)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:services",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T19:43:39Z",
-  "updated_at": "2026-10-23T14:17:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T15:07:37Z",
+  "closed_at": "2026-10-23T15:06:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25280",
   "body": "Filing gate **③**: an observation of the contract review of PR #25266 (record 6348535486, observation 3), disposed in the seat's ACCEPT 6348614791 (item 5). PR #25266 retired the NULL-means-global texts on `sys_user_position` and `sys_user_permission_set`; this one is outside its card (#25203).\n- **Who acts:** `domain:services`.\n- **Dedupe:** none found.\n\nPart of #15212.\n\n## What happens on `main` (at `bda53bb0b`)\n- ADR-0131 retires \"NULL organization means every organization\": a grant applies only while its organization is the active one, and an organization-less grant applies nowhere (`grantAppliesInTenant`, `packages/core/src/security/resolve-authz-context.ts`).\n- `sys_approval_delegation` still reads the old way, in code and in text:\n  - `packages/plugins/plugin-approvals/src/approval-service.ts:3245`: the active-delegation filter keeps a row when `r.organization_id == null` (\"A null-org rule applies across tenants\"), and also when the caller's `organizationId == null`.\n  - `packages/plugins/plugin-approvals/src/sys-approval-delegation.object.ts:143`: the help says \"null = applies across tenants for this delegator\", and the `en` / `es-ES` / `ja-JP` bundles carry it (`translations/*.objects.generated.ts:377`).\n- Whether an organization-less delegation row can still be written under a wall (D9 stamps a system insert) decides how reachable the cross-tenant reading is; the card measures it.\n\n## Wanted\n- Decide the delegation's reading under ADR-0131 the way `grantAppliesInTenant` does (an organization-less delegation applies nowhere under a wall; the single-organization posture as ADR-0131 says), in the one filter at `:3245`.\n- The object help and its bundles say what the code does (regenerate `en` with the repo tool; update the hand-written locales).\n\n## Acceptance\n- Pinned: under a wall, a delegation of organization A does not reroute an approval in organization B, and an organization-less row reroutes nothing; the same-organization delegation still applies.\n- `Clause-②` / `Metadata-protocol` declared per AGENTS.md."

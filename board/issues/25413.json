@@ -2,8 +2,8 @@
   "number": 25413,
   "kind": "issue",
   "title": "feat(plugin-security): under a walled posture, deliver the access upgrade report in-app into the organization OS_PLATFORM_OWNER_ORGANIZATION names, instead of the operator log line only",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T12:23:43Z",
-  "updated_at": "2026-10-23T14:05:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T17:41:23Z",
+  "closed_at": "2026-10-23T17:02:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25413",
   "body": "Filing gate **③**: a direction the maintainer gave in the epic seat's chat on 2026-10-23, on #24446's walled delivery. The seat had put option C (an organization-less, operator-only notification) to the maintainer. The maintainer chose instead to configure the platform owner's organization, the way the platform owner's email is configured: 「既然可以配置平台管理员的邮箱，也可以配置平台管理员的组织id吧？」, naming it `OS_PLATFORM_OWNER_ORGANIZATION`.\n- **Who acts:** the shared queue.\n- **Dedupe:** none. No platform-organization setting exists on `main`; `packages/types/src/env.ts` has `OS_PLATFORM_OWNER_EMAIL` only.\n\nRelated: #24446 (closed), U1 PR #25311, the seat's option-A ruling 6353787407, #24447 (the non-access classes after v18, which meet the same walled-delivery question).\n\n## What is on `main`\n- U1's boot report (`packages/plugins/plugin-security/src/access-upgrade-report.ts`) raises access-class findings at `kernel:bootstrapped`:\n  - under `single`, through `messaging.emit()` to the Default Organization's `admin_full_access` holders plus `OS_PLATFORM_OWNER_EMAIL`, stamped with the Default Organization;\n  - **under a wall (`group` / `isolated`), only as one `error` line addressed to the operator** (option A).\n- Why the wall gets only a log line: `sys_notification` is organization-owned (ADR-0131: no NULL `organization_id`), a walled system write that names no organization is refused (D9), and the operator belongs to no organization by default.\n\n## Wanted\n1. **A new setting, `OS_PLATFORM_OWNER_ORGANIZATION`**, beside `OS_PLATFORM_OWNER_EMAIL` in `packages/types/src/env.ts`:\n   - its value is the organization's id or slug, resolved at boot;\n   - it is read only under a walled posture; `single` keeps the Default Organization.\n2. **Delivery under a wall when it is set:** U1's report emits the same `security.access_upgrade` notification, with the same `dedupKey` per finding set, stamped with that organization and addressed to the operator or operators (`OS_PLATFORM_OWNER_EMAIL`). The `error` log line stays beside it, as it does under `single`.\n3. **Fail loud, never fall back silently:**\n   - set but naming no organization: one boot `error` naming the value and the fix, and the log-line delivery;\n   - set, but the operator is not a member of that organization: a `warn` that the in-app copy will not be visible to them.\n4. **A dedicated organization.** The findings are deployment-level and can name other organizations' ids and sharing-rule names, so any administrator of the named organization can read them in Setup, Diagnostics, Notification Events. Document that the organization must hold operators only. Measure whether a boot `warn` can cheaply flag an administrator of it who is not a configured operator, and add it if so.\n5. **Not set:** unchanged. Option A's log line only.\n6. **Shape it for reuse:** make the walled delivery a small helper the #24447 report can call, rather than a branch inside U1's report.\n\n## Acceptance\n- Under `isolated` and `group`, with the setting naming a dedicated organization the operator belongs to: a vendor rename produces one notification in that organization, visible in the operator's inbox, and none in any other organization. It deduplicates on the next boot.\n- An unknown value, and the setting left unset, behave as in Wanted 3 and 5. Each is pinned, with a CONTROL.\n- `single` is unchanged.\n- The changeset declares `Clause-②: yes` (a new setting) and `Metadata-protocol: none`, at `patch`. The env docs list the setting next to `OS_PLATFORM_OWNER_EMAIL`.\n- R1–R4 hold, with R4 measured under `isolated` and `group`."

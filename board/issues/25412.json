@@ -2,8 +2,8 @@
   "number": 25412,
   "kind": "issue",
   "title": "pm-dispatch: project forms — lane project and director project, lanes read from the seat post's 🟢 line, the maintainer's one-sentence assignment, takeover of a walled account, mailbox PRs, generated roster board (maintainer's word 2026-10-23)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T12:23:36Z",
-  "updated_at": "2026-10-23T12:57:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T15:37:44Z",
+  "closed_at": "2026-10-23T15:35:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

@@ -1,0 +1,37 @@
+{
+  "number": 25500,
+  "kind": "pull_request",
+  "title": "fix(cli): os migrate apply names the birth marker, not a ceremony, when it lets an organization_id drop through",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T16:26:43Z",
+  "updated_at": "2026-10-23T17:36:20Z",
+  "closed_at": "2026-10-23T17:36:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T17:36:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25500",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDWJsBGQpadCH8JR2xZQ5re)_\n\nFixes #25466\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\n`os migrate apply --allow-destructive`, when the organization-ownership drop gate lets an `organization_id` drop through, now says which row let it through:\n\n- **Birth marker** (`details.birth`, written by the boot guard on a datastore created from empty): `organization_id on acme_note: this database was created from empty (CREATED_AT, platform VERSION) and carries the organization-ownership birth marker, so it holds no legacy organization rows and the ceremony is not needed for it — the drop may proceed.`\n- **Ceremony run** (`details: { checkpoint }`): the same sentence as before, `the organization-ownership ceremony verified (VERIFIED_AT) — the drop may proceed.`\n\nThe distinction is read from the `flag` the gate's one marker read (`gateReads.organizationOwnershipMarker`) already returned: no second database read. The new pure helper `organizationOwnershipBirthOf(flag)` in `packages/cli/src/utils/organization-ownership-drop-gate.ts` parses `details.birth` with the spec's existing `OrganizationOwnershipBirthMarkerSchema` (`@objectstack/spec/system`, already exported). No new export from `packages/runtime` or `packages/spec`.\n\nUnchanged: the `--json` document (it prints no such line), exit codes, the accept set (`isDataMigrationFlagVerified` still decides), and the refusal branch. `plan.ts` prints no such line on a verified database, so it is untouched.\n\n## Discriminator: where it comes from\n\nThe runtime boot guard does not tell the two apart. It decides on the shape generation alone (`organizationOwnershipShapeGenerationOf`, which reads `details.birth ?? details.checkpoint`), and no exported reader answers \"birth or ceremony\". The spec's docblock on `ORGANIZATION_OWNERSHIP_MIGRATION_ID` defines the birth marker as the row whose `details.birth` is an `OrganizationOwnershipBirthMarker`. The ceremony's ledger write (`organization-ownership.ts`, `details: { checkpoint }`) replaces the whole field, so a row carries one or the other. The helper reads that declared key with the declared schema. If `details.birth` is present but does not parse, the line still takes the birth arm and names the row's `verified_at`, which the guard writes from the same clock.\n\n## Measured reproduction (real CLI, SQLite, harness copied from the earlier tenant:false run)\n\nDatabase created by `os migrate apply --yes` on an empty file. Its `sys_migration` row is `{\"birth\":{\"shapeGeneration\":1,\"platformVersion\":\"18.0.0\",\"createdAt\":\"…\"}}`. Then `acme_note` declares `systemFields: { tenant: false }` and `os migrate apply --allow-destructive --yes` runs:\n\n| leg | tree | exit | success line |\n|---|---|---|---|\n| before | `apply.ts` from base `ab510f42e7`, cli rebuilt | 0 | `✓ organization_id on acme_note: the organization-ownership ceremony verified (2026-10-23T15:32:50.299Z) — the drop may proceed.` |\n| after | `b58c1ed845` | 0 | `✓ organization_id on acme_note: this database was created from empty (2026-10-23T15:32:05.034Z, platform 18.0.0) and carries the organization-ownership birth marker, so it holds no legacy organization rows and the ceremony is not needed for it — the drop may proceed.` |\n\nIn both legs the column is dropped (`pragma_table_info` has no `organization_id` afterwards) and `Applied 1 change(s).` prints. With `--json`, both legs exit 0 with the same key set. After normalising timestamps and the database file name, the documents differ only in `duration` (959 vs 907 ms). Neither prints the line. The before leg was restored with `git checkout HEAD -- apply.ts`: `git diff HEAD` was empty, the hash matched the HEAD blob, and cli was rebuilt (the marker string is back in `dist/`).\n\n## Tests\n\n`packages/cli/src/commands/migrate/apply.organization-ownership-refusal.test.ts` runs the real `MigrateApply.run` path, with the boot and the marker read replaced. It adds three cases:\n\n- a birth-marker row: exit 0, the drop is applied, and the line names \"created from empty\", the creation time and \"birth marker\", and does not contain \"ceremony verified\";\n- a ceremony-run row (`details.checkpoint`): exit 0, and the line keeps `the organization-ownership ceremony verified (VERIFIED_AT)`;\n- `--json` for both rows: exit 0, no success line, and the two documents are equal.\n\n## Local gates (head `b58c1ed845`)\n\n- `pnpm --workspace-concurrency=2 --filter '@objectstack/cli...' build`: VERDICT command-exit 0\n- `pnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2`: VERDICT command-exit 0, Test Files 326 passed (326), Tests 4808 passed (4808)\n- `pnpm --filter @objectstack/cli typecheck`: VERDICT command-exit 0\n- `pnpm lint`: VERDICT command-exit 0\n- `dispatch-gates --commands`: 67 derived. 65 ran with exit 0. 2 are NOT MEASURED (exit 3, PREREQUISITE NOT MET): `check:dual-build-cjs-loads` and `check:i18n-coverage`, because both need a whole-repo `pnpm build` and only the cli closure was built here. CI runs them.\n- `--ran` reconciliation: 67 derived, 65 run, 2 NOT-MEASURED (derived from recorded exit 3), 0 UNRUN.\n- The cli integration tier is left to CI: the diff touches no integration-tier file and no spawn entry.\n\n## Acceptance notes\n\n- The ceremony arm is pinned at the unit layer only. Running a real ceremony on SQLite to read its line was not part of this S card.\n- The `sys_comment.reactions` sibling success line was checked and left alone. Its marker (`sys-comment-reactions-to-records`) is written only by `os migrate comment-reactions --apply` (`comment-reactions-conversion.ts`) and is not creation-attested (`CREATION_ATTESTED_MIGRATION_IDS` holds only file-references and value-shapes), so a verified row there always comes from a real run.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01CxBKycaiUpA1yGx1XyoGqX\n"
+}

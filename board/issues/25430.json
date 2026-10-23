@@ -2,8 +2,8 @@
   "number": 25430,
   "kind": "issue",
   "title": "chore(console): move the objectui pin 5fef032b1ada → objectui main, past objectui#13361 (closes objectui#7611), before the 18.1.0 cut; re-run F1 on it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "marchtian",
@@ -18,15 +18,21 @@
     "priority:p1",
     "target:v18"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T13:17:46Z",
-  "updated_at": "2026-10-23T13:57:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T16:44:21Z",
+  "closed_at": "2026-10-23T16:44:21Z",
+  "closed_by": {
+    "login": "marchtian",
+    "id": 7553007,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25430",
   "body": "Filed from the 田騏 project thread (session `session_01CBtjEGZifSHGenaRcRBKYb`). ⛔ Not a claim.\n\n## Why\n\n- The 18.1.0 cut moved the console pin first (ruling 5a-B on Version Packages PR #24876, comment 6355689829; landed as #25358 → `.objectui-sha` = `5fef032b1ada`).\n- Since then objectui#7611 (C9's remainder of the ADR-0131 tree, #15194) closed through objectui#13361 (`f2f4b7dc30d5`, 2026-10-23T12:45Z). The pinned console predates it, so 18.1.0 would ship without it.\n- objectui `main` is now `4603b8c4ec99` (read 2026-10-23T13:20Z), 7 commits past the pin: objectui#13346, #13351, #13347, #13359, #13354, #13361, #13363.\n- The #7275-A pin reading on #24876 therefore lags again.\n\n## Done when\n\n- One PR moves the pin to objectui `main`'s tip with green objectui CI, the same way as #25358 / #25262: `scripts/bump-objectui.sh <sha>`; `pnpm objectui:build` then `node scripts/gen-sdui-manifest-node.mjs`; `pnpm gen:sdui-lockstep`. Every file is written by the repo's own tooling.\n- The F1 re-test (the false \"does not match the spec\" banner on a position declaring `permissionSets`; method of os-dev-report 6263864885 on #15194) is re-run measure-only on the new pin, as ruling 6262099137 item 2 asks whenever the pin moves before a cut, and the reading is posted on #15194. The last reading was NO on `12dc7b47c340` (6277654282).\n- After it lands, #24876 is refreshed (`refresh_version_pr`) by the release lane, because `main` has moved.\n\n## Dedupe\n\nNo open PR moves `.objectui-sha` (read 2026-10-23T13:20Z). Precedents: #25358 (#25353), #25262, #24644 (pin move plus F1 re-run)."

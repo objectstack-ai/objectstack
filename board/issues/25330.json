@@ -2,8 +2,8 @@
   "number": 25330,
   "kind": "issue",
   "title": "Setup → System Overview: \"Events by User\"'s largest bar (~740 events) is labelled \"(None)\" and each bar has its own colour — label system writes \"System\" and use one colour per series (hotcrm#2194 T2-U01)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T01:31:45Z",
-  "updated_at": "2026-10-23T14:07:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T14:44:50Z",
+  "closed_at": "2026-10-23T14:44:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 14,
   "locked": false,

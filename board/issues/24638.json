@@ -2,8 +2,8 @@
   "number": 24638,
   "kind": "issue",
   "title": "[Decision] An 18.0-created database whose object newly declares `systemFields: { tenant: false }` has no way on in 18.0 — the drift report prescribes `--allow-destructive`, the drop gate refuses it, and the ceremony is refused",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:server",
-    "pm:blocked",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-19T18:57:52Z",
-  "updated_at": "2026-10-23T14:12:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T15:15:30Z",
+  "closed_at": "2026-10-23T15:15:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/24638",
   "body": "Ruled: 6279608008 · letter A · 2026-10-19T23:30Z — first-class self-ruling (director channel, summon #45); state `pm:queue` · `domain:cli` · `priority:p3`; listed in summon #45's closing table on #12708 for the maintainer's veto window.\n\nFiling gate ②, a decision only the maintainer can make: the case falls outside ruling `6259608309` (18.0 is fresh installs only; a v17 database stays on 17.x), and the options differ on product behaviour.\n\nFiled by `domain:cli` seat 1 (seat post #6024) · `zhuangjianguo` · session `session_01SYEJqDL3NXxrJRBVqaMu9T`, from #24567 row 3's dev report (PR #24635, `open_questions[0]` and `out_of_scope_findings[0]`). ⛔ Not a claim. **Reader who acts:** the maintainer decides here; then `domain:cli` for A (the refusal texts are in `packages/cli` and `packages/runtime`).\n\n## 维护者速读\n\n- **问题:** 在 18.0 里新建的数据库上,作者把某个已有对象改成 `systemFields: { tenant: false }`(不再按组织隔离)。下一步就走不下去了:漂移报告让他用 `os migrate apply --allow-destructive` 删掉 `organization_id` 列,删除门拒绝;18.0 又没有任何能删这列的命令。按源码推断,`os serve` 随后还会把这个库当成\"v17 形态\"拒绝启动,并让他\"留在 17.x\",这句话对一个 18.0 新建的库是错的。\n- **谁会遇到:** 目前没有用户报告,是 dev 在 18.0 上实测出来的(`apply` 一侧实测;`serve` 一侧只读了源码)。\n- **推荐 A:** 只改两处拒绝文案,各加一句说明这种情况怎么办(撤回 `tenant: false`,或等 18.x 的迁移流程,它已经规划了这类表)。不开新口子,不动\"18.0 不提供逃生门\"的裁决。\n- **您要做的一个动作:** 回一个字母(A / B / C)。\n\n## Measured (by the dev at PR #24635's head `69778e478`; read by the seat on `origin/main` `973917c57`)\n\n- **Reproduction:** an 18.0-created database; object `acme_note` was created with its injected `organization_id`, then declared `systemFields: { tenant: false }`. `os migrate apply` reports \"`acme_note.organization_id`: column exists in the database but not in metadata (orphaned) — \\\"os migrate apply --allow-destructive\\\" to drop it\". `os migrate apply --allow-destructive --yes` is refused by the organization-ownership drop gate: exit 1, column kept.\n- **No way on in 18.0:** `os migrate organization-ownership` refuses on every database (`NOT_IMPLEMENTED`).\n- **By source (not measured):** `findV17ShapeTables` in `packages/runtime/src/organization-ownership-boot-guard.ts` reads only `systemFields.tenant === false` plus the physical column. So `os serve` would refuse this database as \"still in the v17 organization-ownership shape … keep this one on a 17.x release\", which is false for it.\n- **The gate's reach:** `ceremonyOrganizationColumnDrops` in `packages/cli/src/utils/organization-ownership-drop-gate.ts` holds back every `organization_id` drop.\n- **The 18.x side:** the cli CHANGELOG entry `6074eaf` says the ceremony plans this population.\n\n**Governing text:**\n- Ruling `6259608309` on #15194 item 1: \"18.0 is fresh installs only … An incomplete ceremony must never certify an old database.\" It speaks of v17 databases, not this one.\n- ADR-0131 D10: no automatic drop, delete or attribution; the ceremony owns the drops.\n- `packages/spec/src/data/object.zod.ts` `systemFields.tenant`: \"Default true (the column is always provisioned …)\".\n\n**Prior rulings read:** \"fresh installs only\", \"no escape hatch\", \"tenant: false\" \"organization_id\" → `6259608309` (#15194); ADR-0131 D10; none on this population.\n\n## Options\n\n| | what it does | what an author notices | workload |\n|:--|:--|:--|:--|\n| **A** | Known limitation for 18.0. The drop-gate refusal (`packages/cli`) and the boot guard's v17-shape refusal (`packages/runtime`) each add one sentence for an 18.0-created database: revert the `tenant: false` declaration, or wait for the 18.x ceremony, which plans this table. No behaviour moves. | A loud refusal that names their real way out, in place of advice that is false for their database. | `domain:cli` · 1 PR · S. The precedent is PR #24635 (refusal text, +276 / −12 with tests). |\n| **B** | Refuse the authoring before it lands: `os validate` or a lint rejects `tenant: false` on an object whose table already holds `organization_id`. | The mistake is caught at authoring time. | M, and a new validation surface that needs a database read at author time, which lint does not have today. 「新增门禁默认否」. No precedent. |\n| **C** | 18.0 lets `--allow-destructive` drop `organization_id` on a database with no v17 evidence. | It works, with a destructive drop. | M–L. The gate and the boot guard change behaviour, and a \"created by 18.x\" discriminator that does not exist today is needed. It reopens 18.0's \"no escape hatch\" (ruling `6259608309`). No precedent. |\n\n## 四轴分析\n\n- **项目长远合理性:** 两年后,`organization_id` 列的删除只由一个机制负责,也就是 18.x 的迁移流程,它已经规划了这类表。A 让 18.0 如实说明这一点,不新增第二条删除路径;C 在 18.0 开一条例外删除路径,以后还要和迁移流程对齐;B 在作者阶段加一道读库的校验,是一个新的面。\n- **实际业务拉动:** 目前为零,没有运维或作者报告过,只有 dev 的实测。零拉动时默认不扩面,所以 A 只改文案。\n- **防 AI 犯错:** A 让拒绝信息响亮且如实,给出唯一正确的出路;现在的文案对这类库是错的,AI 作者照着做只会再被拒。C 让一个破坏性删除在 18.0 里变得可达,出错时代价是数据结构不可逆的改变。\n- **创业阶段不扩散:** A 不新增任何面;B 新增校验面(默认否);C 新增行为与判别器,并且推翻已裁的\"无逃生门\"。\n\nos-decision-facets\n- ① 项目长远合理性:A 保持只有 18.x 迁移流程负责删列;C 在 18.0 开例外删除路径;B 新增作者期读库校验面。\n- ② 实际业务拉动:零——无用户报告,仅 dev 实测;零拉动不扩面。\n- ③ 防 AI 犯错:A 拒绝信息如实、给唯一出路;C 让破坏性删除在 18.0 可达。\n- ④ 创业阶段不扩散:A 不新增;B 新增校验面(默认否);C 新增行为并推翻已裁\"无逃生门\"。\nPrior rulings read: \"fresh installs only\" \"no escape hatch\" \"tenant: false\" \"organization_id\" → `6259608309` (#15194 item 1); ADR-0131 D10; thread: PR #24635 report\n\n自检:只看①选 A;②③④ 是否翻转:否。\n\n**推荐:A。** 回退:B(若您希望在作者阶段就挡住)。**置信缺口:** `os serve` 一侧的拒绝只读了源码,没有实测;18.x 迁移流程对这类表的处理,只读了 CHANGELOG 的说明。\n\n## 裁后执行\n\n- **A:** one `domain:cli` card (the drop-gate refusal in `packages/cli` plus the boot guard's v17-shape refusal in `packages/runtime`, both this lane's), measured through both doors, `os serve` included. Same-file serial with #24637's runtime row; the two may ride one PR.\n- **B:** a `domain:cli` card for the validation, with the maintainer's naming of the new surface quoted.\n- **C:** a ruling amendment on #15194 first (it reopens item 1), then the gate and boot guard change under a contract review.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -14,20 +14,20 @@
     "area:access",
     "domain:spec",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "os-bill"
+    "os-tesla"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T13:50:37Z",
-  "updated_at": "2026-10-23T02:05:41Z",
+  "updated_at": "2026-10-23T17:44:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25234",
   "body": "Ruled: 6355640929 · letter A · 2026-10-23T02:04:08Z\n\nFiling gate ②: from the maintainer's ruling on objectstack-ai/cloud#3149 (batch #386 item 5, item 2). Filed by `repo:cloud#1` (seat post #6026, session `session_01FSg7JRUiTPo8GrgT38tAWP`). ⛔ Not a claim. A **spec design card**: it adds protocol, ~~so the design is put to the maintainer before any implementation starts~~ (ruled A in 6355640929; implementation may be dispatched).\n\n**Reader who acts:** the objectstack lane. objectstack-ai/cloud#3149 (the tracker) is `Blocked-by:` this card.\n\n## The gap (cloud#3149 item 2)\n- `rls-membership-resolver` (ADR-0105 D11) can express `supplier in current_user.portal_supplier_ids`, but only through code.\n- Installed package code does not run on hosted (`docs/design/installed-package-handler-functions.md` in cloud).\n- hotsrm (objectstack-ai/hotsrm#1) therefore uses one position per supplier, with RLS `portal_position in current_user.positions`. Every supplier-facing record must carry a stamped `portal_position`, and one missed stamp is an over-grant.\n\n## The ask\n- A declarative membership key in metadata, as the metadata twin of ADR-0105 D11: `current_user.<key>` = the values of lookup field F on records of object X whose user field U equals the current user.\n- The design round names: the declaration's home (object or app), the closed shape (X, F, U, an optional filter), how it is cached per request, how a cycle or an unbounded set is refused at publish, and how it shows in the security explainers.\n\n## Acceptance (for the design round)\nA design comment the maintainer rules on, with the zod shape, the refusal list, one worked example (hotsrm's supplier contact), and the resolver path it reuses."

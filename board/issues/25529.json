@@ -1,0 +1,30 @@
+{
+  "number": 25529,
+  "kind": "issue",
+  "title": "Identity: the platform's OIDC provider emits the standard `locale` claim at userinfo (profile scope), so a hosted environment's JIT sign-in follows the cloud account language",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T19:52:10Z",
+  "updated_at": "2026-10-23T19:52:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25529",
+  "body": "Filing gate ②: the framework half of the ruling the maintainer gave on objectstack-ai/cloud#3125 (batch #387 item 1, column 现在立 card 5: 「用户语言偏好随云账号进入每个环境」, platform first). This is the producer half that #25261 (the reader, landed as `829cb779`) assumed exists. Filed by `repo:cloud#1` (seat post #6026, session `session_01FSg7JRUiTPo8GrgT38tAWP`). ⛔ Not a claim.\n\n**Reader who acts:** the objectstack lane. objectstack-ai/cloud#3159, the cloud half, is `Blocked-by:` this card. It resumes as a pin bump plus a local-stack reading.\n\n## Measured (pinned tree `f0fdd45bbc83`, better-auth 1.7.12, `@better-auth/oauth-provider` 1.7.12)\nThe source is the cloud dev report on objectstack-ai/cloud#3159 (comment `6373436798`).\n\n- The OP is composed only inside plugin-auth: `packages/plugins/plugin-auth/src/auth-manager.ts:4252` (`return [jwtPlugin, oauthProvider({`; line 4241 on `main` `1ff43b67`). It passes `customAccessTokenClaims`, but no `customUserInfoClaims` and no `customIdTokenClaims`. A host only switches the OP on (`plugins.oidcProvider: true`); it gets no claim seam and no host-plugin seam.\n- The platform's own RP reads the claim from **userinfo**. That RP is plugin-auth `genericOAuth` with no custom `getUserInfo`. better-auth uses the decoded ID token only when it carries both `sub` and `email`. oauth-provider 1.7.12 keeps the standard profile claims out of the ID token (`ID_TOKEN_SCOPE_CLAIM_GUARDS`), so the RP GETs `/oauth2/userinfo`. That body becomes `source.oauth.profile`, which `idp-locale-claim.ts` reads.\n- So today a hosted environment never receives `locale`, and #25261's reader never fires on the cloud path.\n- `locale` is not a better-auth `additionalField` (`sys-user.object.ts`, the #13881 block), so the user object the provider hands a claims hook carries no `locale`. The value has to be read through the data engine.\n\n## Wanted\n- In plugin-auth's `oauthProvider({...})`, add `customUserInfoClaims`. It returns `{ locale }` when the granted scopes include `profile` and the user's `sys_user.locale` (read through the data engine, in system context) is a non-empty BCP-47 tag. Otherwise it returns nothing.\n- ⛔ No new host configuration key and no new column. Every ObjectStack OP emits the standard claim (OIDC Core 5.1), not only the cloud's.\n\n## Acceptance\n- A test on the OP: userinfo carries `locale: \"zh-CN\"` for a user with `zh-CN` under the `profile` scope. It omits the claim for a user with no locale, and when `profile` was not granted.\n- Ablation: drop the hook and the test goes red.\n- If the suite can drive one round trip, the platform RP's JIT path stores the claim (#25261's reader) end to end.\n\n## Dedupe\n`repo:objectstack-ai/objectstack userinfo locale claim` returns 1 hit: #25261 (closed, the RP reader; it does not cover the OP). No other card was found."
+}

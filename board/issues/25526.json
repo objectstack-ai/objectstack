@@ -1,0 +1,37 @@
+{
+  "number": 25526,
+  "kind": "pull_request",
+  "title": "fix(plugin-approvals): the approval request Timeline shows each step by its label, not the node id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T19:22:02Z",
+  "updated_at": "2026-10-23T20:09:14Z",
+  "closed_at": "2026-10-23T20:09:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T20:09:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25526",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuACdPWFJTLDcTrByFCHLzqb)_\n\nFixes #25501\n\nClause-②: no\nMetadata-protocol: none\n\n## What was wrong\nThe `sys_approval_request` record page (`packages/plugins/plugin-approvals/src/sys-approval-request.page.ts`) has a Timeline tab. That tab is a `record:related_list` over `sys_approval_action`, and its columns asked for `step_name`. Every action row stores two step fields, both declared on `sys-approval-action.object.ts`:\n- `step_name`: \"Machine name of the step at the time of the action\". Every writer in `approval-service.ts` sets it to the Approval node id (`step_name: nodeId`, or `raw.flow_node_id ?? raw.current_step`).\n- `step_label`: \"Label of the step at the time of the action\". `ApprovalService.actionRow` writes it on every row from the request's `current_step_label`, and `display-label-backfill.ts` fills it on older rows.\n\nSo every Timeline row showed the node id (`dual_signoff`), while the highlights strip right above it showed the label (`current_step_label`). The object's own list views (`recent`, `by_actor`, `all_actions`) already use `step_label`.\n\nThe card's premise holds with one correction: `step_name` is not missing. It is a declared, stored field that holds the machine id, so the column named a real field. It was the wrong one of the two.\n\n## The change\n- The Timeline column `step_name` is now `step_label`. Nothing else on the page changes, and the page's doc comment says why the step column is `step_label`.\n- Landing: the file the claim names. `packages/spec` is not touched.\n- I checked every other field the page names against its object. The Timeline columns `created_at`, `action`, `actor_id`, `comment` and `attachments` and its sort field `created_at` are all `sys_approval_action` fields. The highlights strip's `process_label`, `status`, `current_step_label`, `submitter_id` and `updated_at` are all `sys_approval_request` fields, and none of them is a machine id where a label exists.\n\n## Tests\n`src/sys-approval-request-page.test.ts` gains `names each Timeline step by its label, step_label, never by the node's machine id, step_name`. It reads the page's Timeline columns and asserts two things: `step_label` is listed and `step_name` is not, and `step_label` is the declared `Approval Step` text field. A control asserts that `step_name` stays a declared field.\n\nThe file's existing test `every field the page names exists on its object` already checks that each Timeline column names a field of `sys_approval_action`. It stayed green on the defect, because `step_name` is a declared field. That is why this test pins the choice, the way the strip's `current_step_label` is already pinned.\n\nAblation, at head `4e80cfeeaf`, under the verify lock. `node scripts/ablation-replace.mjs --file packages/plugins/plugin-approvals/src/sys-approval-request.page.ts --anchor \"'actor_id', 'step_label', 'comment'\" --replacement \"'actor_id', 'step_name', 'comment'\" -- pnpm --filter @objectstack/plugin-approvals exec vitest run --maxWorkers=2 src/sys-approval-request-page.test.ts`:\n- `mutation landed: anchor 1 -> 0, blob 1b31bf215cb3 -> 48f41780fd75`\n- `× names each Timeline step by its label, step_label, never by the node's machine id, step_name` and `Tests 1 failed | 19 passed (20)`. Only the new test went red, and the existence test stayed green, as described above.\n- `restored: blob == HEAD (1b31bf215cb3) and git diff HEAD is empty`\n\nThe test imports the page from `src` through a relative import, so the ablation needs no `dist/` rebuild.\n\n## Local verification (head `4e80cfeeaf`)\n- `pnpm --filter '@objectstack/plugin-approvals^...' build` (dependency closure): VERDICT command-exit 0.\n- `pnpm --filter @objectstack/plugin-approvals test`: `Test Files 95 passed (95)`, `Tests 1234 passed (1234)`.\n- `pnpm --filter @objectstack/plugin-approvals typecheck`: exit 0, and `check:test-typecheck: OK`.\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 69 commands. 68 exit 0. `pnpm check:i18n` exited 3 at first because its prerequisite build was missing; after its named build closure it gave `check-i18n-bundles: OK`.\n- `pnpm check:dual-build-cjs-loads` exited 3: PREREQUISITE NOT MET, because it needs a whole-workspace `pnpm build`. NOT MEASURED locally; CI runs it.\n- `--ran`: `69 derived famil(ies) accounted for — 68 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)`.\n\n## Acceptance notes\n- The `sys_approval_action` object itself still names the step by `step_name` in three places that this card does not cover:\n  - its `titleFormat` (`'{action} · {step_name}'`);\n  - its `display_title` formula, the record title (`nameField`);\n  - its `highlightFields`.\n  So an action record's own title and strip read for example `approve · dual_signoff`. This is not filed: it is a separate surface (the action record's own page and title, not the request page's Timeline), and changing a formula's record title has a wider reach than one column. Carrier: none.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016g7nYP9wdNx1GDa5XDr7Uy)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016g7nYP9wdNx1GDa5XDr7Uy\n"
+}

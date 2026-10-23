@@ -2,7 +2,7 @@
   "number": 25407,
   "kind": "pull_request",
   "title": "fix(release): re-date a pre-written current-series field on its GA's own version run",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T12:04:18Z",
-  "updated_at": "2026-10-23T14:11:28Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-23T14:46:33Z",
+  "closed_at": "2026-10-23T14:46:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T14:46:31Z",
   "comments": 0,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25407",

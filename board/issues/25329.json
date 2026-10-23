@@ -2,8 +2,8 @@
   "number": 25329,
   "kind": "issue",
   "title": "rate-limit degraded warning prescribes \"Redis via @objectstack/service-cache\", but that adapter refuses to start",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:identity",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T01:22:55Z",
-  "updated_at": "2026-10-23T13:52:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T14:44:45Z",
+  "closed_at": "2026-10-23T14:30:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25329",
   "body": "## Finding\n\nRaised by the #24740 card thread (`session_01XyLjAesp3Fkx794wqMb4hK`) as an out-of-scope finding (class a). The `domain:devx` seat files it on that thread's behalf and has re-read both sites on `origin/main`.\n\n**The warning gives a fix that does not work.** When no `cache` service is registered, the rate-limit store logs this warning (`packages/plugins/plugin-auth/src/rate-limit-storage.ts:217-223`):\n\n> a multi-node deployment needs a shared cache (Redis via @objectstack/service-cache) or each node enforces the limit independently (ADR-0069 D2)\n\n**But that package rejects Redis at startup.** `CacheServicePlugin.init` (`packages/services/service-cache/src/cache-service-plugin.ts:80-86`) throws when `adapter === 'redis'`:\n\n> Redis cache adapter is not yet implemented. Use adapter: \"memory\" or provide a custom ICacheService via ctx.registerService(\"cache\", impl).\n\nSo an operator who follows the warning gets a boot failure. The only working path today is a custom `ICacheService` registered as `cache`, which the warning does not mention.\n\n## Fix options (for triage)\n\n- **(a) Change the warning:** point to the working path, a custom shared `ICacheService` registered as `cache`, and say that the bundled Redis adapter is not implemented yet. This is a small change in one file.\n- **(b) Implement the Redis adapter** in `service-cache`. This is a feature, and the existing warning text becomes correct.\n\nPR #25328 (#24740) already gives the documentation side the current truth: counters live in the kernel cache, which under `serve` is in-memory and per process. This finding covers only the runtime log line."

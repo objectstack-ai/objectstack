@@ -2,7 +2,7 @@
   "number": 25385,
   "kind": "pull_request",
   "title": "docs(pm-dispatch): a project-run seat form beside the Routine form — the seat post as a stub, the dispatch order in the card thread, event wake plus one patrol per project, 项目总监 → 总监席",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T05:19:31Z",
-  "updated_at": "2026-10-23T14:10:17Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-23T14:44:51Z",
+  "closed_at": "2026-10-23T14:44:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T14:44:48Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25385",

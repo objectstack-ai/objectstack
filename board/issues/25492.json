@@ -1,0 +1,36 @@
+{
+  "number": 25492,
+  "kind": "pull_request",
+  "title": "test(cli): move the audit-mail-bodies archive test budget onto the 10 s grid",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T15:49:29Z",
+  "updated_at": "2026-10-23T16:46:45Z",
+  "closed_at": "2026-10-23T16:46:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T16:46:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25492",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuACdPWFJTLDcTrByFCHLzqb)_\n\nPart of #25411\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\n`packages/cli/src/commands/migrate/audit-mail-bodies.archive.integration.test.ts` line 2 declared `// test-budget: 85 — spawns the real producer once per single-cause fixture: …`. The weekly `shard-timings-refresh` generator reads that line with `readTestBudget` in `scripts/measure-test-shard-timings.mjs` and refuses it, because SECONDS must be a multiple of 10 (the reading x `CEILING_HEADROOM`, rounded UP to the next 10 s).\n\nThe line's own arithmetic is 67.8 s x 1.25 = 84.75 s, which rounds up to **90**. Only the number moves: the class (one of `TEST_BUDGET_CLASSES`) and the reason are unchanged, and the reason stays true because its arithmetic did not change.\n\nScope is producer 1 only, the file the claim names. Producer 2, a PR-time grid check in `scripts/`, belongs to `domain:devx` and is not taken here. #25411's second producer remains open for that lane.\n\n## Evidence\n\n- **The generator's own reader accepts the new line and refuses the base.** Running `readTestBudget` from `scripts/measure-test-shard-timings.mjs` on both versions:\n  - Worktree: accepted, `{\"seconds\":90,\"cls\":\"spawns the real producer once per single-cause fixture\",\"line\":2}`.\n  - Base `b2c0752900`: refused, `…audit-mail-bodies.archive.integration.test.ts:2: the budget 85 s is not on the 10 s grid`.\n- **Tree-wide sweep with the same reader.** Every tracked JS/TS file whose text matches `test[-_ ]?budget:` (24 files) was fed to `readTestBudget`.\n  - Head: 23 declarations read OK, 1 file with no declaration (the generator itself), **0 refused**.\n  - Control leg, the same sweep over base `b2c0752900`: exactly 1 refused, this line. No other off-grid or ungrammatical `test-budget:` line exists in the tree.\n- **The file itself, run once locally** under `os-verify-lock`: `pnpm --filter @objectstack/cli exec vitest run --project integration --maxWorkers=2 src/commands/migrate/audit-mail-bodies.archive.integration.test.ts` gave Test Files 1 passed, Tests 8 passed, Duration 43.77 s, VERDICT command-exit 0. That is inside the declared 90 s, on a shared container.\n- **cli unit layer:** `pnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2` gave Test Files 326 passed (326), Tests 4805 passed (4805), VERDICT command-exit 0.\n- **Derived gates** (`node scripts/pm/dispatch-gates.mjs --commands`, at head `6d1e8648c3`): 56 commands. 54 exited 0. `pnpm check:dual-build-cjs-loads` and `pnpm check:i18n-coverage` exited 3 (PREREQUISITE NOT MET: they read built output of packages outside the cli closure). `--ran` reconciles: 56 derived, 54 run, 2 NOT-MEASURED, 0 UNRUN. CI measures both on a full build.\n\n## Changeset\n\nNone. This follows AGENTS.md Post-Task Checklist step 3: `skip-changeset` is for a diff that publishes nothing from any released package. The shipped contents of `@objectstack/cli` are its `files[]`: `dist`, `README.md`, `CHANGELOG.md`. After `pnpm --filter '@objectstack/cli...' build`:\n- The test's header text and its `describe` title have 0 hits in those paths.\n- The positive control has hits: the sibling source `audit-mail-bodies.ts`'s docblock (2 files in `dist`) and its help example (3 hits in `dist/commands/migrate/audit-mail-bodies.js`).\n\n## Acceptance notes\n\n- The base sweep found no second off-grid line, so no fix outside the claim's surface was needed and none was made.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016g7nYP9wdNx1GDa5XDr7Uy\n"
+}

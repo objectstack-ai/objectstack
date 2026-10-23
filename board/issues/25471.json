@@ -1,0 +1,32 @@
+{
+  "number": 25471,
+  "kind": "issue",
+  "title": "plugin-approvals: the admin_rescue system comment is written into the approval timeline as English prose, so a zh-CN viewer reads it untranslated",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "marchtian",
+    "id": 7553007,
+    "type": "User"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T15:35:52Z",
+  "updated_at": "2026-10-23T17:56:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25471",
+  "body": "## What happens\n\nOn a record's **审批 / Approvals** tab, every timeline entry names the step by a title-cased version of the node id, not by the node's configured label:\n\n```\n提交 · Dev Admin · Review Reviewer\n通过 · Dev Admin · Review Reviewer\n提交 · Dev Admin · Review Director\n```\n\nThe flow declares Chinese labels for those nodes, and the server already stores them. From `sys_approval_action` for the same request:\n\n```json\n{ \"step_name\": \"review_reviewer\", \"step_label\": \"初审人审批\", \"action\": \"approve\", ... }\n```\n\n`sys_approval_request.current_step_label` is also `初审人审批`. So the data is right; the console timeline renders `step_name` (humanized) rather than `step_label`.\n\nA related case: the `admin_rescue` system comment is written into the timeline as English prose (\"Routed to this organization's administrators because the approver slate named no one: position 'srm_procurement_director' has no holder.\"). It shows up untranslated on a zh-CN console.\n\n## Repro\n\n- `@objectstack/*` 18.0.0, `objectstack dev`, locale zh-CN.\n- App: objectstack-ai/hotsrm `main`, flow `srm_admission_approval`. Its nodes are `review_reviewer` (label `初审人审批`) and `review_director` (label `采购总监审批`).\n- Create an application, set its status to `admission_review`, and approve both steps.\n- Open the record and go to the 审批 tab.\n\n## Expected\n\nThe timeline shows `初审人审批` / `采购总监审批` (`step_label`, or the translated label once #24863's contract applies). System comments use the viewer's locale.\n\n## Related\n\n- #24863 and #24281 (both closed) cover labels in the request snapshot and the highlights strip. This issue is the timeline on the record's Approvals tab."
+}

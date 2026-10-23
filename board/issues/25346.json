@@ -2,8 +2,8 @@
   "number": 25346,
   "kind": "issue",
   "title": "Setup → Notification Preferences: Topic and Channel are free-text boxes, so muting one topic means typing its machine name — offer pickers over the topics and channels the platform knows (hotcrm#2194 T2-U15, the remainder)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:workflow",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T01:40:18Z",
-  "updated_at": "2026-10-23T13:08:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T15:02:38Z",
+  "closed_at": "2026-10-23T15:01:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25346",
   "body": "## 维护者速读\n\n- **事由：** 通知偏好里的「主题」「渠道」仍是手填文本，要靠输入机器名来静音某个主题。\n- **要做：** 原定并入 #24775，但该卡在裁决前已关闭。用户选择器已由 #24895 做完，订阅对象已退役；剩下的是主题和渠道改为可选列表。\n- **完成标准：** 新建偏好时从列表选主题和渠道。\n\nFiling gate **③ a task the maintainer set**: the maintainer's ruling on objectstack-ai/hotcrm#2194, recorded there at `6354968262` (the director seat, posting from the maintainer's account): 「25251 B hotcrm B」, 2026-10-23T01:05:47Z. That is letter B for all three rounds, exactly as the seat recommended, and it adopts **T2-U15**, ruled as a fold into #24775. That card closed `completed` on 2026-10-20T19:51Z, before the ruling, and its follow-ups landed part of this item but not all, so the remainder is filed here (see *Why*). Filed by the `repo:hotcrm` seat 1 (`os-elon-musk`, session `session_014xanhPEmGTMTfVH4UokwJT`) under objectstack-ai/hotcrm#2194's *After the ruling*. ⛔ Not a claim.\n\n**Grade:** triage's. The seat suggests `priority:p3`: an adopted suggestion with a measured cost on an existing surface, no wrong data and no contract change.\n\n**Reader (who acts):** objectstack triage routes and grades it. The landing below is the seat's reading of `origin/main`; paths under `src/` are HotCRM's (objectstack-ai/hotcrm).\n\n## Governing text\n\n- The ruling above. Per objectstack-ai/hotcrm#2194's own governing text, this item is an adopted suggestion through filing gate ②, not a defect card, and a platform or console landing is changed there, never re-implemented in HotCRM: 「平台相关的功能，应该尽量先改平台。」 (maintainer, 2026-10-18, ledger `6245607810`).\n\n## Why (measured)\n\n- **Page / persona:** Setup → Notification Preferences (and, in round 1, Subscriptions), the system administrator.\n- **Round 1:** free-text \"User\\*: Recipient user id, or '\\*'\", \"Principal: 'role:x' | 'team:x' | 'user:id' | …\", and free-text topic and channel. Muting one user required pasting a 32-character id. Evidence: objectstack-ai/hotcrm [track 2 report, *UI and UX suggestions*](https://github.com/objectstack-ai/hotcrm/blob/ed4f40e42b8b6ce059a4e648f25f8f6037ffd9f6/qa/2026-10-20-setup-pass/REPORT.md), U-15; [`32-config-notification-preferences-new.png`](https://github.com/objectstack-ai/hotcrm/blob/ed4f40e42b8b6ce059a4e648f25f8f6037ffd9f6/qa/2026-10-20-setup-pass/shots/32-config-notification-preferences-new.png), [`33-config-notification-subscriptions-new.png`](https://github.com/objectstack-ai/hotcrm/blob/ed4f40e42b8b6ce059a4e648f25f8f6037ffd9f6/qa/2026-10-20-setup-pass/shots/33-config-notification-subscriptions-new.png).\n- **What has landed since:** `user_id` is a `sys_user` lookup (#24895, closed), so the person is picked; `sys_notification_subscription` is retired in 18 (`packages/spec/src/migrations/entries/semantic/18.sys-notification-subscription-retired.ts`).\n- **What remains:** Topic and Channel are still typed.\n\n## Landing\n\nRead on objectstack `origin/main` `7b047b44`:\n- `packages/services/service-messaging/src/objects/notification-preference.object.ts`: `topic: Field.text` (\"Notification topic, or '*' for all topics.\", ~:124) and `channel: Field.text` (\"Channel id (inbox/email/push/…), or '*' for all channels.\", ~:140).\n- Channels are the registered `MessagingChannel.id`s; topics are the `sys_notification.topic` values the platform and apps emit. The dev measures whether either set is enumerable today. Where none is, the field's help names where the values come from, and a picker over a set that does not exist is not built here.\n\n## Done when\n\n- New Notification Preference offers Channel as a choice among the registered channels plus \"all\", and Topic as a choice among the known topics plus \"all\", wherever the platform can enumerate them.\n- A typed value the platform cannot match stays refused or warned as today.\n- Pins on the field declarations.\n\n**Size:** M.\n\n## Dedupe\n\nMethod: every open objectstack-ai/objectstack issue (108) and every issue updated since 2026-10-19 (544, any state), listed through the repo-scoped `issues` endpoint (paged) at 2026-10-23T01:20Z and matched case-insensitively on their titles. Words: `notification preference`, `topic`, `channel`. 5 hits, all closed: #24775 and #24895 (the carrier and its landed follow-up, above), #25194, #24983 and #24924 (other messaging fields). **New.**\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

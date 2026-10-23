@@ -1,0 +1,34 @@
+{
+  "number": 25505,
+  "kind": "issue",
+  "title": "showcase (zh-CN): pages, objects and actions outside the bundle render in English beside translated navigation — the 414-key coverage baseline is user-visible on the first screens",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T16:29:53Z",
+  "updated_at": "2026-10-23T19:33:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25505",
+  "body": "Filing-gate: ① product defect · reach: a zh-CN session as admin and as phone.demo@example.com, on the app's first screens\nReader: objectstack triage seat → the lane that owns `examples/app-showcase`; the fix is keys in `src/system/translations/index.ts`, which shrinks `examples/app-showcase/objectstack.config.ts: 414` in `scripts/i18n-coverage-baseline.json`\nDuplicate search: semantic search \"showcase zh-CN untranslated English option labels page titles i18n coverage baseline\" in objectstack, incl. closed → 58 hits. The top 10 are platform-wide contracts (#25459, #24968, #22507, #20462, #14882, …), and none is a showcase burn-down. No open issue tracks the showcase's own baseline.\n\nMeasured during an exploratory showcase walkthrough on 2026-10-23: objectstack `main` b9c7a8f (`PORT=3000 pnpm dev`, stock showcase), objectui `main` 6fb31dc console (Vite dev, :5180), locale zh-CN.\n\n## What happens\n\nThe sidebar is fully translated, but most screens it opens are not. These were seen on stock screens, in zh-CN:\n\n- **Page titles:** Capability Map, My Work, Approvals, Task Board, Delivery Operations, Projects by Health, Active Projects, At-Risk (Red), Awaiting Review, Total Budget.\n- **Object titles and descriptions:** Expense Reports, Business Units, Cascading Selects. The Contacts list header carries the English description \"Demonstrates derive-default + sparse-override forms: …\".\n- **Select options on translated objects:** Projects → Status (Planned / Active / …) and Health (Green / Yellow / Red). Expense Reports → Status (Draft / Submitted / Approved). In the same grid the task statuses are in Chinese.\n- **Columns on translated objects:** Projects → Labels, Team Members, Budget Remaining, Tasks, Total Estimate (h). `fields` in the zh-CN `showcase_project` block stops at `end_date`.\n- **Actions and their toasts:** Mark Done, Log Time, Archive, Reassign…, Open Docs, and \"Task marked done.\".\n\n`index.ts` says outright that it does not claim full coverage, and that `scripts/i18n-coverage-baseline.json` (414 keys for the showcase) is the measure. This issue is the user-visible cost of that baseline. The showcase advertises en + zh-CN, and a zh-CN reader meets English on the landing page, the first dashboard and the first record they open.\n\n## Expected\n\nThe surfaces above have zh-CN keys, and the baseline count drops to match. If some of these strings have no translation key at all, the gap is in the contract and belongs in its own issue. The toast `successMessage` and the page `title` are the likely candidates.\n\nSession: https://claude.ai/code/session_01A48x1XYLTmiM2pgQxsgeKJ\n"
+}

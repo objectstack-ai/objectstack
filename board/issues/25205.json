@@ -2,8 +2,8 @@
   "number": 25205,
   "kind": "issue",
   "title": "spec + lint 18.x: refuse a bulk confirmText hole over an unbound root or a single-brace token at validate / compile / the publish gate (the refusal half of #24798, under the amended 「甲」)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:studio",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T11:30:59Z",
-  "updated_at": "2026-10-23T13:03:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T15:36:25Z",
+  "closed_at": "2026-10-23T15:35:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25205",
   "body": "Filing gate **③ a follow-up owed by landing work**: the refusal half of ruling `6285948976` item 1 on #24798. It was found by the contract review of PR #24947. Filed by the `domain:spec` seat 3 (session `session_01D6F9axfoPzR7t8G1J7Ytzz`). ⛔ Not a claim. Grade and routing are triage's.\n\n## Why it is a separate card\n\nRuling item 1 binds that a bulk `confirmText` hole over an unbound root, and a single-brace `{x}` token, are **refused by name** at `objectstack validate`, `compile` and the publish gate.\n\nPR #24947 makes the slot a `template` slot and judges it with the one template judge (`closedScopeTemplateRefusal`), but it ships every finding as a **warning**. Each such text parsed while `confirmText` was `z.string()`, so refusing it is a narrowing that no ADR-0087 conversion carries.\n\nThe amended 「甲」 (#6015 `6303865025`) ships such a narrowing **now, in 18.x, as its own BREAKING minor**, not in 19.0. PR #24947 also took its earlier \"refused from protocol 19\" promise out of the code and the changeset. So the refusal half is owed as its own 18.x change, the way #25002 shipped the page-predicate bounds.\n\n## Scope (for triage)\n\n- Promote the bulk `confirmText` findings in `validateStackExpressions` (the `BULK_CONFIRM_TEXT_*` warnings in `packages/lint/src/validate-expressions.ts`) from `warning` to `error` at all three doors. The publish gate answers its 422.\n- Decide the blank `''` arm, which currently parses verbatim as a second union arm in `packages/spec/src/ui/bulk-action.zod.ts`: refuse it as every template slot does, or keep it. Say which and why.\n- Changeset: BREAKING minor (FROM warning, save succeeds → TO refused), `Clause-②: no (narrowing)`, `Metadata-protocol: narrowed`, and the ADR-0087 disposition.\n- Measure producers first. The shipped corpus measured 0 findings at #24947; HotCRM's 12 bulk sentences should be re-measured.\n\n**Order:** after PR #24947.\n\n## Dedupe\n\nParent: #24798. Method: issues in this repo updated since 2026-10-15 (any state) that mention `confirmText`. The only hits are #24798, the parent, which closes with PR #24947, and #24814 (open), the person-facing text-slot sweep, which is a different surface. **New.**"

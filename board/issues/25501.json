@@ -1,0 +1,35 @@
+{
+  "number": 25501,
+  "kind": "issue",
+  "title": "plugin-approvals: the approval request page's Timeline lists each action's step as the machine id (`dual_signoff`) — its related list asks for `step_name`, while every row stores `step_label`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T16:27:53Z",
+  "updated_at": "2026-10-23T20:10:36Z",
+  "closed_at": "2026-10-23T20:09:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25501",
+  "body": "Filing-gate: ① product defect · reach: the served `sys_approval_request` record page, opened from the approvals inbox as admin\nReader: objectstack triage seat → the lane that owns `packages/plugins/plugin-approvals`; the fix is one column name in `src/sys-approval-request.page.ts`\nDuplicate search: semantic search \"approval request timeline related list step_name machine name instead of step_label\" in objectstack, incl. closed → 6 hits: #25471 (open, a different surface: the record's Approvals tab, which objectui#13248 fixed), #24281 / #24264 / #24309 / #23889 / #24863 (closed: the highlights strip, the lists and the snapshot, not this related list). None covers the page's Timeline tab.\n\nMeasured during an exploratory showcase walkthrough on 2026-10-23: objectstack `main` b9c7a8f (`PORT=3000 pnpm dev`, stock showcase), objectui `main` 6fb31dc console (Vite dev, :5180), locale zh-CN.\n\n## What happens\n\nOpen an approval request, e.g. EXP-2001 in the showcase `showcase_expense_signoff` flow. The highlights strip correctly reads **审批步骤: 经理 + 财务签批** (the node label `Manager + Finance Sign-off`). Directly below it, the **时间线 / Timeline** tab lists three rows, and the Step column of every row reads the raw node id:\n\n```\n2026/10/23 下午3:00  批准  Ada Auditor (demo)  dual_signoff  财务同意\n2026/10/23 下午2:58  批准  Dev Admin           dual_signoff  经理同意\n2026/10/23 下午2:35  提交  Mei Phone (demo)    dual_signoff  —\n```\n\n## Where\n\n`packages/plugins/plugin-approvals/src/sys-approval-request.page.ts`, the Timeline tab's `record:related_list`:\n\n```ts\ncolumns: ['created_at', 'action', 'actor_id', 'step_name', 'comment', 'attachments'],\n```\n\n`sys-approval-action.object.ts` declares `step_name` as \"Machine name of the step at the time of the action\". Next to it, `step_label` (\"Label of the step at the time of the action\") is filled on every row, with the boot backfill covering older rows. So the page asks for the wrong one of the two columns.\n\n## Expected\n\nThe Timeline's Step column shows `step_label`, the same text the strip above it shows. That means swapping the column, plus whatever the translated-label contract from #24863 asks for.\n\nSession: https://claude.ai/code/session_01A48x1XYLTmiM2pgQxsgeKJ\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 25482,
+  "kind": "issue",
+  "title": "rest: metadata rollback coerces toVersion with Number(), so {\"toVersion\": true} or [2] restores a version and 1.5 answers 404 instead of 400",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T15:41:13Z",
+  "updated_at": "2026-10-23T20:21:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25482",
+  "body": "Filing gate: ① a product defect with a named location and a live reproduction (finding class (a)).\nReader: the `packages/rest` lane (`meta-item-history-routes.ts`, the `/rollback` handler), next PR touching the metadata history doors.\nDedupe (open AND closed): \"metadata rollback toVersion non-integer coerced\" → 1 hit, this card only.\nreach: public HTTP entry, measured — `POST /api/v1/meta/:type/:name/rollback {\"toVersion\": true}` answers 200 and reverts the live body on a stock showcase boot.\nChecklist item priority: P1\ntype: Bug\nQA-source: #25479 · studio-authoring.draft-publish-lifecycle · observed beside the clauses\n\n## What happens\n\n`POST /api/v1/meta/:type/:name/rollback` coerces a non-integer `toVersion` with `Number(...)` and accepts whatever passes `isFinite && >= 1`:\n\n- `{\"toVersion\": true}` → 200, \"Reverted to version 1\". The live body really changes to v1.\n- `{\"toVersion\": [2]}` and `{\"toVersion\": \"2\"}` → 200, and the item reverts to v2.\n- `{\"toVersion\": 1.5}` → `404 VERSION_NOT_FOUND`. This should be the route's own `400 INVALID_REQUEST`.\n\nThe route's own refusal text says `'toVersion' (positive integer) is required`, so a boolean or a one-element array restoring a version is a silent coercion of an input to a destructive door. `/diff` in the same file already reads its numbers through `readDeclaredQueryNumber`.\n\n## Reproduction (stock showcase, admin)\n\n1. Publish a dashboard twice in a writable package, so that history holds v1 and v2.\n2. `POST /api/v1/meta/dashboard/NAME/rollback {\"toVersion\":true}` → 200. `GET /api/v1/meta/dashboard/NAME` now serves v1.\n3. Re-measured on a separate boot on a view with no history: `{\"toVersion\":true}` answers `404 \"No history row at version 1\"`, and `{\"toVersion\":[2]}` answers `404 \"…version 2\"`. Both were read as integers. `{\"toVersion\":\"abc\"}` → 400.\n\nMeasured on `main` 77392e90 (two dashboards, and separately on a view).\n\n## Where\n\n`packages/rest/src/meta-item-history-routes.ts`, rollback handler (around lines 808–811):\n\n```\nconst toVersionRaw = body.toVersion ?? body.version ?? req.query?.toVersion;\nconst toVersion = Number(toVersionRaw);\nif (!Number.isFinite(toVersion) || toVersion < 1) { …400… }\n```\n\n**Expected:** only a positive integer (a JSON number, or a numeric query string) is accepted. Everything else gets `400 INVALID_REQUEST`."
+}

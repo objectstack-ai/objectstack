@@ -1,0 +1,37 @@
+{
+  "number": 25519,
+  "kind": "pull_request",
+  "title": "fix(plugin-email): Send test with \"None (log only)\" picked but not saved no longer delivers over the live SMTP",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T17:55:20Z",
+  "updated_at": "2026-10-23T18:40:35Z",
+  "closed_at": "2026-10-23T18:40:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T18:40:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25519",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuACdPWFJTLDcTrByFCHLzqb)_\n\nFixes #25509\n\nClause-②: no\nMetadata-protocol: none\n\n## What was wrong\nSetup → Email's \"Send test email\" (the `mail/test` handler in `packages/plugins/plugin-email/src/email-plugin.ts`) tests the form's merged values, saved or not: `smtp` builds a one-shot `SmtpTransport`, Resend / Postmark build a one-shot service. `provider === 'log'` matched neither branch, so `target` stayed the LIVE service. With SMTP live and \"None (log only — no real delivery)\" picked on the form but not saved, the press delivered a real mail and answered `ok: true` \"Sent test email to …\".\n\n## The change\n- New `provider === 'log'` branch: when the live transport is not already a `LogTransport`, the test goes through a one-shot `EmailService` over a new `LogTransport`, with the same `persistence` option as the smtp branch (the press is still recorded in `sys_email`). When the live transport already IS a `LogTransport` (a saved `log`, or the out-of-the-box namespace), the target stays the live service and the answer is the existing saved-`log` warning, unchanged.\n- The answer for the unsaved-`log` press uses the saved-`log` answer's severity and words (`ok: false`, `severity: 'warning'`, \"only logged and recorded in sys_email\"), the banner's phrase for a log-only transport (\"no mail left this machine\"), and names the live transport it did not use, so the two doors agree:\n  `Nothing was delivered — the provider on the form is \"None (log only)\", so the test message was only logged and recorded in sys_email; no mail left this machine. The live transport was not used (Mail is delivered through SMTP (smtp.saved.test:587)); save the form to stop delivery.`\n- The other providers' branch is the old `provider !== 'log'` body, untouched (it became the `else`).\n- Landing: the file the claim names. `packages/spec` is not touched.\n\n## Tests\n`packages/plugins/plugin-email/src/mail-log-provider.pin.test.ts` gains a describe block (its harness's `sendTest` now takes an optional unsaved form state, posted as `payload.values`, as the page does):\n- SMTP saved on the page and live, form provider `log`: `nodemailer.sendMail` is never called; the answer is `ok: false` / `warning`, starts \"Nothing was delivered\", says \"no mail left this machine\" and names `SMTP (smtp.saved.test:587)`; the live transport is still the `SmtpTransport` afterwards.\n- SMTP built at boot from the boot options (`OS_EMAIL_SMTP_*` as `providerOptions`), form provider `log`: no `sendMail`, same answer shape.\n- CONTROL: form provider `smtp` with a host still sends (`sendMail` once, `ok: true`, \"Sent test email to admin@example.test via smtp (smtp.form.test:587)\").\n\nFixture re-judged: two pins in `email-plugin.queue-delivery.test.ts` (\"mail/test is never queued\") pressed the button with form provider `log` to reach the harness's host transport, which is exactly the behaviour this PR removes. They now press with an SMTP host on the form, faking only nodemailer's wire (`sendMail` resolves; `sendMail` rejects with `535 5.7.8`), and keep every assertion they had (inline answer from the transport, no `sys_job_queue` job, audit row finalized `sent`). A third leg keeps the queue invariant on the LIVE service: a live `LogTransport` with queue delivery on answers the warning inline, with no job.\n\nRuns (head `79a4642ce8`, after merging `origin/main`; the merge brought no plugin-email path):\n- `pnpm --filter @objectstack/plugin-email test`: Test Files 38 passed (38), Tests 689 passed (689).\n- `pnpm --filter @objectstack/plugin-email typecheck`: exit 0 (`tsc --noEmit`, then `check:test-typecheck: OK`).\n\n**Ablation** (head `2485802f70`, through `scripts/ablation-replace.mjs`): the anchor `if (!(svc.options.transport instanceof LogTransport)) {` was replaced by `if (false /* ABLATION-25509 */) {`. The tool reported \"ok mutation landed: anchor 1 -> 0, blob a4f67d1b9e86 -> 6d31a251e7e3\". The pin went RED: Tests 2 failed | 6 passed (8), both unsaved-`log` legs failing on \"expected vi.fn() to not be called at all, but actually been called 1 times\" (the live SMTP sent), with the CONTROL and the saved-`log` pins holding. The restore reported \"ok restored: blob == HEAD (a4f67d1b9e86) and `git diff HEAD` is empty\". The test imports `./email-plugin.js` from `src`, so no `dist` leg applies.\n\n## Gates\n`node scripts/pm/dispatch-gates.mjs --commands` at `79a4642ce8` derives 67 commands; all 67 ran locally with their exit codes recorded. `--ran` says: \"67 derived famil(ies) accounted for — 66 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)\".\n- NOT MEASURED: `check:dual-build-cjs-loads`, reason: PREREQUISITE NOT MET (it reads built output of every package; this worktree built only plugin-email's closure). CI's Build Core / Lint lanes carry it.\n- The CI-only families (Test Core, Build Core, the type-check lanes, artifact rosters) are read from this PR's check-runs.\n\n## Acceptance notes\n- The handler's own doc comment already says a one-shot temporary service is built when the form differs from the live one; the `log` branch now honours it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016g7nYP9wdNx1GDa5XDr7Uy\n"
+}

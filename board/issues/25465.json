@@ -1,0 +1,36 @@
+{
+  "number": 25465,
+  "kind": "pull_request",
+  "title": "ci(test-core): a shard whose tests read no .d.ts builds its closure with OS_SKIP_DTS=1",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T15:06:47Z",
+  "updated_at": "2026-10-23T18:20:22Z",
+  "closed_at": "2026-10-23T18:20:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-23T18:20:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25465",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DTotpiGYVS8HCVm8u3FZDUX)_\nFixes #25375\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读(草稿)\n\n**改了什么**：Test Core 六个分片在建依赖闭包前多一步「Choose this shard's declaration build」。分片里没有 `@objectstack/cli`、`@objectstack/metadata` 时，整个分片设 `OS_SKIP_DTS=1`，构建只出 JavaScript，不再生成 `.d.ts`（spec 那次 6 GB 堆的声明构建、cli 的完整 `tsc` 都省掉）。带这两个包的分片照旧。只改 `.github/workflows/ci.yml`。\n\n**为什么改**：vitest 只加载 JS，大多数分片生成的声明文件没人读。本地 4 核冷构建同一闭包（65 个包）：开声明 5m59s，关声明 1m24s。卡面原方案是六个分片全关，但实测全关会让 cli（4 个测试文件，24 例）和 metadata（1 个文件）红，原因都是 TS7016 找不到 spec / cli 的 `.d.ts`，这些测试本来就是在编译已发布的声明。所以这两个包所在的分片保留声明。\n\n**风险与代价（含回滚）**：① 关声明的分片和 Build Core 不在同一个 turbo 哈希空间（`turbo.json` 的 `globalEnv`），读不到 Build Core 写进远端缓存的带声明产物，只能读本分片在合并队列和 main 上写的无声明产物；落地后头几轮会偏冷，之后自愈。② 以后若有新测试读已建好的 `.d.ts` 却落在关声明的分片，会以 TS7016 明确变红，修法是把它的包加进 `DTS_READERS`，不会静默放过。③ 全量跑时 cli 切 3 片、metadata 占 1 片，当前切法下只有分片 1、6 省；PR 只跑受影响包时省的分片更多。回滚：删掉这一步即可。\n\n**席位意见**：同意落地（devx 席位已在 head e62c37b 复核，ACCEPT 见 #25375）。机制早已在 main 上（`turbo.json` 的 `globalEnv` 和各包 tsup 配置），本 PR 只决定哪些分片打开它。收窄到不含 cli、metadata 的分片是对的；漏掉的读者会以 TS7016 明确变红，不会静默放过。落地后头几轮偏冷属预期。\n\n**你要做的**：以 GOVERNED_APPROVERS 账户审批本 PR（受管面 Tier H）。\n\n## What changed\n\nOne new step in the `test` job, right after \"Compute this shard's package set\":\nit writes `OS_SKIP_DTS=1` to `$GITHUB_ENV` unless the shard's package list\ncarries a package in `DTS_READERS` (`@objectstack/cli @objectstack/metadata`).\nThrough `$GITHUB_ENV` it reaches both closure builds, the test step and the\nmain-push seed, so all of them hash in one namespace (`turbo.json` `globalEnv`).\n`turbo.json` is untouched.\n\n## The card's step 2: tests that read a `.d.ts`\n\nThe card's premise \"vitest never reads a `.d.ts`\" is false for two packages.\nThe static grep the card names gives 70 test files that mention `.d.ts`, so I\nmeasured instead. Under `OS_SKIP_DTS=1`, the whole Test Core list (dogfood\nexcluded, `OS_TEST_TIERS=queue`) ran on 830a63a in a cloud container. These\nwent red:\n\n| Package | Test file | Reads | Disposition |\n|:--|:--|:--|:--|\n| `@objectstack/cli` | `test/published-subpath-console.pin.test.ts` (6 tests) | cli's own `dist/console.d.ts` | shard keeps DTS |\n| `@objectstack/cli` | `test/published-subpath-hook-body.pin.test.ts` (4) | cli's own `dist/hook-body.d.ts` | shard keeps DTS |\n| `@objectstack/cli` | `test/scaffold-emission-typechecks.test.ts` (12) | spec's `dist/**/*.d.ts` (TS7016) | shard keeps DTS |\n| `@objectstack/cli` | `test/scaffold-test-script-passes.test.ts` (2) | spec's `dist/**/*.d.ts` (TS7016) | shard keeps DTS |\n| `@objectstack/metadata` | `src/serializers/typescript-serializer-annotation.test.ts` (1) | spec's `dist/**/*.d.ts` (TS7016) | shard keeps DTS |\n\n`@objectstack/example-showcase` was killed (exit 137) in that run because the\nlocal container ran out of memory. Run alone under `OS_SKIP_DTS=1` it passed:\n37 files, 443 tests.\n\nSilent-skip check: 32 packages own a test that compiles a TS program or names a\n`.d.ts`. I ran them again with declarations on and compared the vitest totals\nper task. All 38 `test`/`test:repo` totals were identical except one.\n`@objectstack/spec:test` ran 21634 passed with DTS and 21632 passed plus 1\nskipped without it. The difference is\n`scripts/root-entry-type-nameability.pin.test.ts`, which skips by its own design\nwhen spec's dist declarations are absent. That pin runs with\n`OS_EXPECT_ROOT_NAMEABILITY=1` against a built dist in lint.yml's\n`root-entry-type-nameability-pin-built-dist` step, so its coverage holds.\n\n## Measurement\n\nLocal, cloud container, 4 cores, the same 65-package closure (every package\nwhose `build` the full Test Core list schedules), `turbo run build --force\n--concurrency=4`:\n\n| | Wall | Σ task time | `@objectstack/spec#build` | `@objectstack/cli#build` |\n|:--|--:|--:|--:|--:|\n| declarations on | 5m59s | 838s | 92.2s | 18.5s |\n| `OS_SKIP_DTS=1` | 1m24s | 146s | 47.8s | 7.6s |\n\nThat is 23% of the DTS-on wall time, against the card's ceiling of 60%.\n\nToday's baseline on CI, from the card: cold closure step 3.1 to 6.0 min per\nshard on PR run 39891259937, about 31 runner-minutes in total.\n\nOn main after the shard-timings refresh (#25409), the full list puts metadata\non shard 2 and the three cli slices on shards 3 to 5, so shards 1 and 6 skip\non a full run. On a PR the affected set decides. This PR's own diff selects\nonly `@objectstack/driver-sql` (a declared ci.yml input), so its first run\nmeasures a cold DTS-off closure. Nothing in the remote cache has DTS-off\nhashes yet. The CI step timings from this PR, both ways, are posted as a PR\ncomment.\n\nReplay trade-off: a skipping shard cannot replay Build Core's DTS-on remote\nartifacts. In steady state that costs nothing. Every package hash a merge\nintroduces is built in the queue run's shard closures, which write the remote\n(`remote:rw` on `merge_group` and main pushes). That gives later PRs a DTS-off\nhit for every package they do not change. The packages a PR does change miss\nboth ways, and they build faster without declarations. The cost is real only\nin the first runs after landing.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands` lists 54 commands. All 54 exit 0\non 8d58beb3. `check:dts-closure` and `check:dual-build-cjs-loads` were re-run\nafter a full DTS-on `pnpm build`, because they read a built tree. `actionlint`\nis not installed here. The workflow parses as YAML, and the job's step order\nis unchanged around the new step.\n\n## Acceptance notes\n\n- Scope deviation from the card's step 1: two packages' shards keep their\n  declarations, for the reason above. The other way to save on those shards is\n  to keep only spec's and cli's declarations under a per-package variable.\n  That needs `tsup.config.*`, cli's `build` script and `turbo.json`\n  `globalEnv`, which is outside this card's file surface, so it is not done\n  here.\n- `.github/workflows/test-nightly-tiers.yml` builds its own shard closure and\n  is not changed here.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VqzDQEbeHPVJoaEoutGsTi\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VqzDQEbeHPVJoaEoutGsTi)_\n\n"
+}

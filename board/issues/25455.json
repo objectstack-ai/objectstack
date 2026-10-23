@@ -1,0 +1,36 @@
+{
+  "number": 25455,
+  "kind": "pull_request",
+  "title": "chore(console): move the objectui pin 1d178e06ac5e → 6fb31dcc9954, past objectui#13370, so the console builds against the spec again",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "marchtian",
+    "id": 7553007,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T14:29:18Z",
+  "updated_at": "2026-10-23T16:44:21Z",
+  "closed_at": "2026-10-23T16:44:19Z",
+  "closed_by": {
+    "login": "marchtian",
+    "id": 7553007,
+    "type": "User"
+  },
+  "merged_at": "2026-10-23T16:44:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25455",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiVqegiix7AA9ngHhBhH78Zv)_\n\nFixes #25430\nPart of #25438\nClause-②: no\nMetadata-protocol: none\n\nThis PR moves the console pin from `1d178e06ac5e` (set by #25437) to `6fb31dcc9954`. That is objectui `main` at `6fb31dcc9954844b2631ecfa96e999c4f73c4881`, the merge of objectui#13370.\n\nIt does two things on the 18.1.0 path:\n\n- **#25438: Console Pin Gate is red on `main`.**\n  - #24947 made a bulk action's `confirmText` a `template` slot. objectui typed the envelope's `source` as required, so `@object-ui/plugin-view` fails its declaration build at `ObjectView.tsx:2615` against the current spec. It fails at every objectui commit before objectui#13370, including `1d178e06ac5e`.\n  - objectui#13370 types `source` as optional, as the spec's `Expression` does. At this pin, `pnpm objectui:build` on this branch builds the console with no local patch.\n  - This PR is marked `Part of` #25438, not `Fixes`. #25438 is closed when Console Pin Gate goes green on `main`.\n- **#25430.** The new pin carries objectui#13361 (`f2f4b7dc3`, the #7611 remainder: Publish from Home no longer reports a `defineCapability` declaration as unresolved). The epic #15194 gate (c) re-test reads this change.\n\n**Branch history.** The harness assigned the branch `claude/project-thread-nldmem`, and the card's `Claim:` names it. The branch first moved the pin from `5fef032b1ada`. After #25437 landed its own move to `1d178e06ac5e`, the branch merged `main`, took `main`'s side of the three conflicted files, and re-ran the bump from there. The net diff against `main` is the four files below.\n\n## The diff\n\nThese are the same four files as in the earlier pin moves #25358 and #25262. The repo's own tooling wrote each one; none was edited by hand.\n\n- `.objectui-sha` and `.changeset/console-6fb31dcc9954.md`: `OBJECTUI_ROOT=/home/claude/objectui OBJECTUI_NO_DEEPEN=1 bash scripts/bump-objectui.sh 6fb31dcc9954844b2631ecfa96e999c4f73c4881 --no-commit` exited 0. It printed \"1d178e06ac5e..6fb31dcc9954 walks completely\", \"7 releasing changeset(s), 0 breaking\" and \"(on origin/main)\".\n- `scripts/sdui-manifest.record.json`: `NODE_OPTIONS=--max-old-space-size=6144 pnpm objectui:build` exited 0 with \"dist ready … from objectui@6fb31dcc9954\" and \"Console bundle carries THIS tree's @objectstack/spec, and only it\". Then `node scripts/gen-sdui-manifest-node.mjs` ran: 107 components, sha256 `d1fde278ffd6…`. `sdui.manifest.json` is byte-identical, so only its provenance record moves. `node scripts/check-sdui-manifest.mjs` passes.\n- `packages/sdui-parser/objectui-lockstep.json`: `OBJECTUI_ROOT=.cache/objectui-6fb31dcc9954 pnpm gen:sdui-lockstep` recorded 214 region lines, blob `0131f27cf86d`, and 25 diagnostic codes. `pnpm check:sdui-lockstep` passes. `pnpm check:console-sha` passes.\n\n## The changeset\n\n`scripts/objectui-changeset-digest.mjs` derived it from the 7 changesets objectui added over `1d178e06ac5e..6fb31dcc9954`, across 7 non-merge commits. #25437's `console-1d178e06ac5e.md` already covers the earlier part of the range, so the two do not overlap. Under ruling A (#25105), a console refresh is `patch` with `Metadata-protocol: none`.\n\n## Choosing the pin\n\n`6fb31dcc9954` is objectui `origin/main`'s tip, and `1d178e06ac5e` is its ancestor. objectui CI on `6fb31dcc9954`:\n- Push runs Lint 39968382243, Repo Gates 39968382372, Changeset Guard 39968382262, Changeset Release 39968382314 and Bundle Analysis 39968382271 succeeded.\n- objectui#13370's own merge-queue run passed before it merged.\n\n## Verification on the built console\n\nI ran the F1 re-test for #15194 gate (c) on this branch's console at this pin, before the merge with `main`. F1 is absent; the reading is on #15194 (comment 6367439307). The injection stamp carries a real witness (`skew: true`).\n\n## Out of scope\n\n- No objectui source changed here.\n- No product code, `.github/workflows/**`, `scripts/build-console.sh` or `content/docs/releases/` is in the diff.\n- This PR is not a release act and does not touch the Version Packages PR #24876.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01CBtjEGZifSHGenaRcRBKYb\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CBtjEGZifSHGenaRcRBKYb)_"
+}
