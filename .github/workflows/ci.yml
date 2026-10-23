@@ -275,6 +275,7 @@ jobs:
               - 'scripts/check-dual-build-cjs-loads.mjs'
               - 'scripts/check-lean-entry-closure.mjs'
               - 'scripts/check-sourcemap-no-sources-content.mjs'
+              - 'scripts/ci/assert-turbo-remote-cache.mjs'
               - 'scripts/population-floor.mjs'
             # Build inputs of the vendored Console SPA — see the Console Pin Gate
             # job at the bottom of this file. `.objectui-sha` is a ROOT DOTFILE, so
