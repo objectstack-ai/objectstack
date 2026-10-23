@@ -13,18 +13,20 @@
   "labels": [
     "domain:skills",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T13:07:04Z",
-  "updated_at": "2026-10-22T14:45:41Z",
+  "updated_at": "2026-10-23T06:50:19Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25220",
   "body": "## Source\n\nThis was out-of-scope finding 2 of PR #25214 (card #25185). Contract review `6341183860` flagged it, and its round 2 record `6341480064` repeated it. The review sent it to the skills lane, as a card the seat files at ACCEPT.\n\n## Finding\n\nThe session harness of a Claude Code project thread tells it to begin every PR body with an attribution block. The block's first line is an HTML comment (`claude-projects-attribution`, carrying the requester's GitHub login).\n\n`.claude/agents/os-dev.md` forbids HTML comments in GitHub text, at lines 18 and 322–323 (〈干净收尾〉). Its reason is that the sanitizer eats short angle-bracket fragments.\n\nSo every card thread breaks one of the two rules. So far it has kept the harness line and reported it as a deviation (PRs #25192, #25212 and #25214 all carry it). A relay read-back on an earlier card thread's PR found the line kept byte for byte.\n\n## Ask\n\nAdd a one-line exemption to `os-dev.md`, shaped like the existing one for trailers the harness writes itself (line 286: report it, do not copy or rewrite it):\n\n- the harness-required attribution line on PR body line 1 stays exactly as the harness gives it, and the dev reports it;\n- the ban still covers every HTML comment the dev writes itself.\n\nThe closing keyword moves to line 4 because of it; say that too, or point to the rule that already allows it.\n\n## Acceptance\n\n- `os-dev.md` names the exemption in one line; nothing else in the ban is loosened.\n- Line growth is paid by compression under `check:pm-skill-ratchet`, with no ceiling moved.\n- The `.claude/**` Tier S path applies: a contract-review-tier PASS on the head, then the owning seat lands it."

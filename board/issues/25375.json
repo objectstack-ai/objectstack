@@ -1,0 +1,32 @@
+{
+  "number": 25375,
+  "kind": "issue",
+  "title": "ci: the six Test Core shards build their dependency closure with DTS on — spec's 6 GB-heap declaration pass and cli's full `tsc` run on every shard although vitest never reads a `.d.ts`; set `OS_SKIP_DTS=1` on the shard legs and their main seed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T04:36:51Z",
+  "updated_at": "2026-10-23T04:43:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25375",
+  "body": "Filing gate: ③ maintainer-directed task (CI performance programme, 2026-10-23). Reader: the `domain:devx` execution seat, dispatch step — one os-dev, one PR. Dedup: `search_issues` on objectstack-ai/objectstack, closed included, \"OS_SKIP_DTS test shard dependency closure build dts tsup skip declarations CI\" → 29 hits; on-topic are #11907 and #12078 (both closed — a DTS-less cached build served where DTS was needed; the repair that followed is `turbo.json`'s `globalEnv: OS_SKIP_DTS`), none open. Session: `session_01GVTBi44LAWbPWg4evKfE1T`.\n\n## One-sentence problem\n\nEach of the six Test Core shards first builds the packages its tests depend on, and that build emits TypeScript declarations for every package — including `@objectstack/spec`'s separate 6 GB-heap declaration pass and `@objectstack/cli`'s full type-checking `tsc` — even though the tests only load JavaScript; on a cold run that is 3–6 minutes per shard spent producing files nothing in the job reads.\n\n## Evidence (file lines at objectstack commit 303aef0)\n\n- `grep -rn OS_SKIP_DTS .github/workflows` → 0 hits: CI never sets it. 20 of 22 `tsup.config.*` files read `dts: !process.env.OS_SKIP_DTS` (one `dts: false`, none unconditionally on); the root `tsup.config.ts` the same.\n- `packages/spec/package.json:267` — `build` = `gen:migration-registry && gen:schema && gen:openapi && tsup && NODE_OPTIONS=--max-old-space-size=6144 BUILD_DTS=true tsup && check-dts-emitted && check-dts-references && check-dev-prereqs --stamp`; spec's source is 2174 .ts files / 30 MB.\n- `packages/cli` `build` is a full `tsc -p tsconfig.build.json` (type-checks) and switches to `--noCheck` only under `OS_SKIP_DTS`; `cli#typecheck` runs `tsc --noEmit` again — cli is type-checked twice per lane today.\n- `ci.yml:758-760` — the shard's \"Build this shard's dependency closure\" step (`turbo run build --filter=PKG^...`); measured cold 3.1–6.0 min per shard on PR run 39891259937 (Σ ≈ 31 runner-min), 3.0–3.4 min on merge_group 39894014103, 0–1.7 min warm.\n- `turbo.json:4` — `globalEnv: [\"OS_SKIP_DTS\"]`: the variable is in every task hash, so a DTS-less artifact can never be replayed where a DTS-on one is expected (the #11907 class is structurally closed) — and equally the shard legs will not replay Build Core's DTS-on artifacts once they differ.\n- AGENTS.md line 575 notes `OS_SKIP_DTS=1` as the local fast path; line 1108: \"`OS_SKIP_DTS=1` greens `check:api-surface` locally and reds it in CI\" — the consumer gates that read `dist/*.d.ts` (lint.yml `typecheck-consumers`, AGENTS.md 745–748) must keep DTS on. This card touches only the six shard legs.\n\n## Governing text\n\n- AGENTS.md line 43: \"tsup/vitest never type-check\" — type-checking belongs to `pnpm typecheck`, which is the lint workflow's job, not the test shards'.\n- AGENTS.md line 1108 (above) fixes the boundary: DTS stays on wherever a gate reads declarations.\n\n## Change\n\n1. `ci.yml` Test Core legs: set `OS_SKIP_DTS: '1'` on the closure build step and the test step (same hash namespace within the job), and on the push-main seed of the same job so the saved seed matches what PRs restore.\n2. Verify no test in the shard set reads a `.d.ts` or asserts on emitted declarations: `git grep -l \"\\.d\\.ts\" -- 'packages/*/src/**/*.test.ts' 'packages/*/test/**'` and the `check-test-source-alias.mjs` ledger; any hit is listed in the PR with its disposition.\n3. Measure on the PR itself, cold, both ways (one run with the variable, one without — a `workflow_dispatch` or two pushes) and pin the winner in the PR body: the DTS saving per shard versus the lost chance of replaying Build Core's remote artifacts (different hash namespace). If the replay loss wins, the card closes with that measurement and no change.\n\n## Acceptance\n\n- Cold shard closure build step ≤ 60% of today's on the same closure (e.g. 6.0 → ≤ 3.6 min) with all six legs green; Build Core, typecheck lanes and consumer gates unchanged and green.\n- `cli#test` (which depends on its own `build`, `turbo.json:209`) still passes — the `--noCheck` build must emit what the cli spawner tests execute.\n\n## Work estimate\n\nLane `domain:devx` · 1 PR (.github/workflows/ci.yml; possibly turbo.json if a per-task env is preferred over the job env) · precedent: `turbo.json`'s `globalEnv` line from the #11907 repair — PR not reachable from this depth-50 clone. `Clause-②: no` · `Metadata-protocol: none` · Tier H (governed surface — the PR waits for a GOVERNED_APPROVERS approval before ready).\n\nPrior rulings read: os_skip_dts, dts, closure → docs/adr 1 hit, AGENTS.md 3 hits (lines 575, 1108 cited above); ADR none; thread: none.\n\nRelated: #11907 (closed), #12078 (closed), #22077 (closed).\n\n## Maintainer directive (verbatim, untranslated)\n\n> 同意，立卡\n\n— the maintainer, 2026-10-23, in reply to the director seat's offer 「(a) 我按 PM 流程把 A1–A5、B1–B3 立成卡进队列(英文卡面、带 Governing text: 与工作量列),由 os-dev 派发」. The CI performance analysis those letters index is the seat's 2026-10-23 five-line audit (objectstack ci.yml + lint.yml; the other 39 workflows; the repo-side turbo/vitest/gate configuration; objectui's 28 workflows; GitHub Actions run data for the preceding 5–55 hours). The maintainer's stated goal, verbatim: 「我希望优化的是性能和效率速度」."
+}

@@ -1,0 +1,28 @@
+{
+  "number": 25392,
+  "kind": "pull_request",
+  "title": "pm: mailbox PR for the cross-account wake test (never merged)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T06:39:51Z",
+  "updated_at": "2026-10-23T06:43:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25392",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · research thread 车队机制迁往 Projects_\n\n## What this is\n\nA draft pull request with **no file changes** (one empty commit). It is a mailbox: a project thread subscribes to it, and a comment left here by another account's project wakes that thread with the comment body. Opened to measure whether that wake arrives and what it carries (doc section 13 of the fleet-to-projects research, 2026-10-23).\n\n## Rules\n\n- Never marked ready, never merged, never enqueued. Closed as soon as the test is read.\n- Comments addressed with a first line `To: <login>` are for that login's thread.\n- Ledger queries for landing PRs must exclude this PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012ZD1FxpnvQ4qsZTFEJvqQ7"
+}

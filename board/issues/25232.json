@@ -2,8 +2,8 @@
   "number": 25232,
   "kind": "issue",
   "title": "Package registry: a merged artifact carries a per-package source, so a control-plane install registers as marketplace, not code",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T13:49:06Z",
-  "updated_at": "2026-10-23T01:24:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T03:56:43Z",
+  "closed_at": "2026-10-23T03:55:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25232",
   "body": "Filing gate ②: from the maintainer's ruling on objectstack-ai/cloud#3138 (batch #386 item 4, letter A, 2026-10-22T13:42Z: 「3138 A」). Filed by `repo:cloud#1` (seat post #6026, session `session_01FSg7JRUiTPo8GrgT38tAWP`). ⛔ Not a claim.\n\n**Reader who acts:** the objectstack lane. objectstack-ai/cloud#3138 is `Blocked-by:` this card, and #25098 (Setup → Packages leaves tenants) stays blocked on cloud#3138.\n\n## Measured (cloud#3137's dev report, comment `6315452493` on cloud#3137; local stack, cloud `ef6f3ceb`, objectui pin `616df659`)\n- A package installed through the control plane is served by the tenant environment. The environment's `GET /api/v1/packages` lists it with `source: 'code'`; no row carries `marketplace`.\n- Cause: the control plane merges an environment's installs into one artifact. `AppPlugin` registers it through `manifest.register()` with no source, and the registry defaults it to `code`. Only `MarketplaceInstallLocalPlugin` (self-hosted) stamps `marketplace`.\n- `InstalledPackageSourceSchema` (`packages/spec/src/kernel/package-registry.zod.ts:67`) already declares `'code' | 'marketplace' | 'authored'`, and defines the source as the registering door's statement.\n\n## The ruling (letter A: the producer states the origin)\n- One merged artifact may carry a **per-package** `source`. The `manifest.register()` / `AppPlugin` seam accepts it, and the registry stops defaulting such a package to `code`.\n- No new enum value, no new declaration face: a writer at an existing seam.\n- Cloud's half follows the pin that carries this: the per-environment factory stamps control-plane installs `marketplace` and registers `MARKETPLACE_INSTALLED_UI_BUNDLE` (cloud#3138).\n\n## Acceptance\nA kernel booted from a merged artifact whose packages carry `source: 'marketplace'` lists them as `marketplace` in `GET /api/v1/packages`, and `developer:packages?source=marketplace` shows them. Packages without a per-package source keep today's behaviour."

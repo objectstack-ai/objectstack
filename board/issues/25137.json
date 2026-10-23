@@ -2,8 +2,8 @@
   "number": 25137,
   "kind": "issue",
   "title": "docs(objectql): \"Multi-Tenant Schemas\" says the injected organization_id stays NULL with no organization context, and since PR #24940 a table the driver creates carries it NOT NULL and refuses that write",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-21T19:37:58Z",
-  "updated_at": "2026-10-23T01:14:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T06:52:58Z",
+  "closed_at": "2026-10-23T06:52:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

@@ -2,8 +2,8 @@
   "number": 24740,
   "kind": "issue",
   "title": "docs: HARDENING.md and production-readiness.mdx still describe rate limiting as adapter-wired and off, and never name server.security.rateLimit or trustProxy",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-20T03:23:51Z",
-  "updated_at": "2026-10-23T01:37:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T06:57:18Z",
+  "closed_at": "2026-10-23T06:57:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

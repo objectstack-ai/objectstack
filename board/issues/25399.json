@@ -1,0 +1,33 @@
+{
+  "number": 25399,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth)!: a cloud-managed environment refuses local self-registration, invitations (resends included), user creation and import, and sets passwords only on local accounts",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T08:11:23Z",
+  "updated_at": "2026-10-23T08:25:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25399",
+  "body": "Fixes #25083\n\nClause-②: yes (narrowing)\nMetadata-protocol: none\n\n## What this does\n\nThis is the services half of the maintainer's ruling 6341690661 on #25083 (objectstack-ai/cloud#3132: hosted environments are managed; self-hosted is unaffected). On a cloud-managed environment, `isCloudManaged()` from `@objectstack/core` (#25306) narrows plugin-auth's local identity doors. With the variable unset, every door behaves exactly as on `main`.\n\n| Door | Managed (`OS_CLOUD_MANAGED=1`) |\n|:--|:--|\n| Audience posture | Only `invite_only`, at construction and on every merged `applyConfigPatch` |\n| Email sign-up | Both `disableSignUp` arms are forced on and advertised. The bootstrap owner's first sign-up still enters, as under SSO-only |\n| `organization/invite-member` | `409 RESOURCE_CONFLICT`, refused at the route in the `before` hook, **resends included**. The `beforeCreateInvitation` arm stays as the second line |\n| `admin/create-user`, `admin/import-users` | `409` after the admin check (a non-admin still hears `403`). Nothing is written |\n| `admin/set-user-password` | Refuses an `idp_provisioned` target with `409`. An `env_native` target is still answered, so the break-glass admin stays editable |\n| `set-initial-password` | Only a caller with platform-admin standing (`isPlatformAdminUser`). Another signed-in caller gets `409`; an anonymous caller still gets `401` |\n\nThe four raw routes answer the ADR-0112 envelope through `cloudManagedRefusal(door)`. `invite-member` answers better-auth's own `{ code, message }` body, as every org-hook refusal in this package does.\n\n**For the cloud's twin** (objectstack-ai/cloud#3169, the per-environment `set-initial-password` the cloud mounts): the package entry now exports `cloudManagedRefusal`, `CLOUD_MANAGED_REFUSAL_CODE`, `CLOUD_MANAGED_REFUSAL_STATUS`, `CLOUD_MANAGED_REFUSAL_MESSAGES` and `CloudManagedDoor`. `isPlatformAdminUser` was already exported. That twin takes the same arm with the same refusal. This export is the widening in `Clause-②: yes (narrowing)`; the door changes are the narrowing.\n\n## Provenance\n\n- The doors, the suite and the changeset were prepared by the `domain:services` seat 1 card thread (claim 6349623693) on `claude/project-thread-i0vfmz`, in commits `a6598847`, `7b0b758c` and `0366f01d`. They paused only because the core accessor and the spec flag had not landed.\n- The maintainer then handed the card to the cloud ops seat (takeover claim 6359752007). This branch carries those commits, merges `main`, and adds the following:\n  - the only merge conflict was in `auth-manager.ts`'s import block;\n  - `hasPlatformAdminStanding` is no longer imported there, because it moved with the actor guards in #25273;\n  - the suite calls `resetCloudManagedForTesting()` on every switch, because `isCloudManaged()` memoizes;\n  - the package-entry export above;\n  - the invite-member resend fix below.\n- The served flag `features.cloudManaged` landed in #25309 and is not re-added here.\n\n## Contract review (narrowing): PASS, with one should-fix fixed in this PR\n\nThe review was run at `CONTRACT_REVIEW_TIER` on head `5a3d27f6`. Its findings and dispositions:\n\n1. **should-fix, fixed.** better-auth answers `invite-member { resend: true }` for a pending invitee before it consults `beforeCreateInvitation`. It extends `expiresAt` and re-sends the e-mail, and the console reaches that branch through `sys_invitation`'s `resend_invitation`. The `before` hook now refuses the route under the managed mode. Pinned by a resend leg (409, expiry unchanged) and its unmanaged control (200, expiry extended). Ablating the new arm reds only the resend leg.\n2. **nit, kept.** `set-user-password` refuses `source === 'idp_provisioned'` and admits other values. A null `source` is answered as local, which matches the ruling's wording (\"refuses `idp_provisioned` targets\"). `sys_user.source` defaults to `env_native`.\n3. **nit, fixed.** The changeset now names both body shapes instead of claiming `error.code` everywhere.\n4. **nit, noted.** The JIT path is pinned through `decideAudienceAdmission` only. This diff does not touch that path.\n\n## Verification (head `f37350ae`)\n\n- `@objectstack/plugin-auth`:\n  - test: Test Files 188 passed, Tests 3560 passed | 10 skipped;\n  - typecheck (incl. `check:test-typecheck`): exit 0;\n  - build: exit 0;\n  - `src/cloud-managed.test.ts`: 32/32.\n- Ablations: each was committed first, run under a trap restore, and restored to HEAD.\n\n  | Ablation | Result |\n  |:--|:--|\n  | `set-initial-password` arm off | 1 failed |\n  | memo reset removed | 5 failed |\n  | package export removed | 1 failed |\n  | invite-member route arm off | 1 failed |\n\n- Full dogfood (owed by the `(narrowing)` arm), on the final head after building the `@objectstack/dogfood...` closure (66/66 tasks): Test Files 289 passed | 3 skipped, Tests 2491 passed | 18 skipped.\n- `dispatch-gates.mjs` derived 135 commands from this diff; 129 can run locally. 120 exit 0. The other 9 are not measured here and are left to CI:\n  - 4 need a PR context: `check-closing-target-claim`, `check-partof-closing-keyword`, `check-single-claim-paths`, `check-governed-queue-guard`. `check-partof-closing-keyword` was also run locally against this body; see below.\n  - 2 need a whole-workspace build: `check:dual-build-cjs-loads`, `check:published-readme-exports`.\n  - 2 are `check-issue-citations` runs (plain and `--census`) whose board read was refused with HTTP 403. The plain run was measured green on the previous head, and this head adds no new issue citation.\n  - 1 is `select-shard-timings-run --self-test`, which needs bash `mapfile`; macOS bash 3.2 lacks it.\n- objectstack-ai/objectui#13330 (the console half) remains open and is being built separately. objectstack-ai/cloud#3169 remains open until this lands in the cloud's pin.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

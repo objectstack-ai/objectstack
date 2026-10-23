@@ -2,9 +2,9 @@
   "number": 25254,
   "kind": "pull_request",
   "title": "docs(pm-dispatch): platform-readings line 403 follows the ADR-0131 D9/D13 schema rule, not the retired tenancy ledger",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T16:23:45Z",
-  "updated_at": "2026-10-22T16:29:52Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-10-23T06:46:58Z",
+  "closed_at": "2026-10-23T06:46:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T06:46:56Z",
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25254",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DMMchS2pMx7VafJmdzGaxFv)_\n\nFixes #25244\nClause-②: no\nMetadata-protocol: none\n\n## Summary\n\nOne line of `.claude/skills/pm-dispatch/references/platform-readings.md` (line 403) still said the D9 system-write stamp only recognised the `PLATFORM_OBJECT_TENANCY` ledger's `tenant-scoped` class. That ledger retired with ADR-0131 D13, and the stamp's scope is decided by the object's schema alone, as `Engine.buildDriverOptions` in `packages/objectql` reads it through `resolveTenantFieldName`: a tenant column and not federated ⇒ in scope; no tenant column (`tenancy.enabled: false`, `systemFields.tenant: false`, no tenant field) or federated ⇒ auto-muted. The line now states that rule and cites ADR-0131 D9 / D13 by name; `reach: in` still only says a tenant column exists.\n\n- Edited in place: 1 line, 119 bytes (cap 120), file stays 460 lines at its 460 ceiling, no ceiling moved.\n- `git grep -n PLATFORM_OBJECT_TENANCY -- .claude` is empty afterwards.\n- Verified against `origin/main` e58bd0e: `packages/objectql/src/engine.ts` `buildDriverOptions` (`isTenantAuditInScope = resolveTenantFieldName(objectSchema) !== null && !isFederated`), and `docs/adr/0131-*.md` carries `### D9` and `### D13`.\n\n## Gates (local, head 67003ee)\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 20 commands; all 20 ran with exit 0 (`pnpm check:pm-skill-ratchet` and `pnpm check:pm-skill-id-lint` among them; `check:doc-formula-expressions` first answered exit 3 PREREQUISITE NOT MET, re-run after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` → exit 0). `--ran` reconciliation: 20 derived, 20 run, 0 NOT-MEASURED, 0 UNRUN. Ratchet verdict line: `platform-readings.md is 460 lines (ceiling 460; headroom 0)`.\n\nDiff touches `.claude/**` only (Tier S governed surface); no published package moves, so `skip-changeset` is declared with this create.\n\n## 维护者速读(草稿)\n\n**改了什么:** `platform-readings.md` 第 403 行一行改写:D9 盖章按 schema 裁(有租户列且非联邦才在范围),引 ADR-0131 D9/D13,不再点名已删除的 `PLATFORM_OBJECT_TENANCY` 账本。行数与字节上限都未动。\n\n**为什么改:** 该账本随 #25201 退役后,这行读起来会把席位引去找一个已不存在的符号;引擎里 `buildDriverOptions` 早已只按 schema 判定。\n\n**风险与代价(含回滚):** 仅文档一行,无代码、无发布面;回滚即 revert 本 commit。\n\n**席位意见:** (留空)\n\n**你要做的:** 席位内 `CONTRACT_REVIEW_TIER` 达档复核 PASS 记录后由席位入队落地;无需维护者批准(Tier S)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01REMuzhz6MWRjg8uohedMnM\n"

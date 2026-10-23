@@ -1,0 +1,37 @@
+{
+  "number": 25359,
+  "kind": "pull_request",
+  "title": "feat(spec,core,objectql): a merged artifact's package entry states its own source, so a control-plane install registers as marketplace, not code",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T02:44:24Z",
+  "updated_at": "2026-10-23T03:55:58Z",
+  "closed_at": "2026-10-23T03:55:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T03:55:56Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25359",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao26JYdNaCZQJBiyvajaDVdq)_\n\nFixes #25232\n\nClause-②: yes\nMetadata-protocol: added\n\n## What\n\nOne merged release artifact may now state a **per-package** origin, per the maintainer's ruling on objectstack-ai/cloud#3138, letter A (「3138 A」): \"One merged artifact may carry a per-package `source`. The `manifest.register()` / `AppPlugin` seam accepts it, and the registry stops defaulting such a package to `code`.\"\n\n- **spec** (`packages/spec/src/stack.zod.ts`): `ArtifactPackageSchema` (one `packages[]` entry of an assembled artifact) gains an optional `source` beside `manifest`. Its values are the new `ArtifactPackageSourceSchema` = `InstalledPackageSourceSchema.extract(['code', 'marketplace'])`. No new enum value: it is the door-statable subset of the one closed origin set, and `authored` is excluded because `registerApp` already refuses it. The key sits on the wrapper, not the body, because it says how the package reached the artifact.\n- **engine, core** (`packages/core/src/artifact-packages.ts`): new `resolveArtifactPackageEntries(artifact)` returns `{ manifest, source? }[]` in dependency order, with `source` read off the entry the gate already parsed and never defaulted. `resolveArtifactPackageOrder` is now that function projected to the bodies, so the metadata door and every other caller are unchanged.\n- **engine, objectql** (`packages/objectql/src/plugin.ts`): `manifest.register` stamps each package with its entry's `source`, else the door's `options.source`, else `registerApp`'s `code` default. An entry's own statement wins over the door's because it is the more specific producer statement.\n- **No AppPlugin change**: `AppPlugin.init` hands a bundle that carries `packages[]` to `manifest.register` as it arrived, and the ADR-0087 forward conversion (`replayPackageBodies`) spreads entry keys, so `source` survives both.\n\n## Acceptance\n\nCard: \"A kernel booted from a merged artifact whose packages carry `source: 'marketplace'` lists them as `marketplace` in `GET /api/v1/packages`, and `developer:packages?source=marketplace` shows them. Packages without a per-package source keep today's behaviour.\"\n\n- `packages/runtime/src/domains/packages-artifact-entry-source.test.ts`: a real `LiteKernel` with the real `ObjectQLPlugin` + `AppPlugin(mergedArtifact)`, then the real dispatcher's `GET /packages`, parsed through `ListInstalledPackagesResponseSchema`. The marketplace entry is listed `marketplace` beside a `code` sibling. Control: an artifact whose entries state nothing lists both `code`.\n- `developer:packages?source=marketplace` is the client-side filter over that row's `source` (objectui `views/metadata-admin/packageSource.ts`); there is no server-side `source` query. So the served row is the seam this PR owns, and nothing in objectui changes.\n- `packages/objectql/src/package-source-stamp.test.ts` (kernel level, the `manifest` service): mixed entries; explicit `code`; entry over door; the no-source control; `authored` and `cloud` on an entry refused at the gate as `INVALID_ARTIFACT_PACKAGE_ENTRY` / 422.\n\n## Ablation (one-time, not a kept test)\n\nMutation: delete the line in `resolveArtifactPackageEntries` that carries `verdict.data.source` onto the node, via `scripts/ablation-replace.mjs` (anchor 1 → 0, blob `8149e550` → mutated). Then rebuild `@objectstack/core`, and `ablation-dist-preflight --absent` confirmed the marker gone from `dist/`. Result: the runtime acceptance test went **red**: `\"com.example.merged.installed\": \"code\"` where `marketplace` was expected. The control case stayed green. Restore: the tool restored the blob to HEAD with `git diff HEAD` empty. After rebuilding, the preflight found the marker back in `dist/` and both tests passed. My first attempt mutated `plugin.ts`; it was a no-op because the build failed on the unused destructured binding, so it was discarded and redone on the core line.\n\n## Gates\n\nLocal subset derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (95 commands), run on head `c2d4316084`, with exit codes captured to disk before any pipe. `dispatch-gates --ran`: \"95 derived famil(ies) accounted for — 95 run, 0 NOT-MEASURED (a DERIVED zero — all 95 recorded an exit code and none of them is 3)\"; all 95 exit 0. Five `@objectstack/spec` gates (`check:api-surface`, `check:dual-source-exports`, `check:entry-nameability`, `check:exported-any`, `check:generated`) first answered exit 3 or 1 on a stale `packages/spec/dist` (declaration-stamp mismatch after the pin-test edit). After `pnpm --filter @objectstack/spec build` they were re-run on the same head and all answered exit 0. The commit-message trailer check and `check:nul-bytes` are clean. Every other family is CI's, cited from the PR's check-runs.\n\n- `pnpm --filter @objectstack/{spec,core,objectql,runtime} typecheck`: exit 0.\n- `pnpm --filter @objectstack/core test` 112 files / 2663 tests; `pnpm --filter @objectstack/objectql test` 464 / 8692; `pnpm --filter @objectstack/spec test` 709 / 21552 (1 todo): all pass.\n- `@objectstack/runtime`: the full suite exceeds the container's 10-minute foreground cap (`exit 124`). Narrowed to `src/domains/packages*.test.ts` + `src/app-plugin*.test.ts`: 54 files / 811 tests pass. The full run is CI's.\n- `pnpm --filter @objectstack/spec check:generated --fix` regenerated `api-surface/` and `export-origins/` (the new export); every other artifact was already current.\n\n## Acceptance notes\n\n- The precedence rule (entry over door) is a choice this PR makes. The ruling says the registry stops defaulting such a package to `code`; it does not address a door that states one origin while an entry states another. No producer does that today: the marketplace install-local plugin states `marketplace` for bundles that carry no entry `source`.\n- Cloud's half (the per-environment factory stamping control-plane installs `marketplace`) follows the pin that carries this, on objectstack-ai/cloud#3138.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DfWYSwCSiPUfqza6ajXVxs)_\n"
+}

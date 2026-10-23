@@ -2,8 +2,8 @@
   "number": 25287,
   "kind": "issue",
   "title": "platform-objects sys_user: the 2FA display (chip, list column, view tab, Security heading) shows a dead \"No\" on every deployment where twoFactor is off",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,20 +11,27 @@
     "type": "Bot"
   },
   "labels": [
+    "area:identity",
     "bug",
-    "domain:spec",
-    "pm:queue",
+    "domain:engine",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T20:18:01Z",
-  "updated_at": "2026-10-22T20:18:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T06:24:33Z",
+  "closed_at": "2026-10-23T06:24:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25287",
   "body": "Filing gate ①: class (c), a declared display with no working capability behind it. Measured by the `repo:cloud#1` seat's dev on objectstack-ai/cloud#3160 (report comment `6350327150` there). It comes from the maintainer's ruling on cloud#3125: 2FA is either offered, or not shown where it is not wired. Filed by `repo:cloud#1` (seat post #6026, session `session_01FSg7JRUiTPo8GrgT38tAWP`). ⛔ Not a claim.\n\n**Reader who acts:** the objectstack lane. objectstack-ai/cloud#3160 is `Blocked-by:` this card and picks it up with a pin bump.\n\n## Measured (framework pin `9d13b5fc`, objectui `616df659`, local stack)\n- `plugin-auth` resolves `twoFactor = OS_AUTH_TWO_FACTOR ?? plugins.twoFactor ?? false` (`auth-manager.ts:3366`–`:3370`). The control plane sets neither, and `/api/v1/auth/config` serves `features.twoFactor: false`.\n- Even so, `platform-objects` shows a 2FA state with no way to act on it:\n  - the `sys_user` record page highlights chip 「Two-Factor Enabled: No」 (`pages/sys-user.page.ts:131`);\n  - the Security tab's 「Two-Factor Authentication」 heading and caption sit above an empty quick-actions bar (`:405`–`:435`);\n  - the list columns and a 「2FA Enabled」 view tab (`identity/sys-user.object.ts:673`, `:690`, `:705`–`:714`).\n  This shows on every deployment with the default `twoFactor: false`.\n- A deployment cannot hide it. There is no user-page analogue of `registerOrganizationRecordPage`, and `requiresFeature` gates only actions and params, not fields, columns, tabs or page components.\n\n## Wanted (the smallest honest shape; the lane may choose the contract shape instead)\n- **Shape 1 (S):** drop `two_factor_enabled` from the `sys_user` highlights chip and from the default list columns. Show the Security tab's 2FA block only when 2FA is enabled, and retire or gate the 「2FA Enabled」 view tab.\n- **Shape 2 (M):** extend `requiresFeature` from actions and params to field display, view columns, tabs and page components, fail-closed like actions. It is the stronger contract, but a new authorable surface. Take it only if the whole class should close now.\n- If the gate uses a `visibleWhen` over `features`, note that a faulting predicate fails open (objectstack-ai/objectstack#25267 is the sibling).\n\n## Acceptance\n- With `twoFactor` off, a user's own `sys_user` record, the user list and its tabs show no 2FA state.\n- With it on, the Security tab shows the state and its enable action.\n\n## Related, outside this card (objectui; the cloud seat cannot file there)\n- With `twoFactor` on, `enable_two_factor`'s `visible` predicate throws in objectui's `record_section` scope (`features` is not bound there), so the enable button never renders.\n- objectui's login page has no second-factor step: a user who enrolled through the API is silently stuck on `/_console/login`. Any deployment that turns 2FA on today locks enrolled users out."

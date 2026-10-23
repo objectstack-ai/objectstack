@@ -1,0 +1,37 @@
+{
+  "number": 25380,
+  "kind": "issue",
+  "title": "pm-dispatch: a SessionStart hook prints the lane's seat-post stub and the SKILL.md pointer, because a multi-repo project's working directory does not surface the repo's .claude/skills (maintainer's word 2026-10-23)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T04:49:15Z",
+  "updated_at": "2026-10-23T06:52:58Z",
+  "closed_at": "2026-10-23T06:52:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25380",
+  "body": "Filing gate **③**: a maintainer-direct task, the maintainer's words quoted verbatim. Filed from the Claude Code project \"Objectstack\" (account `os-elon-musk`) by the research thread 车队机制迁往 Projects on the maintainer's word there. ⛔ Not a claim. Lane self-applied under exception 二 (`.claude/**` hooks and settings are governed Tier S, the lane table's `domain:skills` row); grade suggested p3; triage may regrade.\n\n**Reader (who acts):** the `domain:skills` seat 2 (seat post #19287), in one PR on `.claude/settings.json` + a new `.claude/hooks/session-start-fleet.sh` (+ its `.selftest.sh`, as every sibling hook has) + one pointer line in `.claude/skills/pm-dispatch/references/seat-lifecycle.md`. Size S–M.\n\n## The maintainer's words (2026-10-23, the project's thread 车队机制迁往 Projects, verbatim)\n\n> 包括Claude code projects 我打开之后怎么让他自动加载相关的技能要求。\n> 同意，你现在就立卡派发处理。\n\n## What was measured\n\n- In a Claude Code project that attaches three repositories (objectstack, objectui, hotcrm) the session's working directory is the parent of the three checkouts. Each repository's `CLAUDE.md` IS loaded at session start, and the PreToolUse guards in `objectstack/.claude/settings.json` DO fire in project threads (measured on card threads 2026-10-22/23). But `objectstack/.claude/skills/pm-dispatch` did not appear in any thread's available-skill list (checked 2026-10-23 04:30Z from such a thread), so no thread could invoke `/pm-dispatch`; every seat thread of the last two days read `SKILL.md` by hand only because the maintainer's project instructions told it to.\n- There is no SessionStart hook in the repository today (`.claude/settings.json` has PreToolUse only).\n\n## Wanted\n\nA `SessionStart` hook, registered in `.claude/settings.json` beside the existing guards, that prints to the session (stdout → context) at most ~15 lines:\n\n1. The pointer: `Fleet protocol: read .claude/skills/pm-dispatch/SKILL.md (and the stage references its index names) before any dispatch, claim, review or landing act.` plus the latest touch sha of `SKILL.md` on the checkout's HEAD (`git log -1 --format=%h -- .claude/skills/pm-dispatch/SKILL.md`), so a seat can compare it with its opening mark (`seat-lifecycle.md` 〈开轮互斥〉).\n2. If the environment names a lane (`OS_FLEET_LANE`, set by the project's instructions or environment; absent ⇒ the line says `lane: not set`), the lane's seat-post number from `references/lanes/<lane>.md` and the one-line reminder 「the seat post is a stub; posture and ledger live in the project」.\n3. Nothing else: no network, no GitHub read (the proxy and the write gate are not this hook's business), exit 0 always — a hook that fails must never block a session.\n\nThe hook is a dependency-free bash script shaped like its siblings (`guard-*.sh` + `*.selftest.sh`), and `seat-lifecycle.md` gains one line saying the hook exists and what it prints, ⛔ not a second copy of the pointer text.\n\nNot wanted: uploading pm-dispatch as a claude.ai account skill (two sources of one rule, against 「规则住本仓」 and the ratchet); editing `AGENTS.md` (Tier H).\n\n## Acceptance\n\n- Opening a project thread whose checkout includes objectstack shows the pointer lines in the session's first context; verified once from a project thread and recorded in the PR body with the exact lines.\n- `bash .claude/hooks/session-start-fleet.selftest.sh` green; the hook exits 0 with and without `OS_FLEET_LANE`, and on a checkout where the skill file is missing.\n- `pnpm check:pm-skill-ratchet` green (one line added to `seat-lifecycle.md`, paid by one deletion or within ceiling).\n- Tier S landing: a `CONTRACT_REVIEW_TIER` PASS on the head, then the owning seat lands it on the maintainer's word.\n\n## Dedupe\n\nMCP `search_issues`, objectstack, \"SessionStart hook settings.json print lane seat pointer pm-dispatch SKILL.md read before acting multi-repo project skills not discovered\" → 32 hits; the top ten are #24974, #19287, #7623, #23445, #22979, #22316, #22372, #22257, #20385, #7518. None adds a SessionStart hook or addresses skill discovery in a multi-repo project. **New.**\n\nDedupe words: `SessionStart hook pm-dispatch pointer` · `multi-repo project skills not discovered` · `OS_FLEET_LANE seat stub`."
+}

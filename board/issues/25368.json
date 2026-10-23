@@ -1,0 +1,37 @@
+{
+  "number": 25368,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): Setup → Sessions shows each session's user agent and last activity",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T04:21:19Z",
+  "updated_at": "2026-10-23T05:20:33Z",
+  "closed_at": "2026-10-23T05:20:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T05:20:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25368",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoBt3iJSAGzrBZHSPU8iwNqw)_\n\nPart of #25343\nClause-②: no\nMetadata-protocol: none\n\n## What\n\nSetup → Sessions (`sys_session.listViews.all_sessions`) and the Account app's `mine` view now show `user_agent` and `last_activity_at` beside the IP address. Both fields already exist on `sys_session`. The `revoked` audit view is unchanged.\n\nBefore, two sessions of one user read the same user, organization and creation minute, so an administrator who meant to end one session revoked both. The user agent tells the devices apart.\n\nRuling carried: objectstack-ai/hotcrm#2194, record `6354968262`: 「25251 B hotcrm B」 (adopts R2-T2-U05).\n\n## Why `Part of`, not a closing keyword\n\nTwo halves of the card's *Done when* are outside this PR's surface, and the card stays open for them:\n\n1. **Last Activity is empty by default.** `last_activity_at` is written only by plugin-auth's `enforceSessionControls`, and only while `session_idle_timeout_minutes` is above 0. With both idle and absolute limits at their default of 0, the function returns before it reads the row (`packages/plugins/plugin-auth/src/auth-manager.ts`, the `idleMin <= 0 && absHrs <= 0` early return, and the heartbeat sits under `if (idleMin > 0)`). So on a default deployment the new column is blank. Writing a heartbeat with the controls off adds a `sys_session` read on every authenticated request and a write about once a minute per session, on every deployment. That is a cost decision for the seat, not a mechanical change in this file.\n2. **Browser and OS.** `user_agent` is the raw string better-auth records, shown as stored. The device part sits near the start of the string (\"Macintosh; Intel Mac OS X\" against \"iPhone; CPU iPhone OS\"), so two devices differ even in a truncated cell. A readable \"Chrome on macOS\" needs a console renderer, which is objectui's surface. No server-side derived field is added here.\n\n## Tests\n\n- New pin `packages/platform-objects/src/identity/sys-session-list-columns.test.ts`: both live-session views carry `user_agent` and `last_activity_at`, and every column in every view names a declared, non-`internal` field.\n- `pnpm --filter @objectstack/platform-objects test`: Test Files 89 passed (89), Tests 1324 passed (1324). `typecheck` (tsc, scripts config, `check:test-typecheck`) exit 0.\n- Reverse check (one-shot, not kept): with `ablation-replace.mjs`, the `mine` view's columns lost `user_agent` and `last_activity_at` (anchor 1 → 0, blob `49bf758d0dfd` → `92353a98cd87`). The pin went red (`× mine shows the device (user_agent) and the last request (last_activity_at)`). After the restore, `git diff HEAD` was empty.\n\n## Gates (local, at `ccce09d66`)\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 66 commands. Each one ran with its exit code captured before any pipe. `--ran` result: 66 derived, 64 run, 2 NOT MEASURED, 0 unrun.\n\n- NOT MEASURED (exit 3, prerequisite): `pnpm check:dual-build-cjs-loads` needs every package's `dist/`. `node scripts/check-plugin-teardown-shape.mjs --self-test` is checker-health only and needs an unshallowed clone. CI runs both.\n- `pnpm check:i18n` and `pnpm check:lean-entry-closure` first exited 3 (unbuilt prerequisites). After the prerequisite build they exited 0. `pnpm check:type-check-debt` hit a 280 s local timeout, then ran to the end with exit 0.\n\n## Acceptance notes\n\n- Changeset `.changeset/25343-session-list-columns.md` (`patch`, `@objectstack/platform-objects`) states that Last Activity is empty while no idle timeout is configured.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_014Hse9cj2i4o5UAVrd21NKr\n"
+}

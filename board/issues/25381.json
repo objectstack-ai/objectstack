@@ -1,0 +1,37 @@
+{
+  "number": 25381,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): Create User can grant a permission set in the same step, through the delegated-administration gate",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T04:58:00Z",
+  "updated_at": "2026-10-23T08:16:40Z",
+  "closed_at": "2026-10-23T08:16:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T08:16:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25381",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoL6oH8EmKk5FD1KRSQUD9wm)_\n\nFixes #25338\n\nClause-②: yes (widening: `POST /api/v1/auth/admin/create-user` and the `sys_user` `create_user` action accept an optional `permissionSet`; a request without it is answered exactly as before)\nMetadata-protocol: none\n\nCompanion UI half: objectstack-ai/objectui#13347 (a member who may read none of an app's objects lands on one access page instead of a grid of refusals).\n\n## What changes\n\n**Create User can grant one permission set in the same step.**\n\n- `create_user` gains an optional inline `permissionSet` param (text, the set's machine name). The result dialog shows it when one was granted.\n- `runAdminCreateUser` (plugin-auth) parses `permissionSet`. When one is named, it resolves the calling administrator's OWN execution context through `resolveRequestExecutionContext` (`@objectstack/core`, session-only, fail-closed) before anything is written, then runs the account creation and `engine.insert('sys_user_permission_set', { user_id, permission_set }, { context: <caller's context> })` inside one `engine.transaction()`.\n- A refused grant answers the refusal's own status and code (403 `PERMISSION_DENIED` from the delegated-administration gate, 400 `VALIDATION_FAILED` with `fields` for a name the catalog does not hold), and the transaction rolls the user back.\n- Refused before any write: a non-string `permissionSet` (400), a caller whose own context does not resolve (403), a host that wires no grant seam (501).\n- Cloud-managed is unchanged: `create_user` stays hidden under `features.cloudManaged` (#25295).\n\n## Security floor\n\n- **No new assignment path.** The grant is the same non-system insert into `sys_user_permission_set` that Setup's grant form makes, under the caller's context, so the security middleware, the ADR-0090 D12 `DelegatedAdminGate` (which stamps `granted_by`) and the catalog name check (`grant-permission-set-name.ts`) judge it exactly as they judge the form. No `isSystem` context is used for the grant.\n- **No widening of who can grant what.** The route's existing platform-admin gate decides who may create a user. It never decides what that user may be granted; the D12 gate does. Dogfood G1 reads `granted_by` = the administrator, which is the gate's own stamp.\n- Ruling carried: hotcrm#2194 record 6354968262 (\"25251 B hotcrm B\").\n\n## Verification\n\n- `plugin-auth` `admin-user-endpoints.test.ts`: 65/65, 8 new cases (none asked; assigned under the actor's context, not system; 403 refusal rolls back and writes no audit; unknown name gives 400 with `fields` and rolls back; no seam 501; unresolved context 403; non-string 400; the param is inline, never field-backed).\n- New dogfood `create-user-permission-set.dogfood.test.ts` (showcase boot): 3/3. G1 assigned `showcase_contributor` with `granted_by` = admin; G2 `no_such_set_25338` gives 400 and no user; G3 a member caller gets 403 and no user.\n- Ablation: `runAtomically` replaced with a plain `work()` call (a `ctx.logger.debug` marker, proven in `dist/` by `ablation-dist-preflight.mjs`). G2 goes red: the user survives the refused grant (\"expected [ …(26) ] to have a length of +0 but got 1\"). Restored to HEAD's blob, rebuilt, `--absent` passes. A first leg used a comment marker that the build stripped, so preflight refused it and it measured nothing; it is not counted.\n- `platform-objects`: 88 files, 1318 tests pass (the create-user result-dialog pin now lists `permissionSet`). `tsc --noEmit` clean for plugin-auth and platform-objects. `check-i18n-bundles` OK (zh-CN, ja-JP, es-ES translated).\n- Tenant-audit census re-counted for the one new write site (237 → 238) with `tenant-audit-census.mjs --write`, and the page's hand-written figures updated to match.\n\n## Acceptance notes\n\n- The param is INLINE text, not field-backed on `sys_user_permission_set.permission_set`. That object belongs to plugin-security, and the console's `ActionParamDialog` refuses the whole action when a field-backed param's object metadata is not loaded. The field-backed form would not have given a picker anyway: a field-backed param takes the field's `type` (text), not its `widget: 'permission-ref'` hint. A picker for this param needs params to honour a widget hint (objectui), noted here, not filed.\n- A datasource whose driver has no `beginTransaction` runs the account and the grant unatomically, the engine's declared limit (ADR-0119 D1).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01TpToTVFniSfCoKfhPL16Nz\n"
+}

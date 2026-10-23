@@ -1,0 +1,35 @@
+{
+  "number": 25397,
+  "kind": "pull_request",
+  "title": "feat(spec): a dataset dimension may name its null bucket with `nullLabel`",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T07:28:10Z",
+  "updated_at": "2026-10-23T08:05:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25397",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao65RrUYonFsC9SXEirycswQ)_\n\nFixes #25391\n\nClause-②: yes (widening)\nMetadata-protocol: added\n\nThe spec half of ruling `6358843349` on #25330 (letter A, maintainer 「同意」), verbatim: \"new spec key `DatasetDimension.nullLabel` (I18nLabel, optional; final spelling settled at spec review), the objectui consumer reads it over `chart.nullCategory`, and `system.datasets.ts` sets `user_id`'s null label to 「System」.\" The consumer half and the `system.datasets.ts` producer follow after this lands; #25330 remains open for them.\n\n## What changes\n\n- **`DatasetDimensionSchema.nullLabel`** (`packages/spec/src/ui/dataset.zod.ts`): optional, typed `I18nLabelSchema` (the `label` slot's own type, so a plain string or an inline locale map), `.meta({ title: 'Null Label' })`. The describe says it names the bucket of rows whose value for the dimension is null, that it is display copy only (grouping is unchanged), and that consumers fall back to their own default when it is absent. No alias and no guidance entry: no sibling contract spells this slot, so there is nothing to anchor one to.\n- **Liveness row** `dataset.dimensions.nullLabel`: `planned`, `evidenceScope: cross-repo`, `authorWarn: true` with an `authorHint`. Measured: objectstack's dataset compiler copies `name` / `label` / `field` / `type` / `dateGranularity` into the Cube dimension and nothing else; objectui at the `.objectui-sha` pin `0d12e953` and at main `a14737b` has no reader (its only `nullLabel` spelling is the local parameter of `chart-series.ts` `pivotSeriesBuckets`, fed from `ChartSeriesOptions.nullCategoryLabel`).\n- **Form reconciliation ledger** (`metadata-form-zod-reconciliation.test.ts`): one `omit` row for `dataset` / `dimensions` / `nullLabel`, in the planned-not-rendered group (`page.print`, `page.record`, `field.conditionalFormatting`). Offering a repeater column now would let an author set a label nothing shows. It also keeps `packages/platform-objects` out of this diff: a new repeater row child would owe four locale catalog entries there.\n- **Generated:** `content/docs/references/ui/dataset.mdx`, `packages/spec/authorable-surface/ui.json` (`ui/DatasetDimension:nullLabel`), `packages/spec/liveness/state-counts/dataset.md` (planned 0 to 1), via `check:generated --fix`.\n- **Changeset** `.changeset/25391-dataset-dimension-null-label.md`: `@objectstack/spec` `minor`, with both declaration lines.\n\n## Verification (head `b22602309`)\n\n- New `packages/spec/src/ui/dataset-dimension-null-label.test.ts`, 6 cases: the string form and the locale-map form parse and keep their value; an absent key parses to the same object with no `nullLabel` materialized; `nullLabel: 42` is refused as `invalid_union` at `['nullLabel']`; an undeclared sibling key is still refused (`unrecognized_keys`); a whole `DatasetSchema` carrying it parses clean.\n- `pnpm --filter @objectstack/spec test`: 711/711 files, 21633 passed, 1 todo. The first run (before the ledger row) failed exactly one case, `dataset.dimensions: accepted by the Zod but unauthorable in the form`, which the ledger row answers.\n- `pnpm --filter @objectstack/spec typecheck`: exit 0. `pnpm --filter @objectstack/lint test`: 155/155 files, 7178 tests.\n- Author warning measured end to end: `lintLivenessPropertiesFromLedgerDir` over a stack whose dataset dimension sets `nullLabel: 'System'` returns one `liveness-planned-property` finding carrying the row's hint; the same stack without the key returns none.\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 112 families for this diff; all 112 ran and exit 0. `--ran` reconciliation: 112 run, 0 NOT-MEASURED, 0 UNRUN. On the first sweep 11 families answered exit 3 (a stale `packages/spec/dist` after the test edit, and one pinned control commit missing from the shallow clone) and `check:generated` answered 1 for the same stale dist; after `pnpm --filter @objectstack/spec build` and a fetch of that one commit, all 12 re-ran and exit 0.\n\n## Acceptance notes\n\n- **How the key reaches the renderer is the consumer half's decision.** A dataset response describes a dimension column as `{ name, type, label }`, and the compiler does not copy `nullLabel` into the Cube. The objectui half can read it from the served dataset document, or the response's dimension descriptor can carry it, which would be a `service-analytics` change. The ruling does not pick one; noted here, not filed.\n- **Translation.** `translation.datasets.NAME.dimensions.DIM` declares only `label`, so a translated null label is written today as an inline locale map on the key itself. A bundle face for it would come with the consumer, if wanted.\n- Final spelling stays open to the spec review, per the ruling.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Fd2ukZvGZZbccf6CSDPzuv\n"
+}

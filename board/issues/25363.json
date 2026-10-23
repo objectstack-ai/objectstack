@@ -1,0 +1,37 @@
+{
+  "number": 25363,
+  "kind": "pull_request",
+  "title": "feat(spec): ExecutionStatus gains missed, a scheduled due time that passed while no kernel was ticking",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T03:25:18Z",
+  "updated_at": "2026-10-23T04:46:49Z",
+  "closed_at": "2026-10-23T04:46:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T04:46:47Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25363",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg6zwDuV2XvoDkqC7bXgqnpc)_\n\nFixes #25325\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## What changes\n\n- `packages/spec/src/automation/execution.zod.ts`: `ExecutionStatus` gains `'missed'`, appended **last** (the file's own rule, as for `refused`). The TSDoc says what it means: a scheduled flow's due time that passed while no kernel was ticking, recorded once by the next kernel that found it. It is terminal and is never started, resumed or replayed. It is distinct from `cancelled` (nobody cancelled it) and from `failed` (nothing ran). No new field.\n- `execution.test.ts`: the order pin moves. The first eight members are unchanged, the ninth is `refused`, the tenth is `missed`, and the length is 10.\n- `content/docs/references/automation/execution.mdx` and `api/automation-api.mdx`: regenerated with `gen:docs` after `check:generated` named exactly that artifact as stale. Nothing else regenerated.\n- One changeset, `.changeset/25325-execution-status-missed.md`, at `patch` for `@objectstack/spec` and `@objectstack/plugin-approvals` (`Metadata-protocol: none` takes `patch`).\n\n## Declared services hunk (`domain:services`)\n\n`packages/plugins/plugin-approvals/src/approval-service.ts`: `RUN_STATUS_LIVENESS` (declared `as const satisfies` a Record keyed by `ExecutionStatus` with `RunLiveness` values) gains `missed: 'terminal'`. The services seat agreed to this line in advance in hand-off addendum `6354069893` on #25235. Without it the new member does not compile. The services PR cannot carry the line either, because `satisfies` refuses the extra key until the member exists.\n\n## TSDoc claims checked against the schema at this head\n\n- `ExecutionLogSchema` has `startedAt` (required), `completedAt` and `durationMs` (optional), and `refusalMessage` (optional). It has **no** top-level `error` field: errors live only on each `steps[]` entry. So the TSDoc says that on the `ExecutionLog`, `durationMs` and `refusalMessage` are absent and `steps` is empty.\n- The stored run row (`sys_automation_run`) spells the same instants `started_at` / `finished_at`, and it has `duration_ms`, `error` and `refusal_message` columns. The TSDoc names those three as absent on the row. This is a correction to the card's wording, which listed `error` as absent on both surfaces.\n\n## Not touched\n\n`AutomationResult.status`, `TriggerFlowResponseSchema.data.status` (`contracts/automation-result-status.pin.test.ts` is unchanged) and `JobExecutionStatus`. `ListRunsRequestSchema.status` and the REST `?status=` filter (`parseEnumParam(..., ExecutionStatus.options)` in `packages/runtime/src/domains/automation.ts`) widen by construction. The `sys_automation_run.status` column options, `TERMINAL_RUN_STATUSES` and the retention `onlyWhen` set widen in the services PR for #25235, together with the producer. #25235 remains open.\n\n## Sweep for totality sites\n\nOutside `packages/spec`, every reader of `ExecutionStatus` in `packages/**` is one of three things: a parameter type (`client`, `service-automation` `engine.ts`), an `.options` read (`runtime` `automation.ts`, and its `it.each(ExecutionStatus.options)` test), or the one total map, `RUN_STATUS_LIVENESS`. No other Record keyed by `ExecutionStatus` and no exhaustive switch exists beyond that map.\n\n## Tests\n\nAt head `a6b929fa3`:\n\n- `pnpm --filter @objectstack/spec build`: lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/automation/execution.test.ts`: 1 file, 49/49 passed.\n- `pnpm --filter '@objectstack/plugin-approvals^...' build`, then `pnpm --filter @objectstack/plugin-approvals typecheck && pnpm --filter @objectstack/plugin-approvals test && pnpm --filter @objectstack/spec typecheck`: lock VERDICT command-exit 0, with plugin-approvals at 94 files and 1214/1214 tests passed (the totality test `run-status-liveness.test.ts` included).\n- Reverse verification. `node scripts/ablation-replace.mjs` deleted the `missed: 'terminal'` line (anchor x1 -> x0) and the plugin-approvals typecheck exited 2 with TS1360 (the map does not satisfy the Record type whose key union now includes `\"missed\"`). That shows the check read the rebuilt `.d.ts`. The line was then restored with `git checkout HEAD --`: `git diff HEAD` is empty and the HEAD blob hash matches.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 116 families. Each one ran with its exit code captured before any pipe, and `--ran` reconciled the record: `116 derived famil(ies) accounted for — 113 run, 3 NOT-MEASURED`, 0 unrun, `--ran` exit 0. The three NOT MEASURED families all exited 3 (PREREQUISITE NOT MET) because they need built output from packages outside this diff's closure. CI measures them:\n\n- `check:skill-examples` needs the client SDK `dist`.\n- `check:i18n` needs the workspace CLI `dist`.\n- `check:dual-build-cjs-loads` needs a whole-repo build.\n\n`pnpm --filter @objectstack/spec check:generated` passes after the `gen:docs` regeneration (`check:api-surface`, `check:authorable-surface` and `check:docs` are among the 113 that ran green). The full farm is CI's.\n\n## Acceptance notes\n\n- The member has no producer until the services PR for #25235 lands. This is the same short producer-less window that `refused` had.\n- Contract review of record is owed before the queue (`needs:contract-review`, per the claim).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01B2EeooonSXrANpkpgUSfFZ)_\n"
+}

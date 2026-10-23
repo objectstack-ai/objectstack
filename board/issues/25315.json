@@ -2,8 +2,8 @@
   "number": 25315,
   "kind": "issue",
   "title": "refactor(core, plugin-auth, service-settings): one definition each for the admin_full_access anchor predicate and the organization-reach rule, exported from core security and called by every reader that spells them today",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T23:49:59Z",
-  "updated_at": "2026-10-23T01:06:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T03:30:35Z",
+  "closed_at": "2026-10-23T03:29:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25315",
   "body": "Filing gate **③**: two findings from contract reviews, each recorded on the #15212 reconciliation ledger and outside its PR's surface.\n- From PR #25265 (#25208): ledger 6348725929.\n- From PR #25301 (#25248): ledger 6353870843.\n- **Who acts:** the epic seat dispatches it after PR #25301 lands, because that PR adds the second reach copy.\n- **Dedupe:** none. This card is the carrier for both ledger items.\n\nPart of #15212.\n\n## What is on `main` (and on #25301's head)\n1. **The `admin_full_access` anchor predicate is spelled twice.**\n   - Core: `grantAnchorsPlatformStanding` in `packages/core/src/security/resolve-authz-context.ts` (about `:944`, module-private). Under a walled posture no grant anchors. Under `single`, the grant owned by the Default Organization does.\n   - The last-administrator guard: `anchorOwnerTest` in `packages/plugins/plugin-auth/src/last-admin-guard.ts` (about `:1160`). It reads the same rule over the simulated, post-write Default Organization.\n   - This is the half of 8c-2 carrier 3 (6253205661) that #25208's claim left out.\n2. **The organization-reach rule is spelled twice.** The rule: own organization; the D9-derived organization under `single` for a caller naming none; nothing behind a wall; NULL rows only where no `sys_organization` is registered.\n   - Core: the localization fallback's reach in `resolve-authz-context.ts`, added by #25301.\n   - `service-settings`: its own reach, from #25226 (`organizationReachOf`, `withinReach`, `loadScopedRows` in `settings-service.ts`).\n\n## Wanted\n1. **Measure first.** Confirm that each pair states one rule, and name any difference. A real difference is a finding to report, not something to fold silently.\n2. Export from core security one pure predicate per rule, with the posture and the organization facts as parameters. Each existing reader calls it:\n   - the guard passes the simulated Default Organization;\n   - `service-settings` imports core's reach rather than restating it.\n3. **No behaviour change.** Every existing pin stays green, unchanged.\n4. Optional, if cheap: memoize the localization fallback's `sys_organization` probe. It is bounded today (only reached while the settings service fails). Drop it if it costs more than it returns.\n5. One changeset. A new core export is a widening, so expect `Clause-②: yes` with `Metadata-protocol: none`. The dev re-declares from the diff.\n\n## Acceptance\n- One definition of each rule, in core. Every reader named above calls it, and grep finds no restatement.\n- A shared-predicate unit table covers every posture and caller shape.\n- An ablation that diverges the exported predicate reds the pins of every reader that calls it.\n- The existing pins of `resolve-authz-context`, the last-administrator guard and `service-settings` are unchanged and green.\n- R1–R4 hold."

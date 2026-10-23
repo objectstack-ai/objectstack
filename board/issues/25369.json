@@ -1,0 +1,37 @@
+{
+  "number": 25369,
+  "kind": "pull_request",
+  "title": "feat: the position list says who holds each position and which permission sets it grants",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T04:23:21Z",
+  "updated_at": "2026-10-23T06:10:05Z",
+  "closed_at": "2026-10-23T06:10:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T06:10:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25369",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoWnNJDmFSk7m68Yejj9bevh)_\n\nFixes #25333\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## What\n\nSetup → Positions can now say who holds each position and which permission sets it grants. Both answers come from the rules the authorization resolver enforces with. They are not a second copy of those rules.\n\n- `GET /meta/position?include=grants` adds two read-only keys to each position: `_holderCount` and `_grantedPermissionSets: [{ name, via }]`. Both transports serve it, through the shared list chain (`createMetaListAnswer`). Without `?include=grants`, the list is byte-for-byte unchanged, so the pickers and assignment pages that read it pay no extra read.\n- `via: 'definition'` marks a set the position's `permissionSets` names. `via: 'name'` marks the set that shares the position's name, which the position-name fold grants although the definition does not list it. That is the set #24757 found in force and invisible. The fold's retirement is on hold, so the list shows it rather than hiding a grant that is live.\n- `_holderCount` counts holders in the caller's active organization by the rule the resolver uses to give a caller positions: `sys_user_position` rows in their validity window, membership roles, and `everyone` for every active member. A switched-off position keeps its holders (ADR-0049). The count is `null`, never `0`, in these cases:\n  - there is no active organization;\n  - the position is `platform_admin` or `guest`;\n  - the read was truncated;\n  - the caller may not read `sys_user_position`.\n\n## How\n\n- **`@objectstack/core`.** Two readers are lifted out of `resolveUserAuthzGrants`: `readPositionGrantsInForce` (the §6a rule: the definition's sets in force, with disabled positions and sets dropped) and `countPositionHolders`, which uses the §3/§4 holding rule through the shared `heldPositionNames`. The resolver now calls the same helpers and resolves exactly what it resolved before; the core security suite is green.\n- **`@objectstack/spec`.** `ISecurityService` gains the optional `describePositionGrants(positions, context)` and its `PositionGrantSummary` type. A security service without it serves the list undecorated, never with empty values.\n- **`@objectstack/plugin-security`.** It serves `describePositionGrants` by running the evaluator's own `resolvePermissionSets` plus `dropDeactivatedFoldedSets` over `[position, ...declared]`, the same steps `resolvePermissionSetsForContext` takes. The holder count is gated on `canReadObject('sys_user_position', context)`.\n- **`@objectstack/rest`.** Step 8 of `createMetaListAnswer` decorates a `position` list when asked with `include=grants`. An anonymous caller, or a service without the method, gets the list unchanged.\n\n## Acceptance (the card's *Done when*)\n\n- **Holder count and sets per row.** Served as above. The console half (the columns and the whole-row click) is objectstack-ai/objectui's own draft PR on the same branch name, `claude/project-thread-kuevbz`.\n- **Matches what the server enforces.** This is pinned as agreement, not as the reader's own output:\n  - `position-catalog-readers.test.ts` checks that, user by user, `countPositionHolders` counts a user for P exactly when `resolveUserAuthzGrants` gives that user P, and that a position's sets in force are exactly what the resolver grants a holder of it alone.\n  - `describe-position-grants.test.ts` checks that each described position's sets equal `resolvePermissionSetsForContext` for a holder of that position alone, the same-named set included.\n- **Same-named set case.** `sales_manager` lists `crm_sales_user` and `forecasting` (`via: 'definition'`) and `sales_manager` (`via: 'name'`). Three controls go with it:\n  - a set declared under the position's own name is a declaration, not a fold;\n  - a fold whose set is switched off grants nothing;\n  - `guest` folds nothing.\n- **Both transports.** `meta-list-projection-parity.test.ts` runs the `?include=grants` probe through RestServer and the runtime dispatcher.\n\n## Ablations\n\nEach was run with `scripts/ablation-replace.mjs` and restored to the HEAD blob.\n\n- Removing the fold from `describePositionGrants` turns 2 tests red.\n- Removing the `canReadObject` gate on the holder count turns 1 test red (the null-for-a-member-without-the-read case).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01K9LFkQaGHiensHNgGGgKvD\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 25376,
+  "kind": "issue",
+  "title": "ci(test-shards): widen Test Core from 6 to 8 shards once `@objectstack/spec` is file-sharded — the \"6 is enough\" arithmetic predates the cli slices (full-battery slowest shard ≈ 1937 s → ≈ 1452 s)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:blocked",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T04:37:35Z",
+  "updated_at": "2026-10-23T05:57:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25376",
+  "body": "Filing gate: ③ maintainer-directed task (CI performance programme, 2026-10-23). Reader: the `domain:devx` execution seat, dispatch step — one os-dev, one PR, after the spec-slicing card lands. Dedup: `search_issues` on objectstack-ai/objectstack, closed included, \"SHARD_COUNT 6 to 8 test shards widen partition\" → 3 hits, all closed (#22075, #16473, #15208); none open. Session: `session_01GVTBi44LAWbPWg4evKfE1T`.\n\nBlocked-by: #25372\n\n## One-sentence problem\n\nThe six-way split of objectstack's test suite was sized when the largest indivisible block was 1773 s; the cli package has since been sliced into three and (with the sibling card) spec into two, so the arithmetic that said \"a seventh or eighth shard buys nothing\" no longer holds — a full-battery run's slowest shard drops from ≈ 1937 s to ≈ 1452 s at eight.\n\n## Evidence (file lines at objectstack commit 303aef0)\n\n- `scripts/partition-test-shards.mjs:127` — `export const SHARD_COUNT = 6;`; `:61-62` and `ci.yml:468-473` carry the standing reasoning for 6, written against max 1773 s / spec 1147 s.\n- `scripts/test-shard-timings.json` (2026-10-13): 73 packages sum 11,619 s; cli 2206 s (3 slices), spec 1331 s (to be 2 slices), objectql 700, runtime 632, metadata-protocol 588, rest 531.\n- Local LPT replay over the 76 packages with a `test` script: 6 bins ≈ 1936–1938 s (max/mean 1.00); 8 bins ≈ 1452 s; 10 bins hit the spec floor at 1331 s — hence this card waits for the spec slicing.\n- `ci.yml:557` Test Core `timeout-minutes: 50`; `:563` the matrix `shard: [1, 2, 3, 4, 5, 6]`; `:577-585` and `:602-610` shard-scoped Turbo cache keys; the `Test Core` aggregator (`ci.yml:1428-1480`) verifies a roster of six.\n- Measured full-battery shard tests step 24–27 min today (PR 39891259937 shard 3/6 26.6 min; schedule runs median 28.1 min wall, n=24). Per-shard fixed overhead (checkout, node, pnpm, restore, install) measured 1.3–1.5 min, so two more shards cost ≈ 3 runner-min per run.\n\n## Governing text\n\n- `ci.yml:468-473` / `partition-test-shards.mjs:61-62`: the recorded reasoning this card supersedes; the PR must rewrite those comments with the new numbers, not delete them.\n- `platform-readings.md` (pm-dispatch references): \"单容器重验证并发甜点 ≈3,排批按它定上限\" concerns the PM's local re-verification, not CI shard width — no conflict.\n\n## Change\n\n1. `SHARD_COUNT` 6 → 8 and the partition self-test pins (the 1.3× balance ratio pin must be re-derived from the new weights, not loosened).\n2. `ci.yml`: matrix 1..8; the aggregator roster and `check-aggregator-roster` expectations; the shard-scoped cache key namespace is already per-shard. Re-estimate `timeout-minutes` from the new slowest predicted shard × the drift ceiling (#16465 lineage), do not leave 50.\n3. `shard-timings-refresh.yml` and `measure-test-shard-timings.mjs`: wherever the shard count is read by name or pinned, follow the in-tree pattern for \"the count changed\" (the refresh header documents a NOT MEASURED transition window).\n\n## Acceptance\n\n- Full-battery run after landing: slowest `Test Core` shard tests step ≤ 25 min → target ≈ 17 min with the spec slicing in; no shard over 70% of its timeout (#16465 red line).\n- Aggregator roster, `check:ci-filter-parity`, partition self-test green; the first Monday refresh completes with eight shard rows.\n\n## Risks and pins\n\n- Same files as the spec-slicing card (partition pins, timings, ci.yml matrix): land strictly after it — hence `Blocked-by:` above, not a parallel dispatch.\n- Two more runners per run ≈ +3 runner-min/run (≈ +16 runner-h/day at today's volume) — accepted by the maintainer directive below.\n\n## Work estimate\n\nLane `domain:devx` · 1 PR (scripts/partition-test-shards.mjs, .github/workflows/ci.yml, possibly shard-timings-refresh.yml) · precedent: the last widening is the one `ci.yml:468-473` argues against; its PR and +/− lines are not reachable from this depth-50 clone. `Clause-②: no` · `Metadata-protocol: none` · Tier H (`.github/workflows/ci.yml` is a governed surface — the PR waits for a GOVERNED_APPROVERS approval before ready).\n\nPrior rulings read: shard, partition, shard_count → docs/adr 3 hits, AGENTS.md 0, packages/spec/src 21 (none named for this mechanism); ADR none; thread: none.\n\nRelated: #22075 (closed), #16465 (closed), #16473 (closed), #22917 (closed — drift red on shard 3/6).\n\n## Maintainer directive (verbatim, untranslated)\n\n> 同意，立卡\n\n— the maintainer, 2026-10-23, in reply to the director seat's offer 「(a) 我按 PM 流程把 A1–A5、B1–B3 立成卡进队列(英文卡面、带 Governing text: 与工作量列),由 os-dev 派发」. The CI performance analysis those letters index is the seat's 2026-10-23 five-line audit (objectstack ci.yml + lint.yml; the other 39 workflows; the repo-side turbo/vitest/gate configuration; objectui's 28 workflows; GitHub Actions run data for the preceding 5–55 hours). The maintainer's stated goal, verbatim: 「我希望优化的是性能和效率速度」."
+}

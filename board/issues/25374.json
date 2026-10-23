@@ -1,0 +1,32 @@
+{
+  "number": 25374,
+  "kind": "issue",
+  "title": "ci: no job asserts the Turbo remote cache is actually on — TURBO_TOKEN is withheld whenever the signing secret is empty, turbo then prints \"Remote caching disabled\" and builds cold with nothing red; add the assertion to Build Core and the closure builds",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T04:36:27Z",
+  "updated_at": "2026-10-23T04:43:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25374",
+  "body": "Filing gate: ③ maintainer-directed task (CI performance programme, 2026-10-23). Reader: the `domain:devx` execution seat, dispatch step — one os-dev, one PR. Dedup: `search_issues` on objectstack-ai/objectstack, closed included, \"turbo remote cache TURBO_TOKEN remote caching disabled assert summary Build Core\" → 13 hits; the only on-topic ones are #21186 (closed — wired the remote cache) and #21193 (closed — build hash inputs); none open. Session: `session_01GVTBi44LAWbPWg4evKfE1T`.\n\n## One-sentence problem\n\nobjectstack's CI has a Vercel Turbo remote cache wired into Build Core, the six Test Core closure builds and the three lint typecheck lanes, but nothing checks that it is on: the token is passed only when a second secret is present, a missing or rotated secret turns the cache off silently, and the only trace is a log line nobody reads — so the ten parallel builds per PR may have been cold for weeks without a signal.\n\n## Evidence (file lines at objectstack commit 303aef0)\n\n- `ci.yml:2547-2600` (Build Core env): `TURBO_CACHE`, `TURBO_TOKEN`, `TURBO_TEAM`, `TURBO_REMOTE_CACHE_SIGNATURE_KEY`; writes only on `merge_group` and main `push`/`workflow_dispatch`, PRs read-only. The comment at `:2577-2580` says that when the token is withheld \"the summary then reads Remote caching disabled (remote cache requested — …)\". `TURBO_TOKEN` is passed only when `secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY` is non-empty.\n- The same env block in the Test Core closure build (`ci.yml:748-751`) and the lint typecheck lanes (`lint.yml:5784-5787`, `:6040-6043`, `:6108-6111`, `:6241-6244`, `:6267-6270`).\n- `grep -rn \"Remote caching\" .github/workflows` and any `remoteCache` summary assertion → 0 hits. `turbo.json:7-9` sets `remoteCache.signature: true`.\n- Whether the repo variable `TURBO_TEAM` and the two secrets are configured today cannot be read from a seat container (the Actions variables endpoint answers 403 through the session proxy); the only observable is the builds themselves: PR run 39891259937 Build Core \"Build packages\" 6.45 min with a 0 s Turbo restore, i.e. no local hit and no visible remote hit.\n\n## Governing text\n\n- `ci.yml:2559-2562` records why only `build` tasks go to the remote cache (test/typecheck stay local); this card keeps that boundary.\n- pm-dispatch SKILL.md, 升级与决策: 「新增门禁默认否:门禁是只减不增的零件,例外只有维护者点名」. This card adds an assertion step inside existing required jobs, not a new check context or workflow; the maintainer's directive below names it. If the lane reads the change as a new gate, it goes back to the director batch rather than landing.\n\n## Change\n\n1. After each remote-cache-enabled turbo build (Build Core, the shard closure, the three lint lanes) add one step that reads the run summary (`turbo … --summarize` writes `.turbo/runs/*.json`) or the captured log, and: on `merge_group`/`push` fails the job if remote caching reports disabled; on `pull_request` warns only (forks carry no secrets). Print hit / miss / remote-hit counts into `GITHUB_STEP_SUMMARY` so a seat can read the hit rate without downloading logs.\n2. One shared script under `scripts/ci/` (e.g. `assert-turbo-remote-cache.mjs` with `--self-test`), called from the five places — not five inline copies.\n3. The PR records in this card what the first green run's summary says about the cache state before the change (on / off), because that answer decides whether a follow-up on the secrets is a maintainer action (`pm:awaiting-maintainer`).\n\n## Acceptance\n\n- A merge_group run with the token deliberately withheld (one-off `workflow_dispatch` with an input, or a PR-side simulation) reds at the new step with the turbo sentence in the failure.\n- A normal green merge_group run's step summary shows remote hits > 0 for `build` tasks.\n- No new check context appears in the required set; `check:required-contexts` stays green.\n\n## Work estimate\n\nLane `domain:devx` · 1 PR (.github/workflows/ci.yml, .github/workflows/lint.yml, one new scripts/ci file) · precedent: the wiring PR under #21186 — not reachable from this depth-50 clone for +/− lines. `Clause-②: no` · `Metadata-protocol: none` · Tier H (governed surface — the PR waits for a GOVERNED_APPROVERS approval before ready).\n\nPrior rulings read: remote cache, turbo_token, signature → docs/adr 2 hits, AGENTS.md 1 hit (none on asserting the cache state); ADR none; thread: none.\n\nRelated: #21186 (closed), #21193 (closed), #22077 (closed).\n\n## Maintainer directive (verbatim, untranslated)\n\n> 同意，立卡\n\n— the maintainer, 2026-10-23, in reply to the director seat's offer 「(a) 我按 PM 流程把 A1–A5、B1–B3 立成卡进队列(英文卡面、带 Governing text: 与工作量列),由 os-dev 派发」. The CI performance analysis those letters index is the seat's 2026-10-23 five-line audit (objectstack ci.yml + lint.yml; the other 39 workflows; the repo-side turbo/vitest/gate configuration; objectui's 28 workflows; GitHub Actions run data for the preceding 5–55 hours). The maintainer's stated goal, verbatim: 「我希望优化的是性能和效率速度」."
+}

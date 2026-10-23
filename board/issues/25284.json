@@ -2,7 +2,7 @@
   "number": 25284,
   "kind": "pull_request",
   "title": "docs(spec): clarify has index guard",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -15,11 +15,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T19:52:16Z",
-  "updated_at": "2026-10-22T19:52:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T06:24:05Z",
+  "closed_at": "2026-10-23T06:24:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25284",
   "body": "Fixes #25282\n\nClarifies that terminal indexes are refused by has(), while intermediate numeric segments remain unguarded because the guard builder emits named field selections only.\n\nValidation:\n- pnpm --filter @objectstack/spec build\n- pnpm --filter @objectstack/spec check:generated\n- pnpm --filter @objectstack/spec test -- flow-value-slot-template.test.ts"

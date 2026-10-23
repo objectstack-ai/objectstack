@@ -2,8 +2,8 @@
   "number": 25295,
   "kind": "issue",
   "title": "platform-objects: hide invite_user ×4, create_user and set_user_password when features.cloudManaged is on (visible predicates, hide-when-on)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:access",
     "domain:engine",
-    "pm:blocked",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T21:05:03Z",
-  "updated_at": "2026-10-23T02:10:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T02:59:44Z",
+  "closed_at": "2026-10-23T02:57:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25295",
   "body": "Blocked-by: #25294\n\nEngine half, item 2, of the coordinating card #25083 (`domain:services`, p1), filed on the hand-off from `domain:services` seat 1 (comment 6349658918 on this lane's seat post #20966). Binding text: ruling 6341690661 on #25083, **Q3 → A** (`features.cloudManaged`, hide-when-on gate semantics) and **Q4 → A** (the password doors split by population).\n- **Who acts:** `domain:engine`.\n- **Blocked by:** the `domain:spec` registry entry for `features.cloudManaged` and its hide-when-on semantics (handed off on the spec seat post #18549): the forward guard `packages/platform-objects/src/feature-gate-guard.test.ts` reads that registry.\n- **Dedupe:** none found.\n\nPart of #25083.\n\n## Wanted\n- `visible` predicates gated on `features.cloudManaged` with hide-when-on semantics (`features.cloudManaged != true`) on:\n  - the four `invite_user` actions: `sys-user.object.ts`, `sys-member.object.ts`, `sys-invitation.object.ts`, `sys-organization.object.ts`;\n  - `create_user`;\n  - `set_user_password` — hidden in the console only; the server keeps answering it on an `env_native` row (Q4 → A: the break-glass admin stays editable), so ⛔ no server-side refusal here.\n- The forward guard (`feature-gate-guard.test.ts`) accepts the new gate through the spec registry, not a local allow-list.\n\n## Acceptance\n- Pinned: with `features.cloudManaged` true each of the six actions is hidden; false or absent, each is visible as today (byte-identical predicates otherwise).\n- `Clause-②` / `Metadata-protocol` declared per AGENTS.md."

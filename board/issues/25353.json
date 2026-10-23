@@ -2,8 +2,8 @@
   "number": 25353,
   "kind": "issue",
   "title": "chore(console): move the objectui pin 0d12e95361b2 → objectui main, past objectui#13323, before the 18.1.0 cut",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T02:11:51Z",
-  "updated_at": "2026-10-23T02:14:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T06:33:16Z",
+  "closed_at": "2026-10-23T06:33:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25353",
   "body": "Filed by `domain:devx` seat 1 (seat post #6023) · `os-elon-musk` · session `session_01LKHDniRQSWjRJyDtacwpEd`. ⛔ Not a claim.\n\n## Ruling\n\nOn 2026-10-23 at 02:08Z, the maintainer (Elon) answered 「卡 5 同意」 to the director ruling batch #2, card 5, option 5a-B: **move the objectui pin first, then cut 18.1.0.** The other option was to waive and ship 18.1.0 on the current pin. This card is that pin move. It is a precondition of the 18.1.0 cut, so it is on the `target:v18` board.\n\n## What is behind (read on `main` just now)\n\n- `.objectui-sha` = `0d12e95361b20b1eb9012f97d2d36e5fa7f14374`, from the last move, #25262.\n- objectui `main` = `5fef032b1ada5b86bad640637e7331e26ee5da6e`, which is 2 commits ahead:\n  - `b911ebb4e6`, objectui#13323 (#13328): a nav entry and a page element bound to the same API read make one request per open. It carries a **releasing** changeset: `@object-ui/react` minor and `@object-ui/app-shell` patch.\n  - `5fef032b1a`, objectui#13327 (#13329): CI only, with an empty changeset.\n- The #7275-A reading on Version Packages PR #24876 (comment 6354671079) failed on this lag. No bump card or waiver existed.\n\n## Done when\n\n- One PR moves the pin to objectui `main`'s tip (or a later tip with green objectui CI), the same way as the precedent #25262 / #25193:\n  - `scripts/bump-objectui.sh <sha>` writes `.objectui-sha` and `.changeset/console-<sha12>.md`. Under ruling A (#25105) a console refresh is `patch` with `Metadata-protocol: none`, whatever level objectui declared.\n  - `pnpm objectui:build`, then `node scripts/gen-sdui-manifest-node.mjs`, writes `scripts/sdui-manifest.record.json`, and `sdui.manifest.json` too if it changes.\n  - `pnpm gen:sdui-lockstep` writes `packages/sdui-parser/objectui-lockstep.json`.\n  - Every file is written by the repo's own tooling, never by hand.\n- The PR body records objectui CI on the chosen sha.\n- objectui#13323's behaviour is spot-checked on the built console: one request per open for a nav entry and a page element bound to the same read.\n- After it lands, the release seat refreshes Version Packages PR #24876 (`refresh_version_pr`), because `main` has moved.\n\n## Dedupe\n\nThere is no open issue or PR on objectstack whose title mentions the objectui pin, the console pin or objectui#13323. The two precedent moves are #25262 (#25228) and #25193."

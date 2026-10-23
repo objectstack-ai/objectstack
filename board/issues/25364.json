@@ -1,0 +1,36 @@
+{
+  "number": 25364,
+  "kind": "issue",
+  "title": "fix(plugin-auth): a failed read in the last-administrator guard's default-slug capture rule answers 403 PERMISSION_DENIED, while auth-manager's sibling slug guard answers 503 for the same fault — give the read fault one code",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T03:36:31Z",
+  "updated_at": "2026-10-23T06:33:15Z",
+  "closed_at": "2026-10-23T06:33:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25364",
+  "body": "Filing gate **③**: a finding of the contract review of PR #25286 (#25271; record 6352123147, ① 4), carried on the #15212 ledger (6352526831). It is outside that PR's surface.\n- **Who acts:** the shared queue.\n- **Dedupe:** none.\n\n## What is on `main`\n- The last-administrator guard's `sys_organization` `beforeUpdate` rule (`packages/plugins/plugin-auth/src/last-admin-guard.ts`, `guardOrganizationDefaultSlug`, from #25286) answers a read it cannot complete with 403 `PERMISSION_DENIED`. That is the guard file's `failClosed` shape, and the text says the read failed and to retry.\n- The sibling slug guard in `auth-manager.ts` answers the same kind of fault with 503 `SERVICE_UNAVAILABLE` (`slugGuardReadFaultApiError`).\n- So a caller cannot tell \"you may not\" from \"try again\" by code on this door.\n\n## Wanted\n- One code for a read fault across both guards. Most likely 503 `SERVICE_UNAVAILABLE`, or a dedicated code with its own row in `packages/spec`'s error-code ledger (ADR-0112).\n- The refusal on the merits stays 403 `PERMISSION_DENIED`.\n- Measure first: every half of the last-administrator guard uses `failClosed`. Say whether to change one half or the shared shape, because changing one half alone splits the guard's vocabulary.\n\n## Acceptance\n- A read fault answers the same code from both guards, pinned at the HTTP door (`organization/update`) and the engine door.\n- A refusal on the merits is unchanged.\n- R1–R4 hold."
+}

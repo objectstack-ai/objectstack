@@ -2,9 +2,9 @@
   "number": 25350,
   "kind": "pull_request",
   "title": "fix(service-settings)!: a host that binds its own engine and states no organization source reads and writes as the organization D9 derives",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,6 +12,7 @@
   },
   "labels": [
     "documentation",
+    "needs:upgrade-harness",
     "size/m",
     "tests",
     "tooling"
@@ -22,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T01:50:13Z",
-  "updated_at": "2026-10-23T02:23:24Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 2,
+  "updated_at": "2026-10-23T05:13:53Z",
+  "closed_at": "2026-10-23T05:13:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T05:13:51Z",
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/25350",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuSQfvzuV2ZjD9aZ44eAhnVq)_\n\nFixes #25249\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n\nRuling-ref: 6355249103 (letter A). Why `Clause-②: no (narrowing)`: nothing is added to any accept set. `SettingsServiceOptions` and the `bindEngine` extras are unchanged. What narrows is which organization a host that binds its own engine, and states no organization source, reads and writes as.\n\n## What changed\n\n`SettingsService.organizationReachOf` (`packages/services/service-settings/src/settings-service.ts`) now takes ADR-0131 D9's answer from `organizationDecision()`:\n\n1. the stated `organization` source, when the host bound one (the plugin always does);\n2. no engine at all (the in-memory store): `no-organization-object`, as before;\n3. otherwise `resolveGuestOrganization(this.engine, posture)`, the same call the plugin's source makes, through the engine the service holds.\n\nThere is no second predicate, no registry-sniffing arm, and no `catch` around the probe. An engine that exposes no `registry` (the plugin's own `wrapEngineAsSettingsEngine`, any hand-written `SettingsEngine`) cannot say the organization object is absent, so D9 reads it as registered and asks `sys_organization`. A lean self-binding host declares the composition at its bind site: `bindEngine(engine, audit, { organization: async () => ({ kind: 'no-organization-object' }) })`, or hands over an engine whose `registry.getObject` answers.\n\nThe retired docblock sentence (\"Unset … reads as a composition that registers no organization object\") is rewritten on the source type, its field and the `bindEngine` extra. The `index.ts` host paragraph gains the declaration line and names the symptom of omitting it. No `docs/adr` edit.\n\nAlso: a changeset (`@objectstack/service-settings` patch, BREAKING, FROM/TO, the one-line fix).\n\n## Branch\n\nThe harness assigned the branch `claude/project-thread-c4vx2u`, not the repo-convention `claude/issue-25249-…`. This note is for the Duplicate Fix Guard. The card's `Claim:` (6354964172) names this branch.\n\n## Tests\n\nPremises P1–P4 of the ruling were re-read on the branch before the migration: `registryHoldsObject` answers `true` with no `registry.getObject` (core `resolve-authz-context.ts:1235`); `wrapEngineAsSettingsEngine` returns `find` / `insert` / `update` only and forwards `find` verbatim; the plugin's only `bindEngine` call states a source; the plugin is the only non-test constructor in the repo. All four hold.\n\n**Migration (45 tests in 7 files, red on the route alone).** Each suite now states its composition truthfully, through a shared testkit (`src/__tests__/settings-organization.testkit.ts`):\n- a suite over a double states `LEAN_ORGANIZATION_SOURCE` at its bind: `settings-getmany`, `settings-user-rung-owner.pin`, `settings-system-context.pin` (its constructor-engine case moves to `bindEngine` with the same crypto provider and secret store);\n- a suite running the real `ObjectQL` behind the production adapter forwards that engine's `registry` (`withEngineRegistry`), so D9 answers `no-organization-object` itself: `settings-secret-rotation`, `sys-secret-orphan-report`, `settings-global-rung`, `settings-user-reference.pin`.\n\nNo default in the service, no stub `getObject`, no new input. The four construction sites outside the package pass `{ env }` and no engine; they are untouched.\n\n**Pins** (`settings-organization-reach.pin.test.ts`, new section):\n- (a) a registry-less adapter over a real engine holding one `sys_organization` row, no source: the tenant and user rungs read and write as that organization, and the rows with no organization do not answer;\n- (b) no organization object, no source: on the real engine, `AuthzStoreUnavailableError` naming `sys_organization` (pinned as measured; `isMissingTableError` not widened); on a double whose probe answers nothing, no tenant rung and the tenant write refused (`SETTINGS_VALIDATION`);\n- (c) a stated lean source: rows with no organization read and written, unchanged;\n- (d) no engine: the in-memory store unchanged;\n- (e) the existing plugin pins keep their assertions.\n\nAblation (`scripts/ablation-replace.mjs` on the committed route): the engine branch of `organizationDecision` replaced by the old lean answer. (a) and both (b) pins went red; (c), (d) and the plugin pins (e) stayed green, the expected direction. Restored: blob equals HEAD, `git diff HEAD` empty.\n\nRuns on `e12143e6` (after merging `origin/main`):\n- `vitest run` in `packages/services/service-settings`: 58 files / 987 tests passed (982 before the new pins).\n- `pnpm --filter @objectstack/service-settings typecheck`: exit 0.\n- Derived gates, the full dogfood battery (`!` title) and the contract-review-tier review: reported on the card in the os-dev-report and on this PR.\n\n## Out of scope\n\nHosts outside this repo that bind `SettingsService` themselves (cloud control-plane mocks, embedded runtimes) are downstream of the published package. The changeset's FROM / TO and its one-line fix are the hand-off; no cloud card is filed from here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014FFTcf6msoLbXiD6BR7wHW)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_014FFTcf6msoLbXiD6BR7wHW\n"

@@ -1,0 +1,37 @@
+{
+  "number": 25387,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): hide the sys_user 2FA display when twoFactor is off",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T05:22:24Z",
+  "updated_at": "2026-10-23T06:24:33Z",
+  "closed_at": "2026-10-23T06:24:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T06:24:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25387",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoXFSLU1DJHNjbPNr5sCZdkJ)_\n\nFixes #25287\n\nClause-②: no\nMetadata-protocol: none\n\nUnblocks objectstack-ai/cloud#3160 (picks this up with a pin bump). Shape 1 per triage's retriage answer 6357013838: no new authorable key; shape 2 (`requiresFeature` on display surfaces) is not taken.\n\n## What changes\n\n2FA is either offered, or not shown where it is not wired. `plugin-auth` resolves `twoFactor` to `false` unless a deployment turns it on, so on the default deployment the four surfaces below showed a 2FA state nobody could act on.\n\n| Surface | Before | After |\n|---|---|---|\n| Record page, highlights chip | `two_factor_enabled` (\"Two-Factor Enabled: No\") | dropped; the details grid still hides the field |\n| Record page, Security tab | 2FA heading + caption over an empty action bar | heading, caption, a new `record:highlights` showing `two_factor_enabled`, the 2FA quick actions and the closing divider each carry one component `visibleWhen` |\n| `all_users` / `me` list columns | `two_factor_enabled` column | dropped |\n| \"2FA Enabled\" view (`listViews.two_factor`) | a tab that could only ever be empty | retired (its three translated labels leave the generated bundles) |\n\nThe gate is `has(features.twoFactor) && features.twoFactor == true`, in the `P` (CEL envelope) form the page's other node gates use. The right half is exactly `featureGatePredicate('twoFactor')`, the conjunct `requiresFeature: 'twoFactor'` lowers onto the object's 2FA actions. The `has()` half keeps the gate closed without faulting while the auth config has not loaded (the console binds `features` to an empty map until then).\n\n## Where each gate is evaluable (measured at the pinned objectui `0d12e953`)\n\n- **Page component `visibleWhen`:** evaluable. `SchemaRenderer`'s node scope spreads the ambient predicate scope, and `AppContent` / `RecordFormPage` mount `ExpressionProvider` with the raw `/api/v1/auth/config` `features`, so `features.twoFactor` is bound. A declared node predicate that faults is withheld, not drawn (objectui#13299, present at the pin), so the card's fail-open caveat does not apply to this surface; the `has()` guard avoids the fault anyway.\n- **Highlights field, list column, list view:** not evaluable. `record:highlights.fields`, `ListView.columns` and the `listViews` map carry no predicate key; `ViewTabSchema.visible` is a static boolean. Gating them would need a new authorable key, so they are removed from the defaults instead.\n\n## Verification\n\n- New pin `packages/platform-objects/src/pages/sys-user-two-factor-display.test.ts` (7 tests). Off: no list view names `two_factor_enabled` and `two_factor` is gone; the chip strip omits the field; every Security-tab node that names 2FA, plus the closing divider, carries the one gate; the gate evaluates `false` (not a fault) for `{ twoFactor: false }`, a map without the key, and `{}`. On: the gate evaluates `true` and the Security tab carries both the state (`two_factor_enabled`) and the enable action under it. Evaluated with `@objectstack/formula`'s `celEngine`, the engine the package's other predicate pins use.\n- Reverse check: with the fix committed (`2a544030`), removing `visibleWhen` from the Security tab's 2FA caption node turns the pin red (`every Security-tab node that names 2FA … carries the one gate`: 1 failed, 6 passed); restored with `git checkout HEAD --`, blob hash identical to HEAD, 7/7 green again. One-off, no permanent mutation test.\n- `platform-objects`: 89 test files, 1325 tests pass (`vitest run`, at `2a544030`). `pnpm --filter @objectstack/platform-objects typecheck` exit 0.\n- `node scripts/check-i18n-bundles.mjs --write`: exit 0; the only change is the retired view's label in en / zh-CN / ja-JP / es-ES.\n- Local gate subset (`dispatch-gates.mjs --commands`, reconciled with `--ran`): 66 derived, 64 run with exit 0, 2 NOT MEASURED (exit 3, prerequisite refused): `check-plugin-teardown-shape.mjs --self-test` (its pinned positive-control commit is outside this shallow clone) and `check:dual-build-cjs-loads` (needs every package's `dist/`, i.e. a full `pnpm build`). Both are left to CI.\n\n## Acceptance notes\n\n- The `two_factor_enabled` field itself stays: the 2FA actions' predicates read it. A deployment with 2FA on that wants the column or the \"2FA Enabled\" tab back can declare them in its own list view.\n- `plugin-auth/src/auth-plugin.ts` has a comment naming `sys_user.listViews.{all_users,unverified,two_factor}` as an example of schema-embedded list views; it now names one retired view. Left alone to keep this PR inside its claimed file surface.\n- `object-collapsed-sections-echo-decisions.test.ts` cites the retired view's translated label as precedent in a decision string (prose, not an assertion); the precedent stays valid as history.\n- Not this PR, the card's own objectui findings (measured by the cloud seat at objectui `616df659`, not re-measured here), reported for the seat to file in objectui: with `twoFactor` on, `enable_two_factor`'s `visible` predicate faults in the `record_section` scope of `record:quick_actions` (`features` not bound there), so the enable button never renders; and objectui's login page has no second-factor step, so a user who enrolled through the API is stuck on `/_console/login`. Until the first is fixed, the on-case shows the gated heading and state but its action bar stays empty in the real console.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ukg7cK1DZiCfUdo5FH4G7A\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ukg7cK1DZiCfUdo5FH4G7A)_\n"
+}

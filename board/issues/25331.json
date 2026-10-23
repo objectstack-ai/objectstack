@@ -2,8 +2,8 @@
   "number": 25331,
   "kind": "issue",
   "title": "Setup field help is written for developers (\"Foreign key to sys_user.id\", \"via isGrantActive\", \"(P3 digest middleware)\", \"Reaper / Rotator / Archiver\") and shows inert fields — rewrite it for admins and hide Last Certified At (hotcrm#2194 T2-U02)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:records",
     "bug",
     "domain:engine",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T01:32:23Z",
-  "updated_at": "2026-10-23T01:53:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T05:48:17Z",
+  "closed_at": "2026-10-23T05:48:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25331",
   "body": "## 维护者速读\n\n- **事由：** 一轮 Setup 测试遇到 9 处面向开发者的字段说明（外键、函数名、ADR 编号、内部组件名），还有标明「目前无效」的字段。\n- **要做：** 把这些说明改写成管理员能读懂的话；隐藏尚无作用的字段（如 Last Certified At）。\n- **完成标准：** 下列字符串在管理员界面上不再出现。\n\nFiling gate **③ a task the maintainer set**: the maintainer's ruling on objectstack-ai/hotcrm#2194, recorded there at `6354968262` (the director seat, posting from the maintainer's account): 「25251 B hotcrm B」, 2026-10-23T01:05:47Z. That is letter B for all three rounds, exactly as the seat recommended, and it adopts **T2-U02**. Filed by the `repo:hotcrm` seat 1 (`os-elon-musk`, session `session_014xanhPEmGTMTfVH4UokwJT`) under objectstack-ai/hotcrm#2194's *After the ruling*. ⛔ Not a claim.\n\n**Grade:** triage's. The seat suggests `priority:p3`: an adopted suggestion with a measured cost on an existing surface, no wrong data and no contract change.\n\n**Reader (who acts):** objectstack triage routes and grades it. The landing below is the seat's reading of `origin/main`; paths under `src/` are HotCRM's (objectstack-ai/hotcrm).\n\n## Governing text\n\n- The ruling above. Per objectstack-ai/hotcrm#2194's own governing text, this item is an adopted suggestion through filing gate ②, not a defect card, and a platform or console landing is changed there, never re-implemented in HotCRM: 「平台相关的功能，应该尽量先改平台。」 (maintainer, 2026-10-18, ledger `6245607810`).\n\n## Why (measured)\n\n- **Pages / persona:** many Setup forms, the system administrator.\n- **Now:** developer text in admin help: \"Foreign key to sys_user.\", \"NULL only on a grant written before the column existed\", \"Reserved for a future access-recertification workflow … Inert today\", \"via isGrantActive\", \"(P3 digest middleware)\", \"Owned by objectql (better-auth is oblivious to this column)\", \"[ADR-0086 D3]\", \"ADR-0057 … Reaper / Rotator / Archiver\". 9 distinct developer-facing strings met in one pass.\n- **Evidence:** objectstack-ai/hotcrm [track 2 report, *UI and UX suggestions*](https://github.com/objectstack-ai/hotcrm/blob/ed4f40e42b8b6ce059a4e648f25f8f6037ffd9f6/qa/2026-10-20-setup-pass/REPORT.md), U-02; [`07-people-users-assign-permset-dialog.png`](https://github.com/objectstack-ai/hotcrm/blob/ed4f40e42b8b6ce059a4e648f25f8f6037ffd9f6/qa/2026-10-20-setup-pass/shots/07-people-users-assign-permset-dialog.png), [`13-access-capabilities-detail.png`](https://github.com/objectstack-ai/hotcrm/blob/ed4f40e42b8b6ce059a4e648f25f8f6037ffd9f6/qa/2026-10-20-setup-pass/shots/13-access-capabilities-detail.png), [`22-config-settings-lifecycle.png`](https://github.com/objectstack-ai/hotcrm/blob/ed4f40e42b8b6ce059a4e648f25f8f6037ffd9f6/qa/2026-10-20-setup-pass/shots/22-config-settings-lifecycle.png). Re-measured unchanged on `@objectstack/*` 18.0.0 by the round 2 pass ([round 2 track 2 report, *UI and UX suggestions*](https://github.com/objectstack-ai/hotcrm/blob/4d7cc467dcb08226fea5b8a1b2ea89ee05d6353b/qa/2026-10-20-v18-setup/REPORT.md), the section's opening paragraph).\n\n## Landing\n\nRead on objectstack `origin/main` `7b047b44` (`git grep -F`, sources and generated `en` bundles, tests excluded):\n- \"Foreign key to sys_user.id\": `packages/platform-objects/src/apps/translations/en.objects.generated.ts` ~:1593, ~:1657 (10 hits in all).\n- \"NULL only on a grant written before …\": `packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts` ~:107.\n- \"Reserved for a future access-recertification workflow\": the same file ~:209 and `sys-user-position.object.ts` ~:182 (the inert Last Certified At).\n- \"via isGrantActive\": `packages/plugins/plugin-approvals/src/sys-approval-delegation.object.ts` ~:120.\n- \"(P3 digest middleware)\": `packages/services/service-messaging/src/objects/notification-preference.object.ts` ~:163 (and \"P3 quiet-hours middleware\" beside it).\n- \"better-auth is oblivious\": `packages/platform-objects` `sys_user` field help (7 hits).\n- \"Reaper / Rotator / Archiver\": `packages/objectql/src/lifecycle/lifecycle-settings.ts` ~:22.\n- \"[ADR-0086 D3]\": 0 hits today; the dev re-measures the page the tester saw.\n- `service-messaging` already carries an `admin-copy-vocabulary.test.ts`; the dev reads whether it is the place to extend.\n\n## Done when\n\n- Each string above is replaced, on the admin-facing help, by a sentence an administrator can act on, in every shipped locale bundle (regenerated, not hand-edited).\n- Last Certified At (and any field whose own help says it is inert) is not shown on the Setup forms until something reads it.\n- A pin that the strings above no longer reach the admin-facing help.\n\n**Size:** M.\n\n## Dedupe\n\nMethod: every open objectstack-ai/objectstack issue (108) and every issue updated since 2026-10-19 (544, any state), listed through the repo-scoped `issues` endpoint (paged) at 2026-10-23T01:20Z and matched case-insensitively on their titles. Words: `developer`, `admin copy`, `help text`, `inert`. 4 hits: #25203, #24910, #24576 (help-text residues on other surfaces) and #24339 (an ADR note), all closed. Not on point. **New.**\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

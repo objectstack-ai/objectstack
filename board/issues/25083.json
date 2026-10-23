@@ -13,20 +13,20 @@
   "labels": [
     "area:access",
     "domain:services",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
-    "os-sales"
+    "hotlong"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-21T08:23:10Z",
-  "updated_at": "2026-10-23T02:13:49Z",
+  "updated_at": "2026-10-23T08:11:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 13,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25083",
   "body": "Ruled: 6341690661 · letter Q1 B / Q2 D / Q3 A / Q4 A · 2026-10-22T13:16Z\n\n> Ruling supersedes two sentences below: the JIT 「declared default permission set」 and its config key are retired (Q1 B — default access is the `everyone` anchor, ADR-0090 D5; HotCRM instance objectstack-ai/hotcrm#2231), and the managed-mode switch is `OS_CLOUD_MANAGED=1` read by `isCloudManaged()` with the control-plane binding as the fuse (Q2 D). Read comment 6341690661 before the body.\n\nFiled by the director seat (summon #43 continuation 5, `session_01QJC7i981TSs9L1CGJK59Ax`) as the objectstack half of the maintainer's ruling on objectstack-ai/cloud#3132 (2026-10-21, 「云端环境就是受管模式，自托管模式不影响」): hosted environments are managed — every account the organisation invites lives in the cloud, authorization stays in the environment; self-hosted deployments are unchanged. ⛔ Not a claim.\n\n## Why\nADR-0024 D5.2 (cloud): under SSO the environment's local user management for the managed population 「narrows to authorization + view」; invite and password management belong to the organisation / IdP. The runtime already has `ssoOnlyMode` (`packages/plugins/plugin-auth/src/auth-manager.ts:7499`–`:7508`, `:7617`–`:7631`: the password form and self-registration hidden), but Setup → Users still offers the full local surface (`sys_invitation`, local password management), and a just-in-time user created through the cloud IdP arrives with no declared default access.\n\n## What changes\n- **Under `ssoOnlyMode` (or `OS_AUTH_SSO_ONLY`):** Setup → Users lists users read-only (identity fields come from the IdP) and keeps only authorization: positions, permission sets, sharing-relevant fields; the local 「invite」 and password actions are not offered; one line says where to invite (the hosting organisation). The break-glass local admin stays editable (ADR-0024's invariant).\n- **Default access for a JIT user:** an environment declares the permission set a just-in-time user receives on first entry (one config key, read by the IdP JIT path); absent, the smallest read-only platform set. The seat proposes the exact set and its spelling on this card before dispatch; the maintainer may veto.\n- **No local sign-up on a managed environment:** under the managed mode the audience posture is `invite_only` and not configurable (an application cannot open self-registration in the environment; a future self-registration door, if ever wanted, is the cloud's, scoped to an environment, as its own card — the maintainer's word: 「在应用里自己注册的人…我的建议是这个也不要」).\n- Self-hosted deployments without an IdP are unaffected (the mode is off).\n\n## Acceptance\n- With `ssoOnlyMode` on: Setup → Users shows no invite or password action; the audience posture reads `invite_only` and the configuration door refuses `open`; positions and permission sets remain assignable; the break-glass admin remains editable; a JIT user holds the declared default set after first entry (pinned); with the mode off, nothing changes (pinned).\n- Docs: `data-hooks.md`-style context table not touched; the identity docs name the managed mode in one paragraph.\n- UI copy: the objectui half, if any, is filed by the claiming seat as a cross-repo card.\n"

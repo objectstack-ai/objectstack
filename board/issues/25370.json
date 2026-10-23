@@ -1,0 +1,38 @@
+{
+  "number": 25370,
+  "kind": "pull_request",
+  "title": "fix(platform-objects, plugin-sharing, spec): Setup forms show option labels instead of machine values",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T04:27:40Z",
+  "updated_at": "2026-10-23T06:10:03Z",
+  "closed_at": "2026-10-23T06:10:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T06:10:02Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25370",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao9syRPnMJSuZZ5jYxme4Xun)_\n\nFixes #25332\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nSetup forms showed machine values where an administrator expects labels. This PR fixes the declarations that produce them. The stored values do not change.\n\n| Form | Field | Producer | Fix |\n|---|---|---|---|\n| Business Units | Kind (`cost_center` …) | `packages/platform-objects/src/identity/sys-business-unit.object.ts` | bare-string options become `{ value, label }` |\n| Sharing Rules | Recipient Type (`business_unit`, `unit_and_subordinates` …), Access Level (`read`, `edit`) | `packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts` | same |\n| (same vocabulary) | Recipient Type, Access Level on `sys_record_share` | `packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts` | same, see below |\n| Datasources | field label `autoMigrate` | `packages/spec/src/data/driver/{sqlite,postgres,mysql}.zod.ts` | the key gains `.meta({ title: 'Auto-migrate schema' })` |\n\n- `Field.select([...strings])` makes each label equal to its string, so a snake_case value is shown as-is. The options now carry English labels. The Recipient Type labels are the ones its help text already used (\"Business unit and subordinates\", \"Field\").\n- The en translation bundles are regenerated (`node scripts/check-i18n-bundles.mjs --write`). The existing zh-CN, ja-JP and es-ES option translations were already present and are kept unchanged.\n- **Where the producer sits, and why:** the dispatch expected the `autoMigrate` label on a datasource object. Measured, it is the driver-config JSON Schema in `packages/spec`: the console's datasource form labels each config row with the property's `title` and falls back to the raw key, and `autoMigrate` was the one SQL-driver key without a title. So the fix is at the spec producer, never a renderer fallback.\n- **In-place fix of `sys_record_share`:** `recipient-vocabulary-consistency.test.ts` holds one rendering per option key across both sharing objects, so labelling the rule's options alone turns it red. The record share gets the same labels. This is the same defect class with a mechanical fix and the same gate family; the claim's file surface did not name this file, and the seat is told.\n\n## Pins (one per declaration)\n\n- `packages/platform-objects/src/identity/business-unit-kind-option-labels.test.ts`: values unchanged, no label equals its value.\n- `packages/plugins/plugin-sharing/src/sharing-rule-option-labels.test.ts`: the same for both fields on both sharing objects, plus the help text naming labels the select shows.\n- `packages/spec/src/data/driver/config-registry.test.ts`: the `autoMigrate` JSON-Schema title on sqlite, postgres and mysql.\n\n## Verification (head `ce8bac22`)\n\n- `pnpm --filter @objectstack/spec exec vitest run src/data/driver/config-registry.test.ts`: 39/39.\n- `pnpm --filter @objectstack/platform-objects test`: 89 files, 1320 tests passed.\n- `pnpm --filter @objectstack/plugin-sharing test`: 54 files, 1209 tests passed. The first run, before `sys_record_share` was labelled, failed `recipient-vocabulary-consistency.test.ts` as described above.\n- `typecheck` for spec, platform-objects, plugin-sharing: exit 0.\n- `pnpm --filter @objectstack/spec check:generated`: all 14 artifacts up to date.\n- `dispatch-gates --commands`: 91 derived, 89 exit 0, 2 NOT MEASURED (exit 3, prerequisites): `check-plugin-teardown-shape.mjs --self-test` needs an unshallowed clone; `check:dual-build-cjs-loads` needs every package's `dist/`. CI runs both.\n\n## Acceptance notes\n\n- **Not in this PR, objectui:** \"Display name\\* `name`\" is objectui's `packages/app-shell/src/views/metadata-admin/SchemaForm.tsx`. It renders the field key in a `code` chip beside the label whenever the label is not the prettified key. The Packages form takes its labels from objectui's `package-schema.ts`, so no declaration here produces it. The seat files the objectui card.\n- **Not in this PR, objectui:** the datasource form (objectui `datasource/DatasourceResourcePage.tsx`) renders enum options by raw value, so `autoMigrate`'s options still read `off` / `safe`. JSON Schema has no option-label channel for it to read.\n- The datasource config titles are English only: the form reads them straight from the JSON Schema, and no translation path covers driver-config titles.\n- Other driver-config keys with no title, which render their raw key wherever the form shows them: memory `initialData` / `strictMode` / `persistence`, mongodb `options`, turso `encryptionKey` / `sync` / `timeout`. They are not on the four forms the card names.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QUKVainSF9Fx4YDaSPyE64)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QUKVainSF9Fx4YDaSPyE64\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 25393,
+  "kind": "pull_request",
+  "title": "docs(os-dev): name the harness attribution-line exemption in 〈干净收尾〉; Check Changeset reads the PR body",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T07:00:23Z",
+  "updated_at": "2026-10-23T07:09:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25393",
+  "body": "Fixes #25220\nClause-②: no\nMetadata-protocol: none\n\n`.claude/agents/os-dev.md` only, net zero lines (404 → 404; ceiling 404 untouched). One exemption line under 〈干净收尾〉's HTML-comment ban: the harness-written attribution comment on PR body line 1 stays exactly as the harness gives it and the dev reports it; `Fixes #N` then sits on the first line after it; every HTML comment the dev writes itself stays banned. Paid by deleting the `cdn.playwright.dev` 403 line (moot under the `playwright install` ban directly above it). Carry-over from PR #25240's contract review: the changeset-line rule now says `Check Changeset` reads the two declaration lines off the PR body (`scripts/check-changeset-no-major.mjs` `declarationFromPullRequest`, `readClause2Line(pr.body)` / `readMetadataProtocolLine(pr.body)`); the changeset-body copy is AGENTS.md Post-Task Checklist ③'s publishing rule (`check:adr-0087-registration` reads it there). Every changed line is ≤120 bytes; no re-wrap.\n\n## 维护者速读(草稿)\n\n**改了什么**:`os-dev.md` 两处。① 〈干净收尾〉HTML 注释禁令下加一行例外:harness 自写的 PR 正文首行归属注释原样留、只报;`Fixes #N` 紧随其后;dev 自写的 HTML 注释仍禁。② 「两行同抄进 changeset 正文行首」一行改为写明 `Check Changeset` 读的是 PR 正文。为付行数,删掉 Toolchain traps 里 `cdn.playwright.dev` 403 那一行(上一行已禁 `playwright install`,该情形不再出现)。\n\n**为什么改**:项目线程的 harness 要求 PR 正文第一行是一条 HTML 注释归属行,与 os-dev.md 的 HTML 注释禁令必然冲突,此前每张卡都只能记一条 deviation。② 来自 PR #25240 的合同复核:门禁实际读 PR 正文(`check-changeset-no-major.mjs`),原句写成读 changeset,会误导。\n\n**风险与代价(含回滚)**:仅规则文本,不发布、不改脚本。风险是删掉的 403 一行所载的教训丢失(被上一行规则覆盖)。回滚 = revert 本 PR 一个 commit。\n\n**席位意见**:\n\n**你要做的**:席位的 `CONTRACT_REVIEW_TIER` PASS 落在本 head 之后,一句「objectstack-ai/objectstack#N 可以落地」(N 为本 PR 号)。\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `fc7b53ff` (20 commands); all 20 ran on the working tree that became `da46daf`, each exit code captured before any pipe; `--ran` reconciliation: 20 derived, 20 run, 0 NOT-MEASURED, 0 UNRUN. All exit 0, including `pnpm check:pm-skill-ratchet` (`os-dev.md is 404 lines (ceiling 404; headroom 0)`) and `pnpm check:pm-skill-id-lint`. `check:doc-formula-expressions` exit 0 (no prerequisite build needed). CI-only families (type-check lanes, wide-population and roster families) are read off this PR's check-runs.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01REMuzhz6MWRjg8uohedMnM\n"
+}

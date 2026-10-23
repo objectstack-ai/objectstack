@@ -1,0 +1,31 @@
+{
+  "number": 25394,
+  "kind": "pull_request",
+  "title": "chore(ci): empty spec-shape-retirements.json — all five entries name closed objectui cards (#25108)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T07:02:18Z",
+  "updated_at": "2026-10-23T07:02:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25394",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D3HAzRn9UnnjnvWeBJbjUjJ)_\n\nFixes #25108\nClause-②: no\nMetadata-protocol: none\n\n## What\n\n`scripts/ci/spec-shape-retirements.json`: all five entries in `retirements` are deleted, leaving `\"retirements\": []`. `$comment` is byte-identical, and no other key exists.\n\n- Why: the registry's own `$comment` says each entry is \"deleted when that card closes\". All five downstream cards are closed `completed`.\n- Why it matters: a stale entry still matches. While one stays, a new break in the same objectui file with the same code and message reads `known` instead of red.\n- The entries removed name objectstack PRs #23836, #23846, #24442, #24970 and #24778.\n\nOne file, +1 / −82. No gate script, workflow or package change. Nothing publishes, so there is no changeset (`skip-changeset`). Precedent: #23822.\n\n## Measurements (against `origin/main` at `fc7b53ffbf`)\n\n- **Downstream cards** (read through the REST API before the edit):\n\n  | entry (objectstack PR) | downstream card | state | closed |\n  |:--|:--|:--|:--|\n  | #23836 | objectstack-ai/objectui#12654 | closed `completed` | 2026-10-16T15:04Z |\n  | #23846 | objectstack-ai/objectui#12711 | closed `completed` | 2026-10-16T17:06Z |\n  | #24442 | objectstack-ai/objectui#13022 | closed `completed` | 2026-10-19T13:05Z |\n  | #24970 | objectstack-ai/objectui#13308 | closed `completed` | 2026-10-21T10:21Z |\n  | #24778 | objectstack-ai/objectui#13309 | closed `completed` | 2026-10-21T10:09Z |\n\n- **`parseRegistry` accepts an empty array:** `scripts/ci/spec-shape-gate.mjs:857`. The shape check at `:865` refuses only a non-object, or a `retirements` that is not an array (`!Array.isArray(doc.retirements)`). Per-entry rules run inside `doc.retirements.forEach`, so zero entries raise zero problems. The self-test pins this case (`:1470`, \"an empty registry loads as zero retirements\").\n- **The edited file, loaded by the real reader:** `parseRegistry(<the edited file>)` returns `retirements.length === 0` and does not throw.\n- **Self-test:** `node scripts/ci/spec-shape-gate.mjs --self-test` gives `60/60 passed across 7 batteries`, both before and after the edit.\n- **Other readers of the file:** only `scripts/ci/spec-shape-gate.mjs` and `.github/workflows/spec-shape-gate.yml`. The workflow's `paths:` filter (`:116`) names this file, so this PR runs its own `Spec Shape Gate`.\n\n## Gates\n\nDerived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `fc7b53ffbf`, with the one changed path. Exit codes were captured before any pipe and reconciled with `--ran`: \"22 derived, 22 run, 0 NOT-MEASURED, 0 UNRUN (a DERIVED zero — all 22 recorded an exit code and none of them is 3)\".\n\n| Command | Exit |\n|---|---|\n| `node scripts/check-ci-filter-parity.mjs` | 0 |\n| `node scripts/check-closing-keyword-parity.mjs` | 0 |\n| `node scripts/check-closing-keyword-parity.mjs --self-test` | 0 |\n| `node scripts/check-comment-mask-corpus.mjs` | 0 |\n| `node scripts/check-position-name-fold-loaders.mjs` | 0 |\n| `node scripts/check-position-name-fold-loaders.mjs --self-test` | 0 |\n| `node scripts/check-scripts-symbol-anchors.mjs` | 0 |\n| `node scripts/check-scripts-symbol-anchors.mjs --self-test` | 0 |\n| `pnpm check:agent-test-spelling` | 0 |\n| `pnpm check:bash32-floor` | 0 |\n| `pnpm check:cli-command-ids` | 0 |\n| `pnpm check:cross-package-test-inputs` | 0 |\n| `pnpm check:driver-memory-census` | 0 |\n| `pnpm check:entry-guard` | 0 |\n| `pnpm check:gitlink-declared` | 0 |\n| `pnpm check:nul-bytes` | 0 |\n| `pnpm check:parse-guard` | 0 |\n| `pnpm check:pnpm-filter-targets` | 0 |\n| `pnpm check:pnpm-flag-spellings` | 0 |\n| `pnpm check:refd-timer-probe` | 0 |\n| `pnpm check:spec-shape-gate` | 0 |\n| `pnpm check:watch-hint-literal` | 0 |\n\nThe first sweep ran in a checkout with no `node_modules`. Six commands exited 3 (`PREREQUISITE NOT MET`): `check-ci-filter-parity`, both `check-closing-keyword-parity` commands, `check-comment-mask-corpus`, `check:cli-command-ids` and `check:driver-memory-census`. After `pnpm install --frozen-lockfile` (exit 0, no tracked file changed), all 22 were re-run. The table shows that second sweep.\n\nCI runs the rest of the families on this PR.\n\n## Acceptance notes\n\n- Done when (from the card): this PR's own path-filtered `Spec Shape Gate` run concludes `success` with no \"matched nothing\" list. That run is CI's to report. It cannot be measured locally.\n- Not touched: the gate script's header and grammar. Unlike #23822, no comment in `spec-shape-gate.mjs` or `spec-shape-gate.yml` names any of the five entries, so the change is the JSON file alone.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01LKHDniRQSWjRJyDtacwpEd"
+}

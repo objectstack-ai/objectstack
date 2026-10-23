@@ -1,0 +1,26 @@
+{
+  "number": 25389,
+  "kind": "pull_request",
+  "title": "test: scope the tree-wide pin scans to the extensions they judge",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Nitjsefnie",
+    "id": 75166987,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T05:45:05Z",
+  "updated_at": "2026-10-23T08:11:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25389",
+  "body": "Fixes #25321\n\n## Summary\n\nThe four remaining tree-scan pin tests handed `git grep` (or `ls-files` + `grep`) all of\n`packages/` and filtered to the files they judge afterwards, so a loaded runner paid for\nhundreds of megabytes of non-source bytes per scan inside the pins' 60 s budget. This gives\neach scan the pathspec of the extension it judges — the same shape PR #25319 used for the\nruntime twin — so every pin judges the same file set while git reads only those files.\n\n## Changes\n\n- `packages/objectql/src/action-owner-key-single-source.test.ts`: the three full-tree greps\n  become one extension-scoped multi-needle scan shared by both tree assertions; stale-site\n  line reporting and the release-record/pin exemptions are unchanged.\n- `packages/core/src/security/row-serving-door-exposure.pin.test.ts`: one shared\n  extension-scoped grep replaces the whole-tree scan; all matchers, comment filtering and\n  caller classifications unchanged.\n- `packages/core/src/security/second-object-read-exposure.pin.test.ts`: same shape; the\n  arbiter prefilter, decision-site and wiring checks unchanged.\n- `packages/core/src/security/operation-private-keys.pin.test.ts`: the content prefilter\n  becomes one extension-scoped grep that includes `.tsx` on purpose, so the existing\n  excluded-`.tsx`-declaration boundary assertion keeps its own discriminating population;\n  the ordinary offender set stays `.ts` minus `.d.ts`, and the filename-only `ls-files`\n  exclusion census is untouched.\n- `packages/core/src/security/granted-permissions-not-enforced.pin.test.ts` already scopes\n  its pathspecs (`.ts`/`.mts`) and is left unchanged.\n- Every `SCAN_TIMEOUT_MS = 60_000` is byte-identical to before: this is not a timeout\n  raise. Ablation checks confirm each edited pin still goes red on a planted violation in\n  a still-scanned path, and that the excluded-`.tsx` boundary assertion still fires on a\n  planted excluded declaration.\n\n## Testing\n\n- The four edited pins pass locally (objectql 5/5; row-serving 3/3; second-object 4/4;\n  operation-private-keys 5/5).\n- Per-scanner ablations: a planted offending declaration/call in a still-scanned `.ts`\n  path turns each pin red with its own assertion failure and is restored to green; a\n  planted declaration in an excluded `.tsx` file still turns the boundary assertion red\n  while the ordinary offender assertion stays green.\n- Narrow ESLint over the touched files: clean.\n- Full CI (build, sharded tests, docs, lint, typecheck) runs on this branch.\n\nTests-only change: per `.github/workflows/pr-automation.yml` the diff releases nothing, so\nit is eligible for the `skip-changeset` exemption label — applying labels is not something\na fork PR can do for itself.\n\nAuthored by automated coding agents; per-commit authorship is recorded in the commits'\n`Co-Authored-By` trailers.\n"
+}

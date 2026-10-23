@@ -1,0 +1,37 @@
+{
+  "number": 25357,
+  "kind": "pull_request",
+  "title": "fix(spec)!: a flow get_record node's limit is declared a positive integer, so a fraction, 0 or a negative is refused at every door that parses a flow",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T02:34:52Z",
+  "updated_at": "2026-10-23T03:43:55Z",
+  "closed_at": "2026-10-23T03:43:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T03:43:53Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25357",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoBtFLBZ6RGauULKM9CboqUv)_\n\nFixes #25302\n\nClause-②: no (narrowing)\nMetadata-protocol: narrowed\n\n## What changes\n\n`GetRecordConfigSchema.limit` (`packages/spec/src/automation/builtin-node-config.zod.ts`) goes from `z.number()` to `z.number().int().positive()`. The `get_record` executor (`packages/services/service-automation/src/builtin/crud-nodes.ts`) parses its config against this contract, then calls `data.find` with `limit` as written when `limit > 1`, and `findOne` otherwise. It does not go through `findData`, so the Data API's page-window normalizer never judges it. Before this change `limit: 2.5` reached the driver as its LIMIT, and `0`, `-1` or `0.5` silently read one record.\n\nThe executor contract is the one judge every flow door shares (`flowNodeConfigRefusals`, the value half). Narrowing it refuses the value at `nodes.N.config.limit` with `node-config-refused-by-contract` at `FlowSchema.parse`, `defineStack` (`STACK_SCHEMA_INVALID`, 422), `objectstack validate` / `compile`, the registered `flow` type schema the metadata save door validates against, `AutomationEngine.registerFlow`, and an artifact's parse. No consumer code changes.\n\n- **Why not reuse the PR #25300 exports.** `QueryPageWindowSchema` is `int().nonnegative()`, and `0` means \"the total alone\" at a list door. A `get_record` node always reads at least one row, so `0` there is not a window. The bound is its own, and the TSDoc says why.\n- **ADR-0087 disposition:** `not-required (already-registered flow-builtin-node-config-values-refused)`, amended in this diff. That D3 entry already covers \"a value outside the declared set or range\" for builtin node configs. Its surface, replacement and reason now name `get_record` `limit`. The reason also says the one difference: such a node used to run rather than fail. No D2 conversion, because only the author knows the count they meant.\n- **Changeset:** `.changeset/25302-get-record-limit-positive-integer.md`, `@objectstack/spec` `minor`, with FROM → TO and the one-line fix.\n- **Generated:** `content/docs/references/automation/builtin-node-config.mdx` (`check:generated --fix`, 1 of 14 artifacts stale: `check:docs`). The JSON Schema (gitignored) now reads `type: integer`, `exclusiveMinimum: 0`.\n\n## Producers measured\n\n- **This repo** at `97967a9`: 70 `get_record` nodes in `*.ts`. Every `limit` within 14 lines of one is a positive whole number (200 ×4, 5 ×5, 50 ×2, 10 ×2). The one other value is the string `'{page.size}'` in `canonicalize-stored-flow.test.ts`, which is already refused as the wrong type and still throws `/limit/`. Query: `git grep -n -A14 -E \"type: ?['\\\"]get_record['\\\"]\"` piped to a grep for `limit:`.\n- **HotCRM** at `4166f21` (current `main`): 42 `get_record` nodes. 12 `limit`s, all positive whole numbers (500 ×7, 1000 ×2, 1 ×1, and `BILLING_HANDOFF_LINE_ITEM_LIMIT` = 200 ×2).\n\n## Tests\n\nAt head `d972d18` (the spec diff is unchanged since `e92f351`; the merge brought plugin-security/plugin-sharing only):\n\n- `flow-builtin-node-config-values.test.ts`: probes `limit` 2.5 / 0 / -1 at the judge, and a new `get_record limit is a positive integer` block. That block covers a fraction at `FlowSchema` in the contract's words; `defineStack` asserting `code` + `status` (`STACK_SCHEMA_INVALID` / 422) and the path, for 2.5, 0, -1, 0.5 and an unsafe integer; and the save-door schema. Controls: `limit` 1, 2 and 200 parse, and no `limit` parses.\n- `@objectstack/spec` test: 709/709 files, 21566 passed. typecheck: exit 0.\n- Consumers (filter direction: downstream readers of the schema): `@objectstack/service-automation` 198/198 files, 2618 tests; `@objectstack/lint` 153/153, 7076; `@objectstack/metadata-protocol` 259 passed + 3 skipped, 21416 passed. typecheck exit 0 for all three. No fixture needed triage, because no fixture carries a non-positive or fractional `limit`.\n- **Ablation** (`scripts/ablation-replace.mjs`, mutation `int().positive()` removed): the test file went 10 failed / 59 passed, which is exactly the 10 refusal cases. The controls stayed green. Restored: blob equals HEAD `a900d3e7` and `git diff HEAD` is empty. Spec's own tests import `src`, so no build leg applies.\n- Dogfood: see the report comment on the card (it runs on the final head).\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 113 families for this diff. Each was run locally with its exit code captured before any pipe. 112 exited 0. `pnpm check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: it reads the dist of about 40 packages this diff does not build), so it is NOT MEASURED locally and left to CI's `Lint & Repo Gates`. `check:skill-examples` first exited 3 (no client dist), then exited 0 after building `@objectstack/client` and `client-react`. Three gates first exited 3 on a shallow clone or a missing lint dist, then exited 0 after `git fetch --unshallow` and building the lint closure.\n\n## Acceptance notes\n\n- The executor's own form descriptor in `crud-nodes.ts` declares `limit: { type: 'integer', title: 'Limit' }` with no `minimum`. So a designer form built from it offers `0`, which the save door now refuses with the contract's words. That is outside this card's file surface. Noted, not filed: declared ≠ enforced does not apply, because the refusal is loud at save.\n- `if (limit && limit > 1)` in the executor is now exact: `limit` is either absent or a whole number of at least 1.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_013XF6vcPvtFkNY5BmaMGzcd)_\n"
+}

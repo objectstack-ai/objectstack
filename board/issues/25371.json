@@ -1,0 +1,37 @@
+{
+  "number": 25371,
+  "kind": "pull_request",
+  "title": "feat(platform-objects): Create Key offers the key's expiry and names the Authentication policy that bounds it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T04:27:56Z",
+  "updated_at": "2026-10-23T05:30:47Z",
+  "closed_at": "2026-10-23T05:30:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T05:30:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25371",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao61ZBid2jvapvCexubDuEuE)_\n\nFixes #25339\n\nClause-②: yes\nMetadata-protocol: none\n\n## What changed\n\nSetup → API Keys → Create Key asked only for a name, so every key silently got the default life the Authentication API key policy sets. Ruling carried: objectstack-ai/hotcrm#2194 record `6354968262`, 「25251 B hotcrm B」 (adopts T2-U21).\n\n- **`sys_api_key` `create_api_key`** (`packages/platform-objects/src/identity/sys-api-key.object.ts`) now declares an optional, field-backed `expires_at` param (the column is `datetime`). Its help text names the policy: left empty, the key gets the *Default key lifetime* under Setup → Authentication → API keys (90 days unless changed); a date later than the *Maximum key lifetime* there is refused. The param has **no `defaultValue` on purpose**: an action param default is a literal submitted verbatim (`ActionParamSchema.defaultValue`, and objectui `ActionParamDialog` seeds it untouched), so any fixed date there would override the deployment's policy instead of following it.\n- **The reveal dialog** shows the expiry the key actually got (`expires_at`, plain text) beside the masked key. The route already echoes it in its answer.\n- **The route's ceiling refusal** (`packages/runtime/src/domains/keys.ts`) now names the setting that decided it: \"the Authentication API key policy's Maximum key lifetime is N days\", next to the latest date allowed. Code and status unchanged: `400 API_KEY_EXPIRY_TOO_LONG`, never a clamp.\n- Translation bundles regenerated (`node scripts/check-i18n-bundles.mjs --write`); the zh-CN / ja-JP / es-ES values are translated by hand, reusing each locale's existing labels for the column and the two policy settings.\n\n## Where it landed, and why not plugin-auth\n\nThe order expected the refusal in `packages/plugins/plugin-auth`. Measured on `origin/main` `303aef069`: the mint route is `@objectstack/runtime` `domains/keys.ts` (the one mint path, `POST /api/v1/keys`), and it already reads the policy through the auth service's `resolveApiKeyLifecyclePolicy` and refuses past the ceiling since #23367 (pinned in `packages/runtime/src/api-key-lifecycle.pin.test.ts`). plugin-auth is only the policy's source and is untouched here. The one runtime change is the refusal text.\n\n## Pins\n\n- New `packages/platform-objects/src/identity/sys-api-key-create-expiry.test.ts`: params are exactly `name` (required) and `expires_at` (optional); no literal default on `expires_at`; its help text names both policy settings; the param resolves to a `datetime` column; the reveal lists `key` then `expires_at`.\n- `setup-list-empty-states.test.ts`: the reveal pin now expects the masked key plus the plain-text expiry.\n- `api-key-lifecycle.pin.test.ts`: the refusal (status + `error.code` already asserted) also names the policy setting. The empty-field default and the \"a changed setting changes the answer\" pins already exist there and are unchanged.\n\n## Verification (head `9bfcaebce8`)\n\n- `pnpm --filter @objectstack/platform-objects test`: 89 files, 1322/1322 passed; `typecheck` green.\n- `pnpm --filter @objectstack/runtime exec vitest run src/api-key-lifecycle.pin.test.ts src/domains`: 138 files, 3807/3807 passed; `typecheck` green.\n- Ablation (route): restoring `domains/keys.ts` from `303aef069` turns `a day past the ceiling is refused …` red (1 failed / 13 passed); restored with `git checkout HEAD --`, `git diff HEAD` empty and the blob hash equal to HEAD's.\n- `dispatch-gates --commands`: 69 derived; 68 run, exit 0; 1 NOT-MEASURED: `pnpm check:dual-build-cjs-loads` exits 3 (PREREQUISITE NOT MET, it reads every package's `dist/` and this worktree built only the diff's closure). CI's Lint & Repo Gates runs it on a full build. `--ran` reconciliation: 0 UNRUN.\n\n## Acceptance notes\n\n- **The dialog states the default; it does not prefill a policy-derived date.** The card asks for the expiry \"defaulted from the policy\". An action param can only carry a literal default, and the policy is per-deployment configuration, so a prefilled date would need a dynamic default surface on `ActionParamSchema` (or a renderer that reads the policy). That is a spec/renderer contract change outside this card's S size. What ships: the field says what empty means and names the setting, and the reveal shows the exact date the key got. If a prefilled date is still wanted, it is a separate decision. Carrier: the engine seat.\n- Security floor holds: nothing here lengthens a lifetime. The route still refuses (never clamps) a date past the maximum, and an empty field still gets the policy default, never a permanent key.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012ZpkdTkteFWsMN7p2QMzLq\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012ZpkdTkteFWsMN7p2QMzLq)_\n"
+}
