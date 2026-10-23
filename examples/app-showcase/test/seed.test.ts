@@ -315,6 +315,106 @@ describe('showcase form + page section i18n coverage (#8231)', () => {
 });
 
 /**
+ * #25505 — the same two halves as the section sweep above, for the screens a
+ * zh-CN visitor opens first: the landing pages, the first dashboard, the
+ * object lists the sidebar links to, and the task's row / toolbar actions.
+ * They used to read English under a fully translated sidebar.
+ *
+ * `check:i18n-coverage` measures this app with ONE count, so it cannot see a
+ * first-screen key traded for an obscure one. This names the surfaces and
+ * DERIVES what each declares from the composed stack — a field, option, widget
+ * or action added to one of them later has to arrive translated too.
+ */
+describe('showcase zh-CN first screens are translated (#25505)', () => {
+  const zh = (stack.translations?.[0] as any)?.['zh-CN'] as Record<string, any> | undefined;
+
+  const OBJECTS = [
+    'showcase_project',
+    'showcase_contact',
+    'showcase_expense_report',
+    'showcase_business_unit',
+    'showcase_cascade',
+  ];
+  const PAGES = [
+    'showcase_capability_map',
+    'showcase_my_work',
+    'showcase_review_queue',
+    'showcase_task_board',
+    'showcase_active_projects',
+  ];
+  const DASHBOARDS = ['showcase_ops_dashboard'];
+  const ACTIONS_OF = ['showcase_task'];
+
+  /** One declared string: its bundle path, and what the zh-CN bundle holds there. */
+  interface Entry { path: string; value: unknown }
+  const entry = (path: string): Entry => ({
+    path,
+    value: path.split('.').reduce<any>((node, key) => node?.[key], zh),
+  });
+
+  function declaredEntries(): Map<string, Entry[]> {
+    const out = new Map<string, Entry[]>();
+    for (const name of OBJECTS) {
+      const obj = (stack.objects ?? []).find((o: any) => o.name === name) as any;
+      const list: Entry[] = [];
+      for (const attr of ['label', 'pluralLabel', 'description']) {
+        if (obj?.[attr]) list.push(entry(`objects.${name}.${attr}`));
+      }
+      for (const [field, def] of Object.entries<any>(obj?.fields ?? {})) {
+        if (def?.label) list.push(entry(`objects.${name}.fields.${field}.label`));
+        for (const opt of Array.isArray(def?.options) ? def.options : []) {
+          if (opt?.label) list.push(entry(`objects.${name}.fields.${field}.options.${opt.value}`));
+        }
+      }
+      out.set(`object ${name}`, list);
+    }
+    for (const name of PAGES) {
+      const page = (stack.pages ?? []).find((p: any) => p.name === name) as any;
+      out.set(`page ${name}`, page?.label ? [entry(`pages.${name}.label`)] : []);
+    }
+    for (const name of DASHBOARDS) {
+      const dash = (stack.dashboards ?? []).find((d: any) => d.name === name) as any;
+      const list: Entry[] = [];
+      for (const attr of ['label', 'description']) {
+        if (dash?.[attr]) list.push(entry(`dashboards.${name}.${attr}`));
+      }
+      for (const w of Array.isArray(dash?.widgets) ? dash.widgets : []) {
+        if (w?.title) list.push(entry(`dashboards.${name}.widgets.${w.id}.title`));
+      }
+      out.set(`dashboard ${name}`, list);
+    }
+    for (const object of ACTIONS_OF) {
+      const list: Entry[] = [];
+      for (const action of (stack.actions ?? []) as any[]) {
+        if (action.objectName !== object) continue;
+        for (const attr of ['label', 'successMessage']) {
+          if (action[attr]) list.push(entry(`objects.${object}._actions.${action.name}.${attr}`));
+        }
+      }
+      out.set(`actions of ${object}`, list);
+    }
+    return out;
+  }
+
+  const surfaces = declaredEntries();
+
+  it('every named surface exists and declares strings (guards against a vacuous sweep)', () => {
+    for (const [surface, list] of surfaces) {
+      expect(list.length, `${surface} declares nothing — renamed or removed?`).toBeGreaterThan(0);
+    }
+  });
+
+  for (const [surface, list] of surfaces) {
+    it(`${surface}: every declared string has a real zh-CN translation`, () => {
+      const untranslated = list
+        .filter((e) => typeof e.value !== 'string' || !e.value || /^[\x20-\x7e]+$/.test(e.value))
+        .map((e) => e.path);
+      expect(untranslated, 'missing from the zh-CN bundle, or echoed as ASCII').toEqual([]);
+    });
+  }
+});
+
+/**
  * Static shadow of the seed contract after #3433: a seed write is a curated
  * end-state fact, so the platform EXEMPTS it from the object's `state_machine`
  * rule — a project is seeded directly `active` / `on_hold` / `completed`
