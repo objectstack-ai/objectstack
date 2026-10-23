@@ -30,6 +30,7 @@
     "@objectstack/connector-rest": "workspace:*",
     "@objectstack/connector-slack": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/organizations": "workspace:*",
     "@objectstack/runtime": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-i18n": "workspace:*",
