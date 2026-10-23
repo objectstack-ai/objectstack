@@ -4815,7 +4815,7 @@ describe('AuthManager', () => {
       await (m as any).enforceSessionControls('s1', undefined);
       expect(engine.findOne).toHaveBeenCalledTimes(1);
       expect(engine.update).toHaveBeenCalledTimes(1);
-      const patch = engine.update.mock.calls[0][1];
+      const [, patch] = engine.update.mock.calls[0] as unknown as [string, Record<string, unknown>];
       expect(patch.last_activity_at instanceof Date).toBe(true);
       expect(patch.revoke_reason).toBeUndefined();
     });
