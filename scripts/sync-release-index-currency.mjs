@@ -1158,12 +1158,13 @@ export function selfTest() {
       + 'stamped forward, version and date',
     behind.rewrites.length === 1 && behind.text.includes(`current series: 17.3.0, released ${RUN_DATE}`));
     const otherMajor = runOn(
-      indexOf(CURRENT_V17.replace('current series: 17.3.0', 'current series: 18.1.0'), CURRENT_V16),
+      indexOf(CURRENT_V17.replace('current series: 17.3.0', 'current series: 18.4.0'), CURRENT_V16),
       CHANGELOG_FIXTURE,
     );
-    expect('J — judged against the entry\'s OWN major: a v17 field naming 18.1.0 is no 17.x written '
-      + 'ahead of a 17.x cut, so it is stamped to 17.3.0 as a stale field',
-    !aheadOfNewestGa('18.1.0', '17.3.0') && otherMajor.rewrites.length === 1
+    expect('J — judged against the entry\'s OWN major: a v17 field naming 18.4.0 is no 17.x written '
+      + 'ahead of a 17.x cut (its minor and patch say nothing about 17.x), so it is stamped to '
+      + '17.3.0 as a stale field',
+    !aheadOfNewestGa('18.4.0', '17.3.0') && otherMajor.rewrites.length === 1
       && otherMajor.text.includes(`current series: 17.3.0, released ${RUN_DATE}`));
 
     expect('J — the GATE still reports the field: the deferral holds it out of this run\'s verdict, '
@@ -1179,7 +1180,7 @@ export function selfTest() {
       + 'index still reaches the verdict and stops the run',
     mixed.deferred.length === 1 && mixed.findings.length === 1 && mixed.findings[0].includes('final release: 16.0.0'));
 
-    const notice = deferralNotice(verdict.deferred[0]);
+    const notice = verdict.deferred.length === 1 ? deferralNotice(verdict.deferred[0]) : '';
     expect('J — the run says why: the field, the newest GA, whose own run dates it, and the remedy '
       + 'when that GA never ships',
     notice.includes(`(${AHEAD_FIELD})`) && notice.includes('(17.3.0)') && notice.includes('17.4.0\'s own version run')
