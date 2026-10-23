@@ -2,7 +2,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
-import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError } from '@objectstack/core';
+import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError, isExternalAudienceContext } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
@@ -329,6 +329,8 @@ import {
 } from './manifest.js';
 import { GUEST_POSITION } from '@objectstack/spec';
 import { registerBuiltinCapabilities } from './builtin-capabilities.js';
+import { humanBaselineFor } from './external-baseline.js';
+import { grantRowPolicySpeaks, stampExternalGrant } from './external-owd-grant-stamp.js';
 
 /**
  * [ADR-0138 D9, D1] Whether `context` is the GUEST envelope — the anonymous
@@ -3150,6 +3152,22 @@ export class SecurityPlugin implements Plugin {
             : this.permissionEvaluator.getEffectiveScope('write', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
           if (delegated) sc.__delegatorWriteScope = delegated.delegatorScope;
         }
+        // [Ruling of record 6355206139, letter B] The EXTERNAL rung's OWD seam.
+        // plugin-sharing floors an external principal's org-wide default at
+        // owner_only unless a held grant's RLS speaks for this object; whether
+        // one does is a question about the grants, answered here where they are
+        // resolved, and handed over beside the depth above
+        // (`external-owd-grant-stamp.ts`, `@objectstack/core`
+        // `external-owd-floor.ts`). An internal principal is never stamped.
+        if (isExternalAudienceContext(sc)) {
+          const collect = (rlsOperation: string) =>
+            this.collectRLSPolicies(permissionSets, opCtx.object, rlsOperation, (sc.positions ?? []) as string[], sc);
+          if (['find', 'findOne', 'count', 'aggregate'].includes(opCtx.operation)) {
+            stampExternalGrant(sc, opCtx.object, 'read', grantRowPolicySpeaks(collect, 'read'));
+          } else if (['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation)) {
+            stampExternalGrant(sc, opCtx.object, 'write', grantRowPolicySpeaks(collect, 'write', rlsOperationForVerb(opCtx.operation)));
+          }
+        }
       }
 
       // 2.7. Row-level WRITE authorization (pre-image check).
@@ -5072,9 +5090,10 @@ export class SecurityPlugin implements Plugin {
     const readQl = () => this.ql;
     const readResolveKernelService = () => this.resolveKernelService;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveWriteScopeForSharing' | 'tenancyPosture'> = {
+    const host: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveWriteScopeForSharing' | 'tenancyPosture'> = {
       baselinePermissionSets: this.baselinePermissionSets,
       checkControlledByParentWrite: (...a) => this.checkControlledByParentWrite(...a),
+      collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
       computeLayeredRlsFilter: (...a) => this.computeLayeredRlsFilter(...a),
       computeReadPartialMaskRules: (...a) => this.computeReadPartialMaskRules(...a),
       computeRlsFilter: (...a) => this.computeRlsFilter(...a),
@@ -5136,7 +5155,8 @@ export class SecurityPlugin implements Plugin {
     // [#25223 cut 10] The body moved to `security-plugin-sharing-verdicts.ts` (see `SharingVerdictsHost`).
     const readPermissionEvaluator = () => this.permissionEvaluator;
     const readResolveKernelService = () => this.resolveKernelService;
-    const host: Pick<SharingVerdictsHost, 'getObjectSecurityMeta' | 'permissionEvaluator' | 'resolveKernelService' | 'resolvePermissionSetsForContext'> = {
+    const host: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'resolveKernelService' | 'resolvePermissionSetsForContext'> = {
+      collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
       getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get permissionEvaluator() { return readPermissionEvaluator(); },
       get resolveKernelService() { return readResolveKernelService(); },
@@ -5171,9 +5191,11 @@ export class SecurityPlugin implements Plugin {
     // [#25223 cut 10] The body moved to `security-plugin-sharing-verdicts.ts` (see `SharingVerdictsHost`).
     const readLogger = () => this.logger;
     const readResolveKernelService = () => this.resolveKernelService;
-    const host: Pick<SharingVerdictsHost, 'logger' | 'resolveKernelService' | 'resolveWriteScopeForSharing'> = {
+    const host: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'logger' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolveWriteScopeForSharing'> = {
+      collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
       get logger() { return readLogger(); },
       get resolveKernelService() { return readResolveKernelService(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
       resolveWriteScopeForSharing: (...a) => this.resolveWriteScopeForSharing(...a),
     };
     return resolveSharingCanEdit.call(host, object, recordId, context, resolvedSets);
@@ -5252,9 +5274,11 @@ export class SecurityPlugin implements Plugin {
     // [#25223 cut 10] The body moved to `security-plugin-sharing-verdicts.ts` (see `SharingVerdictsHost`).
     const readLogger = () => this.logger;
     const readResolveKernelService = () => this.resolveKernelService;
-    const host: Pick<SharingVerdictsHost, 'logger' | 'resolveKernelService' | 'resolveWriteScopeForSharing'> = {
+    const host: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'logger' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolveWriteScopeForSharing'> = {
+      collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
       get logger() { return readLogger(); },
       get resolveKernelService() { return readResolveKernelService(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
       resolveWriteScopeForSharing: (...a) => this.resolveWriteScopeForSharing(...a),
     };
     return resolveSharingWriteVerdict.call(host, rlsOperation, object, recordId, context, resolvedSets);
@@ -6468,9 +6492,14 @@ export class SecurityPlugin implements Plugin {
    * a guest's schema view relative to a deployment that declared nothing.
    *
    * Returns `[]` when no baseline is configured or none of it resolves.
+   *
+   * [Ruling of record 6355206139] …and an EXTERNAL caller (`org_external`) is
+   * judged against `external_default`, the baseline the data plane resolves for
+   * it, never the member baseline: the same helper names both
+   * (`external-baseline.ts`).
    */
   private async resolveFallbackPermissionSets(context?: any): Promise<PermissionSet[]> {
-    const fallback = this.baselinePermissionSets;
+    const fallback = humanBaselineFor(context?.positions, this.baselinePermissionSets);
     if (fallback.length === 0) return [];
     return this.permissionEvaluator.resolvePermissionSets(
       fallback,

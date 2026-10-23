@@ -73,6 +73,8 @@ import type { ExplainDecision, ExplainOperation, PermissionSet } from '@objectst
 import type { SecurityPlugin } from './security-plugin.js';
 import { absentUnderCallerRead, requiredCapsForOperation, unreadableUnderCallerRead } from './security-plugin.js';
 import { PermissionDeniedError } from './errors.js';
+import { grantRowPolicySpeaks } from './external-owd-grant-stamp.js';
+import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import {
   buildContextForUser,
   delegatedOrganizationRefusal,
@@ -97,6 +99,7 @@ export interface ExplainAccessHost {
   readonly resolveKernelService: SecurityPlugin['resolveKernelService'];
   readonly tenancyPosture: SecurityPlugin['tenancyPosture'];
   checkControlledByParentWrite: SecurityPlugin['checkControlledByParentWrite'];
+  collectRLSPolicies: SecurityPlugin['collectRLSPolicies'];
   computeLayeredRlsFilter: SecurityPlugin['computeLayeredRlsFilter'];
   computeReadPartialMaskRules: SecurityPlugin['computeReadPartialMaskRules'];
   computeRlsFilter: SecurityPlugin['computeRlsFilter'];
@@ -118,7 +121,7 @@ type RlsFilterOptions = NonNullable<Parameters<SecurityPlugin['computeLayeredRls
 
 /** The body of `SecurityPlugin#explainAccessForCaller`; the method's docblock there is its contract. */
 export async function explainAccessForCaller(
-  this: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveWriteScopeForSharing' | 'tenancyPosture'>,
+  this: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveWriteScopeForSharing' | 'tenancyPosture'>,
   request: { object: string; operation: string; userId?: string; recordId?: string },
   callerContext?: any,
 ): Promise<ExplainDecision> {
@@ -345,6 +348,14 @@ export async function explainAccessForCaller(
         return this.computeReadPartialMaskRules(meta, sets as any, delSets as any, basePerms, delBasePerms);
       },
       baselinePermissionSets: this.baselinePermissionSets,
+      // [Ruling of record 6355206139] The EXTERNAL OWD seam's question, asked
+      // through the SAME collection the middleware's step 2.6 stamp asks.
+      externalGrantSpeaks: (sets, o, opClass, dataOp, c) =>
+        grantRowPolicySpeaks(
+          (op) => this.collectRLSPolicies(sets as any, o, op, (c?.positions ?? []) as string[], c),
+          opClass,
+          rlsOperationForVerb(dataOp),
+        ),
       // [#25107] The prologue's posture, for its organization-membership
       // refusal of a delegated context ({@link delegatedOrganizationRefusal}).
       tenancyPosture: this.tenancyPosture,

@@ -2976,9 +2976,10 @@ export class AuthManager {
           }
 
           // ── Ruling 6355206139 E2: the directory doors, narrowed for an external ──
-          // list-members and get-full-organization check membership only, so an
-          // `external` caller would read every fellow member (and every pending
-          // invitation) there. See `external-directory-door.ts`.
+          // list-members, get-full-organization, list-teams and list-invitations
+          // check membership only, so an `external` caller would read every
+          // fellow member, team and pending invitation there. See
+          // `external-directory-door.ts`.
           await narrowDirectoryForExternalCaller(ctx, this.externalDirectoryDoorDeps());
 
           // ── #24750: invite-member's unknown-role refusal carries its code ──
@@ -7525,6 +7526,13 @@ export class AuthManager {
         (await first('sys_member', { user_id: userId, organization_id: organizationId }))?.role,
       readUserEmail: async (userId) => (await first('sys_user', { id: userId }))?.email,
       resolveOrganizationSlug: async (slug) => (await first('sys_organization', { slug }))?.id,
+      readUserTeamIds: async (userId) => {
+        if (!sys) return [];
+        const rows: any[] = await sys.find('sys_team_member', { where: { user_id: userId }, fields: ['team_id'], limit: 1000 });
+        return (Array.isArray(rows) ? rows : [])
+          .map((r) => r?.team_id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0);
+      },
       isExternalRole: isExternalMembershipRole,
     };
   }

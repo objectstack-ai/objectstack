@@ -14,7 +14,9 @@
  *     `organization_admin` grant. The better-auth `role='admin'` is upstream a
  *     *provisioning source* of those grants (`auto-org-admin-grant.ts`), so it
  *     never re-enters adjudication here — the #2836 dual-track class is closed
- *     by construction.
+ *     by construction. `EXTERNAL` derives from holding the reserved identity
+ *     `org_external`, which the resolver projects from the membership row once
+ *     (never re-read from the role here).
  *
  *  2. **The rung → injection-rule mapping + its tested invariants (D2).** Each
  *     rung maps to EXACTLY ONE row-visibility injection rule
@@ -22,16 +24,24 @@
  *     REFERENCE MODEL of those rules over a synthetic row-set — it locks the two
  *     properties the ADR requires as invariants: strict nesting (rung n's
  *     visible set ⊇ rung n−1's) and the EXTERNAL deny-by-default semantics
- *     (explicit shares only, OWD never widens it).
+ *     (explicit grants only, OWD never widens it).
  *
  * This module is NOT the enforcement path. The effective read/write filter is
  * `Layer0(tenant) AND Layer1(business RLS)`, computed in `@objectstack/plugin-
  * security` (`tenant-layer.ts` + `security-plugin.ts`), and the real behavior
  * guard is the `authz-matrix-gate` unit snapshot + the dogfood conformance
  * matrix. The reference model here exists so the ladder's *mathematical*
- * properties can be asserted at the unit layer without an enforcement boot, and
- * so the EXTERNAL rung — which has no enforcement path yet — cannot be
- * reinvented differently when portal/external membership arrives.
+ * properties can be asserted at the unit layer without an enforcement boot.
+ *
+ * [Ruling of record 6355206139, letter B] The EXTERNAL rung is live: its
+ * holders are the organization's `external` members (`sys_member.role =
+ * external`, projected to the reserved identity `org_external`), and its rule
+ * is re-ruled from "explicit shares only" to EXPLICIT GRANTS only — shares
+ * (share links included), sharing rules, and position and permission-set
+ * grants with their RLS evaluated. Enforcement: the `everyone` anchor withheld
+ * (`resolve-authz-context.ts`), the `external_default` baseline
+ * (`plugin-security`), the OWD floor (`plugin-sharing`), the directory doors
+ * (`plugin-auth`).
  */
 
 import type { AuthzPosture } from '@objectstack/spec/security';
@@ -70,7 +80,7 @@ export const POSTURE_INJECTION_RULE: Record<AuthzPosture, string> = {
   MEMBER:
     'Business RLS within the organization — ownership (owner / unit depth), the OWD baseline, and explicit sharing.',
   EXTERNAL:
-    'Explicitly shared rows ONLY — OWD baselines and sharing rules never apply; a misconfiguration can only shrink visibility, never widen it.',
+    'Explicit grants ONLY — shares (share links included), sharing rules, and position and permission-set grants with their RLS evaluated, within the organization. The OWD baseline never widens it (owner_only floor), and the everyone-anchored default sets and the member directory never reach it; a misconfiguration can only shrink visibility, never widen it.',
 };
 
 /** Capability-grant evidence the posture derivation consumes (ADR-0095 D3). */
@@ -87,21 +97,40 @@ export interface PostureEvidence {
    * owner/admin role upstream, consumed here only as a held capability.
    */
   isTenantAdmin: boolean;
+  /**
+   * [Ruling of record 6355206139, letter B] Holds the reserved identity
+   * `org_external` — the projection of `sys_member.role = external` in the
+   * active organization (with no active organization, of any external
+   * membership: the fail-closed reading the resolver gives the `everyone`
+   * anchor). An organization MEMBERSHIP fact, not a capability grant, and the
+   * one input that may LOWER the rung: optional, so every caller that predates
+   * it derives exactly what it did.
+   */
+  isExternal?: boolean;
 }
 
 /**
  * Resolve the principal's posture rung from held capability grants (ADR-0095 D3).
  *
- * Returns `PLATFORM_ADMIN` | `TENANT_ADMIN` | `MEMBER`. It NEVER returns
- * `EXTERNAL`: no external principal type exists yet (the sharing chain has no
- * portal/guest-share concept — ADR-0095 W4). The `EXTERNAL` rung, its injection
- * rule, and its semantics are defined and test-locked ({@link postureVisibleRows},
- * {@link POSTURE_INJECTION_RULE}) so that when portal/external membership lands
- * (ADR-0093) the derivation gains an EXTERNAL branch HERE without the rung being
- * reinvented. `MEMBER` is the authenticated-principal floor.
+ * `PLATFORM_ADMIN` from the unscoped platform grant, then — [ruling of record
+ * 6355206139, letter B] — `EXTERNAL` for a holder of `org_external`, then
+ * `TENANT_ADMIN` from the org-admin grant, and `MEMBER`, the authenticated
+ * floor.
+ *
+ * Why EXTERNAL sits ABOVE the org-admin test: the posture is EXTERNAL, not a
+ * restricted member and not an administrator (the ruling keeps ADR-0095's
+ * rejection of "EXTERNAL as a restricted MEMBER"). An external cannot carry
+ * `owner`/`admin` beside `external` (E5 refuses the mixed list at write), so
+ * the org-admin grant can only reach one through an explicit
+ * `organization_admin` assignment; that grant then reaches it as a grant, but
+ * it does not lift the rung, so the Layer 0 wall and every posture reader keep
+ * treating the holder as external. `PLATFORM_ADMIN` stays first: the unscoped
+ * platform grant is a deployment-level standing that no organization's
+ * membership role can demote.
  */
 export function derivePosture(evidence: PostureEvidence): AuthzPosture {
   if (evidence.isPlatformAdmin) return 'PLATFORM_ADMIN';
+  if (evidence.isExternal === true) return 'EXTERNAL';
   if (evidence.isTenantAdmin) return 'TENANT_ADMIN';
   return 'MEMBER';
 }
@@ -113,14 +142,24 @@ export interface LadderRow {
   id: string;
   /** The row's tenant. `undefined` = a non-tenant (platform-global) row. */
   organization_id?: string;
-  /** The row's owner (drives the MEMBER ownership disjunct). */
+  /** The row's owner (drives the ownership disjunct, the EXTERNAL owner_only floor included). */
   owner_id?: string;
   /**
-   * Whether an OWD-derived source would admit this row for a member (public
-   * baseline / criteria sharing). EXTERNAL deliberately ignores this field.
+   * Whether the OWD baseline would admit this row for a member (a
+   * `public_read` / `public_read_write` object). EXTERNAL deliberately ignores
+   * this field: the OWD baseline never widens an external.
    */
   owdVisible?: boolean;
-  /** User ids this row is EXPLICITLY shared to (the only EXTERNAL source). */
+  /**
+   * Whether an explicit position or permission-set grant the principal holds
+   * admits this row through its own RLS (`supplier in current_user.<key>`).
+   * Reaches EXTERNAL and MEMBER alike.
+   */
+  grantVisible?: boolean;
+  /**
+   * User ids this row is shared to — a share, a share link, or a sharing rule's
+   * materialised grant. Reaches EXTERNAL and MEMBER alike.
+   */
   sharedTo?: readonly string[];
 }
 
@@ -135,23 +174,27 @@ function isSharedTo(row: LadderRow, userId: string): boolean {
   return (row.sharedTo ?? []).includes(userId);
 }
 
-/** EXTERNAL rung: explicitly shared rows ONLY — never OWD, never org-wide. */
+/**
+ * EXTERNAL rung: explicit grants ONLY — rows shared to it, and, within its
+ * organization, rows it owns (the owner_only floor) and rows an explicit
+ * grant's RLS admits. Never the OWD baseline, never org-wide.
+ */
 function externalVisible(rows: readonly LadderRow[], p: LadderPrincipal): LadderRow[] {
-  return rows.filter((r) => isSharedTo(r, p.userId));
+  return rows.filter(
+    (r) =>
+      isSharedTo(r, p.userId) ||
+      (r.organization_id === p.organizationId && (r.owner_id === p.userId || r.grantVisible === true)),
+  );
 }
 
 /**
- * MEMBER rung: business RLS within the org — ownership OR OWD baseline OR
- * explicit sharing. Composed as `EXTERNAL ∪ (in-org ownership/OWD)` so the
+ * MEMBER rung: business RLS within the org — everything EXTERNAL reaches, plus
+ * the OWD baseline. Composed as `EXTERNAL ∪ (in-org OWD)` so the
  * EXTERNAL ⊆ MEMBER leg of the nesting invariant holds by construction.
  */
 function memberVisible(rows: readonly LadderRow[], p: LadderPrincipal): LadderRow[] {
-  const shared = new Set(externalVisible(rows, p));
-  return rows.filter(
-    (r) =>
-      shared.has(r) ||
-      (r.organization_id === p.organizationId && (r.owner_id === p.userId || r.owdVisible === true)),
-  );
+  const external = new Set(externalVisible(rows, p));
+  return rows.filter((r) => external.has(r) || (r.organization_id === p.organizationId && r.owdVisible === true));
 }
 
 /**

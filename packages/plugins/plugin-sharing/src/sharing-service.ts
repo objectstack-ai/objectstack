@@ -29,6 +29,9 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // by?" — the twin of `SqlDriver.computeTenantField`, so the organization a grant
 // is stamped from is read off the SAME column the wall scopes the record by.
 import { resolveTenantFieldName } from '@objectstack/objectql';
+// [Ruling of record 6355206139] The EXTERNAL rung's OWD floor — the stamp
+// plugin-security makes and this service reads, named once in core.
+import { owdForAudience } from '@objectstack/core';
 import { WRITE_ACCESS_LEVELS, normalizeAccessLevel } from './access-level.js';
 import { hasPhantomOwnerAnchor } from './federated-phantom-anchors.js';
 import {
@@ -545,7 +548,13 @@ export class SharingService implements ISharingService {
     // scopes, the answer is deny-all, whatever its bound sets admit at the
     // object level.
     if (isGuestPrincipal(context)) return { id: '__deny_all__' };
-    if (effectiveSharingModel(schema) !== 'private') return null;
+    // [Ruling of record 6355206139, letter B] The EXTERNAL rung's OWD floor:
+    // for an external principal the object's org-wide default is owner_only
+    // unless a held grant's RLS speaks for the object (`owdForAudience`,
+    // `@objectstack/core`) — so a `public_read` / `public_read_write` object
+    // answers it the rows it owns and the rows shared to it, and the OWD
+    // baseline never widens it.
+    if (owdForAudience(effectiveSharingModel(schema), context, object, 'read') !== 'private') return null;
     if (!hasOwnerField(schema)) return null;
     // [#7858] …and an `owner_id` the REGISTRY injected into a FEDERATED object
     // is not an owner column at all: the platform provisions no storage for one,
@@ -630,7 +639,10 @@ export class SharingService implements ISharingService {
 
     const schema = this.engine.getSchema?.(object);
     if (!schema) return null;
-    if (effectiveSharingModel(schema) === 'public') return null;
+    // [Ruling of record 6355206139] The write half of the EXTERNAL OWD floor
+    // (see buildReadFilter): a `public_read_write` object is not write-open to
+    // an external unless a held grant's RLS speaks for it.
+    if (owdForAudience(effectiveSharingModel(schema), context, object, 'write') === 'public') return null;
     if (!hasOwnerField(schema)) return null;
     // [#7858] The write half of the same phantom-anchor test the read filter
     // applies — the card measured BOTH gates. Fixing only the read half would
@@ -861,7 +873,8 @@ export class SharingService implements ISharingService {
     try {
       const schema = this.engine.getSchema?.(object);
       if (!schema) return 'abstain';
-      const model = effectiveSharingModel(schema);
+      // [Ruling of record 6355206139] The EXTERNAL OWD floor (buildReadFilter).
+      const model = owdForAudience(effectiveSharingModel(schema), context, object, 'write');
       if (model === 'public') return 'abstain';
       if (!hasOwnerField(schema)) return 'abstain';
       if (!context.userId) return 'deny';
@@ -944,7 +957,8 @@ export class SharingService implements ISharingService {
     try {
       const schema = this.engine.getSchema?.(object);
       if (!schema) return 'abstain';
-      if (effectiveSharingModel(schema) === 'public') return 'abstain';
+      // [Ruling of record 6355206139] The EXTERNAL OWD floor (buildReadFilter).
+      if (owdForAudience(effectiveSharingModel(schema), context, object, 'write') === 'public') return 'abstain';
       if (!hasOwnerField(schema)) return 'abstain';
       if (!context.userId) return 'deny';
 

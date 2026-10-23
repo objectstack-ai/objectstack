@@ -113,7 +113,27 @@ const invoiceAuditor: PermissionSet = {
   objects: { crm_secret: { allowRead: true, allowCreate: true, allowEdit: true, viewAllRecords: true, modifyAllRecords: true } },
 } as any;
 
-const ALL_SETS: PermissionSet[] = [...defaultPermissionSets, memberBaseline, publicReader, invoiceAuditor];
+// [Ruling of record 6355206139, letter B] An EXTERNAL member's explicit grant:
+// the ordinary business object, opened as an object, with no row predicate of
+// its own. What it reaches is the rung's rule — `external_default` (its
+// identity position's set) plus this grant, never `member_default`.
+const portalGrant: PermissionSet = {
+  name: 'portal_grant',
+  label: 'Portal grant (explicit, no RLS)',
+  objects: { task: { allowRead: true, allowCreate: true, allowEdit: true } },
+} as any;
+
+// …and the same grant WITH a row predicate — the `supplier in
+// current_user.<key>` shape the ruling names — which is what lifts the OWD
+// floor for its object (the stamp cells below).
+const portalGrantWithRls: PermissionSet = {
+  name: 'portal_grant_rls',
+  label: 'Portal grant (explicit, with RLS)',
+  objects: { task: { allowRead: true, allowCreate: true, allowEdit: true } },
+  rowLevelSecurity: [{ name: 'portal_rows', object: 'task', operation: 'select', using: "status == 'portal'" }],
+} as any;
+
+const ALL_SETS: PermissionSet[] = [...defaultPermissionSets, memberBaseline, publicReader, invoiceAuditor, portalGrant, portalGrantWithRls];
 // The fail-closed sentinel's marker value. `RLS_DENY_FILTER` is declared
 // `Record<string, unknown>`, so the member arrives as `unknown` and the `rank()`
 // substring probe below cannot take it; converted once here rather than at each
@@ -290,6 +310,15 @@ const ROLES = {
   member: { userId: 'u1', tenantId: 'org-1', positions: ['org_member'], permissions: ['member_baseline'] },
   // Authenticated user with NO active organization → tenant scoping cannot resolve → fail-closed.
   no_org_member: { userId: 'u2', positions: ['org_member'], permissions: ['member_baseline'] },
+  // [Ruling of record 6355206139, letter B] The EXTERNAL rung: an `external`
+  // member (the resolver's `org_external` projection, its `audience` and
+  // posture stamps) holding one explicit grant. Its baseline is
+  // `external_default`, never `member_default` — so no `owner_only_*` floor
+  // (that binds `org_member`) and no wildcard object grant.
+  external: {
+    userId: 'x1', tenantId: 'org-1', positions: ['org_external'], permissions: ['portal_grant'],
+    audience: 'external', posture: 'EXTERNAL',
+  },
 };
 
 // The locked snapshot of POST-EXTRACTION behavior (Layer0 AND Layer1). Read the
@@ -314,6 +343,16 @@ const EXPECTED_MATRIX: Record<string, Record<string, { read: unknown; write: unk
     // [D1 accepted delta (e)] no active org: Layer 0 fail-closes the WRITE
     // (was owner-scoped only). Read stays deny-sentinel (unchanged).
     no_org_member: { read: { id: DENY }, write: [{ $and: [{ id: DENY }, { created_by: 'u2' }] }] },
+    // [Ruling 6355206139 — the EXTERNAL column] Its explicit grant opens the
+    // object; Layer 0 walls it to its organization, and its write carries the
+    // owner_only floor (`external_default`, bound to `org_external`) exactly as
+    // a member's does. This matrix is plugin-security's half: plugin-sharing
+    // ANDs the OWD floor on top (owner_id = me, or a share) for a `task` that
+    // declares an owner column — see `plugin-sharing/src/external-owd-floor.test.ts`.
+    external: {
+      read: { organization_id: 'org-1' },
+      write: [{ $and: [{ organization_id: 'org-1' }, { created_by: 'x1' }] }],
+    },
   },
   private_obj: {
     // [W2] TRUE platform admin: Layer 0 exemption (platform posture) + Layer 1
@@ -333,6 +372,8 @@ const EXPECTED_MATRIX: Record<string, Record<string, { read: unknown; write: unk
     // A member's plain wildcard grant does not cover a private object → denied at the CRUD gate, before RLS.
     member: { read: 'CRUD_DENY:PermissionDeniedError', write: 'CRUD_DENY:PermissionDeniedError' },
     no_org_member: { read: 'CRUD_DENY:PermissionDeniedError', write: 'CRUD_DENY:PermissionDeniedError' },
+    // [EXTERNAL] Nothing granted it, and no baseline reaches it → CRUD gate.
+    external: { read: 'CRUD_DENY:PermissionDeniedError', write: 'CRUD_DENY:PermissionDeniedError' },
   },
   platform_global: {
     // [W2] superuser bypass fires on tenancy-disabled posture → null.
@@ -356,6 +397,9 @@ const EXPECTED_MATRIX: Record<string, Record<string, { read: unknown; write: unk
     // [#2936] no-org member: same fail-closed deny on the write (see above); the
     // global catalog stays VISIBLE on read (Layer 0 non-tenant, delta (c)).
     no_org_member: { read: null, write: [{ id: DENY }] },
+    // [EXTERNAL] The global catalog a member reads through `member_default` is
+    // not the external's: no grant names it → CRUD gate.
+    external: { read: 'CRUD_DENY:PermissionDeniedError', write: 'CRUD_DENY:PermissionDeniedError' },
   },
   better_auth: {
     // [W2] better-auth-managed posture → superuser read bypass → null.
@@ -385,6 +429,9 @@ const EXPECTED_MATRIX: Record<string, Record<string, { read: unknown; write: unk
     // organization neither widens the write nor fail-closes it — unlike the
     // `task` cell above, where delta (e) fail-closes the same principal.
     no_org_member: { read: { id: 'u2' }, write: [{ id: 'u2' }] },
+    // [EXTERNAL] Its own identity row only (`external_default`'s
+    // `sys_user_self`) — never `sys_user_org_members`, the directory scope.
+    external: { read: { id: 'x1' }, write: [{ id: 'x1' }] },
   },
 };
 
@@ -683,7 +730,8 @@ describe('ADR-0099 P0 — probe vs carried-rung equivalence (#3211 M1)', () => {
       if (s.includes('created_by') || s.includes('"id"')) return 1;      // owner/self-scoped
       return 2;                                                          // org-scoped
     };
-    const LADDER_ORDER = ['platform_admin', 'org_admin', 'member'] as const;
+    // [Ruling 6355206139] The EXTERNAL column is the ladder's foot: never wider than MEMBER.
+    const LADDER_ORDER = ['platform_admin', 'org_admin', 'member', 'external'] as const;
     for (const [oName, col] of Object.entries(EXPECTED_MATRIX)) {
       for (const side of ['read', 'write'] as const) {
         for (let i = 1; i < LADDER_ORDER.length; i++) {
@@ -695,17 +743,70 @@ describe('ADR-0099 P0 — probe vs carried-rung equivalence (#3211 M1)', () => {
     }
   });
 
-  // ── [D3 dead branch] capability evidence can never derive EXTERNAL ────────
-  // The EXTERNAL rung activates only from `audience:'external'` (ADR-0090 D10)
-  // when the portal principal type ships; no combination of capability-grant
-  // evidence may reach it. (Full EXTERNAL × layer share-fixture cells live in
-  // posture-ladder.test.ts — the semantics lock — and extend at P3.)
-  it('[D3 dead branch] no capability-grant evidence derives EXTERNAL', () => {
+  // ── [D3] EXTERNAL derives from the external identity, never from capability evidence ──
+  // [Ruling of record 6355206139] The branch is live: a holder of `org_external`
+  // derives EXTERNAL; no combination of capability-grant evidence alone does.
+  // The rung's cells are the `external` column above, and its OWD half is
+  // plugin-sharing's (`external-owd-floor.test.ts`).
+  it('[D3] capability evidence alone never derives EXTERNAL; the external identity does', () => {
     for (const isPlatformAdmin of [true, false]) {
       for (const isTenantAdmin of [true, false]) {
         expect(derivePosture({ isPlatformAdmin, isTenantAdmin })).not.toBe('EXTERNAL');
       }
     }
+    expect(derivePosture({ isPlatformAdmin: false, isTenantAdmin: false, isExternal: true })).toBe('EXTERNAL');
+  });
+
+  // ── [Ruling 6355206139] The OWD seam's stamp, made where the grants resolve ──
+  // plugin-sharing floors an external's OWD at owner_only unless a held grant's
+  // RLS speaks for the object; step 2.6 says whether one does, on the context
+  // it hands the sharing middleware. Measured on the real middleware.
+  describe('[EXTERNAL] the grant-RLS stamp the OWD floor reads', () => {
+    const stampsAfter = async (operation: 'find' | 'update', roleCtx: any) => {
+      const plugin = new SecurityPlugin();
+      const h = makeHarness({
+        ...OBJECTS.task,
+        orgScoping: true,
+        findOneImpl: (q: any) => (q?.where?.$and ? null : { id: 'r1' }),
+      });
+      await plugin.init(h.ctx); await plugin.start(h.ctx);
+      const context = { ...roleCtx };
+      const opCtx: any = operation === 'find'
+        ? { object: 'task', operation, ast: { where: undefined }, context }
+        : { object: 'task', operation, data: { id: 'r1', name: 'x' }, options: { where: { id: 'r1' } }, context };
+      try { await h.run(opCtx); } catch { /* the stamp is made before any refusal */ }
+      return { read: context.__externalReadGrant, write: context.__externalWriteGrant };
+    };
+
+    // A stamp names the object it was resolved for, so a nested operation on
+    // another object under the same envelope (measured here: a `sys_user`
+    // write-class stamp beside the `task` find) can never stand in for this
+    // one. The cells therefore ask whether `task` is stamped.
+    it('a grant with no RLS opens the object, not its rows: `task` is not stamped, so the floor stands', async () => {
+      for (const op of ['find', 'update'] as const) {
+        const stamps = await stampsAfter(op, ROLES.external);
+        expect(stamps.read, op).not.toBe('task');
+        expect(stamps.write, op).not.toBe('task');
+      }
+    });
+
+    it('a grant whose RLS speaks for the object stamps it, for the read class and (derived) the write class', async () => {
+      const withRls = { ...ROLES.external, permissions: ['portal_grant_rls'] };
+      expect((await stampsAfter('find', withRls)).read).toBe('task');
+      expect((await stampsAfter('update', withRls)).write).toBe('task');
+    });
+
+    it('a stale stamp the envelope brought is cleared, never trusted', async () => {
+      const stale = { ...ROLES.external, __externalReadGrant: 'task' };
+      expect((await stampsAfter('find', stale)).read).not.toBe('task');
+    });
+
+    it('CONTROL: an internal principal is never stamped', async () => {
+      const member = { ...ROLES.member, permissions: ['member_baseline', 'portal_grant_rls'] };
+      for (const op of ['find', 'update'] as const) {
+        expect(await stampsAfter(op, member), op).toEqual({ read: undefined, write: undefined });
+      }
+    });
   });
 });
 

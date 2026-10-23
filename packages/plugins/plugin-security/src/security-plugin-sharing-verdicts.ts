@@ -65,6 +65,8 @@ import type { SharingWriteVerdict } from '@objectstack/spec/contracts';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type { SecurityPlugin } from './security-plugin.js';
 import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
+import { isExternalAudienceContext } from '@objectstack/core';
+import { externalGrantPatch } from './external-owd-grant-stamp.js';
 
 /**
  * The `SecurityPlugin` members the functions below read — every one of them,
@@ -95,7 +97,7 @@ type RlsFilterOptions = NonNullable<Parameters<SecurityPlugin['computeLayeredRls
 
 /** The body of `SecurityPlugin#resolveSharingReadFilter`; the method's docblock there is its contract. */
 export async function resolveSharingReadFilter(
-  this: Pick<SharingVerdictsHost, 'getObjectSecurityMeta' | 'permissionEvaluator' | 'resolveKernelService' | 'resolvePermissionSetsForContext'>,
+  this: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'resolveKernelService' | 'resolvePermissionSetsForContext'>,
   object: string,
   context: any,
   resolvedSets?: PermissionSet[],
@@ -119,9 +121,11 @@ export async function resolveSharingReadFilter(
   // controlled_by_parent derivation) pass the sets it already resolved for
   // THIS identity, instead of re-resolving them from the context.
   let readScope: string | undefined = depth;
+  let heldSets: PermissionSet[] | undefined = resolvedSets;
   if (readScope === undefined) {
     try {
       const permissionSets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context));
+      heldSets = permissionSets;
       if (permissionSets.length > 0) {
         const meta = await this.getObjectSecurityMeta(object);
         readScope = this.permissionEvaluator.getEffectiveScope(
@@ -138,16 +142,50 @@ export async function resolveSharingReadFilter(
       readScope = undefined;
     }
   }
+  // [Ruling of record 6355206139] …and the EXTERNAL OWD seam's stamp, as step
+  // 2.6 makes it, so this filter is floored exactly as the find's is. Sets
+  // that cannot be resolved stamp nothing: the floor, the narrow direction.
+  if (heldSets === undefined && isExternalAudienceContext(context)) {
+    heldSets = await this.resolvePermissionSetsForContext(context).catch(() => [] as PermissionSet[]);
+  }
+  const sets = heldSets ?? [];
+  const grantPatch = externalGrantPatch(context, object, 'read', (op) =>
+    this.collectRLSPolicies(sets, object, op, (context?.positions ?? []) as string[], context),
+  );
   const filter = await sharing.buildReadFilter(object, {
     ...context,
     ...(readScope ? { __readScope: readScope } : {}),
+    ...grantPatch,
   });
   return (filter ?? null) as Record<string, unknown> | null;
 }
 
+/**
+ * [Ruling of record 6355206139] The EXTERNAL OWD seam's write-class stamp for
+ * a rebuilt context handed to a sharing write gate (see
+ * {@link resolveSharingReadFilter}); `{}` for an internal principal.
+ */
+async function externalWriteGrantPatch(
+  this: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'resolvePermissionSetsForContext'>,
+  rlsOperation: string,
+  object: string,
+  context: any,
+  resolvedSets?: PermissionSet[],
+): Promise<Record<string, string | undefined>> {
+  if (!isExternalAudienceContext(context)) return {};
+  const sets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context).catch(() => [] as PermissionSet[]));
+  return externalGrantPatch(
+    context,
+    object,
+    'write',
+    (op) => this.collectRLSPolicies(sets, object, op, (context?.positions ?? []) as string[], context),
+    rlsOperation,
+  );
+}
+
 /** The body of `SecurityPlugin#resolveSharingCanEdit`; the method's docblock there is its contract. */
 export async function resolveSharingCanEdit(
-  this: Pick<SharingVerdictsHost, 'logger' | 'resolveKernelService' | 'resolveWriteScopeForSharing'>,
+  this: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'logger' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolveWriteScopeForSharing'>,
   object: string,
   recordId: string,
   context: any,
@@ -158,9 +196,10 @@ export async function resolveSharingCanEdit(
     | undefined;
   if (!sharing || typeof sharing.canEdit !== 'function') return true;
   const writeScope = await this.resolveWriteScopeForSharing(object, context, resolvedSets);
+  const grantPatch = await externalWriteGrantPatch.call(this, 'update', object, context, resolvedSets);
   try {
     return (
-      (await sharing.canEdit(object, recordId, { ...context, __writeScope: writeScope })) === true
+      (await sharing.canEdit(object, recordId, { ...context, __writeScope: writeScope, ...grantPatch })) === true
     );
   } catch (e) {
     this.logger.error?.(
@@ -198,7 +237,7 @@ export async function resolveWriteScopeForSharing(
 
 /** The body of `SecurityPlugin#resolveSharingWriteVerdict`; the method's docblock there is its contract. */
 export async function resolveSharingWriteVerdict(
-  this: Pick<SharingVerdictsHost, 'logger' | 'resolveKernelService' | 'resolveWriteScopeForSharing'>,
+  this: Pick<SharingVerdictsHost, 'collectRLSPolicies' | 'logger' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolveWriteScopeForSharing'>,
   rlsOperation: string,
   object: string,
   recordId: string,
@@ -212,10 +251,12 @@ export async function resolveSharingWriteVerdict(
   const probe = sharing?.[method];
   if (typeof probe !== 'function') return 'abstain';
   const writeScope = await this.resolveWriteScopeForSharing(object, context, resolvedSets);
+  const grantPatch = await externalWriteGrantPatch.call(this, rlsOperation, object, context, resolvedSets);
   try {
     const verdict = await probe.call(sharing, object, recordId, {
       ...context,
       __writeScope: writeScope,
+      ...grantPatch,
     });
     return verdict === 'allow' || verdict === 'deny' ? verdict : 'abstain';
   } catch (e) {

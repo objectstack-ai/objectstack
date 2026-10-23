@@ -88,8 +88,7 @@ import { isGuestEnvelope, POSITION_NAME_FOLD_EVENT } from './security-plugin.js'
 import type { PermissionSet } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 import { readDisabledCatalogNames } from '@objectstack/core';
-import { BUILTIN_IDENTITY_ORG_EXTERNAL } from '@objectstack/spec';
-import { EXTERNAL_DEFAULT_PERMISSION_SET } from './objects/default-permission-sets.js';
+import { humanBaselineFor } from './external-baseline.js';
 
 /**
  * The `SecurityPlugin` members the functions below read — every one of them,
@@ -163,11 +162,11 @@ export async function resolvePermissionSetsForContextUnmemoized(
   // fellow-member directory scope, an app's `isDefault` set — here any more
   // than through the `everyone` anchor it does not hold. Its floor is its own
   // anchor-safe set: its own identity rows, and data only through explicit grants.
+  // One helper names it, so the explainer and the describe fallback attribute
+  // and resolve the same baseline (`external-baseline.ts`).
   const baseline: string[] = isAgent
     ? [MCP_AGENT_PERMISSION_SET_RESTRICTED]
-    : positions.includes(BUILTIN_IDENTITY_ORG_EXTERNAL)
-      ? [EXTERNAL_DEFAULT_PERMISSION_SET]
-      : this.baselinePermissionSets;
+    : humanBaselineFor(positions, this.baselinePermissionSets);
   // [ADR-0090 D5] Baseline is ADDITIVE, always (for humans): the baseline
   // set(s) apply to every authenticated request IN ADDITION to whatever else
   // resolved. The former "only when the user has nothing else" conditional

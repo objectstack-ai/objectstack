@@ -19,9 +19,21 @@ import {
 } from './platform-ownership-policies.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
-const shippedFloorPolicies = defaultPermissionSets
-  .flatMap((ps) => ps.rowLevelSecurity ?? [])
-  .filter((p) => typeof p.using === 'string' && p.using.trim() === OWNERSHIP_FLOOR_PREDICATE);
+// [Ruling of record 6355206139] `member_default` and `external_default` carry
+// the SAME floor — one identity `(object, name, using)`, two carriers — so every
+// relief that lifts a member's floor lifts an external's too. Deduplicated by
+// that identity, as the derivation keys it.
+const floorCarriers = defaultPermissionSets.filter((ps) =>
+  (ps.rowLevelSecurity ?? []).some((p) => typeof p.using === 'string' && p.using.trim() === OWNERSHIP_FLOOR_PREDICATE),
+);
+const shippedFloorPolicies = [
+  ...new Map(
+    floorCarriers
+      .flatMap((ps) => ps.rowLevelSecurity ?? [])
+      .filter((p) => typeof p.using === 'string' && p.using.trim() === OWNERSHIP_FLOOR_PREDICATE)
+      .map((p) => [`${p.object}\u0000${p.name}\u0000${p.using}`, p] as const),
+  ).values(),
+];
 
 describe('[#5492] platform ownership-floor provenance', () => {
   it('recognises exactly the shipped write-class floor policies (non-vacuous)', () => {
@@ -29,6 +41,10 @@ describe('[#5492] platform ownership-floor provenance', () => {
     // nothing at all.
     expect(platformOwnershipFloorPolicyCount()).toBeGreaterThan(0);
     expect(platformOwnershipFloorPolicyCount()).toBe(shippedFloorPolicies.length);
+  });
+
+  it('the floor ships on the member baseline and the external baseline, and nowhere else', () => {
+    expect(floorCarriers.map((ps) => ps.name).sort()).toEqual(['external_default', 'member_default']);
   });
 
   it('the shipped set is `owner_only_writes` (update) + `owner_only_deletes` (delete)', () => {
