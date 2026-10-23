@@ -5,7 +5,7 @@
 //
 // These run against a scratch directory in milliseconds. The END-TO-END half —
 // that `build-schemas.ts` actually routes its clean through this function, in
-// both write and `--check` mode — is pinned in build-schemas-check-mode.test.ts,
+// both write and `--check` mode — is pinned in build-schemas-check-mode.manifest.test.ts,
 // because a unit test over an extracted helper stays green forever if the caller
 // goes back to `fs.rmSync(OUT_DIR, { recursive: true })`. Neither half is
 // sufficient on its own.

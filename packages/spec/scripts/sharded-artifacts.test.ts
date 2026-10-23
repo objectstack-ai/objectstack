@@ -395,7 +395,7 @@ describe('sharded artifacts — entry-point shard naming (#5837)', () => {
 
 // ── #9109 — this file's fixture repos inherit nothing from the machine ───────
 //
-// Same exposure class #9068 closed for `build-schemas-check-mode.test.ts`, and
+// Same exposure class #9068 closed for `build-schemas-check-mode.fixture.ts`, and
 // the same two layers, applied here verbatim. The fixtures below were spawned
 // with `cwd` and two `-c user.*` args only, so they inherited the ambient global
 // and system git config, `init.templateDir`, and every `GIT_*` variable.

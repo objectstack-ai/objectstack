@@ -1822,9 +1822,9 @@ function computeGuidanceRoutes(): GuidanceRoutes {
  * so a diff that rewrites this constant AND `authorable-surface.base.json`'s
  * `description` to the same bytes leaves `baseRev` and `keys` untouched and
  * `check:authorable-surface` green. Both halves in one reviewed diff, or neither —
- * a one-sided edit is the fatal case above, and `build-schemas-check-mode.test.ts`
- * is what says so, because it seeds its fixtures with the description read off the
- * committed file and runs THIS generator against them.
+ * a one-sided edit is the fatal case above, and `build-schemas-check-mode.*.test.ts`
+ * are what say so, because they seed their fixtures with the description read off the
+ * committed file and run THIS generator against them.
  *
  * "Written only by `gen:schema`" still UNDER-states the rule rather than
  * contradicting it: the writer is still this generator (`scripts/build-schemas.ts`),
@@ -2022,7 +2022,7 @@ function verifyCommittedSurfaceBase(
   // coincidence, and would therefore be exactly where a file-validating-file
   // comparison could hide. Keeping the keys git-sourced is what stops it; the pin
   // is behavioural (a key shed from this file is still caught under `.git/shallow`
-  // — see build-schemas-check-mode.test.ts) rather than a comment asserting it.
+  // — see build-schemas-check-mode.git-topology.test.ts) rather than a comment asserting it.
   //
   // The ancestry half is NOT established by that caller, and cannot be: a
   // truncated history cannot show the rev is upstream. It is the rev the tree

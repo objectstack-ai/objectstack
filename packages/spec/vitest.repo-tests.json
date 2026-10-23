@@ -1,6 +1,11 @@
 [
   "scripts/build-console-objectstack-root.test.ts",
-  "scripts/build-schemas-check-mode.test.ts",
+  "scripts/build-schemas-check-mode.anchor.test.ts",
+  "scripts/build-schemas-check-mode.deleted-baseline.test.ts",
+  "scripts/build-schemas-check-mode.deletion-proofs.test.ts",
+  "scripts/build-schemas-check-mode.git-topology.test.ts",
+  "scripts/build-schemas-check-mode.manifest.test.ts",
+  "scripts/build-schemas-check-mode.retired-keys.test.ts",
   "scripts/category-title.test.ts",
   "scripts/conversions-major18-merge.test.ts",
   "scripts/count-shards-merge.test.ts",

@@ -718,7 +718,28 @@ export class EmailServicePlugin implements Plugin {
                 } catch (err: any) {
                   return { ok: false, severity: 'error', message: `Failed to build SMTP transport: ${err?.message ?? String(err)}` };
                 }
-              } else if (provider !== 'log') {
+              } else if (provider === 'log') {
+                // "None (log only — no real delivery)" on the form tests the
+                // form's choice, as every other provider does: a one-shot
+                // LogTransport, never the live service. Testing `svc` here
+                // delivered a real mail over a live SMTP while the form said
+                // nothing would be. A live LogTransport already IS the form's
+                // choice, so that case keeps the saved-`log` answer below.
+                if (!(svc.options.transport instanceof LogTransport)) {
+                  target = new EmailService({
+                    transport: new LogTransport(ctx.logger),
+                    defaultFrom: merged.from_email
+                      ? {
+                          address: String(merged.from_email),
+                          name: merged.from_name ? String(merged.from_name) : undefined,
+                        }
+                      : undefined,
+                    // Same sys_email audit trail as the smtp test above.
+                    ...(svc.options.persistence ? { persistence: svc.options.persistence } : {}),
+                    logger: ctx.logger,
+                  });
+                }
+              } else {
                 // A provider with no transport behind it — a value stored while
                 // the settings page still offered SendGrid / Amazon SES (#5094).
                 // Refuse before asking for an API key: nothing here can use one.
@@ -788,6 +809,18 @@ export class EmailServicePlugin implements Plugin {
                     severity: 'warning',
                     message: 'No delivery transport is active — the message was only logged and recorded in sys_email. '
                       + 'Configure an SMTP host (or an API provider) and save before testing.',
+                  };
+                }
+                // The form's unsaved "None (log only)": the same severity and
+                // the same words for what happened, plus the live transport the
+                // test did not use and what saving the form will do.
+                if (target !== svc && target.options.transport instanceof LogTransport) {
+                  return {
+                    ok: false,
+                    severity: 'warning',
+                    message: 'Nothing was delivered — the provider on the form is "None (log only)", so the test message '
+                      + 'was only logged and recorded in sys_email; no mail left this machine. The live transport was '
+                      + `not used (${describeLiveMailTransport(svc).label}); save the form to stop delivery.`,
                   };
                 }
                 return {
