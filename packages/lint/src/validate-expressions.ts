@@ -2000,8 +2000,8 @@ export interface StackExpressionOptions {
    *    the same predicate at `object '…' · action …`.
    *
    * [#24798] A sixth judges an object write too: the bulk `confirmText`
-   * pass over the object's own `listViews` (`bulkConfirmTextIssues`), warnings
-   * only. On a `view` write that pass is the ONLY one, over the
+   * pass over the object's own `listViews` (`bulkConfirmTextIssues`), errors
+   * since #25205. On a `view` write that pass is the ONLY one, over the
    * written view's `list` and `listViews` — every other pass reads a
    * collection a view write does not carry.
    *
@@ -3471,16 +3471,6 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   return issues;
 }
 
-/**
- * Why a finding on a bulk `confirmText` is a warning, said once at the end of
- * each: `confirmText` was a plain string before it became a `template` slot,
- * so every one of these sentences parsed — refusing it is a narrowing no
- * conversion carries. This change ships the advisory; the refusal is its own
- * change, not this one, and the sentence promises no release for it.
- */
-const BULK_CONFIRM_TEXT_WARNING_ONLY =
-  'A warning, not a refusal: this text parsed before `confirmText` became a template slot.';
-
 /** The slot as {@link closedScopeTemplateRefusal}'s sentences name it. */
 const BULK_CONFIRM_TEXT_SLOT = "A bulk action's `confirmText`";
 
@@ -3501,14 +3491,16 @@ const LIST_VIEWS_LABEL = 'listViews';
  * `template` it is (`validateExpression('template', …)`), which names a hole
  * holding logic or an unknown formatter. A blank sentence is named too.
  *
- * ⚠️ Every finding is a `warning` here, never an `error`: each of these
- * texts parsed before the slot was typed, so a refusal is a narrowing no
- * ADR-0087 conversion carries. Under the amended 「甲」 (record 6303865025)
- * such a refusal ships in 18.x as a BREAKING minor, as its own change (the
- * `validatePagePredicateBounds` precedent: advisory first, refusal after);
- * this pass is the advisory. The containers walked: a view's `list` and each
- * `listViews.<key>`, a standalone list view (the flattened overlay or the
- * ViewItem record), and an object's `listViews.<key>`.
+ * [#25205] Every finding is an `error`, as the flow text slots' are: the three
+ * doors refuse the text, and the publish gate answers its 422. Each of these
+ * texts parsed before the slot was typed, so the refusal is a narrowing no
+ * ADR-0087 conversion carries; under the amended 「甲」 (record 6303865025) it
+ * ships in 18.x as its own BREAKING minor (the `validatePagePredicateBounds`
+ * precedent: advisory first, in #24798, refusal after). The parse is not
+ * narrowed: a stored view keeps loading, and its next save is judged here.
+ * The containers walked: a view's `list` and each `listViews.<key>`, a
+ * standalone list view (the flattened overlay or the ViewItem record), and an
+ * object's `listViews.<key>`.
  */
 function bulkConfirmTextIssues(
   stack: AnyRec,
@@ -3532,11 +3524,11 @@ function bulkConfirmTextIssues(
       if (confirmSource === undefined) continue; // neither a string nor a template envelope: the parse refuses its shape
       const label = typeof bulkDef.name === 'string' ? ` '${bulkDef.name}'` : '';
       const where = `${at} · bulkActionDefs[${di}]${label} confirmText`;
-      const warn = (message: string, quoted: string): void => {
-        issues.push({ where, message: `${message} ${BULK_CONFIRM_TEXT_WARNING_ONLY}`, source: quoted, severity: 'warning' });
+      const refuse = (message: string, quoted: string): void => {
+        issues.push({ where, message, source: quoted, severity: 'error' });
       };
       if (BLANK_TEXT.test(confirmSource)) {
-        warn(
+        refuse(
           `${BULK_CONFIRM_TEXT_SLOT} is blank, so the confirm step shows an empty sentence where the default one names `
             + 'the record count: write the sentence, or remove the key to show the default.',
           confirmSource,
@@ -3545,10 +3537,10 @@ function bulkConfirmTextIssues(
       }
       const refusal = closedScopeTemplateRefusal(confirmSource, { slot: BULK_CONFIRM_TEXT_SLOT, roots: bulkConfirmTemplateRoots(bulkDef) });
       if (refusal !== undefined) {
-        warn(refusal, confirmSource);
+        refuse(refusal, confirmSource);
         continue;
       }
-      for (const e of validateExpression('template', confirmSource).errors) warn(e.message, e.source);
+      for (const e of validateExpression('template', confirmSource).errors) refuse(e.message, e.source);
     }
   };
   const judgeListViews = (named: unknown, owner: string): void => {
