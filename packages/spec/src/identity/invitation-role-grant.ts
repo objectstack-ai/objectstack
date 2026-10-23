@@ -5,6 +5,7 @@ import {
   BUILTIN_MEMBERSHIP_ROLE_OPTIONS,
   MEMBERSHIP_ROLE_ADMIN,
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
+  MEMBERSHIP_ROLE_EXTERNAL,
   MEMBERSHIP_ROLE_MEMBER,
   MEMBERSHIP_ROLE_OWNER,
   type BuiltinMembershipRole,
@@ -31,6 +32,9 @@ import { mapMembershipRole } from './eval-user.zod';
  *   authorizes position by position, not the membership role.
  * - `member` — `'any'`: every issuer, including one whose own membership could
  *   not be resolved. A plain-member invitation confers nothing to cap.
+ * - `external` — `'any'` too (ruling of record 6355206139, E3): it confers less
+ *   than `member` — no endpoint, no baseline beyond its holder's own rows — so
+ *   any issuer that reaches the invitation endpoint may hand it out.
  *
  * A role the closed vocabulary does not list (ADR-0108) is graded by
  * {@link invitationRoleGrantors} like `delegated_admin`: administrative
@@ -71,6 +75,7 @@ export const INVITATION_ROLE_GRANTORS = {
   [MEMBERSHIP_ROLE_ADMIN]: ADMINISTRATIVE_ISSUERS,
   [MEMBERSHIP_ROLE_DELEGATED_ADMIN]: ADMINISTRATIVE_ISSUERS,
   [MEMBERSHIP_ROLE_MEMBER]: INVITATION_ROLE_ANY_ISSUER,
+  [MEMBERSHIP_ROLE_EXTERNAL]: INVITATION_ROLE_ANY_ISSUER,
 } as const satisfies Record<BuiltinMembershipRole, InvitationRoleGrantors>;
 
 /**
