@@ -5,7 +5,7 @@ import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
+import { resolveArtifactPackageEntries, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
 // [ADR-0130 D4] The residual rule's decision half — which top-level items of a
 // multi-package stack no body declares, and the id they take. See
 // `unclaimedTopLevelObjects` below.
@@ -705,7 +705,7 @@ export class ObjectQLPlugin implements Plugin {
       // [ADR-0130 D4/D5] The load path reads BOTH artifact shapes and registers
       // the packages inside one artifact in dependency-TOPOLOGICAL order.
       //
-      // `resolveArtifactPackageOrder` is the whole of that decision: it reads
+      // `resolveArtifactPackageEntries` is the whole of that decision: it reads
       // `packages` when present and falls back to the caller's own object as a
       // single-element list when absent (D4), and it orders through
       // `resolvePluginOrder` — the platform's ONE topological sorter (ADR-0116).
@@ -723,6 +723,12 @@ export class ObjectQLPlugin implements Plugin {
       // from, stamped on each registry row (`InstalledPackageSchema.source`).
       // Absent means `'code'`, the deployment's own code (`registerApp`'s
       // default); the marketplace install-local plugin states `'marketplace'`.
+      //
+      // One merged artifact may carry packages of different origins, so an
+      // entry may state its own (`ArtifactPackageSchema.source`): the producer
+      // that merged it is the one that knows. A package's own statement is the
+      // more specific one and is stamped as written; a package that states none
+      // takes the door's, as above.
       register: (registeredArtifact: any, options?: { source?: 'code' | 'marketplace' }) => {
         // ADR-0087 D2 at the registration door, for an artifact that carries
         // `packages[]`: its bodies are strictly parsed by the ordering below
@@ -736,7 +742,8 @@ export class ObjectQLPlugin implements Plugin {
         const artifact = Array.isArray(registeredArtifact?.packages)
           ? ql.convertPackageBodyForward(registeredArtifact)
           : registeredArtifact;
-        const ordered = resolveArtifactPackageOrder(artifact) as any[];
+        const entries = resolveArtifactPackageEntries(artifact);
+        const ordered = entries.map((entry) => entry.manifest) as any[];
         // [ADR-0130 D4] The objects of the stack's RESIDUAL — top-level objects
         // no package body declares — as the residual rule answers it. See
         // {@link unclaimedTopLevelObjects}.
@@ -802,8 +809,8 @@ export class ObjectQLPlugin implements Plugin {
           if (refusal) throw refusal;
         }
 
-        for (const manifest of ordered) {
-          ql.registerApp(manifest, scope, options?.source);
+        for (const { manifest, source } of entries as Array<{ manifest: any; source?: 'code' | 'marketplace' }>) {
+          ql.registerApp(manifest, scope, source ?? options?.source);
           ctx.logger.debug('Manifest registered via manifest service', {
             id: manifest.id || manifest.name
           });
