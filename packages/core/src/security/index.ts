@@ -232,6 +232,28 @@ export {
   type DefaultOrganizationAnswer,
 } from './default-organization.js';
 
+// [ADR-0131 D5] The ONE anchor rule for platform standing: which
+// `admin_full_access` grant anchors it, with the posture and the Default
+// Organization as parameters. The resolver's §6b and plugin-auth's
+// last-administrator guard (over the simulated Default Organization) ask it.
+export {
+  organizationAnchorsPlatformStanding,
+  type PlatformStandingAnchorFacts,
+} from './platform-standing-anchor.js';
+
+// [ADR-0131 D8/D9] The ONE organization-reach rule: whose `sys_setting` rows a
+// caller may draw on. `SettingsService` and the resolver's localization
+// fallback ask it, each with its own posture source and failure policy.
+export {
+  resolveOrganizationReach,
+  organizationReachAdmits,
+  organizationReachRowOwner,
+  organizationIdOf,
+  UNOWNED_ORGANIZATION_REACH,
+  type OrganizationReach,
+  type OrganizationReachFacts,
+} from './organization-reach.js';
+
 // [ADR-0131 D9, ADR-0138 D4] The ONE "which organization does a caller with no
 // organization of its own act in?" decision. Two askers: the engine's
 // system-context insert (`@objectstack/objectql`, which re-exports these same

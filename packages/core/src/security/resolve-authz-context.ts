@@ -73,6 +73,14 @@ import { openUserGrantsCache } from './resolve-user-grants-cache.js';
 import { openRequestGrantsMemo, withRequestGrantsMemo } from './request-grants-memo.js';
 import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from './platform-admin.js';
 import { findDefaultOrganization } from './default-organization.js';
+import { organizationAnchorsPlatformStanding } from './platform-standing-anchor.js';
+import {
+  organizationReachAdmits,
+  organizationReachRowOwner,
+  resolveOrganizationReach,
+  UNOWNED_ORGANIZATION_REACH,
+  type OrganizationReach,
+} from './organization-reach.js';
 import { derivePosture } from './posture-ladder.js';
 import { securityCatalogReaderOf, type SecurityCatalogReader } from './security-catalog.js';
 import { resolveSystemWriteOrganization, type SystemWriteOrganizationDecision } from './system-write-organization.js';
@@ -926,27 +934,18 @@ function grantOrganizationOf(row: unknown): string | null {
 }
 
 /**
- * [ADR-0131 D5] Does a stored grant ANCHOR platform-admin standing — the one
- * predicate, with the posture as its parameter, that §6b asks of every
- * `admin_full_access` grant:
- *
- *  - a walled posture (`group` / `isolated`): no grant anchors standing; it is
- *    config-derived (`OS_PLATFORM_OWNER_EMAIL`, §6b-config) and nothing else
- *    (#11663 L5);
- *  - `single`: the grant the first-user promotion writes, which is owned by the
- *    Default Organization ({@link readDefaultOrganizationId}).
- *
- * Any other organization's grant of the set confers the set, never standing. An
- * organization-less grant anchors nothing: the ownership ceremony (ADR-0131
- * D10) attributes the one an earlier release's promotion wrote to the Default
- * Organization, so the reading that took it as the anchor retired with it.
+ * [ADR-0131 D5] Does a stored grant ANCHOR platform-admin standing — what §6b
+ * asks of every `admin_full_access` grant. The rule is core security's one
+ * definition ({@link organizationAnchorsPlatformStanding}), which the
+ * last-administrator guard asks too; this file supplies the grant's
+ * organization as {@link grantOrganizationOf} normalizes it, the REQUESTED
+ * posture and the Default Organization ({@link readDefaultOrganizationId}).
  */
 function grantAnchorsPlatformStanding(
   grant: unknown,
   anchor: { walled: boolean; defaultOrganizationId: string | undefined },
 ): boolean {
-  if (anchor.walled || anchor.defaultOrganizationId === undefined) return false;
-  return grantOrganizationOf(grant) === anchor.defaultOrganizationId;
+  return organizationAnchorsPlatformStanding(grantOrganizationOf(grant), anchor);
 }
 
 /**
@@ -2467,50 +2466,35 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
  * [ADR-0131 D8/D9] Which `sys_setting` tenant rows the direct localization
  * fallback in {@link resolveLocalizationContextUncached} may draw on — the
  * reach `SettingsService` reads the same rows with, so the fallback can never
- * answer what the service it stands in for would refuse:
+ * answer what the service it stands in for would refuse. The rule is core
+ * security's one definition ({@link resolveOrganizationReach}); this fallback
+ * supplies its own facts:
  *
- *  - `own` — one organization's rows: the caller's, under every posture; or,
- *    for a caller that names none where no wall stands, the one organization
- *    D9's predicate derives ({@link resolveGuestOrganization}).
- *  - `no-organization-object` — the composition registers no organization
- *    object (the lean embedding, kept by ADR-0131's D9 note): the rows written
- *    with no organization, the only rows it can hold.
- *  - `unowned` — nothing to read: a caller that names no organization behind a
- *    wall, where D9 derives none (zero organizations, or several), or where
- *    the derivation could not be asked (a failed organization read). The
- *    built-in defaults answer.
+ *  - the wall: the REQUESTED posture ({@link resolveTenancyPosture}), as the
+ *    platform-standing anchor in this file reads it — a deployment that asked
+ *    for a wall stays walled here even while running degraded, and the
+ *    posture costs no query;
+ *  - the organization a caller that names none acts in: D9's predicate
+ *    ({@link resolveGuestOrganization}) under that same posture.
  *
- * The posture is the REQUESTED one ({@link resolveTenancyPosture}), as the
- * platform-standing anchor in this file reads it: a deployment that asked for
- * a wall stays walled here even while running degraded, and the posture costs
- * no query. This fallback is reached only when the settings service is absent
- * or has just failed, so it takes no inputs that service would supply.
+ * A failed derivation reads nothing (`unowned`): no organization's row is read
+ * on a guess, and the built-in defaults answer. This fallback is reached only
+ * when the settings service is absent or has just failed, so it takes no
+ * inputs that service would supply.
  */
-async function localizationFallbackReach(
-  ql: any,
-  tenantId: string | undefined,
-): Promise<
-  | { kind: 'own'; organizationId: string }
-  | { kind: 'no-organization-object' }
-  | { kind: 'unowned' }
-> {
-  if (typeof tenantId === 'string' && tenantId !== '') return { kind: 'own', organizationId: tenantId };
+async function localizationFallbackReach(ql: any, tenantId: string | undefined): Promise<OrganizationReach> {
   try {
-    const decision = await resolveGuestOrganization(ql, resolveTenancyPosture());
-    if (decision.kind === 'derived') return { kind: 'own', organizationId: decision.organizationId };
-    if (decision.kind === 'no-organization-object') return { kind: 'no-organization-object' };
+    return await resolveOrganizationReach({
+      callerOrganizationId: tenantId,
+      wallStands: () => postureEnforcesWall(resolveTenancyPosture()),
+      deriveOrganization: () => resolveGuestOrganization(ql, resolveTenancyPosture()),
+    });
   } catch {
     // The organization could not be derived (`AuthzStoreUnavailableError`):
     // no organization's row is read on a guess. Not the direct read's own
     // backend fault, so it does not populate the failure memo (#10221).
+    return UNOWNED_ORGANIZATION_REACH;
   }
-  return { kind: 'unowned' };
-}
-
-/** A `sys_setting` row's organization, with "no organization" spelled one way. */
-function settingRowOrganizationOf(row: any): string | null {
-  const organizationId = row?.organization_id;
-  return typeof organizationId === 'string' && organizationId !== '' ? organizationId : null;
 }
 
 async function resolveLocalizationContextUncached(
@@ -2590,8 +2574,8 @@ async function resolveLocalizationContextUncached(
   // query-options-erasure guard: that cast is a distinct, counted erasure
   // site, not implied by an already-`any` receiver).
   let rows: any[] = [];
-  if (reach.kind !== 'unowned' && ql && typeof ql.find === 'function') {
-    const organization_id = reach.kind === 'own' ? reach.organizationId : null;
+  const organization_id = organizationReachRowOwner(reach);
+  if (organization_id !== undefined && ql && typeof ql.find === 'function') {
     try {
       let result = await ql.find('sys_setting', {
         where: {
@@ -2606,7 +2590,7 @@ async function resolveLocalizationContextUncached(
       if (result && (result as any).value) result = (result as any).value;
       // The organization is compared HERE too, not trusted to the filter —
       // the settings service's own rule (`preferredRow`).
-      rows = (Array.isArray(result) ? result : []).filter((r) => settingRowOrganizationOf(r) === organization_id);
+      rows = (Array.isArray(result) ? result : []).filter((r) => organizationReachAdmits(reach, r?.organization_id));
     } catch {
       // THE backend fault the failure memo exists for (#10221).
       backendFailed = true;
