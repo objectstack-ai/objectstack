@@ -101,12 +101,18 @@ function rows(res: any): any[] {
 }
 
 /** A submitted report, opened into approval the way the seed's `launchSignoff` does. */
-async function submitReport(booted: Booted, flowName: string): Promise<{ report: any; request: any }> {
-  const report = one(await booted.data.insert('showcase_expense_report', {
+async function submitReport(booted: Booted, flowName: string, amount: number): Promise<{ report: any; request: any }> {
+  const created = one(await booted.data.insert('showcase_expense_report', {
     name: 'EXP-TEST',
     employee: 'Mei Phone',
     status: 'submitted',
   }, SYS));
+  // One line, so the `total_amount` roll-up the committee gate reads is real.
+  await booted.data.insert('showcase_expense_line', {
+    expense_report: created.id, merchant: 'Acme Travel', category: 'travel', amount, status: 'submitted',
+  }, SYS);
+  const report = one(await booted.data.findOne('showcase_expense_report', { where: { id: created.id }, ...SYS }));
+  expect(Number(report.total_amount)).toBe(amount);
   const launched: any = await booted.automation.execute(flowName, {
     record: report,
     previous: { ...report, status: 'draft' },
@@ -147,6 +153,8 @@ const CASES = [
   {
     flow: ExpenseSignoffFlow,
     node: 'dual_signoff',
+    // Under the $5,000 committee threshold, as the seeded EXP-2001 is.
+    amount: 1500,
     // per_group: one from EACH group finalizes.
     approvers: ['position:manager', 'position:auditor'],
     rejecter: 'position:auditor',
@@ -154,16 +162,18 @@ const CASES = [
   {
     flow: CommitteeQuorumFlow,
     node: 'committee',
+    // At or above the $5,000 the committee's start gate requires (EXP-DEMO: 8,900).
+    amount: 8900,
     // quorum: any 2 of 3 finalizes.
     approvers: ['position:manager', 'position:legal'],
     rejecter: 'position:finance',
   },
 ] as const;
 
-describe.each(CASES)('#25469 — $flow.name writes its decision back onto the report', ({ flow, node, approvers, rejecter }) => {
+describe.each(CASES)('#25469 — $flow.name writes its decision back onto the report', ({ flow, node, amount, approvers, rejecter }) => {
   it('approve: the report reads `approved` once the approval finalizes, not before', async () => {
     const booted = await boot(flow);
-    const { report, request } = await submitReport(booted, flow.name);
+    const { report, request } = await submitReport(booted, flow.name, amount);
 
     const first = await decide(booted, request.id, 'approve', approvers[0]);
     expect(first.finalized, 'one approval already finalized the request').toBe(false);
@@ -184,7 +194,7 @@ describe.each(CASES)('#25469 — $flow.name writes its decision back onto the re
 
   it('reject: the report goes back to `draft`, a value its status field declares', async () => {
     const booted = await boot(flow);
-    const { report, request } = await submitReport(booted, flow.name);
+    const { report, request } = await submitReport(booted, flow.name, amount);
 
     const res = await decide(booted, request.id, 'reject', rejecter);
     expect(res.finalized).toBe(true);
@@ -205,7 +215,7 @@ describe.each(CASES)('#25469 — $flow.name writes its decision back onto the re
     expect((preFix.nodes as any[]).some((n) => n.type === 'update_record')).toBe(false);
 
     const booted = await boot(preFix);
-    const { report, request } = await submitReport(booted, flow.name);
+    const { report, request } = await submitReport(booted, flow.name, amount);
     await decide(booted, request.id, 'approve', approvers[0]);
     const second = await decide(booted, request.id, 'approve', approvers[1]);
     expect(second.finalized).toBe(true);
