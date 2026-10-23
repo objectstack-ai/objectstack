@@ -147,7 +147,7 @@ import {
   pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
-import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
+import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, templateSlotSource } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
@@ -518,7 +518,12 @@ function pushBulkActionDefs(out: ExpectedEntry[], viewRoot: string[], view: any,
     // nobody wrote.
     const authoredLabel = inlineText(def.label);
     pushDerived(out, [...base, 'label'], authoredLabel ?? humanizeFieldPath(defName), def.label, 'view', { objectName });
-    pushOptional(out, [...base, 'confirmText'], def.confirmText, 'view', { objectName });
+    // [#24798] `confirmText` is a `template` slot: a bare string or the
+    // `{ dialect: 'template', source }` envelope, and either one is the same
+    // authored sentence. Read it through the template judge's one reader, so
+    // the envelope form is seeded like the string instead of being recorded
+    // as an absent key.
+    pushOptional(out, [...base, 'confirmText'], templateSlotSource(def.confirmText), 'view', { objectName });
     pushOptional(out, [...base, 'confirmLabel'], def.confirmLabel, 'view', { objectName });
     if (!Array.isArray(def.params)) continue;
     for (const param of def.params) {

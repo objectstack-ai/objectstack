@@ -252,6 +252,16 @@ describe('translateObject — embedded listViews: description and bulk-action co
     expect(def(out).params[0].label).toBe('备注');
   });
 
+  it('an envelope-form confirmText is judged by its source on the embedded view too (#24798)', () => {
+    const envelope = (source: string) => ({ dialect: 'template', source });
+    const base = clone(WITH_COPY);
+    def(base).confirmText = envelope(def(base).confirmText);
+    expect(def(translate(clone(base), base)).confirmText).toBe('确定将所选账户标记为已复核吗？');
+    const edited = clone(base);
+    def(edited).confirmText = envelope('Review {{ count }} accounts?');
+    expect(def(translate(edited, base)).confirmText).toEqual(envelope('Review {{ count }} accounts?'));
+  });
+
   it('an edited description beats the catalog; the label beside it stays translated', () => {
     const doc = clone(WITH_COPY);
     doc.listViews.mine.description = 'Our accounts';
