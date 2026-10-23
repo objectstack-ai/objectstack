@@ -95,6 +95,8 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { RestServer } from '@objectstack/rest';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { AppPlugin } from '../app-plugin.js';
+import { loadArtifactBundle } from '../load-artifact-bundle.js';
 
 const CALLER = { userId: 'u_mcp', isSystem: false, positions: [], permissions: [], systemPermissions: [] };
 
@@ -749,4 +751,287 @@ for (const { shape, environmentId } of SHAPES) {
             });
         }
     });
+}
+
+/**
+ * [#25297] `list_actions`, `run_action` and `resume_run` collect the standalone
+ * `action` items, the ones no object embeds, from the protocol's merged
+ * `action` listing (`GET /api/v1/meta/action`'s read), and no longer from
+ * `metadata.loadMany('action')`.
+ *
+ * `loadMany` reads the metadata service's loaders alone. Measured on this rig
+ * at the base tree, on both shapes:
+ *
+ * | the object-less action, and where it came from | `loadMany('action')` | `list_actions` | `run_action` | REST `POST /actions/global/NAME` |
+ * | :-- | :-- | :-- | :-- | :-- |
+ * | a package's, registered through the `manifest` service (during the boot, or a marketplace install) | absent | not listed | `Action 'NAME' not found` | `200`, the handler's answer |
+ * | an environment-authored row (`saveMetaItem`) | absent | not listed | `Action 'NAME' not found` | `200` |
+ * | the same, bound to the package's object (the merged object listing does not fold it into the object's `actions`) | absent | not listed | `… not found on object 'OBJECT'` | `200` |
+ * | the compiled artifact's, its `packages[]` included (the artifact door and `AppPlugin`, as `createStandaloneStack` composes them) | held | listed | run | `200` |
+ * | the same, its package disabled | still held | **listed** | **run** | `200` |
+ *
+ * The last row is the narrowing: the merged listing omits a disabled
+ * package's items, so the bridge now omits them, as it omits the package's
+ * objects since #25120. REST's door still runs that action; that is REST's
+ * door, not this one.
+ */
+const GLOBAL = 'global';
+const AUTHORED = 'qa_authored_ping';
+const AUTHORED_HANDLER = 'qa_authored_handler';
+const AUTHORED_BOUND = 'qa_authored_bound';
+
+/** An object-less action `target`ing `handler`, exposed to AI unless `exposed` is false. */
+function objectLessAction(name: string, handler: string, exposed = true) {
+    return {
+        name,
+        label: name,
+        type: 'script',
+        target: handler,
+        ...(exposed ? { ai: { exposed: true, description: `${name}: an object-less action, for this test only` } } : {}),
+    };
+}
+
+/** The package of two objects (`packageOf`) with two top-level actions that name no object. */
+function globalActionPackageOf(prefix: string) {
+    const pkg = packageOf(prefix);
+    const names = { ping: `${prefix}_ping`, hidden: `${prefix}_hidden`, handler: `${prefix}_handler` };
+    return {
+        ...pkg,
+        ...names,
+        id: `com.qa.${prefix}`,
+        artifact: () => ({
+            ...pkg.artifact(),
+            actions: [objectLessAction(names.ping, names.handler), objectLessAction(names.hidden, names.handler, false)],
+        }),
+    };
+}
+
+/** The object-less actions `list_actions` lists, by name, the platform's own left out. */
+async function listedGlobalActions(bridge: any): Promise<string[]> {
+    return ((await bridge.listActions()) as any[])
+        .filter((a) => a?.objectName === GLOBAL && /^qa_/.test(String(a?.name)))
+        .map((a) => String(a.name))
+        .sort();
+}
+
+/**
+ * Save the environment-authored object-less action through the protocol, as
+ * `PUT /api/v1/meta/action/NAME` does; with `boundTo`, also one bound to that
+ * object, whose handler is `AUTHORED_HANDLER` on it.
+ */
+async function saveAuthoredAction(kernel: ObjectKernel, boundTo?: string): Promise<void> {
+    const protocol: any = kernel.getService('protocol');
+    await protocol.saveMetaItem({ type: 'action', name: AUTHORED, item: objectLessAction(AUTHORED, AUTHORED_HANDLER) });
+    if (boundTo) {
+        await protocol.saveMetaItem({
+            type: 'action',
+            name: AUTHORED_BOUND,
+            item: { ...objectLessAction(AUTHORED_BOUND, AUTHORED_HANDLER), objectName: boundTo },
+        });
+    }
+}
+
+/** The standalone `action` items' names the metadata service's loaders hold. */
+async function loaderActionNames(kernel: ObjectKernel): Promise<string[]> {
+    const meta = kernel.getService<IMetadataService>('metadata') as unknown as { loadMany(type: string): Promise<Array<{ name?: unknown }>> };
+    return (await meta.loadMany('action')).map((a) => String(a?.name));
+}
+
+for (const { shape, environmentId } of SHAPES) {
+    for (const { label, when } of REGISTRATIONS) {
+        describe(`[#25297] a package's object-less action, and an environment-authored one — ${shape}, ${label}`, () => {
+            const pkg = globalActionPackageOf('qa_glb');
+            const mcp = recordingMcp();
+            let booted: Booted | undefined;
+            let dispatcher: HttpDispatcher;
+
+            beforeAll(async () => {
+                booted = await bootKernel(environmentId, when, pkg, mcp);
+                booted.engine.registerAction(GLOBAL, pkg.handler, async () => ({ pong: 'package' }));
+                booted.engine.registerAction(GLOBAL, AUTHORED_HANDLER, async () => ({ pong: 'authored' }));
+                booted.engine.registerAction(pkg.open, AUTHORED_HANDLER, async () => ({ pong: 'authored, bound' }));
+                await saveAuthoredAction(booted.kernel, pkg.open);
+                dispatcher = new HttpDispatcher(booted.kernel as any, undefined, { enforceProjectMembership: false });
+            }, 60_000);
+            afterAll(async () => {
+                await shutdown(booted);
+            }, 60_000);
+
+            const bridge = () => bridgeFor(dispatcher, mcp, undefined, TENANT_CALLER);
+
+            it('list_actions lists the package\'s object-less action exposed to AI and the environment-authored one, and not the unexposed one', async () => {
+                expect(await listedGlobalActions(await bridge())).toEqual([AUTHORED, pkg.ping].sort());
+            });
+
+            it('run_action runs the package\'s object-less action through its handler, unscoped and scoped to global, as REST does', async () => {
+                expect(await runOutcome(async () => (await bridge()).runAction(pkg.ping, {}))).toEqual({ result: { pong: 'package' } });
+                expect(await runOutcome(async () => (await bridge()).runAction(pkg.ping, { objectName: GLOBAL })))
+                    .toEqual({ result: { pong: 'package' } });
+                const rest = await restActionAnswer(booted!.kernel, GLOBAL, pkg.ping, {});
+                expect({ status: rest.status, data: rest.data }, 'the parity target: REST runs it').toEqual({ status: 200, data: { pong: 'package' } });
+            });
+
+            it('run_action runs the environment-authored object-less action, as REST does', async () => {
+                expect(await runOutcome(async () => (await bridge()).runAction(AUTHORED, {}))).toEqual({ result: { pong: 'authored' } });
+                const rest = await restActionAnswer(booted!.kernel, GLOBAL, AUTHORED, {});
+                expect({ status: rest.status, data: rest.data }).toEqual({ status: 200, data: { pong: 'authored' } });
+            });
+
+            it('list_actions lists, and run_action runs, an environment-authored action bound to the package\'s object, as REST does', async () => {
+                const listed = ((await (await bridge()).listActions()) as any[]).map((a) => `${a?.objectName}:${a?.name}`);
+                expect(listed).toContain(`${pkg.open}:${AUTHORED_BOUND}`);
+                expect(await runOutcome(async () => (await bridge()).runAction(AUTHORED_BOUND, { objectName: pkg.open })))
+                    .toEqual({ result: { pong: 'authored, bound' } });
+                const rest = await restActionAnswer(booted!.kernel, pkg.open, AUTHORED_BOUND, {});
+                expect({ status: rest.status, data: rest.data }).toEqual({ status: 200, data: { pong: 'authored, bound' } });
+            });
+
+            it('run_action resolves the object-less action the package did not expose to AI, and refuses it at the exposure gate', async () => {
+                const ran = await runOutcome(async () => (await bridge()).runAction(pkg.hidden, {}));
+                expect(ran.message).toMatch(new RegExp(`^Action '${pkg.hidden}' on 'global' is not exposed to AI`));
+            });
+
+            it('CONTROL: an object-less name nothing declares is still not found', async () => {
+                const ran = await runOutcome(async () => (await bridge()).runAction('qa_nowhere', {}));
+                expect(ran.message).toBe('Action \'qa_nowhere\' not found');
+            });
+        });
+    }
+}
+
+for (const { shape, environmentId } of SHAPES) {
+    describe(`[#25297] a DISABLED package's object-less action — ${shape}: neither listed nor run, the environment-authored one still both`, () => {
+        const pkg = globalActionPackageOf('qa_glb_off');
+        const mcp = recordingMcp();
+        let booted: Booted | undefined;
+        let dispatcher: HttpDispatcher;
+
+        beforeAll(async () => {
+            booted = await bootKernel(environmentId, 'boot', pkg, mcp);
+            booted.engine.registerAction(GLOBAL, pkg.handler, async () => ({ pong: 'package' }));
+            booted.engine.registerAction(GLOBAL, AUTHORED_HANDLER, async () => ({ pong: 'authored' }));
+            await saveAuthoredAction(booted.kernel);
+            expect((booted.engine as any).registry.disablePackage(pkg.id), 'precondition: disabled').toBeTruthy();
+            dispatcher = new HttpDispatcher(booted.kernel as any, undefined, { enforceProjectMembership: false });
+        }, 60_000);
+        afterAll(async () => {
+            await shutdown(booted);
+        }, 60_000);
+
+        it('list_actions lists the environment-authored action and none of the package\'s', async () => {
+            const bridge = await bridgeFor(dispatcher, mcp, undefined, TENANT_CALLER);
+            expect(await listedGlobalActions(bridge)).toEqual([AUTHORED]);
+        });
+
+        it('run_action answers the package\'s action "not found", scoped and unscoped, and runs the environment-authored one', async () => {
+            const bridge = await bridgeFor(dispatcher, mcp, undefined, TENANT_CALLER);
+            expect(await runOutcome(() => bridge.runAction(pkg.ping, {})))
+                .toEqual({ code: undefined, status: undefined, message: `Action '${pkg.ping}' not found` });
+            expect(await runOutcome(() => bridge.runAction(pkg.ping, { objectName: GLOBAL })))
+                .toEqual({ code: undefined, status: undefined, message: `Action '${pkg.ping}' not found on object 'global'` });
+            expect(await runOutcome(() => bridge.runAction(AUTHORED, {}))).toEqual({ result: { pong: 'authored' } });
+        });
+    });
+}
+
+/** The compiled artifact: the project's own object-less action, and a `packages[]` entry carrying another. */
+const ART = { app: 'com.qa.qa-art', pkg: 'com.qa.qa-art-pkg', ping: 'qa_art_ping', pkgPing: 'qa_art_pkg_ping', handler: 'qa_art_handler' } as const;
+const artifactWithGlobalActions = () => ({
+    manifest: { id: ART.app, name: 'qa art', version: '0.0.1', type: 'app' },
+    objects: [{ name: 'qa_art_obj', label: 'Art', fields: { name: { name: 'name', type: 'text', label: 'Name' } } }],
+    actions: [objectLessAction(ART.ping, ART.handler)],
+    views: [], apps: [], flows: [], requires: [],
+    packages: [{
+        manifest: {
+            id: ART.pkg, name: 'qa art package', version: '0.0.1', type: 'app',
+            objects: [{ name: 'qa_art_pkg_obj', label: 'Art package', fields: { name: { name: 'name', type: 'text', label: 'Name' } } }],
+            actions: [objectLessAction(ART.pkgPing, ART.handler)],
+        },
+    }],
+});
+
+/**
+ * A kernel booted from a compiled artifact the way `createStandaloneStack`
+ * composes it: the artifact door (`MetadataPlugin`'s `artifactSource`) and an
+ * `AppPlugin` over the same bundle.
+ */
+async function bootArtifactKernel(environmentId: string | undefined, mcp: unknown): Promise<Booted> {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    const root = mkdtempSync(join(tmpdir(), 'os-mcp-artifact-actions-'));
+    const engine = new ObjectQL();
+    engine.registerDriver(new SqlDriver({
+        client: 'better-sqlite3',
+        connection: { filename: ':memory:' },
+        useNullAsDefault: true,
+    }) as any, true);
+    const artifact = join(root, 'objectstack.json');
+    writeFileSync(artifact, JSON.stringify(artifactWithGlobalActions()));
+    await kernel.use(new MetadataPlugin({
+        watch: false, artifactWatch: false, ...(environmentId ? { environmentId } : {}),
+        artifactSource: { mode: 'local-file', path: artifact }, rootDir: root,
+    } as any));
+    await kernel.use(new ObjectQLPlugin({ ql: engine, ...(environmentId ? { environmentId, hydrateMetadataFromDb: true } : {}) }));
+    const bundle = await loadArtifactBundle(artifact, { tag: '[#25297 rig]', unwrapEnvelope: true });
+    await kernel.use(new AppPlugin(bundle, undefined, { skipSeedData: true, securityMetadataRegistrar: 'artifact-door' }));
+    await kernel.use({
+        name: 'qa.mcp-host',
+        dependencies: ['com.objectstack.engine.objectql'],
+        init: async (ctx: PluginContext) => {
+            ctx.registerService('mcp', mcp);
+        },
+    } as Plugin);
+    await kernel.bootstrap();
+    await engine.syncSchemas();
+    engine.registerAction(GLOBAL, ART.handler, async () => ({ pong: 'artifact' }));
+    return { kernel, engine, root };
+}
+
+for (const { shape, environmentId } of SHAPES) {
+    for (const disabled of [false, true]) {
+        describe(`[#25297] the compiled artifact's object-less actions — ${shape}${disabled ? ', its package disabled' : ''}`, () => {
+            const mcp = recordingMcp();
+            let booted: Booted | undefined;
+            let dispatcher: HttpDispatcher;
+
+            beforeAll(async () => {
+                booted = await bootArtifactKernel(environmentId, mcp);
+                if (disabled) {
+                    expect((booted.engine as any).registry.disablePackage(ART.pkg), 'precondition: disabled').toBeTruthy();
+                }
+                dispatcher = new HttpDispatcher(booted.kernel as any, undefined, { enforceProjectMembership: false });
+            }, 60_000);
+            afterAll(async () => {
+                await shutdown(booted);
+            }, 60_000);
+
+            const bridge = () => bridgeFor(dispatcher, mcp, undefined, TENANT_CALLER);
+
+            it(`precondition: the metadata service's loaders hold both${disabled ? ', the disabled package\'s too' : ''}`, async () => {
+                expect((await loaderActionNames(booted!.kernel)).sort()).toEqual([ART.pkgPing, ART.ping].sort());
+            });
+
+            if (!disabled) {
+                it('CONTROL: list_actions lists both, and run_action runs both, as REST does', async () => {
+                    expect(await listedGlobalActions(await bridge())).toEqual([ART.pkgPing, ART.ping].sort());
+                    for (const name of [ART.ping, ART.pkgPing]) {
+                        expect(await runOutcome(async () => (await bridge()).runAction(name, {}))).toEqual({ result: { pong: 'artifact' } });
+                        const rest = await restActionAnswer(booted!.kernel, GLOBAL, name, {});
+                        expect({ status: rest.status, data: rest.data }).toEqual({ status: 200, data: { pong: 'artifact' } });
+                    }
+                });
+            } else {
+                it('list_actions lists the project\'s own action and not the disabled package\'s', async () => {
+                    expect(await listedGlobalActions(await bridge())).toEqual([ART.ping]);
+                });
+
+                it('run_action answers the disabled package\'s action "not found", scoped and unscoped, and still runs the project\'s own', async () => {
+                    expect(await runOutcome(async () => (await bridge()).runAction(ART.pkgPing, {})))
+                        .toEqual({ code: undefined, status: undefined, message: `Action '${ART.pkgPing}' not found` });
+                    expect(await runOutcome(async () => (await bridge()).runAction(ART.pkgPing, { objectName: GLOBAL })))
+                        .toEqual({ code: undefined, status: undefined, message: `Action '${ART.pkgPing}' not found on object 'global'` });
+                    expect(await runOutcome(async () => (await bridge()).runAction(ART.ping, {}))).toEqual({ result: { pong: 'artifact' } });
+                });
+            }
+        });
+    }
 }

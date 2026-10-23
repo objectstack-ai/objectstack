@@ -3102,6 +3102,21 @@
       "pinned": 2
     },
     {
+      "file": "packages/plugins/plugin-auth/src/idp-locale-claim.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/idp-locale-claim.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/idp-locale-claim.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/impersonation-bearer-rotation.test.ts",
       "verb": "delete",
       "pinned": 1

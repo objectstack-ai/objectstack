@@ -39,6 +39,7 @@ import {
   type LinkingAuthContext,
   refuseImplicitAccountLink,
 } from './implicit-account-linking.js';
+import { IdpLocaleSync } from './idp-locale-claim.js';
 import type { IDataEngine } from '@objectstack/core';
 import {
   API_KEY_DEFAULT_EXPIRY_DAYS,
@@ -49,7 +50,6 @@ import {
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { EngineQueryOptions } from '@objectstack/spec/data';
 import type {
   ApiKeyLifecyclePolicy,
   IEmailService,
@@ -76,13 +76,9 @@ import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
 import {
-  accountLockedEventFor,
   emitAuthSessionAuditEvent,
   loginEventFor,
   logoutEventFor,
-  refusalCodeOf,
-  signInClientFingerprint,
-  signInFailureEventFor,
   SIGN_IN_EMAIL_PATH,
   type AuthEventAuditSurface,
 } from './auth-session-audit.js';
@@ -203,6 +199,18 @@ import {
   resolveMembershipRole,
   type ActorGuardHost,
 } from './auth-manager-actor-guards.js';
+// [#25224 cut 2] The sign-in lockout path; the methods of the same names
+// below hand each body the members it reads (`SignInLockoutHost`).
+import {
+  assertAccountNotLocked,
+  auditRefusedSignIn,
+  findSignInAccount,
+  recordSignInOutcome,
+  resolveSignInAccountId,
+  resolveTwoFactorAccountLockout,
+  stampLastLogin,
+  type SignInLockoutHost,
+} from './auth-manager-sign-in-lockout.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -1885,12 +1893,18 @@ export class AuthManager {
         // implicit link is written — see `implicit-account-linking.ts`. The
         // audience gate judges only `create-user`, so the two never answer
         // the same call.
-        validateUserInfo: async (data: any, ctx: any) =>
-          (await refuseImplicitAccountLink(data, ctx, {
+        //
+        // It is also where better-auth hands over the IdP's raw profile, so
+        // the profile's `locale` claim is STAGED here, refusing nothing; the
+        // session the sign-in mints settles it (`idp-locale-claim.ts`).
+        validateUserInfo: async (data: any, ctx: any) => {
+          this.idpLocale.stage(data, ctx);
+          return (await refuseImplicitAccountLink(data, ctx, {
             requireLocalEmailVerified: this.implicitLinkRequiresLocalEmailVerified(),
             resolveContext: () => this.linkingContext(),
             logInfo: (m, meta) => this.config.logger?.info?.(m, meta),
-          })) ?? this.validateAudienceAdmission(data, ctx),
+          })) ?? this.validateAudienceAdmission(data, ctx);
+        },
       },
       account: {
         ...AUTH_ACCOUNT_CONFIG,
@@ -5049,6 +5063,25 @@ export class AuthManager {
       return undefined;
     }
   }
+
+  /**
+   * An external sign-in's `locale` claim → `sys_user.locale`, staged by the
+   * `validateUserInfo` seam and settled on the session the sign-in mints.
+   * The rule and its record: `idp-locale-claim.ts`.
+   */
+  private readonly idpLocale = new IdpLocaleSync({
+    getEngine: () => this.getDataEngine() as never,
+    getSupportedLocales: () => {
+      try {
+        const locales = this.config.getI18n?.()?.getLocales?.();
+        return Array.isArray(locales) ? locales : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    resolveAuth: () => this.linkingContext(),
+    warn: (message, meta) => this.config.logger?.warn?.(message, meta),
+  });
 
   /**
    * [ADR-0093 D7] The users created in each in-flight better-auth request,
@@ -8448,6 +8481,7 @@ export class AuthManager {
     const userDeleteAfter = async (user: any, ctx: any) => {
       const result = hostUserDeleteAfter ? await hostUserDeleteAfter(user, ctx) : undefined;
       await clearUserUnlinks(user, ctx);
+      await this.idpLocale.forget(user, ctx);
       return result;
     };
 
@@ -8589,6 +8623,9 @@ export class AuthManager {
         this.config.getAuditSink?.(),
         loginEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined),
       );
+      // An external sign-in's staged `locale` claim lands on the user the
+      // session names, new or returning (`idp-locale-claim.ts`). Never throws.
+      await this.idpLocale.settle(session, ctx);
       return result;
     };
     // [#23772] A minted principal session is NEVER renewed. better-auth's
@@ -9435,40 +9472,15 @@ export class AuthManager {
    * endpoint context `ctx` — it writes that account's `login_failed` row with
    * the refusal's own code before throwing (`auth-session-audit.ts`).
    */
-  private async assertAccountNotLocked(email: string, ctx?: unknown): Promise<void> {
-    const threshold = Number(this.config.lockoutThreshold) || 0;
-    if (threshold <= 0) return;
-    const engine = this.getDataEngine();
-    if (!engine) return;
-    let locked = false;
-    let lockedUserId: string | undefined;
-    try {
-      const u = await this.findSignInAccount(engine, email, ['locked_until']);
-      const lu = u?.locked_until as string | number | Date | null | undefined;
-      locked = !!(lu && new Date(lu).getTime() > Date.now());
-      if (locked && u) lockedUserId = u.id;
-    } catch {
-      return; // fail-open
-    }
-    if (locked) {
-      if (ctx !== undefined && lockedUserId) {
-        await emitAuthSessionAuditEvent(
-          this.config.getAuditSink?.(),
-          signInFailureEventFor(lockedUserId, {
-            path: SIGN_IN_EMAIL_PATH,
-            reason: 'ACCOUNT_LOCKED',
-            fingerprint: signInClientFingerprint(ctx),
-          }),
-        );
-      }
-      const { APIError } = await import('better-auth/api');
-      throw new APIError('FORBIDDEN', {
-        message:
-          'This account is temporarily locked after too many failed sign-in ' +
-          'attempts. Try again later or ask an administrator to unlock it.',
-        code: 'ACCOUNT_LOCKED',
-      });
-    }
+  private assertAccountNotLocked(email: string, ctx?: unknown): Promise<void> {
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const readConfig = () => this.config;
+    const host: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine'> = {
+      get config() { return readConfig(); },
+      findSignInAccount: (...a) => this.findSignInAccount(...a),
+      getDataEngine: (...a) => this.getDataEngine(...a),
+    };
+    return assertAccountNotLocked.call(host, email, ctx);
   }
 
   /**
@@ -9491,54 +9503,19 @@ export class AuthManager {
    * `account_locked` row records, so a lock that was never written is never
    * reported as one.
    */
-  private async recordSignInOutcome(
+  private recordSignInOutcome(
     email: string,
     success: boolean,
   ): Promise<{ userId: string; lockedUntil: Date; threshold: number } | undefined> {
-    const threshold = Number(this.config.lockoutThreshold) || 0;
-    if (threshold <= 0) return undefined;
-    const engine = this.getDataEngine();
-    if (!engine) return undefined;
-    try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const u = await this.findSignInAccount(engine, email, ['failed_login_count', 'locked_until']);
-      if (!u) return undefined;
-      if (success) {
-        if ((Number(u.failed_login_count) || 0) !== 0 || u.locked_until) {
-          await engine.update(
-            'sys_user',
-            { id: u.id, failed_login_count: 0, locked_until: null },
-            { context: SYSTEM_CTX } as any,
-          );
-        }
-        return undefined;
-      }
-      const next = (Number(u.failed_login_count) || 0) + 1;
-      const patch: Record<string, unknown> = { id: u.id, failed_login_count: next };
-      let lockedUntil: Date | undefined;
-      if (next >= threshold) {
-        const mins = Number(this.config.lockoutDurationMinutes) || 15;
-        lockedUntil = new Date(Date.now() + mins * 60_000);
-        patch.locked_until = lockedUntil;
-      }
-      await engine.update('sys_user', patch, { context: SYSTEM_CTX } as any);
-      return lockedUntil ? { userId: u.id, lockedUntil, threshold } : undefined;
-    } catch (e) {
-      // Never break the auth response. [#12981] But lockout accounting that
-      // silently stops accounting is brute-force protection that is OFF.
-      this.logDurabilityDegradation(
-        'AuthManager: the sign-in lockout counter was NOT written — the auth response is '
-          + 'unaffected, so nothing looks broken. This attempt was not counted, which means '
-          + 'consecutive failures do not accumulate and the account is never locked: '
-          + '`lockoutThreshold` (ADR-0069 D2) is configured and, for this identity, not enforced. '
-          + 'A brute-force run against this account meets no limit while this persists, and the '
-          + 'only notice is this line. Remedy: make the sys_user update land — check the write '
-          + 'permission on `failed_login_count` / `locked_until` and driver connectivity.',
-        e,
-        { object: 'sys_user', threshold, success },
-      );
-      return undefined;
-    }
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const readConfig = () => this.config;
+    const host: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
+      get config() { return readConfig(); },
+      findSignInAccount: (...a) => this.findSignInAccount(...a),
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return recordSignInOutcome.call(host, email, success);
   }
 
   /**
@@ -9554,35 +9531,18 @@ export class AuthManager {
    * (`auth-session-audit.ts`, account events). The password is never read.
    * Never throws — the refusal is already decided and the sink swallows.
    */
-  private async auditRefusedSignIn(
+  private auditRefusedSignIn(
     ctx: any,
     email: string,
     lockStamped: { userId: string; lockedUntil: Date; threshold: number } | undefined,
   ): Promise<void> {
-    const sink = this.config.getAuditSink?.();
-    if (!sink) return;
-    const userId = lockStamped?.userId ?? (await this.resolveSignInAccountId(email));
-    if (!userId) return;
-    const fingerprint = signInClientFingerprint(ctx);
-    await emitAuthSessionAuditEvent(
-      sink,
-      signInFailureEventFor(userId, {
-        path: SIGN_IN_EMAIL_PATH,
-        reason: refusalCodeOf(ctx?.context?.returned),
-        fingerprint,
-      }),
-    );
-    if (lockStamped) {
-      await emitAuthSessionAuditEvent(
-        sink,
-        accountLockedEventFor(lockStamped.userId, {
-          path: SIGN_IN_EMAIL_PATH,
-          lockedUntil: lockStamped.lockedUntil,
-          threshold: lockStamped.threshold,
-          fingerprint,
-        }),
-      );
-    }
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const readConfig = () => this.config;
+    const host: Pick<SignInLockoutHost, 'config' | 'resolveSignInAccountId'> = {
+      get config() { return readConfig(); },
+      resolveSignInAccountId: (...a) => this.resolveSignInAccountId(...a),
+    };
+    return auditRefusedSignIn.call(host, ctx, email, lockStamped);
   }
 
   /**
@@ -9591,23 +9551,14 @@ export class AuthManager {
    * row names the account the credential check actually judged and the lock
    * gate and counter hold.
    */
-  private async resolveSignInAccountId(email: string): Promise<string | undefined> {
-    const engine = this.getDataEngine();
-    if (!engine) return undefined;
-    try {
-      return (await this.findSignInAccount(engine, email, []))?.id;
-    } catch (e) {
-      // The refusal stands either way; what is lost is its ledger row.
-      this.logDurabilityDegradation(
-        'AuthManager: a refused sign-in was NOT recorded in sys_audit_log — the account it named '
-          + 'could not be resolved, so its `login_failed` row was not written. The refusal itself was '
-          + 'answered normally, so nothing looks broken, and the Auth preset of Setup → Audit Log is '
-          + 'missing this attempt. Remedy: make the sys_user read land — check driver connectivity.',
-        e,
-        { object: 'sys_user', action: 'login_failed' },
-      );
-      return undefined;
-    }
+  private resolveSignInAccountId(email: string): Promise<string | undefined> {
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const host: Pick<SignInLockoutHost, 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'> = {
+      findSignInAccount: (...a) => this.findSignInAccount(...a),
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return resolveSignInAccountId.call(host, email);
   }
 
   /**
@@ -9634,20 +9585,13 @@ export class AuthManager {
    * Throws what the engine throws; each caller keeps its own failure posture
    * (the gate fails open, the counter and the ledger report the lost write).
    */
-  private async findSignInAccount(
+  private findSignInAccount(
     engine: IDataEngine,
     email: string,
     fields: readonly string[],
   ): Promise<({ id: string } & Record<string, unknown>) | undefined> {
-    const query: EngineQueryOptions = {
-      where: { email: email.toLowerCase() },
-      fields: ['id', ...fields],
-      context: { isSystem: true, positions: [], permissions: [] },
-    };
-    const row = await engine.findOne('sys_user', query);
-    return row && typeof row.id === 'string' && row.id
-      ? (row as { id: string } & Record<string, unknown>)
-      : undefined;
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts`; it reads no member of this class.
+    return findSignInAccount(engine, email, fields);
   }
 
   /**
@@ -9680,14 +9624,12 @@ export class AuthManager {
    */
   private resolveTwoFactorAccountLockout():
   { enabled: boolean; maxFailedAttempts: number; durationSeconds: number } | undefined {
-    const threshold = Number(this.config.lockoutThreshold) || 0;
-    if (threshold <= 0) return undefined;
-    const minutes = Number(this.config.lockoutDurationMinutes) || 15;
-    return {
-      enabled: true,
-      maxFailedAttempts: threshold,
-      durationSeconds: minutes * 60,
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const readConfig = () => this.config;
+    const host: Pick<SignInLockoutHost, 'config'> = {
+      get config() { return readConfig(); },
     };
+    return resolveTwoFactorAccountLockout.call(host);
   }
 
   /**
@@ -9718,32 +9660,13 @@ export class AuthManager {
    * is read for — for every object and every deployment. The defect the ruling
    * named is the missing actor, and this is that actor.
    */
-  private async stampLastLogin(userId: string, ip: string | undefined): Promise<void> {
-    const engine = this.getDataEngine();
-    if (!engine || !userId) return;
-    try {
-      const SYSTEM_CTX = { isSystem: true, attributedUserId: userId, positions: [], permissions: [] };
-      const patch: Record<string, unknown> = { id: userId, last_login_at: new Date() };
-      // Cap to the column width (IPv6 textual max 45) — a malformed/oversized
-      // forwarded header must not blow up the write.
-      if (ip) patch.last_login_ip = ip.slice(0, 45);
-      await engine.update('sys_user', patch, { context: SYSTEM_CTX } as any);
-    } catch (e) {
-      // Never break the auth response. [#12981] But this write is the ONLY
-      // trace the sign-in leaves in the compliance ledger.
-      this.logDurabilityDegradation(
-        'AuthManager: the last-login stamp was NOT written — the sign-in succeeded and the user '
-          + 'holds a valid session, so nothing looks wrong. `last_login_at` / `last_login_ip` keep '
-          + 'their previous values, and because this update is what plugin-audit turns into the '
-          + 'change-trail row, this sign-in leaves NO trace in the compliance ledger at '
-          + 'all: "when did this account last sign in, and from where" now answers with a stale '
-          + 'row, and a login from a new address is exactly what that trail is read for. Remedy: '
-          + 'make the sys_user update land; the next sign-in that lands re-stamps it, but this one '
-          + 'is not recoverable.',
-        e,
-        { object: 'sys_user', fields: ['last_login_at', 'last_login_ip'] },
-      );
-    }
+  private stampLastLogin(userId: string, ip: string | undefined): Promise<void> {
+    // [#25224 cut 2] The body moved to `auth-manager-sign-in-lockout.ts` (see `SignInLockoutHost`).
+    const host: Pick<SignInLockoutHost, 'getDataEngine' | 'logDurabilityDegradation'> = {
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
+    };
+    return stampLastLogin.call(host, userId, ip);
   }
 
   /**

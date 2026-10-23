@@ -175,7 +175,7 @@ describe('every new APIError( in plugin-auth/src carries an ADR-0112 code (#2424
     // throw does not have to edit this line; only losing them does.
     // [#25224] `AuthManager`'s throws are counted over the files its methods'
     // bodies live in: `auth-manager.ts` and the bodies moved out of it whole.
-    const authManagerFiles = ['auth-manager.ts', 'auth-manager-actor-guards.ts'];
+    const authManagerFiles = ['auth-manager.ts', 'auth-manager-actor-guards.ts', 'auth-manager-sign-in-lockout.ts'];
     expect(sites.length).toBeGreaterThanOrEqual(30);
     expect(new Set(sites.map((s) => s.file)).size).toBeGreaterThanOrEqual(4);
     expect(perFile.filter((f) => authManagerFiles.includes(f.file)).reduce((n, f) => n + f.sites.length, 0)).toBeGreaterThanOrEqual(24);
