@@ -13,6 +13,9 @@ const specs = brandingSettingsManifest.specifiers as Array<{
   type: string;
   key?: string;
   id?: string;
+  label?: string;
+  description?: string;
+  required?: boolean;
   default?: unknown;
 }>;
 const byKey = (k: string) => specs.find((s) => s.key === k);
@@ -53,5 +56,34 @@ describe('brandingSettingsManifest', () => {
     expect(byKey('accent_color')).toBeDefined();
     expect(byKey('accent_color')!.default).toBeUndefined();
     expect(byKey('logo_url')!.default).toBeUndefined();
+  });
+
+  // [#25347] One organization showed three names: Branding's unsaved
+  // 'ObjectStack' default, the organization record's "Default Organization",
+  // and the console's 'ObjectOS'. The first was a value nobody serves, and the
+  // key's label claimed the organization's name for the product's.
+  describe('workspace_name is the product name, with no default of its own (#25347)', () => {
+    const name = () => byKey('workspace_name')!;
+
+    it('declares no default: an unsaved page shows no name the console never shows', () => {
+      // Both readers (runtime config and plugin-auth) serve only a value somebody
+      // SET; a manifest default was shown on the page and used nowhere.
+      expect(name().default).toBeUndefined();
+      expect(SettingsManifestSchema.parse(brandingSettingsManifest).specifiers
+        .find((s) => s.key === 'workspace_name')!.default).toBeUndefined();
+    });
+
+    it('is not required: empty means the deployment\'s own name, so the page can save without one', () => {
+      // A required key with no default blocks every save of the namespace in
+      // the console's pre-save check until somebody types a name.
+      expect(name().required).toBe(false);
+    });
+
+    it('is labelled the product name, and its help points at the organization record for the organization\'s name', () => {
+      expect(name().label).toBe('Product name');
+      expect(name().description).toMatch(/not the organization's own name/);
+      expect(name().description).toMatch(/Organization record \(Rename Organization\)/);
+      expect(name().description).toMatch(/Leave empty/);
+    });
   });
 });

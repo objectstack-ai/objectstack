@@ -12,9 +12,11 @@
 // What this file pins, from source:
 //  - the new action's declaration: its params are exactly `name` and `logo`,
 //    it sits at `record_header` and `list_item`, it targets better-auth's
-//    `organization/update` exactly as `update_organization` does, and it is
-//    gated like it: on `multiOrgEnabled` and on the grades that reach
-//    `organization/update` (owner, admin);
+//    `organization/update` exactly as `update_organization` does, it is
+//    gated on the grades that reach `organization/update` (owner, admin) like
+//    it, and on the organization CAPABILITY, not on `multiOrgEnabled`: a
+//    `single` deployment renames its one organization through this door
+//    (#25347), while `update_organization`, the slug door, stays multi-org;
 //  - one door per field on the record header: no `record_header` action that
 //    targets `organization/update` carries a `slug` param;
 //  - the header order: the rename takes an inline slot and leave folds into
@@ -102,10 +104,13 @@ describe('sys_organization.rename_organization: the declaration', () => {
       .toEqual({ type: update.type, target: update.target, method: update.method, recordIdParam: update.recordIdParam, bodyShape: update.bodyShape });
   });
 
-  it('is gated on the update reach and multiOrgEnabled, the same lowered predicate as update_organization', () => {
-    const gate = `(${membershipReachPredicate('update_organization')}) && ${featureGatePredicate('multiOrgEnabled')}`;
-    expect(action('rename_organization').visible?.source).toBe(gate);
-    expect(action('update_organization').visible?.source).toBe(gate);
+  it('is gated on the update reach, like update_organization, and on the organization capability, so single offers it', () => {
+    // [#25347] Under `single` (`multiOrgEnabled: false`) this is the only door
+    // that renames the deployment's one organization: the generic edit form
+    // keeps `name` readonly, and `update_organization` stays multi-org-only.
+    const reach = `(${membershipReachPredicate('update_organization')})`;
+    expect(action('rename_organization').visible?.source).toBe(`${reach} && ${featureGatePredicate('organization')}`);
+    expect(action('update_organization').visible?.source).toBe(`${reach} && ${featureGatePredicate('multiOrgEnabled')}`);
   });
 });
 
@@ -150,5 +155,25 @@ describe('sys_organization: the open-source slug door is unchanged (control)', (
     expect(update.locations).toEqual(['list_item']);
     expect(update.target).toBe(UPDATE_TARGET);
     expect(paramKeys(update)).toEqual(['name', 'slug', 'logo']);
+  });
+});
+
+describe('sys_organization: each name and timezone field says where its value is set (#25347)', () => {
+  const field = (name: string) =>
+    (SysOrganization.fields as Record<string, { description?: string; readonly?: boolean }>)[name];
+
+  it("the organization's name names its door and points at Branding for the product name", () => {
+    expect(field('name').readonly).toBe(true);
+    expect(field('name').description).toMatch(/changed with Rename Organization/);
+    expect(field('name').description).toMatch(/Settings → Branding/);
+  });
+
+  it('the timezone says it changes no date calculation and that Localization\'s Default timezone wins', () => {
+    // Nothing in the platform reads this column (see its declaration); the zone
+    // in effect is the settings door's `localization.timezone`.
+    const help = field('timezone').description ?? '';
+    expect(help).toMatch(/does not change any date calculation/);
+    expect(help).toMatch(/Settings → Localization → Default timezone/);
+    expect(help).not.toMatch(/are computed in/);
   });
 });

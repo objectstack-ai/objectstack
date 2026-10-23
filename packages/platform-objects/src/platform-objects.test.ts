@@ -699,7 +699,9 @@ describe('feature-gate lowering matrix (#2874)', () => {
     // Their doors are better-auth's `organization/update` (owner, admin) and
     // `organization/delete` (owner), so the grade term leads the feature gate.
     ['SysOrganization', SysOrganization, 'update_organization', `${ADMINS} && ${MULTI_ORG}`],
-    ['SysOrganization', SysOrganization, 'rename_organization', `${ADMINS} && ${MULTI_ORG}`],
+    // [#25347] The rename door is the organization's, under every posture:
+    // `single` has one organization and this is the only way to rename it.
+    ['SysOrganization', SysOrganization, 'rename_organization', `${ADMINS} && ${ORG}`],
     ['SysOrganization', SysOrganization, 'delete_organization', `(${OWNER}) && ${MULTI_ORG}`],
     ['SysOrganization', SysOrganization, 'set_active_organization', MULTI_ORG],
     ['SysOrganization', SysOrganization, 'leave_organization', MULTI_ORG],
@@ -770,7 +772,9 @@ describe('feature-gate lowering matrix (#2874)', () => {
     const gated = (SysOrganization.actions ?? [])
       .filter((a) => ((a.visible as { source?: string } | undefined)?.source ?? '').includes('features.multiOrgEnabled'))
       .map((a) => a.name);
-    const pinned = rows.filter(([exported]) => exported === 'SysOrganization').map(([, , name]) => name);
+    const pinned = rows
+      .filter(([exported, , , gate]) => exported === 'SysOrganization' && gate.includes(MULTI_ORG))
+      .map(([, , name]) => name);
     expect([...gated].sort()).toEqual([...pinned].sort());
     expect(gated).not.toContain('change_slug');
   });
