@@ -1245,7 +1245,14 @@ export const CEILINGS = new Map([
   // and the first-class self-ruling gate left (−13), and the same ruling batch
   // ordered the human floor widened and the risk / workload criteria written
   // as judgeable lines (+13); landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 120],
+  // Lowered 120 → 103 as the SOURCE of the cross-file move declared in
+  // CROSS_FILE_MOVES below (the thin triage seat): the release board, the
+  // cross-repo pin chain and the decision-inbox duties moved into the 总监席
+  // charter; the fork-PR sweep and the hold/closed re-validation went to the
+  // lane patrol (dispatch-runbook.md, line-neutral there). The human-ruling
+  // floor and the risk / workload tests stayed intact. Landed count, headroom 0,
+  // same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 103],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
@@ -1400,7 +1407,14 @@ export const CEILINGS = new Map([
   // Lowered 72 → 70 by the same revocation: the in-project delegated-ruling
   // channel and its standing order left; `needs_decision` joins the ruling
   // batch the maintainer rules by hand. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 70],
+  // Raised 70 → 87 by the CROSS-FILE MOVE declared in CROSS_FILE_MOVES below
+  // (the thin triage seat): the release board (5), the cross-repo pin chain (3,
+  // extended to every app repo) and the decision-inbox duties (2) moved in from
+  // triage-duties.md, whose ceiling fell 120 → 103 in the same PR, with the
+  // daily digest, the thin-triage pairing and the roster pointer the same word
+  // ordered; +17 against a net source decrease of 17. Landed count, headroom 0,
+  // same convention.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 87],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // alternates between the two multi-lane repos, oldest-first inside a repo, with a
   // 4-hour starvation guard). A seat charter is read per seat session like every
@@ -2026,6 +2040,20 @@ export const CROSS_FILE_MOVES = new Map([
       ruling: '入队与落地 consolidation into landing-operations.md under the principle-only cut of SKILL.md, authorised by #14685 item 5 (comment 5520452691)',
       was: 69,
       sources: [['.claude/skills/pm-dispatch/SKILL.md', 819]],
+    },
+  ],
+  // The thin triage seat (maintainer's word 2026-10-23, verbatim and
+  // untranslated: 「分诊不忙不如留给总监管」): the 分诊席 keeps bare-card first
+  // touch and cross-lane dedupe; its daily duties — the release board, the
+  // cross-repo pin chain, the decision-inbox duties — moved into the 总监席
+  // charter. `was` values are the participants' ceilings on `origin/main`
+  // before the move; the reviewer holds them against that diff.
+  [
+    '.claude/skills/pm-dispatch/references/lanes/director.md',
+    {
+      ruling: 'the triage daily duties (release board, pin chain, decision-inbox duties) consolidated into the 总监席 charter on the maintainer\'s word of 2026-10-23 「分诊不忙不如留给总监管」, under the cross-file move authorised by #14685 item 5 (comment 5520452691)',
+      was: 70,
+      sources: [['.claude/skills/pm-dispatch/references/triage-duties.md', 120]],
     },
   ],
 ]);
