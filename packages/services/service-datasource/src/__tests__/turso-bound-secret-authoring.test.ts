@@ -112,6 +112,7 @@ function makeAuthoringDoor() {
       return ref;
     },
     countBoundObjects: async () => 0,
+    listObjectsBoundTo: async () => [],
   };
   return { records, secrets, service: new DatasourceAdminService(cfg) };
 }

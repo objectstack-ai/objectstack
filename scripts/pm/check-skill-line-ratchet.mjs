@@ -1250,6 +1250,17 @@ export const CEILINGS = new Map([
   // own counts (headroom 0, same convention as every entry above); added rows,
   // paid for by the SKILL.md decrease — the map's total goes down.
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 96],
+  // The project coordinator's interface with the seat threads (maintainer's
+  // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
+  // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
+  // post, cross-lane p1-first intake, one project-wide card-thread cap with
+  // waiting threads not counting, effort and tier by difficulty, ruling
+  // threads, quota pause, language and reporting — each section naming its
+  // reader and pointing at the rule's single source instead of restating it.
+  // It is beside seat-lifecycle.md because the coordinator is not a
+  // `domain:*` seat. A NEW file, so this is not a raise and funds nothing —
+  // set at the landed line count, headroom 0, same convention as above.
+  ['.claude/skills/pm-dispatch/references/coordinator.md', 49],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
   ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 51],
   // Unchanged at 120 through the maintainer's revocation of every autonomous-
@@ -2116,6 +2127,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   // The five per-phase references of the principle-only cut carry no table
   // row (their tables stayed in SKILL.md), so each pin is the measurement 0.
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 0],
+  ['.claude/skills/pm-dispatch/references/coordinator.md', 0],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 0],
   ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 0],
   ['.claude/skills/pm-dispatch/references/triage-duties.md', 0],

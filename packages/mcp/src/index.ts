@@ -30,6 +30,7 @@ export {
   renderSkillMarkdown,
   OBJECTSTACK_SKILL_NAME,
   OBJECTSTACK_SKILL_DESCRIPTION,
+  OBJECTSTACK_MCP_SERVER_NAME,
 } from './skill-md.js';
 export type { RenderSkillOptions } from './skill-md.js';
 // The `skill` metadata type (`SkillSchema`) → MCP `prompts` primitive (#3905).

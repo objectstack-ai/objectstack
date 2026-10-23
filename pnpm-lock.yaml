@@ -233,6 +233,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../packages/drivers/driver-sql
+      '@objectstack/organizations':
+        specifier: workspace:*
+        version: link:../../packages/plugins/organizations
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime

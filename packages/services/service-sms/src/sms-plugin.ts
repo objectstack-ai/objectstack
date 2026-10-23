@@ -78,6 +78,11 @@ const SYSTEM_CTX = { isSystem: true } as const;
  * sign-in is enabled, so the refusal for a caller without one says exactly
  * that, and that nothing was sent. A read that fails is reported as a failed
  * read, never as "you have no number".
+ *
+ * Every refusal is admin copy the settings page shows: it names what the admin
+ * does (press Send test SMS signed in as an admin whose account has a number),
+ * never a request field or an endpoint. The `to` override is for API callers
+ * and is documented here, not in the refusal.
  */
 async function resolveSmsTestRecipient(
   payload: unknown,
@@ -91,15 +96,17 @@ async function resolveSmsTestRecipient(
   }
   if (typeof userId !== 'string' || userId === '') {
     return {
-      refusal: 'No recipient — nothing was sent. This call names no "to" number and carries no signed-in '
-        + 'user whose own number the test could go to; pass "to" in the request body.',
+      refusal: 'No recipient — nothing was sent. The test SMS goes to the signed-in admin\'s own phone number, '
+        + 'and no one is signed in on this call. Sign in as an admin whose account has a phone number, then '
+        + 'press Send test SMS again.',
     };
   }
   const engine = getEngine();
   if (!engine) {
     return {
       refusal: 'No data engine is available to read your account\'s phone number — nothing was sent. '
-        + 'Pass "to" in the request body to name a recipient.',
+        + 'The test SMS goes to the signed-in admin\'s own number, so it can be sent only once that number '
+        + 'can be read; press Send test SMS again when the data service is up.',
     };
   }
   let row: Record<string, unknown> | null;
@@ -112,7 +119,8 @@ async function resolveSmsTestRecipient(
   } catch (err: any) {
     return {
       refusal: `Could not read your account's phone number to send the test SMS to (${err?.message ?? String(err)}) `
-        + '— nothing was sent. Pass "to" in the request body to name a recipient.',
+        + '— nothing was sent. The test SMS goes to the signed-in admin\'s own number; press Send test SMS '
+        + 'again once your account can be read.',
     };
   }
   const raw = row?.phone_number;
@@ -120,8 +128,8 @@ async function resolveSmsTestRecipient(
   if (!to) {
     return {
       refusal: 'Your account has no phone number, and the test SMS is sent to the signed-in admin\'s own number '
-        + '— nothing was sent. A number is on an account only where phone sign-in is enabled; otherwise pass '
-        + '"to" in the request body.',
+        + '— nothing was sent. A number is on an account only where phone sign-in is enabled: press Send test SMS '
+        + 'while signed in as an admin whose account has a phone number.',
     };
   }
   return { to };
