@@ -385,9 +385,13 @@ export const CEILINGS = new Map([
   // bullet. Then 318 → 317: #25240 (landed 2026-10-22, the claim template's
   // `Metadata-protocol:` line) had paid one line more than it took and left
   // the ceiling where it was; this ledger edit, merging `main` behind it,
-  // takes the ceiling down to the landed count. Headroom 0 (lowering is
-  // always legitimate).
-  ['.claude/skills/pm-dispatch/SKILL.md', 317],
+  // takes the ceiling down to the landed count. Then 317 → 318, which is still
+  // a lowering: #25348 (landed 2026-10-23, every autonomous-adjudication
+  // channel revoked) spent the last line of its 319 ceiling on the pointer
+  // line that binds every seat to the human floor; this branch, merged behind
+  // it, lands at 319 − 1 = 318, so the ceiling is the landed count once more.
+  // Headroom 0 (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/SKILL.md', 318],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
