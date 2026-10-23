@@ -33,11 +33,11 @@
 - 隔离复核子代理暂存全写按所审 PR 命名的 `<scratchpad>/pr-<n>/`,⛔ 不读非本轮自写的暂存。
 - 独立性对:`Implemented-by:`/`Reviewed-by:` 取值同见 `--template`;子代理记采纳它的席位。
 - 项目席落地的 Tier S:`Reviewed-by:` 须属 PR 作者外的账户;同账户子代理只算复核。
-- 账户读 PR 正文首行 attribution 的 `github_login` 与中继发送者;记录独立性段并书两账户。
+- 作者账户 = PR 正文 attribution 的 `github_login`;记录另带 `Reviewed-by-account:` 行写复核账户。
 - 只动散文面、不欠契约复核的 PR 同欠另一账户一条 `TIER_DEFAULT` 记录;⛔ 散文面无豁免。
 - 轮次报告设复审清单专节,与呈裁清单同为强制审计。
 - 落地前检两条,过则 Tier S 入队、Tier H 等人批:① 达档条款②复核 PASS 在案(同形记录)。
-- ① 在项目席另加:记录的复核账户须异于 PR 作者账户,见上文独立性对。
+- ① 在项目席另加:`Reviewed-by-account:` 的登录须异于 PR attribution 的登录,队列守卫同判。
 - 过渡:无另一账户在席时,① 的替代 = 维护者本人在执行线程的消息逐个点名 PR 编号。
 - 例外:纯重生成或只动上列散文面的 head 后移原记录继续管;判据机读已提交树;
   PR 落 `Regen-provenance:` 行。
