@@ -174,6 +174,7 @@ import {
   stageRlsMembership,
   type RlsFilterHost,
 } from './security-plugin-rls-filter.js';
+import { resolverCollisionMessage, resolverCollisionsOf } from './object-membership-keys.js';
 // [#25223 cut 8] The permission-set resolution for an execution context: the
 // resolution itself, the deactivated folded-set drop, the position-name fold
 // report and the memo's key; the methods of the same names below hand each
@@ -2165,6 +2166,13 @@ export class SecurityPlugin implements Plugin {
       ctx.logger.info('[security] rls-membership-resolver registered', {
         keys: this.rlsMembershipResolver.keys,
       });
+      // [#25234 ruling A] One namespace: a key the resolver owns that an object
+      // also declares (`membershipKeys`) resolves from neither source. Said at
+      // boot, naming both owners, for the objects registered by now; a request
+      // that meets a collision registered later says it again.
+      for (const { key, objects } of resolverCollisionsOf(this.ql, this.rlsMembershipResolver)) {
+        ctx.logger.error(resolverCollisionMessage(key, objects));
+      }
     }
 
     if (this.orgScopingEnabled) {
@@ -7395,16 +7403,42 @@ export class SecurityPlugin implements Plugin {
    * clause it sits in; with the write-side call missing, a `check` reading a
    * resolver key resolved only when the request happened to read first
    * (commit 1d73d45c1).
+   *
+   * [#25234 ruling A] Handed the policies about to compile (and their
+   * object), it also stages the DECLARED membership keys they read
+   * (`ObjectSchema.membershipKeys`, see `object-membership-keys.ts`): per key,
+   * lazily, memoized per request, each through the platform's own Layer 0
+   * system read of the roster object, bounded at `MEMBERSHIP_KEY_MAX_VALUES`
+   * with every miss failing closed. A key both the resolver and a declaration
+   * claim resolves from neither. Called with the context alone, it stages the
+   * resolver's keys only, as before.
    */
-  private stageRlsMembership(context: any): Promise<void> {
+  private stageRlsMembership(
+    context: any,
+    policies?: readonly RowLevelSecurityPolicy[],
+    object?: string,
+  ): Promise<void> {
     // [#25223 cut 7] The body moved to `security-plugin-rls-filter.ts` (see `RlsFilterHost`).
     const readLogger = () => this.logger;
+    const readMetadata = () => this.metadata;
+    const readQl = () => this.ql;
+    const readRlsCompiler = () => this.rlsCompiler;
     const readRlsMembershipResolver = () => this.rlsMembershipResolver;
-    const host: Pick<RlsFilterHost, 'logger' | 'rlsMembershipResolver'> = {
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<RlsFilterHost, 'datetimeFieldNamesCache' | 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'ql' | 'rlsCompiler' | 'rlsMembershipResolver' | 'tenancyDisabledCache' | 'tenancyPosture'> = {
+      datetimeFieldNamesCache: this.datetimeFieldNamesCache,
+      getObjectFieldNames: (...a) => this.getObjectFieldNames(...a),
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get logger() { return readLogger(); },
+      get metadata() { return readMetadata(); },
+      numberComparandFieldsCache: this.numberComparandFieldsCache,
+      get ql() { return readQl(); },
+      get rlsCompiler() { return readRlsCompiler(); },
       get rlsMembershipResolver() { return readRlsMembershipResolver(); },
+      tenancyDisabledCache: this.tenancyDisabledCache,
+      get tenancyPosture() { return readTenancyPosture(); },
     };
-    return stageRlsMembership.call(host, context);
+    return stageRlsMembership.call(host, context, policies, object);
   }
 
   private async computeWriteTenantCheckFilter(

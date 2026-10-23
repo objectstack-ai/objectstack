@@ -3078,15 +3078,15 @@ const ObjectSchemaBase = strictObject(
    * `supplier in current_user.portal_supplier_ids` with no stamp on every
    * record.
    *
-   * The describe states the CONTRACT the reader is to meet (Prime Directive
-   * #10): the one reader is to be plugin-security's request staging
+   * The describe states the CONTRACT the reader meets (Prime Directive #10):
+   * the one reader is plugin-security's request staging
    * (`stageRlsMembership`, beside the registered code resolver), resolving a
    * key lazily, once per request, as the platform's own system read inside
    * the caller's organization wall and never through the caller's audience,
    * posture or row policies; at most `MEMBERSHIP_KEY_MAX_VALUES` (1,000) values,
    * and a larger set, a failed read or an unstaged key fails closed. Keys are
-   * audience-neutral. Until that lands no server reads the key; the liveness
-   * row is `planned` with an author warning.
+   * audience-neutral. A key the registered resolver also owns resolves from
+   * neither. The liveness row is `live` (#25234 PR 2).
    *
    * One key on two objects is refused by `defineStack` and `composeStacks`;
    * the field-type, filter and policy-comparison refusals are the authoring
@@ -3100,12 +3100,11 @@ const ObjectSchemaBase = strictObject(
     + 'userField: \'user\', valueField: \'supplier\', filter: \'active == true\' }`). Declare a key on the '
     + 'one object whose rows define it; a key name is one request-wide name, so declaring it on two objects is '
     + 'refused, and the kernel\'s own names (`id`, `organization_id`, `positions`, `org_user_ids`, '
-    + '`accessible_org_ids`, `email`) are refused. The contract the server is to meet once it reads the key: '
-    + 'the set is read once per request, as a system read inside the caller\'s organization and regardless of '
-    + 'what the caller may read on this object; it holds at most 1,000 values, and a larger set, a failed read '
-    + 'or a key nothing resolves makes every policy reading it match no rows. Not applied yet: no server reads '
-    + 'this key in this release, so a policy reading `current_user.KEY` matches no rows. Until it is applied, '
-    + 'scope rows with positions or a registered membership resolver.',
+    + '`accessible_org_ids`, `email`) are refused. The set is read once per request, only when a policy reads '
+    + 'the key, as a system read inside the caller\'s organization and regardless of what the caller may read on '
+    + 'this object, so the caller needs no read on it; it holds at most 1,000 values, and a larger set, a failed '
+    + 'read, a `filter` that does not compile for this object, or a key a registered membership resolver also '
+    + 'owns makes every policy reading it match no rows. Whoever can write this object\'s rows can grant the key.',
   ),
 
   /**
