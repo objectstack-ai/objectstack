@@ -3658,7 +3658,28 @@ describe('AuthManager', () => {
     it('throws (fails boot) in production when no secret is configured', () => {
       process.env.NODE_ENV = 'production';
       const m = new AuthManager({ baseUrl: 'http://localhost:3000' } as any);
-      expect(() => (m as any).generateSecret()).toThrow(/OS_AUTH_SECRET is required in production/);
+      expect(() => (m as any).generateSecret()).toThrow(/OS_AUTH_SECRET is required outside development/);
+    });
+
+    // The fallback is fail-closed: only a development boot (`isDevelopmentBoot`,
+    // `@objectstack/core`) or NODE_ENV=test admits it. An embedder that never
+    // exported NODE_ENV, or exported a custom value, is a real deployment.
+    it('throws when NODE_ENV is unset and no secret is configured', () => {
+      delete process.env.NODE_ENV;
+      const m = new AuthManager({ baseUrl: 'http://localhost:3000' } as any);
+      expect(() => (m as any).generateSecret()).toThrow(/OS_AUTH_SECRET is required outside development/);
+    });
+
+    it.each(['staging', 'Production', 'dev', ''])('throws when NODE_ENV is %j and no secret is configured', (value) => {
+      process.env.NODE_ENV = value;
+      const m = new AuthManager({ baseUrl: 'http://localhost:3000' } as any);
+      expect(() => (m as any).generateSecret()).toThrow(/OS_AUTH_SECRET is required outside development/);
+    });
+
+    it('falls back to an ephemeral secret under NODE_ENV=test', () => {
+      process.env.NODE_ENV = 'test';
+      const m = new AuthManager({ baseUrl: 'http://localhost:3000' } as any);
+      expect((m as any).generateSecret()).toMatch(/^dev-secret-/);
     });
 
     it('falls back to an ephemeral dev secret outside production', () => {
