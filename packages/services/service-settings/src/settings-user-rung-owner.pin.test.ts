@@ -26,6 +26,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SettingsService } from './settings-service.js';
 import { SettingsValidationError, type SettingsContext } from './settings-service.types.js';
+import { LEAN_ORGANIZATION_SOURCE } from './__tests__/settings-organization.testkit.js';
 
 type Row = Record<string, unknown>;
 
@@ -99,7 +100,7 @@ function engineStack(seed: Row[], opts: { overAnswer?: boolean } = {}) {
   const engine = { find, insert, update: vi.fn(), delete: vi.fn(), count: vi.fn() };
   const svc = new SettingsService({ env: {} });
   svc.registerManifest(MANIFEST);
-  svc.bindEngine(engine as any);
+  svc.bindEngine(engine as any, undefined, { organization: LEAN_ORGANIZATION_SOURCE });
   return {
     svc,
     wrote: () => insert.mock.calls.length + engine.update.mock.calls.length,

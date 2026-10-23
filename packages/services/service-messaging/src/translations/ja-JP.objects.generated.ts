@@ -222,7 +222,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Digest",
-        help: "Batch cadence (P3 digest middleware).",
+        help: "これらの通知を 1 件ずつ送らず、1 通のまとめにします。daily は深夜 0 時、weekly は月曜の深夜 0 時に送信し、none は 1 件ずつすぐに送信します。緊急の通知は常にすぐに送信されます。チャネルが *（すべてのチャネル）の設定でのみ有効です。",
         options: {
           none: "none",
           daily: "daily",
@@ -231,7 +231,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Quiet Hours",
-        help: "Optional { tz, start, end } window (P3 quiet-hours middleware)."
+        help: "通知を保留し、終了時にまとめて配信する毎日の時間帯。例: { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。時刻はそのタイムゾーンの HH:MM で指定します（tz を省略した場合は UTC）。時間帯は深夜 0 時をまたいでもかまいません。緊急の通知は保留されません。チャネルが *（すべてのチャネル）の設定でのみ有効です。"
       },
       created_at: {
         label: "Created At"

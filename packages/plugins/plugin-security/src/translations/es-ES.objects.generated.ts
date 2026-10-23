@@ -30,11 +30,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       user_id: {
         label: "Usuario",
-        help: "Clave foránea a sys_user."
+        help: "El usuario que recibe este conjunto de permisos."
       },
       permission_set: {
         label: "Conjunto de permisos",
-        help: "Nombre de máquina del conjunto de permisos que otorga esta asignación, tal como lo nombra el catálogo de seguridad. Un nombre que el catálogo no contiene se rechaza. NULL solo en una asignación escrita antes de que existiera la columna."
+        help: "El conjunto de permisos que esta asignación da al usuario. Elija uno de los conjuntos de permisos definidos en Configuración; un nombre que no coincide con ningún conjunto de permisos se rechaza."
       },
       organization_id: {
         label: "Organización",
@@ -58,11 +58,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       last_certified_at: {
         label: "Última certificación",
-        help: "Reservada para un futuro flujo de recertificación de accesos, que registraría aquí cuándo se atestiguó por última vez esta concesión. Hoy es inerte: ningún código de la plataforma escribe esta columna ni la lee; ninguna ruta de resolución, control ni regla de lint la consulta, y nada deriva de ella «nunca certificada» ni «certificación obsoleta». Por tanto, un valor nulo significa que el flujo no existe, no que esta concesión no se haya revisado."
+        help: "Aún no se usa: se reserva para una futura función de revisión de accesos. Nada rellena ni comprueba esta fecha, así que un valor vacío no significa que la asignación no se haya revisado."
       },
       certified_by: {
         label: "Certificado por",
-        help: "Reservada para ese mismo futuro flujo de recertificación de accesos: el revisor que atestiguaría esta concesión. Hoy es inerte: ningún código de la plataforma la escribe ni la lee. Un valor escrito aquí por un cliente es una anotación sin verificar; la plataforma no comprueba nada sobre él ni concede nada en función de él."
+        help: "Aún no se usa: se reserva para una futura función de revisión de accesos. Un revisor indicado aquí no se verifica y no cambia nada de lo que concede la asignación."
       },
       created_at: {
         label: "Creado el"
@@ -92,7 +92,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       user_id: {
         label: "Usuario",
-        help: "Clave foránea a sys_user."
+        help: "El usuario que ocupa este puesto."
       },
       position: {
         label: "Puesto",
@@ -128,11 +128,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       last_certified_at: {
         label: "Última certificación",
-        help: "Reservada para un futuro flujo de recertificación de accesos, que registraría aquí cuándo se atestiguó por última vez esta concesión. Hoy es inerte: ningún código de la plataforma escribe esta columna ni la lee; ninguna ruta de resolución, control ni regla de lint la consulta, y nada deriva de ella «nunca certificada» ni «certificación obsoleta». Por tanto, un valor nulo significa que el flujo no existe, no que esta concesión no se haya revisado."
+        help: "Aún no se usa: se reserva para una futura función de revisión de accesos. Nada rellena ni comprueba esta fecha, así que un valor vacío no significa que la asignación no se haya revisado."
       },
       certified_by: {
         label: "Certificado por",
-        help: "Reservada para ese mismo futuro flujo de recertificación de accesos: el revisor que atestiguaría esta concesión. Hoy es inerte: ningún código de la plataforma la escribe ni la lee. Un valor escrito aquí por un cliente es una anotación sin verificar; la plataforma no comprueba nada sobre él ni concede nada en función de él."
+        help: "Aún no se usa: se reserva para una futura función de revisión de accesos. Un revisor indicado aquí no se verifica y no cambia nada de lo que concede la asignación."
       },
       created_at: {
         label: "Creado el"

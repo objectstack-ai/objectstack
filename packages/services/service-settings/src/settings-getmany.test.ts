@@ -22,6 +22,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SettingsService } from './settings-service.js';
 import { UnknownKeyError } from './settings-service.types.js';
+import { LEAN_ORGANIZATION_SOURCE } from './__tests__/settings-organization.testkit.js';
 
 // WHERE-matcher gate: implement exactly the combinators the service emits and
 // THROW on the rest — a bare field-equality read of `$or` would silently match
@@ -91,7 +92,7 @@ async function makeService(rows = ROWS) {
   const engine = makeEngine(rows);
   const svc = new SettingsService();
   svc.registerManifest(MANIFEST);
-  svc.bindEngine(engine as any);
+  svc.bindEngine(engine as any, undefined, { organization: LEAN_ORGANIZATION_SOURCE });
   return { svc, engine };
 }
 

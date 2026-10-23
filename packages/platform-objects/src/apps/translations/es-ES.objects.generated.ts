@@ -86,14 +86,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       ai_access: {
         label: "Acceso a IA",
-        help: "Indica si este usuario dispone de una plaza de IA: otorga acceso a los agentes de IA integrados en la interfaz (build / ask). El framework sintetiza la capacidad `ai_seat` a partir de este indicador (plugin-hono-server resolveCtx). La asignación está limitada por el número de plazas licenciadas o compradas (aplicado por AiSeatPlugin de @objectstack/security-enterprise). Propiedad de objectql (better-auth ignora esta columna)."
+        help: "Indica si este usuario dispone de una plaza de IA. La plaza otorga la capacidad `ai_seat`, que da acceso a los asistentes de IA de la aplicación (build y ask). El número de usuarios que pueden tenerla está limitado por las plazas que incluye su licencia."
       },
       image: {
         label: "Imagen de perfil"
       },
       locale: {
         label: "Idioma",
-        help: "Idioma preferido para las notificaciones, como etiqueta BCP-47 (p. ej. zh-CN, ja-JP). Se lee por destinatario en el momento de la entrega; si no está definido, se aplica el idioma predeterminado del despliegue. Propiedad de objectql (better-auth ignora esta columna)."
+        help: "Idioma preferido para las notificaciones de este usuario, como una etiqueta de idioma, por ejemplo zh-CN o ja-JP. Si no se define, se aplica el idioma predeterminado del despliegue."
       },
       manager_id: {
         label: "Gerente",
@@ -1128,12 +1128,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       create_api_key: {
         label: "Crear clave",
         description: "Crea una clave para un script o una integración. La clave actúa como tú, con tu acceso, en la organización en la que trabajas ahora.",
+        params: {
+          expires_at: {
+            helpText: "Déjelo vacío para usar la duración predeterminada de la clave definida en Configuración → Autenticación → Claves de API (90 días si no se ha cambiado). Una fecha posterior a la duración máxima de la clave definida allí se rechaza."
+          }
+        },
         resultDialog: {
           title: "Clave de API creada",
           description: "Copia la clave ahora: solo se muestra una vez y no se puede recuperar. Si se filtra, revócala y crea una nueva.",
           acknowledge: "He guardado la clave",
           fields: {
-            key: "Clave de API"
+            key: "Clave de API",
+            expires_at: "Caduca el"
           }
         }
       },
@@ -1587,19 +1593,19 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "ID de cliente",
-        help: "Clave foránea a sys_oauth_application.client_id."
+        help: "El ID de cliente de la aplicación OAuth a la que se emitió este token."
       },
       session_id: {
         label: "Sesión",
-        help: "Clave foránea a sys_session.id."
+        help: "La sesión de inicio de sesión en la que se emitió este token."
       },
       user_id: {
         label: "Usuario",
-        help: "Clave foránea a sys_user.id."
+        help: "El usuario en cuyo nombre actúa este token."
       },
       refresh_id: {
         label: "Token de actualización",
-        help: "Clave foránea a sys_oauth_refresh_token.id."
+        help: "El token de actualización a partir del cual se emitió este token de acceso."
       },
       reference_id: {
         label: "ID de referencia",
@@ -1651,15 +1657,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "ID de cliente",
-        help: "Clave foránea a sys_oauth_application.client_id."
+        help: "El ID de cliente de la aplicación OAuth a la que se emitió este token."
       },
       session_id: {
         label: "Sesión",
-        help: "Clave foránea a sys_session.id."
+        help: "La sesión de inicio de sesión en la que se emitió este token."
       },
       user_id: {
         label: "Usuario",
-        help: "Clave foránea a sys_user.id."
+        help: "El usuario en cuyo nombre actúa este token."
       },
       reference_id: {
         label: "ID de referencia",
@@ -1723,11 +1729,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "ID de cliente",
-        help: "Clave foránea a sys_oauth_application.client_id."
+        help: "El ID de cliente de la aplicación OAuth a la que el usuario dio su consentimiento."
       },
       user_id: {
         label: "Usuario",
-        help: "Clave foránea a sys_user.id."
+        help: "El usuario que dio este consentimiento."
       },
       reference_id: {
         label: "ID de referencia",
@@ -1825,11 +1831,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "ID de cliente",
-        help: "Clave foránea a sys_oauth_application.client_id."
+        help: "El ID de cliente de la aplicación OAuth a la que corresponde esta concesión."
       },
       resource_id: {
         label: "ID del recurso",
-        help: "Clave foránea a sys_oauth_resource.identifier."
+        help: "El identificador del recurso protegido para el que la aplicación puede solicitar tokens."
       },
       metadata: {
         label: "Metadatos",
@@ -3047,7 +3053,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       package_version_id: {
         label: "Versión del paquete",
-        help: "Clave foránea a sys_package_version (UUID). Null = incorporado en la plataforma o sobrescritura a nivel de entorno."
+        help: "La versión del paquete desde la que se instaló estos metadatos. Vacío para los metadatos integrados en la plataforma y para los cambios hechos en este entorno."
       },
       managed_by: {
         label: "Gestionado por",

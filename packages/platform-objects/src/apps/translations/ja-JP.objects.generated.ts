@@ -86,14 +86,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       ai_access: {
         label: "AI アクセス",
-        help: "このユーザーが AI シートを保有しているかどうか。UI 内 AI エージェント（build / ask）へのアクセスを付与します。フレームワークはこのフラグから `ai_seat` ケイパビリティを合成します（plugin-hono-server resolveCtx）。割り当て数はライセンス／購入済みシート数が上限です（@objectstack/security-enterprise AiSeatPlugin が強制）。objectql が所有します（better-auth はこの列を認識しません）。"
+        help: "このユーザーが AI シートを保有しているかどうか。シートは `ai_seat` ケイパビリティを付与し、アプリ内の AI アシスタント（build と ask）を利用できるようにします。保有できるユーザー数は、ライセンスに含まれるシート数までです。"
       },
       image: {
         label: "プロフィール画像"
       },
       locale: {
         label: "言語",
-        help: "通知に使用する優先言語（BCP-47 タグ、例: zh-CN、ja-JP）。配信時に受信者ごとに読み取られ、未設定の場合はデプロイのデフォルト言語が適用されます。objectql が所有します（better-auth はこの列を認識しません）。"
+        help: "このユーザーへの通知に使用する優先言語。zh-CN や ja-JP のような言語タグで指定します。未設定の場合はデプロイのデフォルト言語が適用されます。"
       },
       manager_id: {
         label: "マネージャー",
@@ -1128,12 +1128,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       create_api_key: {
         label: "キーを作成",
         description: "スクリプトや連携用のキーを作成します。キーはあなたとして、あなたのアクセス権で、現在作業中の組織で動作します。",
+        params: {
+          expires_at: {
+            helpText: "空欄のままにすると、「設定 → 認証 → API キー」のキーの既定の有効期間(変更していなければ 90 日)が使われます。そこにあるキーの最大有効期間より後の日付は拒否されます。"
+          }
+        },
         resultDialog: {
           title: "API キーを作成しました",
           description: "今すぐキーをコピーしてください。キーは一度しか表示されず、後から取得することはできません。漏えいした場合は失効させて新しいキーを作成してください。",
           acknowledge: "キーを保存しました",
           fields: {
-            key: "API キー"
+            key: "API キー",
+            expires_at: "有効期限"
           }
         }
       },
@@ -1587,19 +1593,19 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "クライアント ID",
-        help: "sys_oauth_application.client_id への外部キー"
+        help: "このトークンの発行先となった OAuth アプリケーションのクライアント ID。"
       },
       session_id: {
         label: "セッション",
-        help: "sys_session.id への外部キー"
+        help: "このトークンが発行されたサインインセッション。"
       },
       user_id: {
         label: "ユーザー",
-        help: "sys_user.id への外部キー"
+        help: "このトークンが代理で操作するユーザー。"
       },
       refresh_id: {
         label: "リフレッシュトークン",
-        help: "sys_oauth_refresh_token.id への外部キー"
+        help: "このアクセストークンの発行元となったリフレッシュトークン。"
       },
       reference_id: {
         label: "参照 ID",
@@ -1651,15 +1657,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "クライアント ID",
-        help: "sys_oauth_application.client_id への外部キー"
+        help: "このトークンの発行先となった OAuth アプリケーションのクライアント ID。"
       },
       session_id: {
         label: "セッション",
-        help: "sys_session.id への外部キー"
+        help: "このトークンが発行されたサインインセッション。"
       },
       user_id: {
         label: "ユーザー",
-        help: "sys_user.id への外部キー"
+        help: "このトークンが代理で操作するユーザー。"
       },
       reference_id: {
         label: "参照 ID",
@@ -1723,11 +1729,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "クライアント ID",
-        help: "sys_oauth_application.client_id への外部キー"
+        help: "ユーザーが同意した OAuth アプリケーションのクライアント ID。"
       },
       user_id: {
         label: "ユーザー",
-        help: "sys_user.id への外部キー"
+        help: "この同意を行ったユーザー。"
       },
       reference_id: {
         label: "参照 ID",
@@ -1825,11 +1831,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "クライアント ID",
-        help: "sys_oauth_application.client_id への外部キー"
+        help: "この許可の対象となる OAuth アプリケーションのクライアント ID。"
       },
       resource_id: {
         label: "リソース ID",
-        help: "sys_oauth_resource.identifier への外部キー"
+        help: "アプリケーションがトークンを要求できる保護リソースの識別子。"
       },
       metadata: {
         label: "メタデータ",
@@ -3047,7 +3053,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       package_version_id: {
         label: "パッケージバージョン",
-        help: "sys_package_version への外部キー（UUID）。null = プラットフォーム組み込みまたは環境レベルの上書き。"
+        help: "このメタデータのインストール元となったパッケージのリリース。プラットフォーム組み込みのメタデータと、この環境で行った変更では空になります。"
       },
       managed_by: {
         label: "管理者",

@@ -86,14 +86,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       ai_access: {
         label: "AI 访问权限",
-        help: "该用户是否占用一个 AI 席位——授予界面内 AI 智能体（build / ask）的使用权限。框架会根据此标志合成 `ai_seat` 能力（plugin-hono-server resolveCtx）。可分配数量受许可/已购席位数限制（由 @objectstack/security-enterprise AiSeatPlugin 强制执行）。归 objectql 所有（better-auth 不感知此列）。"
+        help: "该用户是否占用一个 AI 席位。席位授予 `ai_seat` 能力，可使用应用内的 AI 助手（build 和 ask）。可占用席位的用户数受许可证所含席位数限制。"
       },
       image: {
         label: "头像"
       },
       locale: {
         label: "语言",
-        help: "通知使用的首选语言，BCP-47 标签（如 zh-CN、ja-JP）。投递时按收件人读取；未设置时采用部署默认语言。归 objectql 所有（better-auth 不感知此列）。"
+        help: "该用户接收通知时使用的首选语言，填写语言标签，如 zh-CN 或 ja-JP。未设置时采用部署的默认语言。"
       },
       manager_id: {
         label: "经理",
@@ -1128,12 +1128,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       create_api_key: {
         label: "创建密钥",
         description: "为脚本或集成创建密钥。该密钥以你的身份、按你的访问权限，在你当前所在的组织中生效。",
+        params: {
+          expires_at: {
+            helpText: "留空则使用「设置 → 身份验证 → API 密钥」中的默认密钥有效期(未修改时为 90 天)。晚于该处密钥最长有效期的日期会被拒绝。"
+          }
+        },
         resultDialog: {
           title: "API 密钥已创建",
           description: "请立即复制密钥——它只显示这一次，之后无法找回。如果泄露，请撤销它并创建新的密钥。",
           acknowledge: "我已保存密钥",
           fields: {
-            key: "API 密钥"
+            key: "API 密钥",
+            expires_at: "过期时间"
           }
         }
       },
@@ -1587,19 +1593,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "客户端 ID",
-        help: "指向 sys_oauth_application.client_id 的外键"
+        help: "此令牌所签发给的 OAuth 应用的客户端 ID。"
       },
       session_id: {
         label: "会话",
-        help: "指向 sys_session.id 的外键"
+        help: "签发此令牌时所在的登录会话。"
       },
       user_id: {
         label: "用户",
-        help: "指向 sys_user.id 的外键"
+        help: "此令牌代表其执行操作的用户。"
       },
       refresh_id: {
         label: "刷新令牌",
-        help: "指向 sys_oauth_refresh_token.id 的外键"
+        help: "签发此访问令牌所依据的刷新令牌。"
       },
       reference_id: {
         label: "引用 ID",
@@ -1651,15 +1657,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "客户端 ID",
-        help: "指向 sys_oauth_application.client_id 的外键"
+        help: "此令牌所签发给的 OAuth 应用的客户端 ID。"
       },
       session_id: {
         label: "会话",
-        help: "指向 sys_session.id 的外键"
+        help: "签发此令牌时所在的登录会话。"
       },
       user_id: {
         label: "用户",
-        help: "指向 sys_user.id 的外键"
+        help: "此令牌代表其执行操作的用户。"
       },
       reference_id: {
         label: "引用 ID",
@@ -1723,11 +1729,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "客户端 ID",
-        help: "指向 sys_oauth_application.client_id 的外键"
+        help: "用户已授予同意的 OAuth 应用的客户端 ID。"
       },
       user_id: {
         label: "用户",
-        help: "指向 sys_user.id 的外键"
+        help: "授予此同意的用户。"
       },
       reference_id: {
         label: "引用 ID",
@@ -1825,11 +1831,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       client_id: {
         label: "客户端 ID",
-        help: "指向 sys_oauth_application.client_id 的外键"
+        help: "此授权所针对的 OAuth 应用的客户端 ID。"
       },
       resource_id: {
         label: "资源 ID",
-        help: "指向 sys_oauth_resource.identifier 的外键"
+        help: "该应用可为其申请令牌的受保护资源的标识符。"
       },
       metadata: {
         label: "元数据",
@@ -3047,7 +3053,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       package_version_id: {
         label: "包版本",
-        help: "指向 sys_package_version（UUID）的外键。Null = 平台内置或环境级覆盖。"
+        help: "此元数据安装自的软件包版本。平台内置的元数据以及在本环境中所做的更改此项为空。"
       },
       managed_by: {
         label: "管理方",

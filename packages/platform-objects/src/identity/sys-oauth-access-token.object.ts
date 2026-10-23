@@ -83,25 +83,25 @@ export const SysOauthAccessToken = ObjectSchema.create({
       // unique string — varchar(255) on MySQL). A referencing column takes the
       // referenced column's bound.
       maxLength: 255,
-      description: 'Foreign key to sys_oauth_application.client_id',
+      description: 'The client ID of the OAuth application this token was issued to.',
     }),
 
     session_id: Field.lookup('sys_session', {
       label: 'Session',
       required: false,
-      description: 'Foreign key to sys_session.id',
+      description: 'The sign-in session this token was issued in.',
     }),
 
     user_id: Field.lookup('sys_user', {
       label: 'User',
       required: false,
-      description: 'Foreign key to sys_user.id',
+      description: 'The user this token acts for.',
     }),
 
     refresh_id: Field.lookup('sys_oauth_refresh_token', {
       label: 'Refresh Token',
       required: false,
-      description: 'Foreign key to sys_oauth_refresh_token.id',
+      description: 'The refresh token this access token was issued from.',
     }),
 
     reference_id: Field.text({

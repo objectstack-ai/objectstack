@@ -81,7 +81,7 @@ export const SysUserPermissionSet = ObjectSchema.create({
     user_id: Field.lookup('sys_user', {
       label: 'User',
       required: true,
-      description: 'Foreign key to sys_user.',
+      description: 'The user who receives this permission set.',
     }),
 
     // [ADR-0131 D4] The permission set this grant holds, BY NAME — the grant's
@@ -103,8 +103,8 @@ export const SysUserPermissionSet = ObjectSchema.create({
       // a text input where the widget is not registered.
       widget: 'permission-ref',
       description:
-        'Machine name of the permission set this grant holds, as the security catalog names it. ' +
-        'A name the catalog does not hold is refused. NULL only on a grant written before the column existed.',
+        'The permission set this assignment gives the user. Pick one of the permission sets defined in Setup; ' +
+        'a name that matches no permission set is rejected.',
     }),
 
     organization_id: Field.lookup('sys_organization', {
@@ -202,22 +202,24 @@ export const SysUserPermissionSet = ObjectSchema.create({
     // has to be told it was wrong, not left to infer it. If D5 is ever
     // implemented, these two descriptions are what must change with it.
     // [ADR-0091 D5] The recertification pair.
+    // [#25331] `hidden` keeps the pair off the Setup forms and detail pages until
+    // something reads it; the columns and their stored values stay.
     last_certified_at: Field.datetime({
       label: 'Last Certified At',
       required: false,
+      hidden: true,
       description:
-        'Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. ' +
-        'Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives ' +
-        '"never certified" or "certification stale" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed.',
+        'Not in use yet: kept for a future access-review feature. Nothing fills in or checks this date, ' +
+        'so an empty value does not mean the assignment went unreviewed.',
     }),
 
     certified_by: Field.lookup('sys_user', {
       label: 'Certified By',
       required: false,
+      hidden: true,
       description:
-        'Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. ' +
-        'Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — ' +
-        'the platform checks nothing about it and grants nothing on the strength of it.',
+        'Not in use yet: kept for a future access-review feature. A reviewer entered here is not verified ' +
+        'and changes nothing about what the assignment grants.',
     }),
 
     created_at: Field.datetime({

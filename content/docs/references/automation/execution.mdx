@@ -104,7 +104,7 @@ const result = CheckpointSchema.parse(data);
 | **id** | `string` | ✅ | Execution instance ID |
 | **flowName** | `string` | ✅ | Machine name of the executed flow |
 | **flowVersion** | `integer` | optional | Version of the flow that was executed |
-| **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying' \| 'refused'>` | ✅ | Current execution status |
+| **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying' \| 'refused' \| 'missed'>` | ✅ | Current execution status |
 | **refusalMessage** | `string` | optional | Rendered `end` node `message` when `status` is `refused` — the per-record text the flow refused with. Absent on every other status. |
 | **trigger** | `{ type: string; recordId?: string; object?: string; userId?: string; … }` | ✅ | What triggered this execution |
 | **steps** | `{ nodeId: string; nodeType: string; nodeLabel?: string; status: Enum<'success' \| 'failure' \| 'skipped'>; … }[]` | ✅ | Ordered list of executed steps |
@@ -177,6 +177,7 @@ const result = CheckpointSchema.parse(data);
 * `timed_out`
 * `retrying`
 * `refused`
+* `missed`
 
 
 ---
