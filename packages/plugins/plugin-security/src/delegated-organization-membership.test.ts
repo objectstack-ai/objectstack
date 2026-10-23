@@ -701,7 +701,7 @@ describe('[#25107] every reader in this package that resolves a delegator asks t
       'security-plugin-object-admission.ts',
       'security-plugin-operation-principals.ts',
       'security-plugin-read-filter.ts',
-      'security-plugin.ts',
+      'security-plugin-security-service.ts',
     ]);
     for (const [file, [resolutions, asks]] of Object.entries(counted)) expect(asks, file).toBe(resolutions);
   });

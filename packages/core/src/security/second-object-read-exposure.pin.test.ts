@@ -125,18 +125,18 @@ type Classification =
 
 /** Every non-test caller of the arbiter, classified. */
 const CALLERS: Record<string, Classification> = {
-  'packages/metadata-protocol/src/protocol.ts': {
+  'packages/metadata-protocol/src/protocol-query-validation.ts': {
     kind: 'decided',
     read: "the data door's `$expand` (the list, single-record, query and export routes, every level of the tree)",
     operation: 'get',
-    decision: { file: 'packages/metadata-protocol/src/protocol.ts', fn: 'servesExpansionTarget' },
+    decision: { file: 'packages/metadata-protocol/src/protocol-query-validation.ts', fn: 'servesExpansionTarget' },
     wiring: { file: 'packages/metadata-protocol/src/protocol.ts', call: 'this.servedExpand(' },
     pin: 'packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts',
   },
   'packages/objectql/src/engine.ts': {
     kind: 'executes',
     read: "the expansion sub-read (`ObjectQL.expandRelatedRecords`), for the data door's `$expand`",
-    decidedIn: 'packages/metadata-protocol/src/protocol.ts',
+    decidedIn: 'packages/metadata-protocol/src/protocol-query-validation.ts',
     also:
       'the write-path reference-existence probe (`referenceExists`: whether a stored id resolves, no field) and ' +
       'the validation-predicate reads (`resolvePredicateRelated`: a pass/fail verdict, the value never served). ' +
@@ -162,8 +162,8 @@ const CALLERS: Record<string, Classification> = {
     kind: 'decided',
     read: "the data door's nested-relation filter condition (`ObjectQL.lowerRelationConditions` reads the related object to lower it), refused rather than withheld",
     operation: 'list',
-    decision: { file: 'packages/metadata-protocol/src/protocol.ts', fn: 'refuseUnservedRelationTarget' },
-    wiring: { file: 'packages/metadata-protocol/src/protocol.ts', call: 'this.refuseUnservedRelationTarget(' },
+    decision: { file: 'packages/metadata-protocol/src/protocol-query-validation.ts', fn: 'refuseUnservedRelationTarget' },
+    wiring: { file: 'packages/metadata-protocol/src/protocol-query-validation.ts', call: 'this.refuseUnservedRelationTarget(' },
     pin: 'packages/metadata-protocol/src/protocol.relation-condition-target-exposure.test.ts',
   },
   'packages/plugins/plugin-approvals/src/approval-service.ts': {
@@ -395,7 +395,7 @@ describe('[#22661] every read that reaches a second object asks that object its 
       expect(mentioning).toContain(declaration);
       expect(callsArbiter(declaration)).toBe(false);
       // The body reader reads the right function: the decision lives in it, not beside it.
-      expect(functionBody('packages/metadata-protocol/src/protocol.ts', 'servedExpand').some((line) => DECISION_CALL.test(line))).toBe(false);
+      expect(functionBody('packages/metadata-protocol/src/protocol-query-validation.ts', 'servedExpand').some((line) => DECISION_CALL.test(line))).toBe(false);
     },
     SCAN_TIMEOUT_MS,
   );

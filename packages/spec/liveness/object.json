@@ -215,42 +215,40 @@
       }
     },
     "membershipKeys": {
-      "status": "planned",
+      "status": "live",
       "verifiedAt": "2026-10-23",
-      "evidence": "packages/spec/src/data/object.zod.ts#ObjectSchemaBase (declares the key, optional, typed as the membership-key map); packages/spec/src/security/rls.zod.ts#MembershipKeySchema (the closed entry shape: `userField`, `valueField`, optional `filter`, `label`, `description`; `valueField` equal to `userField` refused); packages/spec/src/security/rls.zod.ts#MembershipKeysSchema (the map; a key name that is not snake_case or is one of the kernel context values in `RESERVED_RLS_MEMBERSHIP_KEYS` refused); packages/spec/src/stack.zod.ts#duplicateMembershipKeyFindings (one key declared on two objects refused by `defineStack` and `composeStacks`)",
-      "authorWarn": true,
-      "authorHint": "Not applied yet: no server reads `membershipKeys` in this release, so a policy reading `current_user.KEY` matches no rows. Until the security plugin stages the key, scope rows with positions or a registered membership resolver.",
-      "note": "PLANNED, the reader pending: #25234 ruling A (6355640929), PR 1 of 3, the spec half. The one reader is to be plugin-security's request staging, `stageRlsMembership` (packages/plugins/plugin-security/src/security-plugin.ts), gaining this declarative second source beside the registered `rls-membership-resolver` service: per key, lazily, once per request, as the platform's own Layer 0 system read independent of the caller's audience and posture, bounded at 1,000 values with overflow failing closed (PR 2). Measured before the key existed: `git grep membershipKeys` over the whole tree at origin/main ab510f42e7 returns zero hits (control: `defaultRowScope` under packages/plugins hits), so this declaration adds no reader and a policy reading a declared key fails closed exactly as an unstaged key does today. The field-type, filter and policy-comparison refusals (ruled refusals 4 to 7 and 11 to 13) are the authoring rules' (PR 3). Drilled into `children` because `check:liveness` refuses an undeclared container inheritance; each child is `planned` for the same reason as the container, and only the container carries `authorWarn`, so authoring the key warns once. Flip to `live` on the commit that lands PR 2, citing `stageRlsMembership` as the evidence and explain's `via: 'membership:KEY'` as the second read point, and drop `authorWarn` / `authorHint` in that same edit: a warned `live` row reds this gate. Flip the children with the container.",
+      "evidence": "packages/plugins/plugin-security/src/security-plugin-rls-filter.ts#stageRlsMembership (stages, beside the registered `rls-membership-resolver`, every declared key the policies about to compile read, on the read door's Layer 1 and the write `check` alike); packages/plugins/plugin-security/src/object-membership-keys.ts#stageDeclaredMembershipKeys (finds the declaring object in the ObjectQL registry, memoizes per key per request, refuses a key two objects declare or the resolver also owns); packages/plugins/plugin-security/src/object-membership-keys.ts#readDeclaredKey (the platform's own Layer 0 system read of the roster: `userField` equal to the caller, the compiled `filter`, the caller's tenant wall, projected to `valueField`, bounded at `MEMBERSHIP_KEY_MAX_VALUES`, every miss fail closed); packages/plugins/plugin-security/src/explain-engine.ts#membershipKeySource (the second read point: explain names the key, the roster object, its fields, the filter, the size or the miss, and the roster's writers; a record-grained rule reads `via: 'membership:KEY'`)",
+      "note": "LIVE since #25234 PR 2 (ruling A, 6355640929), flipped from `planned` with `authorWarn` / `authorHint` dropped in the same edit, as the row's note asked. The reader is plugin-security's `stageRlsMembership`: a key is resolved only when a policy about to compile reads `current_user.KEY`, once per request, by a system read of the declaring object that is independent of the caller's audience and posture (rider 1: a caller with no read on the roster still resolves its key) and walled by the caller's own Layer 0 with no platform-admin crossing. No roster row stages `[]`; more than 1,000 values, a failed read, a `filter` that does not compile for the object, a key two objects declare and a key the registered resolver also owns leave the key unstaged, so every policy reading it fails closed through the compiler's existing path. Pinned through the real SecurityPlugin + ObjectQL over SqlDriver in packages/plugins/plugin-security/src/object-membership-keys.test.ts, and ablated there: removing the declared staging, the write-side staging, the system read or the Layer 0 term each turns its pins red. An `extend` contribution carrying the key is refused at registration (packages/objectql/src/registry.ts#ExtensionMembershipKeysRefusedError). The field-type, filter and policy-comparison refusals at publish (ruled refusals 4 to 7 and 11 to 13) are the authoring rules' (PR 3). Drilled into `children` because `check:liveness` refuses an undeclared container inheritance; the children are flipped with the container.",
       "children": {
         "userField": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-10-23",
-          "evidence": "packages/spec/src/security/rls.zod.ts#MembershipKeySchema (declares `userField`: the column holding the roster row's user, a snake_case column name)",
-          "note": "Planned with its container: no server reads `membershipKeys` until plugin-security's `stageRlsMembership` does. Flip with the container."
+          "evidence": "packages/plugins/plugin-security/src/object-membership-keys.ts#readDeclaredKey (the roster read's equality anchor: `userField` equal to the caller's user id)",
+          "note": "Live with its container (#25234 PR 2): read where the container is staged and explained."
         },
         "valueField": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-10-23",
-          "evidence": "packages/spec/src/security/rls.zod.ts#MembershipKeySchema (declares `valueField`: the column whose values form the set, a snake_case column name, refused when equal to `userField`)",
-          "note": "Planned with its container: no server reads `membershipKeys` until plugin-security's `stageRlsMembership` does. Flip with the container."
+          "evidence": "packages/plugins/plugin-security/src/object-membership-keys.ts#readDeclaredKey (the column projected; its distinct non-empty values, multi-valued ones flattened, are the staged set)",
+          "note": "Live with its container (#25234 PR 2): read where the container is staged and explained."
         },
         "filter": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-10-23",
-          "evidence": "packages/spec/src/security/rls.zod.ts#MembershipKeySchema (declares `filter`: the optional CEL narrowing over this object's own columns)",
-          "note": "Planned with its container: no server reads `membershipKeys` until plugin-security's `stageRlsMembership` does. Flip with the container."
+          "evidence": "packages/plugins/plugin-security/src/object-membership-keys.ts#readDeclaredKey (compiled by `RLSCompiler.compileFilter` against the roster's columns with no caller variables and AND-ed into the read; a filter it refuses leaves the key unresolved)",
+          "note": "Live with its container (#25234 PR 2): read where the container is staged and explained."
         },
         "label": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-10-23",
-          "evidence": "packages/spec/src/security/rls.zod.ts#MembershipKeySchema (declares `label`: the human-readable name of the set)",
-          "note": "Planned with its container: no server reads `membershipKeys` until plugin-security's `stageRlsMembership` does. Flip with the container."
+          "evidence": "packages/plugins/plugin-security/src/object-membership-keys.ts#describeMembershipKeyDeclaration (explain names the key with its `label`)",
+          "note": "Live with its container (#25234 PR 2): read where the container is staged and explained."
         },
         "description": {
-          "status": "planned",
+          "status": "live",
           "verifiedAt": "2026-10-23",
-          "evidence": "packages/spec/src/security/rls.zod.ts#MembershipKeySchema (declares `description`: what the set holds and who it is for)",
-          "note": "Planned with its container: no server reads `membershipKeys` until plugin-security's `stageRlsMembership` does. Flip with the container."
+          "evidence": "packages/plugins/plugin-security/src/object-membership-keys.ts#describeMembershipKeyDeclaration (explain names the key with its `description`)",
+          "note": "Live with its container (#25234 PR 2): read where the container is staged and explained."
         }
       }
     },

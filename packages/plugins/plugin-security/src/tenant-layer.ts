@@ -64,6 +64,61 @@ export function tenantLayer0FilterOf(verdict: TenantLayer0Verdict): Record<strin
 }
 
 /**
+ * The facts about one object and one caller that {@link computeTenantLayer0Verdict}
+ * reads, gathered in ONE place so every reader of the wall builds the same
+ * input: the read door (`computeLayeredRlsFilter`) and the declared
+ * membership-key read (`object-membership-keys.ts`), which walls its system
+ * read of the roster object with the caller's Layer 0 and nothing else.
+ */
+export interface TenantLayer0Facts {
+  tenancyPosture: TenantLayer0Input['tenancyPosture'];
+  /** The execution context: `tenantId` and `accessible_org_ids` are read. */
+  context: { tenantId?: unknown; accessible_org_ids?: unknown } | null | undefined;
+  /** The object's security posture, as `getObjectSecurityMeta` answers it. */
+  meta: { isPrivate: boolean; tenancyDisabled: boolean; isBetterAuthManaged: boolean; tenantAnchorIsPhantom: boolean };
+  /** The object's declared columns; `null` when the schema is not loadable. */
+  objectFields: ReadonlySet<string> | null;
+  /** The object opted out of tenancy (the plugin's cache or the posture's own flag). */
+  tenancyDisabled: boolean;
+  /** A true `PLATFORM_ADMIN` holding the superuser bit (the exemption's own fact). */
+  isPlatformAdmin: boolean;
+}
+
+/** {@link TenantLayer0Facts} as the input {@link computeTenantLayer0Verdict} takes. */
+export function tenantLayer0InputOf(facts: TenantLayer0Facts): TenantLayer0Input {
+  const { meta, objectFields, context } = facts;
+  return {
+    tenancyPosture: facts.tenancyPosture,
+    organizationId: context?.tenantId as string | undefined,
+    // [ADR-0105 D2] The `group` wall's predicate. Resolved by
+    // `resolveAuthzContext` and carried on the context — never re-derived here.
+    accessibleOrgIds: context?.accessible_org_ids as readonly string[] | undefined,
+    // [#7835] A FEDERATED object's `organization_id` may be the registry's
+    // injected anchor rather than a remote column — present in the field set,
+    // absent from the store the query actually runs against (the platform
+    // issues no DDL for `external` objects). Answering "yes, tenant object"
+    // there AND-composes `organization_id = <org>` onto a federated read,
+    // where it isolates nothing and — on SQLite — degrades to a constant-false
+    // string comparison: 0 rows, no error, HTTP 200. This is the
+    // plugin-security sibling of #7738 / PR #7833, which withheld
+    // `DriverOptions.tenantId` for the same objects one layer down; that fix
+    // cannot reach a `where` predicate composed into the AST.
+    //
+    // Only the PLATFORM's anchor is discounted (provenance, per
+    // `federated-phantom-anchors.ts`): a federated object that DECLARES a real
+    // remote `organization_id` keeps its wall, and every local object is
+    // untouched. `undefined` (schema unresolvable) still means "assume tenant
+    // object" — the fail-toward-isolation default is unchanged.
+    objectHasOrgIdField: objectFields
+      ? objectFields.has('organization_id') && !meta.tenantAnchorIsPhantom
+      : undefined,
+    tenancyDisabled: facts.tenancyDisabled,
+    posturePermitsCrossTenant: meta.isPrivate || meta.tenancyDisabled || meta.isBetterAuthManaged,
+    isPlatformAdmin: facts.isPlatformAdmin,
+  };
+}
+
+/**
  * Compute the Layer 0 (tenant) filter to AND onto a read/write.
  *
  * - `null` → Layer 0 contributes nothing (`single` posture; non-tenant object;

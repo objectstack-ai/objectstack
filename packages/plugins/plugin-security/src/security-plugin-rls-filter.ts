@@ -14,7 +14,10 @@
  *   owner crossing asks (#12974, #13147).
  * - `computeWriteCheckFilter`, the ADR-0058 D4 post-image `check` compile.
  * - `stageRlsMembership`, the ADR-0105 D11 membership staging both compiles
- *   ask before they run.
+ *   ask before they run. Since #25234 (ruling A) it also stages the declared
+ *   membership keys the policies about to compile read
+ *   (`object-membership-keys.ts`), so its resolver half is
+ *   `stageResolverMembership`.
  *
  * A MOVE, not a redesign. Each function below is the body of the
  * `SecurityPlugin` method of the same name as it stood, re-indented one level
@@ -78,14 +81,16 @@
 
 import type { SecurityPlugin } from './security-plugin.js';
 import { isCarriedPosture, writeCheckPolicies } from './security-plugin.js';
-import type { PermissionSet, TenantLayer0Verdict } from '@objectstack/spec/security';
+import type { PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
 import { RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
+import { noteResolverStagedKeys, stageDeclaredMembershipKeys } from './object-membership-keys.js';
 import {
   computeTenantLayer0Verdict,
   tenantLayer0FilterOf,
+  tenantLayer0InputOf,
   type TenantLayer0Input,
 } from './tenant-layer.js';
 import {
@@ -419,6 +424,9 @@ export async function computeLayeredRlsFilter(
             return false;
           })
         : allRlsPolicies;
+      // [#25234 ruling A] The declared membership keys these policies read,
+      // staged before they compile. The resolver's half ran above.
+      await this.stageRlsMembership(context, compilable, object);
       layer1 = this.rlsCompiler.compileFilter(
         compilable,
         context,
@@ -445,35 +453,17 @@ export async function computeLayeredRlsFilter(
   // global object correctly contributes nothing (ADR-0095 delta c).
   // [#15813] The verdict is computed ONCE; the filter injected below is its
   // projection. Recording the verdict costs no second computation.
-  const tenantLayer0Input: TenantLayer0Input = {
+  // The input is gathered by `tenantLayer0InputOf` (`tenant-layer.ts`), the
+  // one builder every reader of the wall shares, so the declared
+  // membership-key read walls its roster read with this same input.
+  const tenantLayer0Input: TenantLayer0Input = tenantLayer0InputOf({
     tenancyPosture: this.tenancyPosture,
-    organizationId: context?.tenantId,
-    // [ADR-0105 D2] The `group` wall's predicate. Resolved by
-    // `resolveAuthzContext` and carried on the context — never re-derived here.
-    accessibleOrgIds: context?.accessible_org_ids,
-    // [#7835] A FEDERATED object's `organization_id` may be the registry's
-    // injected anchor rather than a remote column — present in the field set,
-    // absent from the store the query actually runs against (the platform
-    // issues no DDL for `external` objects). Answering "yes, tenant object"
-    // there AND-composes `organization_id = <org>` onto a federated read,
-    // where it isolates nothing and — on SQLite — degrades to a constant-false
-    // string comparison: 0 rows, no error, HTTP 200. This is the
-    // plugin-security sibling of #7738 / PR #7833, which withheld
-    // `DriverOptions.tenantId` for the same objects one layer down; that fix
-    // cannot reach a `where` predicate composed into the AST.
-    //
-    // Only the PLATFORM's anchor is discounted (provenance, per
-    // `federated-phantom-anchors.ts`): a federated object that DECLARES a real
-    // remote `organization_id` keeps its wall, and every local object is
-    // untouched. `undefined` (schema unresolvable) still means "assume tenant
-    // object" — the fail-toward-isolation default is unchanged.
-    objectHasOrgIdField: objectFields
-      ? objectFields.has('organization_id') && !meta.tenantAnchorIsPhantom
-      : undefined,
+    context,
+    meta,
+    objectFields,
     tenancyDisabled,
-    posturePermitsCrossTenant: posturePermits,
     isPlatformAdmin,
-  };
+  });
   const tenantLayer0Verdict = computeTenantLayer0Verdict(tenantLayer0Input);
   const layer0 = tenantLayer0FilterOf(tenantLayer0Verdict);
   // [ADR-0095 D3 · ADR-0123 D2 · #24821] Did the platform operator's crossing,
@@ -645,7 +635,9 @@ export async function computeWriteCheckFilter(
   // check should always have had — it relaxes nothing: no resolver, a
   // throwing resolver or an unresolved key still drop the policy and still
   // fail closed, on this path as on the read path.
-  await this.stageRlsMembership(context);
+  // [#25234 ruling A] With the policies, so the declared membership keys a
+  // `check` reads are staged too — the same keys its `using` twin stages.
+  await this.stageRlsMembership(context, withCheck, object);
   // [#17042] The write face's field-existence net — which this path had NONE
   // of. `computeWriteCheckFilter` compiled `check` clauses with no column
   // check at all, so a phantom column in a negated position
@@ -676,10 +668,26 @@ export async function computeWriteCheckFilter(
 
 /** The body of `SecurityPlugin#stageRlsMembership`; the method's docblock there is its contract. */
 export async function stageRlsMembership(
+  this: Pick<RlsFilterHost, 'datetimeFieldNamesCache' | 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'logger' | 'metadata' | 'numberComparandFieldsCache' | 'ql' | 'rlsCompiler' | 'rlsMembershipResolver' | 'tenancyDisabledCache' | 'tenancyPosture'>,
+  context: any,
+  policies?: readonly RowLevelSecurityPolicy[],
+  object?: string,
+): Promise<void> {
+  if (!context || typeof context !== 'object') return;
+  await stageResolverMembership.call(this, context);
+  // [#25234 ruling A] The declarative second source: the keys these policies
+  // read that an object declares (`object-membership-keys.ts`), per key and
+  // memoized per request. After the resolver, so a key both sources claim is
+  // withdrawn before anything compiles against it.
+  if (policies && policies.length > 0) await stageDeclaredMembershipKeys(this, context, policies, object);
+}
+
+/** The registered resolver's half of {@link stageRlsMembership}: once per request. */
+async function stageResolverMembership(
   this: Pick<RlsFilterHost, 'logger' | 'rlsMembershipResolver'>,
   context: any,
 ): Promise<void> {
-  if (!this.rlsMembershipResolver || !context || typeof context !== 'object') return;
+  if (!this.rlsMembershipResolver) return;
   // One resolution per request: the same context object is threaded through
   // every object the operation touches.
   if (context.__rlsMembershipStaged) return;
@@ -704,6 +712,7 @@ export async function stageRlsMembership(
   }
 
   const bag: Record<string, string[]> = { ...(context.rlsMembership ?? {}) };
+  const staged: string[] = [];
   for (const [key, value] of Object.entries(resolved)) {
     if (RESERVED_RLS_MEMBERSHIP_KEYS.includes(key)) {
       this.logger.warn?.(
@@ -715,7 +724,13 @@ export async function stageRlsMembership(
     if (!Array.isArray(value)) continue;
     // An already-staged key wins: a caller-supplied bag is closer to the
     // request than a generic resolver.
-    if (bag[key] === undefined) bag[key] = value.filter((v) => typeof v === 'string');
+    if (bag[key] === undefined) {
+      bag[key] = value.filter((v) => typeof v === 'string');
+      staged.push(key);
+    }
   }
+  // [#25234] Which keys the resolver supplied, so a key a declaration claims
+  // too can be withdrawn from the bag (one namespace, neither source wins).
+  noteResolverStagedKeys(context, staged);
   if (Object.keys(bag).length > 0) context.rlsMembership = bag;
 }

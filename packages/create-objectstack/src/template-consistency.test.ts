@@ -770,16 +770,44 @@ describe('skills catalog boundary', () => {
 });
 
 describe('syncObjectStackDeps', () => {
-  it('rewrites @objectstack/* ranges in deps and devDeps', () => {
+  // EXACT, not `^<version>`: on the v18 line a breaking change may ship in a
+  // minor or a patch, and the docs tell a project to pin exact versions.
+  it('pins @objectstack/* deps and devDeps to the exact version', () => {
     const pkg = {
       dependencies: { '@objectstack/spec': '^6.0.0', chalk: '^5.0.0' },
       devDependencies: { '@objectstack/cli': '^6.0.0', typescript: '^6.0.0' },
     };
     syncObjectStackDeps(pkg, '14.7.0');
-    expect(pkg.dependencies['@objectstack/spec']).toBe('^14.7.0');
-    expect(pkg.devDependencies['@objectstack/cli']).toBe('^14.7.0');
+    expect(pkg.dependencies['@objectstack/spec']).toBe('14.7.0');
+    expect(pkg.devDependencies['@objectstack/cli']).toBe('14.7.0');
     expect(pkg.dependencies.chalk).toBe('^5.0.0');
     expect(pkg.devDependencies.typescript).toBe('^6.0.0');
+  });
+
+  // A `cut-rc` version pass in pre mode makes the scaffolder `X.Y.Z-rc.N`;
+  // the prerelease tail is part of the pin, not something to strip.
+  it('pins a prerelease version verbatim', () => {
+    const pkg = {
+      dependencies: { '@objectstack/runtime': '^18.0.0' },
+      devDependencies: { '@objectstack/cli': '~18.0.0' },
+    };
+    syncObjectStackDeps(pkg, '18.1.0-rc.2');
+    expect(pkg.dependencies['@objectstack/runtime']).toBe('18.1.0-rc.2');
+    expect(pkg.devDependencies['@objectstack/cli']).toBe('18.1.0-rc.2');
+  });
+
+  // The real scaffold path: the committed template through the rewrite, every
+  // @objectstack/* entry read back, none left carrying a range operator.
+  it('leaves no @objectstack/* range in the scaffolded blank template', () => {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(TEMPLATES_DIR, 'blank', 'package.json'), 'utf8'),
+    );
+    syncObjectStackDeps(pkg, '18.2.3');
+    const stack = Object.entries({ ...pkg.dependencies, ...pkg.devDependencies }).filter(
+      ([name]) => name.startsWith('@objectstack/'),
+    );
+    expect(stack.length).toBeGreaterThan(0);
+    for (const [name, spec] of stack) expect(spec, name).toBe('18.2.3');
   });
 
   it('is a no-op on the 0.0.0 fallback version', () => {

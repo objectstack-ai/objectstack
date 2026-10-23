@@ -76,13 +76,22 @@ function band(id: string, cols: number, children: any[], gap = '16px'): any {
 }
 
 /** A LIVE KPI — object-metric in the new `bare` variant (big tinted number + label). */
-function kpi(id: string, object: string, label: string, colorVariant: string, aggregate: any, filter?: any, format?: string): any {
+function kpi(id: string, object: string, label: string, colorVariant: string, aggregate: any, filter?: any, format?: string, currency?: string): any {
   return {
     id, type: 'object-metric',
     responsiveStyles: { large: { minWidth: '0' } },
-    properties: { objectName: object, label, colorVariant, variant: 'bare', aggregate, ...(filter ? { filter } : {}), ...(format ? { format } : {}) },
+    properties: { objectName: object, label, colorVariant, variant: 'bare', aggregate, ...(filter ? { filter } : {}), ...(format ? { format } : {}), ...(currency ? { currency } : {}) },
   };
 }
+
+/**
+ * How a total budget is written: the pattern and currency of the
+ * `showcase_project_metrics` dataset's `budget_sum` measure, which the
+ * Delivery Operations "Total Budget" tile reads. `object-metric` takes no
+ * currency from the field, so `cc_k6` names it.
+ */
+const BUDGET_FORMAT = '0,0.00';
+const BUDGET_CURRENCY = 'USD';
 
 /**
  * A dataset-bound chart with the shared brand palette. `integerYAxis` pins the
@@ -159,7 +168,7 @@ export const CommandCenterPage = definePage({
                   kpi('cc_k3', 'showcase_task', '待复审 Review', 'purple', { field: 'id', function: 'count' }, IN_REVIEW),
                   kpi('cc_k4', 'showcase_project', '风险项目 At-Risk', 'danger', { field: 'id', function: 'count' }, [{ field: 'health', operator: 'equals', value: 'red' }]),
                   kpi('cc_k5', 'showcase_account', '客户 Accounts', 'orange', { field: 'id', function: 'count' }),
-                  kpi('cc_k6', 'showcase_project', '总预算 Budget', 'success', { field: 'budget', function: 'sum' }, undefined, '0.0a'),
+                  kpi('cc_k6', 'showcase_project', '总预算 Budget', 'success', { field: 'budget', function: 'sum' }, undefined, BUDGET_FORMAT, BUDGET_CURRENCY),
                 ], '10px'),
               }),
 
