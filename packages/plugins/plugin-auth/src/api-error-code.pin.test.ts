@@ -180,6 +180,7 @@ describe('every new APIError( in plugin-auth/src carries an ADR-0112 code (#2424
       'auth-manager-actor-guards.ts',
       'auth-manager-sign-in-lockout.ts',
       'auth-manager-password-session-policy.ts',
+      'auth-manager-email-sms-delivery.ts',
     ];
     expect(sites.length).toBeGreaterThanOrEqual(30);
     expect(new Set(sites.map((s) => s.file)).size).toBeGreaterThanOrEqual(4);
