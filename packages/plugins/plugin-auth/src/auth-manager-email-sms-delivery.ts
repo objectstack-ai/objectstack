@@ -43,10 +43,11 @@
  * manager holds.
  *
  * The four module-level declarations move with the bodies rather than being
- * imported back: `index.ts` re-exports `auth-manager.ts` whole, so exporting
- * them from there would add them to the published surface, and a value import
- * of that file from here would be a cycle. Nothing re-exports this module, so
- * the published surface does not move.
+ * imported back, because only these bodies read them. (`index.ts` lists the
+ * names it publishes from `auth-manager.ts` one by one, so a helper exported
+ * there in place for a module split out of it stays off the published
+ * surface.) Nothing re-exports this module, so the published surface does not
+ * move.
  */
 
 import type { StandardErrorCode } from '@objectstack/spec/api';
