@@ -249,6 +249,10 @@ import {
   ownsRoute,
   type RequestRoutingHost,
 } from './auth-manager-request-routing.js';
+// [#25224 cut 11] The WebContainer password hasher; the method of the same
+// name below calls it, and hands it nothing, because it reads no member of
+// this class.
+import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -259,7 +263,7 @@ import {
  * propagate the store across `await` boundaries the way Node's native
  * implementation does.
  */
-function isWebContainerRuntime(): boolean {
+export function isWebContainerRuntime(): boolean {
   if (typeof globalThis === 'undefined') return false;
   const proc = (globalThis as any).process;
   return (
@@ -3157,40 +3161,11 @@ export class AuthManager {
    * Returns `undefined` outside WebContainer so production deployments keep
    * the native (fast) hasher and never load `@noble/hashes`.
    */
-  private async resolvePasswordHasher(): Promise<
+  private resolvePasswordHasher(): Promise<
     { hash: (password: string) => Promise<string>; verify: (args: { hash: string; password: string }) => Promise<boolean> } | undefined
   > {
-    if (!isWebContainerRuntime()) return undefined;
-    try {
-      const { scryptAsync } = await import('@noble/hashes/scrypt.js');
-      const PARAMS = { N: 16384, r: 16, p: 1, dkLen: 64, maxmem: 128 * 16384 * 16 * 2 } as const;
-      const toHex = (b: Uint8Array): string => {
-        let s = '';
-        for (let i = 0; i < b.length; i++) s += b[i]!.toString(16).padStart(2, '0');
-        return s;
-      };
-      const generateKey = (password: string, saltHex: string): Promise<Uint8Array> =>
-        scryptAsync(password.normalize('NFKC'), saltHex, PARAMS);
-      return {
-        hash: async (password: string) => {
-          const saltBytes = (globalThis as any).crypto.getRandomValues(new Uint8Array(16));
-          const saltHex = toHex(saltBytes);
-          const key = await generateKey(password, saltHex);
-          return `${saltHex}:${toHex(key)}`;
-        },
-        verify: async ({ hash, password }) => {
-          const [saltHex, keyHex] = hash.split(':');
-          if (!saltHex || !keyHex) throw new Error('Invalid password hash');
-          const target = await generateKey(password, saltHex);
-          return toHex(target) === keyHex;
-        },
-      };
-    } catch (err: any) {
-      console.warn(
-        `[AuthManager] WebContainer detected but pure-JS scrypt unavailable: ${err?.message ?? err}. Falling back to default.`,
-      );
-      return undefined;
-    }
+    // [#25224 cut 11] The body moved to `auth-manager-password-hasher.ts`; it reads no member of this class.
+    return resolvePasswordHasher();
   }
 
   /**
