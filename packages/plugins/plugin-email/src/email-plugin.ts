@@ -35,6 +35,7 @@ import type {
 import { bindEmailTemplateDoor, unbindEmailTemplateDoor } from './email-template-door.js';
 import { sweepStrandedOutbox, type OutboxSweepResult } from './outbox-sweep.js';
 import { readInternalHeadersJson } from './internal-header-readback.js';
+import { describeLiveMailTransport, type LiveMailTransportStatus } from './live-transport-status.js';
 import {
   EMAIL_LOG_OBJECTS,
   TENANT_EMAIL_OBJECT,
@@ -153,6 +154,11 @@ interface MailSettingsSurface {
       /** The caller's settings context; `userId` is the signed-in admin who pressed the button. */
       ctx?: { userId?: string };
     }) => Promise<unknown>,
+  ): void;
+  /** State the live transport at the top of Setup → Email (service-settings' `registerLiveStatus`). */
+  registerLiveStatus?(
+    namespace: string,
+    provider: () => Promise<LiveMailTransportStatus | undefined>,
   ): void;
 }
 
@@ -593,7 +599,11 @@ export class EmailServicePlugin implements Plugin {
       try {
         const settings = ctx.getService<MailSettingsSurface>('settings');
         if (settings && typeof settings.createClient === 'function') {
-          const applySettings = async (phase: 'boot' | 'saved' = 'boot') => {
+          // Re-applies still running. The page's live-transport statement
+          // waits for them, so a read made just after a save names the
+          // transport that save built, not the one it replaced.
+          const applying = new Set<Promise<void>>();
+          const applySettingsNow = async (phase: 'boot' | 'saved') => {
             try {
               const payload = await settings.getNamespace('mail');
               const values: Record<string, unknown> = {};
@@ -607,6 +617,12 @@ export class EmailServicePlugin implements Plugin {
               ctx.logger.warn('EmailServicePlugin: failed to apply mail settings: ' + (err?.message ?? err));
             }
           };
+          const applySettings = (phase: 'boot' | 'saved' = 'boot'): Promise<void> => {
+            const run = applySettingsNow(phase);
+            applying.add(run);
+            void run.finally(() => applying.delete(run));
+            return run;
+          };
           await applySettings('boot');
           // Subscribe to namespace changes; rebuild on every update.
           if (typeof settings.subscribe === 'function') {
@@ -614,6 +630,18 @@ export class EmailServicePlugin implements Plugin {
               void applySettings('saved');
             });
             ctx.logger.info('EmailServicePlugin: bound to settings:changed for namespace=mail');
+          }
+
+          // Setup → Email states which transport is LIVE. The form shows what
+          // is stored, and the stored default (provider `smtp`, no host) reads
+          // as SMTP while every message goes to the development log. Asked on
+          // each page read, after any re-apply still running, so it follows a
+          // transport swap made from the same page.
+          if (typeof settings.registerLiveStatus === 'function') {
+            settings.registerLiveStatus('mail', async () => {
+              await Promise.allSettled([...applying]);
+              return this.service ? describeLiveMailTransport(this.service) : undefined;
+            });
           }
 
           // Register the `mail/test` action handler so pressing "Send test

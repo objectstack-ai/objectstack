@@ -20,6 +20,11 @@ import { F } from '@objectstack/spec';
  * shared `isGrantActive` predicate — never by a background job (ADR-0049).
  * The window is half-open `[valid_from, valid_until)` in UTC.
  *
+ * `organization_id` is the organization the delegation belongs to: it
+ * reroutes only the approvals opened in that organization, and an
+ * organization-less row reroutes none (ADR-0131 D1;
+ * `ApprovalService.lookupActiveDelegation`).
+ *
  * Scope note: this is the community-core OOO auto-skip only. Long-term proxy
  * "act-as" access (viewing/acting on another user's full queue under their
  * authority), delegation governance / segregation-of-duties, and org-wide
@@ -147,7 +152,7 @@ export const SysApprovalDelegation = ObjectSchema.create({
       label: 'Organization',
       required: false,
       group: 'System',
-      description: 'Tenant that owns this rule; null = applies across tenants for this delegator.',
+      description: 'The organization this delegation belongs to. It reroutes only the approvals opened in this organization.',
     }),
 
     created_at: Field.datetime({

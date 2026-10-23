@@ -1223,6 +1223,19 @@ function csvSplit(raw: unknown): string[] {
 }
 
 /**
+ * [ADR-0131] The organization a value names, or `null` for none — `NULL`,
+ * absent or blank. The normalization `grantOrganizationOf`
+ * (`@objectstack/core`, `resolve-authz-context.ts`) gives a stored grant row's
+ * organization; `null` names no organization and matches none, its own
+ * included. Read by {@link ApprovalService.lookupActiveDelegation} on both
+ * sides of its comparison: the delegation row's and the request's.
+ */
+function organizationNamed(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  return String(value);
+}
+
+/**
  * Is a submitted decision output blank — i.e. does it fail a `required`
  * declaration (objectui#2955)?
  *
@@ -3227,6 +3240,32 @@ export class ApprovalService implements IApprovalService {
    * shared `isGrantActive` half-open window (ADR-0091 D2), enforced here at
    * resolution time — never by a background job. When several rows are active,
    * the one expiring soonest wins (the most specific coverage window).
+   *
+   * **A delegation applies only in its own organization (ADR-0131).** A row
+   * reroutes a request's approver only when the row's `organization_id` is the
+   * request's organization: the rule `grantAppliesInTenant`
+   * (`@objectstack/core`, `resolve-authz-context.ts`) applies to a stored
+   * position or permission-set grant, read the same way here.
+   *
+   *  - A delegation of another organization reroutes nothing in this one.
+   *  - An organization-less delegation reroutes nothing anywhere. "NULL means
+   *    every organization" is the reading ADR-0131 retired (D1: nothing reads a
+   *    NULL tenant value as an owner). Under a wall no write produces such a row
+   *    any more: a session insert is stamped with its active organization, an
+   *    elevated insert with none is refused (D9), and the write wall refuses an
+   *    update that empties the column. What remains is stored state from before.
+   *    The D10 ceremony attributes it to the Default Organization under
+   *    `single`; under a wall it has no anchor, so the ceremony reports it and
+   *    leaves it NULL. Such a row is reported here at `warn` with its remedy,
+   *    because its author still sees it in Setup and nothing else says it has
+   *    stopped applying.
+   *  - A request with no organization takes no delegation: a missing
+   *    organization has no "every organization" reading either.
+   *
+   * The rule is the same in every posture (ADR-0131 D11). Under `single`, D9
+   * stamps the Default Organization on the delegation its author writes and on
+   * the record a request is about, and the request takes its record's
+   * organization, so a delegation written there applies as it did before.
    */
   private async lookupActiveDelegation(
     delegatorId: string,
@@ -3243,10 +3282,24 @@ export class ApprovalService implements IApprovalService {
         context: SYSTEM_CTX,
       } as any);
     } catch { return null; } // table absent on minimal stacks — no OOO, resolve as-is
-    const active = (rows ?? []).filter((r: any) =>
-      isGrantActive(r, now)
-      // A null-org rule applies across tenants; a scoped rule only within its tenant.
-      && (organizationId == null || r.organization_id == null || String(r.organization_id) === String(organizationId)));
+    const requestOrg = organizationNamed(organizationId);
+    const active: any[] = [];
+    for (const r of rows ?? []) {
+      if (!isGrantActive(r, now)) continue;
+      const rowOrg = organizationNamed(r?.organization_id);
+      if (rowOrg === null) {
+        this.logger?.warn?.(
+          `[approvals] out-of-office delegation '${r?.id}' (${delegatorId} → ${r?.delegate_id}) names no `
+          + `organization, so it reroutes no approval: a delegation applies only to approvals in the `
+          + `organization it belongs to. Create it again while signed in to the organization whose `
+          + `approvals it should cover, and delete this one; on a single-organization deployment, `
+          + `'os migrate organization-ownership --apply' attributes it to the Default Organization instead.`,
+          { delegationId: r?.id, delegatorId, delegateId: r?.delegate_id, requestOrganizationId: requestOrg },
+        );
+        continue;
+      }
+      if (rowOrg === requestOrg) active.push(r);
+    }
     if (!active.length) return null;
     active.sort((a: any, b: any) => {
       const au = a.valid_until ? Date.parse(String(a.valid_until)) : Number.POSITIVE_INFINITY;

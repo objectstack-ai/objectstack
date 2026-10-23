@@ -374,7 +374,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Tenant that owns this rule; null = applies across tenants for this delegator."
+        help: "The organization this delegation belongs to. It reroutes only the approvals opened in this organization."
       },
       created_at: {
         label: "Created At"

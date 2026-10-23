@@ -374,7 +374,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Tenant that owns this rule; null = applies across tenants for this delegator."
+        help: "この委任が属する組織です。この組織で開始された承認だけを振り替えます。"
       },
       created_at: {
         label: "Created At"

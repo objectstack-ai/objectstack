@@ -374,7 +374,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Tenant that owns this rule; null = applies across tenants for this delegator."
+        help: "La organización a la que pertenece esta delegación. Solo redirige las aprobaciones abiertas en esta organización."
       },
       created_at: {
         label: "Created At"
