@@ -46,6 +46,7 @@ import {
   API_KEY_INACTIVITY_DAYS,
   API_KEY_MAX_EXPIRY_DAYS,
   accountScopeAuthGate,
+  isCloudManaged,
   resolveUserAuthzGrants,
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
@@ -8010,6 +8011,10 @@ export class AuthManager {
       // SMS path can actually deliver (plugin on + deliverable SMS service),
       // so the login UI never shows a dead "sign in with code" option.
       phoneNumberOtp: ((pluginConfig as any).phoneNumber ?? false) && this.isPhoneOtpDeliverable(),
+      // The managed (cloud-hosted, SSO-only) mode, from the one accessor every
+      // judgement site reads (ruling 6341690661 on #25083, Q2 D / Q3 A). A
+      // hide-when-on flag: the console hides the doors that add people.
+      cloudManaged: isCloudManaged(),
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
     };
