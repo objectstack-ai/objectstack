@@ -26260,7 +26260,9 @@ export class ObjectStackProtocolImplementation implements
          * [#24253] The caller's execution context: the principal the
          * `backfill` writes run as, so object permissions, RLS/FLS and record
          * hooks apply exactly as they do to that caller's own edit. Required
-         * when `backfill` names anything; nothing else here reads it.
+         * when `backfill` names anything. [#25484] The build probes read as it
+         * too: a dashboard widget is probed through `queryDataset` as this
+         * caller, the renderer's path, never as the system.
          */
         context?: unknown;
     }): Promise<{
@@ -27144,6 +27146,7 @@ export class ObjectStackProtocolImplementation implements
                     published,
                     ...(analytics && typeof analytics.queryDataset === 'function' ? { analytics } : {}),
                     organizationId: null,
+                    ...(request.context !== undefined ? { context: request.context } : {}),
                 });
             } catch {
                 probes = undefined;

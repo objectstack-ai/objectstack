@@ -81,6 +81,19 @@ export interface RunBuildProbesOptions {
     analytics?: ProbeAnalytics;
     /** Threaded into engine/analytics reads (tenant scoping). */
     organizationId?: string | null;
+    /**
+     * The PUBLISHING caller's execution context. Widget probes run
+     * `queryDataset` as this caller, because that is what the renderer does:
+     * a widget is healthy when the person who sees it can read it, so the
+     * probe asks read admission the question the dashboard will ask.
+     *
+     * ⛔ Never substitute a system context when it is absent. A probe that
+     * reads as the system reports a widget healthy that its own publisher
+     * cannot open, and that is the false clean this plane exists to prevent.
+     * Absent, the read goes out context-less and read admission answers for
+     * it — a refusal, reported as such.
+     */
+    context?: unknown;
 }
 
 type Rec = Record<string, unknown>;
@@ -103,17 +116,22 @@ function resultRows(result: unknown): unknown[] {
     return [];
 }
 
-/** True when the object has at least one row (probe read, isSystem). */
+/**
+ * True when the object has at least one row. A system read by default; the
+ * widget plane passes the caller's context so "the object has rows" is judged
+ * over the rows that caller can see — the same rows its dataset query saw.
+ */
 async function hasRows(
     engine: ProbeEngine,
     objectName: string,
     organizationId?: string | null,
+    readContext: unknown = { isSystem: true },
 ): Promise<boolean> {
     const rows = await engine.find(objectName, {
         fields: ['id'],
         limit: 1,
         ...(organizationId ? { where: { organization_id: organizationId } } : {}),
-        context: { isSystem: true },
+        context: readContext,
     });
     return Array.isArray(rows) && rows.length > 0;
 }
@@ -139,7 +157,7 @@ async function hasRows(
 export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<BuildProbeReport> {
     const issues: RuntimeBuildIssue[] = [];
     const checked = { seeds: 0, views: 0, widgets: 0, objects: 0 };
-    const { engine, getItem, published, analytics, organizationId } = opts;
+    const { engine, getItem, published, analytics, organizationId, context } = opts;
 
     // Memoized active-item reads (a dashboard and its widgets share datasets).
     const itemCache = new Map<string, unknown | undefined>();
@@ -340,9 +358,21 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
 
             const objectName = typeof dataset.object === 'string' ? dataset.object : undefined;
             try {
-                const result = await analytics.queryDataset(dataset, selection, undefined);
+                // [#25484] As the publishing caller — the renderer's path. With
+                // no context here, read admission refused every dataset over a
+                // permission-gated object, and a correct widget was reported as
+                // an error-tier `widget_query_failed`. A caller who genuinely
+                // cannot read the dataset is still refused, and still reported.
+                const result = await analytics.queryDataset(dataset, selection, context);
                 const rows = resultRows(result);
-                if (rows.length === 0 && objectName && (await hasRows(engine, objectName, organizationId))) {
+                // "Empty although the object has rows" is judged over the rows
+                // THIS caller can see: a system count would call a row-scoped
+                // empty answer broken.
+                const rowsContext = context && typeof context === 'object' ? context : undefined;
+                if (
+                    rows.length === 0 && objectName
+                    && (await hasRows(engine, objectName, organizationId, rowsContext))
+                ) {
                     issues.push({
                         layer: 'runtime',
                         severity: 'error',
