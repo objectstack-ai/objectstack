@@ -547,6 +547,27 @@ function isEnginePolicyRefusal(err: unknown): err is { code?: string; message?: 
 }
 
 /**
+ * A declared READ FAULT — an engine-level guard that could not complete a read
+ * its verdict depends on, and so refused the write without reaching one
+ * (`SERVICE_UNAVAILABLE`, 503, ADR-0112). The concrete case is the
+ * last-administrator guard's fail-closed envelope (`last-admin-guard.ts`,
+ * `readFault`): without this arm its refusal reached better-auth's router as an
+ * unhandled fault, a 500 with an empty body.
+ *
+ * Read by the declared `code` AND `status`, both, the way `mapDataError`'s
+ * declared-5xx relay reads them for the REST data routes, so the two
+ * transports answer the same engine error with the same status and code. The
+ * engine's prose is not relayed, as that relay withholds a declared fault's:
+ * the guard's message names the driver's own failure, which is for the server
+ * log, not the caller.
+ */
+function isEngineReadFault(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { code?: unknown; status?: unknown };
+  return e.code === 'SERVICE_UNAVAILABLE' && e.status === 503;
+}
+
+/**
  * [#7724] A REFERENTIAL refusal — the engine's `cascadeDeleteRelations` found
  * dependent rows it may neither cascade nor null, so it vetoed the delete
  * (`DELETE_RESTRICTED`, 409, ADR-0112).
@@ -607,9 +628,9 @@ function wireDependents(raw: unknown): Array<{ object: string; count?: number }>
 
 /**
  * Re-throw `err` as a better-auth `APIError` when it is an ObjectQL validation
- * failure (400), an engine policy refusal (403) or a referential delete
- * restriction (409); otherwise re-throw it verbatim. Always throws — the return
- * type is `never`.
+ * failure (400), an engine policy refusal (403), a referential delete
+ * restriction (409) or a declared engine read fault (503); otherwise re-throw
+ * it verbatim. Always throws — the return type is `never`.
  */
 async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
   if (isObjectQLValidationError(err)) {
@@ -634,6 +655,17 @@ async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
       code: 'PERMISSION_DENIED',
     });
   }
+  if (isEngineReadFault(err)) {
+    const { APIError } = await import('better-auth/api');
+    const apiErr = new APIError('SERVICE_UNAVAILABLE', {
+      message:
+        'This request could not be completed: the data store could not answer a read it depends on. ' +
+        'This is a server-side outage, not a refusal of the request: retry once the data store is reachable.',
+      code: 'SERVICE_UNAVAILABLE',
+    });
+    (apiErr as { cause?: unknown }).cause = err;
+    throw apiErr;
+  }
   if (isReferentialDeleteRestriction(err)) {
     const { APIError } = await import('better-auth/api');
     throw new APIError('CONFLICT', {
@@ -655,9 +687,9 @@ async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
 
 /**
  * Wrap every function-valued method of a better-auth adapter so an ObjectQL
- * `ValidationError` (400), an engine policy refusal (403) or a referential
- * delete restriction (409, #7724) thrown from the underlying engine surfaces as
- * a 4xx `APIError` instead of an opaque 500. Non-function properties pass
+ * `ValidationError` (400), an engine policy refusal (403), a referential
+ * delete restriction (409, #7724) or a declared engine read fault (503) thrown
+ * from the underlying engine surfaces as an `APIError` instead of an opaque 500. Non-function properties pass
  * through untouched, and every error that carries none of those signatures is
  * re-thrown verbatim.
  */

@@ -92,7 +92,7 @@ import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readDisabledCatalogNames } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readDisabledCatalogNames, readPositionGrantsInForce, countPositionHolders } from '@objectstack/core';
 // [#25223 cut 1] The leaf readers (policy collection, unresolved-posture
 // probes, field masks, field-name tables); the methods of the same names below
 // hand each body the members it reads (`ObjectInputsHost`).
@@ -144,6 +144,10 @@ import {
   controlledByParentChainRefusal,
   type CbpReadFilterHost,
 } from './security-plugin-cbp-read-filter.js';
+// [#25223 cut 5] Step 3.7's Layer 0 tenant write wall, composed once per write
+// (ADR-0123 D2, ADR-0095 D1); the method of the same name below hands the body
+// the members it reads (`WriteTenantWallHost`).
+import { composeWriteTenantWall, type WriteTenantWallHost } from './security-plugin-write-tenant-wall.js';
 import {
   isPlatformOwnershipFloorPolicy,
   masterGateCoversOperation,
@@ -178,6 +182,7 @@ import {
   type ControlledByParentWriteDenialLeg,
   type ControlledByParentWriteOutcome,
   type DelegationNarrowing,
+  type PositionGrantSummary,
   SEED_SETTLEMENT_SERVICE,
   type ISeedSettlementService,
   type SeedSettlementSnapshot,
@@ -185,7 +190,6 @@ import {
 import {
   crossFieldClassRefusalCarriedBy,
   findCrossFieldClassRefusal,
-  matchesFilterCondition,
   type MatchesFilterOptions,
 } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
@@ -217,6 +221,7 @@ import {
   SECURITY_PLUGIN_ID,
 } from './manifest.js';
 import { declareEveryoneBaseline, registerBuiltinPositions } from './builtin-positions.js';
+import { GUEST_POSITION } from '@objectstack/spec';
 import { registerBuiltinCapabilities } from './builtin-capabilities.js';
 
 /**
@@ -773,7 +778,7 @@ function callerHasOrganizationScope(context: any, posture: TenancyPosture): bool
  * also the whole read scope; under `group` the membership set is the read
  * scope and the active organization stays the write target (ADR-0105 D2).
  */
-function carriesActiveOrganization(context: any): boolean {
+export function carriesActiveOrganization(context: any): boolean {
   const tenantId = context?.tenantId;
   return tenantId != null && tenantId !== '';
 }
@@ -2456,6 +2461,10 @@ export class SecurityPlugin implements Plugin {
         // (`buildEffectiveObjectPermissions`). Exposed on the literal for the
         // reason above: a cross-package consumer can only reach it here.
         getEffectiveObjectPermissions: (context?: any) => this.getEffectiveObjectPermissions(context),
+        // [ADR-0131 D3/D4] Positions described as the resolver enforces them —
+        // holders and the sets in force — for the position catalog's list.
+        describePositionGrants: (positions: readonly string[], context?: any) =>
+          this.describePositionGrants(positions, context),
         // [ADR-0090 D6] First-class access explanation. Same code paths as
         // the middleware (resolution/evaluator/RLS compiler) — explained by
         // construction. Explaining ANOTHER user requires `manage_users`.
@@ -7156,6 +7165,78 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * [ADR-0131 D3/D4] `ISecurityService.describePositionGrants` — each position
+   * as the resolver enforces it for a holder, for the position catalog's list.
+   *
+   * ## The sets, from the enforcement path
+   *
+   * A holder of position P is granted, through P, two things, each read where
+   * the resolver reads it — ⛔ never a second copy of either rule:
+   *
+   *  1. the sets P's DEFINITION names, in force — `@objectstack/core`'s
+   *     `readPositionGrantsInForce`, the reading §6a/§6b of
+   *     `resolveUserAuthzGrants` takes (a switched-off position grants
+   *     nothing; a switched-off set, or a name the catalog holds no set for, is
+   *     not granted). These arrive here as a context's `permissions`;
+   *  2. the set that shares P's NAME — the position-name fold of
+   *     {@link resolvePermissionSetsForContextUnmemoized}, requested by the same
+   *     evaluator call and judged by the same {@link dropDeactivatedFoldedSets}.
+   *     Never for `guest`: the guest envelope requests no position.
+   *
+   * So each position's sets are this resolver's request for a holder of that
+   * position ALONE: the baseline and every other grant left out, and nothing
+   * reported ({@link reportNameFoldCollisions} is the request path's, and an
+   * admin reading the list is not a holder resolving). A set is `via:
+   * 'definition'` when the definition names it, else `via: 'name'`.
+   *
+   * ## The holders
+   *
+   * `countPositionHolders` in `@objectstack/core`, over the caller's active
+   * organization, by the rule the resolver projects a caller's positions by.
+   * The count discloses who holds what in the organization, so it is served only
+   * to a caller who may read the assignment rows themselves
+   * ({@link canReadObject} on `sys_user_position`, the read the position page's
+   * holder list makes); anyone else is told `null`, never `0`.
+   *
+   * A read that fails throws: the caller serves no description, never an
+   * invented one.
+   */
+  private async describePositionGrants(
+    positions: readonly string[],
+    context?: any,
+  ): Promise<PositionGrantSummary[]> {
+    const names = positions.filter((n): n is string => typeof n === 'string' && n !== '');
+    const { inForce, disabledPositions } = await readPositionGrantsInForce(this.ql, names);
+    const tenantId = typeof context?.tenantId === 'string' && context.tenantId !== '' ? context.tenantId : undefined;
+    const holders = tenantId && await this.canReadObject('sys_user_position', context)
+      ? await countPositionHolders(this.ql, tenantId, names)
+      : new Map<string, number>();
+    const summaries: PositionGrantSummary[] = [];
+    for (const position of names) {
+      const permissionSets: PositionGrantSummary['permissionSets'] = [];
+      if (!disabledPositions.has(position)) {
+        const declared = inForce.get(position) ?? [];
+        const folded = position === GUEST_POSITION ? [] : [position];
+        let resolved = await this.permissionEvaluator.resolvePermissionSets(
+          [...folded, ...declared.filter((n) => !folded.includes(n))],
+          this.metadata,
+          this.bootstrapPermissionSets,
+          this.dbLoaderForContext(context),
+          { logger: this.logger },
+        );
+        resolved = await this.dropDeactivatedFoldedSets(folded, declared, [], resolved);
+        for (const set of resolved) {
+          const name = (set as any)?.name;
+          if (typeof name !== 'string' || permissionSets.some((p) => p.name === name)) continue;
+          permissionSets.push({ name, via: declared.includes(name) ? 'definition' : 'name' });
+        }
+      }
+      summaries.push({ position, holderCount: holders.get(position) ?? null, permissionSets });
+    }
+    return summaries;
+  }
+
+  /**
    * [#13419 执行要点 3; #24757 under 「甲」] Report a permission set granted to a
    * position's holders only because the two share a NAME — a grant the
    * position's definition does not declare — and say what happens to it when
@@ -8429,7 +8510,7 @@ export class SecurityPlugin implements Plugin {
    * ({@link resolveOperationPrincipals}), and `refusal` the context's
    * `positions` and `permissions`, which every refusal's details carry.
    */
-  private async composeWriteTenantWall(
+  private composeWriteTenantWall(
     object: string,
     operation: 'insert' | 'update',
     context: any,
@@ -8438,335 +8519,17 @@ export class SecurityPlugin implements Plugin {
     principals: { permissionSets: PermissionSet[]; delegatorSets: PermissionSet[] | null; delegatorContext: any },
     refusal: { positions: unknown; permissionSets: unknown },
   ): Promise<WriteTenantWall> {
-    const { permissionSets, delegatorSets, delegatorContext } = principals;
-    const { positions, permissionSets: explicitPermissionSets } = refusal;
-
-    // ── [ADR-0123 D2] NO ACTIVE ORGANIZATION → refuse the write, loudly ──
-    //
-    // The forge guard below validates SUPPLIED values only, and says so. It
-    // is the right shape for what it guards (a payload naming ANOTHER
-    // tenant), but it leaves the opposite case wide open: a payload naming
-    // NO tenant, written by a caller who HAS no tenant. Nothing downstream
-    // fills it either — auto-stamping lives in the enterprise
-    // `@objectstack/organizations` runtime and has nothing to stamp when the
-    // caller carries no active organization. So the row landed with
-    // `organization_id` NULL, and the read wall then hid it from EVERY
-    // reader including the author who had just created it: a write that
-    // succeeds and a record nobody can reach.
-    //
-    // Both halves were individually defensible, which is why this sat. The
-    // rule that resolves them (ADR-0123 D2, from the #8247 ruling): under an
-    // authenticated session with no active organization, tenant-scoped READS
-    // resolve to nothing (Layer 0's deny sentinel — unchanged, below in
-    // `computeTenantLayer0Filter`) and tenant-scoped WRITES are REFUSED,
-    // with a message that NAMES the missing active organization. If a write
-    // cannot say which tenant its row belongs to, it does not land.
-    //
-    // The verdict is DERIVED, never re-derived: `computeWriteTenantCheckFilter`
-    // is the same Layer 0 the read side computes, so every exemption stays in
-    // one place — a `tenancy.enabled:false` platform-global object, an object
-    // with no `organization_id` column, a federated phantom anchor (#7835), a
-    // true PLATFORM_ADMIN on a posture-permitting object (ADR-0095 D3), and
-    // the whole `single` posture all yield `null` here and are untouched.
-    // System / boot writes never reach this line at all (`isSystem`
-    // short-circuits the middleware). Under `group`, "no organization scope"
-    // means an EMPTY membership set — ADR-0105 D2's own fail-closed rule.
-    // A member WITH a membership set but no active organization passes this
-    // pre-test and still has nowhere for a NEW row to land; that insert is
-    // refused with this same answer on its stored image, below ([#24784]).
-    // So is the insert of a platform operator crossing the wall with no
-    // active organization: crossing exempts it from this pre-test, not
-    // from needing somewhere to land ([#24821]).
-    //
-    // The cheap posture/context pre-test comes first on purpose: the common
-    // deployment is `single` (Layer 0 inert), and the common caller HAS an
-    // active organization. Neither pays for the layered compile inside
-    // `organizationWallRefusal` — the one verdict `canWriteObject` asks too.
-    //
-    // Ordered AHEAD of the forge guard deliberately. A caller with no
-    // organization scope at all who also supplies a foreign `organization_id`
-    // would satisfy both; "you have no active organization" is the actionable
-    // half — the supplied value is not the reason the write cannot land.
-    // `delete` is deliberately absent: it places no row and decides no
-    // tenant, so its target is selected through the Layer 0 ROW wall, which
-    // already resolves to nothing (ADR-0123 D2, stated there as a boundary
-    // rather than left as an omission).
-    //
-    // The refusal has ONE spelling, answered from two points: here on the
-    // scope pre-test, and on the stored image of a union-scope insert with
-    // no active organization (below). Only the operator half differs,
-    // because the two say different things about the context.
-    const refuseNoActiveOrganization = (refused: 'caller' | 'delegator', developerMessage: string): WriteWallRefusal => {
-      const principal = refused === 'delegator' ? 'the delegating principal' : 'this session';
-      return {
-        field: '_record',
-        warning:
-          `[Security] Layer 0 tenant wall REFUSED ${operation} '${object}' — ` +
-          `${principal} has no active organization to place the record in (ADR-0123 D2, fail-closed)`,
-        error: new PermissionDeniedError(
-          `[Security] Access denied: '${object}' is scoped to an organization, and ` +
-            `${principal} has no active organization — so this ${operation} has no ` +
-            `organization to place the record in. Join or select an active organization and retry.`,
-          { operation, object, positions, permissionSets: explicitPermissionSets },
-          developerMessage,
-        ),
-      };
+    // [#25223 cut 5] The body moved to `security-plugin-write-tenant-wall.ts` (see `WriteTenantWallHost`).
+    const readOrgScopingEnabled = () => this.orgScopingEnabled;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'computeWriteTenantWall' | 'orgScopingEnabled' | 'organizationWallRefusal' | 'tenancyPosture'> = {
+      computeWriteTenantCheckFilter: (...a) => this.computeWriteTenantCheckFilter(...a),
+      computeWriteTenantWall: (...a) => this.computeWriteTenantWall(...a),
+      get orgScopingEnabled() { return readOrgScopingEnabled(); },
+      organizationWallRefusal: (...a) => this.organizationWallRefusal(...a),
+      get tenancyPosture() { return readTenancyPosture(); },
     };
-    const denied = await this.organizationWallRefusal(
-      permissionSets,
-      object,
-      operation,
-      context,
-      delegatorSets,
-      delegatorContext,
-    );
-    if (denied) {
-      // The whole write is refused here, so nothing below is composed: the
-      // parts are never computed for a write the pre-test refuses.
-      return {
-        preTest: refuseNoActiveOrganization(
-          denied,
-          `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
-            `organization: tenancy posture '${this.tenancyPosture}' walls '${object}', and ` +
-            `${denied === 'delegator' ? "the delegator's" : "the caller's"} context resolved neither ` +
-            `\`tenantId\` nor a non-empty \`accessible_org_ids\`. Reads under this state resolve to nothing; ` +
-            `writes are refused rather than landing a row with a NULL organization that no reader — ` +
-            `including its own author — could ever see. System contexts and platform operators are unaffected.`,
-        ),
-        judgePayload: () => null,
-        storedImage: null,
-      };
-    }
-
-    // A row carries an organization to judge only when it NAMES one: an
-    // absent or empty value is the auto-stamp's to fill (ADR-0095 D1,
-    // "Not touched": judging it would refuse a legitimate insert before
-    // the stamp runs). One predicate, read by both halves below.
-    const namesOrganization = (r: Record<string, unknown>): boolean =>
-      r.organization_id != null && r.organization_id !== '';
-    // [#22278] …except on UPDATE, where no stamp runs: a row that SETS the
-    // column to `null` or `''` empties the organization of a row that has
-    // one, and that is refused wherever the wall applies. Own-property, so
-    // an update that never names the column is untouched; an `undefined`
-    // value is a column the statement leaves alone, not an emptied one.
-    const emptiesOrganization = (r: Record<string, unknown>): boolean =>
-      operation === 'update' &&
-      Object.prototype.hasOwnProperty.call(r, 'organization_id') &&
-      (r.organization_id === null || r.organization_id === '');
-    // The wall is computed when a payload names an organization (as
-    // before) or when a walled posture may have a hook name one ([#20013]
-    // below). The `single` posture composes no Layer 0 at all, so it pays
-    // for nothing it did not already pay for.
-    let tenantParts: Record<string, unknown>[] = [];
-    // The CALLER's own Layer 0 for this write — `null` where the wall does
-    // not apply to it (a non-tenant object, a phantom anchor, a platform
-    // operator crossing on a posture-permitting object, `single`).
-    let callerTenantCheck: Record<string, unknown> | null = null;
-    // Whether that `null` is a platform operator CROSSING the wall on a
-    // posture-permitting object (ADR-0095 D3) — the wall stands for every
-    // other caller on the object.
-    let callerCrossesTenantWall = false;
-    if (writeRows.some(namesOrganization) || this.orgScopingEnabled) {
-      const callerWall = await this.computeWriteTenantWall(
-        permissionSets,
-        object,
-        operation,
-        context,
-      );
-      const tenantCheck = callerWall.layer0;
-      callerTenantCheck = tenantCheck;
-      callerCrossesTenantWall = callerWall.crossedByPlatformAdmin;
-      // [ADR-0090 D10] The post-image must also satisfy the delegator's tenant
-      // wall — an on-behalf-of write may not land a row in a tenant the
-      // delegator itself could not reach.
-      const delTenantCheck = delegatorSets
-        ? await this.computeWriteTenantCheckFilter(delegatorSets, object, operation, delegatorContext)
-        : null;
-      tenantParts = [tenantCheck, delTenantCheck].filter(Boolean) as Record<string, unknown>[];
-    }
-    const clearsWall = (row: Record<string, unknown>): boolean =>
-      tenantParts.every((f) => matchesFilterCondition(row as any, f as any));
-    // The ONE refusal, shared by both halves — so a value the caller sent
-    // and a value a hook wrote are refused identically.
-    const denyTenantPlacement = (source: string): WriteWallRefusal => ({
-      field: 'organization_id',
-      warning:
-        `[Security] Layer 0 tenant CHECK FAILED on ${operation} '${object}' — write denied ` +
-        `(fail-closed); ${source} organization_id is outside the caller's organization scope`,
-      error: new PermissionDeniedError(
-        `[Security] Access denied: the ${operation} would place '${object}' in another tenant ` +
-          `(organization_id is outside the caller's organization scope)`,
-        { operation, object, positions, permissionSets: explicitPermissionSets },
-      ),
-    });
-    // [#22278] The refusal of an emptied organization, shared by both
-    // halves the same way. Its own sentence: the row is not placed in
-    // another tenant, it is left in none.
-    const denyOrganizationRemoval = (source: string): WriteWallRefusal => ({
-      field: 'organization_id',
-      warning:
-        `[Security] Layer 0 tenant CHECK FAILED on ${operation} '${object}' — write denied ` +
-        `(fail-closed); ${source} organization_id is empty`,
-      error: new PermissionDeniedError(
-        `[Security] Access denied: the ${operation} would leave '${object}' with no organization ` +
-          `(an organization-scoped row keeps an organization on update)`,
-        { operation, object, positions, permissionSets: explicitPermissionSets },
-        `[ADR-0095 D1] tenancy posture '${this.tenancyPosture}' walls '${object}', so a non-system update ` +
-          `must leave the row in an organization the Layer 0 wall admits. An empty organization_id is in none: ` +
-          `the row would drop out of every reader's scope, and an organization-scoped grant row would apply in ` +
-          `every organization. System contexts and platform operators on posture-permitting objects are unaffected.`,
-      ),
-    });
-    // ── [ADR-0123 D2 · ADR-0105 D2/D5 · #24784] A union-scope INSERT with no active organization ──
-    //
-    // Under a union-scope posture (`group`) the scope pre-test above reads
-    // the MEMBERSHIP SET, so a member whose session has no active
-    // organization passes it — rightly, for everything the set bounds:
-    // reads, and updates and deletes, whose rows the membership wall
-    // selected and which keep the organization they already have. An
-    // insert is the one write that needs somewhere NEW to land, and that is
-    // the ACTIVE organization: the engine stamps a new row from `tenantId`
-    // (ADR-0105 D5), and the column is read-only to a session payload. So
-    // that member's row had no organization to land in, and the engine met
-    // it as an organization-less SYSTEM write and refused it
-    // `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` with a 500. ADR-0123 D2's
-    // answer for the state is the 403 `isolated` gives the same session;
-    // this gives it here, before the engine is reached.
-    //
-    // Judged on the STORED image (the seam below), not on the payload: the
-    // image is the row after the `beforeInsert` chain, the same rows the
-    // engine's own organization check reads one step later. So the refusal
-    // covers exactly the rows that would have met that 500, and nothing the
-    // store admitted before is refused now. Only the CALLER's own wall
-    // decides whether the object is walled for it — a platform operator
-    // crossing on a posture-permitting object is the arm below — and the
-    // delegator keeps the pre-test's leg, unchanged. `isolated` never
-    // reaches this: its pre-test reads the active organization itself.
-    const insertLacksActiveOrganization =
-      operation === 'insert' &&
-      postureUsesUnionScope(this.tenancyPosture) &&
-      callerTenantCheck != null &&
-      !carriesActiveOrganization(context);
-    // ── [ADR-0123 D2/D4 · ADR-0131 D9 · ADR-0095 D3 · #24821] …and a platform operator's ──
-    //
-    // A true `PLATFORM_ADMIN` CROSSES the wall on a posture-permitting
-    // object (ADR-0095 D3): its Layer 0 is `null` there, so neither the
-    // pre-test nor the arm above reaches it, under `isolated` or `group`.
-    // Crossing lets the operator read every organization's rows and update
-    // them where they are; it does not give a NEW row an organization. The
-    // row lands where the session's does — the engine stamps it from
-    // `tenantId` and strips the column from a session payload — and with
-    // no active organization it has none. ADR-0131 D9 refuses that write in
-    // every walled posture ("nothing defaults to any owner other than the
-    // derivable one"), and the engine did refuse it, as an
-    // organization-less SYSTEM write: `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`,
-    // status 500, its prose withheld from the wire. The condition is the
-    // member's — no active organization, a row with nowhere to land — so
-    // the answer is the member's too: one refusal, one spelling (ADR-0112
-    // D3), naming what is missing (ADR-0123 D4).
-    //
-    // On the same STORED image as the arm above, for the same reason: a
-    // row a hook places, or one that names its organization where the
-    // engine keeps a session's value, carries one and lands as before.
-    // Reads and updates by the operator are untouched.
-    const operatorInsertLacksActiveOrganization =
-      operation === 'insert' &&
-      callerCrossesTenantWall &&
-      !carriesActiveOrganization(context);
-    const walled = tenantParts.length > 0;
-
-    return {
-      preTest: null,
-      judgePayload: (rows) => {
-        // EVERY supplied row must clear the wall — one forged row in a bulk
-        // payload denies the whole write (fail closed, no partial landing).
-        if (walled && !rows.filter(namesOrganization).every(clearsWall)) return denyTenantPlacement('a supplied');
-        // [#22278] …and no row of an UPDATE payload may empty the column.
-        if (walled && rows.some(emptiesOrganization)) return denyOrganizationRemoval('a supplied');
-        return null;
-      },
-      // [#20013] The seam is installed whenever the wall applies to the write,
-      // and [#24821] for a crossing platform operator's insert with no active
-      // organization too: its own Layer 0 is `null`, so the parts can be empty
-      // while its rows still need somewhere to land. With no wall part
-      // `judgeRow` admits every row. Array UPDATE payloads are left as step
-      // 3.6 leaves them: the engine takes one payload per update.
-      storedImage:
-        (walled || operatorInsertLacksActiveOrganization) && (operation === 'insert' || singlePayload)
-          ? {
-              judgeLanding: (rows) => {
-                // First, as the pre-test's refusal is first: the session's
-                // state is the actionable half. One row with nowhere to land
-                // refuses the whole write — no partial landing.
-                const someRowHasNowhereToLand = (): boolean =>
-                  rows.some((row) => !!row && typeof row === 'object' && !namesOrganization(row));
-                if (operatorInsertLacksActiveOrganization && someRowHasNowhereToLand()) {
-                  return refuseNoActiveOrganization(
-                    'caller',
-                    `[ADR-0123 D2 · ADR-0131 D9] Tenant-scoped inserts are refused when the execution context carries ` +
-                      `no active organization: tenancy posture '${this.tenancyPosture}' walls '${object}', and ` +
-                      `this caller is a platform operator crossing the wall there (ADR-0095 D3). Crossing lets it read ` +
-                      `every organization's rows and update them where they are; a new row still lands in the active ` +
-                      `organization, and the caller's context carries no \`tenantId\` while the stored row names no ` +
-                      `organization, so this insert has none to land in. It is refused rather than reaching the engine ` +
-                      `as an organization-less system write. System contexts are unaffected.`,
-                  );
-                }
-                if (insertLacksActiveOrganization && someRowHasNowhereToLand()) {
-                  return refuseNoActiveOrganization(
-                    'caller',
-                    `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
-                      `organization: tenancy posture '${this.tenancyPosture}' walls '${object}', and the ` +
-                      `caller's context carries no \`tenantId\`. Under this posture the membership set ` +
-                      `(\`accessible_org_ids\`) bounds what the caller reads, while a new row lands in the active ` +
-                      `organization (ADR-0105 D5), so this insert has none to land in. Reads under this state keep ` +
-                      `spanning the membership set; the insert is refused rather than reaching the engine as an ` +
-                      `organization-less system write. System contexts and platform operators are unaffected.`,
-                  );
-                }
-                return null;
-              },
-              judgeRow: (row) => {
-                if (namesOrganization(row) && !clearsWall(row)) return denyTenantPlacement("the stored row's");
-                if (emptiesOrganization(row)) return denyOrganizationRemoval("the stored row's");
-                return null;
-              },
-              // ── [#24822 · ADR-0105 D5] The write's organization is JUDGED here ──
-              //
-              // `judgeRow` holds a stored row's `organization_id` to the wall
-              // whenever the wall has parts, and the payload half above already
-              // refused every supplied value outside them (and, on an update,
-              // every emptied one). So the engine may leave a caller's explicit
-              // value on the row for this verdict instead of stripping it as
-              // `readonly`: on an insert, rather than storing the active
-              // organization in its place; on an update, rather than keeping the
-              // row's own organization against a re-point the wall admitted.
-              // Both replacements were silent: a 2xx, with the row in another
-              // organization than the one the wall admitted. The member says so,
-              // and the engine reads nothing else.
-              //
-              // Set ONLY where the wall's own parts are composed in (`tenantParts`
-              // non-empty). The crossing operator's seam
-              // (`operatorInsertLacksActiveOrganization` with no parts) judges no
-              // organization: its `judgeRow` admits every row. The business
-              // `check` seam of step 3.6 never reaches this composition. Neither
-              // sets it, so the strip there runs as before.
-              //
-              // And only on the two operations whose stored rows this seam is
-              // handed: an insert (its rows), and an update whose payload is ONE
-              // row (the by-id image, and every row the predicate path matched,
-              // each merged with that payload). An ARRAY update payload never
-              // reaches this composition (the condition above), so it is stated
-              // again here rather than inferred: the member is the seam's own
-              // claim about what it judges, and it must stay true if that
-              // condition ever moves. [#25062] The write preview reads this
-              // same value for each row it admits, and spares the column where
-              // the write does.
-              judgesOrganization:
-                walled && (operation === 'insert' || (operation === 'update' && singlePayload)),
-            }
-          : null,
-    };
+    return composeWriteTenantWall.call(host, object, operation, context, writeRows, singlePayload, principals, refusal);
   }
 
   /** [#25062] Step 3.7's way to refuse: the refusal's warn line, then its error. */

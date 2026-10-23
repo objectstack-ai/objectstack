@@ -93,7 +93,7 @@ what moved this page's population from 225 to 227; nothing about the two sites
 changed, only whether this instrument could see them.
 
 **The expensive failure direction is a keyword.** Sites whose receiver the author
-typed `any` have no type to read, and there are 52 of them — just over a fifth
+typed `any` have no type to read, and there are 54 of them — just over a fifth
 of the population, concentrated in exactly the seed and bootstrap paths this
 control exists for. Scoring an unreadable receiver as "not an engine" would have
 dropped every one of them silently, with a clean exit and a smaller number that
@@ -210,7 +210,7 @@ be stated is what this instrument counts, which is written above and re-runnable
 at any commit.
 
 Two structural facts do plausibly widen this reading against any hand or regex
-one, and both are counted in the generated tables below: the 52 sites reached
+one, and both are counted in the generated tables below: the 54 sites reached
 through an erased (`any`) receiver, and the 51 that name their object through a
 `const` rather than inline. An instrument that read either the way a person does
 would report a smaller number and would not say so.
@@ -249,8 +249,8 @@ cannot read, and they are neither in nor out.
 
 | how the instrument reached the site | count |
 | :--- | ---: |
-| receiver carried a readable engine type | 185 |
-| receiver erased, placed by the object NAME | 42 |
+| receiver carried a readable engine type | 183 |
+| receiver erased, placed by the object NAME | 44 |
 | receiver erased, placed by an `object: string` PARAMETER | 5 |
 | receiver erased, placed by an `UNTYPED_RECEIVERS` row | 5 |
 
@@ -307,11 +307,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-23 at `5f4a3f088`.
+Measured on 2026-10-23 at `fb63d396b`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 712 |
+| tracked non-test sources scanned | 714 |
 | engine-shaped types recognised | 87 |
 | declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 172 |

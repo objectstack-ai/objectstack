@@ -64,13 +64,13 @@ export const SysOauthConsent = ObjectSchema.create({
       // unique string — varchar(255) on MySQL). A referencing column takes the
       // referenced column's bound.
       maxLength: 255,
-      description: 'Foreign key to sys_oauth_application.client_id',
+      description: 'The client ID of the OAuth application the user consented to.',
     }),
 
     user_id: Field.lookup('sys_user', {
       label: 'User',
       required: false,
-      description: 'Foreign key to sys_user.id',
+      description: 'The user who gave this consent.',
     }),
 
     reference_id: Field.text({

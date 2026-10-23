@@ -314,6 +314,7 @@
  * reach the identity tables reach this guard.
  */
 
+import type { StandardErrorCode } from '@objectstack/spec/api';
 import type { BaseEngineOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import {
   ADMIN_FULL_ACCESS,
@@ -636,6 +637,44 @@ function isRefusal(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === 'PERMISSION_DENIED';
 }
 
+/**
+ * [ADR-0112] The code every half of this guard answers a read it could not
+ * complete with: the standard catalog's member for a store that cannot answer
+ * right now, the code the organization slug guard's read fault
+ * (`auth-manager.ts`, `slugGuardReadFaultApiError`) and the organization delete
+ * admission's read fault answer with too. One code for the fault across every
+ * guard on a door, so a caller tells "you may not" (403 `PERMISSION_DENIED`)
+ * from "try again" by the code alone.
+ */
+const LAST_ADMIN_GUARD_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
+
+/**
+ * The fail-closed answer to a read the guard could not complete: 503
+ * {@link LAST_ADMIN_GUARD_READ_FAULT_CODE}. Still a refusal of the write — the
+ * hook throws, so nothing is written — but no verdict about it, so it does not
+ * wear {@link refuse}'s 403. The read's own failure rides `cause`. `object`
+ * names the table the caller was writing, as {@link refuse}'s does.
+ */
+function readFault(message: string, object: string, cause: unknown): Error {
+  const err = new Error(`${LAST_ADMIN_GUARD_READ_FAULT_CODE}: ${message}`) as Error & {
+    code?: string;
+    status?: number;
+    object?: string;
+    cause?: unknown;
+  };
+  err.code = LAST_ADMIN_GUARD_READ_FAULT_CODE;
+  err.status = 503;
+  err.object = object;
+  err.cause = cause;
+  return err;
+}
+
+/** Marker so a nested fail-closed wrapper re-throws an inner read fault unchanged. */
+function isReadFault(err: unknown): boolean {
+  const e = err as { code?: unknown; status?: unknown } | null;
+  return e?.code === LAST_ADMIN_GUARD_READ_FAULT_CODE && e.status === 503;
+}
+
 const BREAK_GLASS_CITATION =
   'break-glass invariant, ADR-0135 D5.2 — an environment must always keep at least one ' +
   'administrator who can sign in';
@@ -945,7 +984,7 @@ function touchesAny(data: Record<string, unknown>, keys: readonly string[]): boo
  * slug is an engine update: better-auth's `organization/update` (its adapter
  * writes through the engine, and the refusal reaches the caller as 403
  * `PERMISSION_DENIED`), a seed, a plugin, the data API. A read that throws
- * propagates to the hook, which fails closed.
+ * propagates to the hook, which fails closed with 503 `SERVICE_UNAVAILABLE`.
  */
 async function refuseDefaultOrganizationSlugCapture(
   engine: Pick<LastAdminGuardEngine, 'find'>,
@@ -1573,24 +1612,30 @@ export function registerLastAdminGuard(
    * The fail-CLOSED envelope every half runs inside. A lookup that throws is
    * not "probably fine": the guard could not prove another administrator
    * survives, and the cost of guessing wrong is a permanently locked-out
-   * environment. A deliberate refusal from inside passes through unchanged.
+   * environment. A deliberate refusal from inside passes through unchanged,
+   * and so does a read fault an inner envelope already answered.
+   *
+   * The write is refused either way; only the code tells the two apart: a
+   * verdict is 403 `PERMISSION_DENIED` ({@link refuse}), a lookup that could
+   * not complete is 503 `SERVICE_UNAVAILABLE` ({@link readFault}).
    */
   const failClosed = async (op: GuardedOp, judge: () => Promise<void>): Promise<void> => {
     const words = OP_WORDS[op];
     try {
       await judge();
     } catch (err) {
-      if (isRefusal(err)) throw err;
+      if (isRefusal(err) || isReadFault(err)) throw err;
       const reason = (err as Error)?.message ?? String(err);
       logger?.warn(
         `[LastAdminGuard] administrator lookup failed — ${words.noun} refused: ${reason}`,
       );
-      throw refuse(
+      throw readFault(
         `Refusing this ${words.noun}: the remaining administrators could not be verified ` +
           `(${reason}). This guard fails closed — a ${words.noun} is only permitted when at ` +
           `least one other unbanned administrator is provably left (${BREAK_GLASS_CITATION}). ` +
           'Retry once the identity tables are readable again.',
         words.table,
+        err,
       );
     }
   };
@@ -1920,7 +1965,8 @@ export function registerLastAdminGuard(
    * ({@link refuseDefaultOrganizationSlugCapture}). A payload naming another
    * slug, or none, costs no reads. Fails closed like every half: the rows a
    * predicate write addresses, or the Default Organization itself, that cannot
-   * be read refuse the write.
+   * be read refuse the write, with the same 503 read-fault code
+   * ({@link readFault}) as {@link failClosed}.
    */
   const guardOrganizationDefaultSlug = async (rawCtx: unknown): Promise<void> => {
     const ctx = ctxOf(rawCtx);
@@ -1931,14 +1977,15 @@ export function registerLastAdminGuard(
       const ids = await resolveTargetIds('organization-update', SystemObjectName.ORGANIZATION, ctx.input?.id, ctx.input?.options, data);
       await refuseDefaultOrganizationSlugCapture(engine, ids, data.slug);
     } catch (err) {
-      if (isRefusal(err)) throw err;
+      if (isRefusal(err) || isReadFault(err)) throw err;
       const reason = (err as Error)?.message ?? String(err);
-      throw refuse(
+      throw readFault(
         `Refusing this organization update: the organizations it addresses, or the Default Organization, ` +
           `could not be read (${reason}), so whether the slug '${DEFAULT_ORGANIZATION_SLUG}' would make ` +
           'another organization the Default Organization is unknown (ADR-0131 D5). Retry once ' +
           `'${SystemObjectName.ORGANIZATION}' is readable again.`,
         SystemObjectName.ORGANIZATION,
+        err,
       );
     }
   };

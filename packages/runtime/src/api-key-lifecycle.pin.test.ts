@@ -112,6 +112,10 @@ describe('[#23367] POST /keys — the default life and the ceiling', () => {
     expect(res.body.error.code).toBe('API_KEY_EXPIRY_TOO_LONG');
     // Located: the refusal names the latest date this signing may ask for.
     expect(res.body.error.message).toContain(new Date(NOW + 365 * DAY).toISOString());
+    // And the policy that refused it, by the setting's own label, so the
+    // admin knows which knob decided (the Create Key dialog's expiry field
+    // points at the same setting).
+    expect(res.body.error.message).toContain('Maximum key lifetime is 365 days');
     expect(rows).toHaveLength(0);
   });
 

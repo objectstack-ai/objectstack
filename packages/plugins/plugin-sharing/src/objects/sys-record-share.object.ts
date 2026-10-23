@@ -199,8 +199,14 @@ export const SysRecordShare = ObjectSchema.create({
       // gate reads such a row — since guest access flows through the guest
       // position and share links only (ADR-0090 D11). Held equal to
       // `RecordShareRecipientType` in `@objectstack/spec/contracts`.
-      ['user', 'group', 'position', 'unit_and_subordinates'],
+      // Labelled options, rendered alike on `sys_sharing_rule`.
       {
+        options: [
+          { value: 'user', label: 'User' },
+          { value: 'group', label: 'Group' },
+          { value: 'position', label: 'Position' },
+          { value: 'unit_and_subordinates', label: 'Business unit and subordinates' },
+        ],
         label: 'Recipient Type',
         required: true,
         defaultValue: 'user',
@@ -241,8 +247,11 @@ export const SysRecordShare = ObjectSchema.create({
       // `edit` while claiming more (ADR-0078 declared-but-unenforced; #3865).
       // Rows persisted with `full` are normalised to `edit` (grant-time + boot
       // backfill) and stay honoured by the gates until they are.
-      ['read', 'edit'],
       {
+        options: [
+          { value: 'read', label: 'Read' },
+          { value: 'edit', label: 'Read and edit' },
+        ],
         label: 'Access Level',
         required: true,
         defaultValue: 'read',

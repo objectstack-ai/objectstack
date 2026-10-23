@@ -30,7 +30,10 @@
  *  - the HTTP door: 403 `PERMISSION_DENIED`, the slug unchanged, no standing
  *    gained; the sole organization (already the Default Organization) and a
  *    slug other than `default` are admitted; a walled posture admits it, since
- *    a slug anchors nothing there; a read that fails refuses;
+ *    a slug anchors nothing there; a read that fails refuses with the read-fault
+ *    code, 503 `SERVICE_UNAVAILABLE` — the code `auth-manager.ts`'s
+ *    organization slug guard answers its own read fault with, so one door
+ *    answers one code for the fault;
  *  - the engine door, by id and by predicate: the same refusal, for a
  *    system-context write; walled, admitted.
  */
@@ -217,7 +220,7 @@ describe('[ADR-0131 D5] better-auth organization/update: no re-slug makes anothe
     expect(await slugOf(engine, 'org_b')).toBe('default');
   });
 
-  it('a read of the Default Organization that fails refuses (the guard fails closed), and the slug is not changed', async () => {
+  it('a read of the Default Organization that fails refuses (the guard fails closed) with 503 SERVICE_UNAVAILABLE, not the verdict\'s 403, and the slug is not changed', async () => {
     const { engine, manager, cookie } = await ownerOfB(TWO_NONE_DEFAULT);
     // Only this rule's read (`{ slug: 'default' }`, limit 1) fails: the
     // break-glass half reads the same slug through a wider page, and must not
@@ -228,7 +231,11 @@ describe('[ADR-0131 D5] better-auth organization/update: no re-slug makes anothe
       return (real as any)(object, query, ...rest);
     });
 
-    expect(await answer(await reslug(manager, cookie, 'default'))).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+    const res = await reslug(manager, cookie, 'default');
+    expect(await answer(res)).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+    // The driver's own failure is for the server log, not the caller.
+    expect(await res.clone().text()).not.toContain('injected');
+    vi.restoreAllMocks();
     expect(await slugOf(engine, 'org_b')).toBe('beta');
   });
 });
@@ -260,7 +267,7 @@ describe('[ADR-0131 D5] the engine door (a seed, a plugin, a script): the same r
     expect(await slugOf(engine, 'org_b')).toBe('beta');
   });
 
-  it('a read that fails refuses: the guard fails closed', async () => {
+  it('a read that fails refuses: the guard fails closed, with 503 SERVICE_UNAVAILABLE rather than the verdict\'s 403', async () => {
     const { engine } = await ownerOfB(TWO_NONE_DEFAULT);
     const real = engine.find.bind(engine);
     vi.spyOn(engine, 'find').mockImplementation(async (object: string, query?: any, ...rest: any[]) => {
@@ -268,7 +275,7 @@ describe('[ADR-0131 D5] the engine door (a seed, a plugin, a script): the same r
       return (real as any)(object, query, ...rest);
     });
 
-    expect(await refusalOf(engine.update('sys_organization', { id: 'org_b', slug: 'default' }, SYSTEM))).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(await refusalOf(engine.update('sys_organization', { id: 'org_b', slug: 'default' }, SYSTEM))).toEqual({ code: 'SERVICE_UNAVAILABLE', status: 503 });
     vi.restoreAllMocks();
     expect(await slugOf(engine, 'org_b')).toBe('beta');
   });

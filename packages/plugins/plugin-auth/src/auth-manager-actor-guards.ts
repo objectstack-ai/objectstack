@@ -289,9 +289,26 @@ export async function assertOrganizationDeletable(this: Pick<ActorGuardHost, 'ge
     try {
       await this.organizationDeleteStandingJudge(organizationId);
     } catch (err) {
-      if ((err as { code?: unknown } | null)?.code !== 'PERMISSION_DENIED') throw err;
+      const code = (err as { code?: unknown } | null)?.code;
       const { APIError } = await import('better-auth/api');
-      throw new APIError('FORBIDDEN', { message: (err as Error).message, code: 'PERMISSION_DENIED' });
+      if (code === 'PERMISSION_DENIED') {
+        throw new APIError('FORBIDDEN', { message: (err as Error).message, code: 'PERMISSION_DENIED' });
+      }
+      // The guard's fail-closed answer to a lookup it could not complete (503,
+      // `last-admin-guard.ts` `readFault`): this admission's own read-fault
+      // code, and never the driver's message, which names the failed read.
+      if (code === ORGANIZATION_DELETE_READ_FAULT_CODE && (err as { status?: unknown }).status === 503) {
+        const fault = new APIError('SERVICE_UNAVAILABLE', {
+          code: ORGANIZATION_DELETE_READ_FAULT_CODE,
+          message:
+            'The organization delete could not verify the remaining administrators, so whether this ' +
+            'organization may be deleted was never decided, and nothing was deleted. This is a server-side ' +
+            'outage, not a refusal of the delete: retry once the data store is reachable.',
+        });
+        (fault as { cause?: unknown }).cause = err;
+        throw fault;
+      }
+      throw err;
     }
   }
 

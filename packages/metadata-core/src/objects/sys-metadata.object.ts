@@ -77,7 +77,7 @@ export const SysMetadataObject = ObjectSchema.create({
       label: 'Package Version',
       required: false,
       description:
-        'Foreign key to sys_package_version (UUID). Null = platform-built-in or env-level override.',
+        'The package release this metadata was installed from. Empty for built-in platform metadata and for changes made in this environment.',
     }),
 
     /** Who manages this record: package, platform, or user */

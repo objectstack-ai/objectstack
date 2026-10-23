@@ -116,6 +116,40 @@ export interface DelegableScope {
   assignablePositions: string[];
 }
 
+/**
+ * How a permission set reaches the holders of a position, in
+ * {@link PositionGrantSummary}:
+ *
+ * - `definition` — the position's definition names it in `permissionSets`
+ *   (ADR-0131 D3/D4), the binding the spec declares;
+ * - `name` — it shares the position's NAME and the definition does not list
+ *   it: the resolver's position-name fold grants it anyway. That grant is
+ *   deprecated (the runtime warns `position_name_fold_grant`); it is reported so
+ *   that what a position is shown to grant is what it is enforced to grant.
+ */
+export type PositionGrantVia = 'definition' | 'name';
+
+/** One position, as {@link ISecurityService.describePositionGrants} describes it. */
+export interface PositionGrantSummary {
+  /** The position's machine name. */
+  position: string;
+  /**
+   * How many people hold the position in the caller's active organization, by
+   * the rule the resolver projects a caller's positions by. `null` when no
+   * count is a fact here: no active organization, a position held through
+   * derived standing (`platform_admin`) or by the anonymous principal
+   * (`guest`), a read that came back truncated, or a caller who may not read
+   * the assignment rows (`sys_user_position`).
+   */
+  holderCount: number | null;
+  /**
+   * The permission sets the position grants its holders, IN FORCE — the sets
+   * the resolver grants a holder of this position alone, in resolution order.
+   * Empty for a position the activation ledger switched off.
+   */
+  permissionSets: Array<{ name: string; via: PositionGrantVia }>;
+}
+
 /** Selector for {@link ISecurityService.explain}. */
 export interface ExplainAccessRequest {
   /** Object API name to explain access for. */
@@ -684,6 +718,29 @@ export interface ISecurityService {
   getEffectiveObjectPermissions?(
     context?: SecurityContext,
   ): Promise<Readonly<Record<string, EffectiveObjectPermission>>>;
+
+  /**
+   * [ADR-0131 D3/D4] Describe `positions` as the resolver enforces them: per
+   * position, how many people hold it in the caller's active organization and
+   * which permission sets it grants them, in force. The position catalog's list
+   * reads this, so the list answers "who is a sales manager, and what do they
+   * get?" from the enforcement path rather than from a second copy of it.
+   *
+   * Answers one {@link PositionGrantSummary} per name, in input order. A name
+   * that names no position is described like any other: no holders, and only
+   * what the position-name fold would grant a holder of that name.
+   *
+   * **THROWS on a read failure** — a holder count or a grant that could not be
+   * read is never reported as `0` or as none.
+   *
+   * **OPTIONAL, and absence is a defined state.** A security service that
+   * predates it omits it; a consumer feature-detects and then serves no
+   * description at all, ⛔ never an empty one.
+   */
+  describePositionGrants?(
+    positions: readonly string[],
+    context?: SecurityContext,
+  ): Promise<PositionGrantSummary[]>;
 
   /**
    * [#3544] Whether `context` may EXPORT `object` — the user-level export axis
