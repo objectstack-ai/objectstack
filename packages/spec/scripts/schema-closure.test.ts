@@ -15,7 +15,7 @@
 // spawned end-to-end run was weighed and rejected — `build-docs.ts` resolves
 // `json-schema/`, `api-surface/` and the repo's `content/docs/references/` from
 // its own `__dirname`, so driving it takes the whole sandbox
-// `build-schemas-check-mode.test.ts` builds, for one console line. The
+// `build-schemas-check-mode.fixture.ts` builds, for one console line. The
 // behavioural reading was taken once, by hand, at the change: with
 // `json-schema/data/` moved aside, `gen:docs` printed the warning for `data`
 // and still printed nothing for `meta-spelling`.
