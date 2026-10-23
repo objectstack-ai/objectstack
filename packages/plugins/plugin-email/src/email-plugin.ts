@@ -186,8 +186,15 @@ const ACCOUNT_OBJECT = 'sys_user';
  * reaches the caller in the result message, and it is their own address, so
  * nothing the caller could not already read is disclosed.
  *
- * Every refusal says that nothing was sent and what to supply. A read that
+ * Every refusal says that nothing was sent and what to do. A read that
  * fails is reported as a failed read, never as "you have no address".
+ *
+ * Every refusal is admin copy the settings page shows: it names what the admin
+ * does (press Send test email signed in as an admin whose account has an email
+ * address), never a request field or an endpoint. The `to` override is for API
+ * callers — a non-empty string `to` in the `mail/test` request body wins over
+ * the account address and skips the account read — and is documented here,
+ * not in the refusal.
  */
 async function resolveMailTestRecipient(
   payload: unknown,
@@ -198,8 +205,9 @@ async function resolveMailTestRecipient(
   if (typeof named === 'string' && named.trim() !== '') return { to: named.trim() };
   if (typeof userId !== 'string' || userId === '') {
     return {
-      refusal: 'No recipient — nothing was sent. This call names no "to" address and carries no signed-in '
-        + 'user whose own address the test could go to; pass "to" in the request body.',
+      refusal: 'No recipient — nothing was sent. The test email goes to the signed-in admin\'s own email '
+        + 'address, and no one is signed in on this call. Sign in as an admin whose account has an email '
+        + 'address, then press Send test email again.',
     };
   }
   let row: Record<string, unknown> | null;
@@ -212,14 +220,16 @@ async function resolveMailTestRecipient(
   } catch (err: any) {
     return {
       refusal: `Could not read your account's email address to send the test to (${err?.message ?? String(err)}) `
-        + '— nothing was sent. Pass "to" in the request body to name a recipient.',
+        + '— nothing was sent. The test email goes to the signed-in admin\'s own address; '
+        + 'press Send test email again once your account can be read.',
     };
   }
   const email = row?.email;
   if (typeof email !== 'string' || email.trim() === '') {
     return {
       refusal: 'Your account has no email address, and the test is sent to the signed-in admin\'s own address '
-        + '— nothing was sent. Add an email address to your account, or pass "to" in the request body.',
+        + '— nothing was sent. Press Send test email while signed in as an admin whose account has an email '
+        + 'address.',
     };
   }
   return { to: email.trim() };
