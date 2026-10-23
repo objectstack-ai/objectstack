@@ -125,14 +125,21 @@ only narrows, so it cannot make a `private` row visible. On `public_read` and
 ## External principals — no external org-wide default
 
 There is one org-wide default, `sharingModel`. An external (portal or
-partner) principal reaches **explicitly shared rows only** — the authorization
-kernel's `EXTERNAL` rung (ADR-0095), never derived from an org-wide default.
-Grant it a row with a manual share or a sharing rule, or publish a record
-through a share link (`publicSharing`).
+partner) principal — an organization member holding the `external` role —
+reaches rows through **explicit grants only**: the authorization kernel's
+`EXTERNAL` rung (ADR-0095), never derived from an org-wide default. For an
+external, every object's org-wide default is owner-only; it reads and writes
+the rows it owns and the rows granted to it:
+
+- a manual share or a sharing rule;
+- a share link (`publicSharing`);
+- a permission set or position it holds whose `rowLevelSecurity` speaks for
+  the object (for example `supplier in current_user.<key>`). Such a policy
+  lifts the owner-only floor for that object, and the policy bounds the rows.
 
 `externalSharingModel`, the external dial ADR-0090 D11 declared, was removed
-in `@objectstack/spec` 18 (ADR-0049 enforce-or-remove): no request ever
-resolved an external principal, so the value changed no answer. The schema
+in `@objectstack/spec` 18 (ADR-0049 enforce-or-remove): while it existed no
+request resolved an external principal, so the value changed no answer. The schema
 refuses it with the prescription "delete the key";
 `os migrate meta --from 17` lists the mechanical edits for existing sources.
 
