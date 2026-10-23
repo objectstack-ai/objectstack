@@ -132,7 +132,7 @@
 - S 级机械卡留席内 `mode:subagent`:开线程要重新克隆、重读技能与 `os-dev.md`,起步成本不值。
 - 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明;卡线程照计 `batch`。
 - 项目的 coordinator 跨席位统一调度卡线程;每席一个线程跑 PM 循环,卡线程即 dev。
-- 席位随时把候选卡交 coordinator,附优先级、派发令文件与建议 effort,⛔ 不等自己的槽位。
+- 席位随时把候选卡交 coordinator,附优先级、派发令全文与建议 effort,⛔ 不等自己的槽位。
 - coordinator 按优先级开线程,p1 先;全项目上限由维护者按项目定(`coordinator.md`),满即排队。
 - 卡线程交回或其 PR 合入,席位当即告知 coordinator 释放槽位。
 - 请 coordinator 开线程附维护者原话消息:它只凭维护者明言设线程的 model 与 effort。

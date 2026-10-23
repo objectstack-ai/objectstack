@@ -54,7 +54,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `<domain>`(如 `spec`、`skills`) | 以该 `domain:*` 车道的执行座位身份运行;承办该车道的项目即「车道项目」 | — |
 | `epic:#<n>` | 以父单 #n 的 epic PM 身份运行(见 `references/seat-lifecycle.md` 〈Epic 子树车道〉) | — |
 | `director` | 以总监席身份运行(人工召唤;所在项目即「总监项目」;三职与章程见 `references/lanes/director.md`) | — |
-| `coordinator` | 以项目协调者身份运行(项目会话:开席位线程与卡线程、跨车道调度;接口见 `references/coordinator.md`) | — |
+| `coordinator` | 以协调者身份运行(项目会话:开席位线程与卡线程、跨车道调度;接口见 `references/coordinator.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
 | `batch:<n>` | 席位同时在飞的子代理总上限,按 `Agent` 调用、`create_session` 与卡线程计:dev、复核、普查皆计,⛔ 只读不豁免 | 默认 `3`;`n` 的维护者天花板 `5` |
