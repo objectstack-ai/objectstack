@@ -9,8 +9,9 @@
  * ## ⛔ Package-internal — NOT a public export
  *
  * Deliberately absent from `shared/index.ts` and from the root barrel, like
- * `./refinement-projection.ts`: its callers are `./expression.zod.ts` and the
- * notify node config (`../automation/io-node-config.zod.ts`), both inside
+ * `./refinement-projection.ts`: its callers are `./expression.zod.ts`, the
+ * notify node config (`../automation/io-node-config.zod.ts`) and a bulk
+ * action's `confirmText` (`../ui/bulk-action.zod.ts`), all inside
  * `@objectstack/spec`, and a published factory with no consumer outside the
  * package would widen the public face for nothing. `api-surface/` and
  * `export-origins/` must not move for it.

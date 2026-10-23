@@ -21,7 +21,7 @@
 - 收窄不触发条款②,但按 `yes` 申报恒不是错误;⛔ 个案裁决不改本行。
 - 机器面改围契约的仪器,与辅助面不交,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
 - 机器面卡只按北极星「仪器为车队服务」的那一问评级。
-- 改元数据格式或接受面的照旧归 `domain:spec`;`/meta` 路由本体在 `packages/rest` 归 `domain:cli`。
+- 改元数据格式或接受面的照旧归本席;`/meta` 路由本体在 `packages/rest` 归 `domain:server`。
 - 拿不准 FLAG 回分诊,⛔ 不自设判据;档位随面走,表在 SKILL.md 模型分档,⛔ 不另抄。
 
 ## 常设承诺

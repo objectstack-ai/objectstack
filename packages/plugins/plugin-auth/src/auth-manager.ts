@@ -230,6 +230,15 @@ import {
   reportJwtSigningFailure,
   type PluginAssemblyHost,
 } from './auth-manager-plugin-assembly.js';
+// [#25224 cut 7] The database and the secret handed to better-auth; the
+// methods of the same names below hand each body the members it reads
+// (`DatabaseSecretHost`).
+import {
+  createDatabaseConfig,
+  generateSecret,
+  resolveAuthSecret,
+  type DatabaseSecretHost,
+} from './auth-manager-database-secret.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -4667,71 +4676,14 @@ export class AuthManager {
    * silently.  We therefore wrap the ObjectQL adapter in a factory function
    * so it is correctly recognised as a `DBAdapterInstance`.
    */
-  private async createDatabaseConfig(): Promise<any> {
-    // Use ObjectQL adapter factory if dataEngine is provided
-    if (this.config.dataEngine) {
-      // createObjectQLAdapterFactory returns an AdapterFactory
-      // (options => DBAdapter) which better-auth invokes via getBaseAdapter().
-      // The factory is created by better-auth's createAdapterFactory and
-      // automatically applies modelName/fields transformations declared in
-      // the betterAuth config above.
-      return createObjectQLAdapterFactory(this.config.dataEngine, {
-        // ADR-0093 D7 — the adapter is the one place that sees the created
-        // user's id INSIDE the creating endpoint call; staging it here lets the
-        // session seam recognise that user without reading the row back.
-        onRecordCreated: async (objectName, row) => {
-          if (objectName !== 'sys_user') return;
-          const { tryGetCurrentAuthEndpointContext } = await import('@better-auth/core/context');
-          this.stageUserCreatedInRequest(tryGetCurrentAuthEndpointContext(), row?.id);
-        },
-      });
-    }
-
-    // Fallback warning if no dataEngine is provided
-    console.warn(
-      '⚠️  WARNING: No dataEngine provided to AuthManager! ' +
-      'Using in-memory storage. This is NOT suitable for production. ' +
-      'Please provide a dataEngine instance (e.g., ObjectQL) in AuthManagerOptions.'
-    );
-
-    // ⛔ NOT `undefined`, and ⛔ do not "simplify" it back to that.
-    //
-    // Handing better-auth no `database` makes it build its own in-memory store
-    // in `getBaseAdapter`, and that store is keyed by the schema KEY while
-    // every read resolves by `modelName`. Re-measured 2026-10-21 for #25096 on
-    // better-auth 1.7.12, unchanged since the 1.7.2 reading
-    // (`db/adapter-base.mjs` builds the store by schema KEY;
-    // `@better-auth/memory-adapter` throws on the lookup, naming the model):
-    //
-    //   getAuthTables(options) -> { oauthResource: { modelName: 'sys_oauth_resource' }, … }
-    //   its memoryDB           -> { oauthResource: [] }            // keyed by KEY
-    //   the adapter then asks  -> 'sys_oauth_resource'             // resolved by modelName
-    //   => Error: Model sys_oauth_resource not found
-    //
-    // So on that path EVERY model this package renames is unreachable —
-    // `user`/`sys_user` included. It stayed invisible for as long as nothing
-    // touched a renamed model during boot; the RFC 8707 resource seed does,
-    // from the oauth-provider plugin's `init`, where the throw surfaces as an
-    // UNHANDLED REJECTION rather than a failed request.
-    //
-    // Keying the store by `modelName` is what the adapter actually reads, so
-    // this fixes the dev/test fallback instead of working around it. Production
-    // never reaches this branch — it returns the ObjectQL factory above.
-    //
-    // The import is dynamic on purpose (the rest of better-auth is loaded the
-    // same way here); `createAuthInstance` awaits this method, and better-auth
-    // then calls the returned factory SYNCHRONOUSLY, so the module has to be
-    // resolved before we hand it over, not inside it.
-    const [{ memoryAdapter }, { getAuthTables }] = await Promise.all([
-      import('better-auth/adapters/memory'),
-      import('@better-auth/core/db'),
-    ]);
-    return (options: any) => {
-      const tables = getAuthTables(options) as Record<string, { modelName?: string }>;
-      const db: Record<string, unknown[]> = {};
-      for (const [key, table] of Object.entries(tables)) db[table?.modelName ?? key] = [];
-      return memoryAdapter(db)(options);
+  private createDatabaseConfig(): Promise<any> {
+    // [#25224 cut 7] The body moved to `auth-manager-database-secret.ts` (see `DatabaseSecretHost`).
+    const readConfig = () => this.config;
+    const host: Pick<DatabaseSecretHost, 'config' | 'stageUserCreatedInRequest'> = {
+      get config() { return readConfig(); },
+      stageUserCreatedInRequest: (...a) => this.stageUserCreatedInRequest(...a),
     };
+    return createDatabaseConfig.call(host);
   }
 
   /**
@@ -4739,36 +4691,22 @@ export class AuthManager {
    */
   /** The auth secret, resolved once — see {@link resolvedAuthSecret}. */
   private resolveAuthSecret(): string {
-    if (!this.resolvedAuthSecret) {
-      this.resolvedAuthSecret = this.config.secret || this.generateSecret();
-    }
-    return this.resolvedAuthSecret;
+    // [#25224 cut 7] The body moved to `auth-manager-database-secret.ts` (see `DatabaseSecretHost`).
+    const readConfig = () => this.config;
+    const readResolvedAuthSecret = () => this.resolvedAuthSecret;
+    const writeResolvedAuthSecret = (v: AuthManager['resolvedAuthSecret']) => { this.resolvedAuthSecret = v; };
+    const host: Pick<DatabaseSecretHost, 'config' | 'generateSecret' | 'resolvedAuthSecret'> = {
+      get config() { return readConfig(); },
+      generateSecret: (...a) => this.generateSecret(...a),
+      get resolvedAuthSecret() { return readResolvedAuthSecret(); },
+      set resolvedAuthSecret(v) { writeResolvedAuthSecret(v); },
+    };
+    return resolveAuthSecret.call(host);
   }
 
   private generateSecret(): string {
-    const envSecret = readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true });
-    if (envSecret) return envSecret;
-
-    // No secret configured. In production this is FATAL: a predictable
-    // `dev-secret-<timestamp>` makes session tokens forgeable (session
-    // forgery). Refuse to boot rather than run insecurely.
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error(
-        '[auth] OS_AUTH_SECRET is required in production but is not set. ' +
-        'Refusing to boot with a temporary development secret — session tokens ' +
-        'would be forgeable. Set OS_AUTH_SECRET to a strong random value.'
-      );
-    }
-
-    // Development / test only: fall back to an ephemeral secret, loudly.
-    const fallbackSecret = 'dev-secret-' + Date.now();
-    console.warn(
-      '⚠️  WARNING: No OS_AUTH_SECRET environment variable set! ' +
-      'Using a temporary development secret. ' +
-      'This is NOT secure for production use. ' +
-      'Please set OS_AUTH_SECRET in your environment variables.'
-    );
-    return fallbackSecret;
+    // [#25224 cut 7] The body moved to `auth-manager-database-secret.ts`; it reads no member of this class.
+    return generateSecret();
   }
 
   /**
