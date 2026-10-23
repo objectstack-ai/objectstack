@@ -1777,7 +1777,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // No restart heals it: the next load of this ledger entry meets the
             // same environment item and is refused the same way (see
             // {@link refusesEnvironmentHeldCatalogName}), so the lenient answer
-            // ("loads at the next restart") would be false. The registry's
+            // ("loads at the next restart") would be false. Measured on a real
+            // restart: the boot runs, the rehydrate logs the refusal, and the
+            // package is not loaded at all — its earlier version neither, since
+            // the ledger entry that named it was overwritten. The registry's
             // package door refused before any of its own writes, and nothing of
             // this door's is written yet, so the cloud branch refuses exactly as
             // the inline branch does — `422 PLUGIN_REGISTER_FAILED`, the
