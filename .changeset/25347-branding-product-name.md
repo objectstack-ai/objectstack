@@ -4,7 +4,7 @@
 
 fix(service-settings): Settings → Branding's name is labelled the product name, shows no default the console never uses, and Localization's timezone says it is the one in effect
 
-Clause-②: yes (widening)
+Clause-②: yes
 Metadata-protocol: none
 
 One organization showed three names: Branding's "Organization name" read `ObjectStack`, the organization record read `Default Organization`, and the console read `ObjectOS`. Branding's key names the PRODUCT the deployment shows, and the organization's own name lives on its record, so each now says which one it is.
