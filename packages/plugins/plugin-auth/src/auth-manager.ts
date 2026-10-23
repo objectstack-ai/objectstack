@@ -44,7 +44,6 @@ import {
   API_KEY_INACTIVITY_DAYS,
   API_KEY_MAX_EXPIRY_DAYS,
   accountScopeAuthGate,
-  hasPlatformAdminStanding,
   // [#25083] Is this process a cloud-managed (hosted) environment? The ONE
   // accessor every managed-mode judgement here asks, and nothing else.
   isCloudManaged,

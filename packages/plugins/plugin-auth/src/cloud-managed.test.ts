@@ -23,6 +23,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Hono } from 'hono';
 import type { PluginContext } from '@objectstack/core';
+import { resetCloudManagedForTesting } from '@objectstack/core';
 import { AuthManager } from './auth-manager';
 import { AuthPlugin } from './auth-plugin';
 import { assertAudienceConfig, decideAudienceAdmission, resolveAudience } from './audience-posture';
@@ -45,6 +46,9 @@ const savedEnv: Record<string, string | undefined> = {};
 function setManaged(on: boolean): void {
   if (on) process.env[MANAGED_ENV] = '1';
   else delete process.env[MANAGED_ENV];
+  // `isCloudManaged()` memoizes its first read (#25306), so every switch
+  // re-reads it; without this the first case's answer would stick.
+  resetCloudManagedForTesting();
 }
 
 beforeEach(() => {
@@ -60,6 +64,7 @@ afterEach(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+  resetCloudManagedForTesting();
   vi.restoreAllMocks();
 });
 
@@ -469,4 +474,22 @@ describe('[#25083] the password doors on a cloud-managed environment', () => {
     expect(v.status, v.text).toBe(200);
     expect(s.credentialOf(s.ids.idp)).toBeDefined();
   }, 120_000);
+});
+
+describe('[#25083] what a host that mounts its own twin of a door imports', () => {
+  // The cloud mounts a per-environment twin of `set-initial-password`
+  // (objectstack-ai/cloud#3169). It takes the same arm from the package entry,
+  // so its refusal and its standing check cannot drift from this door's.
+  it('the package entry exports the managed refusal and the platform-admin predicate', async () => {
+    const entry = await import('./index');
+    expect(entry.cloudManagedRefusal('setInitialPassword')).toEqual({
+      status: 409,
+      body: {
+        success: false,
+        error: { code: 'RESOURCE_CONFLICT', message: CLOUD_MANAGED_REFUSAL_MESSAGES.setInitialPassword },
+      },
+    });
+    expect(entry.isPlatformAdminUser({ isPlatformAdmin: true })).toBe(true);
+    expect(entry.isPlatformAdminUser({ role: 'user' })).toBe(false);
+  });
 });
