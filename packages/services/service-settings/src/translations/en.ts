@@ -361,6 +361,7 @@ export const en: PlatformTranslationData = {
       actions: {
         test: { label: 'Test connection' },
         test_embedder: { label: 'Test embedder' },
+        reset: { label: 'Reset to environment defaults' },
       },
       banners: {
         log_prompts_warning: { title: 'Prompts may contain PII',
