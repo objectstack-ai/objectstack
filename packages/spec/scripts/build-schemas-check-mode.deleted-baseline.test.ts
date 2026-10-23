@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { RENAMED_DEFS } from './lib/renamed-defs';
 import { RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
 // Read ONLY to keep the #17356 fixture honest about which SET its root lives in
@@ -58,7 +59,13 @@ import {
   useSharedSandbox,
 } from './build-schemas-check-mode.fixture';
 
-useSharedSandbox();
+// The repo-root `scripts/` every sandbox here symlinks in, and the generator
+// imports from (#16175): an input from outside this package, so it is named in
+// this file — `check:cross-package-test-inputs` reads a test file's own source,
+// not the fixture module it imports (#25372).
+const ROOT_SCRIPTS = fileURLToPath(new URL('../../../scripts', import.meta.url));
+
+useSharedSandbox(ROOT_SCRIPTS);
 
 const readSurface = () => shardBytes(surfaceDir);
 

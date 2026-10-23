@@ -14,6 +14,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
 // Read ONLY to keep the #17969 nested fixtures honest about the TREE FACTS they
@@ -47,7 +48,13 @@ import {
   writeSurfaceShards,
 } from './build-schemas-check-mode.fixture';
 
-useSharedSandbox();
+// The repo-root `scripts/` every sandbox here symlinks in, and the generator
+// imports from (#16175): an input from outside this package, so it is named in
+// this file — `check:cross-package-test-inputs` reads a test file's own source,
+// not the fixture module it imports (#25372).
+const ROOT_SCRIPTS = fileURLToPath(new URL('../../../scripts', import.meta.url));
+
+useSharedSandbox(ROOT_SCRIPTS);
 
 /** Retired keys whose ONLY registered clause names a DIFFERENT def — the defect. */
 const LEAF_COLLIDER_A = 'api/HttpFindQueryParams:distinct';

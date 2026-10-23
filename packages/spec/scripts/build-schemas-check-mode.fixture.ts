@@ -91,9 +91,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 export const PKG = path.resolve(HERE, '..');
 
-/** The repo root — the fixture root mirrors it, so the generator's own
- *  `../../../scripts` import resolves inside the sandbox (#16175). */
-const REPO_ROOT = path.resolve(PKG, '..', '..');
+/** The repo-root `scripts/` — the fixture root mirrors the repo, so the
+ *  generator's own `../../../scripts` import resolves inside the sandbox
+ *  (#16175). Handed in by each test file through `useSharedSandbox()`, which is
+ *  where this out-of-package input is NAMED: `check:cross-package-test-inputs`
+ *  reads a test file's own source, not the modules it imports (#25372). */
+let rootScripts: string;
 
 export const TSX = path.join(PKG, 'node_modules', '.bin', 'tsx');
 
@@ -435,7 +438,7 @@ export function fixtureTree(prefix: string): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const dir = path.join(root, 'packages', 'spec');
   fs.mkdirSync(dir, { recursive: true });
-  fs.symlinkSync(path.join(REPO_ROOT, 'scripts'), path.join(root, 'scripts'));
+  fs.symlinkSync(rootScripts, path.join(root, 'scripts'));
   return dir;
 }
 
@@ -509,9 +512,11 @@ export function releaseSandbox(dir: string): void {
  * it down at the end. Each `build-schemas-check-mode.*.test.ts` file calls this
  * once at its top level, so every file gets its OWN shared sandbox — files run
  * in parallel (#25372), and a sandbox is an `fs.mkdtemp`, so no two files can
- * name the same one.
+ * name the same one. `rootScriptsDir` is the repo-root `scripts/` every
+ * sandbox symlinks in (see `rootScripts`).
  */
-export function useSharedSandbox(): void {
+export function useSharedSandbox(rootScriptsDir: string): void {
+  rootScripts = rootScriptsDir;
   beforeAll(() => {
     pristine = readShardKeys(path.join(PKG, SCHEMA_MANIFEST_DIR_NAME), 'schemas');
     pristineSurface = readShardKeys(path.join(PKG, AUTHORABLE_SURFACE_DIR_NAME), 'keys');
