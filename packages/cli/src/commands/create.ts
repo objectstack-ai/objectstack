@@ -93,12 +93,12 @@
  * ## The version the standalone shape pins
  *
  * Every `@objectstack/*` package in this monorepo is released together on one
- * version, so the range that is guaranteed to exist and to be mutually
- * compatible is the CLI's own. `getCliVersion()` (owned by `init.ts`, which
- * has pinned scaffolded deps this way since long before this command did) reads
- * it from the CLI package's own manifest; the range is imported rather than
- * re-derived so the two scaffolders cannot drift on the one value that decides
- * whether a scaffold resolves at all.
+ * version, so the version that is guaranteed to exist and to be mutually
+ * compatible is the CLI's own, pinned exactly. `getCliVersion()` (owned by
+ * `init.ts`, which has pinned scaffolded deps this way since long before this
+ * command did) reads it from the CLI package's own manifest; the version is
+ * imported rather than re-derived so the two scaffolders cannot drift on the
+ * one value that decides whether a scaffold resolves at all.
  *
  * ## Why the standalone shape reuses `init`'s renderers
  *
@@ -157,12 +157,14 @@ export const DEFAULT_PLACEMENT: ScaffoldPlacement = 'standalone';
 /**
  * The dependency spec every `@objectstack/*` entry in an emitted manifest gets.
  *
- * `standalone` is caret-pinned to the CLI's own version — a published range
- * that npm, pnpm, yarn and bun all resolve. `workspace:*` is emitted ONLY for
- * the in-repo placement, where a workspace really does supply those names.
+ * `standalone` is the CLI's own version, EXACT (no `^`/`~`, a prerelease kept
+ * verbatim) — a published version that npm, pnpm, yarn and bun all resolve,
+ * and the pin the docs prescribe, because a breaking change may ship in a
+ * minor or a patch on the v18 line. `workspace:*` is emitted ONLY for the
+ * in-repo placement, where a workspace really does supply those names.
  */
 export function objectstackDependencySpec(placement: ScaffoldPlacement): string {
-  return placement === 'in-repo' ? 'workspace:*' : `^${getCliVersion()}`;
+  return placement === 'in-repo' ? 'workspace:*' : getCliVersion();
 }
 
 /**
