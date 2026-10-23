@@ -81,6 +81,7 @@ import { SysPlatformSetting, SysSecret, SysSetting } from '@objectstack/platform
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import { wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
+import { withEngineRegistry } from './__tests__/settings-organization.testkit.js';
 import { LocalCryptoProvider } from './local-crypto-provider.js';
 import { dropEchoedSecretMasks, SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
 import type { SettingsEngine, SettingsSecretStore } from './settings-service.types.js';
@@ -306,11 +307,14 @@ async function boot(opts: {
   const logged: string[] = [];
   const svc = new SettingsService({
     env: {},
-    engine: opts.failVerificationRead
-      ? wrapEngineFailingPostUpdateReads(engine)
-      : opts.forwardContext === false
-        ? wrapEngineDroppingContext(engine)
-        : wrapEngineAsSettingsEngine(engine as any),
+    engine: withEngineRegistry(
+      opts.failVerificationRead
+        ? wrapEngineFailingPostUpdateReads(engine)
+        : opts.forwardContext === false
+          ? wrapEngineDroppingContext(engine)
+          : wrapEngineAsSettingsEngine(engine as any),
+      engine,
+    ),
     cryptoProvider: new LocalCryptoProvider(),
     secretStore: { ...baseStore, ...(opts.secretStoreOverrides ?? {}) },
     logger: { error: (m) => { logged.push(m); } },

@@ -81,7 +81,7 @@ export const SysUserPosition = ObjectSchema.create({
     user_id: Field.lookup('sys_user', {
       label: 'User',
       required: true,
-      description: 'Foreign key to sys_user.',
+      description: 'The user who holds this position.',
     }),
 
     position: Field.text({
@@ -175,22 +175,24 @@ export const SysUserPosition = ObjectSchema.create({
     // workflow built or the columns dropped. Full rationale sits with the
     // sibling declaration in sys-user-permission-set.object.ts.
     // [ADR-0091 D5] The recertification pair.
+    // [#25331] `hidden` keeps the pair off the Setup forms and detail pages until
+    // something reads it; the columns and their stored values stay.
     last_certified_at: Field.datetime({
       label: 'Last Certified At',
       required: false,
+      hidden: true,
       description:
-        'Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. ' +
-        'Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives ' +
-        '"never certified" or "certification stale" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed.',
+        'Not in use yet: kept for a future access-review feature. Nothing fills in or checks this date, ' +
+        'so an empty value does not mean the assignment went unreviewed.',
     }),
 
     certified_by: Field.lookup('sys_user', {
       label: 'Certified By',
       required: false,
+      hidden: true,
       description:
-        'Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. ' +
-        'Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — ' +
-        'the platform checks nothing about it and grants nothing on the strength of it.',
+        'Not in use yet: kept for a future access-review feature. A reviewer entered here is not verified ' +
+        'and changes nothing about what the assignment grants.',
     }),
 
     created_at: Field.datetime({

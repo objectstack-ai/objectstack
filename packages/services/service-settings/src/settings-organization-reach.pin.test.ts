@@ -18,15 +18,21 @@
  * The callers this stands for read with an empty context: plugin-auth's email
  * brand name and boot-time locale, the anonymous runtime-config door's
  * branding read, and a signed-in caller with no active organization.
+ *
+ * [#25249] The last section pins a host that binds its OWN engine and states
+ * no organization source: the service asks D9 itself, through the engine it
+ * holds, and an engine with no registry to ask is read as one that registers
+ * the organization object.
  */
 
 import { describe, it, expect } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
-import { ObjectQL } from '@objectstack/objectql';
+import { isAuthzStoreUnavailableError, ObjectKernel } from '@objectstack/core';
+import { assertEngineUpdateDispatch, ObjectQL } from '@objectstack/objectql';
 import { SysOrganization, SysUser } from '@objectstack/platform-objects/identity';
 import { SysPlatformSetting, SysSetting } from '@objectstack/platform-objects/system';
-import { SettingsServicePlugin } from './settings-service-plugin.js';
-import type { SettingsService } from './settings-service.js';
+import { SettingsServicePlugin, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
+import { SettingsService } from './settings-service.js';
+import { LEAN_ORGANIZATION_SOURCE } from './__tests__/settings-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as const;
 const NS = 'org_reach_fixture';
@@ -39,6 +45,7 @@ const MANIFEST = {
   specifiers: [
     { key: 'brand', type: 'text', label: 'Brand', scope: 'tenant', default: 'none' },
     { key: 'legacy', type: 'text', label: 'Legacy', scope: 'tenant', default: 'none' },
+    { key: 'theme', type: 'text', label: 'Theme', scope: 'user', default: 'none' },
   ],
 } as any;
 
@@ -225,5 +232,129 @@ describe('a composition with no organization object (the lean embedding, ADR-013
 
     expect((await b.service.get(NS, 'brand', {})).value).toBe('Lean again');
     expect(b.rows()).toEqual([['brand', null, 'Lean again']]);
+  });
+});
+
+/**
+ * [#25249] A host that binds its own engine — a control-plane mock, an embedded
+ * runtime — through the production adapter, which carries no registry. No
+ * kernel, no plugin, no posture source (`single`). `organizations` is as in
+ * {@link boot}; `source` is the organization source the host states, if any.
+ */
+async function bootSelfBound(organizations: string[] | null, source?: typeof LEAN_ORGANIZATION_SOURCE) {
+  const engine = new ObjectQL();
+  engine.registry.logLevel = 'silent';
+  const memory = makeMemoryDriver();
+  engine.registerDriver(memory.driver, true);
+  await engine.init();
+  const objects: any[] = [SysUser, SysSetting, SysPlatformSetting];
+  if (organizations !== null) objects.push(SysOrganization);
+  for (const o of objects) engine.registry.registerObject(o, '@objectstack/platform-objects');
+  for (const id of organizations ?? []) {
+    await engine.insert('sys_organization', { id, name: id, slug: id }, SYS);
+  }
+  // The user a user-rung write names, as the store already holds it.
+  memory.rowsOf('sys_user').set('usr_1', { id: 'usr_1', name: 'Ada', email: 'ada@example.test' });
+  const service = new SettingsService({ env: {} });
+  service.registerManifest(MANIFEST);
+  service.bindEngine(wrapEngineAsSettingsEngine(engine as any), undefined, source ? { organization: source } : undefined);
+  const seed = (row: Record<string, unknown>) => {
+    const id = `seed_${memory.rowsOf('sys_setting').size + 1}`;
+    memory.rowsOf('sys_setting').set(id, {
+      id, namespace: NS, scope: 'tenant', user_id: null, value_enc: null, encrypted: false,
+      locked: false, locked_reason: null, ...row,
+    });
+  };
+  const rows = () => [...memory.rowsOf('sys_setting').values()]
+    .map((r) => [r.key, r.organization_id ?? null, r.value])
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  return { service, seed, rows };
+}
+
+/**
+ * The same host over a double: an `IDataEngine`-shaped object with no registry,
+ * whose `sys_organization` holds no rows, and one tenant row written with no
+ * organization.
+ */
+function selfBoundDouble(source?: typeof LEAN_ORGANIZATION_SOURCE) {
+  const stored: Array<Record<string, unknown>> = [
+    { id: 'seed_1', namespace: NS, key: 'brand', scope: 'tenant', user_id: null, organization_id: null, value: 'Lean', encrypted: false, locked: false },
+  ];
+  const engine = {
+    async find(object: string, query: any) {
+      if (object !== 'sys_setting') return [];
+      const where = query?.where ?? {};
+      const branches: Array<Record<string, unknown>> = Array.isArray(where.$or) ? where.$or : [where];
+      const { $or: _or, ...rest } = where;
+      const hits = stored.filter((r) => branches.some((b) => Object.entries({ ...rest, ...b }).every(([k, v]) => (r[k] ?? null) === (v ?? null))));
+      return typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
+    },
+    async insert(_object: string, data: Record<string, unknown>) { stored.push({ ...data }); return { ...data }; },
+    async update(_object: string, data: Record<string, unknown>, options?: any) { assertEngineUpdateDispatch(data, options); return 1; },
+  };
+  const service = new SettingsService({ env: {} });
+  service.registerManifest(MANIFEST);
+  service.bindEngine(engine as any, undefined, source ? { organization: source } : undefined);
+  return { service };
+}
+
+describe('[#25249] a host that binds its own engine and states no organization source', () => {
+  it('(a) one organization: the tenant and user rungs read and write as that organization, through an adapter with no registry', async () => {
+    const b = await bootSelfBound([ORG]);
+    await b.seed({ key: 'brand', value: 'Acme', organization_id: ORG });
+    await b.seed({ key: 'legacy', value: 'Unowned', organization_id: null });
+    await b.seed({ key: 'theme', value: 'Unowned dark', scope: 'user', user_id: 'usr_1', organization_id: null });
+
+    expect((await b.service.get(NS, 'brand', {})).value).toBe('Acme');
+    expect((await b.service.get(NS, 'legacy', {})).source).toBe('default');
+    expect((await b.service.get(NS, 'theme', { userId: 'usr_1' })).source).toBe('default');
+    await b.service.set(NS, 'brand', 'Acme two', {});
+    await b.service.set(NS, 'theme', 'Light', { userId: 'usr_1' });
+    await b.service.set(NS, 'theme', 'Light two', { userId: 'usr_1' });
+
+    expect((await b.service.get(NS, 'brand', { tenantId: ORG })).value).toBe('Acme two');
+    expect((await b.service.get(NS, 'theme', { userId: 'usr_1' })).value).toBe('Light two');
+    expect((await b.service.get(NS, 'theme', { userId: 'usr_1', tenantId: ORG })).value).toBe('Light two');
+    expect(b.rows()).toEqual([
+      ['brand', ORG, 'Acme two'], ['legacy', null, 'Unowned'], ['theme', null, 'Unowned dark'], ['theme', ORG, 'Light two'],
+    ]);
+  });
+
+  it('(b) no organization object, real engine: the probe is refused as a failed read, loudly', async () => {
+    // Measured, not converted: the adapter cannot say the object is absent, so
+    // D9 asks `sys_organization`, and the engine refuses an unregistered name
+    // as "object not found" — which is not a missing table.
+    const b = await bootSelfBound(null);
+    const refusal = await b.service.get(NS, 'brand', {}).then(() => null, (e) => e);
+    expect(isAuthzStoreUnavailableError(refusal)).toBe(true);
+    expect(refusal.object).toBe('sys_organization');
+  });
+
+  it('(b) no organization object, a double with no registry: zero organizations, so no tenant row and no tenant write', async () => {
+    const d = selfBoundDouble();
+    expect((await d.service.get(NS, 'brand', {})).source).toBe('default');
+    const refusal = await d.service.set(NS, 'brand', 'Nobody', {}).then(() => null, (e) => e);
+    expect(refusal?.code).toBe('SETTINGS_VALIDATION');
+  });
+});
+
+describe('[#25249] the readings a stated source and an absent engine keep', () => {
+  it('(c) a host that states the lean composition reads and writes the rows with no organization', async () => {
+    const d = selfBoundDouble(LEAN_ORGANIZATION_SOURCE);
+    expect((await d.service.get(NS, 'brand', {})).value).toBe('Lean');
+
+    const b = await bootSelfBound(null, LEAN_ORGANIZATION_SOURCE);
+    await b.service.set(NS, 'brand', 'Lean', {});
+    await b.service.set(NS, 'brand', 'Lean again', {});
+    expect((await b.service.get(NS, 'brand', {})).value).toBe('Lean again');
+    expect(b.rows()).toEqual([['brand', null, 'Lean again']]);
+  });
+
+  it('(d) no engine: the in-memory store keeps its rows with no organization', async () => {
+    const service = new SettingsService({ env: {} });
+    service.registerManifest(MANIFEST);
+    await service.set(NS, 'brand', 'Memory', {});
+    expect((await service.get(NS, 'brand', {})).value).toBe('Memory');
+    expect(((service as any).memory as Array<Record<string, unknown>>).map((r) => r.organization_id ?? null)).toEqual([null]);
   });
 });

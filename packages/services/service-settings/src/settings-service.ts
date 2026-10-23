@@ -45,6 +45,7 @@ import {
   organizationIdOf,
   organizationReachAdmits,
   organizationReachRowOwner,
+  resolveGuestOrganization,
   resolveOrganizationReach,
   UNOWNED_ORGANIZATION_REACH,
   type OrganizationReach,
@@ -198,8 +199,12 @@ export type SettingsTenancyPostureSource = () =>
  * facts. The plugin supplies it at bind time; it is asked only for such a
  * caller, on a key below the global rung.
  *
- * Unset — a service constructed directly — reads as a composition that
- * registers no organization object: nothing names an organization to it.
+ * Unset, the service asks the same predicate itself, through the engine it
+ * holds ({@link SettingsService.organizationReachOf}). A host that binds its own
+ * engine on a composition with no organization object states that with a
+ * source answering `{ kind: 'no-organization-object' }`. A service with no
+ * engine at all (the in-memory store) holds no organization's rows, and keeps
+ * that reading.
  */
 export type SettingsOrganizationSource = () => Promise<SystemWriteOrganizationDecision>;
 
@@ -866,8 +871,8 @@ export class SettingsService {
   private tenancyPosture?: SettingsTenancyPostureSource;
   /**
    * The organization a caller that names none acts in where no wall stands,
-   * bound with the engine. Unset reads as a composition with no organization
-   * object. See {@link organizationReachOf}.
+   * bound with the engine. Unset, it is derived through the engine the service
+   * holds. See {@link organizationReachOf}.
    */
   private organizationSource?: SettingsOrganizationSource;
   /** Change subscribers, optionally scoped to a namespace. */
@@ -914,7 +919,8 @@ export class SettingsService {
       /**
        * ADR-0131 D9's answer for a caller that names no organization where no
        * wall stands: the one organization it reads and writes as, none, or a
-       * composition with no organization object.
+       * composition with no organization object. Omitted, the service asks
+       * D9 through `engine` itself (see `organizationDecision`).
        */
       organization?: SettingsOrganizationSource;
     },
@@ -1871,11 +1877,29 @@ export class SettingsService {
     return resolveOrganizationReach({
       callerOrganizationId: ctx.tenantId,
       wallStands: () => this.organizationWallStands(),
-      deriveOrganization: async () => {
-        const source = this.organizationSource;
-        return source ? source() : { kind: 'no-organization-object' };
-      },
+      deriveOrganization: () => this.organizationDecision(),
     });
+  }
+
+  /**
+   * ADR-0131 D9's answer for a caller that names no organization where no wall
+   * stands: the bound source's when the host stated one, else the predicate
+   * asked here, through the engine this service holds.
+   *
+   * The second branch is the same call the plugin's source makes
+   * (`resolveGuestOrganization`, the one spelling of D9 for a caller with no
+   * organization of its own), so a host that binds its own engine, or hands
+   * one to the constructor, reads and writes as the organization the
+   * composition derives rather than as no organization. An engine that exposes
+   * no registry cannot say the organization object is absent, and the
+   * predicate reads that as registered: a host that means the lean composition
+   * says so with its source. No engine at all is the in-memory store, which
+   * holds no organization's rows.
+   */
+  private async organizationDecision(): Promise<SystemWriteOrganizationDecision> {
+    if (this.organizationSource) return this.organizationSource();
+    if (!this.engine) return { kind: 'no-organization-object' };
+    return resolveGuestOrganization(this.engine, await this.tenancyPosture?.());
   }
 
   /**

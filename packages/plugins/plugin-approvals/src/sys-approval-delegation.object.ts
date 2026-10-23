@@ -117,7 +117,7 @@ export const SysApprovalDelegation = ObjectSchema.create({
       group: 'Delegation',
       description:
         'Rule is inactive before this instant. Null = active immediately. ' +
-        'Enforced at resolution time via isGrantActive — never by a background job.',
+        'Checked each time an approval is routed, so the rule starts on time without any scheduled job.',
     }),
 
     valid_until: Field.datetime({

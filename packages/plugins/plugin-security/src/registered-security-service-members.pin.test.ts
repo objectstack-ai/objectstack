@@ -65,6 +65,7 @@ const DECLARED_MEMBERS = {
   resolvePermissionSetNames: 'required',
   resolvePermissionSetsForContext: 'optional',
   getEffectiveObjectPermissions: 'optional',
+  describePositionGrants: 'optional',
   canExport: 'required',
   canReadObject: 'optional',
   hasWriteBypass: 'required',

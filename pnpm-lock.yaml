@@ -788,6 +788,9 @@ importers:
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../lint
+      '@objectstack/plugin-security':
+        specifier: workspace:*
+        version: link:../plugins/plugin-security
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3

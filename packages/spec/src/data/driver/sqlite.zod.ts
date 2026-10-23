@@ -75,7 +75,7 @@ export const SqliteConfigSchema = lazySchema(() => strictObject(
     .meta({ title: 'Filename' }),
 
   /** Dev-only, loosen-only schema self-heal (#2186). */
-  autoMigrate: SqlAutoMigrateSchema.optional(),
+  autoMigrate: SqlAutoMigrateSchema.optional().meta({ title: 'Auto-migrate schema' }),
 })
   .describe('SQLite connection configuration'));
 

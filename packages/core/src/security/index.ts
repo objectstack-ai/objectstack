@@ -207,6 +207,12 @@ export {
   // security catalog — the `sys_metadata_activation` ledger, never a catalog
   // row's `active` column — shared with the explainer and the security plugin.
   readDisabledCatalogNames,
+  // [ADR-0131 D3/D4, ADR-0095 D3] A position, described as the resolver
+  // enforces it for a holder: the sets its definition grants in force, and how
+  // many people hold it in an organization — the position catalog's list reads
+  // these, never a second copy of the rule.
+  readPositionGrantsInForce,
+  countPositionHolders,
   // [ADR-0138 D4] The guest entry's organization step, shared with the CRUD
   // gate that raises D4's located refusal — one step, two askers.
   resolveGuestOrganization,

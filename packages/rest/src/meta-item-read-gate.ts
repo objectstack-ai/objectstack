@@ -114,9 +114,14 @@ export interface MetaReadGateCaller {
     [key: string]: unknown;
 }
 
-/** The one security-service verb the docs audience reads. */
+/** The security-service verbs these chains read: the docs audience's, and the position list's. */
 export interface MetaReadGatePermissionSetResolver {
     resolvePermissionSetNames?(context: any): Promise<unknown> | unknown;
+    /**
+     * [#25333] `ISecurityService.describePositionGrants` — read by the
+     * `position` list's `?include=grants` step ({@link describeMetaPositionList}).
+     */
+    describePositionGrants?(positions: readonly string[], context: any): Promise<unknown> | unknown;
 }
 
 /** How a transport reads the caller (the audience half of the ports). */
@@ -3353,6 +3358,51 @@ function withItems(raw: unknown, items: any[]): unknown {
 }
 
 /**
+ * [#25333, ADR-0131 D3/D4] The `position` list's `?include=grants` step: each
+ * listed position gains, as served decorations beside `_packageId` and the
+ * rest,
+ *
+ *  - `_holderCount` — how many people hold it in the caller's active
+ *    organization, or `null` when no count is a fact for this caller (see
+ *    `PositionGrantSummary.holderCount`);
+ *  - `_grantedPermissionSets` — the sets it grants its holders, in force, each
+ *    with `via: 'definition' | 'name'` (`name`: the position-name fold).
+ *
+ * Both are the security service's answer (`describePositionGrants`), which reads
+ * them where the resolver enforces them — this step only places them, so the
+ * Setup list cannot show a position granting other than what it grants.
+ *
+ * Opt-in, so every other reader of the list (pickers, the assignment pages)
+ * pays no holder read. With no service, or one that predates the verb, or an
+ * anonymous caller, the list is served undecorated: an absent description is
+ * absent, ⛔ never a `0` or an empty set list. A REJECTION propagates: the
+ * transport answers that fault, never a list whose counts were invented.
+ */
+async function describeMetaPositionList(sources: MetaListAnswerSources, list: any[]): Promise<any[]> {
+    const service = await sources.resolveSecurityService();
+    if (!service || typeof service.describePositionGrants !== 'function') return list;
+    const caller = await sources.resolveCaller();
+    if (!caller) return list;
+    const names = list
+        .map((it) => (it && typeof it === 'object' ? (it as { name?: unknown }).name : undefined))
+        .filter((n): n is string => typeof n === 'string' && n !== '');
+    const summaries = await service.describePositionGrants([...new Set(names)], caller);
+    const byName = new Map<string, any>();
+    for (const s of Array.isArray(summaries) ? summaries : []) {
+        if (s && typeof s === 'object' && typeof (s as any).position === 'string') byName.set((s as any).position, s);
+    }
+    return list.map((it) => {
+        const summary = it && typeof it === 'object' ? byName.get((it as any).name) : undefined;
+        if (!summary) return it;
+        return {
+            ...it,
+            _holderCount: typeof summary.holderCount === 'number' ? summary.holderCount : null,
+            _grantedPermissionSets: Array.isArray(summary.permissionSets) ? summary.permissionSets : [],
+        };
+    });
+}
+
+/**
  * [#20320] THE answer of one `/meta/:type` LIST read, after the store read —
  * one chain, called by both transports that serve that read.
  *
@@ -3392,7 +3442,9 @@ function withItems(raw: unknown, items: any[]): unknown {
  *  7. `object` — the ADR-0106 mask ({@link projectMetaObjectSchema} over the
  *     transport's {@link MetaListAnswerSources.resolveObjectMasker}), and the
  *     `private, no-store` an undetermined posture owes (D6 tier 2).
- *  8. The translation step ({@link translateMetaList}, reached through
+ *  8. `position` — `?include=grants`: each position as the resolver enforces
+ *     it for a holder ({@link describeMetaPositionList}).
+ *  9. The translation step ({@link translateMetaList}, reached through
  *     {@link MetaListAnswerSources.translateList}).
  *
  * Every step keys on the FOLDED `metaType`, and a step leaves a shape it does
@@ -3496,7 +3548,16 @@ export function createMetaListAnswer(
             }
         }
 
-        // 8. The translation step ({@link translateMetaList}, through the transport's entry).
+        // 8. [#25333] `position` — `?include=grants`.
+        if (metaType === 'position' && query?.include === 'grants') {
+            const list = listItemsOf(visible);
+            if (list && list.length > 0) {
+                const described = await describeMetaPositionList(sources, list);
+                if (described !== list) visible = withItems(visible, described);
+            }
+        }
+
+        // 9. The translation step ({@link translateMetaList}, through the transport's entry).
         const data = await sources.translateList(metaType, visible);
         return cacheControl ? { ok: true, data, cacheControl } : { ok: true, data };
     };
