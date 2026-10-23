@@ -664,6 +664,24 @@ describe('HttpFindQueryParamsSchema', () => {
     }
   });
 
+  // [#25269] The page window the list door enforces — not `z.coerce.number()`,
+  // which admitted `-1`, `1.5` and a blank `?top=` (as `0`).
+  it.each([['top', '-1'], ['top', '1.5'], ['top', ''], ['top', '   '], ['top', 'abc'], ['skip', '-5'], ['skip', 0.5], ['skip', -1]])(
+    'refuses %s=%j — not a page window',
+    (key, value) => {
+      expect(HttpFindQueryParamsSchema.safeParse({ [key]: value }).success).toBe(false);
+    },
+  );
+
+  it('keeps 0 and the digits a querystring carries as page windows', () => {
+    const result = HttpFindQueryParamsSchema.safeParse({ top: '0', skip: ' 5 ' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.top).toBe(0);
+      expect(result.data.skip).toBe(5);
+    }
+  });
+
   it('should accept sort, orderBy, expand, search, count', () => {
     const result = HttpFindQueryParamsSchema.safeParse({
       sort: 'name asc,created_at desc',

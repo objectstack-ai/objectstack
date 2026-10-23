@@ -145,12 +145,20 @@ describe('[ADR-0139 E7] the comment-thread gate: a leaf per parent object, the p
     expect(pairProbe?.options.fields).toEqual(['object_name', 'record_id']);
   });
 
-  it('D5.1: a delegated caller writes no leaf — the whole read is the probe', async () => {
-    const s = standIn({ objects: ['crm_case'] });
+  it('D5.1, as amended: a delegated caller is written the same leaves and the same restricted probe as any caller', async () => {
+    const opts = { objects: ['crm_case', 'crm_deal', 'sys_attachment', 'far_obj'], middleware: ['sys_attachment'], federated: ['far_obj'] };
+    const plain = standIn(opts);
+    installCommentReadVisibility(plain.engine, silentLogger(), () => admission);
+    const s = standIn(opts);
     installCommentReadVisibility(s.engine, silentLogger(), () => admission);
     const { where } = await read(s.mw(), { userId: 'u1', onBehalfOf: { userId: 'u0' } });
-    expect(leavesOf(where)).toEqual([]);
-    expect(where).toEqual({ id: '__comment_thread_denied__' });
+    expect(leavesOf(where)).toEqual(['crm_case', 'crm_deal']);
+    expect(where).toEqual((await read(plain.mw())).where);
+    // No whole-read window: the stamped rows' only pre-scan is the D5.2 / D5.3 parents' pair probe.
+    expect(s.finds.filter((f) => f.object === 'sys_comment').map((f) => f.options.where)).toEqual([
+      { object_name: { $in: ['far_obj', 'sys_attachment'] } },
+      { object_name: { $null: true } },
+    ]);
   });
 
   it('no leaf without canReadObject: the whole read is the probe, said once', async () => {

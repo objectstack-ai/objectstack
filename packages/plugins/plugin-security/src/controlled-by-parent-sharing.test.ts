@@ -48,7 +48,8 @@ import { matchesFilterCondition } from '@objectstack/formula';
 // to the source in the checkout rather than a prebuilt dist.
 import { validateRecord, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import type { PermissionSet } from '@objectstack/spec/security';
-import { ObjectSchema } from '@objectstack/spec/data';
+import { ObjectSchema, controlledByParentMasterRefusal } from '@objectstack/spec/data';
+import { composeReadableIdsInMemory } from './readable-ids-in-memory.testkit.js';
 
 const REP = 'usr_rep';
 const OTHER = 'usr_other';
@@ -100,11 +101,13 @@ const CONTACT_SCHEMA_NO_MASTER_DETAIL = {
  * `validateRecord` (`@objectstack/objectql`) walks every declared field on an
  * insert but skips provenance-flagged ones outright — `if (def.system ||
  * def.readonly) continue;` — before the required check, and never fires on a
- * field that is not `required` at all. The `readonly` / `system` shapes below
- * are AUTHORABLE (nothing at runtime refuses either flag on a required
- * `master_detail`), so on each of them this gate is the only refusal an absent
- * master FK meets, and each must still answer 422 — the suite asserts that
- * against the REAL validator rather than against a belief about it.
+ * field that is not `required` at all. On the `readonly` / `system` shapes
+ * below this gate is therefore the only refusal an absent master FK meets —
+ * the suite asserts that against the REAL validator rather than against a
+ * belief about it. Neither is authorable any more: the parse refuses both
+ * (`master-not-writable`, #25092), so they reach the runtime only through a
+ * door that does not parse, and there the gate refuses every insert under
+ * them as the declaration defect, `422 INVALID_METADATA` (#25095).
  *
  * [#23100] The first shape, a `master_detail` with no `required`, was the third
  * member of this set while `resolveCbpRelation`'s second fallback resolved it.
@@ -396,8 +399,23 @@ async function boot(options: BootOptions = {}) {
 
   const repContext = () => ({ userId: REP, tenantId: 'org-1', positions: [], permissions: [] });
 
-  /** The READ face: run the middleware, then apply the filter it injected. */
-  const visibleContacts = async (): Promise<string[]> => {
+  /**
+   * [ADR-0139 D6] The derivation answers the engine's `ReadableIds` leaf over
+   * the master, composed by the engine at its executor boundary from this
+   * service's own `canReadObject` / `getReadFilter` of the master. This double
+   * is no engine, so the composition is done for it the same way
+   * (`readable-ids-in-memory.testkit.ts`), with the real service — and the
+   * real sharing service behind it — answering the master's scope.
+   */
+  const compose = (where: unknown, context: any) =>
+    composeReadableIdsInMemory(where, context, {
+      rows: (object) => store.rows[object],
+      readAdmission: (object, c) => plugin.canReadObject(object, c),
+      readScope: (object, c) => plugin.getReadFilter(object, c),
+    });
+
+  /** Run the middleware for a find of the contacts and return the `where` it injected, uncomposed. */
+  const injectedForContacts = async (): Promise<unknown> => {
     const opCtx: any = {
       object: 'crm_contact',
       operation: 'find',
@@ -406,20 +424,29 @@ async function boot(options: BootOptions = {}) {
       context: repContext(),
     };
     await middleware(opCtx, async () => {});
+    return opCtx.ast.where ?? null;
+  };
+
+  /** The READ face: run the middleware, compose the leaf it injected, then apply the filter. */
+  const visibleContacts = async (): Promise<string[]> => {
+    const where = await compose(await injectedForContacts(), repContext());
     return (store.rows.crm_contact ?? [])
-      .filter((r) => matchesFilterCondition(r, opCtx.ast.where ?? null))
+      .filter((r) => matchesFilterCondition(r, where as any))
       .map((r) => String(r.id));
   };
 
   /**
    * [#5815] The ANALYTICS read face: the scope `getReadFilter` hands the
-   * raw-SQL path, applied to the same rows. No middleware runs here — this
-   * method IS the whole enforcement on that surface.
+   * analytics service, which hands it to the engine (the raw-SQL strategy
+   * declines a scope carrying the leaf), applied to the same rows. No
+   * middleware runs here — this method IS the whole enforcement on that
+   * surface.
    */
   const analyticsVisibleContacts = async (context?: any): Promise<string[]> => {
     const filter = await plugin.getReadFilter('crm_contact', context ?? repContext());
+    const where = await compose((filter ?? null) as unknown, context ?? repContext());
     return (store.rows.crm_contact ?? [])
-      .filter((r) => matchesFilterCondition(r, (filter ?? null) as any))
+      .filter((r) => matchesFilterCondition(r, where as any))
       .map((r) => String(r.id));
   };
 
@@ -478,6 +505,8 @@ async function boot(options: BootOptions = {}) {
     ctx,
     plugin,
     repContext,
+    injectedForContacts,
+    compose,
     visibleContacts,
     analyticsVisibleContacts,
     updateContact,
@@ -552,18 +581,23 @@ describe('[#5386] controlled_by_parent folds the master\'s ownership and share g
   });
 
   // ── boundary conditions ──────────────────────────────────────────────────
-  it('the fold reads the grant table, resolves the master ONCE, and never re-enters the detail', async () => {
+  it('the derivation does NO store work; the grant table is read when the master\'s scope is composed, and the detail is never re-entered', async () => {
     const h = await boot({ shareLevel: 'edit' });
     h.store.find.mockClear();
-    await h.visibleContacts();
+    // [ADR-0139 D6] The middleware writes the leaf and walks the chain over
+    // the registry: no pre-scan of the master, no read of anything.
+    const injected = await h.injectedForContacts();
+    const during = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
+    expect(during).not.toContain('crm_account');
+    expect(during).not.toContain('crm_contact');
+    // The master's scope is composed by the engine (here, by the testkit):
+    // THAT is where the grant table is consulted — direct evidence the sharing
+    // half runs inside the composition and not merely that some filter came
+    // back — and the detail itself is never read to answer its own scope.
+    await h.compose(injected, h.repContext());
     const reads = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
-    // The grant table was consulted — direct evidence the sharing half ran and
-    // not merely that some filter came back.
     expect(reads).toContain('sys_record_share');
-    // The master id set is resolved by ONE system-context read. More than one
-    // would mean the derivation re-entered the middleware (v1 is single-level,
-    // ADR-0055 — the master's own controlled_by_parent is not walked).
-    expect(reads.filter((o) => o === 'crm_account')).toHaveLength(1);
+    expect(reads).not.toContain('crm_account');
     expect(reads).not.toContain('crm_contact');
   });
 
@@ -619,10 +653,16 @@ describe('[#5815] getReadFilter enforces the same read scope as the engine middl
     const h = await boot({ shareLevel: 'edit' });
     const filter = await h.plugin.getReadFilter('crm_contact', h.repContext());
     // Before the fix this was `undefined` (RLS null AND sharing null), which
-    // the raw-SQL path spreads into a WHERE that constrains nothing.
+    // the raw-SQL path spreads into a WHERE that constrains nothing. The
+    // predicate is the engine's leaf over the master (ADR-0139 D6): it names
+    // the master and binds no master id, and composed it admits exactly the
+    // contacts under the accounts the caller may read.
     expect(filter).toBeDefined();
-    expect(JSON.stringify(filter)).toContain('acct_own');
-    expect(JSON.stringify(filter)).not.toContain('acct_eu');
+    expect(JSON.stringify(filter)).toContain('"object":"crm_account"');
+    expect(JSON.stringify(filter)).not.toMatch(/acct_own|acct_eu|acct_us/);
+    const composed = await h.compose(filter, h.repContext());
+    expect(JSON.stringify(composed)).toContain('acct_own');
+    expect(JSON.stringify(composed)).not.toContain('acct_eu');
   });
 
   it('PARITY with no grant at all: both surfaces narrow to the caller-owned master', async () => {
@@ -653,15 +693,23 @@ describe('[#5815] getReadFilter enforces the same read scope as the engine middl
     expect(await h.analyticsVisibleContacts()).toEqual(await h.visibleContacts());
   });
 
-  it('fail-closed: the derivation resolves the master ONCE per call, never re-entering the detail', async () => {
+  it('getReadFilter does NO store work for the derivation: the master is read only when the engine composes the leaf', async () => {
     const h = await boot({ shareLevel: 'edit' });
     h.store.find.mockClear();
-    await h.analyticsVisibleContacts();
+    const filter = await h.plugin.getReadFilter('crm_contact', h.repContext());
+    // [ADR-0139 D6] `getReadFilter(contact)` resolves the contact's OWN
+    // sharing half (the grant table) and writes the leaf for the master; it
+    // pre-scans no master and never re-enters the detail.
+    const before = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
+    expect(before).not.toContain('crm_account');
+    expect(before).not.toContain('crm_contact');
+    // Composing the leaf asks `getReadFilter(account)`, whose sharing half
+    // reads the grant table — direct evidence the derivation runs on THIS
+    // path rather than a filter merely coming back from somewhere.
+    h.store.find.mockClear();
+    await h.compose(filter ?? null, h.repContext());
     const reads = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
-    // Direct evidence the derivation (and its sharing half) ran on THIS path
-    // rather than a filter merely coming back from somewhere.
     expect(reads).toContain('sys_record_share');
-    expect(reads.filter((o) => o === 'crm_account')).toHaveLength(1);
     expect(reads).not.toContain('crm_contact');
   });
 
@@ -718,8 +766,9 @@ describe('[#5815] getReadFilter enforces the same read scope as the engine middl
  * 2026-08-15 supersedes #7474's envelope choice for one of its two shapes. An
  * INSERT that omits the FK is handed to required-field validation (`400
  * VALIDATION_FAILED` with `fields[]`) wherever validation provably refuses it;
- * the row above still holds for the stored-row shape and for the three
- * declarations validation does not cover. The insert leg below was rewritten
+ * the row above still holds for the stored-row shape. [#25095] Of the three
+ * declarations validation does not cover, the two flagged ones now answer an
+ * insert `422 INVALID_METADATA` instead (the third resolves no relation). The insert leg below was rewritten
  * for that ruling, not adjusted to match observed behaviour — the successor
  * asserts both sides of the condition.
  */
@@ -917,7 +966,7 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
   });
 
   /**
-   * [#8688] The three shapes the stand-down deliberately does NOT cover.
+   * [#8688] The shapes the stand-down deliberately does NOT cover.
    *
    * `validateRecord` skips provenance-flagged fields before the required check
    * (`if (def.system || def.readonly) continue;`) and never fires on a field
@@ -926,23 +975,28 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
    * (`fk IN (readable masters)`), so readable by nobody, and answering 422 on
    * every later by-id write. Each case asserts BOTH halves: the gate still
    * refuses, AND the real validator raises nothing, which is why it must.
+   *
+   * [#25095] The gate's answer for the two flagged shapes moved: the parse
+   * refuses the declaration (`master-not-writable`), and the gate refuses every
+   * insert under it as that defect, `422 INVALID_METADATA` with the parse's own
+   * message, before the empty-master branch is reached.
    */
   it.each([
     ['`required` + `readonly`', 'master-readonly' as const, CONTACT_SCHEMA_MASTER_READONLY],
     ['`required` + `system`', 'master-system' as const, CONTACT_SCHEMA_MASTER_SYSTEM],
-  ])('[#8688] 422 MISSING_REQUIRED_FIELD survives on insert: %s', async (_label, detail, schema) => {
+  ])('[#8688 → #25095] the gate still refuses an insert omitting the master: %s', async (_label, detail, schema) => {
     const payload = { name: 'New contact' };
 
     // Validation does not cover this shape — nothing downstream would refuse.
     expect(() => validateRecord(schema as any, payload, 'insert')).not.toThrow();
 
-    // …so the gate keeps answering, in the envelope and wording it always had.
+    // …so the gate answers, as the declaration defect the parse refuses.
     const h = await boot({ shareLevel: 'edit', detail });
     const err = await refusalOf(h.insertContact(payload));
-    expect(err.code).toBe('MISSING_REQUIRED_FIELD');
+    expect(err.code).toBe('INVALID_METADATA');
     expect(err.status).toBe(422);
     expect(err.statusCode).toBe(422);
-    expect(err.message).toContain("did not supply 'account'");
+    expect(err.message).toContain(controlledByParentMasterRefusal(schema.name, schema.sharingModel, schema.fields)!.message);
     expect(err.message).not.toContain('requires edit access to its master record');
   });
 

@@ -26,6 +26,11 @@
  *    it, so it is no limit of this transport) and is still skipped.
  * 3. The local and embedded-replica faces declare no limit for any op: their
  *    apply door is the SQL driver's.
+ * 4. A unique index its rows already violate is a limit of THAT entry, not of
+ *    its op type: on the local and the remote face alike the shared duplicate
+ *    pre-flight declares it on the entry (`applyLimit`, naming the conflicting
+ *    group), `driftApplyLimit('create_index')` still answers `null`, and the
+ *    apply door skips the entry.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -165,4 +170,39 @@ describe('the local and embedded-replica faces declare no limit: their apply doo
     for (const type of OP_TYPES) expect(driver.driftApplyLimit(type), type).toBeNull();
     stub.close();
   });
+});
+
+describe('a unique index its rows violate: a limit of the entry, declared on both faces', () => {
+  /** `code` is declared unique; two rows already share a value. */
+  const QUOTE = { name: 'quote', tenancy: { enabled: false }, fields: { code: { type: 'text', unique: true } } };
+
+  async function seedDuplicates(file: string): Promise<void> {
+    const setup = createClient({ url: `file:${file}` });
+    await setup.execute('CREATE TABLE "quote" ("id" TEXT PRIMARY KEY, "created_at" TEXT, "updated_at" TEXT, "code" TEXT)');
+    await setup.execute(`INSERT INTO "quote" ("id", "code") VALUES ('q1', 'Q-1'), ('q2', 'Q-1')`);
+    setup.close();
+  }
+
+  for (const face of ['local', 'remote'] as const) {
+    it(face, async () => {
+      const file = nextFile();
+      await seedDuplicates(file);
+      const driver = face === 'local' ? new TursoDriver({ url: `file:${file}` }) : await remoteOver(file);
+      if (face === 'local') {
+        open.push({ driver, client: null });
+        await driver.connect();
+      }
+      expect(driver.transportMode).toBe(face);
+
+      const [entry, ...rest] = op(await driver.detectManagedDrift([QUOTE]), 'create_index');
+      expect(rest).toEqual([]);
+      expect(entry!.category).toBe('destructive');
+      expect(entry!.applyLimit).toContain('code="Q-1"');
+      expect(driver.driftApplyLimit('create_index')).toBeNull();
+
+      const { applied, skipped } = await driver.applyMigrationEntries([entry!], { allowDestructive: true });
+      expect(applied).toEqual([]);
+      expect(skipped).toEqual([entry]);
+    });
+  }
 });

@@ -5,12 +5,13 @@ import type { SettingsManifest } from '@objectstack/spec/system';
 /**
  * Company — the workspace's legal organization identity.
  *
- * Distinct from `branding` (the public-facing workspace name / logo / theme):
- * this is the **legal entity** — registered name, address, tax IDs, and the
- * primary contact. Downstream consumers are invoices/receipts, email footers
- * (CAN-SPAM requires a physical postal address), contracts, and compliance
- * exports. Benchmarked against Salesforce "Company Information" and Stripe's
- * business profile.
+ * Distinct from `branding` (the product name / logo / accent colour the console
+ * shows; not offered under the walled `group` / `isolated` postures): this is
+ * the **legal entity** — registered name, address, tax IDs, and the primary
+ * contact. Downstream consumers are invoices/receipts, email footers (CAN-SPAM
+ * requires a physical postal address), contracts, and compliance exports.
+ * Benchmarked against Salesforce "Company Information" and Stripe's business
+ * profile.
  *
  * Scope is `tenant`: one org per physical tenant (ADR-0002).
  */
@@ -30,7 +31,7 @@ export const companySettingsManifest: SettingsManifest = {
     { type: 'group', id: 'identity', label: 'Identity', required: false },
     {
       type: 'text', key: 'legal_name', label: 'Legal name', required: false,
-      description: 'Registered legal name of the organization (may differ from the organization name set under Branding).',
+      description: 'Registered legal name of the organization, as it appears on contracts and invoices.',
       maxLength: 200,
     },
     {

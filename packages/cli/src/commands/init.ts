@@ -128,120 +128,38 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  * states, keyed `<declaring package>><peer>` — pnpm's scoped `allowedVersions`
  * spelling, so each entry widens exactly one declaration and nothing else.
  *
- * Every one of them is reported by `pnpm install` on a brand-new scaffold, and
- * none is a real incompatibility. They are declared here because that report is
- * the first thing a newcomer sees, on the one screen where they are deciding
- * whether this project is solid, and there is nothing they did to cause it.
+ * An entry belongs here only while `pnpm install` on a brand-new scaffold
+ * reports that skew and the skew is measured harmless: that report is the first
+ * thing a newcomer sees, on the one screen where they are deciding whether this
+ * project is solid, and there is nothing they did to cause it. An entry whose
+ * skew is gone retires at once — a suppression with no skew behind it leaves
+ * the NEXT real skew pre-silenced.
  *
- *  - `better-auth>better-sqlite3` — better-auth peers `^12.0.0` while the tree
- *    resolves 13.x. The peer is OPTIONAL and governs one configuration only: a
- *    raw better-sqlite3 `Database` handed to better-auth's `database` option.
- *    ObjectStack never does that — `AuthManager.createDatabaseConfig()` passes
- *    an ObjectQL adapter factory (or `undefined`, better-auth's own in-memory
- *    adapter). So the upstream range is stale and 13 is right — widening is
- *    the correct remedy, not pinning our own declaration back to 12.
+ * EMPTY today, so `renderPnpmWorkspaceYaml` emits no `peerDependencyRules`
+ * block at all. Every entry this map has carried is retired, each read on the
+ * better-auth `1.7.12` pin off the lockfile's `peerDependencies` blocks and
+ * the published manifests:
  *
- *    RE-MEASURED on the pinned 1.7.2 (#16813). The original reading was taken
- *    on 1.7.1 (commit 675ab574e) and was behavioural: better-auth's own Kysely dialect —
- *    migrations, sign-up, sign-in, adapter find/update/delete — behaves
- *    identically on better-sqlite3 13.0.3 and on 12.11.1. 1.7.2 makes that
- *    structural instead of empirical: of the 464 files in the published
- *    `better-auth@1.7.2` tarball, exactly ONE names better-sqlite3 —
- *    `package.json`, i.e. the peer declaration itself. Zero code files
- *    reference it (positive control: `kysely` names 9). better-auth never
- *    imports the package; it accepts a `Database` the CALLER constructs and
- *    hands it to Kysely, and its own sqlite test path uses node's built-in
- *    `node:sqlite` `DatabaseSync`. There is therefore no better-auth call site
- *    that could touch an API moved between better-sqlite3 12 and 13 — the
- *    range is a statement about an instance we never supply. Re-read
- *    2026-09-11 on the 1.7.3 pin (the rendered file's prose carried this
- *    reading until it shrank to one line per block): the published package
- *    still names better-sqlite3 only in that peer declaration.
+ *  - RETIRED: `better-auth>better-sqlite3` (`'13'`). better-auth used to peer
+ *    an optional `better-sqlite3@^12.0.0` while the tree resolves 13.x (1.7.3
+ *    still declared it). `better-auth@1.7.12` declares no better-sqlite3 peer
+ *    at all, so there is nothing left to widen. The CLI's own 13.x declaration
+ *    is held by `test/better-sqlite3-peer-declaration.pin.test.ts`.
  *
- *    ⚠️ TWO CORRECTIONS to what this entry used to say, both measured:
- *      • the 13.x copy better-auth binds to is `@objectstack/cli`'s OWN
- *        `optionalDependencies` entry, NOT `@objectstack/driver-sql`'s. On the
- *        chain that actually reports (`cli` → `runtime` → `plugin-auth` →
- *        `better-auth`) the CLI is the ancestor, so its copy is the one pnpm
- *        resolves the peer against — pnpm names it in the warning itself
- *        ("found 13.0.3 in @objectstack/cli"). Editing driver-sql alone would
- *        not move this line.
- *      • pinning the CLI back to `^12` is not a neutral alternative. Measured
- *        on a bare project depending on `@objectstack/cli@17.3.0`, it clears
- *        the report only by installing a SECOND native better-sqlite3
- *        (12.11.1 alongside 13.0.3), and the 12 copy is dead weight — the CLI
- *        loads better-sqlite3 itself (`src/utils/sqlite-occupancy.ts`) and
- *        knex resolves 13.x through driver-sql regardless. This
- *        `allowedVersions` entry clears the same report with the resolution
- *        byte-identical (0 lines of lockfile diff).
+ *  - RETIRED: `@better-auth/core`, `/oauth-provider`, `/scim` and `/sso`, each
+ *    `>@better-auth/utils` (`'0.5.0'`). The four used to peer an EXACT
+ *    `@better-auth/utils@0.4.2` while the tree resolves 0.5.0. At 1.7.12 all
+ *    four peer `^0.4.2 || ^0.5.0`, which the resolved 0.5.0 satisfies.
  *
  *  - RETIRED (#3653): `@better-auth/scim>better-call` — the rc.1-era scim pin
- *    peered an exact `better-call@1.3.7` against the host's 1.4.0, and this
- *    map declared that skew away. Stable scim peers `better-call@1.4.0`, so
- *    the skew is genuinely gone and the entry retired WITH the pin move, as
- *    its ratchet demanded. Measured on 1.7.1 when #3653 landed; re-read
- *    2026-09-12 on `1.7.3`, the pin today, off the installed manifest —
- *    `peerDependencies['better-call']` is the exact string `1.4.0`.
+ *    peered an exact `better-call@1.3.7` against the host's 1.4.0. Stable
+ *    scim peers better-call exactly at the version the tree resolves: the
+ *    string `1.4.4` on the 1.7.12 pin today.
  *
- *  - `<four>@better-auth/utils` — `@better-auth/core`, `/oauth-provider`,
- *    `/scim` and `/sso` each peer an EXACT `@better-auth/utils@0.4.2`, while a
- *    scaffolded tree hands them 0.5.0. The 0.5.0 comes from `better-call@1.4.0`
- *    (better-auth's own HTTP layer), which DEPENDS on `^0.5.0`;
- *    `@objectstack/plugin-auth` names the four packages as direct dependencies
- *    without naming utils, so pnpm satisfies their peer from better-call's copy
- *    rather than from better-auth's own exact 0.4.2 dependency.
- *
- *    Measured compatible rather than assumed. Those four import exactly three
- *    symbols across two subpaths — `base64`/`base64Url` (`/base64`),
- *    `createHash` (`/hash`) and, in core only, `createRandomStringGenerator`
- *    (`/random`). 0.5.0 exports all three with identical signatures; `/random`
- *    is unchanged apart from formatting, `/base64` swaps `new Uint8Array(data)`
- *    for a helper that IS `new Uint8Array(data)` on non-strings, and `/hash`
- *    only widens its input coercion for views not backed by a plain
- *    ArrayBuffer. Run against the input shapes those call sites actually pass,
- *    0.4.2 and 0.5.0 agree on every value; run end to end (better-auth with the
- *    sso, oauth-provider and scim plugins), a tree where the four resolve 0.5.0
- *    and one where they resolve 0.4.2 produce the same transcript — sign-up,
- *    sign-in, session, both OAuth metadata documents, the RFC 7636 PKCE
- *    challenge, and the SCIM and SSO endpoint outcomes.
- *
- *    ⛔ A resolution change is the WRONG remedy here, and was measured too:
- *    pinning utils back to 0.4.2 clears the four lines only by dragging
- *    `better-call@1.4.0` off its own declared `^0.5.0` — manufacturing one real
- *    range violation to silence four benign ones.
- *
- *    Spelled `0.5.0` exactly, not `0.5`: 0.5.0 is the version that was
- *    measured, and a future 0.6.0 SHOULD report again rather than inherit this
- *    finding.
- *
- *    ⚠️ These four do NOT retire with the SCIM rc pin, even though one of them
- *    names scim. Stable `@better-auth/scim@1.7.3` still peers
- *    `@better-auth/utils@0.4.2` EXACTLY — re-read (2026-09-11) off the
- *    installed package manifest, unchanged from 1.7.1 and 1.7.2 — so this skew
- *    outlives that pin. They retire
- *    when the four packages accept 0.5.0 upstream, or when
- *    `SCAFFOLD_PNPM_RANGE` reaches `>=10.31` — pnpm 10.31 changed peer
- *    resolution so that all four land on 0.4.2 by themselves. Measured on the
- *    rendered scaffold, one clean resolve per pnpm version:
- *
- *      pnpm 10.15.0 – 10.30.0   all four reported as unmet peers.
- *      pnpm >= 10.31.0          resolved to 0.4.2; nothing to report.
- *
- * `allowedVersions` suppresses the report ONLY; it moves no resolution — the
- * lockfile a scaffold resolves is byte-identical with and without this block
- * (verified by digest on pnpm 10.15.0 and 10.30.0).
+ * `allowedVersions` suppresses the report ONLY; it moves no resolution, so a
+ * retirement leaves the lockfile a scaffold resolves unchanged.
  */
-export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
-  'better-auth>better-sqlite3': '13',
-  // '@better-auth/scim>better-call' retired with the scim rc pin (#3653) —
-  // stable scim peers better-call@1.4.0 exactly (re-read 2026-09-12 on the
-  // 1.7.3 pin), the copy every install already resolves. init.test.ts pins
-  // its ABSENCE now.
-  '@better-auth/core>@better-auth/utils': '0.5.0',
-  '@better-auth/oauth-provider>@better-auth/utils': '0.5.0',
-  '@better-auth/scim>@better-auth/utils': '0.5.0',
-  '@better-auth/sso>@better-auth/utils': '0.5.0',
-};
+export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {};
 
 /**
  * Lowest pnpm that can actually install this scaffold, declared as
@@ -435,12 +353,88 @@ export const SCAFFOLD_TYPESCRIPT_RANGE = '^5.3.0';
 export const SCAFFOLD_VITEST_RANGE = '~4.1.12';
 
 /**
+ * The npm `overrides` SELECTOR that routes `uuid` out of GHSA-w5hq-g745-h8pq,
+ * and the range it routes to ({@link SCAFFOLD_UUID_OVERRIDE_RANGE}).
+ *
+ * The advisory affects `uuid` below 11.1.1 (and 12.0.0 and 13.0.0, fixed in
+ * 12.0.1 and 13.0.1). A scaffold reaches it through ONE edge:
+ * `@objectstack/cli`, `@objectstack/runtime`, `@objectstack/plugin-auth` and
+ * `@objectstack/verify` depend on `@objectstack/rest`, which depends on
+ * `exceljs ^4.4.0`, which depends on `uuid ^8.3.0`. exceljs
+ * 4.4.0 is its newest release, and its only later one, `4.4.1-prerelease.0`,
+ * declares `uuid ^8.3.0` too, so no exceljs upgrade leaves the 8.x line.
+ *
+ * Why the scaffold and not `@objectstack/rest` itself: npm reads `overrides`
+ * only from the ROOT manifest of an install. Measured 2026-10-22, each manifest
+ * in an empty directory with a fresh `--cache`: the published
+ * `@objectstack/rest` 18.0.0 repacked with `"overrides": { "uuid": "^11.1.1" }`
+ * and installed as a dependency still resolves `uuid` 8.3.2 on npm 10.9.9 and
+ * 11.21.1, and `npm audit` reports the same 3 entries as the unmodified
+ * package. The monorepo's own `pnpm-workspace.yaml` override (the same
+ * selector and range as here) has the same limit: it never reaches an npm
+ * consumer. This block reaches the projects the scaffolders create, and no
+ * other npm consumer of `@objectstack/rest`.
+ *
+ * The selector is `uuid@<12.0.0`, not a bare `uuid`, so that it rewrites only
+ * edges that can resolve below the fix, and it stops at the major boundary so
+ * that a later advisory on the 11.x line moves the range alone. It also leaves
+ * a project free to add a newer `uuid` of its own. Measured on a consumer of
+ * the published `@objectstack/rest` 18.0.0, npm 10.9.9 and 11.21.1: with this
+ * selector, a later `npm install uuid@14` exits 0, declares `^14.0.3`, and
+ * exceljs keeps `uuid` 11.1.1; with a bare `uuid` key it exits 1 with
+ * `EOVERRIDE`. A spec-less `npm install uuid` exits 1 with `EOVERRIDE:
+ * Override for uuid@* conflicts with direct dependency` under either key,
+ * because npm reads it as `uuid@*`, which meets `<12.0.0`. Naming the major is
+ * the fix, the same cost the `vitest` entry carries.
+ *
+ * Safe at runtime because exceljs calls exactly one `uuid` export, `v4()`, with
+ * no arguments (`lib/xlsx/xform/sheet/cf-ext/cf-rule-ext-xform.js`), and
+ * `uuid` 11 keeps it. The monorepo's own suites already run exceljs on `uuid`
+ * 11.1.1 through the workspace override.
+ */
+export const SCAFFOLD_UUID_OVERRIDE_SELECTOR = 'uuid@<12.0.0';
+
+/**
+ * The `uuid` range {@link SCAFFOLD_UUID_OVERRIDE_SELECTOR} routes to: the
+ * `legacy-11` line from its first release outside GHSA-w5hq-g745-h8pq, the
+ * same target as the workspace override, so a scaffold resolves the `uuid` the
+ * monorepo's own exceljs suites run on.
+ *
+ * Measured 2026-10-22, each manifest in an empty directory with a fresh
+ * `--cache`, the `@objectstack/*` ranges resolving to the published 18.0.0
+ * (blank template, `os init -t app`, `-t plugin` and `-t empty`):
+ *
+ *   without the entry   npm 10.9.9, 11.21.1   exit 0, `uuid` 8.3.2; `npm
+ *                                             audit` reports 9 moderate entries,
+ *                                             all GHSA-w5hq-g745-h8pq
+ *   with the entry      npm 10.9.9, 11.21.1   exit 0, `uuid` 11.1.1; `npm
+ *                                             audit` lists no `uuid` entry
+ *
+ * `os create plugin` has no `@objectstack/rest` in its closure and audits
+ * clean either way; the entry is inert there. Under the entry, exceljs's
+ * buffered write (with a rule that calls `v4()`), its streaming
+ * `WorkbookWriter`, its buffered load and `@objectstack/rest`'s own
+ * `parseXlsxToRows` ran on the installed tree, on both npm versions.
+ *
+ * The re-check that lets this go: `npm ls uuid --all` in an emitted `-t app`
+ * install WITHOUT the entry, on the newest npm 10 and on npm 11. When no path
+ * resolves a `uuid` inside the advisory's range, delete it here, in
+ * {@link SCAFFOLD_NPM_OVERRIDES}, and its `POLICY_STAMPS` row together.
+ */
+export const SCAFFOLD_UUID_OVERRIDE_RANGE = '^11.1.1';
+
+/**
  * The npm `overrides` block every STANDALONE scaffold emits: `os init`'s three
  * templates, `os create plugin` outside the monorepo, and — by generation, not
- * import — `create-objectstack`'s bundled template (the `overrides.vitest` row
- * in `scripts/sync-scaffold-emission-policy.mjs`'s `POLICY_STAMPS`).
+ * import — `create-objectstack`'s bundled template (the `overrides.vitest` and
+ * `overrides.uuid@<12.0.0` rows in `scripts/sync-scaffold-emission-policy.mjs`'s
+ * `POLICY_STAMPS`).
  *
- * Why it exists. vitest 4.1.12 (published 2026-10-15) peers
+ * It carries two entries with two reasons. `uuid` is the advisory route on
+ * {@link SCAFFOLD_UUID_OVERRIDE_SELECTOR}. The rest of this comment is about
+ * `vitest`.
+ *
+ * Why the `vitest` entry exists. vitest 4.1.12 (published 2026-10-15) peers
  * `@vitest/browser-webdriverio ^4.1.11`, and that package's only match, 4.1.11,
  * peers `vitest: 4.1.11` exactly — a peer set that contradicts itself. A
  * scaffold reaches it through its own root vitest, now that the range is
@@ -487,6 +481,7 @@ export const SCAFFOLD_VITEST_RANGE = '~4.1.12';
  */
 export const SCAFFOLD_NPM_OVERRIDES: Readonly<Record<string, string>> = Object.freeze({
   vitest: SCAFFOLD_VITEST_RANGE,
+  [SCAFFOLD_UUID_OVERRIDE_SELECTOR]: SCAFFOLD_UUID_OVERRIDE_RANGE,
 });
 
 /** The `@types/node` range a scaffolded project declares. */
@@ -570,7 +565,8 @@ export function renderScaffoldPackageJson(
     dependencies: template.dependencies,
     devDependencies: template.devDependencies,
     // Every template, whether or not it declares vitest itself — without it
-    // npm 10 cannot install any of them (see SCAFFOLD_NPM_OVERRIDES).
+    // npm 10 cannot install any of them, and `npm audit` reports the `uuid`
+    // advisory exceljs pulls in (see SCAFFOLD_NPM_OVERRIDES).
     overrides: { ...SCAFFOLD_NPM_OVERRIDES },
   };
 }
@@ -618,8 +614,9 @@ export function renderScaffoldPackageJson(
  *   allowBuilds             and `SCAFFOLD_BUILT_DEPENDENCIES` (why each
  *                           package needs its build).
  *   peerDependencyRules     `SCAFFOLD_ALLOWED_PEER_VERSIONS`: one measured
- *                           paragraph per entry, its retirement condition,
- *                           and the retired `@better-auth/scim>better-call`.
+ *                           paragraph per entry and the retired entries.
+ *                           Emitted only while that map is non-empty; it is
+ *                           empty today, so the block is absent.
  *
  * The file carried 57 comment lines here, and 66 in the template, until the
  * maintainer asked for it to stay minimal with the rationale moved into the
@@ -1005,6 +1002,45 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
 });
 
 export default ${toCamelCase(namespace)}Item;
+`,
+      // The starter test the `test` script above runs (#25175). Without a test
+      // file, `vitest run` exits 1 with "No test files found", so a fresh
+      // project failed its own `npm test`. It loads the package's stack —
+      // `defineStack`'s strict parse, the protocol's own refusal path — and
+      // asserts what a host receives: a `plugin` that hands every object the
+      // `src/objects` barrel exports to the stack. It deliberately boots no
+      // engine: that needs `@objectstack/verify` declared and a vitest config
+      // for the boot's timeout and logs, and the comment points the author at
+      // the documented harness for that step instead.
+      // `test/scaffold-test-script-passes.test.ts` runs it in a sandbox, and
+      // `test/scaffold-emission-typechecks.test.ts` type-checks it.
+      'package.test.ts': () => `import { describe, expect, it } from 'vitest';
+import stack from './objectstack.config';
+import * as objects from './src/objects';
+
+// This package is the stack objectstack.config.ts exports: what another stack
+// receives when it loads the package. Importing that file runs defineStack(),
+// which checks the definition against the ObjectStack protocol and throws on
+// anything the protocol refuses, so a definition another stack would refuse
+// fails this file before any test in it runs.
+//
+// The test below reads what the package declares. To test what the engine
+// does with a record, such as refusing an item saved without its required
+// name, boot the stack with @objectstack/verify:
+// https://objectstack.ai/docs/protocol/kernel/plugin-spec#plugin-testing
+describe('this package', () => {
+  it('is a plugin that hands every object in src/objects to the stack', () => {
+    expect(stack.manifest?.type).toBe('plugin');
+
+    // An object src/objects/index.ts exports is loaded only when the config
+    // hands it to the stack. One the config drops is never loaded, and
+    // \`objectstack validate\` neither counts nor checks it.
+    const loaded = (stack.objects ?? []).map((object) => object.name);
+    for (const object of Object.values(objects)) {
+      expect(loaded).toContain(object.name);
+    }
+  });
+});
 `,
     }),
   },

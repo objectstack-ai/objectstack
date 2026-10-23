@@ -21,8 +21,10 @@ import { SqliteWasmDriver } from '../src/index.js';
  *
  *  1. Flushes must be ATOMIC. A non-atomic overwrite torn by a mid-write kill
  *     left "database disk image is malformed" on the next boot.
- *  2. An already-corrupt on-disk image must SELF-HEAL: quarantine the bad file
- *     and boot on a fresh database instead of failing every query forever.
+ *  2. An already-corrupt on-disk image is REFUSED at connect, naming the file,
+ *     and left exactly as it was found (#25019). It used to self-heal: the open
+ *     renamed it to `<file>.corrupt-<timestamp>` and booted on an empty
+ *     database, which read as connected over an operator's file it replaced.
  *  3. `undefined` bindings must persist as SQL NULL rather than throwing sql.js's
  *     raw-string "Wrong API use : tried to bind a value of an unknown type".
  */
@@ -70,11 +72,11 @@ describe('SqliteWasmDriver durability & resilience', () => {
     expect(rows[0].name).toBe('A');
   });
 
-  it('self-heals a corrupt database image by quarantining it and booting fresh', async () => {
+  it('refuses a corrupt database image at connect, naming the file, and leaves it as it was found', async () => {
     const dir = newDir();
     const file = join(dir, 'corrupt.db');
     // A file that starts with the SQLite magic header but is otherwise garbage:
-    // sql.js opens it, then blows up on the first page read ("malformed").
+    // sql.js opens it, then fails the first page read.
     const junk = Buffer.concat([
       Buffer.from('SQLite format 3\0', 'binary'),
       Buffer.alloc(4096, 0xab),
@@ -90,18 +92,21 @@ describe('SqliteWasmDriver durability & resilience', () => {
       }),
     );
 
-    // Boot must succeed and queries must work on the fresh database.
-    await driver.initObjects([{ name: 'acct', fields: { name: { type: 'string' } } }]);
-    await (driver as any).knex('acct').insert({ id: 'a1', name: 'healed' });
-    const rows = await (driver as any).knex('acct');
-    expect(rows.length).toBe(1);
+    let refusal: any;
+    await driver.connect().catch((e: unknown) => { refusal = e; });
+    expect(refusal?.name).toBe('SqliteDatabaseFileError');
+    expect(refusal?.code).toBe('SQLITE_NOTADB');
+    expect(refusal?.filename).toBe(file);
+    expect(String(refusal?.message)).toContain(`'${file}'`);
+    // The prescription: the operator moves the file aside, since the open no longer does.
+    expect(String(refusal?.message)).toContain(
+      `move the file aside yourself (mv '${file}' '${file}.unreadable')`,
+    );
 
-    // The corrupt bytes were preserved in a sibling quarantine file, and a
-    // warning was surfaced.
-    const quarantined = readdirSync(dir).filter((f) => f.includes('.corrupt-'));
-    expect(quarantined.length).toBe(1);
-    expect(readFileSync(join(dir, quarantined[0]))).toEqual(junk);
-    expect(warnings.some((w) => w.includes('corrupt'))).toBe(true);
+    // Nothing renamed, nothing written beside it, the bytes untouched.
+    expect(readdirSync(dir)).toEqual(['corrupt.db']);
+    expect(readFileSync(file)).toEqual(junk);
+    expect(warnings.some((w) => w.includes('Quarantined'))).toBe(false);
   });
 
   it('persists an undefined binding as SQL NULL instead of throwing', async () => {

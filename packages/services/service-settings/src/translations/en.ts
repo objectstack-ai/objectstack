@@ -98,7 +98,7 @@ export const en: PlatformTranslationData = {
         contact: { title: 'Contact' },
       },
       keys: {
-        legal_name: { label: 'Legal name', help: 'Registered legal name (may differ from the organization name set under Branding).' },
+        legal_name: { label: 'Legal name', help: 'Registered legal name of the organization, as it appears on contracts and invoices.' },
         registration_number: { label: 'Registration number', help: 'Company registration / incorporation number (e.g. EIN).' },
         tax_id: { label: 'Tax / VAT ID', help: 'Shown on invoices (e.g. VAT, GST, ABN).' },
         address_line1: { label: 'Address line 1' },

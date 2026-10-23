@@ -51,23 +51,30 @@
  * object is read: no caller-scoped read of it happens, so its middleware
  * logs no denial for it.
  *
- * ## The bounded probe (ADR-0139 D5): three classes, by name, chosen up front
+ * ## A delegated caller reads through the leaf (ADR-0139 D5.1, as amended)
  *
- * The engine refuses to compose a leaf for three classes (`INTERNAL_ERROR` /
+ * A delegated (on-behalf-of) caller (ADR-0090 D10) is no class of its own: it
+ * gets the same leaves and the same probed parents as any caller. The engine
+ * composes each leaf with the delegated context exactly as it stands, and the
+ * security service answers both halves for it as the INTERSECTION of the
+ * principal's leg and the delegator's — the scope a delegated direct read of
+ * the parent is narrowed by, which is what the probe reads. ⛔ This module
+ * reads no delegation link: the context is passed on, never inspected.
+ *
+ * ## The bounded probe (ADR-0139 D5): two classes, by name, chosen up front
+ *
+ * The engine refuses to compose a leaf for two classes (`INTERNAL_ERROR` /
  * 500). This module routes each to the bounded probe BEFORE any leaf is
  * written — ⛔ never by catching that refusal:
  *
- *  1. **A delegated (on-behalf-of) caller** (ADR-0090 D10): the security
- *     service's read scope does not carry the delegator intersection, so no
- *     leaf is written at all; the whole read is the probe.
- *  2. **A parent an object-scoped read middleware narrows**
- *     (`hasObjectMiddleware`): its WHERE is built at read time and is no part
- *     of its read scope, so a leaf would be wider than a direct read.
- *  3. **A federated parent**, bound to another datasource than the gated
- *     object (`resolveEffectiveDatasource`): no driver evaluates a subquery
- *     across two datasources. On a deployment that registers the `telemetry`
- *     datasource, that is every parent of a ledger the lifecycle split routes
- *     there.
+ *  1. **A parent an object-scoped read middleware narrows**
+ *     (`hasObjectMiddleware`, D5.2): its WHERE is built at read time and is
+ *     no part of its read scope, so a leaf would be wider than a direct read.
+ *  2. **A federated parent** (D5.3), bound to another datasource than the
+ *     gated object (`resolveEffectiveDatasource`): no driver evaluates a
+ *     subquery across two datasources. On a deployment that registers the
+ *     `telemetry` datasource, that is every parent of a ledger the lifecycle
+ *     split routes there.
  *
  * Two more states send the WHOLE read to the probe, up front, and the gate
  * says so once for each:
@@ -100,7 +107,7 @@
  *
  * Beyond the bound the probe fails CLOSED: the un-scanned rows are excluded,
  * and a warning says so. A probe that throws denies the whole read, and says
- * so. Restricted to the parents of classes 2 and 3, its window holds only the
+ * so. Restricted to the parents of the two classes, its window holds only the
  * rows naming those parents.
  *
  * ## What the read's own refusal does (ADR-0139 D3)
@@ -217,12 +224,12 @@ export const PARENT_GATE_SCAN_LIMIT = 2_000;
 
 /**
  * Why a parent object is read through the bounded probe and not as a
- * `ReadableIds` leaf — ADR-0139 D5's three classes, by name, plus the engine
- * that cannot tell. Every value is decided before any leaf is written.
+ * `ReadableIds` leaf — ADR-0139 D5's two remaining classes, by name, plus the
+ * two states in which the gate cannot write a leaf at all. Every value is
+ * decided before any leaf is written. A delegated caller is none of them
+ * (D5.1, as amended: the engine composes its leaf; module header).
  */
 export type ParentProbeClass =
-  /** D5.1 — an on-behalf-of caller: the whole read is the probe. */
-  | 'delegated-caller'
   /** D5.2 — an object-scoped read middleware narrows this parent. */
   | 'object-middleware'
   /** D5.3 — this parent is bound to another datasource than the gated object. */
@@ -236,11 +243,11 @@ export type ParentProbeClass =
 
 /**
  * How one read reaches its parents: the parent objects written as leaves, and
- * the ones the probe reads, each with its class — or the one class that sends
+ * the ones the probe reads, each with its class — or the one state that sends
  * the whole read to the probe.
  */
 export type ParentReadPlan =
-  | { probeWholeRead: 'delegated-caller' | 'engine-cannot-classify' | 'no-object-admission' }
+  | { probeWholeRead: 'engine-cannot-classify' | 'no-object-admission' }
   | {
       probeWholeRead: null;
       /** One `ReadableIds` leaf each, in name order. */
@@ -341,14 +348,6 @@ export function parseParentRecord(
   return { object, recordId: String(recordId) };
 }
 
-/**
- * Whether `context` reads on behalf of another user (ADR-0090 D10) — the
- * engine's own test for D5's first class, so the two agree by construction.
- */
-function isDelegatedCaller(context: CommentReadMiddlewareCtx['context']): boolean {
-  return Boolean((context as { onBehalfOf?: { userId?: unknown } } | undefined)?.onBehalfOf?.userId);
-}
-
 /** The machine names a comparand on `object_name` confines a row to, or `null` for a shape not read. */
 function confinedObjectNames(comparand: unknown): string[] | null {
   const machineName = (v: unknown): v is string => typeof v === 'string' && OBJECT_NAME_RE.test(v);
@@ -434,21 +433,21 @@ export function enumerateParentObjects(
 }
 
 /**
- * [ADR-0139 D4, D5] How one read of `gate.object` by `context` reaches its
- * parents. Reads the context, whether the security service answers
- * `canReadObject` (`objectAdmission`, resolved by the caller), the read's own
- * `where` (the parents it names), the registry, the middleware registrations
- * and the datasource bindings only — it asks the security service nothing and
- * reads no row, so it decides the probe up front, never by catching a refusal.
+ * [ADR-0139 D4, D5] How one read of `gate.object` reaches its parents. Reads
+ * whether the security service answers `canReadObject` (`objectAdmission`,
+ * resolved by the caller), the read's own `where` (the parents it names), the
+ * registry, the middleware registrations and the datasource bindings only — it
+ * asks the security service nothing and reads no row, so it decides the probe
+ * up front, never by catching a refusal. It reads nothing of the caller: the
+ * plan is the same for every caller, a delegated one included (D5.1, as
+ * amended).
  */
 export function planParentReads(
   engine: ParentRecordGateEngine,
   gate: ParentRecordGate,
-  context: CommentReadMiddlewareCtx['context'],
   objectAdmission: boolean,
   where?: unknown,
 ): ParentReadPlan {
-  if (isDelegatedCaller(context)) return { probeWholeRead: 'delegated-caller' };
   if (!objectAdmission) return { probeWholeRead: 'no-object-admission' };
   const parents = enumerateParentObjects(engine, gate, where);
   const hasObjectMiddleware = engine.hasObjectMiddleware;
@@ -679,10 +678,8 @@ export async function computeParentRecordFilter(
 
   // 1. Leaf or probe, per parent object the read can be about, before any
   //    branch is written. The read's own `where`, as it reached this gate.
-  const plan = planParentReads(engine, gate, ctx.context, hasObjectAdmission(getAdmission), ctx.ast?.where);
-  if (plan.probeWholeRead === 'engine-cannot-classify' || plan.probeWholeRead === 'no-object-admission') {
-    reportWholeReadProbeOnce(engine, logger, gate, plan.probeWholeRead);
-  }
+  const plan = planParentReads(engine, gate, hasObjectAdmission(getAdmission), ctx.ast?.where);
+  if (plan.probeWholeRead !== null) reportWholeReadProbeOnce(engine, logger, gate, plan.probeWholeRead);
 
   const branches: Array<Record<string, unknown>> = [];
   // 2. One ReadableIds leaf per composable parent object (ADR-0139 D4).

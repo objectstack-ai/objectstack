@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@objectstack/lint": "workspace:*",
+    "@objectstack/plugin-security": "workspace:*",
     "@types/node": "^26.6.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

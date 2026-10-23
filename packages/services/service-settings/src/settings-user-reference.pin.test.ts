@@ -20,6 +20,7 @@ import { SysUser } from '@objectstack/platform-objects/identity';
 import { SysPlatformSetting, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 import { SettingsService } from './settings-service.js';
 import { buildSettingAuditWriter, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
+import { withEngineRegistry } from './__tests__/settings-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as const;
 const GHOST = 'usr_ghost_21913';
@@ -97,7 +98,7 @@ const MANIFEST = {
 function settings(): SettingsService {
   const svc = new SettingsService();
   svc.registerManifest(MANIFEST);
-  svc.bindEngine(wrapEngineAsSettingsEngine(engine as any));
+  svc.bindEngine(withEngineRegistry(wrapEngineAsSettingsEngine(engine as any), engine));
   return svc;
 }
 

@@ -481,7 +481,7 @@ describe('templates survive npm packing', () => {
 // ratcheted there. The two are one file (#22162): the same bytes, one comment
 // line per block, held by packages/cli/test/scaffold-workspace-consistency.test.ts.
 // So the measurements behind every block of this file — the pnpm version table,
-// why each build is approved, each peer skew and when it retires — live in
+// why each build is approved, each retired peer skew and why — live in
 // init.ts's docblocks (`renderPnpmWorkspaceYaml`, `SCAFFOLD_BUILT_DEPENDENCIES`,
 // `SCAFFOLD_ALLOWED_PEER_VERSIONS`), not in the file a new project opens.
 describe('blank template explicit empty workspace', () => {
@@ -517,7 +517,7 @@ describe('blank template explicit empty workspace', () => {
 
   it('adds no other top-level setting to the bundled file', () => {
     const keys = [...settings.matchAll(/^([A-Za-z][\w-]*):/gm)].map((m) => m[1]);
-    expect(keys).toEqual(['packages', 'onlyBuiltDependencies', 'allowBuilds', 'peerDependencyRules']);
+    expect(keys).toEqual(['packages', 'onlyBuiltDependencies', 'allowBuilds']);
   });
 });
 
@@ -564,13 +564,17 @@ describe('blank template pnpm build approvals (#3119)', () => {
   });
 });
 
-// A brand-new scaffold's very first `pnpm install` reported two unmet peers —
-// on the one screen where a newcomer is deciding whether this project is solid,
-// with nothing they did to cause it and nothing they can do about it (until commit 675ab574e).
-// Both are third-party ranges we cannot edit, so the declaration is pnpm's
-// scoped `allowedVersions`, and it has to travel INSIDE the scaffold: a
-// `peerDependencyRules` block in this repo's own pnpm-workspace.yaml would not
-// ship with the published packages, exactly as the overrides note there says.
+// A brand-new scaffold's very first `pnpm install` reported unmet peers — on
+// the one screen where a newcomer is deciding whether this project is solid,
+// with nothing they did to cause it (until commit 675ab574e). They were
+// third-party ranges we cannot edit, so the declaration was pnpm's scoped
+// `allowedVersions`, carried INSIDE the scaffold. On the better-auth 1.7.12 pin
+// every skew it declared is gone, and an entry whose skew is gone retires at
+// once: a suppression with no skew behind it would hide the NEXT real peer
+// break from an `npx create-objectstack` user's first screen. Re-adding any
+// entry needs a new measured skew, not a revert. The `objectstack init`
+// renderer retires the same entries, and scaffold-workspace-consistency.test.ts
+// in packages/cli is what fails if the two ever disagree.
 describe('blank template peer-skew declarations (#10326)', () => {
   const wsPath = path.join(pkgRoot, 'src', 'templates', 'blank', 'pnpm-workspace.yaml');
   // Same comment-stripping as the block above: the prose explaining these keys
@@ -578,81 +582,32 @@ describe('blank template peer-skew declarations (#10326)', () => {
   const settings = fs.existsSync(wsPath)
     ? fs.readFileSync(wsPath, 'utf8').replace(/^\s*#.*$/gm, '')
     : '';
-  const allowed = /^ {2}allowedVersions:\n((?:[ \t]+.*\n?)*)/m.exec(settings)?.[1] ?? '';
 
-  it('declares the stale better-auth > better-sqlite3 peer', () => {
-    // better-auth peers `^12.0.0`; the tree resolves 13.x — @objectstack/cli's
-    // own optionalDependency, which is the copy pnpm names in the report on the
-    // cli -> runtime -> plugin-auth -> better-auth chain (#16813; this comment
-    // used to credit @objectstack/driver-sql, which is not the binding copy).
-    // The peer is optional and governs only a raw better-sqlite3 `Database`
-    // handed to better-auth's `database` option — a path ObjectStack never
-    // takes (AuthManager passes an ObjectQL adapter factory). Measured on the
-    // path it does govern, 1.7.1 behaves identically on 13.0.3 and 12.11.1;
-    // re-measured on 1.7.2, the published package references better-sqlite3 in
-    // no file at all, so there is no call site to be incompatible.
-    expect(
-      /^\s*'better-auth>better-sqlite3':\s*'13'\s*$/m.test(allowed),
-      "allowedVersions must widen better-auth's stale better-sqlite3 peer to 13",
-    ).toBe(true);
-  });
-
-  it('keeps the retired @better-auth/scim > better-call suppression OUT (#3653)', () => {
-    // FLIPPED from a presence ratchet when the scim pin moved off the rc:
-    // stable @better-auth/scim 1.7.1 peers better-call@1.4.0 exactly, so the
-    // rc-era skew the entry declared away is gone. A suppression with no skew
-    // behind it would hide the NEXT real better-call peer break from an
-    // `npx create-objectstack` user's first screen — re-adding it needs a new
-    // measured skew, not a revert.
-    expect(
-      /'@better-auth\/scim>better-call'/.test(allowed),
-      'the retired @better-auth/scim>better-call suppression must stay out of allowedVersions',
-    ).toBe(false);
+  it('ships a pnpm-workspace.yaml to read', () => {
+    // Every absence assertion below is vacuous on a missing file.
+    expect(settings).toMatch(/^allowBuilds:$/m);
   });
 
   it.each([
-    ['@better-auth/core'],
-    ['@better-auth/oauth-provider'],
-    ['@better-auth/scim'],
-    ['@better-auth/sso'],
-  ])('declares %s\'s exact @better-auth/utils peer against the resolved 0.5.0', (declaring) => {
-    // These four peer an EXACT @better-auth/utils 0.4.2 while the tree resolves
-    // 0.5.0 through better-call's `^0.5.0` dependency. Measured on the surface
-    // the range governs — the three symbols the four import — 0.4.2 and 0.5.0
-    // agree on every value, so the report is the only difference. This template
-    // ships to `npx create-objectstack` users; the `objectstack init` renderer
-    // declares the same four, and scaffold-workspace-consistency.test.ts in
-    // packages/cli is what fails if the two ever disagree.
-    const key = `${declaring}>@better-auth/utils`.replace(/[/*+?^${}()|[\]\\]/g, '\\$&');
-    expect(
-      new RegExp(`^\\s*'${key}':\\s*'0\\.5\\.0'\\s*$`, 'm').test(allowed),
-      `allowedVersions must widen ${declaring}'s @better-auth/utils peer to 0.5.0`,
-    ).toBe(true);
+    // better-auth@1.7.12 declares no better-sqlite3 peer at all.
+    ['better-auth>better-sqlite3'],
+    // Retired with the scim rc pin (#3653).
+    ['@better-auth/scim>better-call'],
+    // At 1.7.12 the four peer `^0.4.2 || ^0.5.0`, which the resolved 0.5.0
+    // satisfies; they used to peer an EXACT 0.4.2.
+    ['@better-auth/core>@better-auth/utils'],
+    ['@better-auth/oauth-provider>@better-auth/utils'],
+    ['@better-auth/scim>@better-auth/utils'],
+    ['@better-auth/sso>@better-auth/utils'],
+  ])('keeps the retired %s suppression OUT', (key) => {
+    expect(settings, `the retired ${key} suppression must stay out of the template`)
+      .not.toContain(`'${key}'`);
   });
 
-  it('covers every declaring package that peers @better-auth/utils', () => {
-    // The defect was PARTIAL coverage — two skews declared, four left showing.
-    // A set assertion fails both ways: a fifth declaration nobody measured, and
-    // a drop of one of these four while the rest stay.
-    const declaring = [...allowed.matchAll(/^\s*'([^']+)>@better-auth\/utils':/gm)]
-      .map((m) => m[1])
-      .sort();
-    expect(declaring).toEqual([
-      '@better-auth/core',
-      '@better-auth/oauth-provider',
-      '@better-auth/scim',
-      '@better-auth/sso',
-    ]);
-  });
-
-  it('scopes every rule to one declaring package, never a bare peer name', () => {
-    // A bare `better-sqlite3: '13'` would silence that peer for EVERY package
-    // that declares it, including ones whose complaint would be real.
-    const entries = [...allowed.matchAll(/^\s*'([^']+)':/gm)].map((m) => m[1]);
-    expect(entries.length).toBeGreaterThan(0);
-    for (const key of entries) {
-      expect(key, `"${key}" must be spelled <declaring package>><peer>`).toContain('>');
-    }
+  it('declares no peerDependencyRules block while no skew is declared', () => {
+    // A bare header with no rules would advertise a declaration that is not there.
+    expect(settings).not.toMatch(/^peerDependencyRules:/m);
+    expect(settings).not.toMatch(/allowedVersions:/);
   });
 });
 

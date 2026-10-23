@@ -48,7 +48,9 @@
  *    subject-erasure wrapper's posture. On a driver without transactions the
  *    refusals are the guarantee, since every one runs before the first write:
  *    the count above, and the Default Organization's guard question and count
- *    below.
+ *    below. So does the refusal of a delete the admission could not decide
+ *    because a read it decides on failed (#25059: 503 `SERVICE_UNAVAILABLE`,
+ *    {@link organizationDeleteReadFaultBody}).
  * 4. **The engine never clears the tenant column.** Under all of this,
  *    `ObjectQL.cascadeDeleteRelations` refuses a `sys_organization` delete
  *    while any row still names it, whatever path reaches it.
@@ -199,6 +201,35 @@ export function organizationNotEmptyBody(owned: readonly OrganizationOwnedRows[]
       `This organization still owns records in ${named}. ` +
       'Delete or move those records first, then delete the organization.',
     dependents: owned.map((o) => ({ object: o.object, count: o.count })),
+  };
+}
+
+/**
+ * [#25059] The wire code for a delete the admission could not decide because a
+ * read it decides on failed: the standard catalog's member for a store that
+ * cannot answer right now (ADR-0112), the code the organization slug guard's
+ * and the invitation role cap's read faults answer with too.
+ */
+export const ORGANIZATION_DELETE_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
+
+/**
+ * [#25059] The 503 body for that delete, beside its code
+ * ({@link ORGANIZATION_DELETE_READ_FAULT_CODE}, spelled at the throw site).
+ *
+ * The admission runs before better-auth's first write, so a read it decides on
+ * that fails refuses there: handing the request on would let better-auth clear
+ * the caller's active organization and delete the members and invitations with
+ * nothing counted, and a driver without transactions keeps those deletes when
+ * the engine's own refusal lands on the organization row. It is no verdict
+ * about the delete (neither the 403 nor the 409 code), and it names the table,
+ * never the driver's message.
+ */
+export function organizationDeleteReadFaultBody(object: string): { message: string } {
+  return {
+    message:
+      `The organization delete could not read \`${object}\`, so whether this organization may be deleted ` +
+      'was never decided, and nothing was deleted. This is a server-side outage, not a refusal of the ' +
+      'delete: retry once the data store is reachable.',
   };
 }
 

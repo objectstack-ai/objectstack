@@ -508,3 +508,15 @@ describe('driver lookups — an OFF-vocabulary id is refused, never answered wit
     expect(resolveDatabaseDriverId('sqlite3')).toBeUndefined();
   });
 });
+
+/**
+ * The Studio connection form labels each config row with the JSON-Schema
+ * `title` and falls back to the raw key, so an untitled `autoMigrate` showed
+ * the machine key `autoMigrate` as its field label on the New datasource form.
+ */
+describe('SQL driver `autoMigrate` carries a form title', () => {
+  it.each(['sqlite', 'postgres', 'mysql'] as const)('%s', (id) => {
+    const json = getDriverConfigJsonSchemaById(id) as { properties: Record<string, { title?: string }> };
+    expect(json.properties.autoMigrate?.title).toBe('Auto-migrate schema');
+  });
+});

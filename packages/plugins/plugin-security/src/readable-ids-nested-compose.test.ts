@@ -5,7 +5,7 @@
  * that sits INSIDE a composed scope is composed by the engine too, so a
  * two-level `controlled_by_parent` chain — a child whose master is itself
  * `controlled_by_parent` — compiles to ONE statement with the subqueries
- * nested, and serves exactly the rows today's id-list path serves.
+ * nested, and serves exactly the rows the id-list form served before the switch.
  *
  * Measured on the real stack: `ObjectQL` over better-sqlite3, the real
  * `SecurityPlugin` with the real `SharingService` behind it, direct member
@@ -14,26 +14,24 @@
  * child → PARENT (`controlled_by_parent`, its master GRAND) → GRAND (`private`,
  * owner-scoped by plugin-sharing), read two ways over the SAME rows:
  *
- *  - **today's id-list path**: a `controlled_by_parent` child of PARENT, read
- *    as the security middleware chain scopes it — `computeControlledByParentFilter`
- *    pre-scans GRAND and then PARENT under a system context and hands the
- *    driver `parent IN [ids]` (ADR-0055 §2 mechanism (b));
- *  - **the leaf path**: a child of the same shape whose reads carry
- *    `{ parent: { $in: ReadableIds.of(PARENT) } }` (a consumer-shaped
- *    middleware writes it), with the engine's security source wrapped so that
- *    `getReadFilter(PARENT)` answers the real scope with its pre-resolved
- *    master id list replaced by the leaf `ReadableIds.of(GRAND)` — the
- *    spelling the plugin-security switch (ruling 6303721609, card (c)) will
- *    answer. The wrapper stands in for that switch and touches nothing else:
- *    `getReadFilter(GRAND)` and both `canReadObject` halves are the real
- *    service's, asked by the engine with the caller's context at each level.
+ *  - **the switch's path**: a `controlled_by_parent` child of PARENT, read as
+ *    the security middleware chain scopes it — `computeControlledByParentFilter`
+ *    answers `{ parent: { $in: ReadableIds.of(PARENT) } }` (ADR-0139 D6, the
+ *    seventh consumer), and `getReadFilter(PARENT)` answers PARENT's scope
+ *    with the leaf `ReadableIds.of(GRAND)` inside it;
+ *  - **a consumer's path**: a child of the same shape whose reads carry the
+ *    same leaf over PARENT written by a consumer-shaped object-scoped
+ *    middleware (the shape the six earlier consumers emit), composed by the
+ *    engine from the same security answers.
  *
- * Before the engine composed the nested leaf, the leaf path answered
- * `INTERNAL_ERROR` / 500: driver-sql refused the uncomposed leaf inside the
- * parent's subquery (the #24932 dev report's measurement, reproduced here on
- * the base before the change). The closed doors are measured beside the
- * parity: a caller the grandparent object does not admit, a delegator who
- * does not exist, and a delegator the grandparent object does not admit.
+ * The two paths must agree row for row, and the first must run ONE statement.
+ * Before the switch, the first path pre-scanned GRAND and then PARENT under a
+ * system context and bound `parent IN [ids]`; before the engine composed the
+ * nested leaf, the second answered `INTERNAL_ERROR` / 500 (driver-sql refused
+ * the uncomposed leaf inside the parent's subquery). The closed doors are
+ * measured beside the parity: a caller the grandparent object does not admit,
+ * a delegator who does not exist, and a delegator the grandparent object does
+ * not admit.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
@@ -41,7 +39,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveAuthzContext, assembleExecutionContext } from '@objectstack/core';
-import { ReadableIds, RLS_DENY_FILTER } from '@objectstack/spec/data';
+import { ReadableIds, isReadableIds } from '@objectstack/spec/data';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
 import { SharingService, buildSharingMiddleware, SysRecordShare } from '@objectstack/plugin-sharing';
@@ -60,9 +58,9 @@ const ORG = 'org_rid_nest';
 const GRAND = 'qa_rid_nest_grand';
 /** The middle: `controlled_by_parent`, its master GRAND — its read scope is derived from GRAND's. */
 const PARENT = 'qa_rid_nest_parent';
-/** Today's path: a `controlled_by_parent` child of PARENT, scoped by the id-list pre-scan. */
+/** The switch's path: a `controlled_by_parent` child of PARENT, scoped by the leaf the derivation answers. */
 const CHILD_CBP = 'qa_rid_nest_child_cbp';
-/** The leaf path: the same rows, read through a leaf over PARENT that a consumer-shaped middleware writes. */
+/** A consumer's path: the same rows, read through a leaf over PARENT that a consumer-shaped middleware writes. */
 const CHILD_LEAF = 'qa_rid_nest_child_leaf';
 
 /** The delegator: the human an agent acts for, and the owner of two grandparents. */
@@ -111,29 +109,16 @@ const ids = (rows: unknown): string[] =>
 
 const leafBranch = () => ({ parent: { $in: ReadableIds.of(PARENT) } });
 
-/**
- * The real scope with every pre-resolved master id list on `fk` replaced by
- * the leaf over `master` — `{ fk: { $in: [ids] } }` becomes
- * `{ fk: { $in: ReadableIds.of(master) } }`, copy-on-write — and how many
- * were replaced. The spelling the plugin-security switch will answer.
- */
-function withLeafForMaster(scope: unknown, fk: string, master: string): { scope: unknown; replaced: number } {
-  let replaced = 0;
-  const rewrite = (node: unknown): unknown => {
-    if (node === null || typeof node !== 'object') return node;
-    if (Array.isArray(node)) return node.map(rewrite);
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
-      if (key === fk && value !== null && typeof value === 'object' && Array.isArray((value as { $in?: unknown }).$in)) {
-        replaced++;
-        out[key] = { ...(value as Record<string, unknown>), $in: ReadableIds.of(master) };
-      } else {
-        out[key] = rewrite(value);
-      }
-    }
-    return out;
-  };
-  return { scope: rewrite(scope), replaced };
+/** The leaves a scope carries on `fk`, as the objects they name. */
+function leavesOn(scope: unknown, fk: string, out: string[] = []): string[] {
+  if (scope === null || typeof scope !== 'object') return out;
+  if (Array.isArray(scope)) { for (const item of scope) leavesOn(item, fk, out); return out; }
+  for (const [key, value] of Object.entries(scope as Record<string, unknown>)) {
+    const comparand = key === fk && value !== null && typeof value === 'object' ? (value as { $in?: unknown }).$in : undefined;
+    if (isReadableIds(comparand)) out.push(comparand.object);
+    else leavesOn(value, fk, out);
+  }
+  return out;
 }
 
 async function boot() {
@@ -296,22 +281,8 @@ async function boot() {
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   // The engine's security source (what `ObjectQLPlugin.init` puts in the
-  // slot): the real service, with PARENT's read scope answered in the
-  // spelling the plugin-security switch will answer — the pre-resolved master
-  // id list replaced by the leaf over GRAND. Every other answer is the real
-  // service's, untouched.
-  const replacedPerCall: number[] = [];
-  const wrapped = {
-    canReadObject: (object: string, context: unknown) => security!.canReadObject(object, context),
-    async getReadFilter(object: string, context: unknown) {
-      const real = await security!.getReadFilter(object, context);
-      if (object !== PARENT || real === undefined || real === RLS_DENY_FILTER) return real;
-      const { scope, replaced } = withLeafForMaster(real, 'grand', GRAND);
-      replacedPerCall.push(replaced);
-      return scope;
-    },
-  };
-  (engine as unknown as Record<symbol, unknown>)[Symbol.for('objectstack.objectql.securityServiceSource')] = () => wrapped;
+  // slot): the real service, read at every composition.
+  (engine as unknown as Record<symbol, unknown>)[Symbol.for('objectstack.objectql.securityServiceSource')] = () => security;
   sharing = new SharingService({ engine: engine as never, securityService: () => security as never });
   engine.registerMiddleware(buildSharingMiddleware(sharing, ctx.logger) as never, { object: '*' });
   // The consumer shape: an object-scoped read middleware on the leaf-path
@@ -349,7 +320,7 @@ async function boot() {
   return {
     engine,
     onBehalfOf,
-    replacedPerCall,
+    readFilter: (object: string, context: unknown) => security!.getReadFilter(object, { ...(context as object) }),
     read: async (object: string, context: unknown) =>
       ids(await engine.find(object, { context: { ...(context as object) } } as never)),
     count: (object: string, context: unknown) => engine.count(object, { context: { ...(context as object) } } as never),
@@ -379,7 +350,7 @@ const fromTable = (sql: string): string | undefined => /^select .*? from `?([a-z
 /** A statement that reads `table` — not one that reads another table with `table` inside a subquery. */
 const readsTable = (table: string) => (sql: string) => fromTable(sql) === table;
 
-describe('[ADR-0139 D6 as amended] a two-level controlled_by_parent chain composes and serves the rows the id-list path serves', () => {
+describe('[ADR-0139 D6 as amended] a two-level controlled_by_parent chain composes, and the switch\'s path serves the rows a consumer\'s leaf serves', () => {
   let rig: Rig;
   beforeAll(async () => { rig = await boot(); });
   afterAll(async () => { await rig.teardown(); });
@@ -389,7 +360,7 @@ describe('[ADR-0139 D6 as amended] a two-level controlled_by_parent chain compos
     expect(await rig.read(GRAND, member(OTHER, SET.human))).toEqual(['g_caller_only', 'g_neither', 'g_shared']);
   });
 
-  it("a direct caller: the leaf path serves exactly the rows today's id-list path serves — find and count, both identities", async () => {
+  it("a direct caller: the switch's path serves exactly the rows a consumer's leaf serves — find and count, both identities", async () => {
     for (const [user, expected] of [
       [HUMAN, ['c_both', 'c_del_only', 'c_shared']],
       [OTHER, ['c_caller_only', 'c_neither', 'c_shared']],
@@ -408,7 +379,7 @@ describe('[ADR-0139 D6 as amended] a two-level controlled_by_parent chain compos
     expect(await rig.read(CHILD_LEAF, member(HUMAN, SET.human))).not.toContain('c_via_null');
   });
 
-  it("a delegated caller: the leaf path serves exactly the rows today's path serves — the delegator intersection at both levels", async () => {
+  it("a delegated caller: the switch's path serves exactly the rows a consumer's leaf serves — the delegator intersection at both levels", async () => {
     const context = await rig.onBehalfOf(HUMAN);
     const today = await rig.read(CHILD_CBP, context);
     expect(today).toEqual(['c_both', 'c_shared']);
@@ -417,53 +388,40 @@ describe('[ADR-0139 D6 as amended] a two-level controlled_by_parent chain compos
     expect(await rig.count(CHILD_CBP, context)).toBe(2);
   });
 
-  it("the wrapper replaced PARENT's pre-resolved master id list with the leaf on every composed read: once per leg", async () => {
+  it("PARENT's read scope carries the leaf over GRAND — one for a direct caller, one per leg for a delegated one — and no master id", async () => {
     // The direct answer carries one `controlled_by_parent` predicate; the
-    // delegated answer carries one per leg (ADR-0090 D10). Either way, every
-    // list was replaced — none reached the driver as a bound id list.
-    expect(rig.replacedPerCall.length).toBeGreaterThan(0);
-    expect(rig.replacedPerCall.every((n) => n >= 1)).toBe(true);
-    expect(new Set(rig.replacedPerCall)).toEqual(new Set([1, 2]));
+    // delegated answer carries one per leg (ADR-0090 D10). Either way it is
+    // the leaf: no grandparent id is pre-resolved into the scope.
+    const direct = await rig.readFilter(PARENT, member(HUMAN, SET.human));
+    expect(leavesOn(direct, 'grand')).toEqual([GRAND]);
+    expect(JSON.stringify(direct)).not.toMatch(/g_both|g_del_only|g_shared/);
+    const delegated = await rig.readFilter(PARENT, await rig.onBehalfOf(HUMAN));
+    expect(leavesOn(delegated, 'grand')).toEqual([GRAND, GRAND]);
   });
 
-  it('one statement per find and per count on the leaf path: the child\'s select with the parent and the grandparent inside nested subqueries, and no pre-scan of the parent — against the pre-scans of today\'s path', async () => {
+  it('one statement per find and per count on BOTH paths: the child\'s select with the parent and the grandparent inside nested subqueries, and no pre-scan of the parent or the grandparent', async () => {
     const context = member(HUMAN, SET.human);
-    for (const [verb, run] of [
-      ['find', () => rig.engine.find(CHILD_LEAF, { context: { ...context } } as never)],
-      ['count', () => rig.engine.count(CHILD_LEAF, { context: { ...context } } as never)],
-    ] as const) {
-      const statements = await rig.statementsDuring(run);
-      const all = `${verb}:\n${statements.join('\n')}`;
-      // The read is ONE statement: the child's, the parent inside its subquery
-      // and the grandparent inside that one.
-      const reads = statements.filter(readsTable(CHILD_LEAF));
-      expect(reads, all).toHaveLength(1);
-      expect(reads[0].match(/in \(select/gi) ?? [], all).toHaveLength(2);
-      expect(reads[0], all).toMatch(new RegExp(`in \\(select .id. from .${PARENT}. where .grand. in \\(select .id. from .${GRAND}.`, 'i'));
-      // No statement reads the parent on its own: the leaf stands where the
-      // pre-resolved id list stood, so the parent is never pre-scanned.
-      expect(statements.filter(readsTable(PARENT)), all).toHaveLength(0);
-      // What else the driver ran is the security service's own answering, not
-      // the read: the real `getReadFilter(PARENT)` still derives PARENT's
-      // scope through `computeControlledByParentFilter`, whose grandparent
-      // pre-scan this rig's wrapper then REPLACES with the leaf (it retires
-      // with the plugin-security switch, card (c)), and plugin-sharing reads
-      // the share rows to answer the grandparent's scope. Neither is a read
-      // of the child, the parent or — as a read of its own — the grandparent
-      // by the composed statement.
-      for (const sql of statements.filter(readsTable(GRAND))) expect(sql, all).toMatch(/^select .id. from/i);
+    for (const child of [CHILD_CBP, CHILD_LEAF]) {
+      for (const [verb, run] of [
+        ['find', () => rig.engine.find(child, { context: { ...context } } as never)],
+        ['count', () => rig.engine.count(child, { context: { ...context } } as never)],
+      ] as const) {
+        const statements = await rig.statementsDuring(run);
+        const all = `${child} ${verb}:\n${statements.join('\n')}`;
+        // The read is ONE statement: the child's, the parent inside its subquery
+        // and the grandparent inside that one.
+        const reads = statements.filter(readsTable(child));
+        expect(reads, all).toHaveLength(1);
+        expect(reads[0].match(/in \(select/gi) ?? [], all).toHaveLength(2);
+        expect(reads[0], all).toMatch(new RegExp(`in \\(select .id. from .${PARENT}. where .grand. in \\(select .id. from .${GRAND}.`, 'i'));
+        // No statement reads the parent or the grandparent on its own: the
+        // leaf stands where the pre-resolved id list stood at every level, so
+        // neither is pre-scanned. What else the driver ran is plugin-sharing
+        // reading the share rows to answer the grandparent's scope.
+        expect(statements.filter(readsTable(PARENT)), all).toHaveLength(0);
+        expect(statements.filter(readsTable(GRAND)), all).toHaveLength(0);
+      }
     }
-    // Today's path: the grandparent and then the parent are pre-scanned under
-    // a system context (`select id from …`), and the child's own statement
-    // binds the parent ids as a list — no subquery anywhere.
-    const today = await rig.statementsDuring(() => rig.engine.find(CHILD_CBP, { context: { ...context } } as never));
-    const todayAll = `today:\n${today.join('\n')}`;
-    expect(today.filter(readsTable(GRAND)), todayAll).toHaveLength(1);
-    expect(today.filter(readsTable(PARENT)), todayAll).toHaveLength(1);
-    const todayReads = today.filter(readsTable(CHILD_CBP));
-    expect(todayReads, todayAll).toHaveLength(1);
-    expect(todayReads[0], todayAll).not.toMatch(/in \(select/i);
-    expect(today.some((sql) => /in \(select/i.test(sql)), todayAll).toBe(false);
   });
 });
 
@@ -487,7 +445,7 @@ describe('[ADR-0139 D6 as amended] the closed doors stay closed at every level o
     expect(await rig.readOutcome(CHILD_LEAF, context)).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
   });
 
-  it('a delegator the grandparent object does not admit: the leaf path and today\'s path both serve nothing', async () => {
+  it('a delegator the grandparent object does not admit: both paths serve nothing', async () => {
     const context = await rig.onBehalfOf(NO_GRAND_READ);
     expect(await rig.canReadObject(GRAND, context)).toBe(false);
     expect(await rig.read(CHILD_CBP, context)).toEqual([]);

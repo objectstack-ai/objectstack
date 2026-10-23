@@ -10,12 +10,3 @@ onlyBuiltDependencies:
 allowBuilds:
   better-sqlite3: true
   esbuild: true
-
-# Upstream peer ranges measured harmless; this only silences the warning.
-peerDependencyRules:
-  allowedVersions:
-    'better-auth>better-sqlite3': '13'
-    '@better-auth/core>@better-auth/utils': '0.5.0'
-    '@better-auth/oauth-provider>@better-auth/utils': '0.5.0'
-    '@better-auth/scim>@better-auth/utils': '0.5.0'
-    '@better-auth/sso>@better-auth/utils': '0.5.0'

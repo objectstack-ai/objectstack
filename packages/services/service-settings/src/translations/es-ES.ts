@@ -303,7 +303,7 @@ export const esES: PlatformTranslationData = {
         contact: { title: 'Contacto' },
       },
       keys: {
-        legal_name: { label: 'Razón social', help: 'Nombre legal registrado de la organización (puede diferir del nombre de la organización indicado en Marca).' },
+        legal_name: { label: 'Razón social', help: 'Nombre legal registrado de la organización, tal como aparece en contratos y facturas.' },
         registration_number: { label: 'Número de registro', help: 'Número de registro / constitución de la empresa (p. ej. EIN, n.º de sociedad).' },
         tax_id: { label: 'ID fiscal / IVA', help: 'Identificador fiscal que aparece en las facturas (p. ej. IVA, GST, ABN).' },
         address_line1: { label: 'Dirección línea 1' },

@@ -80,8 +80,8 @@
  * So the invariant is enforced at the WRITE, on the chokepoints every path goes
  * through — `beforeUpdate` and `beforeDelete` on `sys_user`, `sys_member`,
  * `sys_user_permission_set` and `sys_organization` (which names the Default
- * Organization), and `beforeInsert` / `beforeUpdate` on the activation
- * ledger — rather than at any
+ * Organization, so its `beforeInsert` is judged too), and `beforeInsert` /
+ * `beforeUpdate` on the activation ledger — rather than at any
  * individual endpoint.
  * HTTP-level guards protect only the endpoints they are attached to; these hold
  * for the admin ban / remove endpoints, `updateMemberRole`, the SCIM adapter
@@ -314,6 +314,7 @@
  * reach the identity tables reach this guard.
  */
 
+import type { StandardErrorCode } from '@objectstack/spec/api';
 import type { BaseEngineOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import {
   ADMIN_FULL_ACCESS,
@@ -325,8 +326,11 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import { SystemObjectName, SystemUserId } from '@objectstack/spec/system';
 import { isMissingTableError, resolveTenancyPosture } from '@objectstack/types';
 import {
+  DEFAULT_ORGANIZATION_SLUG,
+  findDefaultOrganization,
   isGrantActive,
   matchesConfiguredPlatformAdmin,
+  organizationAnchorsPlatformStanding,
   resolvePlatformAdminEmails,
   securityCatalogReaderOf,
 } from '@objectstack/core';
@@ -379,6 +383,13 @@ export interface LastAdminGuardOptions {
 
 const DEFAULT_MAX_SCAN = 1000;
 
+/**
+ * [ADR-0131 D5] The id an inserted organization is simulated under when its
+ * payload names none yet. No grant can name it, so it anchors nobody's
+ * standing — the one property the simulation needs of it.
+ */
+const INSERTED_ORGANIZATION_ID = '(the organization being created)';
+
 /** Reads run as system: this is a safety proof, never RLS-scoped to a caller. */
 const SYSTEM_READ: BaseEngineOptions = { context: { isSystem: true } };
 
@@ -405,6 +416,7 @@ type GuardedOp =
   | 'activation-insert'
   | 'activation-update'
   | 'user-standing-update'
+  | 'organization-insert'
   | 'organization-update'
   | 'organization-delete';
 
@@ -419,6 +431,12 @@ interface OpWords {
   subject: string;
   /** The table this op writes — what a refusal reports as `err.object`. */
   table: string;
+  /**
+   * How this write takes the standing away, for a write whose row is not
+   * itself the evidence — `accounts` reads "that account" or "those accounts".
+   * Absent: the row is the evidence, and the refusal says so.
+   */
+  moves?: (accounts: string) => string;
 }
 
 const OP_WORDS: Record<GuardedOp, OpWords> = {
@@ -501,7 +519,21 @@ const OP_WORDS: Record<GuardedOp, OpWords> = {
   // [ADR-0131 D5] The organization whose `admin_full_access` grant anchors
   // platform standing under `single` is the Default Organization, named by its
   // `slug` (or by being the only one) — so re-slugging or deleting it is a
-  // standing write.
+  // standing write, and so is adding one: a second organization beside a sole
+  // one not slugged `default` leaves no Default Organization, and one slugged
+  // `default` becomes it.
+  'organization-insert': {
+    noun: 'organization creation',
+    verb: 'create',
+    gerund: 'creating',
+    Verb: 'Create',
+    subject: 'organizations',
+    table: SystemObjectName.ORGANIZATION,
+    moves: (accounts) =>
+      `A new '${SystemObjectName.ORGANIZATION}' row moves this deployment's Default Organization off ` +
+      `the organization whose '${ADMIN_FULL_ACCESS}' grant is what MAKES ${accounts} an administrator, ` +
+      'so creating it has the same end state as revoking that grant',
+  },
   'organization-update': {
     noun: 'organization change',
     verb: 'change',
@@ -531,7 +563,16 @@ const OP_WORDS: Record<GuardedOp, OpWords> = {
  * does. Sending THAT operator to look at an IdP group would send them into a
  * system they may not even run.
  */
-function standingOrigin(table: string, noun: string): string {
+function standingOrigin(table: string, noun: string, op?: GuardedOp): string {
+  if (op === 'organization-insert') {
+    return (
+      'Under the single tenancy posture the Default Organization is the one slugged \'default\', else ' +
+      'the only organization, so a second organization beside a sole one with another slug leaves ' +
+      'none, and a new one slugged \'default\' takes its place. Grant another account administrator ' +
+      'standing first, or give the current Default Organization the slug \'default\' first (while it ' +
+      'is the only organization that changes nothing else), then create the organization.'
+    );
+  }
   if (table === METADATA_ACTIVATION) {
     return (
       `If the ${noun} came from a disable action, an upgrade step or a script, revoke the ` +
@@ -596,6 +637,44 @@ function isRefusal(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === 'PERMISSION_DENIED';
 }
 
+/**
+ * [ADR-0112] The code every half of this guard answers a read it could not
+ * complete with: the standard catalog's member for a store that cannot answer
+ * right now, the code the organization slug guard's read fault
+ * (`auth-manager.ts`, `slugGuardReadFaultApiError`) and the organization delete
+ * admission's read fault answer with too. One code for the fault across every
+ * guard on a door, so a caller tells "you may not" (403 `PERMISSION_DENIED`)
+ * from "try again" by the code alone.
+ */
+const LAST_ADMIN_GUARD_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
+
+/**
+ * The fail-closed answer to a read the guard could not complete: 503
+ * {@link LAST_ADMIN_GUARD_READ_FAULT_CODE}. Still a refusal of the write — the
+ * hook throws, so nothing is written — but no verdict about it, so it does not
+ * wear {@link refuse}'s 403. The read's own failure rides `cause`. `object`
+ * names the table the caller was writing, as {@link refuse}'s does.
+ */
+function readFault(message: string, object: string, cause: unknown): Error {
+  const err = new Error(`${LAST_ADMIN_GUARD_READ_FAULT_CODE}: ${message}`) as Error & {
+    code?: string;
+    status?: number;
+    object?: string;
+    cause?: unknown;
+  };
+  err.code = LAST_ADMIN_GUARD_READ_FAULT_CODE;
+  err.status = 503;
+  err.object = object;
+  err.cause = cause;
+  return err;
+}
+
+/** Marker so a nested fail-closed wrapper re-throws an inner read fault unchanged. */
+function isReadFault(err: unknown): boolean {
+  const e = err as { code?: unknown; status?: unknown } | null;
+  return e?.code === LAST_ADMIN_GUARD_READ_FAULT_CODE && e.status === 503;
+}
+
 const BREAK_GLASS_CITATION =
   'break-glass invariant, ADR-0135 D5.2 — an environment must always keep at least one ' +
   'administrator who can sign in';
@@ -626,8 +705,10 @@ interface PendingStandingWrite {
   /** The update payload, or `undefined` for a delete. */
   patch?: Record<string, unknown>;
   /**
-   * [ADR-0131 D3] A row this write INSERTS — the activation ledger's only
-   * standing write that addresses no existing row (`ids` is then empty).
+   * [ADR-0131 D3] A row this write INSERTS — a standing write that addresses
+   * no existing row (`ids` is then empty): an activation-ledger row switched
+   * off, or (ADR-0131 D5) an organization, which can move the Default
+   * Organization.
    */
   inserted?: Record<string, unknown>;
   /**
@@ -884,6 +965,59 @@ function touchesAny(data: Record<string, unknown>, keys: readonly string[]): boo
 }
 
 /**
+ * [ADR-0131 D5] Under `single` the Default Organization is the organization
+ * slugged `default`, else the only one, and its `admin_full_access` grant
+ * confers platform administrator standing. So re-slugging ANOTHER organization
+ * to `default` makes it the Default Organization: on a store holding several
+ * organizations, none slugged `default`, an organization owner who re-slugs
+ * their own takes the anchor, and every holder of a grant it owns becomes a
+ * platform administrator. The break-glass halves never see that, because it
+ * takes standing from nobody.
+ *
+ * This refuses it: a slug changed TO `default` is admitted only on the
+ * organization that is already the Default Organization (the sole one,
+ * re-slugged to the name the boot gives it). Under a wall no grant anchors and
+ * a slug is just a slug, so nothing is read. A slug change to any other value
+ * is not this rule's (the update half judges moving the anchor AWAY).
+ *
+ * Judged at the engine, on `beforeUpdate`, because every door that can change a
+ * slug is an engine update: better-auth's `organization/update` (its adapter
+ * writes through the engine, and the refusal reaches the caller as 403
+ * `PERMISSION_DENIED`), a seed, a plugin, the data API. A read that throws
+ * propagates to the hook, which fails closed with 503 `SERVICE_UNAVAILABLE`.
+ */
+async function refuseDefaultOrganizationSlugCapture(
+  engine: Pick<LastAdminGuardEngine, 'find'>,
+  organizationIds: ReadonlySet<string>,
+  slug: unknown,
+): Promise<void> {
+  if (slug !== DEFAULT_ORGANIZATION_SLUG || organizationIds.size === 0) return;
+  const posture = resolveTenancyPosture();
+  if (postureEnforcesWall(posture)) return;
+  const { id, several } = await findDefaultOrganization((where, limit) =>
+    engine.find(SystemObjectName.ORGANIZATION, { where: { ...where }, limit, fields: ['id'] }, SYSTEM_READ),
+  );
+  if (id !== undefined && organizationIds.size === 1 && organizationIds.has(id)) return;
+  const named = [...organizationIds].map((o) => `'${o}'`).join(', ');
+  const standing =
+    id !== undefined
+      ? `This deployment's Default Organization is '${id}'.`
+      : several
+        ? 'This deployment holds several organizations and none of them is the Default Organization.'
+        : 'This deployment names no Default Organization.';
+  throw refuse(
+    `Refusing this organization update: under the '${posture}' tenancy posture the slug ` +
+      `'${DEFAULT_ORGANIZATION_SLUG}' names the Default Organization, whose '${ADMIN_FULL_ACCESS}' grant ` +
+      'confers platform administrator standing (ADR-0131 D5), so only the Default Organization may take ' +
+      `it, and re-slugging ${named} to it would make that organization the Default Organization. ` +
+      `${standing} Keep another slug. To name a Default Organization, hold one organization (the sole ` +
+      `organization is the Default Organization and may then take the slug '${DEFAULT_ORGANIZATION_SLUG}'), ` +
+      'or declare a walled tenancy posture (OS_TENANCY_POSTURE=group or isolated), where a slug anchors nothing.',
+    SystemObjectName.ORGANIZATION,
+  );
+}
+
+/**
  * Register the last-administrator guard on an ObjectQL engine: the ban half
  * (`beforeUpdate`) and the delete half (`beforeDelete`) of ONE invariant, off
  * one administrator enumeration.
@@ -997,14 +1131,20 @@ export function registerLastAdminGuard(
   };
 
   /**
-   * [ADR-0131 D5] The Default Organization once `pending` lands — the
-   * resolver's definition (`readDefaultOrganizationId`,
-   * `resolve-authz-context.ts`): the organization with `slug = 'default'`, else
-   * the only one; `undefined` when neither exists. With a pending organization
-   * write, the rows it addresses are read as well — an update can move a row
-   * onto or off `default`, a delete removes it — and judged as they would read
-   * after it. A composition that registers no organization object holds none
-   * (the read is not issued).
+   * [ADR-0131 D5] The Default Organization once `pending` lands: the one
+   * definition (`findDefaultOrganization`, `@objectstack/core` — the
+   * organization with `slug = 'default'`, else the only one; `undefined` when
+   * neither exists), the definition the resolver reads the anchor by.
+   *
+   * The read is the guard's own on purpose, and is why this does not call the
+   * resolver's `readDefaultOrganizationId`: it answers with the rows as
+   * `pending` would leave them. The rows a pending organization write addresses
+   * are read as well — an update can move a row onto or off `default`, a delete
+   * removes it — and an inserted row is added to both reads. Its reads also go
+   * through {@link scan}, so an unreadable or oversized store refuses the write
+   * ({@link failClosed}) where the resolver would answer the request. A
+   * composition that registers no organization object holds none (the read is
+   * not issued).
    */
   const readDefaultOrganizationId = async (
     op: GuardedOp,
@@ -1023,33 +1163,43 @@ export function registerLastAdminGuard(
       if (missing.length === 0) return rows;
       return [...rows, ...(await scan(op, SystemObjectName.ORGANIZATION, { where: { id: { $in: missing } }, fields }))];
     };
-    const after = (rows: Array<Record<string, unknown>>) =>
-      rows.map((row) => applyPending(row, pending, SystemObjectName.ORGANIZATION))
+    const after = (rows: Array<Record<string, unknown>>) => {
+      const kept = rows.map((row) => applyPending(row, pending, SystemObjectName.ORGANIZATION))
         .filter((row): row is Record<string, unknown> => row !== undefined);
-    const bySlug = after(await addressed(await scan(op, SystemObjectName.ORGANIZATION, { where: { slug: 'default' }, fields })))
-      .find((row) => row.slug === 'default' && toId(row.id));
-    if (bySlug) return toId(bySlug.id);
-    // "The only organization" asks 0 / 1 / several, so it reads a page just wide
-    // enough to still tell several apart after the rows a pending delete removes.
-    const page = await engine.find(
-      SystemObjectName.ORGANIZATION,
-      { where: {}, fields, limit: 2 + (orgWrite?.ids.size ?? 0) },
-      SYSTEM_READ,
-    );
-    const remaining = after(Array.isArray(page) ? page : []);
-    return remaining.length === 1 ? toId(remaining[0]!.id) : undefined;
+      return orgWrite?.inserted ? [...kept, orgWrite.inserted] : kept;
+    };
+    const found = await findDefaultOrganization(async (where, limit) => {
+      if ('slug' in where) {
+        const rows = after(await addressed(await scan(op, SystemObjectName.ORGANIZATION, { where: { slug: where.slug }, fields })));
+        return rows.filter((row) => row.slug === where.slug && toId(row.id));
+      }
+      // "The only organization" asks 0 / 1 / several, so it reads a page just
+      // wide enough to still tell several apart after the rows a pending
+      // delete removes.
+      const page = await engine.find(
+        SystemObjectName.ORGANIZATION,
+        { where: {}, fields, limit: limit + (orgWrite?.ids.size ?? 0) },
+        SYSTEM_READ,
+      );
+      return after(Array.isArray(page) ? page : []);
+    });
+    return found.id;
   };
 
   /**
    * [ADR-0131 D5] Which `admin_full_access` grants among `links` the anchor
-   * reads — the resolver's predicate (`grantAnchorsPlatformStanding`,
-   * `resolve-authz-context.ts`): under `single`, one owned by the Default
-   * Organization ({@link readDefaultOrganizationId}, read only when some grant
-   * names an organization). Every other organization's grant is an
-   * organization administrator's. An organization-less grant anchors nothing
-   * (ADR-0131 D1), and neither does any grant under a wall or where no Default
-   * Organization is nameable — a composition that registers no organization
-   * object among them — exactly as the resolver reads it.
+   * reads — core security's one rule (`organizationAnchorsPlatformStanding`,
+   * `@objectstack/core`), the rule the resolver's §6b asks, decided here over
+   * the Default Organization as `pending` would leave it
+   * ({@link readDefaultOrganizationId}, read only when no wall stands and some
+   * grant names an organization). Under `single`, the grant owned by that
+   * organization anchors; every other organization's grant is an organization
+   * administrator's. An organization-less grant anchors nothing (ADR-0131 D1),
+   * and neither does any grant under a wall or where no Default Organization
+   * is nameable — a composition that registers no organization object among
+   * them. The posture is the REQUESTED one, read as the resolver reads it.
+   * ⛔ The owner normalizer (`toId`: a string or a number) is this guard's own
+   * by design; the rule takes the organization already normalized.
    */
   const anchorOwnerTest = async (
     op: GuardedOp,
@@ -1057,13 +1207,12 @@ export function registerLastAdminGuard(
     pending?: PendingStandingWrite,
   ): Promise<(link: Record<string, unknown>) => boolean> => {
     const ownerOf = (link: Record<string, unknown>) => toId(link.organization_id ?? link.organizationId);
-    const defaultOrganizationId = !postureEnforcesWall(resolveTenancyPosture()) && links.some((l) => ownerOf(l))
+    const walled = postureEnforcesWall(resolveTenancyPosture());
+    const defaultOrganizationId = !walled && links.some((l) => ownerOf(l))
       ? await readDefaultOrganizationId(op, pending)
       : undefined;
-    return (link) => {
-      const owner = ownerOf(link);
-      return owner !== undefined && owner === defaultOrganizationId;
-    };
+    const anchor = { walled, defaultOrganizationId };
+    return (link) => organizationAnchorsPlatformStanding(ownerOf(link), anchor);
   };
 
   /**
@@ -1463,24 +1612,30 @@ export function registerLastAdminGuard(
    * The fail-CLOSED envelope every half runs inside. A lookup that throws is
    * not "probably fine": the guard could not prove another administrator
    * survives, and the cost of guessing wrong is a permanently locked-out
-   * environment. A deliberate refusal from inside passes through unchanged.
+   * environment. A deliberate refusal from inside passes through unchanged,
+   * and so does a read fault an inner envelope already answered.
+   *
+   * The write is refused either way; only the code tells the two apart: a
+   * verdict is 403 `PERMISSION_DENIED` ({@link refuse}), a lookup that could
+   * not complete is 503 `SERVICE_UNAVAILABLE` ({@link readFault}).
    */
   const failClosed = async (op: GuardedOp, judge: () => Promise<void>): Promise<void> => {
     const words = OP_WORDS[op];
     try {
       await judge();
     } catch (err) {
-      if (isRefusal(err)) throw err;
+      if (isRefusal(err) || isReadFault(err)) throw err;
       const reason = (err as Error)?.message ?? String(err);
       logger?.warn(
         `[LastAdminGuard] administrator lookup failed — ${words.noun} refused: ${reason}`,
       );
-      throw refuse(
+      throw readFault(
         `Refusing this ${words.noun}: the remaining administrators could not be verified ` +
           `(${reason}). This guard fails closed — a ${words.noun} is only permitted when at ` +
           `least one other unbanned administrator is provably left (${BREAK_GLASS_CITATION}). ` +
           'Retry once the identity tables are readable again.',
         words.table,
+        err,
       );
     }
   };
@@ -1645,12 +1800,15 @@ export function registerLastAdminGuard(
         `Refusing this ${words.noun}: it would revoke the administrator standing of ` +
           `${losing.map((id) => `'${id}'`).join(', ')}, ` +
           `${many ? 'who are the last administrators' : 'who is the last administrator'} this ` +
-          `system has that ${many ? 'are' : 'is'} not already banned. The ` +
-          `'${table}' row is what MAKES ${many ? 'those accounts' : 'that account'} an ` +
-          `administrator, so ${words.gerund} it has the same end state as ${words.gerund} ` +
-          `${many ? 'the users themselves' : 'the user themselves'}: nobody would be able to ` +
+          `system has that ${many ? 'are' : 'is'} not already banned. ` +
+          (words.moves
+            ? words.moves(many ? 'those accounts' : 'that account')
+            : `The '${table}' row is what MAKES ${many ? 'those accounts' : 'that account'} an ` +
+              `administrator, so ${words.gerund} it has the same end state as ${words.gerund} ` +
+              `${many ? 'the users themselves' : 'the user themselves'}`) +
+          `: nobody would be able to ` +
           `administer the system or restore anyone's access (${BREAK_GLASS_CITATION}). ` +
-          `${REMEDY} ${standingOrigin(table, words.noun)}`,
+          `${REMEDY} ${standingOrigin(table, words.noun, op)}`,
         words.table,
       );
     });
@@ -1801,10 +1959,70 @@ export function registerLastAdminGuard(
     await enforceStanding('organization-update', SystemObjectName.ORGANIZATION, ctx.input, data);
   };
 
+  /**
+   * [ADR-0131 D5] The capture half: a slug changed TO `default` on an
+   * organization that is not the Default Organization
+   * ({@link refuseDefaultOrganizationSlugCapture}). A payload naming another
+   * slug, or none, costs no reads. Fails closed like every half: the rows a
+   * predicate write addresses, or the Default Organization itself, that cannot
+   * be read refuse the write, with the same 503 read-fault code
+   * ({@link readFault}) as {@link failClosed}.
+   */
+  const guardOrganizationDefaultSlug = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== SystemObjectName.ORGANIZATION) return;
+    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
+    if (data.slug !== DEFAULT_ORGANIZATION_SLUG) return;
+    try {
+      const ids = await resolveTargetIds('organization-update', SystemObjectName.ORGANIZATION, ctx.input?.id, ctx.input?.options, data);
+      await refuseDefaultOrganizationSlugCapture(engine, ids, data.slug);
+    } catch (err) {
+      if (isRefusal(err) || isReadFault(err)) throw err;
+      const reason = (err as Error)?.message ?? String(err);
+      throw readFault(
+        `Refusing this organization update: the organizations it addresses, or the Default Organization, ` +
+          `could not be read (${reason}), so whether the slug '${DEFAULT_ORGANIZATION_SLUG}' would make ` +
+          'another organization the Default Organization is unknown (ADR-0131 D5). Retry once ' +
+          `'${SystemObjectName.ORGANIZATION}' is readable again.`,
+        SystemObjectName.ORGANIZATION,
+        err,
+      );
+    }
+  };
+
   const guardOrganizationDelete = async (rawCtx: unknown): Promise<void> => {
     const ctx = ctxOf(rawCtx);
     if (ctx.object !== SystemObjectName.ORGANIZATION) return;
     await enforceStanding('organization-delete', SystemObjectName.ORGANIZATION, ctx.input);
+  };
+
+  /**
+   * [ADR-0131 D5] The insert half. The Default Organization is the one slugged
+   * `default`, else the only one, so ADDING an organization can move it with no
+   * grant row touched: a second organization beside a sole one with another
+   * slug leaves none, and a new `default`-slugged one takes its place — either
+   * way the grant the promotion wrote no longer anchors. Judged like every
+   * other standing write, and refused only when it would leave nobody who can
+   * sign in and administer; an organization owner or admin, a configured
+   * administrator, or a `default`-slugged Default Organization that stays put
+   * admits it. ⛔ Not a standing-preservation rule: a platform administrator who
+   * also owns an organization keeps that, which the invariant counts, so the
+   * insert is admitted and the grant stops anchoring.
+   *
+   * Under a wall no grant anchors (`anchorOwnerTest`), so no organization row
+   * feeds the enumeration and the insert costs no reads. A batch insert is
+   * dispatched per row, so each row is judged against the stored rows without
+   * its siblings — which reads the anchor as moved no later than the whole
+   * batch would.
+   */
+  const guardOrganizationInsert = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== SystemObjectName.ORGANIZATION) return;
+    if (postureEnforcesWall(resolveTenancyPosture())) return;
+    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
+    // A payload that names no id yet is still an organization, and owns no grant.
+    const inserted = { ...data, id: toId(data.id) ?? INSERTED_ORGANIZATION_ID };
+    await enforceStanding('organization-insert', SystemObjectName.ORGANIZATION, ctx.input, undefined, inserted);
   };
 
   // Priority 20: AFTER the ADR-0092 identity write guard's checks (10), before
@@ -1858,7 +2076,17 @@ export function registerLastAdminGuard(
     priority: 20,
     packageId,
   });
+  engine.registerHook('beforeInsert', guardOrganizationInsert, {
+    object: SystemObjectName.ORGANIZATION,
+    priority: 20,
+    packageId,
+  });
   engine.registerHook('beforeUpdate', guardOrganizationUpdate, {
+    object: SystemObjectName.ORGANIZATION,
+    priority: 20,
+    packageId,
+  });
+  engine.registerHook('beforeUpdate', guardOrganizationDefaultSlug, {
     object: SystemObjectName.ORGANIZATION,
     priority: 20,
     packageId,
@@ -1872,8 +2100,9 @@ export function registerLastAdminGuard(
   logger?.info(
     '[LastAdminGuard] last-administrator guard registered on sys_user (ban + delete, and the ' +
       'email/email_verified pair the deployment-config anchor derives from), sys_member and ' +
-      'sys_user_permission_set (standing revocation), sys_organization (the Default ' +
-      'Organization the grant anchor reads) and sys_metadata_activation ' +
+      'sys_user_permission_set (standing revocation), sys_organization (creating, re-slugging ' +
+      'or removing the Default Organization the grant anchor reads, and re-slugging another ' +
+      "organization to 'default') and sys_metadata_activation " +
       '(switching admin_full_access off) — ADR-0135 D5.2',
   );
 

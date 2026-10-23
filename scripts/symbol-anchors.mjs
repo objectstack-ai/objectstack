@@ -88,9 +88,9 @@
  *
  *     (`scripts/symbol-anchors.mjs#extractAnchors`, `#defineCorpus`)
  *
- * ### Three corpus-declared variations on the SAME three forms (#18107, #18592)
+ * ### Four corpus-declared variations on the SAME three forms (#18107, #18592, #24894)
  *
- * None changes what an anchor means; all three are DELIMITER and POPULATION
+ * None changes what an anchor means; all four are DELIMITER and POPULATION
  * declarations a corpus makes about its own documents, defaulted OFF so a
  * corpus that says nothing reads exactly the text it read before.
  *
@@ -121,6 +121,18 @@
  *       text is prose and in PROSE a colon before digits is punctuation. What
  *       the option admits there is re-measured below.
  *
+ *   `tildeRangeCitations: true`  A FOURTH declaration, and a third path-less
+ *       spelling kept apart from the two above on purpose (#24894): the bare
+ *       approximate RANGE, `createColumn ~7354-7368`, a tilde and two numbers
+ *       with no colon and no `L`. In a data ledger it continues the filename
+ *       named before it; in prose it is a quantity (`~60-120` seconds) far more
+ *       often than a line, which is why it is opt-in and why `defineCorpus`
+ *       refuses it beside a `docProjection` exactly as it refuses the option
+ *       above. It is its OWN declaration, ⛔ not a third row inside
+ *       `pathlessLineCitations`, because a corpus gate that prints which
+ *       path-less spellings it leaves unjudged (`docs/adr/**` does) names that
+ *       option's two; folding a third in would make that sentence false.
+ *
  * ⭐ A dotted `#Outer.member` is also part of the grammar, and `sweepCorpus`
  * requires EVERY segment to resolve. Admitting it was additive: a dotted symbol
  * could not be written inside a code span at all before, so nothing that
@@ -138,9 +150,12 @@
  *
  * ⛔ A LINE NUMBER IS NOT AN ANCHOR FORM. `<file>.ts:4901`, `<file>.ts:341-400`,
  * `<file>.ts:459–463` (en dash), `<file>.tsx:~605-615` (the approximation
- * tilde) and a bare continuation -- a backticked `:` followed by a line spec,
- * `2933` -- are all findings, and so are the two PATH-LESS spellings a corpus
- * declaring `pathlessLineCitations` admits. ⚠️ The angle brackets are
+ * tilde), the same spec after a COMMA in place of the colon (`<file>.ts`, a
+ * comma, `1159-1161`, written with no space) and a bare continuation -- a
+ * backticked `:` followed by a line spec, `2933` -- are all findings, and so
+ * are the two PATH-LESS spellings a corpus declaring `pathlessLineCitations`
+ * admits and the tilde range one declaring `tildeRangeCitations` admits.
+ * ⚠️ The angle brackets are
  * deliberate: this file is itself inside the `scripts/**` corpus, so an
  * illustration written path-shaped would be a citation of its own.
  *
@@ -365,8 +380,23 @@ const LINE_SPEC = '\\d+(?:\\s*[-–—]\\s*\\d+)?(?:\\s*[,/]\\s*\\d+(?:\\s*[-–
  * ⛔ The tilde is the ONLY thing admitted here, and ⛔ no whitespace with it: a
  * `:` followed by a SPACE and then digits is ordinary prose punctuation
  * (`**Date**: 2026-04-19`, `exit contract: 1`), and admitting it was measured
- * to fire 26 times across `docs/adr/**` alone, every one a false positive. */
-const LINE_ANCHOR = new RegExp('(?<![\\w/.-])(' + PATHISH + '):~?(' + LINE_SPEC + ')(?![\\w-])', 'g');
+ * to fire 26 times across `docs/adr/**` alone, every one a false positive.
+ *
+ * ⭐ An ELEVENTH, and the separator is the only thing that changed: a COMMA in
+ * place of the colon, the path then a comma then the spec with nothing between
+ * them (#24894). The platform checklist accumulated 42 of these unrefused
+ * before a hand sweep re-pointed them, because every pattern here needed a
+ * colon. ⛔ Tight, exactly as the tilde: a comma followed by a SPACE is a list
+ * or a count after a file name (a test file, a comma, a space, `12 cases`), and
+ * the loose form was measured to admit three such counts in that ledger. The
+ * tight form was measured over all five registered corpora, on `7b047b4483`
+ * in this repository, before it became a row for every corpus rather than an
+ * option: 11 hits, all in the checklist's
+ * `FOLLOW-UPS.md`, and ZERO in `docs/adr/**`, `scripts/**`,
+ * `packages/spec/src/**` and the `isSystem` census page -- so nothing that
+ * passed anywhere else can start failing on this row alone, and a citation
+ * carrying its own path is resolvable wherever it is written. */
+const LINE_ANCHOR = new RegExp('(?<![\\w/.-])(' + PATHISH + ')(:~?|,)(' + LINE_SPEC + ')(?![\\w-])', 'g');
 const LINE_CONTINUATION = new RegExp('`\\s*[:,]\\s*(' + LINE_SPEC + ')`', 'g');
 
 /* `// <dir>/<file>.ts:378` — a comment that is nothing but a path. */
@@ -447,6 +477,34 @@ const TILDE_LINE = /~\s*`(\d{2,5})`/g;
 const PATHLESS_LINE_SPEC = '\\d+(?:-\\d+)?';
 const PATHLESS_COLON_CITATION = new RegExp('(?<![A-Za-z0-9_"]):~?(' + PATHLESS_LINE_SPEC + ')', 'g');
 const PATHLESS_L_CITATION = new RegExp('(?<![A-Za-z0-9_])~?L(\\d{2,}(?:-\\d+)?)(?![A-Za-z0-9_])', 'g');
+
+/* ⭐ THE TILDE RANGE, opt-in per corpus as `tildeRangeCitations` (#24894): a
+ * tilde, a number and a range end, with no colon and no `L` --
+ * `createColumn ~7354-7368` for "about lines 7354 to 7368". It continues the
+ * filename named before it exactly as the two spellings above do, and it was
+ * the one approximate spelling none of them read: a checklist item carried it
+ * until a hand sweep re-pointed it, and nothing would have stopped the next.
+ *
+ * ⛔ Its OWN declaration, and default OFF, both as MEASUREMENTS. Taken on
+ * `7b047b4483` in this repository with the option forced on, it reads 5
+ * tokens across the four corpora that do not declare it: three in `scripts/**`
+ * comment prose, every one a duration or a count, and two in `docs/adr/**`,
+ * one a count and one a dated read position in a record's prose. An
+ * approximate month in `scripts/**` matched the shape and is refused by the
+ * ascending rule below. In prose it is a quantity first; in the checklist's
+ * data it is a line pin.
+ *
+ * ⚠️ The shape is tight for the same reason the path-less colon form is: with
+ * no path in front of it the boundaries ARE the safety margin. No whitespace
+ * anywhere, a TWO-DIGIT floor on both numbers (as the `L` pin), the left side
+ * refusing an identifier character or a `:` (a tilde after a colon is the
+ * colon form's own approximation, already recorded), and the right side
+ * refusing an identifier character or a `%`. And a line range ASCENDS: a second number
+ * below the first is read as the tail of something else, which is what keeps
+ * an approximate month -- a tilde, a four-digit year, a hyphen, a two-digit
+ * month -- out. That last rule is applied in `extractAnchors`, where the two
+ * numbers are compared, because a regex cannot. */
+const TILDE_RANGE_CITATION = /(?<![A-Za-z0-9_:])~(\d{2,})[-–](\d{2,})(?![A-Za-z0-9_%])/g;
 
 const EXEMPT_MARKER = /<!--\s*anchor-exempt:\s*(HISTORICAL|EXTERNAL)\b[^>]*-->/;
 export const EXEMPT_CLASSES = ['HISTORICAL', 'EXTERNAL'];
@@ -627,17 +685,19 @@ export function symbolSegmentResolution(source, filePath, symbol) {
  *
  * @param {string} markdown the document text (already projected, if the corpus
  *   declares a `docProjection`)
- * @param {{unspannedAnchors?: boolean, pathlessLineCitations?: boolean}} [options]
+ * @param {{unspannedAnchors?: boolean, pathlessLineCitations?: boolean, tildeRangeCitations?: boolean}} [options]
  *   `unspannedAnchors` admits the UNSPANNED form beside the spanned one, for a
  *   corpus whose documents are data rather than markdown.
  *   `pathlessLineCitations` admits the two line citations that carry no path of
  *   their own -- the bare `:NNN` continuation and the `L` pin -- for a corpus
  *   that writes a second pointer into a file it has already named.
- *   ⛔ Both default OFF: a prose corpus that never opted in reads exactly the
- *   text it read before.
+ *   `tildeRangeCitations` admits the third, the bare tilde range, for the same
+ *   kind of corpus.
+ *   ⛔ All three default OFF: a prose corpus that never opted in reads exactly
+ *   the text it read before.
  */
 export function extractAnchors(markdown, options = {}) {
-  const { unspannedAnchors = false, pathlessLineCitations = false } = options;
+  const { unspannedAnchors = false, pathlessLineCitations = false, tildeRangeCitations = false } = options;
   const anchors = [];
   const lineAnchors = [];
   const lines = markdown.split('\n');
@@ -654,7 +714,7 @@ export function extractAnchors(markdown, options = {}) {
     if (inFence) {
       if (!FENCED_HEADER.test(text)) return;
       for (const m of text.matchAll(LINE_ANCHOR)) {
-        lineAnchors.push({ line: lineNo, index: m.index, raw: m[0], path: m[1], cited: parseInt(m[2], 10), exempt: null, fencedHeader: true });
+        lineAnchors.push({ line: lineNo, index: m.index, raw: m[0], path: m[1], cited: parseInt(m[3], 10), exempt: null, fencedHeader: true, comma: m[2] === ',' });
       }
       return;
     }
@@ -731,7 +791,7 @@ export function extractAnchors(markdown, options = {}) {
     };
     for (const m of text.matchAll(LINE_ANCHOR)) {
       const ex = exemptionFor(m.index + m[0].length);
-      pushLineAnchor({ line: lineNo, index: m.index, raw: m[0], path: m[1], cited: parseInt(m[2], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null }, m[0].length);
+      pushLineAnchor({ line: lineNo, index: m.index, raw: m[0], path: m[1], cited: parseInt(m[3], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null, comma: m[2] === ',' }, m[0].length);
     }
     for (const m of text.matchAll(TILDE_LINE)) {
       const ex = exemptionFor(m.index + m[0].length);
@@ -755,6 +815,17 @@ export function extractAnchors(markdown, options = {}) {
         if (alreadyRecorded(m.index, m.index + m[0].length)) continue;
         const ex = exemptionFor(m.index + m[0].length);
         pushLineAnchor({ line: lineNo, index: m.index, raw: m[0], path: lastPath, cited: parseInt(m[1], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null, pathless: true }, m[0].length);
+      }
+    }
+    /* Same de-duplication as the pass above, and the same inheritance: the
+     * range continues the filename named before it. A second number BELOW the
+     * first is not a line range (see `TILDE_RANGE_CITATION`) and is skipped. */
+    if (tildeRangeCitations) {
+      for (const m of text.matchAll(TILDE_RANGE_CITATION)) {
+        if (lineAnchorRanges.some(([s, e]) => m.index < e && m.index + m[0].length > s)) continue;
+        if (parseInt(m[2], 10) < parseInt(m[1], 10)) continue;
+        const ex = exemptionFor(m.index + m[0].length);
+        pushLineAnchor({ line: lineNo, index: m.index, raw: m[0], path: lastPath, cited: parseInt(m[1], 10), exempt: ex?.class ?? null, exemptRaw: ex?.raw ?? null, pathless: true, tildeRange: true }, m[0].length);
       }
     }
   });
@@ -812,7 +883,7 @@ export function defineCorpus(spec) {
   const {
     id, label, docRoots, docPattern = /\.mdx?$/, crossRepos = {}, checkBarePaths = false,
     docProjection = null, judgeUntrackedLineAnchors = true, excludeDirs = [],
-    unspannedAnchors = false, pathlessLineCitations = false,
+    unspannedAnchors = false, pathlessLineCitations = false, tildeRangeCitations = false,
   } = spec;
   if (!id || !label) throw new Error('defineCorpus: `id` and `label` are required');
   if (!Array.isArray(docRoots) || docRoots.length === 0) throw new Error('defineCorpus: `docRoots` must be a non-empty array');
@@ -848,19 +919,28 @@ export function defineCorpus(spec) {
    * by the next projection of the same kind, silently and with nobody deciding
    * it; this one over-refuses a hypothetical PROJECTED DATA corpus loudly, at
    * registration, and the ruling this module implements already names that exit
-   * -- widen the core rather than fork the rule. */
-  if (docProjection !== null && pathlessLineCitations) {
+   * -- widen the core rather than fork the rule.
+   *
+   * ⭐ `tildeRangeCitations` is refused beside a projection by the SAME rule
+   * (#24894): it is the third path-less spelling, and in prose a tilde range is
+   * a quantity. The message names whichever option was declared. */
+  const pathlessOptions = [
+    pathlessLineCitations && 'pathlessLineCitations',
+    tildeRangeCitations && 'tildeRangeCitations',
+  ].filter(Boolean);
+  if (docProjection !== null && pathlessOptions.length) {
+    const named = pathlessOptions.map((o) => `\`${o}: true\``).join(' and ');
     throw new Error(
-      `defineCorpus: corpus \`${id}\` declares a \`docProjection\` AND \`pathlessLineCitations: true\`. `
-        + 'A projection declares the judged text is authored PROSE, where a colon before digits is punctuation; '
-        + 'the two path-less spellings are for a DATA corpus writing a second pointer beside a filename it has '
+      `defineCorpus: corpus \`${id}\` declares a \`docProjection\` AND ${named}. `
+        + 'A projection declares the judged text is authored PROSE, where a colon or a tilde before digits is punctuation or a quantity; '
+        + 'the path-less spellings are for a DATA corpus writing a second pointer beside a filename it has '
         + 'already named. Drop one of the two: sweep the raw document if this corpus is data, or leave '
-        + '`pathlessLineCitations` off and keep citing a path.',
+        + `${pathlessOptions.map((o) => `\`${o}\``).join(' and ')} off and keep citing a path.`,
     );
   }
   return {
     id, label, docRoots, docPattern, crossRepos, checkBarePaths, docProjection,
-    judgeUntrackedLineAnchors, excludeDirs, unspannedAnchors, pathlessLineCitations,
+    judgeUntrackedLineAnchors, excludeDirs, unspannedAnchors, pathlessLineCitations, tildeRangeCitations,
   };
 }
 
@@ -1005,6 +1085,7 @@ export function sweepCorpus(corpus, root = process.cwd()) {
       {
         unspannedAnchors: corpus.unspannedAnchors ?? false,
         pathlessLineCitations: corpus.pathlessLineCitations ?? false,
+        tildeRangeCitations: corpus.tildeRangeCitations ?? false,
       },
     );
 
@@ -1048,6 +1129,11 @@ export function sweepCorpus(corpus, root = process.cwd()) {
       findings.push({
         kind: la.exemptRaw ? 'bad-exemption' : 'line-anchor',
         doc: rel, line: la.line, raw: la.raw,
+        /* The two spellings #24894 added, carried so a corpus can tell them
+         * apart without re-parsing `raw` -- the checklist exempts them inside
+         * its append-only text, where they were written before any gate read
+         * them. */
+        comma: la.comma === true, tildeRange: la.tildeRange === true,
         detail: la.exemptRaw
           ? `\`${la.exemptRaw}\` names no valid exemption class — expected one of ${EXEMPT_CLASSES.join(' / ')}`
           : `a line number is not an anchor form — cite the symbol (\`${la.path ?? 'path'}#symbol\`) or drop to a file-level anchor`,
@@ -1186,8 +1272,13 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 //           projection. ⛔ The cases ride the file's ONE battery on purpose:
 //           the roster is per SECTION BANNER and this file carries none, which
 //           is why a single hoisted battery is its landed shape.
+// 156 → 175 when the comma form joined the shared row and the tilde range
+//           became its own opt-in (#24894): each firing spelling beside the
+//           silent neighbour that bounds it, the default-off pair, the
+//           inheritance row, the de-duplication pair, and the projection
+//           refusal extended to the new option with its data-corpus control.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'symbol-anchors self-test': 156,
+  'symbol-anchors self-test': 175,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1606,6 +1697,43 @@ export function selfTest() {
   check(extractAnchors('a template at packages/a/page.html:42 here').lineAnchors.length === 1,
     '`html` is in the shared anchorable vocabulary — a citation into a template page is read like any other');
 
+  // 11e'. ⭐ THE COMMA FORM (#24894) — the colon's separator swapped for a
+  //       comma, read by EVERY corpus because it carries its own path. Each
+  //       firing row has its silent neighbour beside it: the tight/loose line
+  //       is the whole rule.
+  const commaOf = (s) => extractAnchors(s).lineAnchors;
+  check(commaOf('see packages/a/foo.ts,123 for it').length === 1 && commaOf('see packages/a/foo.ts,123 for it')[0].comma === true
+    && commaOf('see packages/a/foo.ts,123 for it')[0].cited === 123,
+  `a COMMA citation is a line anchor for every corpus, marked as the comma form — got ${JSON.stringify(commaOf('see packages/a/foo.ts,123 for it'))}`);
+  check(commaOf('see foo.ts,123-140 there').map((l) => l.raw).join() === 'foo.ts,123-140', 'a comma citation of a RANGE is caught, bare filename or not');
+  check(commaOf('see doctor.ts,1159–1161 there').length === 1, 'a comma citation with an EN DASH range is caught');
+  check(commaOf('pinned by foo.test.ts, 12 cases').length === 0,
+    '⛔ a comma followed by a SPACE is a count after a file name, not a citation — the loose form was measured to admit three of those in the checklist');
+  check(commaOf('both a.ts,b.ts and x.json,y.json').length === 0, 'a comma LIST of files is not a citation');
+  check(commaOf('the pin packages/a/foo.ts:123 here')[0]?.comma === false, 'CONTROL: the colon form is still read, and is NOT marked as the comma form');
+
+  // 11e''. ⭐ THE TILDE RANGE (#24894), its own opt-in. Both directions on
+  //        the SAME text, and every quantity-shaped neighbour pinned silent.
+  const trDoc = 'fixtures.knownGaps cite createColumn ~7354-7368 in it';
+  check(extractAnchors(trDoc).lineAnchors.length === 0
+    && extractAnchors(trDoc, { pathlessLineCitations: true }).lineAnchors.length === 0,
+  'DEFAULT: a tilde range is NOT read without `tildeRangeCitations` — not even beside `pathlessLineCitations`, whose two spellings a corpus gate may name');
+  const tr = (s) => extractAnchors(s, { tildeRangeCitations: true }).lineAnchors;
+  check(tr(trDoc).map((l) => l.raw).join() === '~7354-7368' && tr(trDoc)[0].tildeRange === true && tr(trDoc)[0].pathless === true,
+    `OPT-IN: a tilde range is caught, marked path-less and as the tilde range — got ${JSON.stringify(tr(trDoc))}`);
+  check(tr('arms in applyTenantScope (~12016–12066)').length === 1, 'an EN DASH tilde range in parentheses is caught');
+  const trInherit = tr('`packages/a/b.ts#createColumn` ~7354-7368');
+  check(trInherit.length === 1 && trInherit[0].path === 'packages/a/b.ts', 'a tilde range inherits the path named before it');
+  check(tr('a run of ~2026-09 ships').length === 0, '⛔ a DESCENDING pair is not a line range — an approximate month stays silent');
+  check(tr('takes ~10-20% of the run').length === 0, 'a percentage range is not a citation');
+  check(tr('a ~ 100-200 budget and ~100 - 200 rows').length === 0, '⛔ a tilde range with WHITESPACE in it is prose, not a citation');
+  check(tr('version 1~12-34 and v~12-34').length === 0, 'a tilde inside an identifier-shaped token is not a citation');
+  check(tr('one ~5-9 item').length === 0, 'a one-digit range is under the two-digit floor');
+  check(tr('computeAuthGate :~5084-5160').length === 0 && tr('a pin at packages/a/x.tsx:~605-615 here').length === 1,
+    'a tilde after a COLON is the colon form\'s own spelling — not read a second time as a tilde range');
+  check(extractAnchors('computeAuthGate ~:5084-5160 and ~7354-7368', { pathlessLineCitations: true, tildeRangeCitations: true }).lineAnchors.length === 2,
+    'with both options on, the colon form and the tilde range each report ONCE');
+
   // 11f. ⭐ WHO MAY DECLARE `pathlessLineCitations` (#18845). The option is a
   //      DATA corpus's declaration, and a corpus declaring a `docProjection`
   //      has already said its documents are prose — so the pair is refused at
@@ -1631,6 +1759,15 @@ export function selfTest() {
     'CONTROL: a projected corpus that never mentions the option registers exactly as it did before');
   check(defineCorpus({ ...proseSpec, pathlessLineCitations: false }).pathlessLineCitations === false,
     'CONTROL: the refusal is about the PAIR — declaring the option OFF beside a projection is not a refusal');
+  // ⭐ The tilde range rides the same rule (#24894), and the message names it.
+  let tildePairError = null;
+  try { defineCorpus({ ...proseSpec, tildeRangeCitations: true }); } catch (err) { tildePairError = err; }
+  check(tildePairError !== null && String(tildePairError.message).includes('tildeRangeCitations')
+    && !String(tildePairError.message).includes('pathlessLineCitations'),
+  `a projected corpus declaring \`tildeRangeCitations\` is refused, and the message names THAT option — got ${JSON.stringify(String(tildePairError && tildePairError.message).slice(0, 160))}`);
+  check(defineCorpus({ id: 'data-corpus', label: 'data', docRoots: ['a'], tildeRangeCitations: true }).tildeRangeCitations === true
+    && defineCorpus({ id: 'x', label: 'x', docRoots: ['a'] }).tildeRangeCitations === false,
+  'CONTROL: a DATA corpus may declare `tildeRangeCitations`, and a corpus that says nothing has it OFF');
   // ⭐ Keyed on ANY projection, ⛔ never on one function's identity: an identity
   //   test is evaded by a wrapper around the very same projection, silently.
   let wrappedError = null;

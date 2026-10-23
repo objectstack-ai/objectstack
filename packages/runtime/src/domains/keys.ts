@@ -240,9 +240,10 @@ export async function handleKeysRequest(
             return {
                 handled: true,
                 response: deps.error(
-                    `expires_at ${new Date(requestedMs).toISOString()} is further away than this deployment allows: an `
-                    + `API key lives at most ${policy.maxExpiryDays} days, so the latest expiry a key signed now may `
-                    + `have is ${latest}. Ask for that date or an earlier one, and rotate the key before it expires.`,
+                    `expires_at ${new Date(requestedMs).toISOString()} is further away than this deployment allows: the `
+                    + `Authentication API key policy's Maximum key lifetime is ${policy.maxExpiryDays} days, so the `
+                    + `latest expiry a key signed now may have is ${latest}. Ask for that date or an earlier one, and `
+                    + 'rotate the key before it expires.',
                     API_KEY_EXPIRY_TOO_LONG.status,
                     { code: API_KEY_EXPIRY_TOO_LONG.code },
                 ),

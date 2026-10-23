@@ -18,15 +18,16 @@ import {
 
 describe('ExecutionStatus', () => {
   it('should accept all valid statuses', () => {
-    const valid = ['pending', 'running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'retrying', 'refused'];
+    const valid = ['pending', 'running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'retrying', 'refused', 'missed'];
     valid.forEach((v) => {
       expect(() => ExecutionStatus.parse(v)).not.toThrow();
     });
   });
 
-  it('names the refused terminal — appended LAST, so every `.options` index reader keeps its positions', () => {
-    expect(ExecutionStatus.options).toContain('refused');
-    expect(ExecutionStatus.options.at(-1)).toBe('refused');
+  it('names the refused and missed terminals — each appended LAST, so every `.options` index reader keeps its positions', () => {
+    expect(ExecutionStatus.options).toHaveLength(10);
+    expect(ExecutionStatus.options[8]).toBe('refused');
+    expect(ExecutionStatus.options.at(-1)).toBe('missed');
     expect(ExecutionStatus.options.slice(0, 8)).toEqual(
       ['pending', 'running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'retrying'],
     );
@@ -35,6 +36,9 @@ describe('ExecutionStatus', () => {
     expect(ExecutionStatus.safeParse('refused').success).toBe(true);
     expect(ExecutionStatus.safeParse('failed').success).toBe(true);
     expect(ExecutionStatus.safeParse('rejected').success).toBe(false);
+    // `missed` is its own member, not a spelling of `cancelled` or `failed`.
+    expect(ExecutionStatus.safeParse('missed').success).toBe(true);
+    expect(ExecutionStatus.safeParse('skipped').success).toBe(false);
   });
 
   it('should reject invalid statuses', () => {

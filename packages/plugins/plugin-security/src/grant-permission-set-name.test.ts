@@ -43,7 +43,7 @@ import {
   grantSetNotInCatalogMessage,
   registerGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
-import { relaxEveryTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -98,7 +98,7 @@ async function boot() {
   await engine.syncSchemas();
   // The organization-less holdings and rows below exist only on a store built
   // before 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is it.
-  await relaxEveryTenantColumn(engine, [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, SysMember]);
+  await relaxTenantColumns(engine, ['sys_user_permission_set']);
   // The authz resolver reads these; the auth plugin registers them in a deployment.
   for (const o of [SysUser, SysMember]) {
     if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');

@@ -83,12 +83,12 @@
  *
  *    ⚠️ Platform-namespace objects used to be a fourth population: first the
  *    whole `sys_` / `cloud_` / `ai_` NAMESPACE, then (#13491) the per-object
- *    verdict of `PLATFORM_OBJECT_TENANCY`. ADR-0131 C8 stage 8b retired that
+ *    verdict of a hand-kept per-table ledger. ADR-0131 C8 stage 8b retired that
  *    write-path reader — under `single` first, then under the walled postures
  *    in 18.x — so a platform object with a tenant column takes the derived
- *    organization or is refused, like every other object. The ledger keeps
- *    its other reader, the tenant-audit mute in `Engine.buildDriverOptions`
- *    ({@link isPlatformObjectOutOfTenantAuditScope}). C1 withdrew the seed
+ *    organization or is refused, like every other object. The ledger's last
+ *    reader, the tenant-audit mute in `Engine.buildDriverOptions`, became a
+ *    schema read too, and the ledger retired (D13). C1 withdrew the seed
  *    loader's namespace exemption. #8686's backfill
  *    (`seed-tenancy-backfill.ts`) still carries the NAMESPACE form; its
  *    residue attribution is C7's. Read the three together before changing any
@@ -133,10 +133,9 @@ export const DEFAULT_TENANT_FIELD = 'organization_id';
  *
  * ⚠️ Since #13491 this is a name test, NOT a tenancy rule, and it is no longer
  * a write-path cut at all. Its only reader is
- * {@link isPlatformNamespaceObject}, which
- * {@link isPlatformObjectOutOfTenantAuditScope} (`platform-object-tenancy.ts`)
- * uses as a cheap pre-filter before consulting the per-object verdict. ⛔ Never
- * reach for it to decide whether a row stays org-less.
+ * {@link isPlatformNamespaceObject}, a published name test the engine itself no
+ * longer consults: the per-table ledger it used to pre-filter for retired with
+ * ADR-0131 D13. ⛔ Never reach for it to decide whether a row stays org-less.
  *
  * ## The three copies, and why they no longer agree
  *
@@ -174,10 +173,10 @@ const PLATFORM_NAMESPACE = /^(sys_|cloud_|ai_)/;
  *
  * ⚠️ NAME-SHAPE ONLY, since #13491. This answers "does the name carry a
  * platform prefix", NOT "do its rows stay org-less" — the 2026-08-31 ruling
- * separated those two questions, and the second one is
- * {@link isPlatformObjectOutOfTenantAuditScope} in `platform-object-tenancy.ts`.
- * ⛔ Never reach for this predicate to decide tenancy: doing so is the
- * wholesale exemption the ruling withdrew.
+ * separated those two questions, and ADR-0131 D13 answers the second one from
+ * the schema alone ({@link resolveTenantFieldName}). ⛔ Never reach for this
+ * predicate to decide tenancy: doing so is the wholesale exemption the ruling
+ * withdrew.
  */
 export function isPlatformNamespaceObject(object: string): boolean {
   return PLATFORM_NAMESPACE.test(object);
@@ -186,6 +185,27 @@ export function isPlatformNamespaceObject(object: string): boolean {
 /**
  * Resolve the column an object is tenant-scoped by, or `null` when it is not
  * tenant-scoped at all.
+ *
+ * ## ⭐ This is the one tenancy-scope predicate (ADR-0131 D9 / D13)
+ *
+ * It decides both of the engine's tenancy cuts for an object, read on the
+ * registered schema — the authored one plus the columns `applySystemFields`
+ * injects, which is the schema the engine actually holds: whether an
+ * organization-less system insert is judged by the system-write rule
+ * (`Engine.resolveSystemInsertOrganization`), and whether an elevated write's
+ * tenant-audit stays live (`Engine.buildDriverOptions`). Non-null ⇒ in scope,
+ * whatever the object's name. There is no per-table list beside it: the
+ * #13491 ledger that once narrowed the audit by name retired with D13, so an
+ * object leaves scope only by DECLARING it on its own schema
+ * (`tenancy.enabled: false`, `systemFields.tenant: false`, no tenant field).
+ *
+ * Which platform-namespace objects that leaves outside, and the declaration
+ * that puts each there, is derived — never restated here — by
+ * `scripts/platform-object-tenancy-census.mjs` into
+ * `scripts/platform-object-tenancy-census.json`, which
+ * `scripts/check-platform-object-tenancy-census.mjs` holds to the tree. ⛔ Do
+ * not quote its counts in this comment: a hand-written count here went stale
+ * once already, with CI green.
  *
  * The twin of `SqlDriver.computeTenantField`, same precedence and same reading:
  * an explicit `tenancy.enabled: false` opt-out wins over any column-presence

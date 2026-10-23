@@ -220,9 +220,6 @@ import {
   SystemWriteOrganizationRequiredError,
   ORGANIZATION_OBJECT,
 } from './tenancy/system-write-organization.js';
-// [#13491] The per-object tenancy inventory that replaced the blanket
-// namespace exemption — the ONE reading both narrowed gates consult.
-import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object-tenancy.js';
 import { resolveTenancyPosture } from '@objectstack/types';
 import {
   normalizeTenancyPosture,
@@ -276,7 +273,7 @@ import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
-import { ExpressionEngine, toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
+import { ExpressionEngine, analyzeRelationshipTraversals, toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import {
   isAggregatedViewContainer,
@@ -2425,9 +2422,10 @@ function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined):
  *  1. `wallJudgesOrganization`: the seam the wall installed on THIS write
  *     declares that it judges the stored rows' organization
  *     (`PostHookWriteImageCheck.judgesOrganization`). The caller reads that
- *     member once, for a non-system caller only. Nothing here derives it:
- *     where no wall judged the column, the strip takes a caller's value
- *     exactly as before.
+ *     member once, for a non-system caller only. [#25062] The write preview
+ *     reads the same value from the wall's verdict on each row
+ *     (`WriteWallRowVerdict`). Nothing here derives it: where no wall judged
+ *     the column, the strip takes a caller's value exactly as before.
  *  2. The object is one the INSERT strip judges, with the column in that
  *     subject ({@link staticReadonlyInsertSubject}). So never the reserved
  *     `sys_` namespace or a platform-internal `managedBy` bucket, whose own
@@ -2467,7 +2465,7 @@ function staticReadonlySparesOrganization(schema: unknown, wallJudgesOrganizatio
  *
  * ONE function for both passes that read the subject, the pre-hook withhold
  * and the post-hook strip, so the hook view and the stored row cannot
- * disagree about the column.
+ * disagree about the column. [#25062] The write preview's strip reads it too.
  */
 function insertStaticReadonlySubject(
   schema: unknown,
@@ -2493,7 +2491,8 @@ function insertStaticReadonlySubject(
  * strips (what is stored), and {@link staticReadonlyStoredView}, which the
  * `readonlyWhen` strips and the master-detail settlement read. `update()`
  * reads the wall's flag once and hands that one value to all of them, so the
- * hook view and the stored row cannot disagree about the column.
+ * hook view and the stored row cannot disagree about the column. [#25062] The
+ * `update`-mode preview's strip reads it too.
  */
 function updateStaticReadonlySubject(schema: unknown, wallJudgesOrganization: boolean): unknown {
   if (!staticReadonlySparesOrganization(schema, wallJudgesOrganization)) return schema;
@@ -3053,6 +3052,64 @@ function planStoredExpressions(schema: any): FormulaPlanEntry[] {
   return plan;
 }
 
+/** [#25073] {@link storedExpressionsReading}'s per-source member reads, bounded like the rule validator's cache. */
+const storedExpressionReadsCache = new Map<string, ReadonlySet<string> | null>();
+const STORED_EXPRESSION_READS_CACHE_CAP = 512;
+
+/** The `record.<field>` names one plan entry reads, or `null` when the platform's member reader cannot say. */
+function storedExpressionReads(entry: FormulaPlanEntry): ReadonlySet<string> | null {
+  const expr = entry.expression as { dialect?: string; source?: unknown } | undefined;
+  if (!expr || (expr.dialect !== undefined && expr.dialect !== 'cel') || typeof expr.source !== 'string') return null;
+  const hit = storedExpressionReadsCache.get(expr.source);
+  if (hit !== undefined) return hit;
+  const analysis = analyzeRelationshipTraversals(expr.source);
+  const reads = analysis ? new Set([...analysis.bareFields, ...analysis.traversals.keys()]) : null;
+  if (storedExpressionReadsCache.size < STORED_EXPRESSION_READS_CACHE_CAP) storedExpressionReadsCache.set(expr.source, reads);
+  return reads;
+}
+
+/**
+ * [#25073] The entries of a stored-expression plan that read one of `fields`
+ * (the object's `autonumber` fields), directly or through another entry that
+ * does, in plan order: the stored fields an insert must compute again once
+ * the record number is issued, because every earlier pass ran before it
+ * existed.
+ *
+ * Reads are the platform's one member reader's (`analyzeRelationshipTraversals`,
+ * `record.x`, `record.?x`, `record['x']`, inside `has()` too), so this cannot
+ * disagree with the lint about which spellings name a field. An entry whose
+ * reads it cannot name (another dialect) counts as a reader: computing it
+ * twice costs a pass, missing it stores a stale value.
+ */
+function storedExpressionsReading(plan: FormulaPlanEntry[], fields: ReadonlySet<string>): FormulaPlanEntry[] {
+  if (plan.length === 0 || fields.size === 0) return [];
+  const moved = new Set(fields);
+  const readers = new Set<FormulaPlanEntry>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const entry of plan) {
+      if (readers.has(entry)) continue;
+      const reads = storedExpressionReads(entry);
+      if (reads !== null && ![...reads].some((name) => moved.has(name))) continue;
+      readers.add(entry);
+      moved.add(entry.name);
+      grew = true;
+    }
+  }
+  return plan.filter((entry) => readers.has(entry));
+}
+
+/** The `autonumber` fields an object declares. */
+function autonumberFieldNames(schema: any): Set<string> {
+  const names = new Set<string>();
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return names;
+  for (const [name, def] of Object.entries(fields as Record<string, any>)) {
+    if (def?.type === 'autonumber') names.add(name);
+  }
+  return names;
+}
+
 /** What {@link computeStoredExpressions} reads its permission map, fault sink and hops from. */
 interface StoredExpressionServing {
   permissionsFor: (plan: FormulaPlanEntry[], records: readonly unknown[]) => Promise<EvalPermissions | undefined>;
@@ -3086,6 +3143,37 @@ async function computeStoredExpressions(
     for (const entry of plan) values[entry.name] = row[entry.name];
     return values;
   });
+}
+
+/**
+ * [#25073] The stored fields an insert computes again once it holds a record
+ * number ({@link storedExpressionsReading}), with what computing them reads.
+ */
+interface AutonumberReaders {
+  readonly plan: FormulaPlanEntry[];
+  readonly execCtx: ExecutionContext | undefined;
+  readonly serving: StoredExpressionServing;
+  /** The {@link ObjectQL.registerInsertRecomputeListener} listeners, told per row; absent when none is registered. */
+  readonly recomputed?: (row: Record<string, unknown>, fields: string[]) => Promise<void>;
+}
+
+/**
+ * [#25073] Compute the readers again over rows that now carry their issued
+ * number, and write the values onto the rows the driver is handed — the step
+ * that makes the stored value the declared expression over the stored row.
+ * The replaced-value report is NOT made again: it judged the caller's value
+ * once, before validation and before any number existed.
+ */
+async function recomputeAutonumberReaders(
+  readers: AutonumberReaders | undefined,
+  rows: Array<Record<string, unknown>>,
+): Promise<void> {
+  if (!readers || readers.plan.length === 0 || rows.length === 0) return;
+  const computed = await computeStoredExpressions(readers.plan, rows, readers.execCtx, readers.serving);
+  rows.forEach((row, k) => Object.assign(row, computed[k]));
+  if (!readers.recomputed) return;
+  const fields = readers.plan.map((entry) => entry.name);
+  for (const row of rows) await readers.recomputed(row, fields);
 }
 
 /**
@@ -3848,7 +3936,9 @@ export interface PostHookWriteImageCheck {
    * Absent or `false`, the strip runs exactly as before. The engine never
    * sets it, and never derives it from the posture or the context: that
    * would be a mirror of the wall, and a mirror is wider than the wall
-   * wherever the wall is not mounted.
+   * wherever the wall is not mounted. [#25062] The write preview, which
+   * installs no seam, reads the same value from the wall's verdict on each
+   * row instead ({@link WriteWallRowVerdict}, `ObjectQL.registerWriteWallVerdict`).
    */
   judgesOrganization?: boolean;
 }
@@ -3982,6 +4072,43 @@ export type FieldOwnedFileReadAuthorizer = (
   ownerIds: string[],
   context: ExecutionContext,
 ) => Promise<Set<string>>;
+
+/**
+ * [#25062] The Layer 0 tenant write wall's answer for ONE row of a write
+ * preview ({@link ObjectQL.validate}): admitted, saying whether the wall judges
+ * the row's `organization_id` (the value
+ * {@link PostHookWriteImageCheck.judgesOrganization} is set from on the
+ * write), or refused with the write's own `code` and `message`. A refused
+ * `field` is `organization_id` when the wall refused a value the row carries,
+ * and `_record` when it refused the caller's state (no active organization).
+ */
+export type WriteWallRowVerdict =
+  | { readonly admitted: true; readonly judgesOrganization: boolean }
+  | {
+      readonly admitted: false;
+      readonly field: 'organization_id' | '_record';
+      readonly code: string;
+      readonly message: string;
+    };
+
+/**
+ * [#25062] "What does the Layer 0 tenant write wall answer for each of these
+ * rows?" One verdict per row, in order, or `null` when the wall is not asked
+ * for this write (the engine then judges the rows as if nothing were
+ * registered).
+ *
+ * The engine declares this shape but never implements it. The wall has one
+ * definition, the enforcement layer's own (`@objectstack/plugin-security`'s
+ * step 3.7), and the verdict travels here as a value: a copy of the wall in
+ * the engine would be the mirror the `judgesOrganization` member forbids. See
+ * `ObjectQL.registerWriteWallVerdict`.
+ */
+export type WriteWallVerdict = (
+  object: string,
+  operation: 'insert' | 'update',
+  context: unknown,
+  rows: readonly Record<string, unknown>[],
+) => Promise<readonly WriteWallRowVerdict[] | null>;
 
 /**
  * The stack collections the engine decomposes into individual registry items —
@@ -4970,6 +5097,9 @@ export class ObjectQL implements IObjectQLEngine {
    * worthless.
    */
   private readonly transactionUnsupportedReported = new Set<string>();
+
+  /** [#25073] Objects already reported by {@link warnAutonumberReadersUnserved}: once per engine instance. */
+  private readonly autonumberReadersUnservedReported = new Set<string>();
 
   /**
    * Objects already reported by {@link warnCascadeNotAtomic} — the `'split'`
@@ -6207,8 +6337,15 @@ export class ObjectQL implements IObjectQLEngine {
    * D10 dangling delegator), the ADR-0066 D3 capability AND-gate for both
    * principals, the `allowCreate`/`allowEdit` CRUD grant, the ADR-0090 D10
    * delegator's independent grant, the middleware's own step 2.5 FLS write gate
-   * over the keys THIS payload names, and its ADR-0123 D2 organization wall
-   * (step 3.7). The gate says nothing about any refusal not in that list.
+   * over the keys THIS payload names, and its ADR-0123 D2 no-active-organization
+   * refusal (step 3.7's scope pre-test, asked with no row, so it refuses a
+   * caller class). The gate says nothing about any refusal not in that list.
+   * [#25062] ⛔ In particular it is not step 3.7's judgement of a ROW's
+   * organization (the forge guard, an emptied organization, an insert with
+   * nowhere to land): it is handed no row to judge, and it answers `true` for
+   * a caller whose payload names an organization the write refuses. That is
+   * the write-wall verdict's question, asked per row
+   * ({@link registerWriteWallVerdict}).
    * `@objectstack/plugin-security`'s `can-write-object-admission.test.ts` pins
    * the probe's answer equal to the registered middleware's on its equivalence
    * block's cases, and pins one D12 UPDATE case as a direction: the probe
@@ -6237,8 +6374,11 @@ export class ObjectQL implements IObjectQLEngine {
    *    The step 2.7 `using` pre-image, the ADR-0055 controlled-by-parent
    *    master-edit check (step 2.8), the RLS `check` post-image (step 3.6) and
    *    the Layer 0 tenant post-image (step 3.7) each judge a ROW: a prior
-   *    image, a master record, or a pre-image merged with the change set. The
-   *    preview reads nothing and holds none of them, so it judges none of them.
+   *    image, a master record, or a pre-image merged with the change set. This
+   *    gate is handed none of them, so it judges none of them. [#25062] The
+   *    tenant wall's judgement of the row the preview holds comes through
+   *    {@link registerWriteWallVerdict} instead: it decides what the preview
+   *    answers for that row, never whether this gate's related read happens.
    *  - **Payload-VALUE refusals — the same caller passes by not sending the
    *    value.** The masked-echo write refusal (step 2.5a) and the `owner_id`
    *    ownership forge (step 3.5) refuse a VALUE, not a caller: the identical
@@ -6295,6 +6435,41 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#25062] The Layer 0 tenant write wall's verdict on each row of a write
+   * preview — supplied by the security plugin, never decided here.
+   *
+   * `validate()` runs no middleware, so the wall's judgement of a row's
+   * `organization_id` never reached it: the preview ran the static-`readonly`
+   * strip unconditionally, reported a caller's organization DROPPED where the
+   * write stores it as sent (the wall judges it, `judgesOrganization`), and
+   * answered VALID a row naming an organization the write refuses 403. The
+   * write-gate probe cannot carry this: it answers whether a CALLER may write,
+   * one boolean for the set; the wall judges a VALUE a row carries. Two
+   * questions, two members. ⛔ Nor is the verdict derived here from the posture,
+   * `tenantId` or `accessible_org_ids`: that would be a mirror of the wall.
+   *
+   * `rows` are the preview's own: after the defaults (insert) and before any
+   * hook, the caller's rows on an update. `validate()` reads each row's verdict
+   * and nothing else: an admitted row whose organization the wall judges keeps
+   * the column out of the static-`readonly` strip, exactly where
+   * `insert()` / `update()` keep it; a refused row is answered `valid: false`
+   * with the write's code and message, on its own, as the preview answers
+   * every other refusal.
+   *
+   * Unregistered is a DEFINED state, as for the members beside it: no wall, no
+   * verdict, and the strip runs as it always has, which is also what the write
+   * does in a composition without the security plugin. A seam that throws
+   * rejects the preview, as a refusal to resolve fails the write.
+   */
+  private _writeWallVerdict?: WriteWallVerdict;
+
+  /** Wire the write wall's per-row verdict for `validate()` (#25062). Last registration wins. */
+  registerWriteWallVerdict(fn: WriteWallVerdict): void {
+    this._writeWallVerdict = fn;
+    this.logger.debug('Registered write-wall verdict for validate() organization judgement');
+  }
+
+  /**
    * [#18783] Where the acting subject's EFFECTIVE object permissions come from —
    * the map `current_user.can(object, verb)` is answered from: in a per-option
    * `visibleWhen`, and since #20082 in a `formula` field and a CEL
@@ -6316,6 +6491,39 @@ export class ObjectQL implements IObjectQLEngine {
   registerEffectiveObjectPermissionsResolver(fn: (context: unknown) => Promise<unknown>): void {
     this._effectiveObjectPermissionsResolver = fn;
     this.logger.debug('Registered effective object-permission resolver for current_user.can()');
+  }
+
+  /** [#25073] {@link registerInsertRecomputeListener}'s listeners, by registrant id. */
+  private readonly insertRecomputeListeners = new Map<
+    string,
+    (event: { object: string; row: Record<string, unknown>; fields: string[] }) => void | Promise<void>
+  >();
+
+  /**
+   * [#25073] Be told, per row, when an insert computes stored fields again
+   * after issuing the row's record number, so a value DERIVED from those
+   * fields can be derived again before the row is written.
+   *
+   * A stored field whose `expression` reads an `autonumber` is computed once
+   * before the `beforeInsert` hooks, when the number does not exist yet, and
+   * again right after the number is issued (after validation). A
+   * `beforeInsert` hook that derived something from the field saw the first
+   * value: `plugin-pinyin-search` stamps the `__search` companion from the
+   * name field there, so a name field reading the number was searchable
+   * without it. The listener runs at the second computation, on the very
+   * row the driver is handed, with the names of the fields computed again
+   * (`fields`), and on every re-issue after a collision too. What it writes
+   * on `row` is written; a throw fails the insert, as a hook's does.
+   *
+   * Keyed by `id`, so a registrant that binds again replaces itself rather
+   * than running twice.
+   */
+  registerInsertRecomputeListener(
+    id: string,
+    fn: (event: { object: string; row: Record<string, unknown>; fields: string[] }) => void | Promise<void>,
+  ): void {
+    this.insertRecomputeListeners.set(id, fn);
+    this.logger.debug('Registered insert recompute listener', { id });
   }
 
   /**
@@ -7536,17 +7744,31 @@ export class ObjectQL implements IObjectQLEngine {
     const hasTenant = tenantScope !== undefined;
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
-    // [#13491] The object's tenancy classification — the reading the mute
-    // below narrows by (ADR-0131 C8 stage 8b retired its other reader, the
-    // system-insert exemption, under every posture). An object
-    // with no tenant field is out by construction; a platform object is out
-    // unless the inventory adjudicated it tenant-scoped.
+    // [ADR-0131 D9/D13] The tenant-audit's scope is the object's SCHEMA: a
+    // tenant column (the registered schema's, as `resolveTenantFieldName`
+    // reads it) on an object that is not federated. That is the same reading
+    // the system-insert rule takes, and there is no second, per-table one —
+    // the #13491 ledger that used to narrow this by name retired with D13. An
+    // object is outside the audit only by declaring itself outside the
+    // machinery (`tenancy.enabled: false`, `systemFields.tenant: false`, no
+    // tenant field, `external`), which `scripts/platform-object-tenancy-census.json`
+    // enumerates for the platform namespaces.
     const isTenantAuditInScope =
       resolveTenantFieldName(objectSchema) !== null &&
-      !isFederated &&
-      !isPlatformObjectOutOfTenantAuditScope(object);
+      !isFederated;
+    // [ADR-0131 D8 · 8c-1] The wall's exemption, declared to the driver. An
+    // exempt platform admin's predicate write reaches the driver with no
+    // `tenantId` because the wall lifted the scope on purpose, and the
+    // driver's `[tenant-audit]` line tells such a write to declare
+    // `bypassTenantAudit: true` — an option no REST caller can set. The
+    // exemption is decided once, by `computeTenantLayer0Verdict`, and arrives
+    // here as the recorded verdict; this reads it, it does not re-decide it
+    // (see {@link wallExemptedOperation}).
+    const wallExempt =
+      tenantObject && isTenantAuditInScope && !scope.writeTarget &&
+      this.wallExemptedOperation(execCtx, scope.recordedVerdict);
     const preserveAudit = (execCtx as any)?.preserveAudit === true;
-    if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit) return base;
+    if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit && !wallExempt) return base;
     const opts: any = base && typeof base === 'object' ? { ...base } : {};
     if (hasTx && opts.transaction === undefined) {
       opts.transaction = tx;
@@ -7563,9 +7785,9 @@ export class ObjectQL implements IObjectQLEngine {
       opts.timezone = execCtx!.timezone;
     }
     if (isSystem && opts.bypassTenantAudit === undefined && !isTenantAuditInScope) {
-      // [#13491] The isSystem mute NARROWED by the object's tenancy
-      // classification, in the same stroke as the guard above and by the same
-      // reading (2026-08-31 ruling, execution point 1).
+      // [#13491 → ADR-0131 D13] The isSystem mute, cut by the object's
+      // schema alone (2026-08-31 ruling, execution point 1: the OBJECT decides,
+      // never the caller's flag).
       //
       // It used to mute EVERY elevated write, whatever the object was. The
       // census cited in commit e49d98896's message measured what that cost: 135 of 175 write call sites
@@ -7575,15 +7797,22 @@ export class ObjectQL implements IObjectQLEngine {
       // were found by a person reading call sites.
       //
       // What still mutes: an object with no tenant field at all (nothing to be
-      // unscoped from — the driver would exit at `resolveTenantField` anyway),
-      // and a platform object the inventory classified `global` or has not
-      // adjudicated. What no longer mutes: a tenant-scoped object, platform
-      // namespace or not. A caller that means it still passes
+      // unscoped from — the driver would exit at `resolveTenantField` anyway)
+      // and a federated one. What does not: any object with a tenant column,
+      // platform namespace or not — a name prefix, or a hand-kept list of
+      // names, decides nothing here. A caller that means it still passes
       // `bypassTenantAudit: true` explicitly and is honoured above — this
       // branch only fills in a value nobody supplied.
       //
       // ⚠️ Direction, per execution point 3: what this ADDS is a driver WARN
       // line. It changes nothing about what any write touches.
+      opts.bypassTenantAudit = true;
+    }
+    if (wallExempt && opts.bypassTenantAudit === undefined) {
+      // The same fill-in-only rule as the isSystem mute above: a caller's own
+      // value wins. Diagnostics only — the driver's scope is already the
+      // verdict's (no `tenantId`), and this option silences a warning and
+      // touches nothing else; on a read it is inert.
       opts.bypassTenantAudit = true;
     }
     if (preserveAudit && opts.preserveAudit === undefined) {
@@ -7613,23 +7842,7 @@ export class ObjectQL implements IObjectQLEngine {
         ? String(execCtx.tenantId)
         : undefined;
     const recorded = recordedVerdict === undefined ? undefined : TenantLayer0VerdictSchema.safeParse(recordedVerdict);
-    const verdict = recorded?.success
-      ? recorded.data
-      : computeTenantLayer0Verdict({
-          tenancyPosture: this.resolveEnginePosture(),
-          organizationId: activeOrganization,
-          accessibleOrgIds: accessibleOrganizationsOf(execCtx),
-          // Left to the driver, which resolves the tenant column from the
-          // table it actually built (`resolveTenantField`): an object with no
-          // such column is unscoped there whatever this says. `undefined` is
-          // the verdict's "assume a tenant object", as Layer 0 reads an
-          // unresolved field set.
-          objectHasOrgIdField: undefined,
-          tenancyDisabled: false,
-          // The engine holds no permission sets: no exemption is ITS to grant.
-          posturePermitsCrossTenant: false,
-          isPlatformAdmin: false,
-        });
+    const verdict = recorded?.success ? recorded.data : this.engineLayer0Verdict(execCtx, activeOrganization);
     switch (verdict.kind) {
       case 'none':
         return undefined;
@@ -7640,6 +7853,59 @@ export class ObjectQL implements IObjectQLEngine {
       case 'deny':
         return activeOrganization !== undefined ? { tenantId: activeOrganization } : undefined;
     }
+  }
+
+  /**
+   * The Layer 0 verdict over the engine's OWN facts — what {@link driverReadScope}
+   * falls back to where no wall was recorded. The one ladder,
+   * `computeTenantLayer0Verdict`, with the exemption's facts withheld.
+   */
+  private engineLayer0Verdict(
+    execCtx: ExecutionContext | undefined,
+    activeOrganization: string | undefined,
+  ): TenantLayer0Verdict {
+    return computeTenantLayer0Verdict({
+      tenancyPosture: this.resolveEnginePosture(),
+      organizationId: activeOrganization,
+      accessibleOrgIds: accessibleOrganizationsOf(execCtx),
+      // Left to the driver, which resolves the tenant column from the
+      // table it actually built (`resolveTenantField`): an object with no
+      // such column is unscoped there whatever this says. `undefined` is
+      // the verdict's "assume a tenant object", as Layer 0 reads an
+      // unresolved field set.
+      objectHasOrgIdField: undefined,
+      tenancyDisabled: false,
+      // The engine holds no permission sets: no exemption is ITS to grant.
+      posturePermitsCrossTenant: false,
+      isPlatformAdmin: false,
+    });
+  }
+
+  /**
+   * [ADR-0131 D8 · 8c-1] Did the wall's EXEMPTION lift this operation's scope?
+   * True when the recorded verdict is `none` while the same ladder over the
+   * engine's own facts — every rung but the exemption — would have walled it.
+   * That is plugin-security's own `crossedByPlatformAdmin` test (the ladder
+   * asked a second time with only the exemption withheld), with the engine's
+   * existing fallback ({@link engineLayer0Verdict}, what an unrecorded
+   * operation is scoped by) as the second asking: no rung is computed beside
+   * the one ladder, and a `single` posture answers `none` both ways, so it is
+   * no crossing. The #12974 owner bypass records `none` on READS only, where
+   * the declaration is inert.
+   *
+   * Absence is not exemption: a by-id write, a system context or a stack with
+   * no security layer records nothing, and answers false. A recorded value
+   * that does not parse answers false too — junk never lifts anything.
+   */
+  private wallExemptedOperation(execCtx: ExecutionContext | undefined, recordedVerdict: unknown): boolean {
+    if (recordedVerdict === undefined) return false;
+    const recorded = TenantLayer0VerdictSchema.safeParse(recordedVerdict);
+    if (!recorded.success || recorded.data.kind !== 'none') return false;
+    const activeOrganization =
+      execCtx?.tenantId !== undefined && execCtx.tenantId !== null && String(execCtx.tenantId) !== ''
+        ? String(execCtx.tenantId)
+        : undefined;
+    return this.engineLayer0Verdict(execCtx, activeOrganization).kind !== 'none';
   }
 
   /**
@@ -8532,9 +8798,24 @@ export class ObjectQL implements IObjectQLEngine {
    * |:---|:---|:---|:---|:---|
    * | driver-memory | `supports = {}` | **yes** | field-level `unique`, since commit 56c093c4d (ADR-0120 D1/D3 scoping) | `UNIQUE_VIOLATION` / 409 → re-seed + re-issue, here |
    * | driver-mongodb | absent (`{ batchSchemaSync: true }`) | **yes** | single-field unique index when the field declares `unique` | `E11000 duplicate key` → re-seed + re-issue, here |
-   * | driver-sql | `autonumber: true` | no | — | — |
-   * | driver-sqlite-wasm | inherited (`extends SqlDriver`, no `supports` override) | no | — | — |
-   * | driver-turso | inherited (`...super.supports`) | no | — | — |
+   * | driver-sql | `autonumber: true` | no | — | — (but see #25073 below) |
+   * | driver-sqlite-wasm | inherited (`extends SqlDriver`, no `supports` override) | no | — | — (inherited) |
+   * | driver-turso | inherited (`...super.supports`) | no | — | — (inherited) |
+   *
+   * # Numbers the DRIVER issued ahead of the write (#25073)
+   *
+   * For an object whose stored `expression` reads its record number, a driver
+   * that owns its counter issues the number through
+   * `IDataDriver.issueAutonumbers` before this method runs, and the row
+   * arrives here carrying it (`driverIssued`). The driver's own retry inside
+   * `create()` cannot answer a collision on it any more — it reserved
+   * nothing — and must not: a number re-issued there would leave the stored
+   * expression computed from the old one. So the retry is this loop's, the
+   * same loop the fallback drivers use. The member decides whether the error
+   * is a collision on its numbers (never a duplicate the caller typed, never
+   * inside a caller's transaction) and re-seeds the stale counter; this loop
+   * then issues again, recomputes the readers and writes again, under the
+   * same {@link AUTONUMBER_COLLISION_ATTEMPTS} bound.
    *
    * So the retry protects the TWO fallback backends — and it protected only one
    * of them until commit 56c093c4d, because `driver-memory` enforced no uniqueness at all
@@ -8596,7 +8877,12 @@ export class ObjectQL implements IObjectQLEngine {
     issued: IssuedAutonumber[],
     execCtx: ExecutionContext | undefined,
     driverOwnsAutonumber: boolean,
+    driverIssued: string[] = [],
+    readers?: AutonumberReaders,
   ): Promise<any> {
+    // [#25073] Who issued this row's numbers decides who judges a collision on
+    // them: the driver, through the member that issued them, or this engine.
+    const byDriver = driverIssued.length > 0;
     let attempt = 1;
     for (;;) {
       try {
@@ -8607,14 +8893,19 @@ export class ObjectQL implements IObjectQLEngine {
         // driver's error. `envelopeUniqueViolation` returns everything that is
         // not a unique violation untouched (a deadlock, a NOT NULL, an
         // unreachable store), so only the recognised conflict changes shape.
-        if (!this.isIssuedAutonumberCollision(error, issued)) {
+        // [#25073] On a driver-issued number the member answers instead, and
+        // in answering re-seeds the counter it proved stale.
+        const collided: string[] = byDriver
+          ? ((await driver.issueAutonumbers(object, [row], driverOptions, error)) as string[][] | undefined)?.[0] ?? []
+          : this.isIssuedAutonumberCollision(error, issued) ? issued.map((one) => one.field) : [];
+        if (collided.length === 0) {
           throw envelopeUniqueViolation(error, object, this.getSchema(object));
         }
         // Whatever happens next, the stale counter must not survive this call:
         // leaving it in place is what turned one collision into a storm.
         for (const one of issued) this.autonumberCounters.delete(one.counterKey);
         if (attempt >= AUTONUMBER_COLLISION_ATTEMPTS) {
-          const fields = issued.map((one) => one.field).join(', ');
+          const fields = collided.join(', ');
           throw Object.assign(
             new Error(
               `Autonumber collision on '${object}' field(s) [${fields}]: the record number was ` +
@@ -8626,19 +8917,28 @@ export class ObjectQL implements IObjectQLEngine {
         }
         attempt += 1;
         this.logger.warn('Autonumber collided — re-seeding the counter and re-issuing', {
-          object, fields: issued.map((one) => one.field), attempt,
+          object, fields: collided, attempt,
         });
-        // Clear the slots so `applyAutonumbers` treats them as empty again —
-        // leaving the burned value in place would read as an exempt writer's
-        // and be adopted rather than re-issued.
-        for (const one of issued) delete row[one.field];
-        issued = await this.applyAutonumbers(object, row, execCtx, driverOwnsAutonumber);
+        let renumbered: boolean;
+        if (byDriver) {
+          // [#25073] The member emptied the slots it proved stale; issue them again.
+          renumbered = (((await driver.issueAutonumbers(object, [row], driverOptions)) as string[][] | undefined)?.[0] ?? []).length > 0;
+        } else {
+          // Clear the slots so `applyAutonumbers` treats them as empty again —
+          // leaving the burned value in place would read as an exempt writer's
+          // and be adopted rather than re-issued.
+          for (const one of issued) delete row[one.field];
+          issued = await this.applyAutonumbers(object, row, execCtx, driverOwnsAutonumber);
+          renumbered = issued.length > 0;
+        }
+        // [#25073] A new number is a new input to every stored field that reads it.
+        await recomputeAutonumberReaders(readers, [row]);
         // Nothing left to re-issue (the field vanished from the schema
         // mid-flight) — the next failure is the caller's to see, enveloped on
         // the same terms as the exit above (#14095): this call is OUTSIDE the
         // loop's own `try`, so its rejection is a second driver-error exit and
         // not a path the branch above covers.
-        if (issued.length === 0) {
+        if (!renumbered) {
           try {
             return await driver.create(object, row, driverOptions);
           } catch (retryError) {
@@ -8661,6 +8961,31 @@ export class ObjectQL implements IObjectQLEngine {
     const column = uniqueViolationColumn(error);
     if (column === undefined) return true;
     return issued.some((one) => one.field === column);
+  }
+
+  /**
+   * [#25073] A driver that owns the record-number counter
+   * (`supports.autonumber`) but cannot issue a number ahead of the write
+   * (no `IDataDriver.issueAutonumbers`) still fills it inside `create()`, so a
+   * stored field whose `expression` reads it is stored as computed WITHOUT
+   * it, and every insert looks successful. That is a stored value that is
+   * not what its declaration says (AGENTS.md, degradation log levels: `error`),
+   * said once per object per engine instance, with the remedy.
+   */
+  private warnAutonumberReadersUnserved(object: string, plan: readonly FormulaPlanEntry[], driver: unknown): void {
+    if (this.autonumberReadersUnservedReported.has(object)) return;
+    this.autonumberReadersUnservedReported.add(object);
+    const fields = plan.map((entry) => entry.name);
+    const driverName = (driver as { name?: unknown } | null)?.name;
+    this.logger.error(
+      `Stored field(s) [${fields.join(', ')}] on '${object}' read a record number that driver ` +
+        `'${String(driverName ?? 'unknown')}' issues only inside create(), so every insert stores them computed ` +
+        'WITHOUT the number while the write reports success; an update by id recomputes them later. ' +
+        'Use a driver that implements IDataDriver.issueAutonumbers (driver-sql and the drivers built on it do), ' +
+        'or keep the record number out of the stored expression. Reported once per object.',
+      undefined,
+      { object, fields, driver: driverName },
+    );
   }
 
   /**
@@ -15635,6 +15960,27 @@ export class ObjectQL implements IObjectQLEngine {
    * caller cannot read binds as a missing one. ⛔ Unlike the write, a header
    * column the read door served transformed or not at all is judged as empty.
    *
+   * ## The Layer 0 tenant wall answers for its own rows (#25062)
+   *
+   * A row's `organization_id` is judged on the write by the tenant wall, which
+   * lives in the enforcement layer's middleware and so never runs here. The
+   * preview asks that wall for its verdict on each row
+   * ({@link registerWriteWallVerdict}) and answers from it, and it asks where
+   * the write does: on the row before the strips, and again on a row the
+   * strips changed, which is the row the write's stored-image half judges. A
+   * row whose organization the wall judges keeps the column through the
+   * static `readonly` strip (no `droppedFields` entry), as the write stores
+   * it; a row the wall refuses is `valid: false` with the write's own code
+   * (`PERMISSION_DENIED`) and message, under `organization_id` when the wall
+   * refused the value and `_record` when it refused the caller's state, and it
+   * drops nothing. Unregistered, the strip runs as before.
+   *
+   * Named limit: the wall judges the row as the preview holds it, after the
+   * defaults and before any hook. An organization a `beforeInsert` /
+   * `beforeUpdate` hook writes is judged by the write's stored-image half
+   * alone, so a row a hook places outside the caller's scope previews valid
+   * and is refused by the write.
+   *
    * Nothing is written and no sequence is consumed. Reads do happen: the
    * stored row above, the master-detail headers, and the related rows a
    * traversing rule names (see the `previewRelatedForRow` block below).
@@ -15741,6 +16087,41 @@ export class ObjectQL implements IObjectQLEngine {
         ) as Record<string, unknown>)
       : rawRows.slice();
 
+    // [#25062] THE LAYER 0 TENANT WALL'S VERDICT on each row, from the layer
+    // that owns the wall ({@link registerWriteWallVerdict}), over the rows as
+    // the preview holds them: after the defaults, before any hook. The write
+    // asks its wall twice, and so does this: on the payload before the strips
+    // (here; the write's middleware), and on the rows the strips leave (below;
+    // the write's stored-image seam). A refused row is answered with the
+    // write's refusal (the `results` block below) and reaches nothing the write
+    // does not run for it; an admitted row whose organization the wall judges
+    // keeps the column through the static `readonly` strip, as `insert()` /
+    // `update()` keep it. `null` (nothing registered, or the wall not asked)
+    // leaves every row to the strip, exactly as before. ⛔ Nothing here reads
+    // the posture or the context's organizations: the verdict is the wall's
+    // own, read as a value.
+    const askWriteWall = async (asked: Record<string, unknown>[]) => {
+      if (!this._writeWallVerdict || asked.length === 0) return null;
+      const verdicts = await this._writeWallVerdict(object, mode, options?.context, asked);
+      if (verdicts && verdicts.length !== asked.length) {
+        throw new Error(
+          `[ObjectQL] the write-wall verdict answered ${verdicts.length} verdict(s) for ` +
+            `${asked.length} row(s) of '${object}'`,
+        );
+      }
+      return verdicts;
+    };
+    const refusalIn = (verdict: WriteWallRowVerdict | undefined) =>
+      verdict && verdict.admitted === false ? verdict : undefined;
+    const wallVerdicts = await askWriteWall(rows);
+    const wallRefusals = rows.map((_, i) => refusalIn(wallVerdicts?.[i]));
+    const wallRefusalOf = (i: number) => wallRefusals[i];
+    const wallJudgesOrganizationOf = (i: number): boolean => {
+      const verdict = wallVerdicts?.[i];
+      return verdict?.admitted === true && verdict.judgesOrganization === true;
+    };
+    const heldBeforeStrips = rows.slice();
+
     // [#20805] 3. The caller-write strips, over the defaulted rows with the
     // caller's rows as `supplied` — where the write runs them (after the
     // defaults; the write's hooks, which this preview does not run, sit in
@@ -15777,6 +16158,7 @@ export class ObjectQL implements IObjectQLEngine {
       const preserveAudit = options?.context?.preserveAudit === true;
       if (mode === 'insert') {
         for (let i = 0; i < rows.length; i++) {
+          if (wallRefusalOf(i)) continue;
           const stripped = stripRuntimeOwnedFields(
             schemaForValidation as any, rows[i], rawRows[i] ?? {}, undefined, { preserveAudit },
           ) as Record<string, unknown>;
@@ -15784,26 +16166,33 @@ export class ObjectQL implements IObjectQLEngine {
           collectTaken(i, rows[i]!, stripped);
           rows[i] = stripped;
         }
-        const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
-        if (readonlySubject) {
-          for (let i = 0; i < rows.length; i++) {
-            const pass = await this.staticReadonlyCreateStrip(
-              object, readonlySubject, rows[i]!, rawRows[i] ?? {}, options?.context,
-              { logger: undefined, strictReadonlyWrites: false, hookWrittenKeys: undefined, nowSnap: nowSnapshot, permissionResolution },
-            );
-            recordTaken(i, pass.taken);
-            // The write fails on this resolution failure outside partial mode;
-            // a preview has no partial mode, so it fails the same way.
-            if (pass.error !== undefined) throw pass.error;
-            rows[i] = pass.row;
-          }
+        // [#25062] The subject per row, as the write's strip judges that row:
+        // without `organization_id` where the wall judges it
+        // (`insertStaticReadonlySubject`, the write's own view).
+        for (let i = 0; i < rows.length; i++) {
+          if (wallRefusalOf(i)) continue;
+          const readonlySubject = insertStaticReadonlySubject(schemaForValidation, wallJudgesOrganizationOf(i));
+          if (!readonlySubject) continue;
+          const pass = await this.staticReadonlyCreateStrip(
+            object, readonlySubject, rows[i]!, rawRows[i] ?? {}, options?.context,
+            { logger: undefined, strictReadonlyWrites: false, hookWrittenKeys: undefined, nowSnap: nowSnapshot, permissionResolution },
+          );
+          recordTaken(i, pass.taken);
+          // The write fails on this resolution failure outside partial mode;
+          // a preview has no partial mode, so it fails the same way.
+          if (pass.error !== undefined) throw pass.error;
+          rows[i] = pass.row;
         }
       } else {
         for (let i = 0; i < rows.length; i++) {
+          if (wallRefusalOf(i)) continue;
           const supplied: Record<string, unknown> = { ...(rawRows[i] ?? {}) };
           delete supplied.id;
+          // [#25062] The update's own view (`updateStaticReadonlySubject`):
+          // the whole schema, without `organization_id` where the wall judges it.
           const stripped = stripReadonlyFields(
-            schemaForValidation as any, rows[i], supplied, undefined, { preserveAudit },
+            updateStaticReadonlySubject(schemaForValidation, wallJudgesOrganizationOf(i)) as any,
+            rows[i], supplied, undefined, { preserveAudit },
           ) as Record<string, unknown>;
           if (stripped === rows[i]) continue;
           collectTaken(i, rows[i]!, stripped);
@@ -15811,9 +16200,32 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
     }
+    // [#25062] …and the wall's STORED-IMAGE half, on each row the strips
+    // changed: the row as the write would store it, which the wall has not
+    // seen. Where the wall does not judge the organization (a platform
+    // operator crossing it with no active organization), the strip takes a
+    // caller's organization and the stored row has nowhere to land; the write
+    // refuses it there, after its strips, and so does this. A row the strips
+    // left alone was answered above. Only a refusal is read here: the spare
+    // was decided on the first answer, as the write decides it before its
+    // strips.
+    const restripped = rows.flatMap((row, i) => (!wallRefusals[i] && row !== heldBeforeStrips[i] ? [i] : []));
+    const storedImageVerdicts = await askWriteWall(restripped.map((i) => rows[i]!));
+    restripped.forEach((rowIndex, k) => {
+      wallRefusals[rowIndex] = refusalIn(storedImageVerdicts?.[k]);
+    });
+
     const onFieldsDropped = options?.onFieldsDropped;
     if (typeof onFieldsDropped === 'function') {
-      const drops = droppedFieldEvents(object, computedStrip.dropped, readonlyDropped);
+      // [#25062] A row the wall refuses drops nothing: the write that refuses
+      // it reports no drop. So the batch union is the admitted rows' alone.
+      const admittedTook = (perRow: readonly (readonly string[])[], key: string) =>
+        perRow.some((taken, i) => !wallRefusals[i] && taken.includes(key));
+      const drops = droppedFieldEvents(
+        object,
+        computedStrip.dropped.filter((key) => admittedTook(computedStrip.droppedPerRow, key)),
+        readonlyDropped.filter((key) => admittedTook(readonlyDroppedPerRow, key)),
+      );
       for (const drop of drops) {
         try {
           onFieldsDropped(drop);
@@ -15992,6 +16404,16 @@ export class ObjectQL implements IObjectQLEngine {
           message: `${field} has an invalid ${type} value: ${detail}`,
         });
       };
+      // [#25062] A row the tenant wall refuses is answered with the write's
+      // refusal, which the write gives before it validates anything.
+      const wallRefusal = wallRefusalOf(i);
+      if (wallRefusal) {
+        return {
+          valid: false,
+          errors: [{ field: wallRefusal.field, code: wallRefusal.code, message: wallRefusal.message }],
+          warnings,
+        };
+      }
       try {
         // [#21663] `'include'` in both modes: the caller-write strips ran
         // above, so this is the payload the write stores — and the write
@@ -17045,23 +17467,62 @@ export class ObjectQL implements IObjectQLEngine {
         // have already consumed a sequence value for every good row on the
         // failed attempt, leaving gaps. Required-validation exempts autonumber
         // fields either way (they are engine-assigned), and a driver that owns
-        // autonumber assigns nothing here — so no validation rule can depend on
-        // the value, making this reorder safe. In partial mode dead rows are
-        // skipped, so they never consume a sequence value either.
+        // autonumber issues here only through `issueAutonumbers` (#25073), at
+        // this same point — so no validation rule can depend on the value,
+        // making this reorder safe. In partial mode dead rows are skipped, so
+        // they never consume a sequence value either.
         // [#6806] What each row's autonumbers were ISSUED from, so a
         // unique-violation on the write below can be attributed to a counter
         // and answered by re-seeding it. Empty for every row when the driver
         // owns autonumber, and for any row the engine numbered nothing on.
         const issuedPerRow: IssuedAutonumber[][] = new Array(rows.length).fill(null).map(() => []);
+        // [#25073] A stored field whose `expression` reads the record number
+        // was computed above, before the number existed. Where the ENGINE
+        // issues (the fallback drivers) it is computed again right after
+        // `applyAutonumbers`. Where the DRIVER owns the counter, the number
+        // used to appear only inside `create()`, too late for anything to read
+        // it, so for an object with such a field the driver is asked for it
+        // HERE, at the same point after validation, through
+        // `IDataDriver.issueAutonumbers`; the row then reaches `create()` /
+        // `bulkCreate()` carrying it, and the write stays one statement. An
+        // object no stored expression reads a number on keeps the driver's
+        // own issue-at-write path, unchanged (and its in-driver batch re-seed,
+        // #6943, which the engine cannot take over: it never re-issues a batch).
+        const autonumberReaders: AutonumberReaders | undefined = (() => {
+          const plan = storedExpressionsReading(storedExpressionPlan, autonumberFieldNames(schemaForValidation));
+          if (plan.length === 0) return undefined;
+          const listeners = [...this.insertRecomputeListeners.values()];
+          const recomputed = listeners.length === 0 ? undefined : async (row: Record<string, unknown>, fields: string[]) => {
+            for (const listener of listeners) await listener({ object, row, fields });
+          };
+          return { plan, execCtx: opCtx.context, serving: storedExpressionServing, recomputed };
+        })();
+        const issueThroughDriver = driverOwnsAutonumber && autonumberReaders !== undefined
+          && typeof (driver as any)?.issueAutonumbers === 'function';
+        if (driverOwnsAutonumber && autonumberReaders !== undefined && !issueThroughDriver) {
+          this.warnAutonumberReadersUnserved(object, autonumberReaders.plan, driver);
+        }
+        // [#25073] The fields the DRIVER issued on each row, through the member.
+        const driverIssuedPerRow: string[][] = rows.map(() => []);
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
-            issuedPerRow[i] = await this.applyAutonumbers(object, rows[i], opCtx.context, driverOwnsAutonumber);
+            if (issueThroughDriver) {
+              driverIssuedPerRow[i] = (await (driver as any).issueAutonumbers(object, [rows[i]], driverOptions))?.[0] ?? [];
+            } else {
+              issuedPerRow[i] = await this.applyAutonumbers(object, rows[i], opCtx.context, driverOwnsAutonumber);
+            }
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
           }
         }
+        // [#25073] The readers, computed again over every live row that now
+        // carries a number it did not carry when they were last computed.
+        await recomputeAutonumberReaders(
+          autonumberReaders,
+          rows.filter((_, i) => rowErrors[i] === undefined && (issuedPerRow[i].length > 0 || driverIssuedPerRow[i].length > 0)),
+        );
         // Live rows = the ones that survived per-row preparation. In
         // non-partial mode rowErrors is all-empty, so this is exactly `rows`.
         const liveIndexes: number[] = [];
@@ -17114,13 +17575,24 @@ export class ObjectQL implements IObjectQLEngine {
                   object, fields: [...new Set(batchIssued.map((one) => one.field))],
                 });
               }
+              // [#25073] The same answer for numbers the driver issued: the
+              // member re-seeds the counters it proves stale, and the batch is
+              // not re-issued, for the reason above.
+              if (liveIndexes.some((i) => driverIssuedPerRow[i].length > 0)) {
+                const emptied: string[][] = (await (driver as any).issueAutonumbers(object, liveRows, driverOptions, error)) ?? [];
+                if (emptied.some((fields) => fields.length > 0)) {
+                  this.logger.warn('Autonumber collided in a batch insert — counter re-seeded, batch not re-issued', {
+                    object, fields: [...new Set(emptied.flat())],
+                  });
+                }
+              }
               throw envelopeUniqueViolation(error, object, this.getSchema(object));
             }
           }
         } else {
           result = await this.createWithAutonumberResync(
             driver, object, liveRows[0], driverOptions, issuedPerRow[liveIndexes[0]],
-            opCtx.context, driverOwnsAutonumber,
+            opCtx.context, driverOwnsAutonumber, driverIssuedPerRow[liveIndexes[0]], autonumberReaders,
           );
         }
 

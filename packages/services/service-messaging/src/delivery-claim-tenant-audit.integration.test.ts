@@ -6,12 +6,16 @@
  *
  * ## What was measured
  * On a walled deployment (`OS_TENANCY_POSTURE=isolated`) the SQL driver's
- * `auditMissingTenant` gate printed, for both delivery objects:
+ * `auditMissingTenant` gate printed, for both delivery objects, a warning
+ * that opens:
  *
  *   [tenant-audit] updateMany on tenant-scoped object "sys_http_delivery"
- *   without options.tenantId — writes will not be tenant-isolated.
+ *   without options.tenantId — …
  *   [tenant-audit] updateMany on tenant-scoped object "sys_notification_delivery"
- *   without options.tenantId — writes will not be tenant-isolated.
+ *   without options.tenantId — …
+ *
+ * What follows the dash is the driver's prescription, and it has been
+ * reworded since; this file asserts only the opening up to the object name.
  *
  * The audit is right that the writes are environment-wide. The fix is the
  * classification it demands, not the quiet: each `multi: true` write on the

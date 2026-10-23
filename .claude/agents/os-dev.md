@@ -277,7 +277,8 @@ model: opus
 - 全量 dogfood 只在终 head 跑一次,仅当标题带 `!` 或 `Clause-②:` 带 `(narrowing)` 臂(yes/no 皆算)。
 - 命令同 CI:按 ① 建闭包,锁下 `pnpm --filter @objectstack/dogfood test`;⛔ 无 `OS_TEST_SHARD`、无路径。
 - 红 = 本改动的后果(陈旧 fixture)同 PR 修,余照报;⛔ 永不跳过或收窄;计数记 `dogfood_battery`。
-- 认领带 `Clause-②:` 行才照抄进正文行首:`Check Changeset` 读正文不读卡;无则零写,⛔ 不自造。
+- 认领的 `Clause-②:`、`Metadata-protocol:` 两行照抄进 PR 正文行首;无则零写,⛔ 不自造。
+- 两行同抄进每个 changeset 正文行首,`Check Changeset` 读:有 kind 即 `minor`,`none` 即 `patch`。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
@@ -287,7 +288,6 @@ model: opus
 - 受管路径全在 `.claude/**` 者 Tier S,达档复核 PASS 在案即由席位入队落地;余皆 Tier H 等人批。
 - 受管面 PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空;两层同欠。
 - 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
-- 正文以 session-URL 形式的署名页脚收尾(见字节与 sanitizer 纪律节)。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
 - 两个读数缺一不可:被改文件的整文件 before/after,与整包 before/after(全部 SKILL.md 之和)。
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
@@ -322,7 +322,7 @@ model: opus
 - 全文 ⛔ 不出现 HTML 注释:sanitizer 落库后吃短尖括号片段,连反引号里的也吃。
 - 被吃掉标记的评论对 PM 扫描不可见;HTML 注释形不是等价写法,是坏写法。
 - 凡要上 GitHub 的文本,尖括号形状片段一律改占位词拼写(`FIELD`、`IDENT.MEMBER` 一类)。
-- 两种派发模式(`mode:subagent` 与 `mode:cloud`)下 GitHub 都是报告的权威源。
+- 各派发模式(`mode:subagent`、`mode:cloud`、`mode:thread`)下 GitHub 都是报告的权威源。
 - 写完读回那条评论到尾部:只认首行标记保不住正文,sanitizer 可从首个 tag 形片段吃到尾。
 - PR 正文同欠一次全文回读,评审读的正是它。
 

@@ -10,7 +10,6 @@
 - 含 `packages/spec/scripts/**`、`packages/spec/docs/**`。
 - 同含围着 spec 契约转的工具链:门禁、生成器、lint 规则、报错散文、references 管线。
 - 一般开发工具面留 devx;`packages/spec` 恒归本席,不论谁需要它。
-- objectui 的契约面同辖:`packages/types`、schema 与 `$schema` 语料、spec pin 耦合与契约决策卡。
 
 ## 席内分派参考
 

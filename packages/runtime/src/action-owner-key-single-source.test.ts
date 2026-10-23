@@ -45,7 +45,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import { GLOBAL_ACTION_OBJECT_KEY, standaloneActionOwnerKey } from '@objectstack/objectql';
 import {
     standaloneActionObjectName,
@@ -325,11 +325,34 @@ const SCANNED_ROOTS: readonly string[] = ['packages'];
 const SCANNED_EXTENSION = '.ts';
 
 /**
- * Generous on purpose. The scan is one `git grep` and a handful of file reads,
+ * The scanned roots as git pathspecs: every `SCANNED_EXTENSION` file at any
+ * depth under each root, which is the very glob this package declares in
+ * `scripts/cross-package-test-inputs.mjs`. Handed to git rather than applied to
+ * its answer, so git reads only the files the scan judges. The set is the one
+ * the `.endsWith('.ts')` filter on git's output used to keep, file for file, so
+ * nothing the scan proves narrows; what changes is that the other quarter of
+ * the bytes under `packages/` (the `CHANGELOG.md`s alone are 55 MB) is no
+ * longer read just to be thrown away.
+ *
+ * The `glob` magic is spelled out so `GIT_GLOB_PATHSPECS` and
+ * `GIT_NOGLOB_PATHSPECS` cannot change what it matches. A setting that turns
+ * pathspec magic off altogether makes the scan match nothing, and the reach
+ * control in half D reds on that.
+ */
+const SCANNED_PATHSPECS: readonly string[] = SCANNED_ROOTS.map(
+    (root) => `:(glob)${root}/**/*${SCANNED_EXTENSION}`,
+);
+
+/**
+ * The budget of the one tree scan, which `beforeAll` runs (see `scanTree`).
+ * Generous on purpose: the scan is one `git grep` and a handful of file reads,
  * so this is headroom against a merge-queue runner doing a full monorepo build
- * at the same time, not a budget. A pin that times out before its assertion runs
- * reports nothing, and reporting nothing is indistinguishable from finding
- * nothing.
+ * at the same time. A pin that times out before its assertion runs reports
+ * nothing, and reporting nothing is indistinguishable from finding nothing.
+ *
+ * ⛔ Not a dial. When a loaded runner pushes the scan toward this figure, cut
+ * the bytes the scan reads; raising the figure only lets a slower scan hide
+ * for longer.
  */
 const SCAN_TIMEOUT_MS = 60_000;
 
@@ -349,41 +372,102 @@ function git(args: string[]): string[] {
     return stdout.split('\0').filter((entry) => entry.length > 0);
 }
 
+/** Every symbol half D asks about: the dead member, and the reach control's live spelling. */
+const HUNTED_SYMBOLS: readonly string[] = [DELETED_PLUGIN_MEMBER, CANONICAL_HELPER];
+
+/** Per hunted symbol: every scanned file that mentions it, with the 1-based lines that do. */
+type TreeScan = ReadonlyMap<string, ReadonlyMap<string, readonly number[]>>;
+
 /**
- * Every scanned file that so much as mentions `symbol`. Tracked files PLUS
- * untracked ones with ignored paths excluded (`--untracked`) — exactly the files
- * a human authored, never build output. A file written but not yet `git add`ed
- * still reddens, which keeps this a local-loop guard.
+ * ONE walk of the scanned tree answers every question half D asks.
+ *
+ * Each question used to pay its own walk: three `git grep`s per run, each
+ * reading every file under `packages/`, 3 × 212.6 MB. On a quiet machine that
+ * is a fraction of a second; on the most loaded Test Core shard it cost
+ * 86.24 s for this file against the 60 s budget. A tree scan costs the bytes it
+ * reads, and the bytes are what a loaded runner slows, so the remedy is fewer
+ * bytes: one `git grep` for every hunted symbol at once, over
+ * `SCANNED_PATHSPECS`, is 151.2 MB, four times less (both measured with the
+ * scan's own arguments at 21a25dd9). Reading it once also tightens the reach
+ * control, which now proves the very scan whose emptiness the first test
+ * reads, not a sibling run of it.
+ *
+ * Scans tracked files PLUS untracked ones with ignored paths excluded
+ * (`--untracked`): exactly the files a human authored, never build output. A
+ * file written but not yet `git add`ed still reddens, which keeps this a
+ * local-loop guard.
  */
-function filesMentioning(symbol: string): string[] {
-    return git([
+function scanTree(): TreeScan {
+    const candidates = git([
         'grep',
         '--files-with-matches',
         '-z',
         '--untracked',
         '--text',
         '--fixed-strings',
-        '-e',
-        symbol,
+        ...HUNTED_SYMBOLS.flatMap((symbol) => ['-e', symbol]),
         '--',
-        ...SCANNED_ROOTS,
-    ]).filter((file) => file.endsWith(SCANNED_EXTENSION));
+        ...SCANNED_PATHSPECS,
+    ]);
+    const scan = new Map<string, Map<string, number[]>>();
+    for (const symbol of HUNTED_SYMBOLS) scan.set(symbol, new Map());
+    for (const file of candidates) {
+        const lines = readFileSync(join(REPO_ROOT, file), 'utf8').split('\n');
+        let attributed = false;
+        for (const [symbol, files] of scan) {
+            const hits = lines.flatMap((text, index) => (text.includes(symbol) ? [index + 1] : []));
+            if (hits.length === 0) continue;
+            files.set(file, hits);
+            attributed = true;
+        }
+        // git matched this file, so a read that finds none of the needles
+        // means the two disagree about its bytes: a broken scan, never a clean
+        // file.
+        if (!attributed) {
+            throw new Error(
+                `git grep listed ${file} as mentioning one of ${HUNTED_SYMBOLS.join(', ')}, `
+                + 'and reading it finds none of them.',
+            );
+        }
+    }
+    return scan;
+}
+
+/** Filled by half D's `beforeAll`; read by both of its tests. */
+let treeScan: TreeScan | undefined;
+
+function mentionsOf(symbol: string): ReadonlyMap<string, readonly number[]> {
+    const mentions = treeScan?.get(symbol);
+    if (!mentions) {
+        throw new Error(
+            treeScan
+                ? `${symbol} is not one of the symbols the tree scan hunts (HUNTED_SYMBOLS).`
+                : 'Half D read the tree scan before its beforeAll ran it.',
+        );
+    }
+    return mentions;
+}
+
+/** Every scanned file that so much as mentions `symbol`. */
+function filesMentioning(symbol: string): string[] {
+    return [...mentionsOf(symbol).keys()];
 }
 
 /** `<file>:<line>` for every mention that no rule above excuses. */
 function staleMentionSites(symbol: string): string[] {
     const sites: string[] = [];
-    for (const file of filesMentioning(symbol)) {
+    for (const [file, lines] of mentionsOf(symbol)) {
         if (NOT_A_STALE_MENTION.some((rule) => rule.covers(file))) continue;
-        const lines = readFileSync(join(REPO_ROOT, file), 'utf8').split('\n');
-        lines.forEach((text, index) => {
-            if (text.includes(symbol)) sites.push(`${file}:${index + 1}`);
-        });
+        for (const line of lines) sites.push(`${file}:${line}`);
     }
     return sites;
 }
 
 describe('standalone-action owner key — half D: the deleted member is dead TREE-WIDE (#14878)', () => {
+    beforeAll(() => {
+        treeScan = scanTree();
+    }, SCAN_TIMEOUT_MS);
+
     it(
         'is named nowhere outside the release record and the two pins',
         () => {
@@ -413,7 +497,6 @@ describe('standalone-action owner key — half D: the deleted member is dead TRE
                       ].join('\n'),
             ).toEqual([]);
         },
-        SCAN_TIMEOUT_MS,
     );
 
     it(
@@ -434,6 +517,5 @@ describe('standalone-action owner key — half D: the deleted member is dead TRE
             expect(reached).toContain('packages/cli/src/commands/lint.ts');
             expect(reached).toContain('packages/objectql/src/action-governance.ts');
         },
-        SCAN_TIMEOUT_MS,
     );
 });

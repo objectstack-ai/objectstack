@@ -78,6 +78,7 @@ import { childEnv } from './helpers/serve-process.js';
 import {
   renderScaffoldPackageJson,
   renderScaffoldTsconfig,
+  SCAFFOLD_NPM_OVERRIDES,
   SCAFFOLD_PNPM_RANGE,
   SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG,
   SCAFFOLD_TYPES_NODE_RANGE,
@@ -419,6 +420,25 @@ describe('the on-ramp emits the same policy — measured by DRIVING it', () => {
     expect([...pnpmRanges], 'every emission declares engines.pnpm, at one range').toEqual([
       SCAFFOLD_PNPM_RANGE,
     ]);
+  });
+
+  it('emits ONE npm overrides block across ALL THREE scaffolders, and it IS SCAFFOLD_NPM_OVERRIDES', () => {
+    // The on-ramp receives its block by GENERATION, value by value, from
+    // `POLICY_STAMPS` rows whose KEYS are spelled in the stamp script, the
+    // `uuid@<12.0.0` selector among them. Its `--check` holds each VALUE to
+    // the policy and cannot see a key spelled differently from the constant
+    // `os init` and `os create` emit from. Comparing whole blocks here can.
+    const expected = { ...SCAFFOLD_NPM_OVERRIDES };
+    // Control: the block names more than vitest, so a comparison that only
+    // ever met `{ vitest }` cannot pass for this one.
+    expect(Object.keys(expected).length).toBeGreaterThan(1);
+    for (const { id, manifest } of allScaffolderManifests()) {
+      expect(
+        manifest.overrides,
+        `${id} must emit the shared npm overrides block. The on-ramp reaches it by generation: ` +
+          'run `pnpm gen:scaffold-emission-policy`, and keep each POLICY_STAMPS override key equal to its constant',
+      ).toEqual(expected);
+    }
   });
 
   it('carries the committed template through unchanged — the generator ran, the build copied', () => {

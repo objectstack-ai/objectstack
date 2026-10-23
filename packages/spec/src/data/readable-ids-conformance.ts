@@ -259,6 +259,18 @@ export const READABLE_IDS_CASES: readonly ReadableIdsCase[] = [
       + 'rid_parent also carries, under another object name.',
   },
   {
+    name: 'a composed leaf nested in a composed leaf\'s scope: the subqueries nest',
+    where: () => ({ record_id: { $in: composed({ id: { $in: composed({ owner: 'u1' }) } }) } }),
+    verdict: 'matches',
+    holdsComposedLeaf: true,
+    expected: ['c1', 'c3', 'c6', 'c7'],
+    note: 'ADR-0139 D6 as amended, the nested master chain: a parent whose own read scope is derived from ITS '
+      + 'master (a controlled_by_parent master that is controlled_by_parent too) is composed with a leaf inside '
+      + 'its scope, and the driver compiles one statement with the subqueries nested. The inner scope admits '
+      + 'the parents u1 owns, so the rows are the narrowing case\'s. A driver that resolves only the outer leaf '
+      + 'hands the inner one to its compiler unresolved and refuses it, or evaluates it as no restriction.',
+  },
+  {
     name: 'an uncomposed leaf is refused, never evaluated as no restriction',
     where: () => ({ record_id: { $in: ReadableIds.of(P) } }),
     verdict: 'refuses-uncomposed',

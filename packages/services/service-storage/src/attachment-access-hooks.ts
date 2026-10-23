@@ -853,8 +853,12 @@ type AttachmentReadGateEngine = AttachmentLifecycleEngine & {
 } & Partial<Pick<IObjectQLEngine, 'hasObjectMiddleware'>> &
   Partial<Pick<IDataEngine, 'resolveEffectiveDatasource'>>;
 
-/** Why the WHOLE read goes to the bounded probe, decided before any leaf. */
-type WholeReadProbe = 'delegated-caller' | 'engine-cannot-classify' | 'no-object-admission';
+/**
+ * Why the WHOLE read goes to the bounded probe, decided before any leaf. A
+ * delegated caller is not one of them (ADR-0139 D5.1, as amended): the engine
+ * composes its leaf.
+ */
+type WholeReadProbe = 'engine-cannot-classify' | 'no-object-admission';
 
 /**
  * How one read reaches its parents: the parent objects written as leaves and
@@ -913,20 +917,28 @@ type AttachmentReadPlan =
  * the registry does not hold, `sys_attachment` itself, or a parent record that
  * no longer exists (the subquery finds no such id).
  *
- * ## The bounded probe (ADR-0139 D5): three classes, by name, chosen up front
+ * ## A delegated caller reads through the leaf (ADR-0139 D5.1, as amended)
  *
- * The engine refuses to compose a leaf for three classes (`INTERNAL_ERROR` /
+ * A delegated (on-behalf-of) caller (ADR-0090 D10) is no class of its own: it
+ * gets the same leaves and the same probed parents as any caller. The engine
+ * composes each leaf with the delegated context exactly as it stands, and the
+ * security service answers both halves for it as the INTERSECTION of the
+ * principal's leg and the delegator's — the scope a delegated direct read of
+ * the parent is narrowed by, which is what the probe reads. ⛔ This gate reads
+ * no delegation link: the context is passed on, never inspected.
+ *
+ * ## The bounded probe (ADR-0139 D5): two classes, by name, chosen up front
+ *
+ * The engine refuses to compose a leaf for two classes (`INTERNAL_ERROR` /
  * 500). This gate routes each to the bounded probe BEFORE any leaf is written
  * — ⛔ never by catching that refusal:
  *
- *  1. **A delegated (on-behalf-of) caller** (ADR-0090 D10), by the engine's own
- *     test (`onBehalfOf.userId`): the whole read is the probe.
- *  2. **A parent an object-scoped read middleware narrows**
- *     (`hasObjectMiddleware`): `sys_comment`, `sys_comment_reaction`, the
- *     activity stream and the ledger among them. Their WHERE is built at read
- *     time and is no part of their read scope, so a leaf would be wider than a
- *     direct read.
- *  3. **A federated parent**, bound to another datasource than
+ *  1. **A parent an object-scoped read middleware narrows**
+ *     (`hasObjectMiddleware`, D5.2): `sys_comment`, `sys_comment_reaction`,
+ *     the activity stream and the ledger among them. Their WHERE is built at
+ *     read time and is no part of their read scope, so a leaf would be wider
+ *     than a direct read.
+ *  2. **A federated parent** (D5.3), bound to another datasource than
  *     `sys_attachment` (`resolveEffectiveDatasource`): no driver evaluates a
  *     subquery across two datasources.
  *
@@ -946,7 +958,7 @@ type AttachmentReadPlan =
  * (RLS/OWD/sharing of the PARENT apply), and emit one
  * `{ parent_object, parent_id: { $in: <visible> } }` branch per parent object.
  * Past the bound it fails CLOSED and says so; a probe that throws denies the
- * whole read, and says so. Restricted to the parents of classes 2 and 3, its
+ * whole read, and says so. Restricted to the parents of the two classes, its
  * window holds only the rows naming those parents.
  *
  * ## What the read's own refusal does (ADR-0139 D3)
@@ -987,14 +999,6 @@ export function installAttachmentReadVisibility(
   );
 }
 
-/**
- * Whether `context` reads on behalf of another user (ADR-0090 D10) — the
- * engine's own test for D5's first class, so the two agree by construction.
- */
-function isDelegatedCaller(context: AttachmentReadMiddlewareCtx['context']): boolean {
-  return Boolean((context as { onBehalfOf?: { userId?: unknown } } | undefined)?.onBehalfOf?.userId);
-}
-
 /** Whether the security service `getAdmission` resolves answers `canReadObject`. */
 function hasObjectAdmission(getAdmission: AttachmentReadAdmissionSource | undefined): boolean {
   try {
@@ -1006,18 +1010,14 @@ function hasObjectAdmission(getAdmission: AttachmentReadAdmissionSource | undefi
 }
 
 /**
- * [ADR-0139 D4, D5] How one read of `sys_attachment` by `context` reaches its
- * parents. Reads the context, whether a `canReadObject` is composed, the
- * registry, the middleware registrations and the datasource bindings only — it
- * asks the security service nothing and reads no row, so it decides the probe
- * up front, never by catching a refusal.
+ * [ADR-0139 D4, D5] How one read of `sys_attachment` reaches its parents.
+ * Reads whether a `canReadObject` is composed, the registry, the middleware
+ * registrations and the datasource bindings only — it asks the security
+ * service nothing and reads no row, so it decides the probe up front, never by
+ * catching a refusal. It reads nothing of the caller: the plan is the same for
+ * every caller, a delegated one included (D5.1, as amended).
  */
-function planAttachmentParentReads(
-  engine: AttachmentReadGateEngine,
-  context: AttachmentReadMiddlewareCtx['context'],
-  objectAdmission: boolean,
-): AttachmentReadPlan {
-  if (isDelegatedCaller(context)) return { probeWholeRead: 'delegated-caller' };
+function planAttachmentParentReads(engine: AttachmentReadGateEngine, objectAdmission: boolean): AttachmentReadPlan {
   if (!objectAdmission) return { probeWholeRead: 'no-object-admission' };
   const getAllObjects = engine.registry?.getAllObjects;
   const hasObjectMiddleware = engine.hasObjectMiddleware;
@@ -1049,7 +1049,7 @@ function planAttachmentParentReads(
 /** The whole-read probe states already reported, per engine. */
 const wholeReadProbeReported = new WeakMap<object, Set<string>>();
 
-const WHOLE_READ_PROBE_WHY: Readonly<Record<'engine-cannot-classify' | 'no-object-admission', string>> = {
+const WHOLE_READ_PROBE_WHY: Readonly<Record<WholeReadProbe, string>> = {
   'engine-cannot-classify':
     'the engine exposes no registry view, hasObjectMiddleware() or resolveEffectiveDatasource(), so it cannot ' +
     'say which parent objects a ReadableIds leaf can be composed for',
@@ -1061,7 +1061,7 @@ const WHOLE_READ_PROBE_WHY: Readonly<Record<'engine-cannot-classify' | 'no-objec
 function reportWholeReadProbeOnce(
   engine: object,
   logger: AttachmentLifecycleLogger,
-  why: 'engine-cannot-classify' | 'no-object-admission',
+  why: WholeReadProbe,
 ): void {
   let reported = wholeReadProbeReported.get(engine);
   if (!reported) wholeReadProbeReported.set(engine, (reported = new Set()));
@@ -1165,10 +1165,8 @@ async function computeParentVisibilityFilter(
   getAdmission: AttachmentReadAdmissionSource | undefined,
 ): Promise<unknown> {
   // 1. Leaf or probe, per parent object, before any branch is written.
-  const plan = planAttachmentParentReads(engine, ctx.context, hasObjectAdmission(getAdmission));
-  if (plan.probeWholeRead === 'engine-cannot-classify' || plan.probeWholeRead === 'no-object-admission') {
-    reportWholeReadProbeOnce(engine, logger, plan.probeWholeRead);
-  }
+  const plan = planAttachmentParentReads(engine, hasObjectAdmission(getAdmission));
+  if (plan.probeWholeRead !== null) reportWholeReadProbeOnce(engine, logger, plan.probeWholeRead);
 
   const branches: Array<Record<string, unknown>> = [];
   // 2. One ReadableIds leaf per composable parent object (ADR-0139 D4).

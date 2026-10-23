@@ -22,6 +22,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SettingsService } from './settings-service.js';
 import { UnknownKeyError } from './settings-service.types.js';
+import { LEAN_ORGANIZATION_SOURCE } from './__tests__/settings-organization.testkit.js';
 
 // WHERE-matcher gate: implement exactly the combinators the service emits and
 // THROW on the rest — a bare field-equality read of `$or` would silently match
@@ -91,7 +92,7 @@ async function makeService(rows = ROWS) {
   const engine = makeEngine(rows);
   const svc = new SettingsService();
   svc.registerManifest(MANIFEST);
-  svc.bindEngine(engine as any);
+  svc.bindEngine(engine as any, undefined, { organization: LEAN_ORGANIZATION_SOURCE });
   return { svc, engine };
 }
 
@@ -224,7 +225,9 @@ describe('[#10826] SettingsService.getMany', () => {
   // codec, which is why the fixture must already hold the decoded value.
   it('[#12172] resolves the LITERAL stored value — no doubled JSON encoding', async () => {
     const { svc } = await makeService();
-    const ctx = { userId: 'u1', tenantId: 't1' };
+    // No organization: the fixture's rows carry none, and an organization's
+    // read does not fall back to them (ADR-0131 D8).
+    const ctx = { userId: 'u1' };
     const many = await svc.getMany('localization', ['timezone', 'locale', 'currency'], ctx);
 
     // Global row, user-scope key, no user/tenant override.

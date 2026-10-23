@@ -159,8 +159,9 @@ const ALL_GATED = Object.keys(GATED_ACTIONS) as Array<keyof typeof GATED_ACTIONS
 describe('#8083 the gated verb set is the HTTP one', () => {
   it('gates exactly the six methods `buildMcpBridge` routes through callData', () => {
     // `listObjects` / `describeObject` are absent BY DESIGN: the HTTP bridge
-    // answers both straight off the metadata service, so gating them here
-    // would be a fresh divergence in the opposite direction.
+    // answers both without `callData` (from the protocol's merged listing
+    // since #25120), so gating them here would be a fresh divergence in the
+    // opposite direction.
     expect(ALL_GATED.sort()).toEqual(
       ['aggregate', 'create', 'get', 'query', 'remove', 'update'].sort(),
     );
@@ -420,7 +421,7 @@ describe('#15416 the stdio refusal never names an operation it also allows', () 
       for (const action of Object.values(GATED_ACTIONS)) {
         let err: McpExposureError | undefined;
         try {
-          await enforceApiExposure(metadataFor(apiMethods), 'task', action, {} as ExecutionContext);
+          await enforceApiExposure({ metadataService: metadataFor(apiMethods) }, 'task', action, {} as ExecutionContext);
         } catch (e) {
           err = e as McpExposureError;
         }

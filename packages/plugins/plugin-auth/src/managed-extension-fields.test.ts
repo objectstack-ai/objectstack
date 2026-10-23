@@ -629,7 +629,11 @@ function findCollisions(
  * they declare no schema.
  */
 function authManagerPluginFactories(): string[] {
-  const source = readFileSync(join(HERE, 'auth-manager.ts'), 'utf8');
+  // [#25224] The auth manager's source: `auth-manager.ts` and the method
+  // bodies moved out of it whole. A factory imported in either is one it loads.
+  const source = ['auth-manager.ts', 'auth-manager-actor-guards.ts']
+    .map((file) => readFileSync(join(HERE, file), 'utf8'))
+    .join('\n');
   const found = new Set<string>();
   const pattern =
     /const\s*\{\s*([A-Za-z0-9_]+)\s*\}\s*=\s*await import\('((?:better-auth\/plugins|@better-auth\/)[^']*)'\)/g;

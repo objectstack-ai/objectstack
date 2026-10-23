@@ -74,13 +74,25 @@ never needs triple braces.
 
 - `{{path.to.value}}` — dotted-path lookup against the send's `data` object,
   **HTML-escaped in `bodyHtml`**, verbatim in `subject` and `bodyText`.
-- `{{{path.to.value}}}` — the same value, *not* escaped even in `bodyHtml`. Use
-  it only for pre-rendered HTML fragments such as a URL you are dropping into
-  `href`.
+- `{{{path.to.value}}}` — the same value, *not* escaped even in `bodyHtml`. It is
+  admitted in exactly one place: a variable declared with `type: 'url'`, written
+  as the whole value of a double-quoted `href` (`<a href="{{{reset_url}}}">`).
 - `{{ order.total | currency:EUR }}` / `{{ ts | datetime }}` — an optional
   formatter from the shared formula whitelist, so money and dates render the
   same way they do in-app. `datetime` honours the reference timezone the caller
   passes; calendar-day `date` values are timezone-naive.
+
+**Where a hole may sit in `bodyHtml`.** The renderer's escaping is right for
+element text and for a quoted attribute value that holds plain text, so those
+are the supported placements for `{{path}}`. A hole anywhere else — inside a
+`script` or `style` element, a comment, a tag outside any attribute value, an
+unquoted attribute value, an attribute read as a URL (`href`, `src`, …), an
+event handler, a style or markup, or SVG or MathML content — is refused by `os validate`, `os build`,
+`os lint` and the metadata publish door, and so is a `{{{path}}}` hole outside
+the `href` shape above. The refusal (`email-template-hole-placement`, a
+`422 INVALID_METADATA` at the publish door) names the placement and the
+supported ones. A template already stored keeps sending; it is judged the next
+time it is published.
 
 Two properties of the renderer to author around:
 
@@ -118,7 +130,8 @@ export const passwordResetEn = defineEmailTemplateDefinition({
   label: 'Password Reset',
   locale: 'en-US',
   subject: 'Reset your password',
-  bodyHtml: '<p>Use {{{reset_url}}} within {{ttl_minutes}} minutes.</p>',
+  bodyHtml: '<p>Use <a href="{{{reset_url}}}">this link</a> within {{ttl_minutes}} minutes.</p>',
+  variables: [{ name: 'reset_url', type: 'url', required: true }],
 });
 
 export const passwordResetZh = defineEmailTemplateDefinition({
@@ -126,7 +139,8 @@ export const passwordResetZh = defineEmailTemplateDefinition({
   label: 'Password Reset',
   locale: 'zh-CN',
   subject: '重置您的密码',
-  bodyHtml: '<p>请在 {{ttl_minutes}} 分钟内使用 {{{reset_url}}}。</p>',
+  bodyHtml: '<p>请在 {{ttl_minutes}} 分钟内使用<a href="{{{reset_url}}}">此链接</a>。</p>',
+  variables: [{ name: 'reset_url', type: 'url', required: true }],
 });
 ```
 

@@ -96,6 +96,7 @@
  * bootstrap).
  */
 
+import { findDefaultOrganization } from '@objectstack/core';
 import {
   postureEnforcesWall,
   type TenancyPosture,
@@ -217,17 +218,17 @@ async function findRows(
 }
 
 /**
- * Resolve the single-org default organization: prefer the stable `slug='default'`
- * bootstrap org, else the sole org row when exactly one exists. Returns `null`
- * when there is no unambiguous single org (none yet, or ≥2 — the latter is a
- * multi-org shape and this should not have been called).
+ * Resolve the single-org default organization: the one definition
+ * (`findDefaultOrganization`, `@objectstack/core`, ADR-0131 D3/D5 — the stable
+ * `slug='default'` bootstrap org, else the sole org row when exactly one
+ * exists) over {@link findRows}. Returns `null` when there is no unambiguous
+ * single org (none yet, or ≥2 — the latter is a multi-org shape and this should
+ * not have been called). The read is this module's: a failed one reads as no
+ * rows, so it answers `null` rather than throwing.
  */
 export async function resolveDefaultOrgId(engine: any): Promise<string | null> {
-  const bySlug = await findRows(engine, 'sys_organization', { slug: 'default' }, 1);
-  if (bySlug[0]?.id) return String(bySlug[0].id);
-  const any = await findRows(engine, 'sys_organization', {}, 2);
-  if (any.length === 1 && any[0]?.id) return String(any[0].id);
-  return null;
+  const found = await findDefaultOrganization((where, limit) => findRows(engine, 'sys_organization', { ...where }, limit));
+  return found.id ?? null;
 }
 
 /**

@@ -51,6 +51,10 @@
 # deliberately ABSENT — recreating a retired label puts an ownerless lane back
 # into GitHub's autocomplete. Their leftover label OBJECTS may still exist in
 # the repos; deleting those objects is a separate, deliberate PM action.
+# The objectui-repo STREAM labels domain:spec / domain:devx / domain:tooling,
+# retired in objectui only on 2026-10-22 (maintainer ruling 「甲，现在做」), are
+# recorded beside the objectui domain:ui row further down, for the reason the
+# next paragraph gives for `repo:objectstack`.
 #
 # ⛔ One RETIRED ROUTING label is held on those same two terms — deliberately
 # absent, object deliberately kept — but is recorded beside the `repo:*` rows
@@ -460,28 +464,45 @@ gh label create domain:cloud -R objectstack-ai/objectui    -c bfd4f2 -d "Cloud-s
 gh label create status:parked -R objectstack-ai/objectstack -c cfd3d7 -d "Parked — exempt from the PM sweep and half-state patrol until its owner migrates it (e.g. cloud PM)" 2>/dev/null || true
 gh label create status:parked -R objectstack-ai/objectui    -c cfd3d7 -d "Parked in objectui — exempt from the PM sweep until the cloud PM migrates it (with domain:cloud)" 2>/dev/null || true
 
-# objectui workload streams — maintainer rulings 2026-08-21, quoted verbatim:
+# objectui workload lanes — TWO since the maintainer's ruling of 2026-10-22,
+# quoted verbatim: 「objectui 只有 skills 是特殊的，他本身没有 spec 的概念。devx
+# 我感觉可以和 ui 合并」, and on the options put to them, 「甲，现在做」. The
+# three-stream vocabulary it replaces (maintainer rulings 2026-08-21, verbatim:
 # 「B:两车道」→「现在本身就有 domain:devx」→「不要搞出那么多车道名称」→「也有
-# domain:spec」「其他就是 domain:ui ?」, naming finalized 「按 domain:ui 定稿」.
-# objectui cards are streamed by the domain of the surface their FIX lands on
-# (never by symptom location; docs cards follow the surface they document):
-# domain:devx (engineering face — .github/, scripts/, build/publish/release
-# pipeline, gate tooling) and domain:spec (contract face — packages/types, the
-# schema corpus, @objectstack/spec pin coupling) reuse the EXISTING cross-repo
-# lane names and are worked by those lanes exactly as main-repo cards are;
-# domain:ui is the ONE new label, named for the repo's own trade — the published
-# library (components, plugin-*, fields, layout, core) and the apps — worked by
-# the objectui execution seat. Cards whose landing surface is undetermined stay
-# unstreamed for triage first-touch rather than guessed. These rows create
-# objectui-repo label OBJECTS: the main-repo lane roster (the loop above) is
-# untouched, and the retired main-repo domain:ui lane stays retired there (see
-# the header). Named consumers: the objectui execution seat's candidate query
-# and the devx / spec lanes' cross-repo pulls (SKILL.md 多仓协调). Streaming
-# the existing objectui backlog is a triage duty once the vocabulary lands —
-# by file-path evidence, never guessed — not this script's.
-gh label create domain:devx -R objectstack-ai/objectui -c bfd4f2 -d "objectui devx stream: fix lands on .github/, scripts/ or release pipeline — devx lane cross-repo" 2>/dev/null || true
-gh label create domain:spec -R objectstack-ai/objectui -c bfd4f2 -d "objectui spec stream: fix lands on packages/types, schema corpus or spec pin coupling — spec lane" 2>/dev/null || true
-gh label create domain:ui   -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui stream: fix lands on the published library or apps — objectui execution seat" 2>/dev/null || true
+# domain:spec」「其他就是 domain:ui ?」, naming finalized 「按 domain:ui 定稿」)
+# streamed objectui cards by the surface their FIX lands on into domain:devx
+# (engineering face), domain:spec (contract face) and domain:ui (the rest).
+# Measured on objectui, 2026-10-08 → 2026-10-22: every domain:spec card was
+# objectui's own packages/types, docs and widgets catching up with the protocol
+# and was worked by objectui hands — the protocol itself lives only in
+# objectstack — and every domain:devx card was objectui CI, test shards, pin
+# and release tooling, worked by ui seats. So objectui has exactly two lanes:
+#   domain:ui     — ALL objectui code: the published library (components,
+#                   plugin-*, fields, layout, core) and the apps; packages/types,
+#                   the schema corpus and the @objectstack/spec pin coupling;
+#                   .github/, scripts/, the build/publish/release pipeline and
+#                   the gate tooling; docs, which follow the surface they
+#                   document. Worked by the objectui execution seat.
+#   domain:skills — the published skills/** (a governed surface). No objectui
+#                   row here: this file has never created that object; a row
+#                   arrives by PR with the reader that names it.
+# ⛔ RETIRED in objectui only, 2026-10-22: domain:spec, domain:devx and
+# domain:tooling. This script stops creating the first two (domain:tooling was
+# never a row here); their leftover label OBJECTS on objectui are cleaned up by
+# the separate, deliberate PM act the header describes — a "retired, use
+# domain:ui" description, or deletion. objectstack's own domain:spec and
+# domain:devx lanes are untouched: the retirement is per repo. The protocol
+# stays objectstack domain:spec's — a cross-layer feature keeps its parent plus
+# per-layer children, spec and backend first, and its objectui child is now
+# domain:ui. Cards whose landing surface is undetermined stay unstreamed for
+# triage first-touch rather than guessed. The row below creates the objectui-
+# repo label OBJECT: the main-repo lane roster (the loop above) is untouched,
+# and the retired main-repo domain:ui lane stays retired there (see the
+# header). Named consumer: the objectui execution seat's candidate query
+# (.claude/skills/pm-dispatch/references/lanes/ui.md). Re-laning the open
+# objectui backlog onto domain:ui was triage's act on the ruling's day, by
+# file-path evidence — not this script's.
+gh label create domain:ui -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui lane: all objectui code — library, apps, packages/types, .github/, scripts/, docs" 2>/dev/null || true
 
 # The FEATURE AXIS — `area:*`, one per card, eleven values. It is the PLANNING
 # axis: priority is judged on it, and `domain:*` beside it decides only which

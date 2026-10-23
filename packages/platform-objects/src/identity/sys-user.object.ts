@@ -98,6 +98,12 @@ export const SysUser = ObjectSchema.create({
       // "add a teammate" affordance — the Users list is always reachable —
       // and every add flows through better-auth invitations, never bespoke
       // sys_user CRUD.
+      // Hidden while the environment is cloud-managed (`features.cloudManaged`,
+      // hide-when-on): its people arrive from the organisation's identity
+      // provider, never by invitation (ruling 6341690661 on #25083, Q3 A).
+      // Written here rather than as `requiresFeature`, which names one flag
+      // and already carries `organization`.
+      visible: 'features.cloudManaged != true',
       requiresFeature: 'organization',
       requiresMembershipReach: 'invite_member',
       // `${result.email}`: invite-member answers the bare invitation row,
@@ -238,8 +244,10 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/admin/create-user',
-      // Platform-admin standing (ADR-0068 D4) — see the block header above.
-      visible: 'current_user.isPlatformAdmin == true',
+      // Platform-admin standing (ADR-0068 D4) — see the block header above —
+      // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on):
+      // a managed environment's users come from the identity provider.
+      visible: 'current_user.isPlatformAdmin == true && features.cloudManaged != true',
       requiresFeature: 'admin',
       successMessage: 'User created',
       refreshAfter: true,
@@ -310,8 +318,11 @@ export const SysUser = ObjectSchema.create({
       // legacy role scalar), can mint a temporary password, and stamps
       // must_change_password.
       target: '/api/v1/auth/admin/set-user-password',
-      // Platform-admin standing (ADR-0068 D4) — see the block header above.
-      visible: 'current_user.isPlatformAdmin == true',
+      // Platform-admin standing (ADR-0068 D4) — see the block header above —
+      // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on).
+      // Console only: the server keeps answering it on an `env_native` row, so
+      // the break-glass admin stays editable (ruling 6341690661, Q4 A).
+      visible: 'current_user.isPlatformAdmin == true && features.cloudManaged != true',
       requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Password updated',
@@ -695,7 +706,11 @@ export const SysUser = ObjectSchema.create({
       name: 'all_users',
       label: 'All Users',
       data: { provider: 'object', object: 'sys_user' },
-      columns: ['name', 'email', 'phone_number', 'email_verified', 'source', 'two_factor_enabled', 'created_at'],
+      // No `two_factor_enabled` column here or in `me` (#25287): a list column
+      // has no feature gate, and on a deployment with 2FA off (the default)
+      // it read a dead "No" on every row. The state is shown on the user's
+      // own record page, in the Security tab, behind the `twoFactor` gate.
+      columns: ['name', 'email', 'phone_number', 'email_verified', 'source', 'created_at'],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
@@ -712,7 +727,7 @@ export const SysUser = ObjectSchema.create({
       name: 'me',
       label: 'My Profile',
       data: { provider: 'object', object: 'sys_user' },
-      columns: ['name', 'email', 'phone_number', 'email_verified', 'two_factor_enabled', 'updated_at'],
+      columns: ['name', 'email', 'phone_number', 'email_verified', 'updated_at'],
       filter: [{ field: 'id', operator: 'equals', value: '{current_user_id}' }],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 1 },
@@ -727,16 +742,9 @@ export const SysUser = ObjectSchema.create({
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
-    two_factor: {
-      type: 'grid',
-      name: 'two_factor',
-      label: '2FA Enabled',
-      data: { provider: 'object', object: 'sys_user' },
-      columns: ['name', 'email', 'two_factor_enabled', 'updated_at'],
-      filter: [{ field: 'two_factor_enabled', operator: 'equals', value: true }],
-      sort: [{ field: 'name', order: 'asc' }],
-      pagination: { pageSize: 50 },
-    },
+    // No "2FA Enabled" view (#25287): a list view has no feature gate, so on
+    // a deployment with 2FA off it was a tab that could only ever be empty.
+    // Retired rather than gated — gating it would need a new authorable key.
     banned: {
       type: 'grid',
       name: 'banned',
@@ -956,13 +964,14 @@ export const SysUser = ObjectSchema.create({
       defaultValue: false,
       readonly: true, // ADR-0092 — a licensed-seat grant; flows through the AiSeatPlugin enforcement path
       group: 'Admin',
+      // The framework synthesizes the `ai_seat` capability from this flag
+      // (plugin-hono-server resolveCtx); the seat cap is enforced by
+      // @objectstack/security-enterprise AiSeatPlugin. Owned by objectql
+      // (better-auth is oblivious to this column).
       description:
-        'Whether this user holds an AI seat — grants access to the in-UI AI ' +
-        'agents (build / ask). The framework synthesizes the `ai_seat` ' +
-        'capability from this flag (plugin-hono-server resolveCtx). Assignment ' +
-        'is capped by the licensed / purchased seat count (enforced by ' +
-        '@objectstack/security-enterprise AiSeatPlugin). Owned by objectql ' +
-        '(better-auth is oblivious to this column).',
+        'Whether this user holds an AI seat. A seat grants the `ai_seat` ' +
+        'capability, which opens the AI assistants in the app (build and ask). ' +
+        'How many users can hold one is limited by the seats your license includes.',
     }),
 
     // ── Profile ──────────────────────────────────────────────────
@@ -1022,9 +1031,8 @@ export const SysUser = ObjectSchema.create({
       maxLength: 35,
       group: 'Profile',
       description:
-        'Preferred language for notifications, as a BCP-47 tag (e.g. zh-CN, ja-JP). ' +
-        'Read per recipient at delivery time; when unset the deployment default applies. ' +
-        'Owned by objectql (better-auth is oblivious to this column).',
+        'Preferred language for this user\'s notifications, as a language tag such as zh-CN or ja-JP. ' +
+        'When unset, the deployment\'s default language applies.',
     }),
 
     // ── Organization ─────────────────────────────────────────────

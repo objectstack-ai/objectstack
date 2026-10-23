@@ -30,9 +30,11 @@
  *
  * which the engine composes from the caller's read scope of each `P` and the
  * driver evaluates as one subquery per branch: no pre-scan, no candidate
- * window. D5's three classes — a delegated caller, a parent an object-scoped
- * read middleware narrows, a parent on another datasource — are routed to the
- * bounded probe up front, by name (the gate module's header).
+ * window — for a delegated caller too, whose read scope the security service
+ * answers as the delegator intersection (ADR-0139 D5.1, as amended). D5's two
+ * remaining classes — a parent an object-scoped read middleware narrows, a
+ * parent on another datasource — are routed to the bounded probe up front, by
+ * name (the gate module's header).
  *
  * Everything fails CLOSED, row classes exactly as the comment gate treats its
  * threads:

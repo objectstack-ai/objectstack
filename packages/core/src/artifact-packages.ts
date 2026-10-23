@@ -136,7 +136,7 @@
  */
 
 import { resolvePluginOrder, type OrderablePlugin } from './plugin-order.js';
-import { ArtifactPackageSchema } from '@objectstack/spec';
+import { ArtifactPackageSchema, type ArtifactPackageSource } from '@objectstack/spec';
 
 /**
  * Refusals raised by {@link resolveArtifactPackageOrder}, as ADR-0112 envelopes
@@ -181,26 +181,61 @@ export function artifactPackageId(manifest: unknown): string | undefined {
   return typeof id === 'string' && id !== '' ? id : undefined;
 }
 
-/** The ordering-relevant projection of one artifact package. */
-interface ArtifactPackageNode extends OrderablePlugin {
+/**
+ * One package to register, as {@link resolveArtifactPackageEntries} answers it:
+ * the body, and the origin its artifact entry stated for it.
+ */
+export interface ArtifactPackageRegistration {
   /** The caller's ORIGINAL manifest body — never a parsed clone. */
   manifest: unknown;
+  /**
+   * The entry's own `source` (`ArtifactPackageSchema`), as written; absent
+   * when the entry states none, and always absent on the single-`manifest`
+   * branch, which has no entry to state one. ⛔ Never defaulted here: the
+   * registering door owns the default, so an absent value stays absent.
+   */
+  source?: ArtifactPackageSource;
 }
+
+/** The ordering-relevant projection of one artifact package. */
+interface ArtifactPackageNode extends OrderablePlugin, ArtifactPackageRegistration {}
 
 /**
  * Resolve an artifact into the manifests to register, in dependency-topological
  * order (ADR-0130 D4 + D5).
  *
+ * The bodies alone, for readers that register no package row (the metadata
+ * door). A door that records a row reads {@link resolveArtifactPackageEntries},
+ * which carries each entry's stated `source` beside its body.
+ *
  * @param artifact - A release artifact (`{ packages: [...] }`), or a bare
  *   manifest / single-`manifest` artifact — both shapes are read.
  * @returns The manifest bodies to register, in the order to register them.
+ * @throws As {@link resolveArtifactPackageEntries}.
+ */
+export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
+  return resolveArtifactPackageEntries(artifact).map((entry) => entry.manifest);
+}
+
+/**
+ * Resolve an artifact into the packages to register, in dependency-topological
+ * order (ADR-0130 D4 + D5), each with the `source` its entry states.
+ *
+ * One merged artifact may carry packages of different origins, so the origin is
+ * read per entry, off the entry the gate below has already parsed. The same
+ * gate and the same order as {@link resolveArtifactPackageOrder} — that
+ * function IS this one, projected to the bodies.
+ *
+ * @param artifact - A release artifact (`{ packages: [...] }`), or a bare
+ *   manifest / single-`manifest` artifact — both shapes are read.
+ * @returns The packages to register, in the order to register them.
  * @throws An ADR-0112 envelope (`code` + `status: 422`):
  *   `INVALID_ARTIFACT_PACKAGES` for a `packages` that is present but is not an
  *   array (`null` included), `INVALID_ARTIFACT_PACKAGE_ENTRY` for a malformed entry, and
  *   `DUPLICATE_ARTIFACT_PACKAGE` for a duplicate package id. Also
  *   `resolvePluginOrder`'s own error for a cycle.
  */
-export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
+export function resolveArtifactPackageEntries(artifact: unknown): ArtifactPackageRegistration[] {
   const declared = (artifact as { packages?: unknown } | null | undefined)?.packages;
 
   // D4, second branch: no `packages` key → the artifact carries one package and
@@ -212,7 +247,7 @@ export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
   // `.optional()` refuses it, so reading it as absent here would answer for an
   // artifact the declaration calls malformed (#19926). It falls to the refusal
   // below with every other non-array value.
-  if (declared === undefined) return [artifact];
+  if (declared === undefined) return [{ manifest: artifact }];
 
   // Present but not an array: malformed, never absent. The rule is stated
   // once, beside `AssembledPackageBodySchema`.
@@ -300,8 +335,11 @@ export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
         (manifest as { dependencies?: Record<string, unknown> }).dependencies ?? {},
       ),
       manifest,
+      // Read off the PARSED entry: the gate above admitted only a declared
+      // origin, so this is never an unchecked value. Absent stays absent.
+      ...(verdict.data.source !== undefined ? { source: verdict.data.source } : {}),
     });
   });
 
-  return resolvePluginOrder(nodes).map((node) => node.manifest);
+  return resolvePluginOrder(nodes).map(({ manifest, source }) => (source !== undefined ? { manifest, source } : { manifest }));
 }

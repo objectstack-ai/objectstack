@@ -242,6 +242,80 @@ upgraded from a build that leaked these rows — converges on the next start.
   forces a reconcile on demand.
 </Callout>
 
+### Declared rules are read-only: clone one, then switch it off
+
+A sharing rule comes from one of two sources. The application **declares** it
+(a stack's `sharingRules`), or an organization **authors** its own as a
+`sys_sharing_rule` row. A declared rule is code. It is served from the
+registry and has no row, so it is read-only from every API (ADR-0131 D6,
+regime C):
+
+- `DELETE {basePath}/sharing/rules/:idOrName` on a declared name answers
+  `403 PERMISSION_DENIED`, switched off or not
+  (`SharingRuleService.deleteRule`, `plugin-sharing/src/sharing-rule-service.ts`).
+- `PUT {basePath}/meta/sharing_rule/:name` is refused too. The `/meta` side
+  of this rule is described in
+  [Metadata lifecycle](/docs/concepts/metadata-lifecycle).
+
+**To customise a declared rule, clone it and switch the original off.**
+Create your own rule under a **new name**, with the criteria, recipient and
+access level you want. Then switch the declared rule off through the
+activation door:
+
+```http
+POST {basePath}/security/_activation/sharing_rule/:name
+{ "enabled": false }
+```
+
+The door writes one `sys_metadata_activation` row (`metadata_type:
+'sharing_rule'`, no organization column). The same request then revokes
+every grant that carries the declared rule's name, and `{ "enabled": true }`
+re-derives them (`handleCatalogActivationWrite`,
+`runtime/src/domains/catalog-activation.ts`;
+`bindSharingRuleActivationReconcile` and
+`SharingRuleService.reconcileDeclaredRuleActivation`). The door confirms the
+name through the sharing-rule service's `declaredRuleNamed`, and an unknown
+name answers `404`. A deployment whose sharing-rule service does not provide
+that reader answers `503 SERVICE_UNAVAILABLE`: the door does not write a row
+for a name it cannot confirm is declared.
+
+**A declared rule's name is taken in every organization.** A new row under a
+declared name is refused with `409 RESOURCE_CONFLICT`, and so is an update
+that renames a row onto one. The refusal message names the clone path. This
+applies to `POST {basePath}/sharing/rules`, to Setup's **New** and edit forms,
+and to scripts and imports through the data API
+(`DeclaredSharingRuleNameConflictError` and `bindDeclaredRuleNameGuard`,
+`plugin-sharing/src/sharing-rule-service.ts`). An update that keeps the
+row's name, such as switching your own clone's `active` field, is not
+affected.
+
+**Who may flip the switch.** The ledger row is deployment-level, so the door
+is gated by the activation authority, not by `manage_sharing`:
+
+- the caller must hold `manage_metadata` (`403 PERMISSION_DENIED` otherwise);
+- under a walled tenancy posture (`group` / `isolated`), the caller must also
+  be the **platform operator**, because one row switches the rule off in
+  every organization. An organization administrator is refused with
+  `403 PERMISSION_DENIED`, and the message says to ask the platform operator;
+- under `single`, the `manage_metadata` holder is enough.
+
+These checks are `refuseUngrantedActivationAuthoring` and
+`refuseUngrantedActivationWrite` (`runtime/src/domains/activation-gate.ts`,
+ADR-0126 §5). Rules an organization authors under its own names stay that
+organization's to create, and each is switched by its own `active` field.
+
+**If the reconcile fails.** The grant reconcile runs in an `afterInsert` /
+`afterUpdate` hook on `sys_metadata_activation`, after the ledger row is
+written, and no transaction wraps the two. A reconcile that throws reaches
+the door, which answers the error instead of `200`. The ledger row has
+already been written, though, and it keeps its new value. Some of the rule's
+grants can then disagree with the switch until the next boot. At boot,
+`sweepOrphanedRuleGrants` revokes the grants of a rule that is switched off,
+and the rule backfill re-derives the grants of one that is switched on
+(`SharingServicePlugin`'s `kernel:bootstrapped` handler,
+`plugin-sharing/src/sharing-plugin.ts`). Sending the same switch again re-runs
+the reconcile without waiting for a restart.
+
 ### There is no "share every record" rule
 
 The predicate is **mandatory on every authoring path**, whether you declare

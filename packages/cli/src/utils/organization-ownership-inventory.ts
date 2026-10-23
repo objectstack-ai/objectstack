@@ -168,6 +168,13 @@ export interface InventoryEntry {
    * host declares no deletion, so the spec's supplement row has no such key.
    */
   underivableDeparture?: Omit<InventoryDeparture, 'as' | 'where'>;
+  /**
+   * Fate 3 only, platform-only, under a wall only ({@link SoleMembershipAnchor}):
+   * tried after the anchors, on the NULL rows they left. A host's objects have
+   * no membership semantics the platform can read, so the spec's supplement row
+   * has no such key.
+   */
+  soleMembership?: SoleMembershipAnchor;
   categories?: readonly InventoryCategory[];
   /**
    * Fate 4 only: the column is not the tenancy anchor, so it never receives
@@ -180,6 +187,26 @@ export interface InventoryEntry {
   external?: boolean;
   note?: string;
 }
+
+/**
+ * A NULL row about a user takes the organization of that user's sole
+ * membership: every stamped `sys_member` row of the user named by `userKey`
+ * names one organization. It is where the runtime settles a self-registration
+ * grant under a wall, on the first membership (ruling record 6257510973 item
+ * 1, Q1 A). A user in several organizations, or in none, leaves the row
+ * reported: which membership came first is not recorded, so the owner is never
+ * guessed (ADR-0131 D10 fate 4). So is a row whose key another row of the table
+ * already holds in that organization (`userKey` with any one of `keyColumns`):
+ * the grant's unique index would refuse the write, and the operator keeps one.
+ * Under `single` the Default Organization takes the row, as before.
+ */
+export interface SoleMembershipAnchor {
+  userKey: string;
+  keyColumns: readonly string[];
+}
+
+/** The object whose rows are a user's memberships, each naming its organization. */
+export const MEMBERSHIP_OBJECT = 'sys_member';
 
 // ── Citations, spelled once ───────────────────────────────────────────────────
 
@@ -649,7 +676,17 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     anchors: [parent('business_unit_id', 'sys_business_unit')],
   },
   { object: 'sys_user_position', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS} (assignments are organization rows); the business unit carries the organization`, anchors: [parent('business_unit_id', 'sys_business_unit')] },
-  { object: 'sys_user_permission_set', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS} (assignments are organization rows); ${D10_SINGLE}`, anchors: [] },
+  {
+    object: 'sys_user_permission_set',
+    census: P1,
+    fate: 'attribution',
+    citation:
+      `${D3_ORG_ROWS} (assignments are organization rows); under a wall, a self-registration grant written before ` +
+      'the grant waited for the first membership (ruling record 6257510973 item 1) takes the user\'s sole ' +
+      `membership's organization; ${D10_SINGLE}`,
+    anchors: [],
+    soleMembership: { userKey: 'user_id', keyColumns: ['permission_set', 'permission_set_id'] },
+  },
   {
     object: 'sys_audience_binding_suggestion',
     census: P1,

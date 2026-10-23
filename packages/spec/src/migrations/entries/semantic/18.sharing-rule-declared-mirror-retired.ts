@@ -29,8 +29,9 @@ export const entry: SemanticMigration = {
     + 'standing access is orphaned — and only then can the ceremony\'s verified marker mean zero NULL '
     + 'rows. The seeder is machinery, not an authorable shape: no key of any spec schema moves, and a '
     + 'stack authors `sharingRules` exactly as before, so no stored-metadata rewrite exists and this '
-    + 'entry is the retirement note and the notification channel (ADR-0131 D13: each retirement is an '
-    + 'ADR-0087 entry). ADR-0131 D2, D10, D13; ADR-0057 D6 (the runtime shape is canonical).',
+    + 'entry is the retirement note and the notification channel (registered by choice: ADR-0131 D13 '
+    + 'asks an ADR-0087 entry of every retirement of an authorable shape, and the seeder is not one). '
+    + 'ADR-0131 D2, D10, D13; ADR-0057 D6 (the runtime shape is canonical).',
   acceptanceCriteria:
     'A fresh boot in every posture writes no `sys_sharing_rule` row for a declared rule and the rule '
     + 'still grants; removing the declaration stops its grant; no consumer deletes a declared rule '

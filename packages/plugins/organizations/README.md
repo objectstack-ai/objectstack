@@ -52,7 +52,6 @@ Register it **before** `SecurityPlugin`, so the posture probe finds the service.
 | `OrganizationsPluginOptions` | type | Constructor options — currently `ensureDefaultOrganization`. |
 | `OrgScopingPlugin` | alias | Alias of `OrganizationsPlugin`, matching the package name. |
 | `OrgScopingPluginOptions` | alias | Alias of `OrganizationsPluginOptions`. |
-| `claimOrphanOrgRows` | function | One-time back-fill of `organization_id` on orphaned seed rows, for the first organization. |
 | `claimOrgSeedOwnership` | function | Hands an organization's seeded rows to its owner (`owner_id` back-fill, scoped to one org). |
 | `ensureDefaultOrganization` | function | Multi-org flavour of the default-org bootstrap; wraps the open `plugin-auth` helper and adds the per-org seed-ownership handoff. |
 | `assertWalledMembershipPolicyDeclared` | function | The boot gate: throws unless a walled deployment declared its membership policy. |

@@ -163,6 +163,10 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: "compares a field name with the object's tenant column, on a relation its callers already read through cascadeRelationBehavior; it reads no row",
   },
+  'engine.ts#<module> :: organization_id': {
+    disposition: 'not-a-read',
+    why: "names the field a write-wall verdict (WriteWallRowVerdict, #25062) refuses, in the verdict's type; the plugin that owns the wall decides it, and the engine reads no row",
+  },
   'lifecycle/lifecycle-service.ts#tenantWindowsFor :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
     why: 'a federated object whose organization_id is the injection has no tenant partition',

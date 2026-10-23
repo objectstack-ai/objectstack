@@ -339,27 +339,25 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
    * rather than named by anyone — and its organization is the only tenancy
    * fact it carries.
    *
-   * `sys_business_unit_member` rows are NOT organization-stamped on every write
-   * path. Re-measured on this tree at `origin/main` for #14547:
+   * Which write paths stamp `sys_business_unit_member.organization_id`, on
+   * this tree since ADR-0131:
    *
-   *   - REST / session writes ARE stamped — the engine threads the caller's
-   *     `tenantId` into `DriverOptions` and `SqlDriver.injectTenantOnInsert`
-   *     fills the injected `organization_id` column;
-   *   - SEED replay is NOT — `seed-loader.ts` withholds its single-org
-   *     `fallbackOrgId` from every `/^(sys_|cloud_|ai_)/` object, so a seeded
-   *     membership lands org-less unless the replay pinned an organization or
-   *     the record spelled the column itself;
-   *   - ELEVATED (system-context) writes are NOT — `sys_business_unit_member`
-   *     is absent from `PLATFORM_OBJECT_TENANCY`
-   *     (`packages/objectql/src/tenancy/platform-object-tenancy.ts`), so it
-   *     classifies `unclassified` and `Engine.resolveSystemInsertOrganization`
-   *     returns early, stamping nothing. That residual classification gap is
-   *     tracked separately (#14570) and is not closed here;
+   *   - REST / session writes — the engine threads the caller's `tenantId`
+   *     into `DriverOptions` and `SqlDriver.injectTenantOnInsert` fills the
+   *     injected `organization_id` column;
+   *   - SEED replay — the seed loader stamps every seed row with the resolved
+   *     organization, platform namespaces included (C1);
+   *   - ELEVATED (system-context) inserts — an organization-less one takes the
+   *     derived organization or is refused (D9,
+   *     `Engine.resolveSystemInsertOrganization`), judged by the object's
+   *     tenant column alone: no per-table exemption is left (D13);
    *   - `driver-memory` / `driver-mongodb` never stamp a tenant column at all
    *     (both refuse to boot multi-tenant, which is what makes that safe).
    *
-   * So a NULL organization on a member row does not mean "platform-global", it
-   * means UNKNOWN TENANCY — and admitting an identity of unknown tenancy into
+   * What can still hold a NULL is residue written before 18.0 (the ownership
+   * ceremony attributes it) or a lean composition that registers no
+   * organization object. Either way a NULL organization on a member row does
+   * not mean "platform-global", it means UNKNOWN TENANCY — and admitting an identity of unknown tenancy into
    * an org-stamped grant is the same cross-tenant over-grant, arriving by the
    * other door. A grant fails CLOSED: unknown tenancy is not a member here.
    * The sibling recipient widths already read their membership rows this way —
@@ -367,7 +365,8 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
    * screens `sys_user_position`, both with a strict equality.
    *
    * ⚠️ The cost is declared, not hidden: a rule stamped with an organization
-   * whose memberships were seeded expands to nobody even on a unit it can see.
+   * whose memberships carry no organization expands to nobody even on a unit
+   * it can see.
    * That outcome is LOUD — `SharingRuleService.expandRecipient` warns once per
    * rule, naming the rule and the unit — where before it was silent, and the
    * repair is to stamp the membership rows rather than to widen this screen.

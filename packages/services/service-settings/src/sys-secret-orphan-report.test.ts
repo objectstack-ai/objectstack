@@ -48,6 +48,7 @@ import type { SettingsManifest } from '@objectstack/spec/system';
 import type { CryptoHandle, ICryptoProvider } from '@objectstack/spec/contracts';
 import { SettingsService } from './settings-service.js';
 import { wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
+import { withEngineRegistry } from './__tests__/settings-organization.testkit.js';
 import { LocalCryptoProvider } from './local-crypto-provider.js';
 import type { SettingsEngine, SettingsSecretStore } from './settings-service.types.js';
 import {
@@ -274,10 +275,12 @@ async function boot(opts: { forwardContext?: boolean; withDelete?: boolean } = {
   const auditEntries: Array<Record<string, unknown>> = [];
   const svc = new SettingsService({
     env: {},
-    engine:
+    engine: withEngineRegistry(
       opts.forwardContext === false
         ? wrapEngineDroppingContext(engine)
         : wrapEngineAsSettingsEngine(engine as any),
+      engine,
+    ),
     cryptoProvider: new LocalCryptoProvider(),
     secretStore,
     auditWriter: {

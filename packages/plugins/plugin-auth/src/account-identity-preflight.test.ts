@@ -46,7 +46,7 @@ import {
   SYS_ACCOUNT_OBJECT,
 } from './account-identity-preflight.js';
 import { authIdentityObjects } from './manifest.js';
-import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYSTEM = { context: { isSystem: true } } as never;
 
@@ -106,10 +106,9 @@ async function bootEngine(objects: unknown[]): Promise<ObjectQL> {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
   await engine.syncSchemas();
-  // The organization-less rows below (global sets, grants, identities) exist
-  // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
-  // NOT NULL): this is that store.
-  await relaxEveryRegisteredTenantColumn(engine);
+  // The organization-less rows below exist only on a store built before 18.x
+  // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(engine, ['sys_account', 'sys_sso_provider']);
   return engine;
 }
 

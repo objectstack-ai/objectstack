@@ -46,7 +46,7 @@ export const SysOauthClientResource = ObjectSchema.create({
       // unique string — varchar(255) on MySQL). A referencing column takes the
       // referenced column's bound.
       maxLength: 255,
-      description: 'Foreign key to sys_oauth_application.client_id',
+      description: 'The client ID of the OAuth application this grant is for.',
     }),
 
     resource_id: Field.text({
@@ -91,7 +91,7 @@ export const SysOauthClientResource = ObjectSchema.create({
       // symmetric: referent and referrer now accept exactly the same domain,
       // and the silent register-then-never-authorize dead-end is closed.
       maxLength: 255,
-      description: 'Foreign key to sys_oauth_resource.identifier',
+      description: 'The identifier of the protected resource the application may request tokens for.',
     }),
 
     metadata: Field.textarea({
