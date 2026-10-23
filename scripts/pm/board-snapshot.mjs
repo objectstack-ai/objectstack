@@ -215,9 +215,14 @@
  *                       with its cursor (`stopped_by: blank-listing`): nothing
  *                       is marked complete, the count check stays `pending`,
  *                       and the run exits 0 as a planned stop. The next run
- *                       asks again, and a streak of such runs is what the
- *                       freshness row turns red. Believing it would end a
- *                       phase at zero records — the measured failure.
+ *                       asks again. Once the open set is complete, a streak
+ *                       of such runs is what the freshness row turns red; an
+ *                       archive still in its open phase reads `building` and
+ *                       never ages (§ Stale is not green) — the PR leg's
+ *                       fresh dry-run archive, not `main`'s, which has been
+ *                       incremental since 2026-09-10. Believing the blank
+ *                       would end a phase at zero records — the measured
+ *                       failure.
  *
  * ⛔ This is not the retry the section above forbids: it re-asks a `200` that
  * carried no rows, never a refusal; it is bounded by the constant and by the
