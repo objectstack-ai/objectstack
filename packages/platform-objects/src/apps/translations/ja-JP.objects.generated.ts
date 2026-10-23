@@ -86,7 +86,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       ai_access: {
         label: "AI アクセス",
-        help: "このユーザーが AI シートを保有しているかどうか。保有するとアプリ内の AI アシスタント（build と ask）を利用できます。保有できるユーザー数は、ライセンスに含まれるシート数までです。"
+        help: "このユーザーが AI シートを保有しているかどうか。シートは `ai_seat` ケイパビリティを付与し、アプリ内の AI アシスタント（build と ask）を利用できるようにします。保有できるユーザー数は、ライセンスに含まれるシート数までです。"
       },
       image: {
         label: "プロフィール画像"

@@ -86,7 +86,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       ai_access: {
         label: "Acceso a IA",
-        help: "Indica si este usuario dispone de una plaza de IA, que da acceso a los asistentes de IA de la aplicación (build y ask). El número de usuarios que pueden tenerla está limitado por las plazas que incluye su licencia."
+        help: "Indica si este usuario dispone de una plaza de IA. La plaza otorga la capacidad `ai_seat`, que da acceso a los asistentes de IA de la aplicación (build y ask). El número de usuarios que pueden tenerla está limitado por las plazas que incluye su licencia."
       },
       image: {
         label: "Imagen de perfil"

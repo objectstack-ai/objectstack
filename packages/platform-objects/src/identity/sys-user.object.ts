@@ -972,9 +972,9 @@ export const SysUser = ObjectSchema.create({
       // @objectstack/security-enterprise AiSeatPlugin. Owned by objectql
       // (better-auth is oblivious to this column).
       description:
-        'Whether this user holds an AI seat, which gives access to the AI ' +
-        'assistants in the app (build and ask). How many users can hold one ' +
-        'is limited by the seats your license includes.',
+        'Whether this user holds an AI seat. A seat grants the `ai_seat` ' +
+        'capability, which opens the AI assistants in the app (build and ask). ' +
+        'How many users can hold one is limited by the seats your license includes.',
     }),
 
     // ── Profile ──────────────────────────────────────────────────

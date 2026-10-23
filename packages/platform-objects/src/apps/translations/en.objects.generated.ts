@@ -86,7 +86,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ai_access: {
         label: "AI Access",
-        help: "Whether this user holds an AI seat, which gives access to the AI assistants in the app (build and ask). How many users can hold one is limited by the seats your license includes."
+        help: "Whether this user holds an AI seat. A seat grants the `ai_seat` capability, which opens the AI assistants in the app (build and ask). How many users can hold one is limited by the seats your license includes."
       },
       image: {
         label: "Profile Image"

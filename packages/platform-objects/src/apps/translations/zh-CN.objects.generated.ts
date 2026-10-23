@@ -86,7 +86,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       ai_access: {
         label: "AI 访问权限",
-        help: "该用户是否占用一个 AI 席位，占用后可使用应用内的 AI 助手（build 和 ask）。可占用席位的用户数受许可证所含席位数限制。"
+        help: "该用户是否占用一个 AI 席位。席位授予 `ai_seat` 能力，可使用应用内的 AI 助手（build 和 ask）。可占用席位的用户数受许可证所含席位数限制。"
       },
       image: {
         label: "头像"
