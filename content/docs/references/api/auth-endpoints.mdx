@@ -62,6 +62,7 @@ const result = AuthEndpointSchema.parse(data);
 | **ssoEnforced** | `boolean` | optional | SSO-only login enforced: the UI hides the local password form + self-registration (a break-glass "use a password" link remains) |
 | **phoneNumber** | `boolean` | optional | Phone-number sign-in enabled (phone + password, V1.5) |
 | **phoneNumberOtp** | `boolean` | optional | Phone-number OTP sign-in and self-service password reset available — requires the phoneNumber plugin plus a deliverable SMS service |
+| **cloudManaged** | `boolean` | optional | Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed |
 
 
 ---
@@ -187,6 +188,7 @@ This schema accepts one of the following structures:
 | **ssoEnforced** | `boolean` | optional | SSO-only login enforced: the UI hides the local password form + self-registration (a break-glass "use a password" link remains) |
 | **phoneNumber** | `boolean` | optional | Phone-number sign-in enabled (phone + password, V1.5) |
 | **phoneNumberOtp** | `boolean` | optional | Phone-number OTP sign-in and self-service password reset available — requires the phoneNumber plugin plus a deliverable SMS service |
+| **cloudManaged** | `boolean` | optional | Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed |
 
 
 ---

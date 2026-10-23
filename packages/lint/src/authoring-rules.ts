@@ -145,6 +145,7 @@ import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
+import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
 import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
@@ -2303,6 +2304,35 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['object'],
     run: (stack) => validateRuleSchemaFormats(stack),
+  },
+  // [#25189] The email half of #25082 (ruling `6335348115`, F1 A2): a hole an
+  // email template's `bodyHtml` places where the mail renderer cannot encode
+  // it for that placement is refused, naming the placement and the supported
+  // ones. The classification is `@objectstack/formula`'s
+  // `judgeMailHtmlHoles` (F3 C2, context-strict plus the built-in auth
+  // templates' url `href` shape), the same judge `plugin-email`'s built-in
+  // pin reads. Gating: no reading of such a body renders as its author wrote
+  // it for every value.
+  //
+  // Runtime publish gate: `email_template` already maps to `emailTemplates`
+  // (`lintLivenessProperties` crossed it, and is silent there), and this rule
+  // judges each written template on its own — no sibling, no context
+  // collection — so the door's verdict and the whole-stack verdict are the
+  // same value. A stored template is not judged until its next publish, and a
+  // draft not at all (ruling item 4). MEASURED first, with this judge: 0
+  // refusals over HotCRM's 76 declared bodies (`c8a7a7047feb`) and over every
+  // shipped template here; the five non-production bodies it refused (two
+  // docs examples, the dogfood materialization fixture, one conversion
+  // fixture's before and after) were corrected in the same change.
+  {
+    name: 'validateEmailTemplateHolePlacements',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-email-template-hole-placements.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['email_template'],
+    run: (stack) => validateEmailTemplateHolePlacements(stack),
   },
 ];
 

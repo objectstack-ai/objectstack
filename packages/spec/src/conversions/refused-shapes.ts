@@ -41,7 +41,11 @@
  *   ({@link flowNodeValueTemplateRefusals}), and the `external` binding judge
  *   the object refinement and `defineStack` share
  *   ({@link externalBindingDatasourceRefusal}). A site is listed here exactly
- *   when that door refuses it.
+ *   when that door refuses it. One door lives outside this package: the
+ *   page/view `visibleWhen` rule in `@objectstack/lint` judges a `has()`
+ *   argument on the engine's AST, which this package cannot parse, so its
+ *   detector reads the source through {@link refusedHasArguments}, held equal
+ *   to that rule by a test on the lint side (#25281).
  * - It never prints a credential. A view-level API source could carry request
  *   `headers`. The listing names the URL and the method, and withholds the rest.
  *
@@ -58,6 +62,7 @@ import {
 import { externalBindingDatasourceRefusal } from '../data/external-binding-datasource.js';
 import { ComponentPropsMap } from '../ui/component.zod.js';
 import { ViewDataSchema } from '../ui/view.zod.js';
+import { refusedHasArguments } from './cel-has-argument.js';
 import type { ConversionTodoDetail } from './types.js';
 import { mapCollection, mapFlowNodeList, mapPageComponents, mapViewPayloads } from './walk.js';
 
@@ -413,6 +418,66 @@ const flowValueSlotTemplateToken: RefusedStoredShape = {
   },
 };
 
+// ── #25281: a page or view `visibleWhen` handing `has()` an argument that is not a field selection ──
+
+/** The predicate's CEL source: a bare string, or the `{ dialect, source }` envelope. */
+function visibleWhenSource(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (isDict(value) && typeof value.source === 'string') return value.source;
+  return undefined;
+}
+
+const HAS_ARGUMENT_FATE =
+  'No lossless rewrite: which test the author meant (`has(record.x)`, `\'x\' in record`, `record.x != null`, '
+  + '`size(record.items) > 0`) is not recorded anywhere, so the upgrade does not write one. Left as stored, the '
+  + 'page or view still loads and is served, and the console still draws the element for every user because the '
+  + 'predicate never evaluates; its next save through the Studio, REST or MCP is refused with 422 '
+  + 'INVALID_METADATA by `visibility-predicate-has-argument`, as `os validate`, `os build` and `os lint` refuse it '
+  + 'in source. Write the presence test `has(e.f)` admits, on the root this surface binds.';
+
+const visibilityHasArgument: RefusedStoredShape = {
+  id: 'visibility-predicate-has-argument-refused',
+  toMajor: 18,
+  surface: 'visibleWhen on a page component and on a form view\'s sections and section fields',
+  detect(stack, report) {
+    const judge = (element: Dict, path: string, where: string): void => {
+      const source = visibleWhenSource(element.visibleWhen);
+      if (source === undefined) return;
+      const [refused] = refusedHasArguments(source);
+      if (!refused) return;
+      report({
+        path: `${path}.visibleWhen`,
+        from: JSON.stringify(element.visibleWhen),
+        reason: `The visibleWhen of ${where} passes \`${refused.argument}\` to \`has()\`, which takes only a field `
+          + 'selection (`has(e.f)`); the engine refuses it as `has() invalid argument` on every evaluation. '
+          + HAS_ARGUMENT_FATE,
+      });
+    };
+    mapViewPayloads(stack, (payload, kind, path) => {
+      if (kind !== 'form') return payload;
+      for (const bucket of ['sections', 'groups'] as const) {
+        const sections = payload[bucket];
+        if (!Array.isArray(sections)) continue;
+        sections.forEach((section, si) => {
+          if (!isDict(section)) return;
+          const sectionPath = `${path}.${bucket}[${si}]`;
+          judge(section, sectionPath, `the form section at ${sectionPath}`);
+          const fields = section.fields;
+          if (!Array.isArray(fields)) return;
+          fields.forEach((field, fi) => {
+            if (isDict(field)) judge(field, `${sectionPath}.fields[${fi}]`, `the form field at ${sectionPath}.fields[${fi}]`);
+          });
+        });
+      }
+      return payload;
+    });
+    mapPageComponents(stack, (component, path) => {
+      judge(component, path, `the \`${String(component.type)}\` component at ${path}`);
+      return component;
+    });
+  },
+};
+
 /**
  * Every refused stored shape, in report order. A new entry is a reviewed edit:
  * `refused-shapes.test.ts` pins each one.
@@ -422,6 +487,7 @@ export const REFUSED_STORED_SHAPES: readonly RefusedStoredShape[] = [
   viewDataApiProvider,
   flowValueSlotTemplateToken,
   externalBindingOnManagedDatasource,
+  visibilityHasArgument,
 ];
 
 /**

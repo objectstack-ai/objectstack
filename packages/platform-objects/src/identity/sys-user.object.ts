@@ -98,6 +98,12 @@ export const SysUser = ObjectSchema.create({
       // "add a teammate" affordance — the Users list is always reachable —
       // and every add flows through better-auth invitations, never bespoke
       // sys_user CRUD.
+      // Hidden while the environment is cloud-managed (`features.cloudManaged`,
+      // hide-when-on): its people arrive from the organisation's identity
+      // provider, never by invitation (ruling 6341690661 on #25083, Q3 A).
+      // Written here rather than as `requiresFeature`, which names one flag
+      // and already carries `organization`.
+      visible: 'features.cloudManaged != true',
       requiresFeature: 'organization',
       requiresMembershipReach: 'invite_member',
       // `${result.email}`: invite-member answers the bare invitation row,
@@ -238,8 +244,10 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/admin/create-user',
-      // Platform-admin standing (ADR-0068 D4) — see the block header above.
-      visible: 'current_user.isPlatformAdmin == true',
+      // Platform-admin standing (ADR-0068 D4) — see the block header above —
+      // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on):
+      // a managed environment's users come from the identity provider.
+      visible: 'current_user.isPlatformAdmin == true && features.cloudManaged != true',
       requiresFeature: 'admin',
       successMessage: 'User created',
       refreshAfter: true,
@@ -310,8 +318,11 @@ export const SysUser = ObjectSchema.create({
       // legacy role scalar), can mint a temporary password, and stamps
       // must_change_password.
       target: '/api/v1/auth/admin/set-user-password',
-      // Platform-admin standing (ADR-0068 D4) — see the block header above.
-      visible: 'current_user.isPlatformAdmin == true',
+      // Platform-admin standing (ADR-0068 D4) — see the block header above —
+      // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on).
+      // Console only: the server keeps answering it on an `env_native` row, so
+      // the break-glass admin stays editable (ruling 6341690661, Q4 A).
+      visible: 'current_user.isPlatformAdmin == true && features.cloudManaged != true',
       requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Password updated',

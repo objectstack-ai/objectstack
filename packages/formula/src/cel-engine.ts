@@ -404,9 +404,13 @@ let recordScopeEnv: Environment | undefined;
  *    faults `has() invalid argument`. `@objectstack/lint`'s
  *    `validate-visibility-predicates` masks `has(…)` spans at its own call site
  *    (#16118) and that mask stays load-bearing; no other consumer has one.
- *    A select whose receiver is an index or a call (`has(a[0].b)`) is NOT in
- *    this class: the spec admits it, and {@link rewriteIndexedHas} lowers it
- *    before this check runs (#25267).
+ *    The page/view door now REPORTS the argument itself, under
+ *    `visibility-predicate-has-argument` (#25281); on every other surface
+ *    `validateExpression`'s compile pass refuses it. Neither changes what this
+ *    helper answers: a `has()` first error still masks the references behind
+ *    it here. A select whose receiver is an index or a call (`has(a[0].b)`) is
+ *    NOT in this class: the spec admits it, and {@link rewriteIndexedHas}
+ *    lowers it before this check runs (#25267).
  *
  * ⇒ A `null` from this helper is still "nothing was reported", never "the
  * source is clean". ⛔ Do not close the remaining classes by widening the regex

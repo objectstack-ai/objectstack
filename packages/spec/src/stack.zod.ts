@@ -3,6 +3,7 @@
 import { z } from 'zod';
 
 import { ManifestSchema, resolveInstallModes } from './kernel/manifest.zod';
+import { InstalledPackageSourceSchema } from './kernel/package-registry.zod';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from './kernel/metadata-plugin.zod';
 import {
   UNMANAGED_INSTALL_KEY_DISPOSITIONS,
@@ -1918,6 +1919,26 @@ export type RecordStagePackageBody = z.input<typeof RecordStagePackageBodySchema
 export type RecordStagePackageBodyParsed = z.infer<typeof RecordStagePackageBodySchema>;
 
 /**
+ * The origins one artifact entry may state for its package — the subset of
+ * {@link InstalledPackageSourceSchema} a LOAD path can register.
+ *
+ * One merged artifact may carry packages of different origins: a control plane
+ * merges an environment's marketplace installs into the artifact it boots the
+ * environment from, beside the environment's own code. The entry is where the
+ * producer that merged it says which is which, so the registry row records the
+ * producer's statement instead of the load door's `code` default.
+ *
+ * `authored` is not a member: an authored package is installed from
+ * `sys_packages` through `installPackage`, never registered from an artifact,
+ * and `ObjectQL.registerApp` refuses it. No new value is declared here — this
+ * is a narrowing of the one closed origin set, so the registry stays the only
+ * declaration of what an origin means.
+ */
+export const ArtifactPackageSourceSchema = lazySchema(() => InstalledPackageSourceSchema.extract(['code', 'marketplace'])
+  .describe('Where an artifact-carried package came from: code (the deployment\'s own code) or marketplace (installed from the marketplace)'));
+export type ArtifactPackageSource = z.input<typeof ArtifactPackageSourceSchema>;
+
+/**
  * One package carried by a release artifact, in its ASSEMBLED form — the
  * element type of `packages` on {@link ObjectStackDefinitionSchema}.
  *
@@ -1932,6 +1953,14 @@ export type RecordStagePackageBodyParsed = z.infer<typeof RecordStagePackageBody
  * `{ manifest: { id, name, version, type } }` entry is. What it does NOT admit
  * is an authoring manifest whose `objects` are globs — refused here, on
  * purpose, because a glob in a compiled artifact names files nobody will read.
+ *
+ * `source` is the entry's one key beside the body: the origin the producer
+ * that assembled the artifact states for this package
+ * ({@link ArtifactPackageSourceSchema}). The load path stamps it on the
+ * package's registry row (`InstalledPackageSchema.source`); an entry that
+ * states none is registered with the load door's own statement, `code` unless
+ * the door says otherwise. It sits on the WRAPPER, not in the body, because it
+ * describes how the package reached this artifact, not the package itself.
  */
 export const ArtifactPackageSchema = lazySchema(() => strictObject({
   surface: 'an assembled artifact package entry',
@@ -1943,6 +1972,8 @@ export const ArtifactPackageSchema = lazySchema(() => strictObject({
     + 'wrap it as `{ manifest: { … } }`.',
 }, {
   manifest: AssembledPackageBodySchema.describe('The assembled package body this artifact entry carries'),
+  source: ArtifactPackageSourceSchema.optional()
+    .describe('Where this package came from, stamped on its registry row: code (the deployment\'s own code) or marketplace (installed from the marketplace). Absent: the registering door\'s own statement, `code` by default'),
 }).describe('One package carried by a release artifact, assembled (ADR-0130 D4)'));
 
 export type ArtifactPackage = z.input<typeof ArtifactPackageSchema>;

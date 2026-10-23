@@ -272,8 +272,11 @@ describe('[#20790] R2 — a rollback past the move keeps the channel\'s current 
         expect(String(historyRows[historyRows.length - 1]!.metadata)).not.toContain(V1);
         // … the version written before the move keeps what it recorded (append-only, Q1 B) …
         expect(String(historyRows[0]!.metadata)).toContain(V1);
-        // … and the channel keeps its current secret: a restore only strips.
-        expect(calls).toEqual(['strip']);
+        // … and the channel keeps its current secret: a restore never stores.
+        // [#25278] It READS what the channel holds, for the save door's
+        // runtime authoring rules it now asks of the restored body (as the
+        // draft promotion does), then strips.
+        expect(calls).toEqual(['heldPaths:active', 'strip']);
         expect(held.get('channel_intake|active')).toBe(V2);
     });
 });

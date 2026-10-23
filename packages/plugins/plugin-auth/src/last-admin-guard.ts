@@ -329,6 +329,7 @@ import {
   findDefaultOrganization,
   isGrantActive,
   matchesConfiguredPlatformAdmin,
+  organizationAnchorsPlatformStanding,
   resolvePlatformAdminEmails,
   securityCatalogReaderOf,
 } from '@objectstack/core';
@@ -1148,14 +1149,18 @@ export function registerLastAdminGuard(
 
   /**
    * [ADR-0131 D5] Which `admin_full_access` grants among `links` the anchor
-   * reads — the resolver's predicate (`grantAnchorsPlatformStanding`,
-   * `resolve-authz-context.ts`): under `single`, one owned by the Default
-   * Organization ({@link readDefaultOrganizationId}, read only when some grant
-   * names an organization). Every other organization's grant is an
-   * organization administrator's. An organization-less grant anchors nothing
-   * (ADR-0131 D1), and neither does any grant under a wall or where no Default
-   * Organization is nameable — a composition that registers no organization
-   * object among them — exactly as the resolver reads it.
+   * reads — core security's one rule (`organizationAnchorsPlatformStanding`,
+   * `@objectstack/core`), the rule the resolver's §6b asks, decided here over
+   * the Default Organization as `pending` would leave it
+   * ({@link readDefaultOrganizationId}, read only when no wall stands and some
+   * grant names an organization). Under `single`, the grant owned by that
+   * organization anchors; every other organization's grant is an organization
+   * administrator's. An organization-less grant anchors nothing (ADR-0131 D1),
+   * and neither does any grant under a wall or where no Default Organization
+   * is nameable — a composition that registers no organization object among
+   * them. The posture is the REQUESTED one, read as the resolver reads it.
+   * ⛔ The owner normalizer (`toId`: a string or a number) is this guard's own
+   * by design; the rule takes the organization already normalized.
    */
   const anchorOwnerTest = async (
     op: GuardedOp,
@@ -1163,13 +1168,12 @@ export function registerLastAdminGuard(
     pending?: PendingStandingWrite,
   ): Promise<(link: Record<string, unknown>) => boolean> => {
     const ownerOf = (link: Record<string, unknown>) => toId(link.organization_id ?? link.organizationId);
-    const defaultOrganizationId = !postureEnforcesWall(resolveTenancyPosture()) && links.some((l) => ownerOf(l))
+    const walled = postureEnforcesWall(resolveTenancyPosture());
+    const defaultOrganizationId = !walled && links.some((l) => ownerOf(l))
       ? await readDefaultOrganizationId(op, pending)
       : undefined;
-    return (link) => {
-      const owner = ownerOf(link);
-      return owner !== undefined && owner === defaultOrganizationId;
-    };
+    const anchor = { walled, defaultOrganizationId };
+    return (link) => organizationAnchorsPlatformStanding(ownerOf(link), anchor);
   };
 
   /**

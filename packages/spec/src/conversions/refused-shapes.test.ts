@@ -67,6 +67,7 @@ describe('the refused-shape list — registered against the migration chain', ()
       'view-data-api-provider-retired',
       'flow-value-slot-template-dialect-refused',
       'object-external-binding-managed-datasource-refused',
+      'visibility-predicate-has-argument-refused',
     ]);
   });
 
@@ -597,5 +598,66 @@ describe('#25279 — a stored object bound `external` to a datasource the caller
     };
     applyConversionsToStoredItem('object', federatedRow({ datasource: 'warehouse' }), { knownDatasources: known });
     expect(reads).toBe(0);
+  });
+});
+
+// ── #25281 ────────────────────────────────────────────────────────────────
+
+const HAS_ARGUMENT_ID = 'visibility-predicate-has-argument-refused';
+
+const hasPage = (visibleWhen: unknown) => ({
+  name: 'pipeline_home',
+  label: 'Pipeline',
+  type: 'app',
+  regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Pipeline' }, visibleWhen }] }],
+});
+
+const hasView = (visibleWhen: unknown) => ({
+  name: 'task_form',
+  label: 'Task',
+  form: { sections: [{ label: 'Main', visibleWhen, fields: [{ field: 'notes', visibleWhen }] }] },
+});
+
+describe('#25281 — a stored page or view whose visibleWhen hands `has()` an argument that is not a field selection is listed', () => {
+  it.each([
+    ['has(status)', 'status'],
+    ['has(record.items[0])', 'record.items[0]'],
+  ])('a page component carrying `%s`: one TODO naming the argument and the fate; the row is not rewritten', (predicate, argument) => {
+    const row = hasPage(predicate);
+    const { item, todos } = storedTodos('page', row);
+    expect(item).toEqual(row);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe(HAS_ARGUMENT_ID);
+    expect(todo.path).toBe('pages[0].regions[0].components[0].visibleWhen');
+    expect(todo.reason).toContain(`passes \`${argument}\` to \`has()\``);
+    expect(todo.reason).toContain('has() invalid argument');
+    expect(todo.reason).toContain('No lossless rewrite');
+    expect(JSON.parse(todo.from)).toBe(predicate);
+  });
+
+  it('a form view: the section and its field are each listed, at their own path', () => {
+    const { todos } = storedTodos('view', hasView({ dialect: 'cel', source: 'has(status)' }));
+    expect(todos.filter((t) => t.conversionId === HAS_ARGUMENT_ID).map((t) => t.path)).toEqual([
+      'views[0].form.sections[0].visibleWhen',
+      'views[0].form.sections[0].fields[0].visibleWhen',
+    ]);
+  });
+
+  it.each([
+    'has(record.status)',
+    "has(record.items[0].name) && record.items[0].name != ''",
+    "record.note == 'has(x)'",
+    undefined,
+  ])('`%s` is not listed', (predicate) => {
+    expect(storedTodos('page', hasPage(predicate)).todos).toEqual([]);
+    expect(storedTodos('view', hasView(predicate)).todos).toEqual([]);
+  });
+
+  it('the stored page parses: the listing names a predicate the parse accepts and the authoring rule refuses', () => {
+    // The parse does not judge CEL, so the row loads and is served; the refusal
+    // belongs to `visibility-predicate-has-argument` at the save door and in
+    // `os validate` (pinned beside that rule, `@objectstack/lint`).
+    expect(PageSchema.safeParse(hasPage('has(status)')).success).toBe(true);
   });
 });
