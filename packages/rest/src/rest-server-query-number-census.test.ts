@@ -184,16 +184,6 @@ const LEDGER: readonly LedgerRow[] = [
             + 'mapped to the ImportJobProgress DTO — no request value reaches it.',
     })),
     {
-        site: 'POST ${metaPath}/:type/:name/rollback » Number(toVersionRaw)',
-        disposition: 'exempt',
-        reason: 'Read body-first (`body.toVersion ?? body.version ?? req.query.toVersion`) and then '
-            + 'CHECKED, not served: a non-finite or below-1 result is already refused `400` before '
-            + '`rollbackMetaItem` runs, so an unreadable value is never dropped or substituted — '
-            + 'outside this family by its own definition. Its refusal is the door\'s own '
-            + '`INVALID_REQUEST`; moving it onto `VALIDATION_FAILED` would be a wire change to a door '
-            + 'that already refuses, which no card here decides. Pinned below.',
-    },
-    {
         site: 'GET ${dataPath}/:object/export » Number(q.page)',
         disposition: 'exempt',
         reason: '`page` sets only the CHUNK size of the export\'s own `findData` loop (clamped to '
@@ -306,7 +296,7 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         }
     });
 
-    it('positive control: the census sees the reader and both exemptions in the real file', () => {
+    it('positive control: the census sees the reader and every exemption in the real file', () => {
         const keys = new Set(sites.map((s) => s.key));
         for (const row of LEDGER.filter((r) => r.disposition !== 'not-a-query-value')) {
             expect(keys.has(row.site), row.site).toBe(true);
@@ -361,9 +351,13 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // `meta-item-history-routes.ts`): both read their query as strings and coerce
         // no number of it:
         // 9 = 7 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0, length 17 → 18.
+        // [#25482] The rollback's `Number(toVersionRaw)` is gone: its body value is
+        // judged as it came and its query value goes through the reader, so its
+        // exemption row left the ledger with it:
+        // 8 = 7 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 18.
         expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
-        expect(sites).toHaveLength(9);
+        expect(sites).toHaveLength(8);
     });
 });
 
@@ -493,31 +487,87 @@ describe('#20139 census — exemption: export `?page=` changes chunking, never t
     });
 });
 
-describe('#20139 census — exemption: rollback `toVersion` is already refused, never substituted', () => {
-    const rollback = async (query: Record<string, unknown>) => {
+describe('#25482 rollback `toVersion` — only a positive integer names a version', () => {
+    const rollback = async (req: { query?: Record<string, unknown>; body?: unknown }) => {
         const { drive, protocol } = boot();
         const answer = await drive('POST', '/api/v1/meta/:type/:name/rollback', {
             params: { type: 'view', name: 'all_accounts' },
-            query,
+            query: req.query ?? {},
+            body: req.body ?? {},
         });
         return { answer, protocol };
     };
 
     it.each([
-        ['abc'],      // `NaN` → refused
-        [''],         // `Number('')` = 0 → below 1 → refused
-        ['Infinity'], // non-finite → refused
-    ])('?toVersion=%j answers 400 INVALID_REQUEST and nothing is restored', async (toVersion) => {
-        const { answer, protocol } = await rollback({ toVersion });
+        [true],       // was `Number(true)` = 1 → restored v1
+        [[2]],        // was `Number([2])` = 2 → restored v2
+        ['2'],        // a JSON string is not a JSON number
+        [1.5],        // was forwarded → `404 VERSION_NOT_FOUND`
+        [0],
+        [-1],
+        ['abc'],
+        [{}],
+    ])('body { toVersion: %j } answers 400 INVALID_REQUEST and nothing is restored', async (toVersion) => {
+        const { answer, protocol } = await rollback({ body: { toVersion } });
         expect(answer.status).toBe(400);
         expect(answer.body?.code).toBe('INVALID_REQUEST');
         expect(protocol.rollbackMetaItem).not.toHaveBeenCalled();
     });
 
+    it.each([[true], [[2]], [1.5], [0]])(
+        'the `version` alias is judged the same way: body { version: %j } answers 400',
+        async (version) => {
+            const { answer, protocol } = await rollback({ body: { version } });
+            expect(answer.status).toBe(400);
+            expect(answer.body?.code).toBe('INVALID_REQUEST');
+            expect(protocol.rollbackMetaItem).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each([
+        ['abc'],      // `NaN` → refused
+        [''],         // blank → refused, never read as 0 or absent-then-defaulted
+        ['Infinity'], // non-finite → refused
+        ['1.5'],
+        ['0'],
+        ['-1'],
+    ])('?toVersion=%j answers 400 INVALID_REQUEST and nothing is restored', async (toVersion) => {
+        const { answer, protocol } = await rollback({ query: { toVersion } });
+        expect(answer.status).toBe(400);
+        expect(answer.body?.code).toBe('INVALID_REQUEST');
+        expect(protocol.rollbackMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('an absent version answers 400 INVALID_REQUEST', async () => {
+        const { answer, protocol } = await rollback({});
+        expect(answer.status).toBe(400);
+        expect(answer.body?.code).toBe('INVALID_REQUEST');
+        expect(protocol.rollbackMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('lit control: body { toVersion: 2 } reaches rollbackMetaItem as 2', async () => {
+        const { answer, protocol } = await rollback({ body: { toVersion: 2 } });
+        expect(answer.status).toBe(200);
+        expect(protocol.rollbackMetaItem).toHaveBeenCalledTimes(1);
+        expect(protocol.rollbackMetaItem.mock.calls[0][0].toVersion).toBe(2);
+    });
+
+    it('lit control: body { version: 4 } (the alias) reaches rollbackMetaItem as 4', async () => {
+        const { answer, protocol } = await rollback({ body: { version: 4 } });
+        expect(answer.status).toBe(200);
+        expect(protocol.rollbackMetaItem.mock.calls[0][0].toVersion).toBe(4);
+    });
+
     it('lit control: ?toVersion=3 reaches rollbackMetaItem as 3', async () => {
-        const { answer, protocol } = await rollback({ toVersion: '3' });
+        const { answer, protocol } = await rollback({ query: { toVersion: '3' } });
         expect(answer.status).toBe(200);
         expect(protocol.rollbackMetaItem).toHaveBeenCalledTimes(1);
         expect(protocol.rollbackMetaItem.mock.calls[0][0].toVersion).toBe(3);
+    });
+
+    it('precedence is unchanged: a body version wins over ?toVersion=', async () => {
+        const { answer, protocol } = await rollback({ body: { toVersion: 2 }, query: { toVersion: '5' } });
+        expect(answer.status).toBe(200);
+        expect(protocol.rollbackMetaItem.mock.calls[0][0].toVersion).toBe(2);
     });
 });
