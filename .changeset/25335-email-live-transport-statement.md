@@ -5,7 +5,7 @@
 
 feat: Setup → Email states which mail transport is live, and says so when no mail leaves this machine
 
-Clause-②: no
+Clause-②: yes (widening: service-settings exports SettingsService.registerLiveStatus / liveStatusOf, SettingsLiveStatus, SettingsLiveStatusProvider and SETTINGS_LIVE_STATUS_BANNER_ID; nothing is refused)
 Metadata-protocol: none
 
 The Email page showed what is stored, not what is in use. Out of the box the `mail` namespace stores provider `smtp` with an empty host, so the form read as SMTP while every message went to the development log and was recorded in `sys_email` as sent.
