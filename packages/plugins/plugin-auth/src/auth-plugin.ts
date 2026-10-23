@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 // [#25083] `isCloudManaged`: the ONE accessor the cloud-managed doors below ask.
-import { Plugin, PluginContext, IHttpServer, isCloudManaged } from '@objectstack/core';
+import { Plugin, PluginContext, IHttpServer, isCloudManaged, resolveRequestExecutionContext, type RequestAuthService } from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
 import {
   AuthConfig,
@@ -3185,6 +3185,45 @@ export class AuthPlugin implements Plugin {
       });
       // Gate: the shared `gateAdmin` hoisted above the SSO mounts (#9653).
 
+      // [#25338] create-user's optional permission set. The grant is judged
+      // under the CALLER's own execution context — resolved by the platform's
+      // one composition, as the data door resolves it for Setup's grant form —
+      // so the security middleware and the ADR-0090 D12 gate decide it there,
+      // never `gateAdmin`. The parameters are the `/auth/me` endpoints'
+      // (session only, no localization, no gate carried): this route admits a
+      // browser session and needs the caller's grants, nothing else. The
+      // account and the grant are one engine transaction (ADR-0034), with the
+      // engine's declared limit: a datasource without `beginTransaction` runs
+      // it unatomically (ADR-0119 D1, warned once per driver).
+      const createGrantFor = (c: any): import('./admin-user-endpoints.js').AdminCreateGrantSeam => ({
+        resolveActorContext: async () => {
+          const context = await resolveRequestExecutionContext({
+            headers: c.req.raw.headers,
+            ql: this.authManager!.getDataEngine(),
+            authService: this.authManager as unknown as RequestAuthService,
+            tenancy: () => this.tenancy ?? undefined,
+            anonymous: 'fail-closed',
+            authGate: 'withhold',
+            credentials: 'session-only',
+            sessionApi: 'required',
+            session: 'request',
+            localization: 'withhold',
+            requestLocale: undefined,
+            accessToken: 'withhold',
+            oauth: undefined,
+            onAdmission: undefined,
+          });
+          return context as Record<string, unknown> | undefined;
+        },
+        runAtomically: async <T,>(work: () => Promise<T>): Promise<T> => {
+          const engine = this.authManager!.getDataEngine() as
+            | { transaction?: <R>(callback: (trxCtx: any, info: any) => Promise<R>) => Promise<R> }
+            | undefined;
+          if (typeof engine?.transaction !== 'function') return work();
+          return engine.transaction(async () => work());
+        },
+      });
+
       rawApp.post(`${basePath}/admin/create-user`, async (c: any) => {
         try {
           const actor = await gateAdmin(c);
@@ -3212,7 +3251,7 @@ export class AuthPlugin implements Plugin {
           // of recorded as the system. Attribution only: the route's own
           // authorization already happened above, and the writes stay system.
           const { status, body } = await runAttributedToUser(actor.id, () =>
-            runAdminCreateUser(adminUserDeps(), c.req.raw, actor),
+            runAdminCreateUser({ ...adminUserDeps(), createGrant: createGrantFor(c) }, c.req.raw, actor),
           );
           return c.json(body, status as any);
         } catch (error) {

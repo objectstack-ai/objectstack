@@ -858,10 +858,12 @@ describe("#14641 — an invitation reads the INVITEE's own sys_user.locale", () 
  *
  * ⚠️ POPULATION of the class claim these blocks close, stated rather than
  * implied: the auth mail surface is the five `sendTemplate` call sites in
- * `auth-manager.ts` — `IEmailService` declares exactly two delivering members
- * (`send`, `sendTemplate`), plugin-auth's only `.send(` calls are the SMS
- * service's, and no other file under `plugin-auth/src` calls either. Those
- * five are the same five `driveAllFive` above drives and `TEMPLATES` names.
+ * `auth-manager.ts` and `auth-manager-email-sms-delivery.ts` (the body of the
+ * change-email notice) — `IEmailService` declares exactly two delivering
+ * members (`send`, `sendTemplate`), plugin-auth's only `.send(` calls are the
+ * SMS service's, and no other file under `plugin-auth/src` calls either.
+ * Those five are the same five `driveAllFive` above drives and `TEMPLATES`
+ * names.
  * Before this change four of them read the column and `sendMagicLink` did not;
  * `the whole surface reads it` is pinned below by driving all five against one
  * recipient-keyed engine, not by asserting it about this send alone.
@@ -1120,8 +1122,9 @@ describe('#15106 — the CLASS claim: all five auth sends read the recipient col
   });
 
   it('every one of the five sends is written in the stored language of its own recipient', async () => {
-    // ⚠️ POPULATION: the five `sendTemplate` sites in `auth-manager.ts` — the
-    // same five `driveAllFive` drives and `TEMPLATES` names, and the whole of
+    // ⚠️ POPULATION: the five `sendTemplate` sites in `auth-manager.ts` and
+    // `auth-manager-email-sms-delivery.ts` — the same five `driveAllFive`
+    // drives and `TEMPLATES` names, and the whole of
     // plugin-auth's mail surface (see this section's header). This is the pin
     // that closes the class; the per-send pins above only cover one member.
     //

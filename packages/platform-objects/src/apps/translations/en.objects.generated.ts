@@ -182,6 +182,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           mustChangePassword: {
             label: "Require Password Change On First Login"
+          },
+          permissionSet: {
+            label: "Permission Set",
+            helpText: "Optional. Grants this permission set to the new user, so they can open their apps on first sign-in."
           }
         },
         resultDialog: {
@@ -191,6 +195,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           fields: {
             "user.email": "Email",
             "user.phoneNumber": "Phone Number",
+            permissionSet: "Permission Set",
             temporaryPassword: "Temporary Password"
           }
         }
