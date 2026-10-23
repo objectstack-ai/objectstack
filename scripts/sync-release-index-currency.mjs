@@ -68,7 +68,8 @@
 //
 // The rewrite is therefore defined as "make the gate's assertion-2 findings go away",
 // and the verdict at the end is literally `indexCurrencyFindings()` -- the gate's own
-// function over the REWRITTEN text, not an imitation of it.
+// function over the REWRITTEN text, not an imitation of it. One field is held out of
+// it, by name and out loud: a field written AHEAD of the cut (section below).
 //
 // ## ⛔ Boundary 1: assertion 2 ONLY. This file never judges section coverage.
 //
@@ -113,6 +114,9 @@
 //     finding there, and the date belongs to the version commit of the version the
 //     field names, which a run that moves nothing is not -- every prerelease cut is
 //     such a run (see `releaseDate`).
+//   • A `current series:` field naming a NEWER version of its own major than that major's
+//     newest GA -- written ahead of the cut. This one does NOT fall through to the verdict:
+//     it is left for that GA's own version run, see "A field written AHEAD of the cut".
 //
 // ## The one same-version field it DOES re-date: the newest GA's own version run (#25356)
 //
@@ -142,6 +146,35 @@
 //
 // Rejected: comparing the date with npm's `time` for the version. That needs the
 // network at version time, and the `version-pr` lane must not depend on it.
+//
+// ## A field written AHEAD of the cut: left for that GA's own version run (#25408)
+//
+// The 18.0.0 producer again, seen from the other side: a PR writes the field for a GA
+// that has not been cut. Until that GA's version run, the field names a version NEWER
+// than its major's newest GA heading, and it used to be read as stale and rewritten
+// BACKWARDS on every version pass that was not that GA's own. Measured on a throwaway
+// repository before `## 18.1.0` existed: on "(current series: 18.1.0, released
+// 2026-10-21)", a run with nothing pending and an `18.1.0-rc.0` cut alike wrote
+// "(current series: 18.0.0, released 2026-10-23)" -- an older version under a date that
+// belongs to neither release (18.0.0's version commit is dated 2026-10-20).
+//
+// Such a field is early, not stale, and exactly one run can make it true: that GA's own
+// version run, which re-dates it (previous section). So on every run, that one included
+// when it is a LOWER version's GA run (an 18.0.1 patch), the field is left byte-identical,
+// date included (`aheadOfNewestGa`), and the run prints why (`deferralNotice`).
+//
+// It is also held out of this file's verdict, and that departs from "the verdict is the
+// gate's own function" on purpose. The gate still reports the field -- advisory on `main`,
+// red under `--strict` -- and nothing here changes that. But a STOP here fails `pnpm run
+// version`: every `cut-rc.yml` prerelease cut and every `version-pr` refresh in pre mode
+// would go red until the GA, for a state no hand-written sentence improves and the GA's
+// own run resolves. The exit-1 ladder below is for the shapes that need a SENTENCE.
+//
+// Judged against the entry's OWN major. A v17 entry naming 18.1.0 is not 17.x written
+// ahead of a 17.x cut -- no 17.x run will ever make it true -- so it stays a stale field and
+// is stamped to 17.x's newest GA, as before. A field naming a GA that never ships (the
+// series is closed first) is deferred on every run; the notice names that case and its
+// remedy, a correction by hand.
 //
 // An over-eager rewriter is not a lesser failure than an inert one: this file writes
 // into curated, reader-facing prose, so `--self-test` asserts a CURRENT index is left
@@ -238,11 +271,46 @@ export function releaseDate(now = new Date()) {
 }
 
 /**
+ * Whether `named` is a NEWER version of `newestVersion`'s own major than `newestVersion`
+ * -- a status field written ahead of its GA cut. See "A field written AHEAD of the cut".
+ *
+ * A numeric triple compare, the gate's `newestGaOfMajor` discipline: 17.10.0 is newer
+ * than 17.9.0, which a string compare gets backwards. A different major is never ahead:
+ * no run of this major can ever make that field true.
+ *
+ * A version this cannot read as `x.y.z` is a REFUSAL. Answering false would rewrite the
+ * field backwards -- the defect; answering true would defer it on every run, unseen.
+ *
+ * @param {string} named the version the status field names
+ * @param {string} newestVersion the newest GA of the entry's major
+ * @returns {boolean}
+ */
+export function aheadOfNewestGa(named, newestVersion) {
+  const triple = (v) => {
+    const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v);
+    if (m === null) {
+      throw new Error(
+        `sync-release-index-currency: ${JSON.stringify(v)} is not an x.y.z version, so whether a `
+        + 'status field was written ahead of its GA cut cannot be judged. Refusing rather than '
+        + 'either rewriting the field backwards or leaving it alone on a guess.',
+      );
+    }
+    return [Number(m[1]), Number(m[2]), Number(m[3])];
+  };
+  const [aMaj, aMin, aPat] = triple(named);
+  const [bMaj, bMin, bPat] = triple(newestVersion);
+  if (aMaj !== bMaj) return false;
+  return aMin > bMin || (aMin === bMin && aPat > bPat);
+}
+
+/**
  * The rewritten status field, or null when this field is one this file REFUSES.
  *
  * Null is not a failure here: it means the gate's finding (if any) survives to the
  * verdict, which is where a refusal becomes loud. See "What it deliberately does NOT
- * rewrite".
+ * rewrite". The one null the verdict holds back is a field written ahead of the cut
+ * (`aheadOfNewestGa`): it is null on EVERY run, a GA run of a lower version included,
+ * because rewriting it moves it backwards -- see "A field written AHEAD of the cut".
  *
  * A field that already names `newestVersion` is left alone, date included, unless
  * `gaVersionRun` says this run IS `newestVersion`'s version commit. The gate judges the
@@ -269,6 +337,7 @@ export function releaseDate(now = new Date()) {
 export function rewriteStatusField(field, newestVersion, date, { gaVersionRun = false } = {}) {
   const m = STATUS_SHAPE.exec(field);
   if (m === null) return null;
+  if (aheadOfNewestGa(m[2], newestVersion)) return null;
   if (m[2] === newestVersion && !gaVersionRun) return null;
   const rewritten = `${m[1]}${newestVersion}${m[3]}${date}`;
   return rewritten === field ? null : rewritten;
@@ -445,27 +514,71 @@ export function rewriteIndexText({ indexText, changelogText, headChangelogText, 
 }
 
 /**
- * The gate's OWN assertion-2 verdict over a given index text.
+ * @typedef {{ major: number, field: string, named: string, newest: string }} Deferral
+ *   A status field written ahead of its GA cut: `named` is newer than `newest`, the
+ *   newest GA of `major`. Left byte-identical for that GA's own version run.
+ */
+
+/**
+ * The gate's OWN assertion-2 verdict over a given index text, with ONE shape held out:
+ * a `current series:` field written ahead of the cut (`aheadOfNewestGa`), returned as a
+ * deferral instead of a finding -- see "A field written AHEAD of the cut".
  *
  * Assertion 1 is deliberately not consulted -- see "Boundary 1". This is the function
  * that makes "the rewriter and the gate cannot drift apart" a mechanical fact rather
  * than an intention: anything this file failed to bring into line is reported by the
- * very code that would have reddened the patrol, in the same words.
+ * very code that would have reddened the patrol, in the same words. A deferral is judged
+ * per major, from the same entry line the gate reads, so it can hold out that major's
+ * finding and no other.
  *
  * @param {{ indexText: string, changelogText: string }} input
- * @returns {string[]}
+ * @returns {{ findings: string[], deferred: Deferral[] }}
  */
-export function currencyFindings({ indexText, changelogText }) {
+export function currencyVerdict({ indexText, changelogText }) {
   const versions = gaVersions(changelogText);
   const minors = gaMinors(versions).filter(([maj]) => inScope(maj));
   const majors = [...new Set(minors.map(([maj]) => maj))].sort((a, b) => a - b);
   const findings = [];
+  /** @type {Deferral[]} */
+  const deferred = [];
   for (const major of majors) {
     const newest = newestGaOfMajor(versions, major);
     if (newest === null) continue;
-    findings.push(...indexCurrencyFindings(major, newest, indexEntryLine(indexText, major)));
+    const line = indexEntryLine(indexText, major);
+    const field = line === null ? null : indexStatusField(line);
+    const m = field === null ? null : STATUS_SHAPE.exec(field);
+    if (m !== null && aheadOfNewestGa(m[2], newest)) {
+      deferred.push({ major, field, named: m[2], newest });
+      continue;
+    }
+    findings.push(...indexCurrencyFindings(major, newest, line));
   }
-  return findings;
+  return { findings, deferred };
+}
+
+/**
+ * `currencyVerdict`'s findings alone: what stops the run.
+ *
+ * @param {{ indexText: string, changelogText: string }} input
+ * @returns {string[]}
+ */
+export function currencyFindings(input) {
+  return currencyVerdict(input).findings;
+}
+
+/**
+ * The line a run prints for a deferral: which field, why it was left, whose run dates
+ * it, and the remedy when that GA never ships.
+ *
+ * @param {Deferral} deferral
+ * @returns {string}
+ */
+export function deferralNotice({ major, field, named, newest }) {
+  return `    v${major}: (${field}) left as written — ${named} is newer than v${major}'s newest GA in `
+    + `${SPEC_CHANGELOG} (${newest}), so the field was written ahead of the ${named} cut. Only `
+    + `${named}'s own version run can date it, and it will; rewriting it now would move it back to `
+    + `${newest} under a date that belongs to neither release. If ${named} will not ship, correct `
+    + 'the field by hand. check-release-section-coverage reports it until then.';
 }
 
 /**
@@ -479,7 +592,7 @@ export function currencyFindings({ indexText, changelogText }) {
  * one path `main()` takes is the path the self-test drives on a real repository.
  *
  * @param {{ root: string, date: string }} options
- * @returns {{ path: string, rewrites: Rewrite[], wrote: boolean, findings: string[], majors: number[], gaVersionRun: number[] }}
+ * @returns {{ path: string, rewrites: Rewrite[], wrote: boolean, findings: string[], deferred: Deferral[], majors: number[], gaVersionRun: number[] }}
  */
 export function syncIndex({ root, date }) {
   const indexFull = join(root, INDEX_PATH);
@@ -513,10 +626,8 @@ export function syncIndex({ root, date }) {
   const wrote = rewrites.length > 0;
   if (wrote) writeFileSync(indexFull, text);
 
-  return {
-    path: INDEX_PATH, rewrites, wrote, majors, gaVersionRun,
-    findings: currencyFindings({ indexText: text, changelogText }),
-  };
+  const { findings, deferred } = currencyVerdict({ indexText: text, changelogText });
+  return { path: INDEX_PATH, rewrites, wrote, majors, gaVersionRun, findings, deferred };
 }
 
 // ---------------------------------------------------------------------------
@@ -524,12 +635,20 @@ export function syncIndex({ root, date }) {
 function main() {
   const root = scriptRepoRoot();
   const date = releaseDate();
-  const { rewrites, majors, findings } = syncIndex({ root, date });
+  const { rewrites, majors, findings, deferred } = syncIndex({ root, date });
 
-  if (rewrites.length === 0) {
+  if (rewrites.length === 0 && deferred.length === 0) {
     console.log(
       `✓ sync-release-index-currency: every in-scope entry in ${INDEX_PATH} (v${majors.join(', v')}) `
       + `already names the newest GA release of its major, per ${SPEC_CHANGELOG} — nothing rewritten.`,
+    );
+  } else if (rewrites.length === 0) {
+    console.log(`  ${INDEX_PATH}`);
+    for (const deferral of deferred) console.log(deferralNotice(deferral));
+    console.log(
+      `✓ sync-release-index-currency: nothing rewritten — ${deferred.length} status field(s) written `
+      + 'ahead of the cut wait for their GA\'s own version run (above), and every other in-scope entry '
+      + 'already names the newest GA release of its major.',
     );
   } else {
     console.log(`  ${INDEX_PATH}`);
@@ -540,6 +659,7 @@ function main() {
         : '';
       console.log(`    v${rewrite.major}: (${rewrite.from}) → (${rewrite.to})${why}`);
     }
+    for (const deferral of deferred) console.log(deferralNotice(deferral));
     console.log(
       `✓ sync-release-index-currency: ${rewrites.length} status field(s) stamped from `
       + `${SPEC_CHANGELOG} (release date ${date}).`,
@@ -552,7 +672,8 @@ function main() {
     // parenthetical). Both need a human sentence, and at version time this is a LOUD
     // STOP rather than a routine branch -- the release PR gets no CI, so finishing
     // quietly here hands the next author exactly the misaddressed red this script
-    // exists to prevent.
+    // exists to prevent. A field written ahead of the cut needs no sentence and never
+    // reaches here: it is deferred above.
     console.error(
       `\n✗ sync-release-index-currency: ${findings.length} finding(s) this rewrite cannot fix — `
       + 'check-release-section-coverage --strict would be RED on this tree:\n',
@@ -603,11 +724,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Control G: the date refuses an unusable clock': 3,
   'Control H: a prerelease cut never re-dates the newest GA': 7,
   'Control I: the newest GA\'s own version run re-dates a pre-written field': 16,
+  'Control J: a field written AHEAD of the cut waits for its GA\'s own run': 17,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as zeroing it,
 // so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a declared
 // battery, so it reds by the same set difference rather than silently inflating
@@ -806,7 +928,7 @@ export function selfTest() {
     expect('E — a missing SECTION never reaches this file\'s verdict: assertion 1 is not consulted '
       + 'here, because a rewriter cannot write curated prose and hard-failing the version lane on '
       + 'unwritten prose would wedge it for a debt the release did not create',
-      String(currencyFindings).indexOf('coverageFindings') === -1);
+      String(currencyVerdict).indexOf('coverageFindings') === -1);
     expect('E — the verdict is computed over the REWRITTEN text, not the text as read',
       currencyFindings({ indexText: stamped.text, changelogText: CHANGELOG_FIXTURE }).length === 0
         && stale.length === 1);
@@ -993,6 +1115,123 @@ export function selfTest() {
     }
   }
 
+  // ── Control J ─────────────────────────────────────────────────────────────
+  // The measured defect (#25408): before `## 18.1.0` existed, a field pre-written as
+  // "(current series: 18.1.0, released 2026-10-21)" was rewritten BACKWARDS to 18.0.0
+  // under the run's date by every version pass that was not 18.1.0's own. Both
+  // directions are pinned: ahead is left alone, behind is still stamped forward.
+  battery('Control J: a field written AHEAD of the cut waits for its GA\'s own run');
+  {
+    const AHEAD_FIELD = 'current series: 17.4.0, released 2026-09-08';
+    const AHEAD_V17 = CURRENT_V17.replace('current series: 17.3.0, released 2026-09-04', AHEAD_FIELD);
+    const ahead = indexOf(AHEAD_V17, CURRENT_V16);
+    const RUN_DATE = '2026-09-10';
+    const runOn = (indexText, changelogText, headChangelogText = changelogText) =>
+      rewriteIndexText({ indexText, changelogText, headChangelogText, date: RUN_DATE });
+    const headingAbove = (heading) => CHANGELOG_FIXTURE.replace('## 17.3.0-rc.1', `${heading}\n\n## 17.3.0-rc.1`);
+
+    const idle = runOn(ahead, CHANGELOG_FIXTURE);
+    expect('J — a run with nothing to version leaves a field naming 17.4.0 (newest GA 17.3.0) '
+      + 'byte-identical: it is early, not stale, and moving it back to 17.3.0 is the defect',
+    idle.rewrites.length === 0 && idle.text === ahead);
+    const onRc = runOn(ahead, headingAbove('## 17.4.0-rc.0'), CHANGELOG_FIXTURE);
+    expect('J — a prerelease cut of that very version (`17.4.0-rc.0`) leaves it byte-identical too',
+      onRc.rewrites.length === 0 && onRc.text === ahead);
+    const onPatch = runOn(ahead, headingAbove('## 17.3.1'), CHANGELOG_FIXTURE);
+    expect('J — and so does the GA run of a LOWER version (17.3.1): that run is 17.3.1\'s version '
+      + 'commit, not 17.4.0\'s', onPatch.rewrites.length === 0 && onPatch.text === ahead
+      && onPatch.gaVersionRun.join() === '17');
+    expect('J — at the field level an ahead field is refused on every run, the GA-run flag included',
+      rewriteStatusField(AHEAD_FIELD, '17.3.0', RUN_DATE) === null
+        && rewriteStatusField(AHEAD_FIELD, '17.3.0', RUN_DATE, { gaVersionRun: true }) === null);
+
+    expect('J — "ahead" is a numeric triple compare: 17.10.0 is ahead of 17.9.0, 17.9.0 is behind '
+      + '17.10.0, 17.3.1 is ahead of 17.3.0, and a version is not ahead of itself',
+    aheadOfNewestGa('17.10.0', '17.9.0') && !aheadOfNewestGa('17.9.0', '17.10.0')
+      && aheadOfNewestGa('17.3.1', '17.3.0') && !aheadOfNewestGa('17.3.0', '17.3.0'));
+    let threwOnShape = false;
+    try { aheadOfNewestGa('17.4', '17.3.0'); } catch { threwOnShape = true; }
+    expect('J — a version that is not x.y.z is a REFUSAL, never a guess in either direction', threwOnShape);
+
+    const behind = runOn(indexOf(STALE_V17, CURRENT_V16), CHANGELOG_FIXTURE);
+    expect('J — the other direction, on the same run: a field BEHIND the newest GA (17.2.0) is still '
+      + 'stamped forward, version and date',
+    behind.rewrites.length === 1 && behind.text.includes(`current series: 17.3.0, released ${RUN_DATE}`));
+    const otherMajor = runOn(
+      indexOf(CURRENT_V17.replace('current series: 17.3.0', 'current series: 18.1.0'), CURRENT_V16),
+      CHANGELOG_FIXTURE,
+    );
+    expect('J — judged against the entry\'s OWN major: a v17 field naming 18.1.0 is no 17.x written '
+      + 'ahead of a 17.x cut, so it is stamped to 17.3.0 as a stale field',
+    !aheadOfNewestGa('18.1.0', '17.3.0') && otherMajor.rewrites.length === 1
+      && otherMajor.text.includes(`current series: 17.3.0, released ${RUN_DATE}`));
+
+    expect('J — the GATE still reports the field: the deferral holds it out of this run\'s verdict, '
+      + 'it does not blind the gate', indexCurrencyFindings(17, '17.3.0', AHEAD_V17).length === 1);
+    const verdict = currencyVerdict({ indexText: ahead, changelogText: CHANGELOG_FIXTURE });
+    expect('J — the verdict carries no finding for it and one deferral naming the major, the field, '
+      + 'the version it names and the newest GA',
+    verdict.findings.length === 0 && verdict.deferred.length === 1 && verdict.deferred[0].major === 17
+      && verdict.deferred[0].field === AHEAD_FIELD && verdict.deferred[0].named === '17.4.0'
+      && verdict.deferred[0].newest === '17.3.0');
+    const mixed = currencyVerdict({ indexText: indexOf(AHEAD_V17, STALE_FINAL_V16), changelogText: CHANGELOG_FIXTURE });
+    expect('J — a deferral holds out ITS major only: a refused "final release:" on v16 in the same '
+      + 'index still reaches the verdict and stops the run',
+    mixed.deferred.length === 1 && mixed.findings.length === 1 && mixed.findings[0].includes('final release: 16.0.0'));
+
+    const notice = deferralNotice(verdict.deferred[0]);
+    expect('J — the run says why: the field, the newest GA, whose own run dates it, and the remedy '
+      + 'when that GA never ships',
+    notice.includes(`(${AHEAD_FIELD})`) && notice.includes('(17.3.0)') && notice.includes('17.4.0\'s own version run')
+      && notice.includes('by hand'));
+    expect('J — and that runtime prose carries no tracker number', !/#\d/.test(notice));
+
+    const ga174 = headingAbove('## 17.4.0');
+    const onGa = runOn(ahead, ga174, CHANGELOG_FIXTURE);
+    expect('J — on 17.4.0\'s own version run the field is no longer ahead: it is re-dated to that run '
+      + 'and nothing is deferred',
+    onGa.rewrites.length === 1 && onGa.rewrites[0].redated === true
+      && onGa.text.includes(`current series: 17.4.0, released ${RUN_DATE}`)
+      && currencyVerdict({ indexText: onGa.text, changelogText: ga174 }).deferred.length === 0);
+
+    // End to end through syncIndex, on the measured shape: newest GA 18.0.0, field
+    // pre-written for 18.1.0.
+    const V18_AHEAD = '- [v18](/docs/releases/v18) — The line that carries ADR-0131 '
+      + '(current series: 18.1.0, released 2026-10-21).';
+    const at18 = CHANGELOG_FIXTURE.replace('## 17.3.0-rc.1', '## 18.0.0\n\n## 18.0.0-next.5\n\n## 17.3.0-rc.1');
+    const index18 = indexOf(V18_AHEAD, CURRENT_V17, CURRENT_V16);
+    const shapes = [
+      ['with nothing pending', at18],
+      ['on an 18.1.0-rc.0 cut', at18.replace('## 18.0.0\n', '## 18.1.0-rc.0\n\n## 18.0.0\n')],
+    ];
+    for (const [shape, working] of shapes) {
+      const tree = checkoutTree({ index: index18, committed: at18, working });
+      try {
+        const result = syncIndex({ root: tree.dir, date: '2026-10-23' });
+        expect(`J — syncIndex ${shape}: the 18.1.0 field is not written back to 18.0.0 — no write, `
+          + 'byte-identical on disk, no finding, one v18 deferral',
+        result.wrote === false && result.rewrites.length === 0 && result.findings.length === 0
+          && result.deferred.length === 1 && result.deferred[0].major === 18
+          && readFileSync(join(tree.dir, INDEX_PATH), 'utf8') === index18);
+      } finally {
+        rmSync(tree.dir, { recursive: true, force: true });
+      }
+    }
+    const gaTree = checkoutTree({
+      index: index18, committed: at18, working: at18.replace('## 18.0.0\n', '## 18.1.0\n\n## 18.0.0\n'),
+    });
+    try {
+      const result = syncIndex({ root: gaTree.dir, date: '2026-10-23' });
+      expect('J — syncIndex on 18.1.0\'s own version run re-dates the field ON DISK and defers nothing',
+        result.wrote === true && result.rewrites.length === 1 && result.rewrites[0].redated === true
+          && result.deferred.length === 0 && result.findings.length === 0
+          && readFileSync(join(gaTree.dir, INDEX_PATH), 'utf8')
+            .includes('(current series: 18.1.0, released 2026-10-23)'));
+    } finally {
+      rmSync(gaTree.dir, { recursive: true, force: true });
+    }
+  }
+
   // ── Floor ─────────────────────────────────────────────────────────────────
   const declared = Object.keys(SELF_TEST_BATTERIES);
   let floorBreached = false;
@@ -1045,8 +1284,9 @@ export function selfTest() {
     + 'prose) are REFUSED and reach the gate\'s own verdict instead, prose parentheticals and '
     + 'out-of-scope majors are never touched, a prerelease cut (`next` or `rc`) leaves the newest '
     + 'GA\'s release date alone while the GA\'s own version run re-dates a pre-written field (per '
-    + 'major, read from the CHANGELOG at HEAD), and the surface, the scope floor and the verdict are the gate\'s '
-    + 'rather than copies of it.',
+    + 'major, read from the CHANGELOG at HEAD), a field written ahead of the cut is left for that '
+    + 'GA\'s own run instead of being rewritten backwards, and the surface, the scope floor and the '
+    + 'verdict are the gate\'s rather than copies of it.',
   );
   selfTestReachedVerdict = true;
   return 0;
