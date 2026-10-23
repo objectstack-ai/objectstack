@@ -21,6 +21,9 @@
  * The two legs are each other's control: the reader's publish must come back
  * clean, and the non-reader's must still carry the refusal, so neither "the
  * probe stopped running" nor "the probe now reads as the system" can pass.
+ * The refusal's `fix` names the caller's read access; a third leg, a query that
+ * cannot compile, keeps the dataset fix, so the fix follows the failure rather
+ * than the plane.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DatasetSchema } from '@objectstack/spec/ui';
@@ -41,13 +44,19 @@ const DATASET = DatasetSchema.parse({
     measures: [{ name: 'task_count', label: 'Tasks', aggregate: 'count' }],
 });
 
-const ITEMS: Record<string, unknown> = {
+const itemsWithWidgetValues = (values: string[]): Record<string, unknown> => ({
     'dashboard task_board': {
         name: 'task_board',
-        widgets: [{ id: 'w_tasks', dataset: 'task_metrics', values: ['task_count'] }],
+        widgets: [{ id: 'w_tasks', dataset: 'task_metrics', values }],
     },
     'dataset task_metrics': DATASET,
-};
+});
+const ITEMS = itemsWithWidgetValues(['task_count']);
+/** A widget selecting a measure the dataset never declares: a query that cannot compile. */
+const ITEMS_UNDECLARED_MEASURE = itemsWithWidgetValues(['task_cnt']);
+
+/** The fix every widget query failure that is NOT an access refusal keeps. */
+const DATASET_FIX = `Fix the dataset definition (or the widget's values/dimensions) so the query compiles, then republish.`;
 
 /** Both callers may publish; only the reader may read `task_item`. */
 const caller = (userId: string) => ({
@@ -60,7 +69,7 @@ const caller = (userId: string) => ({
 const READER = 'u_reader';
 const NON_READER = 'u_publisher_without_read';
 
-function makeDoor() {
+function makeDoor(items: Record<string, unknown> = ITEMS) {
     const admissionContexts: Array<ExecutionContext | undefined> = [];
     const analytics = new AnalyticsService({
         queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
@@ -80,16 +89,16 @@ function makeDoor() {
             { type: 'dashboard', name: 'task_board' },
         ],
         get: async (ref: any, opts: any) =>
-            opts?.state === 'draft' ? { body: ITEMS[`${ref.type} ${ref.name}`], hash: 'h' } : null,
+            opts?.state === 'draft' ? { body: items[`${ref.type} ${ref.name}`], hash: 'h' } : null,
     });
     vi.spyOn(p, 'promoteDraftForPublish').mockImplementation(async (req: any) => ({
         singularType: req.type,
         orgId: null,
         advisories: [],
-        result: { version: 'h', seq: 1, item: { body: ITEMS[`${req.type} ${req.name}`] }, packageId: null },
+        result: { version: 'h', seq: 1, item: { body: items[`${req.type} ${req.name}`] }, packageId: null },
     }));
     vi.spyOn(p, 'runPublishSideEffects').mockResolvedValue({});
-    p.getMetaItem = async ({ type, name }: any) => ({ item: ITEMS[`${type} ${name}`] });
+    p.getMetaItem = async ({ type, name }: any) => ({ item: items[`${type} ${name}`] });
     p.getMetaItems = async () => ({ items: [] });
     const engineFinds: Array<{ object: string; context: unknown }> = [];
     p.engine = {
@@ -125,8 +134,8 @@ function makeDoor() {
     return { dispatcher: new HttpDispatcher(kernel), admissionContexts, engineFinds };
 }
 
-async function publishAs(userId: string) {
-    const door = makeDoor();
+async function publishAs(userId: string, items: Record<string, unknown> = ITEMS) {
+    const door = makeDoor(items);
     const result = await door.dispatcher.handlePackages(
         '/com.tasks/publish-drafts', 'POST', {}, {}, caller(userId),
     );
@@ -166,6 +175,20 @@ describe('publish-drafts widget probes run as the publishing caller (#25484)', (
             artifact: { type: 'dashboard', name: 'task_board' },
             ref: { type: 'dataset', name: 'task_metrics', member: 'w_tasks' },
         });
+        expect(failed[0].message).toContain(`reading "${GATED}" is not permitted for this user`);
+        // The dataset is correct: the fix names the caller's read access, never a dataset edit.
+        expect(failed[0].fix).toContain(`read access to object "${GATED}"`);
+        expect(failed[0].fix).not.toContain(DATASET_FIX);
         expect(admissionContexts.every((ctx) => ctx?.userId === NON_READER)).toBe(true);
+    });
+
+    it('a query that cannot compile, for a caller who CAN read, keeps the dataset fix', async () => {
+        const { probes } = await publishAs(READER, ITEMS_UNDECLARED_MEASURE);
+
+        expect(probes?.checked?.widgets).toBe(1);
+        const failed = probes.issues.filter((i: any) => i.code === 'widget_query_failed'); // adr0112-ok: D6c build-probe diagnostics code
+        expect(failed).toHaveLength(1);
+        expect(failed[0]).toMatchObject({ layer: 'runtime', severity: 'error', fix: DATASET_FIX });
+        expect(failed[0].message).not.toContain('Access denied');
     });
 });

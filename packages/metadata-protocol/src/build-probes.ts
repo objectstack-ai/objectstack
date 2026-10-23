@@ -15,6 +15,8 @@
 // chat surfaces, and eval harnesses consume one stream regardless of which
 // verification plane found the problem.
 
+import type { StandardErrorCode } from '@objectstack/spec/api';
+
 /** One runtime-verification finding (ADR-0038 BuildIssue, layer 'runtime'). */
 export interface RuntimeBuildIssue {
     layer: 'runtime';
@@ -104,6 +106,36 @@ function asRec(v: unknown): Rec | undefined {
 
 function asArr(v: unknown): unknown[] {
     return Array.isArray(v) ? v : [];
+}
+
+/**
+ * `PERMISSION_DENIED`, pinned against the STANDARD catalog — the code the
+ * analytics service's read admission throws (ADR-0112 envelope, 403).
+ */
+const PERMISSION_DENIED: StandardErrorCode = 'PERMISSION_DENIED';
+
+/**
+ * The read-admission refusal a widget query can be answered with, judged by
+ * the thrown error's ADR-0112 `code` — never by its message text.
+ *
+ * The analytics service refuses a caller who may not read an object (or a
+ * field the dataset reads) with `PERMISSION_DENIED` and names the refused
+ * object in `object` (a joined object can be the one refused, so it is read
+ * from the error before the dataset's own) and the refused fields in
+ * `fields`. That is the caller's access, not the dataset's definition.
+ *
+ * One `PERMISSION_DENIED` is NOT an access question: a member that is no
+ * column reference, refused because the gate cannot tell which fields it
+ * reads, carries `member`, and its remedy IS a dataset change — so it keeps
+ * the dataset fix.
+ */
+function readAdmissionRefusal(e: unknown): { object?: string; fields: string[] } | undefined {
+    const err = e && typeof e === 'object' ? (e as Rec) : undefined;
+    if (!err || err.code !== PERMISSION_DENIED || typeof err.member === 'string') return undefined;
+    return {
+        object: typeof err.object === 'string' && err.object ? err.object : undefined,
+        fields: asArr(err.fields).filter((f): f is string => typeof f === 'string' && f.length > 0),
+    };
 }
 
 /** Result rows of a queryDataset call, tolerant of {rows}/{data}/array shapes. */
@@ -384,6 +416,19 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                     });
                 }
             } catch (e) {
+                // The query runs as the publishing caller, so read admission
+                // can refuse a dataset that is correct. That refusal names an
+                // access remedy; telling the author to edit the dataset would
+                // send them to change something that works.
+                const refusal = readAdmissionRefusal(e);
+                const refusedObject = refusal?.object ?? objectName;
+                const fix = refusal
+                    ? `Dataset "${dsName}" is not the cause and needs no change: read admission refused the publishing caller. ` +
+                      `The publisher (or the role this dashboard is for) needs read access to ` +
+                      `${refusedObject ? `object "${refusedObject}"` : 'the object this dataset reads'}` +
+                      `${refusal.fields.length ? ` and its field(s) ${refusal.fields.join(', ')}` : ''}; grant it, then republish. ` +
+                      `The finding is about this caller's access: a viewer who has that access can read the widget.`
+                    : `Fix the dataset definition (or the widget's values/dimensions) so the query compiles, then republish.`;
                 issues.push({
                     layer: 'runtime',
                     severity: 'error',
@@ -391,7 +436,7 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                     ref: { type: 'dataset', name: dsName, member: widgetId },
                     code: 'widget_query_failed',
                     message: `Dashboard "${p.name}" widget "${widgetId}" query against dataset "${dsName}" failed: ${String((e as Error)?.message ?? e)}`,
-                    fix: `Fix the dataset definition (or the widget's values/dimensions) so the query compiles, then republish.`,
+                    fix,
                 });
             }
         }
