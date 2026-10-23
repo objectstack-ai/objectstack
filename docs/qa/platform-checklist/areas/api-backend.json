@@ -1624,7 +1624,7 @@
         ],
         "knownGaps": [
           "The MCP door cannot be driven live with showcase_mark_done: the bridge's AI-exposure gate (actionAiExposureError, fail-closed on ai.exposed !== true) sits AHEAD of the activation consult, so a non-exposed action answers the exposure refusal regardless of its switch. showcase_portfolio_snapshot is the only stock ai.exposed action. The MCP transport IS drivable live on a stock boot: the boot banner prints `MCP: http://localhost:<port>/api/v1/mcp`, and QA run #21056 drove POST /api/v1/mcp tools/call run_action against showcase_portfolio_snapshot (disabled → isError carrying code ACTION_DISABLED, status 409; re-enabled → ok). Score the MCP clause live. Where the endpoint is not mounted, record acceptance[4] blocked(environment), with the unit pin cited beside it: action-activation-dispatch.test.ts 'door 2' calls invokeBusinessAction in-process over a stubbed engine and metadata service, with no MCP transport and no HTTP, so it is evidence of that layer only, never the clause's pass (RUNNER rule 6, a pin scores only the layer it drives).",
-          "The record-load half of the ordering proof has NO contrasting refusal: the REST door's record load is best-effort (try/catch in domains/actions.ts — a missing record passes an empty record for new-record actions), so a nonexistent recordId never 404s on its own, enabled or disabled. The record leg is proven by code order plus the absence of any read/side effect, never by expecting a 404 from the enabled control."
+          "The record-load half of the ordering proof is scored from the DISABLED traces: code order plus the absence of any read/side effect. An enabled control on the same nonexistent recordId answers 404 RECORD_NOT_FOUND, because every door refuses a subject the caller-scope load did not deliver (refuseDeniedSubjectLoad, packages/runtime/src/action-execution.ts — the script/body door, the flow door and the declarative branch Mark Done now takes all call it; measured on a dogfood boot of #25468: enabled 404, disabled 409, same id). That 404 corroborates the order but is not the leg's evidence. The load itself is still caught (loadActionSubjectRecord), so a new-record or object-less action, which attempts no load, never 404s."
         ]
       },
       "steps": [
@@ -1651,9 +1651,9 @@
           "evidence": "both traces side by side"
         },
         {
-          "clause": "the consult also precedes the record load, proven by absence not by a contrasting refusal: the 409 arrives with a nonexistent recordId in play and no record read occurs — the enabled control CANNOT 404 on the bad id because the load is best-effort by design (domains/actions.ts catches and passes an empty record), so do not score this leg by expecting one",
+          "clause": "the consult also precedes the record load, proven by absence: the 409 arrives with a nonexistent recordId in play and no record read occurs. The enabled control on the same id answers 404 RECORD_NOT_FOUND (the caller-scope load's refusal, fixtures.knownGaps[1]), which corroborates the order but does not score this leg",
           "oracle": "api",
-          "verify": "the step-3/4 disabled traces are 409 with the bogus recordId present; the run record notes the enabled-control caveat rather than a fabricated 404 expectation",
+          "verify": "the step-3/4 disabled traces are 409 with the bogus recordId present; an enabled-control 404, when captured, is recorded beside them as corroboration, never as the verdict",
           "evidence": "traces + run-record note"
         },
         {
@@ -1752,7 +1752,7 @@
         {
           "revision": 7,
           "date": "2026-10-23",
-          "change": "fixtures.requires[0] and acceptance[0] respelled for #25468: showcase_mark_done is no longer a script action with a registered body; it declares its write (operation 'update', patch { done: true, progress: 100 }), which the action route performs as the caller. Its type stays 'script', the schema default, and it still declares no params and no requiredPermissions, so it is still the clean 409 probe: the activation consult runs ahead of the declarative branch in packages/runtime/src/domains/actions.ts (read at base aa2dbab7b; measured on a dogfood boot of the change: disabled with a nonexistent recordId answers 409 ACTION_DISABLED). No clause changed",
+          "change": "fixtures.requires[0] and acceptance[0] respelled for #25468: showcase_mark_done is no longer a script action with a registered body; it declares its write (operation 'update', patch { done: true, progress: 100 }), which the action route performs as the caller. Its type stays 'script', the schema default, and it still declares no params and no requiredPermissions, so it is still the clean 409 probe: the activation consult runs ahead of the declarative branch in packages/runtime/src/domains/actions.ts (read at base aa2dbab7b; measured on a dogfood boot of the change: disabled with a nonexistent recordId answers 409 ACTION_DISABLED). The same boot answered the ENABLED control on that id 404 RECORD_NOT_FOUND, which falsified fixtures.knownGaps[1] and acceptance[2]'s 'the enabled control CANNOT 404': every door now consumes the caller-scope load's verdict through refuseDeniedSubjectLoad (action-execution.ts), the script/body door included, so the text was already stale for a script body and stays false for the declared write. Both are respelled; acceptance[2] still scores from the disabled traces alone, and the enabled 404 is corroboration only. acceptance[2]'s clause text changed, its verdict basis did not",
           "ref": "#25468"
         }
       ]
