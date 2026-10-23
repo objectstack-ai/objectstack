@@ -5,7 +5,7 @@
 
 feat: at boot, an administrator is told when a package upgrade renamed, removed or collided with an access item the customer switched off, cloned or authored
 
-Clause-②: no (a boot report: it refuses nothing, writes no row, and adds no key, code or setting; the notification topic is a free-form string on the existing ingress)
+Clause-②: yes (widening: plugin-sharing's exported `SharingRuleService` gains `listDeclaredRules()`; the report itself refuses nothing and adds no key, code or setting)
 Metadata-protocol: none
 
 ADR-0126 §6 wall 3 says no upgrade un-makes a customer's choice. A switch-off, a clone or a sharing rule row is kept by name, so a vendor rename made a switched-off item active again under its new name, and nothing told anyone. At `kernel:bootstrapped`, beside the catalog reference report, `SecurityPlugin` now compares the customer's access state with the registry this boot registered. It covers sharing rules, permission sets, positions and capabilities, and lists:
