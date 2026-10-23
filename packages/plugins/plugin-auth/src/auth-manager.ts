@@ -63,11 +63,14 @@ import {
 import { resolveMembershipLimitOption } from './membership-limit.js';
 import {
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
+  MEMBERSHIP_ROLE_EXTERNAL,
 } from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 import { createObjectQLAdapterFactory, withSystemContext, withSystemReadContext } from './objectql-adapter.js';
+import { narrowDirectoryForExternalCaller, type ExternalDirectoryDoorDeps } from './external-directory-door.js';
+import { isExternalMembershipRole } from './external-membership.js';
 import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
@@ -2977,6 +2980,12 @@ export class AuthManager {
             return;
           }
 
+          // ── Ruling 6355206139 E2: the directory doors, narrowed for an external ──
+          // list-members and get-full-organization check membership only, so an
+          // `external` caller would read every fellow member (and every pending
+          // invitation) there. See `external-directory-door.ts`.
+          await narrowDirectoryForExternalCaller(ctx, this.externalDirectoryDoorDeps());
+
           // ── #24750: invite-member's unknown-role refusal carries its code ──
           // better-auth throws it with only a message; the spec promises
           // `ROLE_NOT_FOUND` (see `invite-role-not-found-code.ts`). It throws
@@ -3475,6 +3484,13 @@ export class AuthManager {
             ...stmts,
             invitation: ['create'],
           });
+          // [Ruling 6355206139] `external` — a portal user inside the
+          // organization: no organization, member, invitation, team or
+          // access-control statement at all. It confers less than `member`,
+          // which is why any issuer may invite to it (E3).
+          built[MEMBERSHIP_ROLE_EXTERNAL] = defaultAc.newRole(
+            Object.fromEntries(Object.keys(stmts).map((resource) => [resource, []])),
+          );
           customOrgRoles = built;
         }
       } catch {
@@ -7758,6 +7774,30 @@ export class AuthManager {
    * hold, an expired session, a credential that does not parse or one
    * carrying a control character still answers `null`.
    */
+  /**
+   * [Ruling 6355206139 E2] The reads `narrowDirectoryForExternalCaller` makes,
+   * bound to this manager's engine under the system read context. With no
+   * engine every caller reads as no member, so nothing is narrowed — the
+   * mock-mode status quo.
+   */
+  private externalDirectoryDoorDeps(): ExternalDirectoryDoorDeps {
+    const engine = this.config.dataEngine;
+    const sys = engine ? (withSystemReadContext(engine) as any) : undefined;
+    const first = async (object: string, where: Record<string, unknown>) => {
+      if (!sys) return undefined;
+      const rows: any[] = await sys.find(object, { where, limit: 1 });
+      return Array.isArray(rows) ? rows[0] : undefined;
+    };
+    return {
+      resolveActor: (ctx) => this.resolveActor(ctx),
+      readMemberRole: async (userId, organizationId) =>
+        (await first('sys_member', { user_id: userId, organization_id: organizationId }))?.role,
+      readUserEmail: async (userId) => (await first('sys_user', { id: userId }))?.email,
+      resolveOrganizationSlug: async (slug) => (await first('sys_organization', { slug }))?.id,
+      isExternalRole: isExternalMembershipRole,
+    };
+  }
+
   private resolveActor(
     ctx: any,
     options?: { failedReadThrows?: boolean },
