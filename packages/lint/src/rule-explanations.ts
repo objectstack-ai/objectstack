@@ -1858,6 +1858,12 @@ const FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION: RuleExplanation = {
       'seconds from its own clock, so a captured post stops verifying. A usable secret is a string that is ' +
       'not blank after trimming, on the start node\'s `config.secret`; absent, blank and non-string are one ' +
       'verdict.',
+    'A flow that ships in a package names its secret instead of carrying it: `config.secretRef` holds the ' +
+      'name the deployment fills (an environment variable of that name in the open tier, or the entry the ' +
+      'host\'s credential resolver serves), never in the platform\'s `OS_` namespace and never beside a ' +
+      'literal `secret`. The engine reads the name at every post, so the value never appears in the ' +
+      'definition or the repository; a post that arrives while the name resolves to nothing is answered ' +
+      '503, never verified against nothing.',
     'The automation engine refuses to register a flow bound to the api trigger without one — a ' +
       'hardcoded check in `registerFlow`, before any trigger is consulted and whatever the flow\'s ' +
       '`status` — and the trigger refuses to arm it, so the flow never receives a post. The `/automation` ' +

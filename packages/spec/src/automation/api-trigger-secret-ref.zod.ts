@@ -46,6 +46,9 @@ export const API_TRIGGER_SECRET_REF_RESERVED_PREFIX = 'OS_';
 /** An environment-variable-shaped name: a letter or `_`, then letters, digits and `_`. */
 const SECRET_REF_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/** Not {@link API_TRIGGER_SECRET_REF_RESERVED_PREFIX}, in any case. */
+const NOT_RESERVED = /^(?![Oo][Ss]_)/;
+
 /**
  * The reference itself: the name a deployment fills, never the secret. A
  * letter or `_` first, then letters, digits and `_` (an environment variable's
@@ -60,8 +63,9 @@ export const ApiTriggerSecretRefSchema = z
       '(an environment variable\'s name, such as `SRM_HEARTBEAT_SECRET`). Write the name the deployment fills, ' +
       'never the secret itself.',
   )
-  .refine(
-    (name) => !name.toUpperCase().startsWith(API_TRIGGER_SECRET_REF_RESERVED_PREFIX),
+  // A pattern, not a `refine`, so the published JSON Schema carries the rule too.
+  .regex(
+    NOT_RESERVED,
     '`config.secretRef` may not name a variable in the platform\'s `OS_` namespace: whoever signs the posts holds ' +
       'the hook secret, so a platform secret named here would be handed out with it. Name a variable of your own ' +
       '(`SRM_HEARTBEAT_SECRET`).',

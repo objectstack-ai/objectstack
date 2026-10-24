@@ -1131,6 +1131,23 @@ describe('validateFlowTriggerReadiness', () => {
       expect(judge(apiFlow({ hookId: 'intake', secret: 'whsec_4f9a' }))).toEqual([]);
     });
 
+    it('passes the same flow when it names its secret by reference — the form a package ships', () => {
+      expect(judge(apiFlow({ hookId: 'intake', secretRef: 'SRM_HEARTBEAT_SECRET' }))).toEqual([]);
+      // Through the runtime publish gate too: no restored position is needed for a reference.
+      expect(
+        runRuntimeAuthoringRules({ type: 'flow', item: apiFlow({ secretRef: 'SRM_HEARTBEAT_SECRET' }) }).errors,
+      ).toEqual([]);
+    });
+
+    it('a reference that is not a usable name is still no secret, and the remedy names secretRef', () => {
+      for (const secretRef of ['', 'OS_AUTH_SECRET', 'not a name', 42]) {
+        const findings = judge(apiFlow({ secretRef }));
+        expect(findings.map((f) => f.rule), JSON.stringify(secretRef)).toEqual([FLOW_API_TRIGGER_SECRET_MISSING]);
+        expect(findings[0].message).toContain('config.secretRef is not a usable name');
+      }
+      expect(judge(apiFlow({ hookId: 'intake' }))[0].hint).toContain('config.secretRef');
+    });
+
     it('passes an `autolaunched` flow — the explicit-only form needs no secret', () => {
       expect(judge(apiFlow({}, { type: 'autolaunched' }))).toEqual([]);
       // …and the same flow flipped to `api` with nothing else changed fails.
