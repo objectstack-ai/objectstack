@@ -8,12 +8,13 @@
 //     [#9237] The compound rule moved from `showcase_project` to
 //     `showcase_contact`, and the D3 proof got its missing half with it. On
 //     `showcase_project` (OWD `public_read_write`) sharing has nothing to
-//     widen, so every grant the rule reconciled was REFUSED
-//     (`SHARING_NOT_ENABLED`, ADR-0111 D7) — this file could assert the
-//     criteria compiled and matched, and never that anything was ENFORCED,
-//     while its own header claimed both. `showcase_contact` is OWD `private`,
-//     so the grant lands and the enforcement half is now measured rather than
-//     implied.
+//     widen for the organization's staff, so every grant the rule reconciled
+//     was REFUSED (`SHARING_NOT_ENABLED`, ADR-0111 D7; since #25549 a share
+//     there is consulted for an `external` member alone) — this file could
+//     assert the criteria compiled and matched, and never that anything was
+//     ENFORCED, while its own header claimed both. `showcase_contact` is OWD
+//     `private`, so the grant lands and the enforcement half is now measured
+//     rather than implied.
 //   • ADR-0058 D4 — an RLS `check` clause validates the write POST-IMAGE: a
 //     contributor cannot reassign an invoice they own to a different owner.
 //
@@ -53,6 +54,8 @@ describe('showcase: D3 compound sharing (#1887) + D4 RLS check', () => {
   let ql: any;
   let token: string;
   let invId: string;
+  let pjId: string;
+  let memberId: string;
 
   beforeAll(async () => {
     stack = await bootShowcase({
@@ -77,6 +80,11 @@ describe('showcase: D3 compound sharing (#1887) + D4 RLS check', () => {
 
     // An invoice owned by the member (system insert sidesteps authoring rules).
     invId = idOf(await ql.insert('showcase_invoice', { name: 'INV-D34', account: acct, owner: MEMBER, status: 'draft' }, SYS));
+
+    // [#25549] A real project, and the member's user id: the D7 contrast on
+    // `showcase_project` is judged against a record's organization and a recipient.
+    pjId = idOf(await ql.insert('showcase_project', { name: 'D34 Project', account: acct, status: 'planned' }, SYS));
+    memberId = String((await ql.findOne('sys_user', { where: { email: MEMBER }, context: SYS.context }))?.id ?? '');
   }, 90_000);
 
   afterAll(async () => { await stack?.stop(); });
@@ -108,8 +116,9 @@ describe('showcase: D3 compound sharing (#1887) + D4 RLS check', () => {
   });
 
   it('[#9237] the grant the rule reconciles is one the gates CONSULT — not refused as inert', async () => {
-    // The half this proof could never carry on `showcase_project`. The verdict
-    // is caller-independent (ADR-0111 D7) and computed from the OWD alone, so
+    // The half this proof could never carry on `showcase_project`. On a
+    // private object the verdict is caller-independent (ADR-0111 D7) and
+    // computed from the OWD alone, so
     // it is asserted directly rather than inferred from a reconcile count that
     // an empty recipient expansion would leave silently at zero — which is
     // exactly how the sibling rule on `showcase_project` produced no boot WARN
@@ -122,21 +131,30 @@ describe('showcase: D3 compound sharing (#1887) + D4 RLS check', () => {
     expect(granted, 'a share row on a private-OWD object is accepted').toBeTruthy();
 
     // The contrast that names the retired rules' defect, on the object they
-    // used to sit on: same call, same caller, refused for the OWD. The
-    // record id deliberately names no row — the D7 verdict is computed from
-    // the OBJECT before any record is read, which is precisely why it is
-    // caller- and record-independent. Both the code and the object are
-    // asserted, so a refusal arriving for some other reason cannot pass.
-    // [#25549] A public object's share row is now consulted for an EXTERNAL
-    // member of the record's organization, so the public-OWD refusal names the
-    // recipient's standing: `u_d34_probe` resolves to no organization, and the
-    // row would still never be consulted for it.
+    // used to sit on: same call, same caller, refused. [#25549] On a public
+    // object the D7 verdict is no longer the OWD's alone: the external OWD
+    // floor consults a share there, so the verdict reads one fact about the
+    // recipient — is it an `external` member of the RECORD's organization?
+    // The retired rules' `position` recipients expand to that organization's
+    // staff, so the probe is a real project and a staff member of its
+    // organization (both preconditions asserted). Both the code and the reason
+    // are asserted, so a refusal arriving for some other reason cannot pass —
+    // a record the verdict cannot place answers "that organization could not
+    // be resolved" instead.
+    const pjOrg = (await ql.findOne('showcase_project', { where: { id: pjId }, fields: ['organization_id'], context: SYS.context }))?.organization_id;
+    expect(pjOrg, 'fixture: the project carries an organization').toBeTruthy();
+    const membership = await ql.findOne('sys_member', {
+      where: { user_id: memberId, organization_id: pjOrg }, fields: ['role'], context: { ...SYS.context, tenantId: pjOrg },
+    });
+    expect(membership?.role, 'fixture: the member is staff of that organization, not external').toBe('member');
     await expect(
       sharing.grant(
-        { object: 'showcase_project', recordId: 'pj_absent', recipientType: 'user', recipientId: 'u_d34_probe', accessLevel: 'read' },
+        { object: 'showcase_project', recordId: pjId, recipientType: 'user', recipientId: memberId, accessLevel: 'read' },
         { isSystem: true },
       ),
-    ).rejects.toThrow(/SHARING_NOT_ENABLED: 'showcase_project' has a public sharing model, so a share row on it is consulted only for an external member/);
+    ).rejects.toThrow(
+      /SHARING_NOT_ENABLED: 'showcase_project' has a public sharing model, so a share row on it is consulted only for an external member of the record's organization, and the recipient is not one/,
+    );
   });
 
   // ── ADR-0058 D4 ────────────────────────────────────────────────────────────
