@@ -24,8 +24,8 @@
  * - §4 THE DESIGNER'S SCHEMA: the published JSON schema carries the key as a
  *   plain optional boolean with no `default`, under the same
  *   `additionalProperties: false`.
- * - §5 THE STATUS: the describe opens with the `[PLANNED` marker (the runtime
- *   half has not landed, so the key is declared and not yet read) and names
+ * - §5 THE STATUS: the describe carries no `[PLANNED` marker (the runtime
+ *   half, #25573, reads the key in `plugin-approvals`) and names
  *   the subjects an author needs — `submitter_id` (who is removed),
  *   `onEmptyApprovers` (where an emptied slate goes) and `'auto_approve'` (the
  *   one policy refused beside it, §6). The prose itself is not pinned.
@@ -189,7 +189,7 @@ describe('§4 the published JSON schema carries it as an optional boolean with n
 // §5 the status the describe declares
 // ───────────────────────────────────────────────────────────────────────────
 
-describe('§5 the describe declares the key planned and names its two subjects', () => {
+describe('§5 the describe declares the key live and names its two subjects', () => {
   // Read inside each test, never at collection: a key that went missing then
   // reds these two tests instead of erroring the file and hiding §1–§4.
   const doc = (): string => {
@@ -198,8 +198,9 @@ describe('§5 the describe declares the key planned and names its two subjects',
     return member?.description ?? '';
   };
 
-  it('opens with the planned marker: declared, not yet read by the approval engine', () => {
-    expect(doc().startsWith('[PLANNED')).toBe(true);
+  it('carries no planned marker: the approval engine reads the key (#25573)', () => {
+    expect(doc()).toMatch(/^Segregation of duties/);
+    expect(doc()).not.toContain('PLANNED');
   });
 
   it('names who is removed (submitter_id) and where an emptied slate goes (onEmptyApprovers)', () => {

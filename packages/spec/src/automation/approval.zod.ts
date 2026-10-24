@@ -951,26 +951,24 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    *   unchanged — "off, behaviour is unchanged" holds at the parse as well as
    *   at the run.
    *
-   * PLANNED, not yet read: `plugin-approvals` parses the key with the rest of
-   * the config and nothing reads it yet, so the submitter is NOT removed until
-   * #25573 lands. The liveness record is the `liveness/flow.json` `_note`
-   * (the ledger walk ends at `flow/nodes.config`, a record of `unknown`, so
-   * no row can carry a node-config key) and the `[PLANNED — not yet
-   * enforced]` marker this describe opens with; when #25573 lands, the marker
-   * and the describe's last sentence leave and the `_note` sentence is
-   * rewritten.
+   * Read by `plugin-approvals` (#25573): `openNodeRequest` takes the
+   * submitter off every slate the request can open on (`approvers`, the
+   * `fallback` slate and the `admin_rescue` administrators) and writes the
+   * route note, and the decision, the reassign door and the SLA escalation
+   * keep the slot out of the submitter's hands after the open. The liveness
+   * record is the `liveness/flow.json` `_note` (the ledger walk ends at
+   * `flow/nodes.config`, a record of `unknown`, so no row can carry a
+   * node-config key).
    */
   excludeSubmitter: z.boolean().optional().describe(
-    '[PLANNED — not yet enforced] Segregation of duties for this step: when true, the request\'s submitter '
+    'Segregation of duties for this step: when true, the request\'s submitter '
     + '(the user whose action started the flow run, recorded on the approval request as `submitter_id`) is '
     + 'removed from the slate `approvers` resolves to, whatever approver type produced them. If that leaves '
     + 'nobody, the request takes the node\'s `onEmptyApprovers` route (`admin_rescue` by default, or '
     + '`fallbackApprovers` under `\'fallback\'`) and never passes silently, and the approval record shows that '
     + 'the exclusion changed the route. `onEmptyApprovers: \'auto_approve\'` is refused beside '
     + '`excludeSubmitter: true`, because it would approve exactly the request this option exists to stop; '
-    + 'choose `\'admin_rescue\'`, `\'fail\'` or `\'fallback\'`. Omitted or false (the default), the slate stays as resolved. '
-    + 'The approval engine does not read this key yet, so today the submitter is NOT removed: keep any guard '
-    + 'you rely on (an `expression` approver or a validation rule) until it does.',
+    + 'choose `\'admin_rescue\'`, `\'fail\'` or `\'fallback\'`. Omitted or false (the default), the slate stays as resolved.',
   ),
 
   /**
