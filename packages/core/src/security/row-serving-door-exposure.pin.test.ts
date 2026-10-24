@@ -77,11 +77,11 @@ type Classification =
 
 /** Every non-test caller of the read admission, classified. */
 const CALLERS: Record<string, Classification> = {
-  'packages/metadata-protocol/src/protocol.ts': {
+  'packages/metadata-protocol/src/protocol-record-reads.ts': {
     kind: 'door',
     door: 'the cross-object search (`GET /search`, `searchAll`)',
     operation: 'search',
-    decisionSite: 'packages/metadata-protocol/src/protocol.ts',
+    decisionSite: 'packages/metadata-protocol/src/protocol-record-reads.ts',
     pin: 'packages/metadata-protocol/src/protocol.search-api-exposure.test.ts',
   },
   'packages/services/service-analytics/src/plugin.ts': {
