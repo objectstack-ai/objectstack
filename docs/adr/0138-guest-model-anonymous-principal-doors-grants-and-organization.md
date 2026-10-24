@@ -27,8 +27,8 @@ guest's bind door is built implementation-first, when a named deployment needs t
 a public surface; until then no door binds a set to `guest`, and the record carries the door's shape.
 · **Amended** (2026-10-24, letter B of ruling record
 [`6377731715`](https://github.com/objectstack-ai/objectstack/issues/25496#issuecomment-6377731715) on
-[#25496](https://github.com/objectstack-ai/objectstack/issues/25496), maintainer 「同意」; carried on
-[#25445](https://github.com/objectstack-ai/objectstack/issues/25445) by
+[#25496](https://github.com/objectstack-ai/objectstack/issues/25496) (decision batch #388 item 4),
+maintainer 「同意」; carried on [#25445](https://github.com/objectstack-ai/objectstack/issues/25445) by
 [`6377853567`](https://github.com/objectstack-ai/objectstack/issues/25445#issuecomment-6377853567) and
 [`6377887908`](https://github.com/objectstack-ai/objectstack/issues/25445#issuecomment-6377887908)) —
 D2 gains a seventh door class, [the guest upload door bound to a public form](#class-7--the-guest-upload-door-bound-to-a-public-form):
@@ -358,8 +358,9 @@ criterion 2 places outside the model are reached only through a URL an authorize
 mints, so they give a guest nothing to start from. A public form with a required file field
 therefore cannot be submitted by a guest (the card, [#25572](https://github.com/objectstack-ai/objectstack/issues/25572)).
 
-**The rules.** Each states one constraint of the ruling. The implementation enforces each, and none
-binds before it lands.
+**The rules.** Rules 1 to 7 each state one constraint of the ruling, and rule 8 places the one
+existing outside family the door could touch. The implementation enforces them. Before it lands,
+only the last sentence of rule 1 is in force, because it states today's behaviour.
 
 1. **Bound to a public form.** The door serves a form exactly when class 1's doors serve it. It reads
    the form through the one resolution both form doors use
@@ -385,8 +386,8 @@ binds before it lands.
    (`packages/services/service-storage/src/objects/system-file.object.ts#ref_object`, `#ref_id`, `#ref_field`).
    It is stored `acl: 'private'`, as every upload is, and its `owner_id` stays unset, because the
    guest owns nothing (D1). Its organization is the form's, the one D4's clarification (1) binds the
-   form doors to, resolved on the server. Nothing the client sends names it, and where D4 withholds
-   the form, rule 1 withholds this door with it.
+   form doors to, resolved on the server. Nothing the client sends names it, and where the form doors
+   withhold the form on a walled posture (D4 item 5), rule 1 withholds this door with it.
 5. **Attached by the submission that follows.** The form's submit door (class 1) attaches the file
    when the submission's value for the field it was taken for names it. That record write claims the
    file through the field-reference lifecycle
@@ -409,7 +410,8 @@ binds before it lands.
    of `7d` only when `status` is `pending`) reaches only an upload never completed, and a completed
    file that no record claims matches no term
    (`packages/services/service-storage/src/stranded-orphan-inventory.ts`).
-7. **The form's anti-abuse posture.** The ruling names three parts, and each is the form doors' own:
+7. **The form's anti-abuse posture.** The ruling names three parts of the form doors' posture, and
+   the door takes each:
    - *Rate limit per address.* The door is metered by the limiter that meters the form doors, the one
      inbound limiter (`packages/runtime/src/security/inbound-rate-limit.ts#createInboundRateLimitMiddleware`),
      armed by the stack's `server.security.rateLimit`
@@ -420,8 +422,9 @@ binds before it lands.
      Empty state, measured at `e649c2d91e`: the limiter is opt-in and no app under `examples/` arms
      it, so a deployment that arms no budget meters neither the form doors nor this door
      ([What the ruling did not settle](#what-the-ruling-did-not-settle), item 4).
-   - *No listing.* The door answers the stored file's id and nothing else, and no door enumerates
-     guest uploads: the storage family mounts no listing route.
+   - *No listing.* The door answers the stored file's id and nothing else, as the submit answers
+     the created record's id only, and no door enumerates guest uploads: the storage family mounts
+     no listing route.
    - *No read-back of other guests' files.* No door serves an unattached guest file to a caller with
      no session. A file with neither an attachments scope nor a field owner downloads only for a
      signed-in caller (`packages/services/service-storage/src/storage-routes.ts#requireDownloadSession`,
@@ -437,8 +440,7 @@ binds before it lands.
 `scripts/adr-anchors/` (Prime Directive #13). Two rows land with the door, in the same change: the
 sweep's class-7 entry (`packages/qa/dogfood/test/anonymous-door-sweep.classification.ts#DOOR_CLASSES`)
 and the conformance matrix's row. A classification entry that claims no route on the boot is red as
-stale, so neither lands before the door. Until the door lands, the second half of rule 1 holds
-already, and nothing else here is in force. **Card**: E5, [#25572](https://github.com/objectstack-ai/objectstack/issues/25572)
+stale, so neither lands before the door. **Card**: E5, [#25572](https://github.com/objectstack-ai/objectstack/issues/25572)
 (its implementation phase, dispatched after this text lands).
 
 ### D2b — The anonymous door × elevated flow combination: a publish refusal
