@@ -372,7 +372,7 @@ importers:
         specifier: workspace:*
         version: link:../../plugins/plugin-hono-server
       '@objectstack/runtime':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../runtime
       '@objectstack/types':
         specifier: workspace:*
@@ -469,19 +469,19 @@ importers:
         specifier: workspace:*
         version: link:../console
       '@objectstack/core':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../core
       '@objectstack/driver-memory':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../drivers/driver-memory
       '@objectstack/driver-mongodb':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../drivers/driver-mongodb
       '@objectstack/driver-sql':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../drivers/driver-sql
       '@objectstack/driver-sqlite-wasm':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../drivers/driver-sqlite-wasm
       '@objectstack/formula':
         specifier: workspace:*
@@ -502,10 +502,10 @@ importers:
         specifier: workspace:*
         version: link:../metadata-protocol
       '@objectstack/objectql':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../objectql
       '@objectstack/observability':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../observability
       '@objectstack/platform-objects':
         specifier: workspace:*
@@ -541,7 +541,7 @@ importers:
         specifier: workspace:*
         version: link:../rest
       '@objectstack/runtime':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../runtime
       '@objectstack/service-analytics':
         specifier: workspace:*
@@ -1774,43 +1774,43 @@ importers:
   packages/plugins/plugin-dev:
     dependencies:
       '@objectstack/account':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../apps/account
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
       '@objectstack/driver-memory':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../drivers/driver-memory
       '@objectstack/objectql':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../objectql
       '@objectstack/plugin-auth':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../plugin-auth
       '@objectstack/plugin-hono-server':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../plugin-hono-server
       '@objectstack/plugin-security':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../plugin-security
       '@objectstack/rest':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../rest
       '@objectstack/runtime':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../runtime
       '@objectstack/service-i18n':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../services/service-i18n
       '@objectstack/service-realtime':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../services/service-realtime
       '@objectstack/service-storage':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../services/service-storage
       '@objectstack/setup':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../apps/setup
       '@objectstack/spec':
         specifier: workspace:*
