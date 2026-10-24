@@ -271,7 +271,7 @@ enum AuthzPosture {
   source of a position; enforcement reads the posture, never the role. It is
   the one rung whose evidence is an identity position rather than a
   capability bit, and it outranks `TENANT_ADMIN` (only `PLATFORM_ADMIN`
-  precedes it).
+  precedes it). ADR-0099 I3 records the exception.
 - **No enforcement-time code path may consult the better-auth role directly.**
   This removes dual-track adjudication: #2836-class conflicts (explicit deny
   from one track out-composing a wildcard allow from the other) become

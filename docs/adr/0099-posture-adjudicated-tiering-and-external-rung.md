@@ -174,6 +174,11 @@ Invariants (each carries a matrix cell):
 - **I3** — Posture is derived only by the resolver, only from capability
   grants (ADR-0095 D3); no enforcement site re-derives tier at the point of
   decision (fallback probe excepted, per D1, and it may only narrow).
+  _Amended 2026-10-23 (ruling of record 6355206139 on #25233, letter B):
+  `EXTERNAL` is the one exception to "only from capability grants". It
+  derives from the reserved `org_external` position, which the resolver
+  projects from `sys_member.role = external` (ADR-0095 D3); the resolver
+  stays the only deriver, and no enforcement site reads the role._
 - **I4** — Enforcement and explain read the same carried value; a divergence
   is a defect, not a display issue.
 - **I5** — Posture selects tier, never side: no rung grants a read or write
