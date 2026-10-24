@@ -53,7 +53,7 @@ The comment states the original intent: *authentication* is the auth layer's job
 | REST / MCP object CRUD | caller's `ExecutionContext`, threaded | by design |
 | Business-action `script`/`body` | **none** — facade drops context → fall-open | #2849 (adversarial review) |
 | Flow (`runAs:'user'`, user-less trigger) | none → fall-open, warned | #2308 (adversarial review) |
-| Flow (`runAs:'system'`) | explicit elevation | ADR-0049/#1888, by design |
+| Flow (`runAs:'system'`) | explicit elevation, except identity assignment: governed writes to `sys_user_position`, `sys_user_permission_set`, `sys_invitation` and `sys_member` are refused `PERMISSION_DENIED` (ADR-0073 Amendment 2026-10-24) | ADR-0049/#1888, by design; the carve-out #25251 / #25483 |
 | Record-change / schedule triggers | threaded (after #1888 fixes) | bug class, then fixed |
 | Boot / seeding / internal jobs | `{ isSystem: true }` literals, scattered | by design, unaudited |
 
