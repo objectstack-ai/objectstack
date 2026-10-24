@@ -248,15 +248,18 @@ function notifyValuePhrase(value: unknown): string {
 
 // ─── notify email-field recipient (ruling 6377731715 on #25496, letter B) ──
 //
-// The one recipient form that is an email ADDRESS rather than a user: the
-// address held in an `email`-typed field of the record that triggered the
-// flow — for a person who is not a user, such as an applicant who came in
-// through a public form (ADR-0138 guest model). It NAMES the field, so a free
-// string or an expression can never parse as it: a string in `recipients` is
-// a user id or an audience selector, an envelope is a CEL value, and this arm
-// is a closed object whose one key holds a field's machine name. Which field
-// that is, and that it is `email`-typed, is judged where the flow's trigger
-// and the object's fields meet — `@objectstack/lint`'s
+// The recipient form for an email ADDRESS the RECORD supplies, rather than a
+// user: the address held in an `email`-typed field of the record that
+// triggered the flow — for a person who is not a user, such as an applicant
+// who came in through a public form (ADR-0138 guest model). (An address the
+// AUTHOR writes out as a string is the other way to one: an author constant,
+// sent as written — ruling 6386629237 on #25647, letter B; see the
+// `recipients` docblock below.) It NAMES the field, so a free string or an
+// expression can never parse as it: a string in `recipients` is a user id, an
+// audience selector or an address written out, an envelope is a CEL value,
+// and this arm is a closed object whose one key holds a field's machine
+// name. Which field that is, and that it is `email`-typed, is judged where
+// the flow's trigger and the object's fields meet — `@objectstack/lint`'s
 // `validateNotifyEmailFieldRecipients`, a reference-integrity rule, so every
 // authoring command and the runtime publish door refuse it.
 //
@@ -321,9 +324,10 @@ function emailFieldRecipientRefusal(value: unknown): string {
  * recipient leads with.
  */
 const NOTIFY_RECIPIENTS_RULE =
-  '`recipients` is who the notification goes to: a recipient — a user id, or an audience selector such as '
-  + '`team:ID` — written as a string; a list of them, each a string or a CEL value envelope; one CEL value '
-  + 'envelope, `{ dialect: \'cel\', source: \'…\' }`, that evaluates to a recipient or a list of them; or an '
+  '`recipients` is who the notification goes to: a recipient — a user id, an audience selector such as '
+  + '`team:ID`, or an email address written out, an author constant sent as written — as a string; a list of '
+  + 'them, each a string or a CEL value envelope; one CEL value envelope, `{ dialect: \'cel\', source: \'…\' }`, '
+  + 'that evaluates to a recipient or a list of them; or an '
   + 'email-field recipient, `{ emailField: \'applicant_email\' }`, the address in an `email`-typed field of the '
   + 'record that triggered the flow.';
 
@@ -352,7 +356,11 @@ function notifyRecipientsRefusal(input: unknown): string {
  * one value OR a list of them (#19939; the ledger's `eachElement`):
  *
  *  - a **string** is one recipient as written — a user id, or an audience
- *    selector the messaging service resolves (`team:ID`, an email address);
+ *    selector the messaging service resolves (such as `team:ID`); an email
+ *    address written out as a string is no audience selector but an **author
+ *    constant**, sent as written: to the user who holds it, or else, on the
+ *    `email` channel, to the address itself (ruling 6386629237 on #25647,
+ *    letter B);
  *  - a **list** holds one entry per recipient, each a string as written or a
  *    CEL value envelope evaluated per run — an entry that evaluates to a list
  *    (a multi-user field, a list variable) adds EACH of its recipients, so a
@@ -362,6 +370,15 @@ function notifyRecipientsRefusal(input: unknown): string {
  *  - an **email-field recipient** ({@link NotifyEmailFieldRecipientSchema}),
  *    the whole value only, names an `email`-typed field of the triggering
  *    record whose address is the recipient.
+ *
+ * An address a CEL value envelope EVALUATES to is not an author constant: one
+ * a user holds resolves to that user, and one that NO user holds is to fail
+ * the node with a located message pointing to `{ emailField }` (the same
+ * ruling). That refusal is PLANNED, not made: the runtime half (#25647, which
+ * may ride #25571's files) has not landed, so until it does such an address is
+ * still handed to the messaging service as written. The describes below say
+ * "planned" for that reason — ⛔ they claim no refusal the runtime does not
+ * make yet; when the runtime half lands, it rewrites them as made.
  *
  * An envelope that evaluates to `null` or a blank string adds no recipient,
  * as a token that resolved to nothing did, and the executor's guard still
@@ -392,7 +409,9 @@ const NotifyRecipientsSlotSchema = z.union([
       + 'string; a list of them, each a string or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per '
       + 'run (an entry that evaluates to a list adds each of its recipients); one envelope evaluating to a '
       + 'recipient or a list; or `{ emailField }`, the address in an `email`-typed field of the triggering record '
-      + '— a `{…}` template token is refused',
+      + '— a `{…}` template token is refused. An email address written out as a string is an author constant, '
+      + 'sent as written; one an envelope evaluates to resolves to the user who holds it, and failing the node on '
+      + 'one no user holds, pointing to `{ emailField }`, is planned and not made yet',
     xExpression: 'value',
   });
 
@@ -636,7 +655,11 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
       + 'whole value, `{ emailField: \'applicant_email\' }`: the address in that `email`-typed field of the record '
       + 'that triggered the flow, for a person who is not a user — the node then names `email` as its only channel. '
       + 'Delivery to an email-field recipient is not live yet: until the messaging service resolves the form, a '
-      + 'run that reaches the node fails there.',
+      + 'run that reaches the node fails there. An email address written out as a string is no audience selector '
+      + 'but an author constant, sent as written: to the user who holds it, or else, on the `email` channel, to '
+      + 'the address itself. An address an envelope evaluates to is not one: it resolves to the user who holds it, '
+      + 'and one that no user holds is planned to fail the node, pointing to `{ emailField }` — that refusal is not '
+      + 'made yet, so until it is, such an address is still handed to the messaging service as written.',
     ),
   /**
    * Inline notification title — the NON-localizable content path, and a
