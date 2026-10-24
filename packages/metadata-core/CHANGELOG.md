@@ -1,5 +1,160 @@
 # @objectstack/metadata-core
 
+## 18.1.0
+
+### Minor Changes
+
+- 3937697: fix(spec)!: the `Field.select` string shorthand keeps every character it does not document transforming, so an option such as `'no-overlay'` is refused instead of being declared as a different value
+  
+  Clause-②: no (narrowing: a `Field.select` shorthand string the helper used to rewrite silently, e.g. `'no-overlay'` → `nooverlay`, is refused instead)
+  
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered field-select-shorthand-keeps-written-value -->
+  
+  **BREAKING** (a TypeScript author's shorthand that used to be rewritten is now refused), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `Field.select(['a', 'b'])` and `Field.select({ options: ['a', 'b'] })` build each option as `{ label: s, value: … }`. The value used to be the string lower-cased, with whitespace turned into `_`, and then with every character outside `a-z`, `0-9` and `_` deleted. That last step was undocumented and silent: `'no-overlay'` became `nooverlay`, `'user-agent-based'` became `useragentbased`, `'v1.2'` became `v12`, and the field declared a value its author never wrote, so a record written with the value as written was refused with `invalid_option`.
+  
+  - **FROM:** a shorthand string is lower-cased, whitespace becomes `_`, and every other character outside `a-z0-9_` is deleted. `Field.select(['no-overlay'])` declares the option value `nooverlay`, and the object loads.
+  - **TO:** a shorthand string is lower-cased and whitespace becomes `_`, nothing else. `Field.select(['no-overlay'])` declares `no-overlay`, which is not a system identifier, so the object is refused by the rule an explicit `{ value: 'no-overlay' }` already met: `ObjectSchema.create` throws a `ZodError` at module load with `invalid_format` at `fields.FIELD.options.N.value` and the message `System identifier must be lowercase, starting with a letter, and may contain letters, numbers, underscores, or dots`, and the object save door answers `422 INVALID_METADATA` with the same finding. A dot is now kept (`'v1.2'` declares `v1.2`, which is a valid identifier).
+  - **Unchanged:** `Field.select(['In Progress', 'Closed Won'])` still declares `in_progress` and `closed_won`. An explicit option's value is still lower-cased. `SelectOptionSchema.value` accepts and refuses exactly what it did before.
+  - **The fix:** write such an option explicitly, with the value you will store: `Field.select({ options: [{ label: 'no-overlay', value: 'no_overlay' }] })`. If rows already hold the hyphenated spelling, the column is not a select: declare it as `Field.text({ maxLength: 255 })`.
+  
+  `@objectstack/metadata-core`: `sys_metadata_audit.lock_state` was the one in-tree column relying on the strip. It declared the options `none`, `nooverlay`, `nodelete` and `full`, while its writer stores the `MetadataLock` spelling (`none`, `no-overlay`, `no-delete`, `full`), so no `no-overlay` or `no-delete` row ever matched a declared option. It is now `Field.text({ maxLength: 255 })`, read-only as before. `GET /api/v1/meta/object/sys_metadata_audit` serves `lock_state` as `type: 'text'` with `maxLength: 255` and no `options`. No stored row is rewritten, the writer and reader are unchanged, and an existing `varchar(255)` column reports no schema drift on postgres, mysql or sqlite.
+  
+  `@objectstack/platform-objects`: the translation bundles drop the four `sys_metadata_audit.lock_state` option labels (`none`, `nooverlay`, `nodelete`, `full`), which the column no longer declares. The field label stays translated.
+
+### Patch Changes
+
+- 3937697: fix(lint)!: `os lint` and the react-page props check report the retired list-view `filterableFields` by name, and the readers that still treated it as a field position go
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered view-list-filterable-fields-removed, list-view-filterable-fields-retired) The key's retirement, its D2 conversion and its D3 entry are already registered by the change that tombstoned it, which shipped in 18.0.0. This change adds no key, conversion or stored shape: it makes `os lint` and the react-page props check give the verdict `os validate` and `os build` already give the list-view key, with the tombstone's own prescription. -->
+  
+  **BREAKING** (an authoring narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `@objectstack/spec` 18 retired the list view's `filterableFields` with a `retiredKey()` tombstone, so `os validate` and `os build` refuse it at the parse. Two authoring checks still read it as a live field position:
+  
+  - **`os lint`** never parses: it judges the normalized stack, and the conversion that strips the key is retired from the load path. On a JSON, YAML or raw-object source the key reached the list-view field-reference rule as written. A valid field name passed `os lint`, and a stale one was reported as an unknown field (`list-view-field-unknown` / `list-view-field-dotted`), never as the retirement.
+  - **The react-page props check** read `<ListView filterableFields={[…]}>` as a field-bearing prop. A react page's source is parsed against no list-view schema, so `os validate`, `os build` and `os lint` passed the prop whenever its names resolved.
+  
+  Both now refuse the key by name, as an `error`, whatever it names:
+  
+  - a list view (every rung: an object's `listViews`, a `defineView` container's `list` / `listViews`, the flattened list overlay and the view item record) reports `list-view-key-retired` at `….filterableFields`, whether or not its object binding resolves;
+  - `<ListView filterableFields>` on a react page reports `react-prop-retired`.
+  
+  The message names the retirement and the hint is the tombstone's own "Delete the key" sentence, read from `ListViewSchema` rather than retyped. The new rule id is exported from the package root as `LIST_VIEW_KEY_RETIRED`.
+  
+  ### FROM → TO
+  
+  | before | after |
+  | --- | --- |
+  | `filterableFields: ['status']` on a list view in a non-`defineStack` source: `os lint` passed | `os lint` fails with `list-view-key-retired` |
+  | `filterableFields: ['ghost']` on such a list view: `list-view-field-unknown` | `list-view-key-retired` |
+  | `<ListView filterableFields={['status']} />` on a react page: passed every authoring command | `react-prop-retired` |
+  
+  **The one-line fix:** delete `filterableFields` (the key or the prop). For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: 'status' }] }`; the Filter panel offers every field the user may read. `os migrate meta --from 17` lists the edits for existing metadata sources; a react page's source is yours to edit by hand.
+  
+  ### The residue readers that go
+  
+  - **`@objectstack/lint`**: the list-view field-reference rule no longer walks `filterableFields` as a filter position (its severity and dotted-path maps), the field-consumer rule no longer counts it as a behavioural read, and `os explain list-view-field-unknown` / `list-view-field-dotted` no longer name it as a checked position.
+  - **`@objectstack/metadata-protocol`**: `computeViewReferenceDiagnostics` no longer walks `filterableFields`, the same deletion its retired sibling `tabs` had. A stored body has the key stripped by the conversion replay before it is served, and the write door refuses it.
+  - **`@objectstack/metadata-core`**: the ADR-0106 field-security scrub no longer classifies `filterableFields` as a list-view name list. A body that still carries the key goes the unclassified way and fails closed: a list view whose `filterableFields` names a field the caller may not read is dropped whole, where the scrub used to remove the name.
+  
+  ⛔ **Untouched:** `userFilters` and `searchableFields` keep their meaning and their checks.
+- 3937697: feat(spec): a roster object can declare its membership keys, `ObjectSchema.membershipKeys`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `ObjectSchema` gains one optional key, `membershipKeys`: the `current_user.KEY` sets this object defines, by name, the metadata twin of the registered membership resolver (ADR-0105 D11). `current_user.KEY` is to be the distinct values of `valueField` on this object's rows whose `userField` is the signed-in user and on which the optional `filter` holds, so a permission set's row policy can read `supplier in current_user.portal_supplier_ids` instead of a stamp on every record. The entry shape is exported as `MembershipKeySchema` from `@objectstack/spec/security` (types `MembershipKey` and `MembershipKeyParsed`), with the map `MembershipKeysSchema` (`MembershipKeys`, `MembershipKeysParsed`), the name rule `MembershipKeyNameSchema` (`MembershipKeyName`, `MembershipKeyNameParsed`) and the platform bound `MEMBERSHIP_KEY_MAX_VALUES` (1,000).
+  
+  - **What it parses.** `userField` and `valueField` (required column names), `filter` (CEL over this object's own columns), `label` and `description`.
+  - **What it refuses.** Any other member (`object`, which is implied, and an authored size such as `limit`, each with a prescription); a key name that is not snake_case or is one of the kernel's own context names (`id`, `organization_id`, `positions`, `org_user_ids`, `accessible_org_ids`, `email`); `valueField` naming the same column as `userField`; and `membershipKeys` on an object extension, so a key can only be declared by the package that owns the roster object.
+  - **`defineStack` and `composeStacks`** refuse one key declared on two objects, in the cross-reference envelope (`STACK_CROSS_REFERENCE_INVALID`, 422): a key name is one request-wide name. Under `objectConflict: 'merge'`, two stacks declaring a different `membershipKeys` on one object are refused like every other object-level collection.
+  - **What it does today: nothing.** No server reads the key in this release, so a policy reading a declared key matches no rows, as it would for any key nothing supplies. Authoring the key raises the liveness lint's `liveness-planned-property` warning until the security plugin stages it. Scope rows with positions or a registered membership resolver in the meantime.
+  - **`@objectstack/metadata-core`: the field-level-security projection classifies the new key.** When an object document is served to a caller who cannot read some of its fields, each membership key whose `userField`, `valueField` or `filter` names such a field is dropped whole from the served document; the others are served unchanged.
+  - The row-level security docs no longer say the runtime stages `territory_account_ids` or `team_member_ids`: those are app-supplied keys, and the docs now say where a membership key comes from.
+  - Additive: every object that parsed before still parses, and its parsed output is unchanged.
+- 3937697: fix: Setup field help is written for administrators, and the two access-review fields nothing uses yet are hidden from the Setup forms
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A Setup pass met field help written for the platform's developers: "Foreign key to sys_user.id", "NULL only on a grant written before the column existed", "via isGrantActive", "(P3 digest middleware)", "Owned by objectql (better-auth is oblivious to this column)", "LifecycleService (Reaper / Rotator / Archiver)" and ADR numbers. Each now says what the field means and what to do with it, in every shipped locale (`en` regenerated from the source; `zh-CN`, `ja-JP` and `es-ES` translated):
+  
+  - the user, OAuth application, session and refresh-token fields of the permission-set and position assignments and of the OAuth token, consent and client-resource objects, and the package-version field of stored metadata;
+  - the permission set picked on an assignment;
+  - the start time of an approval delegation;
+  - the digest cadence and quiet hours of a notification preference, which now say how each value behaves;
+  - the AI Access and Locale fields of a user;
+  - the Data Lifecycle settings page and its retention overrides.
+  
+  `Last Certified At` and `Certified By` on `sys_user_permission_set` and `sys_user_position` are reserved for a future access-review feature and nothing writes or reads them. They are now `hidden: true`, so the Setup forms and detail pages no longer show them. The columns and any stored values stay.
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+  - @objectstack/spec@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes

@@ -1,5 +1,157 @@
 # @objectstack/service-automation
 
+## 18.1.0
+
+### Patch Changes
+
+- 3937697: fix: no shipped text says the SQL driver reads organization-less rows, and the in-memory HTTP outbox no longer does
+  
+  Clause-②: no (one fix and texts: the in-memory HTTP outbox's `redeliver()` now answers as `SqlHttpOutbox` already did; no accept set, served body or error code of a shipped composition moves)
+  
+  ADR-0131 D8 retired the driver's `OR organization_id IS NULL` arm. Several shipped texts still described it as the live tenant predicate. They now state the current rule: the tenant term is `organization_id = :tenant`, or `IN (:tenants)` under the `group` posture, and nothing else. No tenant-scoped read reaches an organization-less row on a tenant table.
+  
+  - **`@objectstack/service-messaging` — fix.** `MemoryHttpOutbox.redeliver()` no longer lets a tenant-scoped caller replay a row with no organization. It answers `RESOURCE_NOT_FOUND`, as `SqlHttpOutbox` does through the driver's tenant scope (ADR-0131 D8: no layer has a NULL arm). A caller with no tenant is still unscoped. No shipped composition constructs the in-memory outbox; the messaging plugin always builds `SqlHttpOutbox`. Code that embeds `MemoryHttpOutbox` directly sees the change.
+  - **`@objectstack/service-automation`.** The `[http]` node's warning for a durable callout with no organization no longer says the `sys_http_delivery` row is "a global row every organization's redeliver door can reach". It now says no organization's redeliver door reaches that row.
+  - **`@objectstack/objectql`.** The `sys_record_share` entry of the platform-object tenancy inventory carries an updated `evidence` text.
+  - **`@objectstack/lint`.** `os explain unique/legacy-organization-composite` now says that a new row carries its organization wherever the organization object is registered. A composition that registers no organization object still writes rows whose organization column is NULL.
+  - **`@objectstack/spec`.** The TSDoc of `SharingRuleRow` no longer calls it a 1-to-1 stored shape: `deploymentWide` has no `sys_sharing_rule` column. The TSDoc of `DriverOptions.tenantIds` and of the events `organizationId` member describe the predicate without a NULL arm.
+  - **The other packages.** Code comments only.
+- 3937697: feat(objectql): a caller value that a stored field's `expression` replaced is reported through `onFieldsDropped` / `droppedFields` under the new `DroppedFieldsEvent.reason` value `stored_expression`
+  
+  Clause-②: yes (widening)
+  
+  The engine computes a stored (non-`formula`) field's declared `expression` on every write, so a value the caller sends for such a field never stands. Until now nothing said so. `onFieldsDropped` stayed silent, so the PATCH and `/batch` doors answered with no `droppedFields`, and a flow's `update_record` reported success over a row that holds the computed value instead of the one sent.
+  
+  - **New `reason` value.** `DroppedFieldsEventSchema.reason` (`@objectstack/spec/data`) gains `stored_expression`. It means the field is a stored column the engine computes from its `expression`, and the caller's value was replaced by the computed one. The field IS written, so `computed` (a `formula` with no column, whose key is dropped) would be wrong for it. The four existing values are unchanged.
+  - **When it is reported.** On insert (single, batch, and `insertMany`'s per-row `droppedFields`), on update by id, and on a predicate update, in every context, `isSystem` included. It is reported only when the caller sent the field and the value stored differs from the caller's value. A client that sends the computed value (the console's line-item grid) or no value is told nothing. A value another strip already took, such as a stored expression field that is also `readonly`, is reported once, under that strip's reason.
+  - **`strictReadonlyWrites` is unchanged.** The maintainer's ruling 「甲」 says only the loud half ships in 18.x. A strict write whose value for such a field differs from the computed one is NOT refused: it completes with the computed value, and the replacement is reported through `onFieldsDropped` under strict as well. A refusal is runtime behaviour that no conversion can carry, so the strict refusal of a `stored_expression` replacement is deferred to 19.0. A strict write that also carries a refusable drop (`readonly`, `readonly_when`, `primary_key`, `computed`) is refused as before, for those drops only, and fires no listener.
+  - **Flow step warning.** `@objectstack/service-automation` words the new reason. Its warning says the requested value(s) were not stored, rather than that the field was not written, and its closing sentence says the write succeeded with the computed value(s).
+  
+  **For consumers that branch on `reason`.** A `Record<DroppedFieldsEvent['reason'], …>` table fails its typecheck until it has a `stored_expression` row. That is the intended signal: add the row. A client running behind the server should treat a reason it does not recognise as "not applied", never as one of the known reasons.
+- 3937697: fix(service-automation,runtime): a flow whose data node is refused answers its caller with the refusal structured — `details.innerRefusal` and the producer-marked `userMessage` on every door's `400 FLOW_FAILED` — beside an unchanged `message`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Ruling B′ on #24914 (the maintainer's 「同意」, decision batch #379 item 5), the emission half of the contract `@objectstack/spec` declared in #24996. A record save the platform refuses reaches a record form as `code`, `message` and the producer-marked `userMessage`; the same refusal met by a flow's data node used to be flattened into one string (`Node 'ID' failed: create_record(OBJECT) failed: …`), so a screen flow could only show its user that developer text.
+  
+  - **`service-automation`.** The catch arms of `get_record`, `create_record`, `update_record` and `delete_record` read the refusal off the thrown error: the producer-marked `userMessage` (through `declaredUserMessage`) and, for a throw that declared a 4xx answer, `{ code, message }` with `code` in the WIRE spelling the data door answers for the same throw — `UNIQUE_VIOLATION` for a unique refusal, `VALIDATION_FAILED`, `PERMISSION_DENIED`, or the member an app hook's declared status names. `NodeExecutionResult` gains the two optional members, and the engine carries them from the failing node to `AutomationResult.userMessage` / `.innerRefusal` on `execute()`'s failure exit, the `resumeInternal` stranded exit and the retry exits. A fault (no declared answer, or a declared 5xx) carries neither member; nothing is read from message text.
+  - **`runtime`.** The trigger, resume, `/actions` and declared-endpoint doors build their `400 FLOW_FAILED` details through one builder typed as `FlowFailureDetailsSchema` (`errorMessage?`, `summary?`, `innerRefusal?`) and put the run's `userMessage` at the envelope's top level (`ApiErrorSchema.userMessage`). The MCP `resume_run` bridge carries both as the REST resume door serves them. `DomainHandlerDeps.error` gains an optional fourth argument, `extra: { userMessage? }`, the declared slot the doors use; a call without it builds the envelope it always built.
+  - **Unchanged.** Every `error` / `message` text, byte for byte — the node's, the engine's prefix, the stored run, approvals and each door's wording. The in-flow `$error.code` keeps the engine's in-process `DUPLICATE_RECORD`. `error.code` stays `FLOW_FAILED`, and `AutomationResult.code` stays the closed union.
+  
+  **For consumers.** A flow runner can render a refused run the way a record form renders a refused save: the top-level `userMessage` when present, then `details.innerRefusal`, then `message`. A client that does not read the new members keeps its current behaviour. A container that rewords a child's failure into its own (`try_catch` without a catch region, `subflow`) does not forward the members yet; the run then carries none.
+- 3937697: fix: the `get_record` designer form no longer offers a `limit` below 1
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `get_record` node's `limit` is a positive integer, and every flow save door refuses `0`, a negative or a fraction. The executor's form descriptor still declared `limit` as a bare integer, so the designer form offered values the save always refused. The descriptor's `limit` now declares `minimum: 1`, the same floor as the contract. Nothing a flow can store changes; only the form stops offering what the save refuses.
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [4395cbc]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [9f39094]
+- Updated dependencies [3937697]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/metadata-protocol@18.1.0
+  - @objectstack/metadata-core@18.1.0
+  - @objectstack/platform-objects@18.1.0
+  - @objectstack/formula@18.1.0
+  - @objectstack/types@18.1.0
+
 ## 18.0.0
 
 ### Major Changes
