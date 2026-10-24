@@ -11,6 +11,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { AutomationEngine } from './engine.js';
+import { registerSubflowNode } from './builtin/subflow-node.js';
 
 function createTestLogger(): any {
     const l: any = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -60,11 +61,12 @@ describe("a parent flow's subflow node is not a start door", () => {
         const engine = new AutomationEngine(createTestLogger());
         engine.registerFlow(CHILD.name, CHILD);
         engine.registerFlow(PARENT.name, PARENT);
+        registerSubflowNode(engine, { logger: createTestLogger(), getService: () => undefined } as any);
         const execute = vi.spyOn(engine, 'execute');
 
         const result = await engine.execute(PARENT.name, { userId: 'member_1', permissions: [] } as any);
 
-        expect(result.success).toBe(true);
+        expect(result, JSON.stringify(result)).toMatchObject({ success: true });
         // The child was started by the parent's subflow node, and it ran.
         const childCall = execute.mock.calls.findIndex(([name]) => name === CHILD.name);
         expect(childCall).toBeGreaterThan(-1);
