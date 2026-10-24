@@ -295,7 +295,8 @@ export const NotifyEmailFieldRecipientSchema = strictObject({
     + 'the field is named, never an address or an expression',
 });
 
-export type NotifyEmailFieldRecipient = z.infer<typeof NotifyEmailFieldRecipientSchema>;
+export type NotifyEmailFieldRecipient = z.input<typeof NotifyEmailFieldRecipientSchema>;
+export type NotifyEmailFieldRecipientParsed = z.infer<typeof NotifyEmailFieldRecipientSchema>;
 
 /** True when `value` is written as an email-field recipient — a plain object with an `emailField` key. */
 function isEmailFieldRecipientShaped(value: unknown): value is Record<string, unknown> {
