@@ -3,8 +3,8 @@
 /**
  * [ADR-0066 ⑨] Authoring-time validation for capability references.
  *
- * `requiredPermissions` (on objects, fields, apps, actions, list views and
- * dashboards) and `systemPermissions` (on permission sets) are free capability
+ * `requiredPermissions` (on objects, fields, apps, actions, flows, list views
+ * and dashboards) and `systemPermissions` (on permission sets) are free capability
  * strings. A typo
  * — `mange_users` for `manage_users` — is Zod-valid and fails CLOSED at runtime
  * (the caller is denied), which is the safe direction but UNDISCOVERABLE: nothing
@@ -174,6 +174,16 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
     const aName = typeof action.name === 'string' ? action.name : `(action ${i})`;
     for (const cap of asCapArray(action.requiredPermissions)) {
       flag(cap, `action "${aName}"`, `actions[${i}].requiredPermissions`);
+    }
+  }
+
+  // ── Flows: who may START the flow (ruling record 6377848497, letter A) —
+  //    the flow-level twin of an action's list, so the same judgement. A
+  //    misspelled capability here refuses every member at every start door. ──
+  for (const [i, flow] of recordsOf(stack.flows).entries()) {
+    const fName = typeof flow.name === 'string' ? flow.name : `(flow ${i})`;
+    for (const cap of asCapArray(flow.requiredPermissions)) {
+      flag(cap, `flow "${fName}"`, `flows[${i}].requiredPermissions`);
     }
   }
 

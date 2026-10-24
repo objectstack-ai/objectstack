@@ -56,7 +56,7 @@ import {
 } from '../flow-dispatch-status.js';
 // Who may START a flow by name — the one rule the trigger door, the action door
 // and the declared endpoint share (the maintainer's ruling, letters B and A).
-import { ELEVATED_START_REFUSAL, refusesElevatedSelfTriggeredStart } from '../flow-start-admission.js';
+import { flowStartRefusal } from '../flow-start-admission.js';
 // [#12156] ADR-0126 §7.1 clone — the whole-definition copy, the keys it must
 // not carry forward, the same-name refusal and the references notice.
 import {
@@ -2019,12 +2019,14 @@ async function respondToFlowTrigger(
     // and BEFORE dispatch, so a refused start runs nothing — no run record, no
     // node, no side effect. The ONE rule every door that starts a flow by name
     // asks (`../flow-start-admission.ts`): the action door and the declared
-    // endpoint answer the same refusal for the same declaration.
-    if (await refusesElevatedSelfTriggeredStart(automationService, flowName, context?.executionContext)) {
+    // endpoint answer the same refusal for the same declaration — the elevated
+    // self-triggered rule, then the flow's own `requiredPermissions`.
+    const startRefusal = await flowStartRefusal(automationService, flowName, context?.executionContext);
+    if (startRefusal) {
         return {
             handled: true,
-            response: deps.error(ELEVATED_START_REFUSAL.message, ELEVATED_START_REFUSAL.status, {
-                code: ELEVATED_START_REFUSAL.code,
+            response: deps.error(startRefusal.message, startRefusal.status, {
+                code: startRefusal.code,
             }),
         };
     }
@@ -2428,9 +2430,14 @@ export async function classifyResumeResult(
  *                                    type (`autolaunched`, `record_change`,
  *                                    `schedule`) — the system principal only;
  *                                    anyone else → 403 `PERMISSION_DENIED`, never
- *                                    dispatched (`refusesElevatedSelfTriggeredStart`,
+ *                                    dispatched (`flowStartRefusal`,
  *                                    `../flow-start-admission.ts`, which the action
  *                                    door and the declared endpoint ask too)
+ *                                  ⚑ a flow declaring `requiredPermissions` — a
+ *                                    caller holding every named capability (or the
+ *                                    system principal) only; anyone else → 403
+ *                                    `PERMISSION_DENIED`, never dispatched (the
+ *                                    same check)
  *   POST   /:name/toggle       → toggleFlow (unknown name → 404, #7535). Switches
  *                                  PACKAGED flows only — it writes the ADR-0126 §7.2
  *                                  activation ledger. A flow no package ships → 409
