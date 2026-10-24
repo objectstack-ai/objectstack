@@ -170,6 +170,11 @@ import {
   introspectPrimaryKeys,
   introspectUniqueConstraints,
 } from './sql-driver-introspection.js';
+// [#25521 cut 2] The raw-execution path (`execute`, its refusal terminal
+// `rawStatementFault`, and `noteRuntimeIndexDdl`, which keeps the ledger of the
+// index DDL `execute` ran); the methods of the same names below hand each body
+// the members it reads (`RawExecutionHost`).
+import { execute, noteRuntimeIndexDdl, rawStatementFault } from './sql-driver-raw-execution.js';
 import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
@@ -243,26 +248,26 @@ const DEFAULT_ID_LENGTH = 16;
  * text whatever word it opens with. The shared cut then runs without asking the
  * leak predicate, exactly as it does at the engine's raw-statement door.
  */
-const OWN_STATEMENT_FAULT = { statementSent: true } as const;
+export const OWN_STATEMENT_FAULT = { statementSent: true } as const;
 
 // ── Raw index DDL the driver executes on the framework's behalf (#4884) ──────
 /** An SQL identifier in any dialect's quoting, or bare. */
 const SQL_IDENTIFIER = '(?:`[^`]+`|"[^"]+"|\\[[^\\]]+\\]|[A-Za-z_][A-Za-z0-9_$]*)';
 /** Cheap prefilter so ordinary `execute()` traffic never touches the parsers below. */
-const INDEX_DDL_PREFIX = /^\s*(?:create|drop)\s+(?:unique\s+)?index\b/i;
-const CREATE_INDEX_DDL = new RegExp(
+export const INDEX_DDL_PREFIX = /^\s*(?:create|drop)\s+(?:unique\s+)?index\b/i;
+export const CREATE_INDEX_DDL = new RegExp(
   `^\\s*create\\s+(?:unique\\s+)?index\\s+(?:concurrently\\s+)?(?:if\\s+not\\s+exists\\s+)?` +
     `(${SQL_IDENTIFIER})\\s+on\\s+(${SQL_IDENTIFIER}(?:\\.${SQL_IDENTIFIER})?)`,
   'i',
 );
-const DROP_INDEX_DDL = new RegExp(
+export const DROP_INDEX_DDL = new RegExp(
   `^\\s*drop\\s+index\\s+(?:concurrently\\s+)?(?:if\\s+exists\\s+)?` +
     `(${SQL_IDENTIFIER}(?:\\.${SQL_IDENTIFIER})?)`,
   'i',
 );
 
 /** Peel one layer of `"…"` / `` `…` `` / `[…]` quoting off an identifier. */
-function unquoteSqlIdentifier(raw: string): string {
+export function unquoteSqlIdentifier(raw: string): string {
   const s = raw.trim();
   if (s.length >= 2) {
     const first = s[0];
@@ -279,7 +284,7 @@ function unquoteSqlIdentifier(raw: string): string {
  * `"public"."sys_metadata"` → `sys_metadata`. Tokenised rather than split on
  * `.`, so a dot INSIDE a quoted identifier does not become a separator.
  */
-function lastIdentifierSegment(raw: string): string {
+export function lastIdentifierSegment(raw: string): string {
   const parts = raw.match(new RegExp(SQL_IDENTIFIER, 'g'));
   return unquoteSqlIdentifier(parts && parts.length > 0 ? parts[parts.length - 1] : raw);
 }
@@ -1174,7 +1179,7 @@ function backendStatementFaultError(object: string, cause: unknown, targetedTabl
  * @param cause - the dialect error, kept whole for the log and for
  *                cause-following predicates.
  */
-function rawStatementFaultError(cause: unknown): Error {
+export function rawStatementFaultError(cause: unknown): Error {
   const err = new Error(
     'The database refused to run a raw statement. The driver could not attribute the failure ' +
       'to any part of the request, so no verdict about the statement is claimed here. The ' +
@@ -10820,21 +10825,12 @@ export class SqlDriver implements IDataDriver {
    * (`TursoDriver` in remote mode) declares through the SAME composition.
    */
   protected rawStatementFault(command: string, error: unknown): Error {
-    const declared = (error as { status?: unknown } | null | undefined)?.status;
-    if (typeof declared === 'number') return error as Error;
-
-    const detail = (error as { message?: unknown } | null | undefined)?.message;
-    const code = (error as { code?: unknown } | null | undefined)?.code;
-    // [#21385] ⛔ `command` is not written. It is the text the caller sent, and a
-    // raw statement may spell its values inline as well as bind them; the
-    // dialect's text leads with the same statement, compiled, and is cut below.
-    this.logger.warn(
-      '[sql-driver] DATABASE_ERROR — the backend refused a raw statement' +
-        (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +
-        '. The dialect diagnostic, with the statement and its bound literals cut: ' +
-        redactStatementFromMessage(typeof detail === 'string' ? detail : String(error), OWN_STATEMENT_FAULT),
-    );
-    return rawStatementFaultError(error);
+    // [#25521 cut 2] The body moved to `sql-driver-raw-execution.ts` (see `RawExecutionHost`).
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof rawStatementFault> = {
+      get logger() { return readLogger(); },
+    };
+    return rawStatementFault.call(host, command, error);
   }
 
   /**
@@ -10860,27 +10856,15 @@ export class SqlDriver implements IDataDriver {
    * a caller dereference the result unchecked; pinned by
    * `sql-driver-doors-declared-types.test.ts`.
    */
-  async execute(command: any, params?: any[], options?: DriverOptions): Promise<unknown> {
-    if (typeof command !== 'string') {
-      return command;
-    }
-
-    const builder =
-      options?.transaction
-        ? this.knex.raw(command, params || []).transacting(options.transaction as Knex.Transaction)
-        : this.knex.raw(command, params || []);
-
-    let result: unknown;
-    try {
-      result = await builder;
-    } catch (error) {
-      // [#16019] The raw path's terminal — see {@link SqlDriver.rawStatementFault}.
-      throw this.rawStatementFault(command, error);
-    }
-    // Only after the statement actually succeeded — an index we failed to
-    // create is not one we own (#4884).
-    if (INDEX_DDL_PREFIX.test(command)) this.noteRuntimeIndexDdl(command);
-    return result;
+  execute(command: any, params?: any[], options?: DriverOptions): Promise<unknown> {
+    // [#25521 cut 2] The body moved to `sql-driver-raw-execution.ts` (see `RawExecutionHost`).
+    const readKnex = () => this.knex;
+    const host: ThisParameterType<typeof execute> = {
+      get knex() { return readKnex(); },
+      noteRuntimeIndexDdl: (...a) => this.noteRuntimeIndexDdl(...a),
+      rawStatementFault: (...a) => this.rawStatementFault(...a),
+    };
+    return execute.call(host, command, params, options);
   }
 
   /**
@@ -10904,20 +10888,12 @@ export class SqlDriver implements IDataDriver {
 
   /** Record (or, on a DROP, forget) an index this driver just created via raw DDL. */
   protected noteRuntimeIndexDdl(sql: string): void {
-    const created = CREATE_INDEX_DDL.exec(sql);
-    if (created) {
-      const table = lastIdentifierSegment(created[2]);
-      let names = this.runtimeCreatedIndexes.get(table);
-      if (!names) this.runtimeCreatedIndexes.set(table, (names = new Set<string>()));
-      names.add(unquoteSqlIdentifier(created[1]));
-      return;
-    }
-    const dropped = DROP_INDEX_DDL.exec(sql);
-    if (!dropped) return;
-    // SQLite / Postgres `DROP INDEX` names no table, so forget the name
-    // wherever it is recorded — the ledger must never outlive the index.
-    const name = lastIdentifierSegment(dropped[1]);
-    for (const names of this.runtimeCreatedIndexes.values()) names.delete(name);
+    // [#25521 cut 2] The body moved to `sql-driver-raw-execution.ts` (see `RawExecutionHost`).
+    const readRuntimeCreatedIndexes = () => this.runtimeCreatedIndexes;
+    const host: ThisParameterType<typeof noteRuntimeIndexDdl> = {
+      get runtimeCreatedIndexes() { return readRuntimeCreatedIndexes(); },
+    };
+    return noteRuntimeIndexDdl.call(host, sql);
   }
 
   // ===================================
