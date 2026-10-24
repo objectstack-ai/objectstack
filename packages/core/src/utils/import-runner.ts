@@ -242,6 +242,12 @@ export interface RunImportOptions {
    * not consulted for that form). One key set keeps its own blank handling.
    */
   matchFields: string[] | string[][];
+  /**
+   * Target fields written only when a row is created (`FieldMappingEntry.applyOn:
+   * 'create'`): an update leaves them out of its patch, except the fields of
+   * the key set the row was matched by.
+   */
+  createOnlyFields?: string[];
   dryRun: boolean;
   runAutomations: boolean;
   /** #3479 / #3493 — treat rows as established historical facts. The write
@@ -672,13 +678,23 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     p, objectName, environmentId, context, rows, metaMap, translate: messageTranslator,
     writeMode, matchFields, dryRun, runAutomations, treatAsHistorical,
     trimWhitespace, nullValues, createMissingOptions, skipBlankMatchKey,
-    onProgress, shouldCancel, captureUndo,
+    onProgress, shouldCancel, captureUndo, createOnlyFields,
   } = opts;
   // One key set is the one-element case of ordered key sets, except for a row
   // blank on it: only the ordered form reports that row as an error.
   const blankKeyIsRowError = isMatchKeySets(matchFields);
   const keySets: string[][] = blankKeyIsRowError ? matchFields : [matchFields as string[]];
-
+  const createOnly = new Set(createOnlyFields ?? []);
+  // The patch an update writes: the row minus its create-only columns. The
+  // key set the row was matched by stays, as the value it was found by.
+  const updatePatch = (data: Record<string, any>, keySet: readonly string[]): Record<string, any> => {
+    if (createOnly.size === 0) return data;
+    const patch: Record<string, any> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (!createOnly.has(k) || keySet.includes(k)) patch[k] = v;
+    }
+    return patch;
+  };
   const collectUndo = !!captureUndo && !dryRun;
   const undoLog: ImportUndoLog = { created: [], updated: [] };
   // Snapshot only the fields the import touched, so undo restores exactly what
@@ -1153,9 +1169,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           const rowCtx = writeCtxFor([keptOptionValues]);
           // 2. Decide create vs update vs skip.
           let existing: Record<string, any> | 'blank' | 'none' | 'ambiguous' = 'none';
+          let matchedKeySet: string[] = [];
           let handled = false;
           if (writeMode !== 'insert') {
-            ({ match: existing } = await findExisting(data));
+            ({ match: existing, keySet: matchedKeySet } = await findExisting(data));
             if (existing === 'ambiguous') {
               errCount++;
               results[i] = { row: rowNo, ok: false, action: 'failed', code: 'AMBIGUOUS_MATCH', error: `matchFields matched more than one ${objectName} record` };
@@ -1200,7 +1217,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               // protocol: the id is the address every update door already
               // carries in the payload.
               const verdict = willUpdate
-                ? await previewVerdict({ ...data, id: (existing as Record<string, any>).id }, 'update', rowCtx)
+                ? await previewVerdict({ ...updatePatch(data, matchedKeySet), id: (existing as Record<string, any>).id }, 'update', rowCtx)
                 : await previewVerdict(data, 'insert', rowCtx);
               if (verdict && !verdict.valid) {
                 errCount++;
@@ -1224,11 +1241,12 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               }
             } else if (willUpdate) {
               const target = existing as Record<string, any>;
+              const patch = updatePatch(data, matchedKeySet);
               let res2: unknown;
               let updateSummaryStale = false;
               let updateDrops: readonly DroppedFieldsEvent[] | undefined;
               try {
-                res2 = await withTransientRetry(() => p.updateData({ object: objectName, id: target.id, data, context: rowCtx, ...(environmentId ? { environmentId } : {}) }));
+                res2 = await withTransientRetry(() => p.updateData({ object: objectName, id: target.id, data: patch, context: rowCtx, ...(environmentId ? { environmentId } : {}) }));
                 updateDrops = responseDrops(res2); // [#20701] read off the response, never off a recovered record
               } catch (e) {
                 // Record updated but summary recompute failed (framework#3147):
@@ -1240,7 +1258,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               const id = extractRecordId(res2) ?? String(target.id);
               okCount++; updated++;
               if (collectUndo && target.id != null) {
-                undoLog.updated.push({ id: String(target.id), before: captureBefore(target, data) });
+                undoLog.updated.push({ id: String(target.id), before: captureBefore(target, patch) });
               }
               results[i] = { row: rowNo, ok: true, action: 'updated', id,
                 ...(updateSummaryStale ? { code: 'SUMMARY_RECOMPUTE_FAILED' } : {}),

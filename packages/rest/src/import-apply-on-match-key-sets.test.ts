@@ -84,9 +84,97 @@ describe('import route — applyOn and ordered match key sets (#25577, #25578)',
     await route.handler({ params: { object: 'supplier' }, body } as any, res);
     return res;
   };
+  const byCode = async (credit_code: string) => (await engine.find('supplier', { where: { credit_code } }))[0];
 
   beforeEach(async () => {
     ({ engine, route } = await boot());
+  });
+
+  describe('applyOn (#25577)', () => {
+    const mapping = [
+      { sourceField: 'Code', targetField: 'credit_code' },
+      { sourceField: 'Name', targetField: 'name' },
+      { sourceField: 'Status', targetField: 'status', applyOn: 'create' },
+    ];
+
+    it('one upsert run twice: the create-only column keeps the state written since, the always column refreshes', async () => {
+      const first = await call({
+        format: 'csv', csv: 'Code,Name,Status\nC1,Acme,qualified\n',
+        mapping, writeMode: 'upsert', matchFields: ['credit_code'],
+      });
+      expect(first._json).toMatchObject({ ok: 1, created: 1, errors: 0 });
+      expect(await byCode('C1')).toMatchObject({ name: 'Acme', status: 'qualified' });
+
+      // The app moves the supplier on between the two runs.
+      const stored = await byCode('C1');
+      await engine.update('supplier', { id: stored.id, status: 'frozen' });
+
+      const second = await call({
+        format: 'csv', csv: 'Code,Name,Status\nC1,Acme Ltd,qualified\nC2,Beta,qualified\n',
+        mapping, writeMode: 'upsert', matchFields: ['credit_code'],
+      });
+      expect(second._json).toMatchObject({ ok: 2, created: 1, updated: 1, errors: 0 });
+      expect(await byCode('C1')).toMatchObject({ name: 'Acme Ltd', status: 'frozen' });
+      // A row the second run creates gets its create-only column.
+      expect(await byCode('C2')).toMatchObject({ name: 'Beta', status: 'qualified' });
+    });
+
+    it('update mode never writes a create-only column; the dry run previews the same rows', async () => {
+      await engine.insert('supplier', { id: 's1', credit_code: 'C1', name: 'Acme', status: 'frozen' });
+      const body = {
+        format: 'csv', csv: 'Code,Name,Status\nC1,Acme Ltd,qualified\n',
+        mapping, writeMode: 'update', matchFields: ['credit_code'],
+      };
+      const dry = await call({ ...body, dryRun: true });
+      expect(dry._json).toMatchObject({ ok: 1, updated: 1, errors: 0 });
+      const res = await call(body);
+      expect(res._json).toMatchObject({ ok: 1, updated: 1, errors: 0 });
+      expect(await byCode('C1')).toMatchObject({ name: 'Acme Ltd', status: 'frozen' });
+    });
+
+    it('a create-only match-key column still matches, and the update keeps the key it was found by', async () => {
+      await engine.insert('supplier', { id: 's1', credit_code: 'C1', name: 'Acme', status: 'frozen' });
+      const res = await call({
+        format: 'csv', csv: 'Code,Name\nC1,Acme Ltd\n',
+        mapping: [
+          { sourceField: 'Code', targetField: 'credit_code', applyOn: 'create' },
+          { sourceField: 'Name', targetField: 'name' },
+        ],
+        writeMode: 'upsert', matchFields: ['credit_code'],
+      });
+      expect(res._json).toMatchObject({ ok: 1, updated: 1, created: 0 });
+      expect(await engine.find('supplier', {})).toHaveLength(1);
+      expect(await byCode('C1')).toMatchObject({ id: 's1', name: 'Acme Ltd' });
+    });
+
+    it('control: applyOn always (and absent) writes the column on update, as before', async () => {
+      await engine.insert('supplier', { id: 's1', credit_code: 'C1', name: 'Acme', status: 'frozen' });
+      const res = await call({
+        format: 'csv', csv: 'Code,Name,Status\nC1,Acme Ltd,qualified\n',
+        mapping: [
+          { sourceField: 'Code', targetField: 'credit_code' },
+          { sourceField: 'Name', targetField: 'name', applyOn: 'always' },
+          { sourceField: 'Status', targetField: 'status' },
+        ],
+        writeMode: 'upsert', matchFields: ['credit_code'],
+      });
+      expect(res._json).toMatchObject({ ok: 1, updated: 1 });
+      expect(await byCode('C1')).toMatchObject({ name: 'Acme Ltd', status: 'qualified' });
+    });
+
+    it('an applyOn value outside create / always refuses the request with 400 INVALID_REQUEST, and nothing is written', async () => {
+      const res = await call({
+        format: 'csv', csv: 'Code,Status\nC1,qualified\n',
+        mapping: [
+          { sourceField: 'Code', targetField: 'credit_code' },
+          { sourceField: 'Status', targetField: 'status', applyOn: 'insert' },
+        ],
+        writeMode: 'upsert', matchFields: ['credit_code'],
+      });
+      expect(res._status).toBe(400);
+      expect(res._json.code).toBe('INVALID_REQUEST');
+      expect(await engine.find('supplier', {})).toHaveLength(0);
+    });
   });
 
   describe('ordered match key sets (#25578)', () => {
@@ -199,5 +287,27 @@ describe('import route — applyOn and ordered match key sets (#25577, #25578)',
       expect(skip._json.results[0]).toMatchObject({ ok: true, action: 'skipped', code: 'BLANK_MATCH_KEY' });
       expect(await engine.find('supplier', {})).toHaveLength(1);
     });
+  });
+
+  it('both keys in one sheet: key sets pick the record, applyOn keeps its create-only column', async () => {
+    await engine.insert('supplier', { id: 'ovs', country: 'DE', registration_no: 'HRB1', name: 'Overseas', status: 'frozen' });
+    const res = await call({
+      format: 'json', writeMode: 'upsert', matchFields: [['credit_code'], ['country', 'registration_no']],
+      mapping: [
+        { sourceField: 'credit_code', targetField: 'credit_code' },
+        { sourceField: 'country', targetField: 'country' },
+        { sourceField: 'registration_no', targetField: 'registration_no' },
+        { sourceField: 'name', targetField: 'name' },
+        { sourceField: 'status', targetField: 'status', applyOn: 'create' },
+      ],
+      rows: [
+        { country: 'DE', registration_no: 'HRB1', name: 'Overseas GmbH', status: 'qualified' },
+        { credit_code: 'C1', name: 'Domestic', status: 'qualified' },
+      ],
+    });
+    expect(res._json).toMatchObject({ ok: 2, updated: 1, created: 1, errors: 0 });
+    const all = await engine.find('supplier', {});
+    expect(all.find((r: any) => r.id === 'ovs')).toMatchObject({ name: 'Overseas GmbH', status: 'frozen' });
+    expect(all.find((r: any) => r.credit_code === 'C1')).toMatchObject({ name: 'Domestic', status: 'qualified' });
   });
 });

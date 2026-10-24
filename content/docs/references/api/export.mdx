@@ -71,6 +71,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **transform** | `Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>` | optional (default: `"none"`) | Transformation to apply during mapping |
 | **defaultValue** | `any` | optional | Default value if source field is null/empty |
 | **required** | `boolean` | optional (default: `false`) | Whether this field is required (import validation) |
+| **applyOn** | `Enum<'create' \| 'always'>` | optional (default: `"always"`) | When an import writes this column. `always` (default) writes it on every row the import creates or updates. `create` writes it only when the row is created: an `upsert` that matches an existing record leaves that record's value as it is, and an `update` import never writes it, so re-running one upsert refreshes the `always` columns without reverting state written since the first run. A create-only column is still read for matching: the match key a row was found by stays in that row's update. |
 
 
 ---
@@ -143,6 +144,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **transform** | `Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>` | optional (default: `"none"`) | Transformation to apply during mapping |
 | **defaultValue** | `any` | optional | Default value if source field is null/empty |
 | **required** | `boolean` | optional (default: `false`) | Whether this field is required (import validation) |
+| **applyOn** | `Enum<'create' \| 'always'>` | optional (default: `"always"`) | When an import writes this column. `always` (default) writes it on every row the import creates or updates. `create` writes it only when the row is created: an `upsert` that matches an existing record leaves that record's value as it is, and an `update` import never writes it, so re-running one upsert refreshes the `always` columns without reverting state written since the first run. A create-only column is still read for matching: the match key a row was found by stays in that row's update. |
 
 
 ---
@@ -159,6 +161,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **transform** | `Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>` | optional (default: `"none"`) | Transformation to apply during mapping |
 | **defaultValue** | `any` | optional | Default value if source field is null/empty |
 | **required** | `boolean` | optional (default: `false`) | Whether this field is required (import validation) |
+| **applyOn** | `Enum<'create' \| 'always'>` | optional (default: `"always"`) | When an import writes this column. `always` (default) writes it on every row the import creates or updates. `create` writes it only when the row is created: an `upsert` that matches an existing record leaves that record's value as it is, and an `update` import never writes it, so re-running one upsert refreshes the `always` columns without reverting state written since the first run. A create-only column is still read for matching: the match key a row was found by stays in that row's update. |
 
 
 ---
@@ -325,6 +328,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **transform** | `Enum<'none' \| 'uppercase' \| 'lowercase' \| 'trim' \| 'date_format' \| 'lookup'>` | optional (default: `"none"`) | Transformation to apply during mapping |
 | **defaultValue** | `any` | optional | Default value if source field is null/empty |
 | **required** | `boolean` | optional (default: `false`) | Whether this field is required (import validation) |
+| **applyOn** | `Enum<'create' \| 'always'>` | optional (default: `"always"`) | When an import writes this column. `always` (default) writes it on every row the import creates or updates. `create` writes it only when the row is created: an `upsert` that matches an existing record leaves that record's value as it is, and an `update` import never writes it, so re-running one upsert refreshes the `always` columns without reverting state written since the first run. A create-only column is still read for matching: the match key a row was found by stays in that row's update. |
 
 
 ---

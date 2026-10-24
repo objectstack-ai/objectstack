@@ -479,8 +479,34 @@ describe('ImportRowResultSchema — droppedFields and warnings', () => {
 });
 
 // ==========================================
-// Ordered match key sets
+// applyOn (create-only import columns) and ordered match key sets
 // ==========================================
+
+describe('FieldMappingEntrySchema — applyOn', () => {
+  it('defaults to always, so an entry without it is written on create and update as before', () => {
+    expect(FieldMappingEntrySchema.parse({ sourceField: 'a', targetField: 'b' }).applyOn).toBe('always');
+  });
+
+  it.each(['create', 'always'] as const)('accepts applyOn %s, with no unrecognized key', (applyOn) => {
+    const r = FieldMappingEntrySchema.safeParse({ sourceField: 'Status', targetField: 'status', applyOn });
+    expect(r.success).toBe(true);
+    expect(r.data?.applyOn).toBe(applyOn);
+  });
+
+  it('refuses a value outside create / always at the applyOn path', () => {
+    const r = FieldMappingEntrySchema.safeParse({ sourceField: 'a', targetField: 'b', applyOn: 'insert' });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0]).toMatchObject({ code: 'invalid_value', path: ['applyOn'] });
+  });
+
+  it('rides the inline import mapping', () => {
+    const r = ImportRequestSchema.safeParse({
+      format: 'csv', csv: 'Code,Status\nC1,qualified\n', writeMode: 'upsert', matchFields: ['credit_code'],
+      mapping: [{ sourceField: 'Code', targetField: 'credit_code' }, { sourceField: 'Status', targetField: 'status', applyOn: 'create' }],
+    });
+    expect(r.success).toBe(true);
+  });
+});
 
 describe('ImportRequestSchema — matchFields as ordered key sets', () => {
   const base = { format: 'json' as const, rows: [], writeMode: 'upsert' as const };

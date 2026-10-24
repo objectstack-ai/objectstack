@@ -333,6 +333,8 @@ export interface PreparedImport {
     writeMode: 'insert' | 'update' | 'upsert';
     /** One key set, or ordered key sets (first all-non-blank set per row). */
     matchFields: string[] | string[][];
+    /** Targets of the inline entries declaring `applyOn: 'create'`. */
+    createOnlyFields: string[];
     dryRun: boolean;
     runAutomations: boolean;
     /** #3479 — import established historical facts: skip the state_machine rule
@@ -601,6 +603,9 @@ export async function prepareImportRequest(
     // beside the rename and applied once the rows are built (#25491).
     const mapping: Record<string, string> = {};
     const entryRules: InlineEntryRule[] = [];
+    // [#25577] Targets of the entries declaring `applyOn: 'create'`: written
+    // when the runner creates the row, left out of the patch when it updates one.
+    const createOnlyFields: string[] = [];
     if (Array.isArray(body?.mapping)) {
         for (const e of body.mapping) {
             if (e && typeof e.sourceField === 'string' && typeof e.targetField === 'string') {
@@ -608,6 +613,14 @@ export async function prepareImportRequest(
                 const read = readInlineEntryRule(e);
                 if (!read.ok) return read;
                 if (read.rule) entryRules.push(read.rule);
+                if (e.applyOn !== undefined && e.applyOn !== 'always' && e.applyOn !== 'create') {
+                    return {
+                        ok: false, status: 400, code: 'INVALID_REQUEST',
+                        error: `Mapping entry "${e.sourceField}" to "${e.targetField}" declares applyOn ${JSON.stringify(e.applyOn)}; `
+                            + 'applyOn is "always" (the default: written on create and update) or "create" (written only when the row is created).',
+                    };
+                }
+                if (e.applyOn === 'create' && !createOnlyFields.includes(e.targetField)) createOnlyFields.push(e.targetField);
             }
         }
     } else if (body?.mapping && typeof body.mapping === 'object') {
@@ -712,7 +725,7 @@ export async function prepareImportRequest(
     return {
         ok: true,
         prepared: {
-            rows, metaMap, writeMode, matchFields, dryRun, runAutomations,
+            rows, metaMap, writeMode, matchFields, createOnlyFields, dryRun, runAutomations,
             treatAsHistorical,
             trimWhitespace, nullValues, createMissingOptions, skipBlankMatchKey,
         },

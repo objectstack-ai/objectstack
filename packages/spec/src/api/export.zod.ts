@@ -170,6 +170,15 @@ export const FieldMappingEntrySchema = lazySchema(() => z.object({
     .describe('Default value if source field is null/empty'),
   required: z.boolean().default(false)
     .describe('Whether this field is required (import validation)'),
+  applyOn: z.enum(['create', 'always']).default('always')
+    .describe(
+      'When an import writes this column. `always` (default) writes it on every row the import ' +
+      'creates or updates. `create` writes it only when the row is created: an `upsert` that ' +
+      'matches an existing record leaves that record\'s value as it is, and an `update` import ' +
+      'never writes it, so re-running one upsert refreshes the `always` columns without ' +
+      'reverting state written since the first run. A create-only column is still read for ' +
+      'matching: the match key a row was found by stays in that row\'s update.',
+    ),
 }));
 export type FieldMappingEntry = z.input<typeof FieldMappingEntrySchema>;
 /** Post-parse shape of {@link FieldMappingEntry} — defaults applied, transforms run (ADR-0122). */
