@@ -649,6 +649,7 @@
     "api/FieldError:label",
     "api/FieldError:message",
     "api/FieldError:value",
+    "api/FieldMappingEntry:applyOn",
     "api/FieldMappingEntry:defaultValue",
     "api/FieldMappingEntry:required",
     "api/FieldMappingEntry:sourceField",

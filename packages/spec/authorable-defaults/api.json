@@ -60,6 +60,7 @@
     "api/ErrorHandlingConfig:includeStackTrace = false",
     "api/ErrorHandlingConfig:includeTimestamp = true",
     "api/ErrorHandlingConfig:logErrors = true",
+    "api/FieldMappingEntry:applyOn = \"always\"",
     "api/FieldMappingEntry:required = false",
     "api/FieldMappingEntry:transform = \"none\"",
     "api/GetMetaItemCachedResponse:notModified = false",
