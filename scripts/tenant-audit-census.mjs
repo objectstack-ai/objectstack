@@ -232,7 +232,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { requireDefaultExport } from './import-prerequisite.mjs';
@@ -765,6 +765,16 @@ function scopedNames(opens = opensScope) {
       }
       return flat.get(name);
     },
+    /**
+     * The declaration `scope` ITSELF records for `name` -- no chain, ⛔ no floor.
+     *
+     * {@link hostMemberEntry} asks one question of another file: what does class
+     * `C` declare as `x`? A miss there is "this class does not declare it", and
+     * answering from the file-wide floor would hand back another class's `x`.
+     */
+    own(scope, name) {
+      return byScope.get(scope)?.get(name) ?? null;
+    },
   };
 }
 
@@ -785,8 +795,12 @@ function scopedNames(opens = opensScope) {
  *   to. ⛔ The repair may not cost a single site that resolved before: a fix that
  *   traded a false placement for a LOST engine write would be the expensive
  *   direction wearing the other costume.
+ *
+ * `loadModule(fromFile, specifier)` is how {@link hostMemberEntry} reaches the
+ * one other file a host member can name: the class it is typed off. It answers
+ * `{ sf, decls }` or `null`, and without it nothing here reads another file.
  */
-export function declaredTypesIn(sf) {
+export function declaredTypesIn(sf, { loadModule = null } = {}) {
   const thisProps = scopedNames(opensClassScope);
   const locals = scopedNames();
   const fnReturns = scopedNames(opensCallableScope);
@@ -795,6 +809,9 @@ export function declaredTypesIn(sf) {
   const shapes = new Map();
   // Identifiers imported from a `node:` builtin -- never an engine.
   const builtins = new Set();
+  // `local name -> { specifier, name }` for every NAMED import, so a host member
+  // typed `AutomationEngine['flows']` can find the module that declares the class.
+  const imports = new Map();
   // ⭐ The declared type text is stored EXACTLY as the source spells it. It is
   // re-parsed later as a synthetic type alias to read the door rule off it, and
   // a type literal may separate its members by a newline alone -- legal
@@ -819,6 +836,14 @@ export function declaredTypesIn(sf) {
   };
   const noteLocal = (declNode, key, typeNode, initializer) => note(locals, declNode, key, typeNode, initializer);
   const visit = (n) => {
+    if (ts.isImportDeclaration(n) && ts.isStringLiteralLike(n.moduleSpecifier)) {
+      const b = n.importClause?.namedBindings;
+      if (b && ts.isNamedImports(b)) {
+        for (const el of b.elements) {
+          imports.set(el.name.text, { specifier: n.moduleSpecifier.text, name: (el.propertyName ?? el.name).text });
+        }
+      }
+    }
     if (ts.isImportDeclaration(n) && ts.isStringLiteralLike(n.moduleSpecifier)
         && /^node:/.test(n.moduleSpecifier.text)) {
       const b = n.importClause?.namedBindings;
@@ -875,7 +900,7 @@ export function declaredTypesIn(sf) {
     ts.forEachChild(n, visit);
   };
   visit(sf);
-  return { thisProps, locals, fnReturns, shapes, builtins };
+  return { thisProps, locals, fnReturns, shapes, builtins, imports, loadModule };
 }
 
 /** The declared type of `<base>.<member>` when `base`'s shape is in this file. */
@@ -897,43 +922,174 @@ export function receiverKey(node, sf) {
   return node.getText(sf).replace(/\s+/g, ' ');
 }
 
+/**
+ * ⭐ The `this` an ORDINARY function DECLARES -- the type node of its leading
+ * `this:` parameter, or `null`.
+ *
+ * The same walk as {@link thisContainerOf}, asked the one question that walk
+ * leaves open. A `function` REBINDS `this`, so no container can be named --
+ * unless the function says what its `this` is. `this: Pick<Host, 'flows'>` is
+ * exactly that: the compiler checks every `this.flows` in the body against
+ * `Host`, and every caller has to supply one. It is the spelling the
+ * move-only splits give a method body that leaves its class (#25222), so a
+ * `this.flows.delete(name)` that was a `Map` inside the class is a `Map` in
+ * the moved body too -- and the census reads it there for the same reason.
+ *
+ * `null` -- and so the file-wide FLOOR, as before -- for an arrow's way out of
+ * every function, for a class member (its container answers instead), and for
+ * a function that declares no `this`.
+ */
+function declaredThisTypeOf(node) {
+  for (let p = node.parent; p; p = p.parent) {
+    if (ts.isArrowFunction(p)) continue;
+    if (ts.isFunctionExpression(p) || ts.isFunctionDeclaration(p)) {
+      const first = p.parameters[0];
+      return first?.type && ts.isIdentifier(first.name) && first.name.text === 'this' ? first.type : null;
+    }
+    if (ts.isSourceFile(p) || ts.isMethodDeclaration(p) || ts.isGetAccessorDeclaration(p)
+        || ts.isSetAccessorDeclaration(p) || ts.isConstructorDeclaration(p) || ts.isPropertyDeclaration(p)
+        || ts.isClassStaticBlockDeclaration(p)) {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * The corpus file a RELATIVE import specifier names, or `null`.
+ *
+ * ESM spells the EMITTED name (`./engine.js`) and the corpus holds the source
+ * (`engine.ts`), so `.js` / `.mjs` / `.cjs` map to `.ts` (or `.tsx`) / `.mts` /
+ * `.cts`; a bare specifier tries the source extensions and `index`. `isCorpusFile`
+ * is the only membership test, so a caller decides what counts as a file.
+ * ⛔ A package specifier is `null`: this module never reads `node_modules`.
+ */
+export function moduleFileFor(fromFile, specifier, isCorpusFile) {
+  if (!/^\.\.?\//.test(specifier)) return null;
+  const spec = posix.join(posix.dirname(fromFile), specifier);
+  const emitted = /\.(m|c)?js$/.exec(spec);
+  const candidates = emitted
+    ? (emitted[1] === 'm' ? [`${spec.slice(0, -4)}.mts`]
+      : emitted[1] === 'c' ? [`${spec.slice(0, -4)}.cts`]
+        : [`${spec.slice(0, -3)}.ts`, `${spec.slice(0, -3)}.tsx`])
+    : /\.(m|c)?tsx?$/.test(spec) ? [spec]
+      : [`${spec}.ts`, `${spec}.tsx`, `${spec}/index.ts`, `${spec}/index.tsx`];
+  return candidates.find((c) => isCorpusFile(c)) ?? null;
+}
+
+/** The top-level `class name` this file declares or imports, with the file it lives in. */
+function classDeclarationIn(name, sf, decls) {
+  const local = sf.statements.find((s) => ts.isClassDeclaration(s) && s.name?.text === name);
+  if (local) return { node: local, sf, decls };
+  const imported = decls.imports?.get(name);
+  const mod = imported && decls.loadModule ? decls.loadModule(sf.fileName, imported.specifier) : null;
+  if (!mod) return null;
+  const node = mod.sf.statements.find((s) => ts.isClassDeclaration(s) && s.name?.text === imported.name);
+  return node ? { node, sf: mod.sf, decls: mod.decls } : null;
+}
+
+/**
+ * ⭐ What a DECLARED `this` says `this.<member>` is -- read as an entry in the
+ * file that declares it, or `null` when this module cannot read it.
+ *
+ * Three steps, each one a fact in the source and none of them a guess:
+ *
+ *   1. the `this` type, peeled of the {@link NARROWING_WRAPPERS}
+ *      (`Pick<Host, 'flows' | 'logger'>` is `Host`), names an interface or a
+ *      type-literal alias declared at the top level of THIS file;
+ *   2. that shape declares `member` as a property with a type;
+ *   3. the type is read as written -- unless it is `C['member']`, an indexed
+ *      access on a CLASS, which is the host spelling the splits use so that a
+ *      renamed field is a compile error. Then the answer is the class's OWN
+ *      declaration of that property, in the file that declares the class,
+ *      reached through this file's import of it when it lives elsewhere.
+ *
+ * ⛔ An indexed access on anything that is not a readable class is `null`, never
+ *   its text: `Deps['engine']` read as a type text would name `Deps` and
+ *   `engine` as types, and this census would report an index miss about a name
+ *   that is not a type at all. `null` leaves the site exactly where it was.
+ */
+function hostMemberEntry(thisType, member, sf, decls) {
+  let t = thisType;
+  while (ts.isParenthesizedTypeNode(t)
+         || (ts.isTypeReferenceNode(t) && ts.isIdentifier(t.typeName)
+             && NARROWING_WRAPPERS.has(t.typeName.text) && t.typeArguments?.length)) {
+    t = ts.isParenthesizedTypeNode(t) ? t.type : t.typeArguments[0];
+  }
+  if (!ts.isTypeReferenceNode(t) || !ts.isIdentifier(t.typeName) || t.typeArguments?.length) return null;
+  const host = t.typeName.text;
+  const members = sf.statements.flatMap((s) => (
+    ts.isInterfaceDeclaration(s) && s.name.text === host ? [...s.members]
+      : ts.isTypeAliasDeclaration(s) && s.name.text === host && ts.isTypeLiteralNode(s.type) ? [...s.type.members]
+        : []));
+  const sig = members.find((m) => ts.isPropertySignature(m) && m.type && m.name
+    && ts.isIdentifier(m.name) && m.name.text === member);
+  if (!sig) return null;
+  const mt = sig.type;
+  if (ts.isIndexedAccessTypeNode(mt)) {
+    if (!ts.isTypeReferenceNode(mt.objectType) || !ts.isIdentifier(mt.objectType.typeName)
+        || mt.objectType.typeArguments?.length || !ts.isLiteralTypeNode(mt.indexType)
+        || !ts.isStringLiteral(mt.indexType.literal)) return null;
+    const cls = classDeclarationIn(mt.objectType.typeName.text, sf, decls);
+    const prop = mt.indexType.literal.text;
+    const entry = cls ? cls.decls.thisProps.own(cls.node, prop) : null;
+    return entry
+      ? { entry, sf: cls.sf, decls: cls.decls, how: `${host}.${member} -> ${cls.node.name.text}.${prop}` }
+      : null;
+  }
+  return { entry: { type: mt.getText(sf), init: null, node: null, literal: null }, sf, decls, how: `${host}.${member}` };
+}
+
+/** The first name in a type text that the engine type index holds, or `null`. */
+function indexedNameIn(typeText, index) {
+  if (!typeText) return null;
+  for (const id of typeText.match(/[A-Za-z_$][\w$]*/g) ?? []) if (index.has(id)) return id;
+  return null;
+}
+
+/**
+ * The verdict one DECLARATION gives a receiver, read in the file that holds it.
+ *
+ * Lifted out of {@link resolveReceiver} unchanged, so that the same rule can be
+ * read against ANOTHER file's tree: a host member typed off a class answers
+ * from the class's own declaration, and that declaration's type text,
+ * initializer and `any` belong to the class's file, not to the site's.
+ */
+function receiverFromEntry(entry, how, sf, decls, index, depth) {
+  if (!entry) return { kind: 'unresolved', how };
+  const t = indexedNameIn(entry.type, index);
+  if (t) return { kind: 'engine', type: t, how };
+  // ⛔ `any` / `unknown` is NOT a classification. A receiver the author erased
+  // is a receiver this census could not read, and a census must never score
+  // what it could not read as "nothing to report" -- it goes to the ledger.
+  if (entry.type && /^(any|unknown)$/.test(entry.type.trim())) {
+    return { kind: 'unresolved', how: `${how}:any`, detail: entry.type };
+  }
+  if (entry.type) return inlineEngineDoorOrOther(entry.type, how, sf);
+  if (entry.init) {
+    const t2 = indexedNameIn(entry.init, index);
+    if (t2) return { kind: 'engine', type: t2, how: `${how}/init` };
+    const ctor = /^new\s+([A-Za-z_$][\w$.]*)/.exec(entry.init);
+    if (ctor) {
+      const t3 = indexedNameIn(ctor[1], index);
+      if (t3) return { kind: 'engine', type: t3, how: `${how}/new` };
+      return { kind: 'other', type: `new ${ctor[1]}`, how: `${how}/new` };
+    }
+    if (entry.node) {
+      const via = resolveReceiver(entry.node, sf, decls, index, depth + 1);
+      if (via.kind !== 'unresolved') return { ...via, how: `${how}/${via.how}` };
+    }
+    return { kind: 'unresolved', how: `${how}/init`, detail: entry.init };
+  }
+  return { kind: 'unresolved', how };
+}
+
 /** Resolve a receiver expression to an engine-shaped type name, or a reason it is not one. */
 export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
   const r = unwrap(recvNode);
   if (depth > 4) return { kind: 'unresolved', how: 'depth' };
-  const nameOf = (typeText) => {
-    if (!typeText) return null;
-    for (const id of typeText.match(/[A-Za-z_$][\w$]*/g) ?? []) if (index.has(id)) return id;
-    return null;
-  };
-  const fromEntry = (entry, how) => {
-    if (!entry) return { kind: 'unresolved', how };
-    const t = nameOf(entry.type);
-    if (t) return { kind: 'engine', type: t, how };
-    // ⛔ `any` / `unknown` is NOT a classification. A receiver the author erased
-    // is a receiver this census could not read, and a census must never score
-    // what it could not read as "nothing to report" -- it goes to the ledger.
-    if (entry.type && /^(any|unknown)$/.test(entry.type.trim())) {
-      return { kind: 'unresolved', how: `${how}:any`, detail: entry.type };
-    }
-    if (entry.type) return inlineEngineDoorOrOther(entry.type, how, sf);
-    if (entry.init) {
-      const t2 = nameOf(entry.init);
-      if (t2) return { kind: 'engine', type: t2, how: `${how}/init` };
-      const ctor = /^new\s+([A-Za-z_$][\w$.]*)/.exec(entry.init);
-      if (ctor) {
-        const t3 = nameOf(ctor[1]);
-        if (t3) return { kind: 'engine', type: t3, how: `${how}/new` };
-        return { kind: 'other', type: `new ${ctor[1]}`, how: `${how}/new` };
-      }
-      if (entry.node) {
-        const via = resolveReceiver(entry.node, sf, decls, index, depth + 1);
-        if (via.kind !== 'unresolved') return { ...via, how: `${how}/${via.how}` };
-      }
-      return { kind: 'unresolved', how: `${how}/init`, detail: entry.init };
-    }
-    return { kind: 'unresolved', how };
-  };
+  const nameOf = (typeText) => indexedNameIn(typeText, index);
+  const fromEntry = (entry, how) => receiverFromEntry(entry, how, sf, decls, index, depth);
   if (ts.isAsExpression(r)) {
     const t = nameOf(r.type.getText(sf));
     if (t) return { kind: 'engine', type: t, how: 'as' };
@@ -948,7 +1104,17 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
     return inlineEngineDoorOrOther(r.type.getText(sf), 'as', sf);
   }
   if (ts.isPropertyAccessExpression(r) && r.expression.kind === ts.SyntaxKind.ThisKeyword) {
-    return fromEntry(decls.thisProps.lookup(r.name.text, r, thisContainerChain(r)), `this.${r.name.text}`);
+    const floor = fromEntry(decls.thisProps.lookup(r.name.text, r, thisContainerChain(r)), `this.${r.name.text}`);
+    // ⭐ A function that DECLARES its `this` answers through that declaration,
+    // which is what the compiler checks the body against. ⛔ Only where it can be
+    // READ: a host this module cannot follow leaves the site on the floor it had,
+    // so no receiver that resolved before stops resolving.
+    const thisType = declaredThisTypeOf(r);
+    const host = thisType ? hostMemberEntry(thisType, r.name.text, sf, decls) : null;
+    if (!host) return floor;
+    const via = receiverFromEntry(host.entry, `this.${r.name.text} via ${host.how}`, host.sf, host.decls, index, depth);
+    if (via.kind !== 'unresolved') return via;
+    return floor.kind === 'unresolved' ? via : floor;
   }
   if (ts.isIdentifier(r)) {
     if (decls.builtins.has(r.text)) return { kind: 'other', type: `node: builtin ${r.text}`, how: 'node-import' };
@@ -1648,6 +1814,21 @@ export function runCensus({ root = ROOT, roots = SURFACE_ROOTS } = {}) {
   const nonEngineReasons = new Map();
   const undefendedSubtractions = [];
 
+  // The other files a host member can name, read on demand and once. ⛔ Only
+  // files of this census's own corpus: the criterion above -- tracked, never
+  // untracked -- holds for a file reached through an import as for any other.
+  const corpus = new Set(sources);
+  const modules = new Map();
+  const loadModule = (fromFile, specifier) => {
+    const rel = moduleFileFor(fromFile, specifier, (f) => corpus.has(f));
+    if (!rel) return null;
+    if (!modules.has(rel)) {
+      const sf = parseSourceFile(rel, readFileSync(join(root, rel), 'utf8'));
+      modules.set(rel, { sf, decls: declaredTypesIn(sf, { loadModule }) });
+    }
+    return modules.get(rel);
+  };
+
   for (const rel of sources) {
     let text;
     try {
@@ -1657,7 +1838,7 @@ export function runCensus({ root = ROOT, roots = SURFACE_ROOTS } = {}) {
     }
     if (!/\.(insert|update|delete)\s*[(<]/.test(text)) continue;
     const sf = parseSourceFile(rel, text);
-    const decls = declaredTypesIn(sf);
+    const decls = declaredTypesIn(sf, { loadModule });
     const visit = (node) => {
       if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
           && WRITE_VERBS.includes(node.expression.name.text)) {
@@ -2755,6 +2936,98 @@ export function selfTest() {
   t('⛔ FLOOR: …and in the other declaration order the file-wide tier answers the engine instead',
     verdictsIn(innerClassSite + fileMapGetEngine, ['IProbeEngine']), 'engine/IProbeEngine');
 
+  // ── ⭐⭐ A DECLARED `this`: THE HOST A MOVED BODY READS (#25222) ──────────
+  // A method body that leaves its class keeps saying `this.flows`, and its
+  // function declares `this: Pick<Host, 'flows'>` with the host member typed
+  // `Engine['flows']` -- the class's own `Map`, now declared in ANOTHER file.
+  // Through the floor alone a `function` names no container and the module
+  // declares no class, so every such receiver was UNREADABLE: refused as
+  // `[untyped-receiver]`, or placed by a `name` parameter as an engine write the
+  // class never made. ⛔ Pinned in BOTH directions, because "cannot read" must
+  // not become "reads wrong": the Map is subtracted, AND a real engine behind
+  // the same spelling is still counted.
+  /** Every write call's receiver verdict in `entry`, whose imports reach `files` and nothing else. */
+  const verdictsAcross = (files, entry, indexNames = []) => {
+    const parsed = new Map();
+    const loadModule = (fromFile, specifier) => {
+      const rel = moduleFileFor(fromFile, specifier, (f) => Object.hasOwn(files, f));
+      if (!rel) return null;
+      if (!parsed.has(rel)) {
+        const sf = parseSourceFile(rel, files[rel]);
+        parsed.set(rel, { sf, decls: declaredTypesIn(sf, { loadModule }) });
+      }
+      return parsed.get(rel);
+    };
+    const sf = parseSourceFile(entry, files[entry]);
+    const decls = declaredTypesIn(sf, { loadModule });
+    const index = new Map(indexNames.map((n) => [n, { decls: ['probe.ts'], verbs: ['insert', 'update', 'delete'] }]));
+    const out = [];
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+          && WRITE_VERBS.includes(node.expression.name.text)) {
+        const res = resolveReceiver(node.expression.expression, sf, decls, index);
+        out.push(res.kind === 'other'
+          ? `other/${nonEngineReason(res, new Set(), sf).reason}`
+          : `${res.kind}/${res.type ?? ''}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return out.join(' | ');
+  };
+  const engineClass = 'export class Engine {\n  private readonly flows = new Map<string, number>();\n'
+    + '  constructor(private readonly engine: IProbeEngine) {}\n}\n';
+  const guardsHost = "import type { Engine } from './engine.js';\n"
+    + "interface GuardsHost {\n  readonly flows: Engine['flows'];\n  readonly engine: Engine['engine'];\n}\n";
+  const forgetFlow = "export function forget(this: Pick<GuardsHost, 'flows'>, name: string) {\n"
+    + '  this.flows.delete(name);\n}\n';
+  const writeRow = "export function write(this: Pick<GuardsHost, 'engine'>) {\n"
+    + `  this.engine.${WRITE};\n}\n`;
+  t('⭐⭐ a host member typed off a class in ANOTHER file is that class\'s own Map -- subtracted, not refused',
+    verdictsAcross({ 'src/engine.ts': engineClass, 'src/guards.ts': guardsHost + forgetFlow },
+      'src/guards.ts', ['IProbeEngine']),
+    'other/constructed-locally');
+  t('⭐⭐ POSITIVE CONTROL: a host member typed off the same class\'s ENGINE is still an engine write',
+    verdictsAcross({ 'src/engine.ts': engineClass, 'src/guards.ts': guardsHost + writeRow },
+      'src/guards.ts', ['IProbeEngine']),
+    'engine/IProbeEngine');
+  // The host NAMES its class, so a same-named property of another class in the
+  // file is not an answer -- the floor's first TYPED spelling would be.
+  const decoyClass = 'class Decoy {\n  constructor(private readonly flows: IProbeEngine, '
+    + 'private readonly engine: Map<string, number>) {}\n}\n';
+  t('⭐ …and with the class in the SAME file, the host\'s class answers, not a same-named property of another',
+    verdictsAcross({ 'src/guards.ts': decoyClass + engineClass + guardsHost.split('\n').slice(1).join('\n')
+      + forgetFlow + writeRow }, 'src/guards.ts', ['IProbeEngine']),
+    'other/constructed-locally | engine/IProbeEngine');
+  t('⭐ a host member typed DIRECTLY is read as written',
+    verdictsAcross({ 'src/guards.ts': 'interface GuardsHost {\n  readonly engine: IProbeEngine;\n}\n' + writeRow },
+      'src/guards.ts', ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⭐ an ARROW inside the host function is transparent to `this`, so it reads the host too',
+    verdictsAcross({ 'src/engine.ts': engineClass, 'src/guards.ts': guardsHost
+      + "export function forget(this: Pick<GuardsHost, 'flows'>) {\n  const f = () => this.flows.delete('k');\n  f();\n}\n" },
+    'src/guards.ts', ['IProbeEngine']),
+    'other/constructed-locally');
+  t('⛔ FLOOR: a FUNCTION expression inside the host function declares no `this`, so it does not read the host',
+    verdictsAcross({ 'src/engine.ts': engineClass, 'src/guards.ts': guardsHost
+      + "export function forget(this: Pick<GuardsHost, 'flows'>) {\n"
+      + "  const f = function () { this.flows.delete('k'); };\n  void f;\n}\n" },
+    'src/guards.ts', ['IProbeEngine']),
+    'unresolved/');
+  // A class this module cannot LOAD -- untracked, or a package's -- and an
+  // indexed access on something that is not a class leave the site on the
+  // floor it had. Here the floor holds a same-named property of a class in the
+  // host's own file, so "nothing that resolved before stops" is visible.
+  const floorHolder = 'class Holder {\n  constructor(private readonly engine: IProbeEngine) {}\n}\n';
+  t('⛔ FLOOR: a host member typed off a class this census cannot load stays where the floor put it',
+    verdictsAcross({ 'src/guards.ts': floorHolder + guardsHost + writeRow }, 'src/guards.ts', ['IProbeEngine']),
+    'engine/IProbeEngine');
+  t('⛔ an indexed access on an INTERFACE is not read as a type text -- the site stays unreadable, never an index miss',
+    verdictsAcross({ 'src/guards.ts': 'interface Deps {\n  engine: Map<string, number>;\n}\n'
+      + "interface GuardsHost {\n  readonly engine: Deps['engine'];\n}\n" + writeRow },
+    'src/guards.ts', ['IProbeEngine']),
+    'unresolved/');
+
   // The same conflation decided two OTHER questions, and both are verdicts the
   // artefacts carry: WHICH object a site writes, and whether it is elevated.
   /** Every write call's object-name verdict, in source order. */
@@ -2839,7 +3112,12 @@ export function selfTest() {
     + 'many classes enclose it, and NO container at all inside a `function` expression, whose `this` '
     + 'the language itself refuses -- in both declaration orders each, a miss inside the named '
     + 'container falling to the file-wide FLOOR and never outwards to a class that merely encloses '
-    + 'it, while a plain `key: value` rebinds nothing and leaves the class answering).',
+    + 'it, while a plain `key: value` rebinds nothing and leaves the class answering -- and a `function` '
+    + 'that DECLARES its `this` read through that declaration: a host member typed `Engine[\'flows\']` '
+    + 'reads the class\'s own field in the file that declares it, so the host\'s Map is subtracted as that '
+    + 'Map and a real engine behind the same spelling is still counted, with the class imported or in '
+    + 'the same file, an arrow transparent and a nested `function` not, while a class this census cannot '
+    + 'load and an indexed access on an interface both leave the site on the floor it had).',
   );
   return 0;
 }
