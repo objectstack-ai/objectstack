@@ -297,12 +297,18 @@ export const SysOrganization = ObjectSchema.create({
     // params are declared on the action, not read off these flags). The
     // engine's own static-`readonly` strip exempts system-context writers, so
     // better-auth's adapter (which stamps `isSystem`) still writes them.
+    // [#25347] The organization's one name, and its help says what it is not:
+    // the product name the console shows is Settings → Branding's
+    // `workspace_name`, a separate home. It names no door: the rename doors are
+    // multi-organization only, so under `single` none is offered.
     name: Field.text({
       label: 'Name',
       required: true,
       readonly: true,
       searchable: true,
       maxLength: 255,
+      description:
+        'The organization\'s own name. The product name the console shows is a different setting, set in Settings → Branding.',
       group: 'Identity',
     }),
 
@@ -370,6 +376,12 @@ export const SysOrganization = ObjectSchema.create({
     // dates in today; how the two relate is the resolver's question, not this
     // column's, and this column does not read or write that setting.
     //
+    // [#25347] So the help says which one wins, in the reader's terms: this
+    // column changes no date calculation today, and Settings → Localization's
+    // Default timezone is the one in effect (its help says the same from the
+    // other side). The old help said date boundaries ARE computed in this
+    // zone, a claim no reader backed (AGENTS.md Prime Directive #10).
+    //
     // Owned by objectql, not better-auth: an ADR-0105 D7 extension field,
     // registered in plugin-auth's `MANAGED_EXTENSION_FIELDS` (whose collision
     // guard proves better-auth's organization schema owns no `timezone` at the
@@ -389,7 +401,7 @@ export const SysOrganization = ObjectSchema.create({
       maxLength: 64,
       valueDomain: 'iana_time_zone',
       description:
-        'IANA time zone (e.g. UTC, Asia/Shanghai) date boundaries are computed in for this organization — the root default every business unit without a zone of its own inherits. Unset means UTC.',
+        'IANA time zone (e.g. UTC, Asia/Shanghai), kept as the root default for business units without a zone of their own. It does not change any date calculation today: formulas, reports and displayed dates use Settings → Localization → Default timezone.',
       group: 'Configuration',
     }),
 

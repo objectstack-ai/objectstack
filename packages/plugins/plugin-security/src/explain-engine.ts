@@ -59,6 +59,11 @@ import { superuserBypassBitForOperation } from './permission-evaluator.js';
 import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { ExplainObjectNotFoundError } from './errors.js';
 import { RLS_DENY_FILTER, compiledObjectDefaultRowScopeOf, compiledPolicyNameOf } from './rls-compiler.js';
+import {
+  describeMembershipKeyDeclaration,
+  membershipKeyOutcomesFor,
+  type MembershipKeyOutcome,
+} from './object-membership-keys.js';
 import { andComposeLayers } from './tenant-layer.js';
 import { declaredComparisonColumns } from './declared-comparison-columns.js';
 import {
@@ -73,6 +78,8 @@ import {
   type UnresolvedPostureCause,
 } from './unresolved-posture.js';
 import { grantSetNameOf } from './grant-permission-set-name.js';
+import { holdsExternalPosition, humanBaselineFor } from './external-baseline.js';
+import { isExternalAudienceContext } from '@objectstack/core';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
@@ -109,9 +116,9 @@ function isAuthzPosture(v: unknown): v is AuthzPosture {
  *
  *  1. **guest / anonymous → EXTERNAL.** Explain layers one thing on top the
  *     enforcement resolver deliberately does NOT: a guest principal is EXTERNAL
- *     for the debugger. The enforcement floor is MEMBER (no external principal
- *     type exists yet — ADR-0095 D2), so this mapping lives here, and it wins
- *     first.
+ *     for the debugger. The resolver gives a guest no rung at all (its
+ *     EXTERNAL rung is the organization's `external` members — ruling of record
+ *     6355206139), so this mapping lives here, and it wins first.
  *  2. **Reuse `ctx.posture` verbatim when present.** A principal resolved through
  *     the full `resolveAuthzContext` already carries the enforcement-derived
  *     rung; consuming it directly makes drift structurally impossible.
@@ -157,6 +164,9 @@ function derivePosture(context: any): AuthzPosture {
   return deriveAdminPosture({
     isPlatformAdmin: context?.hasPlatformAdminGrant === true,
     isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n)),
+    // [Ruling of record 6355206139] The same evidence the resolver reads: the
+    // projected `org_external` identity.
+    isExternal: holdsExternalPosition(context?.positions),
   });
 }
 
@@ -321,6 +331,14 @@ export interface ExplainEngineDeps {
    * Supply the enforcement composition, never a re-derivation of it: explain's
    * module contract is that it "matches enforcement by construction".
    */
+  /**
+   * [Ruling of record 6355206139] Does a grant `sets` holds carry an RLS
+   * predicate for `object` on the operation class — the question the CRUD
+   * middleware answers for the EXTERNAL OWD seam (`external-owd-grant-stamp.ts`)?
+   * Asked only for an external principal. Absent → no grant speaks, so the
+   * report shows the owner_only floor, the narrow reading.
+   */
+  externalGrantSpeaks?: (sets: PermissionSet[], object: string, opClass: 'read' | 'write', dataOp: string, context: any) => boolean;
   getPartialMaskRules: (
     sets: PermissionSet[],
     object: string,
@@ -335,6 +353,10 @@ export interface ExplainEngineDeps {
    * of them would label the other "resolved" — the vaguest bucket `viaOf` has,
    * on the grant most likely to be the answer to "why can this member read
    * anything at all".
+   *
+   * [Ruling of record 6355206139] The CONFIGURED list. An external principal
+   * resolves `external_default` in its place, and the report attributes that
+   * name instead (`humanBaselineFor`).
    */
   baselinePermissionSets: string[];
   /**
@@ -723,6 +745,9 @@ export async function buildContextForUser(
     ...(grants.tabPermissions ? { tabPermissions: grants.tabPermissions } : {}),
     ...(grants.email != null ? { email: grants.email } : {}),
     ...(grants.posture ? { posture: grants.posture } : {}),
+    // [Ruling of record 6355206139] The population stamp the resolver made, so
+    // the explained context is floored at the OWD seam as enforcement is.
+    ...(grants.audience ? { audience: grants.audience } : {}),
     droppedGrants,
     delegatedPositions,
     // [ADR-0068 D2] Not a second derivation: `derivePosture` returns
@@ -1003,6 +1028,27 @@ function describeMaskingRule(rule: FieldMaskingRule): string {
   return typeof rule === 'string' ? rule : `keepHead ${rule.keepHead}, keepTail ${rule.keepTail}`;
 }
 
+/**
+ * [Ruling of record 6355206139] The OWD an EXTERNAL principal meets, as
+ * plugin-sharing applies it (`owdForAudience`, `@objectstack/core`): the
+ * object's own reading for an internal principal, or when a held grant's RLS
+ * speaks for the object; otherwise owner_only, whatever the object declares.
+ */
+function owdForPrincipal(
+  owd: ReturnType<typeof describeOwd>,
+  context: any,
+  grantSpeaks: boolean,
+): ReturnType<typeof describeOwd> {
+  // A controlled_by_parent detail derives from its master (ADR-0055), whose
+  // own model meets the floor — plugin-sharing does not floor the detail.
+  if (owd.effect === 'private' || owd.model === 'controlled_by_parent' || !isExternalAudienceContext(context) || grantSpeaks) return owd;
+  return {
+    model: `${owd.model} → owner_only for an external principal (no held grant's RLS speaks for this object)`,
+    declared: owd.declared,
+    effect: 'private',
+  };
+}
+
 /** D1-equivalent OWD reading (mirrors plugin-sharing's effectiveSharingModel). */
 function describeOwd(schema: any): { model: string; declared: boolean; effect: 'private' | 'read' | 'public' } {
   const m = schema?.sharingModel ?? schema?.security?.sharingModel;
@@ -1197,6 +1243,86 @@ function objectDefaultRowScopeSource(
     ` Source: the object default row scope ${named} declared on '${object}', not a permission set — ` +
     'no permission set held carries a row policy for this object and operation.'
   );
+}
+
+/**
+ * [#25234 ruling A, rider 3] The permission sets that let their holders create
+ * or edit rows of the roster object `object`: whoever can write a roster row
+ * can grant the membership key it defines. Read from the security catalog, the
+ * definitions the resolver grants, and judged by the evaluator the object gate
+ * asks. `undefined` when the catalog cannot be read: the sentence then names
+ * the object alone.
+ */
+async function rosterWriteHolders(deps: ExplainEngineDeps, object: string): Promise<string[] | undefined> {
+  try {
+    const catalog = securityCatalogReaderOf(deps.ql);
+    if (!catalog) return undefined;
+    const meta = await deps.getObjectSecurityMeta(object);
+    const holders = new Set<string>();
+    for (const entry of await catalog.list('permission')) {
+      const set = entry.definition as unknown as PermissionSet;
+      const name = (set as { name?: unknown }).name;
+      if (typeof name !== 'string') continue;
+      const writes = ['insert', 'update'].some((op) =>
+        deps.evaluator.checkObjectPermission(op, object, [set], { isPrivate: meta.isPrivate }),
+      );
+      if (writes) holders.add(name);
+    }
+    return [...holders].sort();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * [#25234 ruling A] The sentences explain adds where the applicable policies
+ * read a declared membership key: per key, its declaration (the roster object
+ * X, `valueField`, `userField`, the filter), what it resolved to for this
+ * principal or why it did not, and who can grant it (rider 3). Empty when no
+ * policy read one, so every other report is unchanged.
+ */
+async function membershipKeySource(deps: ExplainEngineDeps, outcomes: readonly MembershipKeyOutcome[]): Promise<string> {
+  let out = '';
+  for (const o of outcomes) {
+    out += ` Membership key ${describeMembershipKeyDeclaration(o)}: ` + (o.status === 'resolved'
+      ? `resolved to ${o.values.length} value(s) for this principal` +
+        (o.values.length === 0 ? ', so every policy reading it matches no rows.' : '.')
+      : `did not resolve (${o.reason}: ${o.detail}), so every policy reading it matches no rows.`);
+    if (o.object) {
+      const holders = await rosterWriteHolders(deps, o.object);
+      out += ` Whoever can write '${o.object}' can grant this key` +
+        (holders === undefined ? '.' : holders.length > 0 ? `: holders of [${holders.join(', ')}].` : ': no permission set grants that write.');
+    }
+  }
+  return out;
+}
+
+/**
+ * [#25234 ruling A] The roster row that links this record to a resolved key:
+ * the first of the record's values that the key's set holds, and the roster
+ * row the staging read found it on. "Alice reads PO-42 because her
+ * `srm_supplier_contact` row C-17 links her to supplier S-1."
+ */
+function membershipKeyLinkOf(
+  record: Record<string, unknown>,
+  outcomes: readonly MembershipKeyOutcome[],
+): { key: string; sentence: string } | undefined {
+  for (const o of outcomes) {
+    if (o.status !== 'resolved') continue;
+    for (const [field, raw] of Object.entries(record)) {
+      for (const value of Array.isArray(raw) ? raw : [raw]) {
+        if (typeof value !== 'string' || !o.rosterRowOf.has(value)) continue;
+        const row = o.rosterRowOf.get(value);
+        return {
+          key: o.key,
+          sentence:
+            ` Membership key '${o.key}': the principal's '${o.object}' row${row ? ` '${row}'` : ''} links them to ` +
+            `'${value}' (its '${o.valueField}'), which this record's '${field}' holds.`,
+        };
+      }
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -1992,6 +2118,12 @@ async function applyRecordAttribution(
       // [#24164 ruling E′] An object's default row scope is named as itself,
       // reached through the object's declaration rather than a held set.
       const [objectDefault] = objectDefaultRowScopesOf([layer1, delegatorWriteFilter].filter(Boolean) as Record<string, unknown>[]);
+      // [#25234 ruling A] A predicate that reads a declared membership key is
+      // reached through the key: `via: 'membership:KEY'`, and the detail names
+      // the roster row that links this record to the principal.
+      const membershipKeys = await membershipKeyOutcomesFor(context, object);
+      const membershipLink = !excluded ? membershipKeyLinkOf(record as Record<string, unknown>, membershipKeys) : undefined;
+      const membershipVia = membershipLink?.key ?? membershipKeys[0]?.key;
       rlsLayer.record = {
         outcome: excluded ? 'excluded' : 'admitted',
         rowFilter: recordLayer1,
@@ -2005,7 +2137,13 @@ async function applyRecordAttribution(
                 predicate: recordLayer1,
                 effect: excluded ? 'excludes' : 'admits',
               }
-            : { kind: 'rls_policy', name: 'business_rls', predicate: recordLayer1, effect: excluded ? 'excludes' : 'admits' },
+            : {
+                kind: 'rls_policy',
+                name: 'business_rls',
+                ...(membershipVia ? { via: `membership:${membershipVia}` } : {}),
+                predicate: recordLayer1,
+                effect: excluded ? 'excludes' : 'admits',
+              },
         ],
         detail: (deny
           ? 'Business RLS composes to DENY ALL for this principal.'
@@ -2016,7 +2154,8 @@ async function applyRecordAttribution(
             ? ` On this on-behalf-of ${engineOp}, the predicate is the principal's business RLS AND the delegator's ` +
               'own write filter, as the by-id write composes them (ADR-0090 D10).'
             : '') +
-          (objectDefault ? objectDefaultRowScopeSource(object, [objectDefault]) : ''),
+          (objectDefault ? objectDefaultRowScopeSource(object, [objectDefault]) : '') +
+          (membershipLink?.sentence ?? ''),
       };
     }
   }
@@ -2309,8 +2448,15 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   }
   const delegatorRefused = delegatorMissing || delegatorUnresolved || delegatorOutsideOrganization !== undefined;
   const positions: string[] = context?.positions ?? [];
+  // [Ruling of record 6355206139] The baseline THIS principal resolves: an
+  // external's is `external_default`, never the configured member baseline,
+  // and it is attributed by that name (`external-baseline.ts`).
+  const baselineNames = humanBaselineFor(positions, deps.baselinePermissionSets);
+  const externalBaseline = holdsExternalPosition(positions);
   const viaOf = (name: string): string => {
-    if (deps.baselinePermissionSets.includes(name)) return 'additive baseline (ADR-0090 D5)';
+    if (baselineNames.includes(name)) {
+      return externalBaseline ? 'external baseline (org_external)' : 'additive baseline (ADR-0090 D5)';
+    }
     if (positions.includes(name)) return `position:${name}`;
     if ((context?.permissions ?? []).includes(name)) return 'direct grant';
     return 'resolved';
@@ -2558,7 +2704,15 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   });
 
   // ── 5. owd_baseline ────────────────────────────────────────────────────
-  const owd = describeOwd(schema);
+  // [Ruling of record 6355206139] An external principal meets the owner_only
+  // floor unless a held grant's RLS speaks — the same answer the middleware
+  // stamps for plugin-sharing, so the report and the query cannot disagree.
+  const owdOpClass: 'read' | 'write' = dataOp === 'find' ? 'read' : 'write';
+  const owd = owdForPrincipal(
+    describeOwd(schema),
+    context,
+    isExternalAudienceContext(context) && deps.externalGrantSpeaks?.(sets, object, owdOpClass, dataOp, context) === true,
+  );
   layers.push({
     layer: 'owd_baseline',
     verdict: owd.effect === 'public' ? 'neutral' : 'narrows',
@@ -2707,16 +2861,20 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   // [#24164 ruling E′] Where the narrowing is an object's declared default row
   // scope, say so: its source is the object, not a set the principal holds.
   const objectDefaults = objectDefaultRowScopesOf(filterParts);
+  // [#25234 ruling A] The declared membership keys this object's policies read,
+  // as the composition above staged them on this context.
+  const membershipKeys = await membershipKeyOutcomesFor(context, object);
   layers.push({
     layer: 'rls',
     verdict: denyAll ? 'denies' : readFilter ? 'narrows' : 'not_applicable',
-    detail: denyAll
+    detail: (denyAll
       ? 'Row-level security composes to DENY ALL for this principal.'
       : readFilter
         ? 'Row-level security narrows the row set (see readFilter for the composed predicate)' +
           (delegatorFilter ? ' — intersection of agent + delegator filters (D10).' : '.') +
           (objectDefaults.length > 0 ? objectDefaultRowScopeSource(object, objectDefaults) : '')
-        : 'No RLS policy applies.',
+        : 'No RLS policy applies.') +
+      (membershipKeys.length > 0 ? await membershipKeySource(deps, membershipKeys) : ''),
     contributors: [],
   });
 

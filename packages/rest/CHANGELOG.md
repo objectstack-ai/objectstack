@@ -1,5 +1,223 @@
 # @objectstack/rest
 
+## 18.1.0
+
+### Minor Changes
+
+- 3937697: feat(spec): a form view's `title` is translated through `objects.<object>._views.<view>.title`, and `GET /forms/:slug` serves it in the visitor's language
+  
+  Clause-②: yes (widening)
+  
+  - **Before.** A form view's `title` (`FormViewSchema.title`) had no translation key. The `_views.<view>` entry named `title` as a rename onto `label`, `translateView` never read `config.title`, and `GET /forms/:slug` answered the top-level `label` from the untranslated view. A public form that declared a title served it in the authoring language to every visitor, so declaring one replaced a translated heading (the object label) with an untranslated one in every other locale.
+  - **Now.** `objects.<object>._views.<view>.title` is a declared key, under the same `_views` node and view key as the view's `label`. `translateView` overlays it onto a served form item's `config.title`, on the same locale chain and override rule as every other view string: only a form that authors a title is translated, a missing key keeps the authored title, and a title edited on top of the packaged view keeps the edit. `heading` and `formTitle` are named as renames onto `title`.
+  - **`GET /forms/:slug`.** The served form's `title` is the translated one, and the top-level `label` is taken from the translated view when the view authors a `label`. A view that authors none is still answered without one, so the console heading (`label`, then `form.title`, then the translated object label) is unchanged for it.
+  - **`objectstack validate`.** `@objectstack/lint`'s translation-reference check accepts a `title` key over a form view (a `formViews.<key>` entry, the default `form`, or a `viewKind: 'form'` item) and refuses it, as `translation-target-unknown`, over a list view, pointing at the view's `label` key.
+  - **`os i18n extract`.** The CLI extractor emits `_views.<view>.title` for each form a view container serves (keyed by the composer's runtime name) and for a `viewKind: 'form'` item, so the skeleton carries the slot and the i18n coverage gate reports an authored title a supported locale leaves untranslated.
+  - **Unchanged.** Every other `_views` key, the view `label` and `description` reads, and a form without a title.
+
+### Patch Changes
+
+- 3937697: fix(rest): a lookup cell in the list export names the record by the target object's title field (#24944)
+  
+  Clause-②: no
+  
+  `GET /api/v1/data/:object/export` (Display → Export as CSV / XLSX) wrote a lookup, master-detail, user or tree cell from the lookup field's own `displayField`. Without one, it took the first key of a fixed list (`name`, `title`, `label`, `full_name`, …) found on the expanded record. It never read the target object's `nameField`. So a contact that declares `nameField: 'full_name'` and has no `name` column exported as its job `title` ("VP of Engineering" instead of "John Smith").
+  
+  - **Now.** The export reads each target object's title field once per export, by ADR-0079's `resolveDisplayField`: the `nameField`, then the deprecated `displayNameField` alias. The registry sets that pointer on every object it holds. The cell shows that field's value from the expanded record. This applies to csv, xlsx and json.
+  - **Precedence.** The lookup field's own `displayField` still wins when it is set. The key list is used only when the target resolves no title field, or when its schema cannot be read.
+  - **Field-level security.** When the caller cannot read the target's title field, the `$expand` read leaves it off the record. The cell then shows the record's id. Another column, such as the job title, no longer stands in for the name.
+  - **Visible change.** A target with a literal `name` column and a different declared title now exports the declared title. For example, an account with `nameField: 'display_title'` exports its display title instead of `name`.
+  - **Unchanged.** No query parameter, header, column set or payload shape moves. Only the text of a lookup cell changes.
+- 3937697: fix(rest): a boolean cell in the list export is written in the caller's language (#24945)
+  
+  Clause-②: no
+  
+  `GET /api/v1/data/:object/export` (Display → Export as CSV / XLSX / JSON) wrote every boolean or toggle cell as `是` or `否`, whatever the caller read. The header row of the same file follows the caller's locale, so an English caller got "Converted" and "Do Not Call" over Chinese cells.
+  
+  - **Now.** A boolean or toggle cell is written in the words the import template already uses for the caller's locale: `yes` / `no`, or `是` / `否` for a `zh*` locale. The locale is the one the header row is translated to: `Accept-Language`, then `?locale=`, then the deployment's default locale. The header and the cells always read one language. This applies to csv, xlsx and json.
+  - **No locale at all.** When the request names no locale and the deployment declares no default, the cells read `yes` / `no`, the same words the import template writes then.
+  - **Re-import.** A file exported in either language re-imports its boolean column: the importer reads `yes` / `no` and `是` / `否`.
+  - **Unchanged.** No query parameter, header, column set or payload shape moves. Only the text of a boolean cell changes, and a Chinese caller's file is byte-for-byte what it was.
+- 3937697: fix(rest): the API docs viewer escapes the request-derived openapi URL for the attribute it lands in
+  
+  The `GET {base}/docs` viewer page builds the sibling openapi URL from the request and places it into a `data-url="…"` attribute of a script element. It interpolated that value into the attribute with no escaping, so a character the attribute context interprets reached the served markup as itself rather than as the matching HTML entity. The value is now escaped for its attribute context (ruling 3C on #25040: every outlet that renders a value into HTML escapes it by the context it lands in): the five characters a quoted attribute or element text interprets become their entities, and a browser decodes each back to the original character for the page script. A URL carrying none of those characters is served byte-identically.
+  
+  Clause-②: no
+- 3937697: fix(rest)!: the CSV export writes a text cell its consumer would interpret in a form that consumer reads as text, and the CSV import reverses exactly that
+  
+  Clause-②: no (narrowing) — the CSV export serves different bytes for some text cells, and the CSV import parse reads a cell of the same shape differently; nothing is widened.
+  Metadata-protocol: none (a REST export's bytes and a REST import's parse; nothing a metadata author writes changes)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the bytes one REST export format serves for some text cells and how the CSV import parse reads a cell of that same shape; stored rows are not touched. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the CSV export's bytes change for some text cells, and the CSV import reads a user-authored cell of the same shape differently), shipped as `patch` because the metadata protocol does not move.
+  
+  The CSV export (`GET /api/v1/data/:object/export?format=csv`) wrote every text cell exactly as stored, so a cell whose leading character the program the file is opened in interprets was read there as something other than text. The rule below is defined once, in `csvTextCellNeedsMark` (`packages/rest/src/export-format.ts`), and both directions read it.
+  
+  - **The export.** A CSV text cell whose first character is one of a small fixed set that its consumer interprets is written with one apostrophe (U+0027) in front of its content, before the usual RFC-4180 quoting. A text cell is a string in a column whose field is not declared numeric, boolean, date or datetime, a header label, or a reference field's display title; with no field metadata (the raw path) every string cell is one. A cell made only of digits, spaces and the characters a signed number or a phone number is written with is never marked, so phone numbers and signed amounts are byte-identical.
+  - **The import.** `parseCsvToRows` removes exactly one leading apostrophe from a cell, header row included, when the rest of the cell is one the export would mark. It serves the sync import (`POST /api/v1/data/:object/import`), the async import job (`POST /api/v1/data/:object/import/jobs`) and plugin-auth's admin user import (`POST /api/v1/auth/admin/import-users`), with an inline mapping or a named one. So a CSV exported and imported back returns the stored value, with the one exception in the next point.
+  - **A cell that begins with an apostrophe** followed by a cell the export would mark now imports without that apostrophe; the file cannot tell it from an exported one. That holds for a user-authored cell, and for a stored text value of that shape, which the export writes unchanged, so it comes back without its leading apostrophe. A cell beginning with an apostrophe followed by anything else imports unchanged.
+  - **Measured.** A value beginning with TAB or CR is marked; the import removes the mark, and the default `trimWhitespace: true` then trims the leading TAB or CR exactly as it did before. With `trimWhitespace: false` it returns exactly.
+  - **Unchanged.** Every other cell; numeric, boolean, date and datetime cells; the xlsx and json export formats; json and xlsx import payloads.
+  - **What to do.** Nothing for a file that goes back through these import doors. A program that reads the CSV export some other way and needs the stored text applies the same reversal: remove one leading apostrophe from a cell whose rest the export would mark, by the rule in this repository's `packages/rest/src/export-format.ts`.
+- 3937697: feat(rest)!: `GET {base}/docs`, the OpenAPI document's HTML viewer page, is retired; `GET {base}/openapi.json` stays
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime route retirement in RestServer.registerOpenApiEndpoints, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped: the page was an HTML answer on one REST path, and `objectstack migrate meta` has nothing to rewrite. The machine-readable document, its `api.enableOpenApi` gate and its answer are unchanged. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this route and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only / runtime-export-retired). -->
+  
+  **BREAKING** (a published route stops being served), shipped as `patch` because it is a non-protocol change: it changes what a REST caller is served, not what a metadata author can write.
+  
+  `RestServer.registerOpenApiEndpoints` mounted two routes on every base: the OpenAPI document and an HTML viewer page for it. The viewer page is retired on both route shapes, the unscoped `{base}/docs` and the environment-scoped `{base}/environments/:environmentId/docs`. Nothing read it, and the API origin serves no HTML viewer.
+  
+  - **Not served now:** `GET {base}/docs` has no route. A request to it gets the host's ordinary not-found answer, the same one any unmounted path gets: on the standard server (`@objectstack/plugin-hono-server`) that is `404` with code `ENDPOINT_NOT_FOUND`, for a signed-in caller and an anonymous one alike.
+  - **Unchanged:** `GET {base}/openapi.json` on both route shapes, its `api.enableOpenApi` gate, its anonymous `401` and the document a signed-in caller receives. The document no longer lists the `/docs` path, because it describes only mounted routes.
+  - `api.enableOpenApi` now gates one route, the document.
+  
+  What changes for you. If you opened the page, load the document from `GET {base}/openapi.json` into an OpenAPI viewer of your choice.
+- 3937697: feat: the position list can say who holds each position and which permission sets it grants, read where the resolver enforces both
+  
+  Clause-②: yes (widening: `GET /meta/position?include=grants` adds two read-only served keys per position, `_holderCount` and `_grantedPermissionSets`; `ISecurityService` gains the optional `describePositionGrants`)
+  Metadata-protocol: none
+  
+  Setup → Positions could not answer "who is a sales manager, and what do they get?". The list now can, and its answer is the enforcement path's, not a second copy of it.
+  
+  - **`GET /meta/position?include=grants`** (`@objectstack/rest`, both transports through the shared list chain). Each position gains `_holderCount` and `_grantedPermissionSets: [{ name, via }]`. Without `?include=grants` the list is unchanged, so the pickers and assignment pages that read it pay no extra read.
+  - **`via: 'definition'`** marks a set the position's `permissionSets` names. **`via: 'name'`** marks the set that shares the position's name and that the definition does not list. The position-name fold grants it anyway (the `position_name_fold_grant` warning), so the list shows it rather than hiding a grant that is in force.
+  - **The sets** are the ones the resolver grants a holder of that position alone. A position or set switched off in the activation ledger grants nothing, and a name the catalog holds no set for confers nothing.
+  - **`_holderCount`** counts the people who hold the position in the caller's active organization, by the rule the resolver uses to give a caller positions: `sys_user_position` rows in their validity window, membership roles, and `everyone` for every active member. A switched-off position keeps its holders (ADR-0049). The count is `null`, never `0`, with no active organization, for `platform_admin` and `guest`, after a truncated read, and for a caller who may not read `sys_user_position`.
+  - **`ISecurityService.describePositionGrants`** (`@objectstack/spec` contract, served by `@objectstack/plugin-security`) is optional. A security service without it serves the list undecorated, never with empty values.
+  - **`@objectstack/core`** exports `readPositionGrantsInForce` and `countPositionHolders`. `resolveUserAuthzGrants` now asks the same two rules for a caller, with no change in what it resolves.
+- 3937697: fix(rest)!: `POST /api/v1/meta/:type/:name/rollback` accepts only a positive integer as `toVersion`, and refuses everything else with its own `400 INVALID_REQUEST` instead of coercing it into a version
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. No export, type, flag or error code is added, removed or renamed: the refusal is the door's existing `INVALID_REQUEST` with its existing message. What narrows is one REST door's accept set for a request value, and the remedy is the caller sending a JSON number. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this door (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the rollback door's accept set narrows), shipped as `patch`: it changes which requests one REST door serves, not what a metadata author can write.
+  
+  The rollback door read its version with a bare `Number(...)` and accepted any result that was finite and at least 1. So `{"toVersion": true}` restored version 1, `{"toVersion": [2]}` and `{"toVersion": "2"}` restored version 2, and `{"toVersion": 1.5}` reached the protocol and answered `404 VERSION_NOT_FOUND`. This is the door that makes a caller-supplied version the live row, and its own refusal already said `'toVersion' (positive integer) is required`.
+  
+  - **FROM:** a JSON body `toVersion` (or its `version` alias) that `Number()` turned into a number of at least 1 restored that version: a boolean, a one-element array, a numeric string. A fractional value answered `404`.
+  - **TO:** the body value must be a JSON number that is a whole number of at least 1. A `?toVersion=` query string is read the way `/diff` reads its versions (`readDeclaredQueryNumber`), so `?toVersion=3` still restores version 3. Everything else, `true`, `[2]`, `"2"`, `1.5`, `0`, `-1`, `"abc"`, a blank or non-finite query value, answers `400 INVALID_REQUEST` with the same message as before, and nothing is restored.
+  - **Unchanged:** the precedence (`toVersion`, then `version`, then `?toVersion=`), the capability and walled-catalog gates in front of it, and every answer for a valid version. The client SDK's `rollbackItem` and the console's metadata client already send a JSON number.
+  - **Fix:** send `toVersion` as a JSON number, for example `{"toVersion": 2}`.
+- 3937697: fix(rest)!: a credential is honoured only in the environment whose auth service validated it, on every route behind the shared auth gate
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A request-time authentication check in the REST transport: no key of any metadata schema is removed, renamed or re-shaped, no export, type or error code is removed or renamed, and the refusal reuses the existing anonymous-deny response. There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the REST transport (ADR-0006: auth is per-environment).
+  
+  - **Before.** When the environment a request resolved to had no `auth` service of its own, the REST server validated the caller against the default environment's `auth` service and served the request. Only `GET /ui/view/:object/:type` compared the two environments.
+  - **Now.** `enforceAuth`, the shared gate every data-plane route calls, compares the environment that validated the credential with the environment the request resolved to, and refuses a mismatch with the same `401` and body an unauthenticated request receives. This covers crud, data-action, import/export, batch, sharing, approvals, analytics, search, security and the other routes behind that gate, on both the scoped (`/environments/:environmentId/...`) and the unscoped mount.
+  - **Unchanged.** A credential validated in the environment it targets is served exactly as before, and so is every request on a single-kernel deployment, where the one auth service answers for the one environment. Control-plane requests, which resolve no environment, are not compared.
+  - **Who sees it.** Only a multi-environment host whose per-environment kernels carry no `auth` service while the default environment's does. Such a request now answers `401`.
+  
+  **The remedy.** Give each environment's kernel its own `auth` service, and sign in to the environment you call.
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [4395cbc]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [9f39094]
+- Updated dependencies [3937697]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/metadata-core@18.1.0
+  - @objectstack/platform-objects@18.1.0
+  - @objectstack/types@18.1.0
+  - @objectstack/metadata@18.1.0
+  - @objectstack/observability@18.1.0
+  - @objectstack/service-package@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes

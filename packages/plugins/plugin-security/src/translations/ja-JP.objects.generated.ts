@@ -143,7 +143,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       reserved_identity_position: {
-        message: "'position' cannot spell a framework-reserved built-in identity name (platform_admin, org_owner, org_admin, org_member). These names are built-in identities: the platform projects them into current_user.positions from their own sources of truth, and a row spelling one is not an assignment of that identity. Choose a different name."
+        message: "'position' cannot spell a framework-reserved built-in identity name (platform_admin, org_owner, org_admin, org_member, org_external). These names are built-in identities: the platform projects them into current_user.positions from their own sources of truth, and a row spelling one is not an assignment of that identity. Choose a different name."
       }
     }
   }

@@ -29,6 +29,10 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // by?" — the twin of `SqlDriver.computeTenantField`, so the organization a grant
 // is stamped from is read off the SAME column the wall scopes the record by.
 import { resolveTenantFieldName } from '@objectstack/objectql';
+// [Ruling of record 6355206139] The EXTERNAL rung's OWD floor — the stamp
+// plugin-security makes and this service reads, named once in core.
+import { owdForAudience } from '@objectstack/core';
+import { MEMBERSHIP_ROLE_EXTERNAL } from '@objectstack/spec/identity';
 import { WRITE_ACCESS_LEVELS, normalizeAccessLevel } from './access-level.js';
 import { hasPhantomOwnerAnchor } from './federated-phantom-anchors.js';
 import {
@@ -81,6 +85,36 @@ function makeShareId(): string {
 
 /** System-elevated context for the plugin's own queries / mutations. */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+
+/**
+ * [#25549] A grant recipient's standing in the record's organization, the one
+ * recipient fact the D7 verdict reads ({@link SharingService} `inertGrantReason`).
+ */
+type RecipientStanding = 'external' | 'internal' | 'unknown-organization';
+
+/** [#25549] Marks a D7 refusal that only the recipient's population caused. */
+const INTERNAL_RECIPIENT_REFUSAL = Symbol.for('objectstack.sharing.internalRecipientRefusal');
+
+/**
+ * [#25549] Is `err` a grant refused because its recipient is not an external
+ * member of the record's organization, on an object whose verdict the
+ * recipient's population decides? The rule materialiser reads it to skip that
+ * recipient and keep its pass going; every other refusal still aborts.
+ */
+export function isInternalRecipientRefusal(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as any)[INTERNAL_RECIPIENT_REFUSAL] === true;
+}
+
+/**
+ * [#25549] Is this stored `sys_member.role` list exactly `external`? The twin of
+ * plugin-auth's `isExternalMembershipRole` (this package does not depend on
+ * plugin-auth): distinct, trimmed, lower-cased tokens, exactly one, `external`.
+ */
+function isExternalMembershipRole(raw: unknown): boolean {
+  if (typeof raw !== 'string') return false;
+  const tokens = [...new Set(raw.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean))];
+  return tokens.length === 1 && tokens[0] === MEMBERSHIP_ROLE_EXTERNAL;
+}
 
 /**
  * [ADR-0138 D8] Recipient values `RecordShareRecipientType` no longer declares,
@@ -186,6 +220,30 @@ export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public
     return isSystem ? 'public' : 'private';
   }
   return 'private';
+}
+
+/**
+ * [Ruling of record 6355206139, letter B] The org-wide default THIS principal
+ * meets on `object`: {@link effectiveSharingModel}, floored to owner_only for
+ * an EXTERNAL principal unless a held grant's RLS speaks for the object
+ * (`owdForAudience`, `@objectstack/core`).
+ *
+ * A `controlled_by_parent` detail is never floored here: its record access
+ * derives from its master (ADR-0055) — the security plugin's master read leaf
+ * and master write gate — and the master's own model already meets this floor
+ * for the same principal. Flooring the detail too would refuse an external the
+ * lines of a master shared to it.
+ */
+function owdForPrincipal(
+  schema: any,
+  context: ExecutionContext,
+  object: string,
+  opClass: 'read' | 'write',
+): 'private' | 'read' | 'public' {
+  const model = effectiveSharingModel(schema);
+  const declared = schema?.sharingModel ?? schema?.security?.sharingModel;
+  if (declared === 'controlled_by_parent') return model;
+  return owdForAudience(model, context, object, opClass);
 }
 
 /**
@@ -545,7 +603,13 @@ export class SharingService implements ISharingService {
     // scopes, the answer is deny-all, whatever its bound sets admit at the
     // object level.
     if (isGuestPrincipal(context)) return { id: '__deny_all__' };
-    if (effectiveSharingModel(schema) !== 'private') return null;
+    // [Ruling of record 6355206139, letter B] The EXTERNAL rung's OWD floor:
+    // for an external principal the object's org-wide default is owner_only
+    // unless a held grant's RLS speaks for the object ({@link owdForPrincipal})
+    // — so a `public_read` / `public_read_write` object
+    // answers it the rows it owns and the rows shared to it, and the OWD
+    // baseline never widens it.
+    if (owdForPrincipal(schema, context, object, 'read') !== 'private') return null;
     if (!hasOwnerField(schema)) return null;
     // [#7858] …and an `owner_id` the REGISTRY injected into a FEDERATED object
     // is not an owner column at all: the platform provisions no storage for one,
@@ -630,7 +694,10 @@ export class SharingService implements ISharingService {
 
     const schema = this.engine.getSchema?.(object);
     if (!schema) return null;
-    if (effectiveSharingModel(schema) === 'public') return null;
+    // [Ruling of record 6355206139] The write half of the EXTERNAL OWD floor
+    // (see buildReadFilter): a `public_read_write` object is not write-open to
+    // an external unless a held grant's RLS speaks for it.
+    if (owdForPrincipal(schema, context, object, 'write') === 'public') return null;
     if (!hasOwnerField(schema)) return null;
     // [#7858] The write half of the same phantom-anchor test the read filter
     // applies — the card measured BOTH gates. Fixing only the read half would
@@ -861,7 +928,8 @@ export class SharingService implements ISharingService {
     try {
       const schema = this.engine.getSchema?.(object);
       if (!schema) return 'abstain';
-      const model = effectiveSharingModel(schema);
+      // [Ruling of record 6355206139] The EXTERNAL OWD floor (buildReadFilter).
+      const model = owdForPrincipal(schema, context, object, 'write');
       if (model === 'public') return 'abstain';
       if (!hasOwnerField(schema)) return 'abstain';
       if (!context.userId) return 'deny';
@@ -944,7 +1012,8 @@ export class SharingService implements ISharingService {
     try {
       const schema = this.engine.getSchema?.(object);
       if (!schema) return 'abstain';
-      if (effectiveSharingModel(schema) === 'public') return 'abstain';
+      // [Ruling of record 6355206139] The EXTERNAL OWD floor (buildReadFilter).
+      if (owdForPrincipal(schema, context, object, 'write') === 'public') return 'abstain';
       if (!hasOwnerField(schema)) return 'abstain';
       if (!context.userId) return 'deny';
 
@@ -1309,8 +1378,27 @@ export class SharingService implements ISharingService {
    * The non-system pre-flight still turns an unresolvable name into NOT_FOUND
    * ({@link assertSharingEnforced}); that is an EXISTENCE verdict, which is a
    * different act and stays where it was.
+   *
+   * ## The one arm the recipient's population decides (#25549)
+   *
+   * The `public` arm used to be caller-free AND recipient-free: a public model
+   * reads every row for everyone, so no row was ever consulted. That stopped
+   * being true for one population. An EXTERNAL principal meets an owner_only
+   * floor on a public object ({@link owdForPrincipal}, ruling of record
+   * 6355206139), so `buildReadFilter`, `checkEdit` and `checkDelete` DO read
+   * its `sys_record_share` rows there. The verdict therefore takes the
+   * recipient's population as a second input — still never the granter's:
+   *
+   *  - `recipient` omitted — "for every recipient": the arm refuses, as before;
+   *  - `'external'` — the recipient is an `external` member of the record's
+   *    organization, and the arm admits it (`owner_id` present and not a
+   *    federated phantom anchor, since the floor composes over that column);
+   *  - `'internal'` / `'unknown-organization'` — the arm refuses, naming why.
+   *
+   * Every other arm (bypass, `controlled_by_parent` — ADR-0111 D7.2, owner-less,
+   * phantom anchor) ignores the population: no gate reads a row there for anyone.
    */
-  private inertGrantReason(object: string): string | null {
+  private inertGrantReason(object: string, recipient?: RecipientStanding): string | null {
     if (this.bypassObjects.has(object)) {
       return `'${object}' bypasses record sharing; a share row on it would never be consulted`;
     }
@@ -1321,7 +1409,18 @@ export class SharingService implements ISharingService {
     if (declared === 'controlled_by_parent') {
       return `'${object}' is controlled by its parent (master-detail); share the master record instead`;
     }
-    if (effectiveSharingModel(schema) === 'public' || !hasOwnerField(schema)) {
+    const isPublic = effectiveSharingModel(schema) === 'public';
+    if (isPublic || !hasOwnerField(schema)) {
+      // [#25549] The external floor composes over `owner_id`, so the arm can lift
+      // only where that column is real: present, and not a phantom anchor.
+      if (recipient !== undefined && isPublic && hasOwnerField(schema) && !hasPhantomOwnerAnchor(schema)) {
+        if (recipient === 'external') return null;
+        return recipient === 'internal'
+          ? `'${object}' has a public sharing model, so a share row on it is consulted only for an `
+            + `external member of the record's organization, and the recipient is not one`
+          : `'${object}' has a public sharing model, so a share row on it is consulted only for an `
+            + `external member of the record's organization, and that organization could not be resolved`;
+      }
       return `'${object}' is not under record-sharing enforcement `
         + `(public sharing model or no '${OWNER_FIELD}' field); a share row on it would never be consulted`;
     }
@@ -1381,8 +1480,64 @@ export class SharingService implements ISharingService {
    * input to this question).
    */
   private assertNotInertGrant(object: string): void {
+    // [#25549] The arm the recipient's population decides is the recipient
+    // half's ({@link assertRecipientNotInert}), asked once the organization is known.
+    if (this.recipientDecidesInertness(object)) return;
     const reason = this.inertGrantReason(object);
     if (reason) throw new Error(`SHARING_NOT_ENABLED: ${reason}`);
+  }
+
+  /**
+   * [#25549] Does the D7 verdict on `object` depend on the recipient — refused
+   * for every recipient, admitted for an external one? Defined by the verdict
+   * itself, so it cannot drift from {@link inertGrantReason}.
+   */
+  private recipientDecidesInertness(object: string): boolean {
+    return this.inertGrantReason(object) !== null && this.inertGrantReason(object, 'external') === null;
+  }
+
+  /**
+   * [#25549] The recipient half of the D7 pre-flight, run for every caller once
+   * the grant's organization is resolved: on an object whose verdict the
+   * recipient's population decides, refuse unless the recipient is an
+   * `external` member of THAT organization. A user who is external in one
+   * organization and a member of another is judged where the record lives.
+   *
+   * The refusal is the same `SHARING_NOT_ENABLED` (422) as the object half,
+   * marked with {@link INTERNAL_RECIPIENT_REFUSAL} so the rule materialiser can
+   * skip the recipient and keep its pass going ({@link isInternalRecipientRefusal}).
+   */
+  private async assertRecipientNotInert(
+    object: string,
+    recipientId: string,
+    organizationId: string | null,
+  ): Promise<void> {
+    if (!this.recipientDecidesInertness(object)) return;
+    const standing: RecipientStanding = organizationId
+      ? ((await this.isExternalMemberIn(recipientId, organizationId)) ? 'external' : 'internal')
+      : 'unknown-organization';
+    const reason = this.inertGrantReason(object, standing);
+    if (reason) {
+      throw Object.assign(new Error(`SHARING_NOT_ENABLED: ${reason}`), { [INTERNAL_RECIPIENT_REFUSAL]: true });
+    }
+  }
+
+  /**
+   * [#25549] Is `userId` an `external` member of `organizationId`? The same
+   * population test as the stage-1 doors (plugin-auth `isExternalMembershipRole`):
+   * a `sys_member` row in that organization whose role list is exactly
+   * `external`. The authorization resolver projects `org_external` from a list
+   * that CONTAINS it; the two agree on every row the engine admits, because a
+   * list carrying `external` beside another role is refused at write.
+   */
+  private async isExternalMemberIn(userId: string, organizationId: string): Promise<boolean> {
+    const rows = await this.engine.find('sys_member', {
+      where: { user_id: userId, organization_id: organizationId },
+      fields: ['role'],
+      limit: 10,
+      context: { ...SYSTEM_CTX, tenantId: organizationId },
+    });
+    return (Array.isArray(rows) ? rows : []).some((m: any) => isExternalMembershipRole(m?.role));
   }
 
   /**
@@ -1502,6 +1657,10 @@ export class SharingService implements ISharingService {
       await this.assertCanManageShares(input.object, input.recordId, context);
       organizationId = await this.resolveDirectGrantOrganization(input, context);
     }
+    // [#25549] The recipient half, on both paths: after authorization, so a
+    // refused caller never learns a recipient's population, and after the
+    // organization, because the population is judged in it.
+    await this.assertRecipientNotInert(input.object, input.recipientId, organizationId);
 
     // Upsert: if a row with same (object, record, recipient, source) exists,
     // update its access level / reason; otherwise insert a new one. `source`

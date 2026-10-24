@@ -39,6 +39,7 @@ import {
 } from '@objectstack/objectql';
 import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
+import { isInternalRecipientRefusal } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
 import { parseCriteria, isMatchAllCriteria, MATCH_ALL_CRITERIA_MESSAGE } from './rule-criteria.js';
 import { TeamGraphService, teamHasMember } from './team-graph.js';
@@ -390,6 +391,22 @@ function byName(a: SharingRuleRow, b: SharingRuleRow): number {
 export interface SharingRuleReconcilePassResult extends SharingRuleEvaluationResult {
   /** Grants the engine's organization rule refused; each one is also logged. */
   grantsRefused: number;
+  /**
+   * [#25549] One line, present only when the pass skipped recipients: the rule
+   * is anchored on a public object, where a share reaches an `external` member
+   * of the record's organization only, so no row was written for the internal
+   * recipients it expands to. The count is in the pass's log line.
+   */
+  note?: string;
+}
+
+/** What one attempted grant of a pass came to. */
+type RuleGrantOutcome = 'granted' | 'refused' | 'internal';
+
+/** [#25549] The pass's one-line note when it skipped internal recipients. */
+function internalHalfNote(object: string): string {
+  return `"${object}" has a public sharing model: rows were written for external recipients only; `
+    + 'the internal recipients this rule expands to already reach its records, so none was written for them';
 }
 
 export interface SharingRuleServiceOptions {
@@ -1231,6 +1248,7 @@ export class SharingRuleService implements ISharingRuleService {
       total.grantsUpdated += pass.grantsUpdated;
       total.grantsRevoked += pass.grantsRevoked;
       total.grantsRefused += pass.grantsRefused;
+      if (pass.note) total.note = pass.note;
     }
     return total;
   }
@@ -1635,6 +1653,7 @@ export class SharingRuleService implements ISharingRuleService {
     pass.expandedUsers = 1;
     const matchedIds = await this.findMatchingRecords(rule);
     pass.matchedRecords = matchedIds.length;
+    let skipped = 0;
     for (const recordId of matchedIds) {
       const cur = held.get(recordId);
       if (cur) {
@@ -1642,12 +1661,15 @@ export class SharingRuleService implements ISharingRuleService {
         // {@link reconcile}: a refused level update leaves the desired row.
         held.delete(recordId);
         if (cur.access_level === rule.access_level) continue;
-        if (await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId)) pass.grantsUpdated += 1;
-        else pass.grantsRefused += 1;
-      } else if (await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId)) {
-        pass.grantsCreated += 1;
+        const outcome = await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId);
+        if (outcome === 'granted') pass.grantsUpdated += 1;
+        else if (outcome === 'refused') pass.grantsRefused += 1;
+        else skipped += 1;
       } else {
-        pass.grantsRefused += 1;
+        const outcome = await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId);
+        if (outcome === 'granted') pass.grantsCreated += 1;
+        else if (outcome === 'refused') pass.grantsRefused += 1;
+        else skipped += 1;
       }
     }
     // The user's grants on records the rule no longer matches — what the
@@ -1656,7 +1678,7 @@ export class SharingRuleService implements ISharingRuleService {
       await this.sharing.revoke(String(stale.id), SYSTEM_CTX);
       pass.grantsRevoked += 1;
     }
-    return pass;
+    return this.withInternalHalfNote(rule, pass, skipped);
   }
 
   // ── internals ─────────────────────────────────────────────────────
@@ -2291,18 +2313,26 @@ export class SharingRuleService implements ISharingRuleService {
    *   retire that decision as a side effect, and its three pins are what
    *   notices.
    *
-   * Returns `true` when the grant landed, `false` when it was refused —
+   * Returns `'granted'` when the grant landed, `'refused'` when it was refused —
    * never throws for the refusal, and the caller counts what it is told.
+   *
+   * [#25549] …and `'internal'` for the one other refusal a pass absorbs: on a
+   * public object the grant service admits an `external` member of the
+   * record's organization only ({@link isInternalRecipientRefusal}). That
+   * recipient is skipped, not counted as refused — the row would never be
+   * consulted for it — and the pass reports the skipped half in one line
+   * ({@link withInternalHalfNote}). Every other D7 refusal (bypass, owner-less,
+   * `controlled_by_parent`, phantom anchor) still aborts the rule's pass.
    */
   private async grantOrAbsorbOrganizationRefusal(
     rule: SharingRuleRow,
     recordId: string,
     recipientId: string,
-  ): Promise<boolean> {
+  ): Promise<RuleGrantOutcome> {
     // A rule that may sweep nowhere matched nothing, so it never asks for a
     // grant; refused here too, so no caller can write one around the sweep.
     const context = this.sweepContextOrReport(rule);
-    if (!context) return false;
+    if (!context) return 'refused';
     try {
       await this.sharing.grant(
         {
@@ -2317,8 +2347,9 @@ export class SharingRuleService implements ISharingRuleService {
         } as any,
         context,
       );
-      return true;
+      return 'granted';
     } catch (err: any) {
+      if (isInternalRecipientRefusal(err)) return 'internal';
       if (!isSystemWriteOrganizationRequiredError(err)) throw err;
       this.logger?.warn?.(
         '[sharing-rule] grant refused by the engine organization rule — counted, pass continues',
@@ -2330,8 +2361,27 @@ export class SharingRuleService implements ISharingRuleService {
           code: SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE,
         },
       );
-      return false;
+      return 'refused';
     }
+  }
+
+  /**
+   * [#25549] Put the one-line note on a pass that skipped internal recipients,
+   * and log the count once per pass — never once per skipped grant, which on a
+   * rule over N records and M staff would be N×M lines of the same fact.
+   */
+  private withInternalHalfNote(
+    rule: SharingRuleRow,
+    pass: SharingRuleReconcilePassResult,
+    skipped: number,
+  ): SharingRuleReconcilePassResult {
+    if (skipped === 0) return pass;
+    this.logger?.info?.('[sharing-rule] internal recipients skipped on a public object — external recipients only', {
+      rule: rule.name ?? rule.id,
+      object: rule.object_name,
+      skipped,
+    });
+    return { ...pass, note: internalHalfNote(rule.object_name) };
   }
 
   /**
@@ -2362,6 +2412,7 @@ export class SharingRuleService implements ISharingRuleService {
     let updated = 0;
     let revoked = 0;
     let refused = 0;
+    let skipped = 0;
 
     // Upsert desired. [#14754] Per grant, not per pass: a refusal is counted
     // and the loop goes on, so the revoke loop below is REACHED.
@@ -2375,16 +2426,16 @@ export class SharingRuleService implements ISharingRuleService {
         // inverted, and strictly worse than the abort it replaces.
         existingMap.delete(k);
         if (cur.access_level !== rule.access_level) {
-          if (await this.grantOrAbsorbOrganizationRefusal(rule, want.record_id, want.recipient_id)) {
-            updated += 1;
-          } else {
-            refused += 1;
-          }
+          const outcome = await this.grantOrAbsorbOrganizationRefusal(rule, want.record_id, want.recipient_id);
+          if (outcome === 'granted') updated += 1;
+          else if (outcome === 'refused') refused += 1;
+          else skipped += 1;
         }
-      } else if (await this.grantOrAbsorbOrganizationRefusal(rule, want.record_id, want.recipient_id)) {
-        created += 1;
       } else {
-        refused += 1;
+        const outcome = await this.grantOrAbsorbOrganizationRefusal(rule, want.record_id, want.recipient_id);
+        if (outcome === 'granted') created += 1;
+        else if (outcome === 'refused') refused += 1;
+        else skipped += 1;
       }
     }
     // Revoke stale.
@@ -2393,7 +2444,7 @@ export class SharingRuleService implements ISharingRuleService {
       revoked += 1;
     }
 
-    return {
+    return this.withInternalHalfNote(rule, {
       ruleId: rule.id,
       matchedRecords: desiredSet.matchedRecords,
       expandedUsers: desiredSet.expandedUsers,
@@ -2401,7 +2452,7 @@ export class SharingRuleService implements ISharingRuleService {
       grantsUpdated: updated,
       grantsRevoked: revoked,
       grantsRefused: refused,
-    };
+    }, skipped);
   }
 
   private async reconcileForRecord(
@@ -2423,6 +2474,7 @@ export class SharingRuleService implements ISharingRuleService {
     let updated = 0;
     let revoked = 0;
     let refused = 0;
+    let skipped = 0;
 
     if (match) {
       // [#14754] Per grant, exactly as in {@link reconcile}: one recipient the
@@ -2436,16 +2488,16 @@ export class SharingRuleService implements ISharingRuleService {
           // desired row standing, never fall through to the revoke loop.
           existingMap.delete(userId);
           if (cur.access_level !== rule.access_level) {
-            if (await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId)) {
-              updated += 1;
-            } else {
-              refused += 1;
-            }
+            const outcome = await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId);
+            if (outcome === 'granted') updated += 1;
+            else if (outcome === 'refused') refused += 1;
+            else skipped += 1;
           }
-        } else if (await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId)) {
-          created += 1;
         } else {
-          refused += 1;
+          const outcome = await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId);
+          if (outcome === 'granted') created += 1;
+          else if (outcome === 'refused') refused += 1;
+          else skipped += 1;
         }
       }
     }
@@ -2456,7 +2508,7 @@ export class SharingRuleService implements ISharingRuleService {
       revoked += 1;
     }
 
-    return {
+    return this.withInternalHalfNote(rule, {
       ruleId: rule.id,
       matchedRecords: match ? 1 : 0,
       expandedUsers: users.length,
@@ -2464,7 +2516,7 @@ export class SharingRuleService implements ISharingRuleService {
       grantsUpdated: updated,
       grantsRevoked: revoked,
       grantsRefused: refused,
-    };
+    }, skipped);
   }
 
   /** Revoke every grant `scope` names ({@link ruleGrantScope}), one row at a time through the sharing service. */

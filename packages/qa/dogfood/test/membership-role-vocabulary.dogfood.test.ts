@@ -22,7 +22,7 @@
  *
  * Three properties, in the order a reader needs them:
  *
- *  1. both enforced selects offer the four framework roles and nothing else —
+ *  1. both enforced selects offer the five framework roles and nothing else —
  *     the closed list is the write-side guardrail;
  *  2. an app-declared name is refused AT BETTER-AUTH'S DOOR, leaving no row —
  *     it fails early and loudly, not at the insert (the #3747 symptom) and not
@@ -48,8 +48,8 @@ import { bootShowcase } from './showcase-boot.js';
 
 const SYSTEM_CTX = { isSystem: true };
 
-/** The four framework roles — `BUILTIN_MEMBERSHIP_ROLE_OPTIONS`, in order. */
-const CLOSED_VOCABULARY = ['owner', 'admin', 'delegated_admin', 'member'];
+/** The five framework roles — `BUILTIN_MEMBERSHIP_ROLE_OPTIONS`, in order (`external`: ruling 6355206139). */
+const CLOSED_VOCABULARY = ['owner', 'admin', 'delegated_admin', 'member', 'external'];
 
 /** A `position` the showcase stack declares. Under the retired channel this was
  *  a storable membership role; it must now be reachable only as a position. */
@@ -118,7 +118,7 @@ describe('ADR-0108: the membership-role vocabulary is closed; capability goes th
     return ((schema.fields.role.options ?? []) as { value: string }[]).map((o) => o.value);
   };
 
-  it('both enforced selects offer the four framework roles and nothing else', async () => {
+  it('both enforced selects offer the five framework roles and nothing else', async () => {
     // The registered schema is what the write-path validator reads AND what the
     // Setup picker renders. Nothing widens it at boot any more: no
     // `withMembershipRoleOptions`, no `kernel:ready` re-registration.

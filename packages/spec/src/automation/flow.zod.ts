@@ -1142,6 +1142,19 @@ export const FlowSchema = lazySchema(() => strictObject(
   // `ctx.user` in the hooks those writes fire, name the decider too. A flow
   // with no human decision node runs as its trigger user throughout.
   //
+  // [#25251, ruling 6354966423 letter B] …except identity assignment. The data
+  // middleware refuses, ahead of its `isSystem` bypass, a governed write
+  // (insert, update, delete, transfer, restore, purge) to `sys_user_position`,
+  // `sys_user_permission_set`, `sys_invitation` or `sys_member` from a context
+  // that carries `isSystem` AND a `flowRunId`, which is the context a `system`
+  // run's data nodes write under. The answer is `PERMISSION_DENIED` (403) and
+  // nothing is written. Reads of the four, and writes to every other object,
+  // are unchanged. The remedy for position holdings and permission-set grants
+  // is `runAs: 'user'`, so the ADR-0090 D12 delegated-administration gate
+  // judges the user the run acts for; invitations and memberships change
+  // through the organization endpoints. A platform writer whose system context
+  // carries no flow run is unchanged.
+  //
   // A run under `user` that resolves NO trigger user has nothing to scope to, so
   // its data operations are REFUSED (#3760). This is NOT a schedule-only case —
   // it is any run whose trigger supplied no user, and the commonest by far is a
@@ -1166,6 +1179,11 @@ export const FlowSchema = lazySchema(() => strictObject(
         'this segment: the trigger user until a human decision, the decider after it (RLS-respecting; the nodes ' +
         "after an approval decision run with the decider's identity and permissions, so a node the decider may " +
         'not perform is refused). ' +
+        "Elevation does not reach identity assignment: a system run's governed writes (insert, update, delete, " +
+        'transfer, restore, purge) to sys_user_position, sys_user_permission_set, sys_invitation and sys_member ' +
+        "are refused with PERMISSION_DENIED; declare user for position holdings and permission-set grants (the " +
+        'ADR-0090 D12 delegated-administration gate then judges the user the run acts for), and change invitations ' +
+        'and memberships through the organization endpoints. ' +
         'A run with no trigger user has no identity to scope to, so under user its data operations are REFUSED — ' +
         'declare system to make the elevation explicit. This covers schedule/time-relative/api triggers AND any ' +
         'record-change flow fired by a write that carried no user. Except behind an anonymous door: publish refuses ' +

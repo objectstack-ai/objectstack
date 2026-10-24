@@ -54,18 +54,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { doctorConfig } from '../utils/__tests__/doctor-config.js';
 import Doctor, {
   readDotenvFiles,
   withDotenvOverlay,
   withDotenvOverlayAsync,
   environmentSourcesCheck,
 } from './doctor.js';
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-/** `packages/cli` — the oclif root the real command is loaded against below. */
-const CLI_ROOT = path.resolve(HERE, '..', '..');
 
 /**
  * The escape is written as `\x1b`, never as the byte itself: one raw control
@@ -257,7 +253,7 @@ describe('os doctor, end to end, against a config that reads .env at top level',
     }) as never);
 
     try {
-      await Doctor.run([], { root: CLI_ROOT });
+      await Doctor.run([], await doctorConfig());
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
     } finally {

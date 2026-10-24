@@ -88,6 +88,20 @@ export function equivalentApproverAddresses(address: string): string[] {
 }
 
 /**
+ * The position `address` names — `p` for `position:<p>` — or `undefined` when
+ * it names none (a user id, an email, any other `type:value` literal, a stored
+ * `role:` slot). The inverse of {@link positionAddresses}, read where a slot
+ * address is RESOLVED to the people who could take it (`reassign`'s target
+ * check), never compared with a caller.
+ */
+export function addressedPosition(address: string): string | undefined {
+  for (const prefix of POSITION_ADDRESS_PREFIXES) {
+    if (address.startsWith(prefix)) return address.slice(prefix.length);
+  }
+  return undefined;
+}
+
+/**
  * The caller's identity as the SERVER resolved it — never a client-supplied
  * value: a body or query parameter that names an address is an ASK, judged
  * against this, never a member of it.

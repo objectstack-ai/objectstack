@@ -69,11 +69,10 @@
  * identifiers as FIXED STRINGS, which is a provably exact superset of what
  * `declarationMatcher()` can match (the regex cannot match text that lacks the literal
  * identifier), so no judgement moves into git's regex dialect — the JS regex
- * below remains the sole authority on what counts as a declaration. Reading only
- * the handful of files that mention a symbol, rather than all ~3,600, is also
- * what removes the timeout exposure: one `git grep` process instead of ~3,600
- * sequential `readFileSync` round-trips, which is the part that degrades
- * non-linearly when a runner is I/O-saturated.
+ * below remains the sole authority on what counts as a declaration. One
+ * extension-scoped `git grep` supplies the shared prefilter result; only files
+ * that mention a symbol are read for declaration matching. The scan hook's
+ * budget still applies when the runner is busy.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -81,7 +80,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** …/packages/core/src/security → repo root */
@@ -111,7 +110,7 @@ const HELPER_SYMBOL = 'withoutOperationPrivateKeys';
  * a docblock line begins with ` * `, and a string-literal or regex-source line
  * begins with something other than `const`/`let`/`var`/`function` followed by a
  * guarded name. That property is load-bearing, so it is asserted rather than
- * trusted — see the last test.
+ * trusted — see "this pin quotes both symbols without declaring them".
  *
  * Returned as a FRESH regex per call, never shared. A `/g` regex carries
  * `lastIndex` across calls, so one shared instance makes the result depend on
@@ -125,11 +124,10 @@ const declarationMatcher = (): RegExp =>
   /^\s*(?:export\s+)?(?:const|let|var|function)\s+(OPERATION_PRIVATE_KEY_PREFIX|withoutOperationPrivateKeys)\b\s*[=(<]/gm;
 
 /**
- * Generous on purpose (#7706). The scan costs tens of milliseconds, so this is
- * not a budget — it is headroom against a merge-queue runner that is doing a
- * full monorepo build at the same time. The default 5s was the whole failure:
- * the pin timed out before the assertion ran, and a pin that reports nothing is
- * indistinguishable from a pin that found nothing.
+ * The scan hook's budget includes headroom for a merge-queue runner doing a
+ * full monorepo build at the same time. The earlier filesystem crawl (#7706)
+ * timed out under the default test budget before its assertion ran. A pin that
+ * reports nothing is indistinguishable from a pin that found nothing.
  */
 const SCAN_TIMEOUT_MS = 60_000;
 
@@ -235,13 +233,12 @@ function scannedFiles(): string[] {
 }
 
 /**
- * Every path the fixed-string prefilter returns, BEFORE the extension boundary
- * — so it includes the `.tsx` (and `.md`, and config) files the scan does not
- * judge. Split out for the same reason as `authoredPaths()`: the trade the
- * boundary rests on is a claim about the files it drops, and a claim about
- * dropped files cannot be made from the set they were dropped from.
+ * The fixed-string prefilter covers `.ts` for the offender scan AND `.tsx`
+ * for the boundary-expiry assertion. Other extensions feed neither judgement,
+ * so git need not read their bytes. The `.tsx` hits must stay available before
+ * `isScannedSource` drops them from the offender population.
  */
-function prefilterHits(): string[] {
+function scanTree(): string[] {
   return git([
     'grep',
     '--files-with-matches',
@@ -254,7 +251,8 @@ function prefilterHits(): string[] {
     '-e',
     HELPER_SYMBOL,
     '--',
-    'packages',
+    ':(glob)packages/**/*.ts',
+    ':(glob)packages/**/*.tsx',
   ]);
 }
 
@@ -273,7 +271,18 @@ function declaringFiles(): string[] {
   );
 }
 
+/** One prefilter result shared by the offender, reach and boundary assertions. */
+let treeMentions: string[];
+
+function prefilterHits(): string[] {
+  return treeMentions;
+}
+
 describe('the `__` operation-private-key convention has one owner (#7284)', () => {
+  beforeAll(() => {
+    treeMentions = scanTree();
+  }, SCAN_TIMEOUT_MS);
+
   it(
     'is declared in exactly one file, and that file is the shared home',
     () => {

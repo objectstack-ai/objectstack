@@ -235,22 +235,73 @@ async function authenticate(live: LiveStart): Promise<string> {
 }
 
 /**
+ * The `beforeAll` budget, and the ONE number an install's ceiling is read from.
+ *
+ * An install had a ceiling of its own, a fixed 120 s, set on an idle machine.
+ * The file passes alone in about 76 s, all three installs included. Under a full
+ * `pnpm test` on a 4 vCPU box the first install outlived it. It was SIGKILLed
+ * with more than 390 s of the hook's 600 s left (the whole file took 209 s),
+ * and six assertions went red against correct code. A bigger constant fails
+ * the same way on a busier box. A ceiling scaled from a calibration fails too
+ * (`run-dev-unbuilt-workspace.e2e.test.ts` records both attempts).
+ *
+ * So an install has no budget of its own. It may run until this phase's
+ * deadline, the hook's start plus this budget, minus the reserve below. A slow
+ * box spends the slack the boots and the run waits did not use. An install
+ * that hangs is still killed, and the kill names the install.
+ */
+const SETUP_BUDGET_MS = 2 * BOOT_TIMEOUT_MS + 12 * RUN_WAIT_MS;
+/**
+ * What a killed install leaves the hook, before vitest's own hook timeout.
+ * The group kill, the pipes closing and the throw must land inside it. Past
+ * that, the red is `Hook timed out`, which names no step.
+ */
+const KILL_REPORT_RESERVE_MS = 10_000;
+
+interface InstallRun { exit: number | null; output: string; elapsedMs: number }
+
+/**
  * `os package install ./dist/objectstack.json` against the running runtime.
  * ⛔ Asynchronous on purpose — see the #21321 sibling: a `spawnSync` stops this
  * process draining the server's pipes for the whole install.
+ *
+ * The child runs until `deadline` (see `SETUP_BUDGET_MS`). It gets its own
+ * process group, so the kill reaches the node process `tsx` starts as well.
+ * That process holds the pipes, and `close` would wait for it. A kill REJECTS,
+ * naming the install, the wall time and the budget: the rest of the hook could
+ * only run into vitest's hook timeout. An install that exits by itself
+ * resolves, whatever its code, and the first `it` judges it.
  */
-function packageInstall(appDir: string, live: LiveStart): Promise<{ exit: number | null; output: string }> {
-  return new Promise((done) => {
+function packageInstall(appDir: string, live: LiveStart, deadline: number): Promise<InstallRun> {
+  return new Promise((done, fail) => {
+    const started = Date.now();
     const child = spawn(TSX, [CLI, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
       cwd: appDir,
       env: childEnv({ NO_COLOR: '1' }),
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
     });
     let output = '';
+    let killed = false;
     child.stdout?.on('data', (d) => { output += String(d); });
     child.stderr?.on('data', (d) => { output += String(d); });
-    const timer = setTimeout(() => child.kill('SIGKILL'), 120_000);
-    child.on('close', (code) => { clearTimeout(timer); done({ exit: code, output }); });
+    const timer = setTimeout(() => {
+      killed = true;
+      try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* group already gone */ }
+    }, Math.max(0, deadline - started));
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const elapsedMs = Date.now() - started;
+      if (!killed) {
+        done({ exit: code, output, elapsedMs });
+        return;
+      }
+      fail(new Error(
+        `os package install in ${appDir} was SIGKILLed after ${elapsedMs} ms: the setup budget ` +
+        `(${SETUP_BUDGET_MS} ms for the whole beforeAll, less a ${KILL_REPORT_RESERVE_MS} ms reserve) was spent.` +
+        `\n--- install output ---\n${output.slice(-3000)}\n--- runtime output ---\n${live.output().slice(-3000)}`,
+      ));
+    });
   });
 }
 
@@ -314,7 +365,6 @@ function sharedNames(rows: any[], key: 'name' | 'job_name'): string[] {
   return [...new Set(rows.map((r) => String(r?.[key])).filter((n) => n.endsWith(SHARED_JOB)))].sort();
 }
 
-interface InstallRun { exit: number | null; output: string }
 const readings: {
   installs: Record<string, InstallRun>;
   alphaAlone?: { answer: Answer; floor: number };
@@ -336,6 +386,7 @@ const readings: {
 } = { installs: {}, output: {} };
 
 beforeAll(async () => {
+  const deadline = Date.now() + SETUP_BUDGET_MS - KILL_REPORT_RESERVE_MS;
   const root = mkdtempSync(join(tmpdir(), 'install-local-jobs-shared-'));
   dirs.push(root);
   const appDir = (pkg: Pkg) => {
@@ -359,15 +410,15 @@ beforeAll(async () => {
   const token = await authenticate(first);
 
   // ALPHA alone: a single-package runtime.
-  readings.installs.alpha = await packageInstall(dirOf.alpha, first);
+  readings.installs.alpha = await packageInstall(dirOf.alpha, first, deadline);
   readings.alphaAlone = await awaitRuns(first, token, ALPHA, 0);
   readings.alphaAloneCatalogue = await catalogue(first, token);
 
   // BETA and GAMMA declare the same job name. The floor for ALPHA is taken
   // AFTER both installs answered, so only a run that happens once they are in
   // lifts it.
-  readings.installs.beta = await packageInstall(dirOf.beta, first);
-  readings.installs.gamma = await packageInstall(dirOf.gamma, first);
+  readings.installs.beta = await packageInstall(dirOf.beta, first, deadline);
+  readings.installs.gamma = await packageInstall(dirOf.gamma, first, deadline);
   await sleep(SETTLE_MS);
   readings.alphaAfterOthers = await awaitRuns(first, token, ALPHA, await countOf(first, token, ALPHA));
   readings.betaRuns = await awaitRuns(first, token, BETA, 0);
@@ -394,7 +445,7 @@ beforeAll(async () => {
   readings.gammaAfterAlphaGone = await awaitRuns(second, token2, GAMMA, await countOf(second, token2, GAMMA));
   readings.output.restart = second.output();
   await stopGroup(second.child);
-}, 2 * BOOT_TIMEOUT_MS + 12 * RUN_WAIT_MS);
+}, SETUP_BUDGET_MS);
 
 afterAll(async () => {
   for (const child of groups) await stopGroup(child);
@@ -406,7 +457,7 @@ const transcript = (phase: string) => `\n--- ${phase} output ---\n${(readings.ou
 describe('#21602: two packages declaring the same job name both run, and an uninstall stops only its own', () => {
   it('all three packages install (exit 0)', () => {
     for (const [name, run] of Object.entries(readings.installs)) {
-      expect(run.exit, `${name}: ${run.output}`).toBe(0);
+      expect(run.exit, `${name} (${run.elapsedMs} ms): ${run.output}`).toBe(0);
       expect(run.output, name).toMatch(/Package installed into the running kernel/);
     }
   });

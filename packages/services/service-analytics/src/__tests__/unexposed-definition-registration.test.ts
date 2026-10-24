@@ -252,8 +252,9 @@ describe('cannot answer, do not block — the registration doors\' own tiering',
       logger: recordingLogger().logger,
     });
     expect(await listed(service)).toEqual(['open_cube']);
+    // [#25561] Fail-closed, and answered as the fault it is: 503, not a 403.
     expect(pick(await rejection(() => service.query({ cube: 'open_cube', measures: ['rows'] })))).toEqual({
-      code: 'PERMISSION_DENIED', status: 403, object: OPEN,
+      code: 'SERVICE_UNAVAILABLE', status: 503, object: OPEN,
     });
   });
 

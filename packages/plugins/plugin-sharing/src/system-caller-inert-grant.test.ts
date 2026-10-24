@@ -188,6 +188,15 @@ const ALL_SCHEMAS: Record<string, any> = {
 
 const INERT_OBJECTS = Object.keys(INERT_SCHEMAS);
 
+/**
+ * [#25549] The classes on which a RULE's pass still aborts. On the public one
+ * (`whiteboard`) the grant service admits an `external` member of the record's
+ * organization and refuses everyone else, so a rule pass there skips its
+ * internal recipients and goes on — pinned below and in
+ * `external-recipient-public-object.test.ts`.
+ */
+const RULE_ABORTING_OBJECTS = INERT_OBJECTS.filter((o) => o !== 'whiteboard');
+
 function seedRows(engine: ReturnType<typeof makeEngine>) {
   for (const object of ['account', ...INERT_OBJECTS]) {
     engine._tables[object] = [
@@ -342,10 +351,20 @@ describe('[#8207] the sharing-rule evaluator can no longer materialise inert row
     accessLevel: 'read',
   } as any, SYS);
 
-  it.each(INERT_OBJECTS)('evaluating a rule on %s mints NOTHING (it minted a row pre-fix)', async (object) => {
+  it.each(RULE_ABORTING_OBJECTS)('evaluating a rule on %s mints NOTHING (it minted a row pre-fix)', async (object) => {
     await define(object);
     // `evaluateRule` does not swallow the refusal — its callers do (next block).
     await expect(rules.evaluateRule(`share_${object}_gold`, SYS)).rejects.toThrow(/SHARING_NOT_ENABLED/);
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+  });
+
+  it('[#25549] a rule on the PUBLIC object mints nothing for an internal recipient, and says so in one line', async () => {
+    await define('whiteboard');
+    // `usr_grantee` holds no `external` membership, so the public arm refuses it —
+    // a skip the pass absorbs and reports, not an abort.
+    const result = await rules.evaluateRule('share_whiteboard_gold', SYS);
+    expect(result).toMatchObject({ matchedRecords: 1, expandedUsers: 1, grantsCreated: 0, grantsRefused: 0 });
+    expect(result.note).toMatch(/external recipients only/);
     expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
   });
 
@@ -367,11 +386,11 @@ describe('[#8207] the sharing-rule evaluator can no longer materialise inert row
     // The path the card names as the one most likely to trip. `evaluateRule`
     // throws for the inert rule; `backfillRuleGrants` catches per rule, warns,
     // and carries on, so the ordinary rule is still reconciled.
-    for (const object of ['account', ...INERT_OBJECTS]) await define(object);
+    for (const object of ['account', ...RULE_ABORTING_OBJECTS]) await define(object);
     const logged: Array<{ msg: string; meta: any }> = [];
     const reconciled = await backfillRuleGrants(
       rules,
-      [{ name: 'share_account_gold' }, ...INERT_OBJECTS.map(o => ({ name: `share_${o}_gold` }))],
+      [{ name: 'share_account_gold' }, ...RULE_ABORTING_OBJECTS.map(o => ({ name: `share_${o}_gold` }))],
       {
         info: (msg: string, meta?: any) => logged.push({ msg, meta }),
         warn: (msg: string, meta?: any) => logged.push({ msg, meta }),
@@ -380,7 +399,7 @@ describe('[#8207] the sharing-rule evaluator can no longer materialise inert row
     expect(reconciled).toBe(1); // the ordinary rule, and only it
     expect(logged.some(l => l.msg.includes('boot rule backfill done'))).toBe(true);
     // Each refusal reaches the operator naming the rule AND the reason.
-    for (const object of INERT_OBJECTS) {
+    for (const object of RULE_ABORTING_OBJECTS) {
       const warn = logged.find(l => l.meta?.rule === `share_${object}_gold`);
       expect(warn?.msg).toMatch(/boot rule backfill failed for rule/);
       expect(warn?.meta?.error).toMatch(/SHARING_NOT_ENABLED/);
@@ -402,5 +421,173 @@ describe('[#8207] the sharing-rule evaluator can no longer materialise inert row
     }];
     expect(await rules.revokeRuleGrants(rule!.id)).toBe(1);
     expect(engine._tables.sys_record_share).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 3 — [#25549] the public arm, decided by the recipient's population
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * An external principal meets an owner_only floor on a public object (ruling of
+ * record 6355206139, letter B), so a share row there IS consulted — for that
+ * population only. The D7 verdict on a public object therefore admits a `user`
+ * recipient whose `sys_member.role` in the RECORD's organization is exactly
+ * `external`, and keeps the 422 for everyone else. It still never reads the
+ * granter. These pins hold the four directions: external admitted and live,
+ * internal refused, a user judged in the record's organization (not in another
+ * it belongs to), and a rule that expands to both halves.
+ */
+describe('[#25549] a public object admits a share to an external member of the record’s organization', () => {
+  const BOARD = {
+    name: 'board',
+    sharingModel: 'public_read_write',
+    fields: { id: {}, tier: {}, owner_id: { ...OWNER_FIELD_DEF }, organization_id: {} },
+  };
+  const OWNER = { userId: 'usr_owner', tenantId: 'org_a' } as any;
+  const externalIn = (org: string, userId: string) =>
+    ({ userId, tenantId: org, audience: 'external', posture: 'EXTERNAL' }) as any;
+
+  let engine: ReturnType<typeof makeEngine>;
+  let svc: SharingService;
+  beforeEach(() => {
+    engine = makeEngine({ ...ALL_SCHEMAS, board: BOARD });
+    svc = new SharingService({ engine: engine as any });
+    engine._tables.board = [
+      { id: 'b1', tier: 'gold', owner_id: 'usr_owner', organization_id: 'org_a' },
+      { id: 'b2', tier: 'gold', owner_id: 'usr_owner', organization_id: 'org_a' },
+      { id: 'b3', tier: 'silver', owner_id: 'usr_owner', organization_id: 'org_a' },
+    ];
+    engine._tables.sys_member = [
+      { id: 'm1', user_id: 'usr_ext', organization_id: 'org_a', role: 'external' },
+      { id: 'm2', user_id: 'usr_staff', organization_id: 'org_a', role: 'member' },
+      // External in org_b, a plain member of org_a — the record's organization.
+      { id: 'm3', user_id: 'usr_dual', organization_id: 'org_a', role: 'member' },
+      { id: 'm4', user_id: 'usr_dual', organization_id: 'org_b', role: 'external' },
+      // External in org_a, a member of org_b.
+      { id: 'm5', user_id: 'usr_dual2', organization_id: 'org_a', role: 'external' },
+      { id: 'm6', user_id: 'usr_dual2', organization_id: 'org_b', role: 'member' },
+      // A list the write guard refuses today; the test is "exactly external".
+      { id: 'm7', user_id: 'usr_mixed', organization_id: 'org_a', role: 'external,member' },
+    ];
+  });
+
+  it('an EXTERNAL recipient is admitted, the row carries the record’s organization, and it is LIVE for that record only', async () => {
+    await expect(
+      svc.grant({ object: 'board', recordId: 'b1', recipientId: 'usr_ext' }, OWNER),
+    ).resolves.toMatchObject({ object_name: 'board', recipient_id: 'usr_ext', organization_id: 'org_a' });
+    // The floored external reads the row it was handed beside the (empty) owner arm,
+    // and not b2, which nobody shared to it.
+    expect(await svc.buildReadFilter('board', externalIn('org_a', 'usr_ext'))).toEqual({
+      $or: [{ owner_id: 'usr_ext' }, { id: { $in: ['b1'] } }],
+    });
+  });
+
+  it('an INTERNAL recipient keeps the 422 — the row would never be consulted for it', async () => {
+    const err = await svc
+      .grant({ object: 'board', recordId: 'b1', recipientId: 'usr_staff' }, OWNER)
+      .then(() => null, (e: Error) => e);
+    // The `CODE:` prefix is what the REST layer maps to 422 (`respondSharingError`).
+    expect(err?.message.startsWith('SHARING_NOT_ENABLED:')).toBe(true);
+    expect(err?.message).toMatch(/consulted only for an external member/);
+    expect(ERROR_CODE_LEDGER['@objectstack/plugin-sharing']).toContain('SHARING_NOT_ENABLED');
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+  });
+
+  it('a user is judged in the RECORD’s organization, not in another one it belongs to', async () => {
+    // External in org_b only: refused on an org_a record.
+    await expect(
+      svc.grant({ object: 'board', recordId: 'b1', recipientId: 'usr_dual' }, OWNER),
+    ).rejects.toThrow(/^SHARING_NOT_ENABLED:/);
+    // External in org_a, member of org_b: admitted on the same record.
+    await expect(
+      svc.grant({ object: 'board', recordId: 'b1', recipientId: 'usr_dual2' }, OWNER),
+    ).resolves.toMatchObject({ recipient_id: 'usr_dual2', organization_id: 'org_a' });
+  });
+
+  it('a role list is external only when it is exactly `external`', async () => {
+    await expect(
+      svc.grant({ object: 'board', recordId: 'b1', recipientId: 'usr_mixed' }, OWNER),
+    ).rejects.toThrow(/^SHARING_NOT_ENABLED:/);
+  });
+
+  it('the verdict never reads the granter: a SYSTEM caller gets the same two answers', async () => {
+    await expect(
+      svc.grant({ object: 'board', recordId: 'b1', recipientId: 'usr_ext', source: 'rule', sourceId: 'srule_x' }, SYS),
+    ).resolves.toMatchObject({ recipient_id: 'usr_ext', organization_id: 'org_a' });
+    const asSystem = await svc
+      .grant({ object: 'board', recordId: 'b1', recipientId: 'usr_staff' }, SYS)
+      .then(() => null, (e: Error) => e.message);
+    const asUser = await svc
+      .grant({ object: 'board', recordId: 'b1', recipientId: 'usr_staff' }, OWNER)
+      .then(() => null, (e: Error) => e.message);
+    expect(asSystem).toBe(asUser);
+  });
+
+  it('the D1 management gate still runs first: a caller who cannot manage the record learns nothing about the recipient', async () => {
+    await expect(
+      svc.grant({ object: 'board', recordId: 'b1', recipientId: 'usr_ext' }, { userId: 'usr_nobody', tenantId: 'org_a' } as any),
+    ).rejects.toThrow(/^PERMISSION_DENIED:/);
+  });
+
+  it('a rule that expands to staff AND externals writes rows for the externals only, and says so in one line', async () => {
+    const logs: Array<{ msg: string; meta: any }> = [];
+    const rules = new SharingRuleService({
+      engine: engine as any,
+      sharing: svc,
+      logger: { warn: () => {}, info: (msg: string, meta?: any) => { logs.push({ msg, meta }); } },
+    });
+    engine._tables.sys_team_member = [
+      { id: 't1', team_id: 'team_vendors', user_id: 'usr_ext' },
+      { id: 't2', team_id: 'team_vendors', user_id: 'usr_staff' },
+    ];
+    await rules.defineRule({
+      name: 'share_board_gold',
+      label: 'Share gold boards',
+      object: 'board',
+      criteria: { tier: 'gold' },
+      recipientType: 'team',
+      recipientId: 'team_vendors',
+      accessLevel: 'read',
+    } as any, SYS);
+    const result = await rules.evaluateRule('share_board_gold', SYS);
+    // Two gold records × two members: two rows for the external, none for the staff
+    // member, and the skip is neither a refusal nor an abort.
+    expect(result).toMatchObject({ matchedRecords: 2, expandedUsers: 2, grantsCreated: 2, grantsRefused: 0 });
+    expect(result.note).toBe(
+      '"board" has a public sharing model: rows were written for external recipients only; '
+        + 'the internal recipients this rule expands to already reach its records, so none was written for them',
+    );
+    expect((engine._tables.sys_record_share ?? []).map((r) => r.recipient_id)).toEqual(['usr_ext', 'usr_ext']);
+    // The count reaches the log once per pass, not once per skipped grant.
+    const skipLines = logs.filter((l) => l.msg.includes('internal recipients skipped'));
+    expect(skipLines).toHaveLength(1);
+    expect(skipLines[0].meta).toMatchObject({ rule: 'share_board_gold', object: 'board', skipped: 2 });
+  });
+
+  it('ANTI-VACUITY: a rule that expands to externals only carries no note', async () => {
+    const rules = new SharingRuleService({ engine: engine as any, sharing: svc, logger: { warn: () => {}, info: () => {} } });
+    await rules.defineRule({
+      name: 'share_board_ext',
+      label: 'Share gold boards with the supplier',
+      object: 'board',
+      criteria: { tier: 'gold' },
+      recipientType: 'user',
+      recipientId: 'usr_ext',
+      accessLevel: 'read',
+    } as any, SYS);
+    const result = await rules.evaluateRule('share_board_ext', SYS);
+    expect(result).toMatchObject({ grantsCreated: 2 });
+    expect(result.note).toBeUndefined();
+  });
+
+  it('the other D7 arms ignore the population: an owner-less public object still refuses an external', async () => {
+    engine = makeEngine({ ...ALL_SCHEMAS, board: { ...BOARD, fields: { id: {}, tier: {}, organization_id: {} } } });
+    engine._tables.board = [{ id: 'b1', tier: 'gold', organization_id: 'org_a' }];
+    engine._tables.sys_member = [{ id: 'm1', user_id: 'usr_ext', organization_id: 'org_a', role: 'external' }];
+    svc = new SharingService({ engine: engine as any });
+    await expect(
+      svc.grant({ object: 'board', recordId: 'b1', recipientId: 'usr_ext', source: 'rule' }, SYS),
+    ).rejects.toThrow(/not under record-sharing enforcement/);
   });
 });

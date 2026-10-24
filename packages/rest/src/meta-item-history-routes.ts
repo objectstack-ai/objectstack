@@ -797,7 +797,7 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                     });
                     return;
                 }
-                // [#6877] The `Number(...)` below already refuses an array
+                // [#6877] The version read below already refuses an array
                 // — but as `INVALID_REQUEST` "'toVersion' (positive integer)
                 // is required", which tells a caller who supplied two valid
                 // integers that they supplied none. Refusing the multiplicity
@@ -806,9 +806,33 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 if (refuseUnknownQueryParams(req, res, META_ITEM_ROLLBACK_PARAMS)) return;
                 if (refuseRepeatedQueryParams(req, res, ['toVersion', META_ITEM_MEMBER_PARAM])) return;
                 const body = (req.body && typeof req.body === 'object') ? req.body : {};
-                const toVersionRaw = body.toVersion ?? body.version ?? req.query?.toVersion;
-                const toVersion = Number(toVersionRaw);
-                if (!Number.isFinite(toVersion) || toVersion < 1) {
+                // [#25482] `toVersion` names a history row, so only a positive
+                // integer is a version. A bare `Number(...)` here coerced
+                // whatever came — `true` restored v1, `[2]` and `"2"` restored
+                // v2, and `1.5` reached the protocol and answered `404` — on the
+                // one door that restores a caller-supplied version as live. The
+                // JSON body is typed, so its value is judged AS IT CAME against
+                // the same whole-number declaration `/diff` reads (the client
+                // SDK's `rollbackItem` and the console's metadata client both
+                // send a JSON number); only the untyped query string goes
+                // through `readDeclaredQueryNumber`'s faithful coercion.
+                // Precedence is unchanged — `toVersion`, then the `version`
+                // alias, then `?toVersion=` — and every refusal stays this
+                // door's own `INVALID_REQUEST`.
+                const bodyVersion = body.toVersion ?? body.version;
+                let toVersion: number | undefined;
+                if (bodyVersion !== undefined && bodyVersion !== null) {
+                    const parsed = UNDECLARED_WHOLE_NUMBER_PARAM.safeParse(bodyVersion);
+                    toVersion = parsed.success ? parsed.data : undefined;
+                } else {
+                    try {
+                        toVersion = readDeclaredQueryNumber(req.query, 'toVersion',
+                            UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
+                    } catch {
+                        toVersion = undefined;
+                    }
+                }
+                if (toVersion === undefined || toVersion < 1) {
                     res.status(400).json({
                         error: `'toVersion' (positive integer) is required`,
                         code: 'INVALID_REQUEST',

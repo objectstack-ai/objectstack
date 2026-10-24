@@ -5018,6 +5018,42 @@ describe('translateView — the catalog loses to an explicit override (ADR-0029 
     expect(def(out, 'skip').label).toBe('跳过');
   });
 
+  // #24798: `confirmText` is a template slot, so a served view and its
+  // packaged base may each hold the parsed `{ dialect: 'template', source }`
+  // envelope. Both sides are compared by their source, never by reference.
+  const envelope = (source: string) => ({ dialect: 'template' as const, source });
+  const withEnvelope = (view: any): any => {
+    const out = clone(view);
+    const markDone = def(out, 'mark_done');
+    markDone.confirmText = envelope(markDone.confirmText);
+    return out;
+  };
+
+  it('an unedited envelope-form confirmText still gets the catalog (#24798)', () => {
+    const base = withEnvelope(PACKAGED);
+    const out: any = translateView(clone(base), BUNDLE, { locale: 'zh-CN', packagedBase: base });
+    expect(def(out, 'mark_done').confirmText).toBe('确定将所选任务标记为完成吗？');
+  });
+
+  it('a diverged envelope-form confirmText keeps the authored sentence (#24798)', () => {
+    const base = withEnvelope(PACKAGED);
+    const doc = clone(base);
+    def(doc, 'mark_done').confirmText = envelope('Close {{ count }} tasks?');
+    const out: any = translateView(doc, BUNDLE, { locale: 'zh-CN', packagedBase: base });
+    expect(def(out, 'mark_done').confirmText).toEqual(envelope('Close {{ count }} tasks?'));
+    // The other strings on the def are judged on their own and stay translated.
+    expect(def(out, 'mark_done').label).toBe('标记完成');
+  });
+
+  it('a bare string and an envelope with the same source are the same sentence (#24798)', () => {
+    // The served side bare, the packaged side parsed — and the other way round.
+    const parsedBase = withEnvelope(PACKAGED);
+    const fromBare: any = translateView(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: parsedBase });
+    expect(def(fromBare, 'mark_done').confirmText).toBe('确定将所选任务标记为完成吗？');
+    const fromParsed: any = translateView(withEnvelope(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(def(fromParsed, 'mark_done').confirmText).toBe('确定将所选任务标记为完成吗？');
+  });
+
   it('a def or param the package does not ship was authored after the fact and keeps its strings', () => {
     const doc = clone(PACKAGED);
     doc.config.bulkActionDefs.push({ name: 'added_def', label: 'Added by the org', operation: 'update', patch: {} });

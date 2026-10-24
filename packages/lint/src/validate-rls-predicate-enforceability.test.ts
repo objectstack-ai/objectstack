@@ -1226,7 +1226,7 @@ describe('[#22161] one-line verdicts — the five ids', () => {
     [RLS_PREDICATE_UNPARSEABLE]: ['legacy SQL bridge', '`IN` to `in`', 'ZERO rows', 'PermissionDeniedError', 'rls-predicate-over-budget'],
     [RLS_PREDICATE_OVER_BUDGET]: ['maxAstNodes', 'no syntax or dialect error', 'ZERO rows', 'PermissionDeniedError'],
     [RLS_PREDICATE_UNKNOWN_FIELD]: ['RENAME', 'COMPILED predicate', 'ZERO rows', 'failed OPEN'],
-    [RLS_PREDICATE_UNKNOWN_USER_VARIABLE]: ['§7.3.1 membership sets', 'ARRAYS', 'EVERY position', 'never reported'],
+    [RLS_PREDICATE_UNKNOWN_USER_VARIABLE]: ['§7.3.1 membership sets', 'ARRAYS', 'EVERY position', 'not reported by `os validate`'],
   };
 
   it('covers exactly the five ids', () => {

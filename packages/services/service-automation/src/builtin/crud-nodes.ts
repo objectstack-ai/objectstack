@@ -477,7 +477,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                             type: 'array', items: { type: 'string' }, title: 'Fields',
                             description: 'Field projection — only these fields are read (default: all).',
                         },
-                        limit: { type: 'integer', title: 'Limit' },
+                        // `minimum: 1` mirrors the contract: `GetRecordConfigSchema.limit`
+                        // is a positive integer, refused below 1 at every flow save
+                        // door, so the form never offers a value the save refuses.
+                        limit: { type: 'integer', minimum: 1, title: 'Limit' },
                         outputVariable: { type: 'string', title: 'Output variable' },
                     },
                     required: ['objectName'],

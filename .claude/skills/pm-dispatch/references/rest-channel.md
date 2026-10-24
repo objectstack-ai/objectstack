@@ -59,7 +59,7 @@
 ## 不可迁移 —— 只有这三件,围着它们排计划;红窗守候规则住 `platform-readings.md` 配额段
 
 1. 语义搜索:`/search/*` 被出口代理按设计拒绝。退路 = REST 列表端点加本地 grep。
-2. Projects field_values:GraphQL-only —— 舰队并不需要它;MCP 服务器端无条件抓它才是漏点。
+2. 看板(org Project)field_values:GraphQL-only,舰队不需要它;MCP 服务端无条件抓它才是漏点。
 3. `issue transfer`:issues 端点表无此路由(未实调)⇒ 同为 GraphQL-only;配方住 `platform-readings.md`。
 
 ## 第三桶 —— git 零配额等价物

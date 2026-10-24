@@ -194,3 +194,51 @@ describe('served mail/test — the recipient', () => {
     expect(nm.sendMail).not.toHaveBeenCalled();
   });
 });
+
+// Every recipient refusal is admin copy: the settings page shows it beside the
+// Send test email button, which has no recipient field. It names what the admin
+// does there, never a request field or an endpoint — the `to` override is
+// API-caller detail, documented in `resolveMailTestRecipient`'s TSDoc.
+describe('served mail/test — the recipient refusals are admin copy', () => {
+  const adminCopy = (message: unknown) => {
+    expect(typeof message).toBe('string');
+    const text = message as string;
+    expect(text).toContain('nothing was sent');
+    expect(text).toContain('Send test email');
+    expect(text).not.toContain('/api/');
+    expect(text).not.toMatch(/request body/i);
+    expect(text).not.toMatch(/pass "to"/i);
+  };
+
+  it.each([
+    ['an account with no email address', [{ id: ADMIN_ID, email: null }], {},
+      'Your account has no email address', 'signed in as an admin whose account has an email address'],
+    ['an account row that is missing', [], {},
+      'Your account has no email address', 'signed in as an admin whose account has an email address'],
+    ['a failed account read', [{ id: ADMIN_ID, email: ADMIN_EMAIL }], { userReadFails: true },
+      'Could not read your account\'s email address', 'once your account can be read'],
+  ] as const)('%s', async (_name, users, opts, opening, remedy) => {
+    const { pressSendTest } = await serve([...users], opts);
+
+    const answer = await pressSendTest({});
+
+    expect(answer.status).toBe(400);
+    expect(answer.body?.error?.code).toBe('SETTINGS_ACTION_FAILED');
+    const message = answer.body?.error?.details?.message;
+    expect(message).toMatch(new RegExp(`^${opening}`));
+    expect(message).toContain(remedy);
+    adminCopy(message);
+    expect(nm.sendMail).not.toHaveBeenCalled();
+  });
+
+  it('no signed-in user (in-process call)', async () => {
+    const { settings } = await serve([{ id: ADMIN_ID, email: ADMIN_EMAIL }]);
+
+    const result = await settings.runAction('mail', 'test', {}, {});
+
+    expect(result.message).toMatch(/^No recipient — nothing was sent\./);
+    expect(result.message).toContain('Sign in as an admin whose account has an email address');
+    adminCopy(result.message);
+    expect(nm.sendMail).not.toHaveBeenCalled();
+  });
+});

@@ -77,23 +77,21 @@
  * ## Who is told
  *
  * The log, always, once per category. And the people who can act on the
- * choice:
+ * choice, through `upgrade-report-delivery.ts`:
  *
  *  - under `single`, through the existing notification ingress
- *    (`messaging.emit()`, ADR-0030: a `sys_notification` event in Setup's
- *    Notification Events, and the in-app inbox), to the Default
- *    Organization's `admin_full_access` holders and any
- *    `OS_PLATFORM_OWNER_EMAIL` address. The notification's `dedupKey` is the
- *    finding set's digest, so an unchanged set notifies once, not once per
- *    boot. No messaging service, nobody to tell, or a refused emit: one log
- *    line says so, with the fix for that cause;
- *  - under a wall (`group`, `isolated`), the operator alone, by one `error`
- *    line addressed to the operator. The ledger and the catalog are
- *    deployment-level and only the operator may switch or clone there
- *    (ADR-0126 §5, ADR-0131 D3); the notification family is
- *    organization-scoped, so a walled write with no organization is refused
- *    (ADR-0131 D9), and stamping an organization would tell a tenant. No
- *    notification is attempted.
+ *    (`messaging.emit()`, ADR-0030), to the Default Organization's
+ *    `admin_full_access` holders and any `OS_PLATFORM_OWNER_EMAIL` address.
+ *    The notification's `dedupKey` is the finding set's digest, so an
+ *    unchanged set notifies once, not once per boot;
+ *  - under a wall (`group`, `isolated`), the operator alone. The ledger and
+ *    the catalog are deployment-level and only the operator may switch or
+ *    clone there (ADR-0126 §5, ADR-0131 D3). One `error` line addressed to the
+ *    operator is written. When `OS_PLATFORM_OWNER_ORGANIZATION` names an
+ *    organization, the same notification is also raised in-app there,
+ *    addressed to the operators (#25413). Otherwise no notification is
+ *    attempted: a walled write with no organization is refused (ADR-0131 D9),
+ *    and stamping a tenant's organization would tell that tenant.
  *
  * ## When it runs
  *
@@ -104,14 +102,16 @@
 import { createHash } from 'node:crypto';
 import {
   METADATA_ACTIVATION_TABLE,
-  readDefaultOrganizationId,
-  resolvePlatformAdminEmails,
   type SecurityCatalogEntry,
   type SecurityCatalogReader,
 } from '@objectstack/core';
 import { isTenantAuthored } from '@objectstack/metadata-core';
-import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
-import { GRANT_OBJECT, GRANT_SET_NAME_FIELD } from './grant-permission-set-name.js';
+import {
+  deliverUpgradeReport,
+  type UpgradeReportDelivery,
+  type UpgradeReportLogger,
+  type UpgradeReportNotifier,
+} from './upgrade-report-delivery.js';
 
 /** The notification topic the report is raised on. */
 export const ACCESS_UPGRADE_TOPIC = 'security.access_upgrade';
@@ -549,61 +549,17 @@ export function hasAccessUpgradeFindings(report: AccessUpgradeReport): boolean {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** The kernel logger, as this module uses it. */
-export interface AccessUpgradeReportLogger {
-  info?: (message: string, meta?: Record<string, any>) => void;
-  warn: (message: string, meta?: Record<string, any>) => void;
-  error?: (message: string, cause?: Error, meta?: Record<string, any>) => void;
-}
+export type AccessUpgradeReportLogger = UpgradeReportLogger;
 
 /** The notification ingress, as this module uses it — service-messaging's `emit`. */
-export interface AccessUpgradeNotifier {
-  emit(input: {
-    topic: string;
-    audience: readonly string[];
-    severity: 'warning';
-    dedupKey: string;
-    organizationId?: string;
-    payload: Record<string, unknown>;
-  }): Promise<unknown>;
-}
+export type AccessUpgradeNotifier = UpgradeReportNotifier;
 
 export interface AccessUpgradeBootDeps extends AccessUpgradeReportDeps {
   logger?: AccessUpgradeReportLogger;
   /** The `messaging` service; absent when the composition has none. */
   messaging?: AccessUpgradeNotifier;
-  /** `true` under `group` / `isolated`: the operator alone is told, in the log. */
+  /** `true` under `group` / `isolated`: the operator alone is told (see `upgrade-report-delivery.ts`). */
   walled: boolean;
-}
-
-/** Who the report is delivered to, and the organization a `single` delivery is stamped with. */
-export interface AccessUpgradeAudience {
-  recipients: string[];
-  organizationId?: string;
-}
-
-/**
- * The people who can act on an access choice under `single`: any configured
- * platform operator and every holder of the Default Organization's
- * `admin_full_access` grant. A read that throws propagates. (Under a wall no
- * audience is resolved: see {@link reportAccessUpgrade}.)
- */
-export async function resolveAccessUpgradeAudience(
-  engine: AccessUpgradeReportEngine,
-): Promise<AccessUpgradeAudience> {
-  const recipients = [...resolvePlatformAdminEmails().emails];
-  const organizationId = await readDefaultOrganizationId(engine);
-  if (organizationId === undefined || !engine.getObject(GRANT_OBJECT)) return { recipients };
-  const grants = await engine.find(GRANT_OBJECT, {
-    where: { [GRANT_SET_NAME_FIELD]: ADMIN_FULL_ACCESS, organization_id: organizationId },
-    fields: ['user_id'],
-    limit: 10000,
-    context: SYSTEM_CTX,
-  });
-  for (const row of Array.isArray(grants) ? grants : []) {
-    const userId = nameOf((row as Record<string, unknown>)?.user_id);
-    if (userId !== undefined && !recipients.includes(userId)) recipients.push(userId);
-  }
-  return { recipients, organizationId };
 }
 
 function listed<T>(items: readonly T[]): { items: T[]; more?: number } {
@@ -706,29 +662,22 @@ function logReport(report: AccessUpgradeReport, logger?: AccessUpgradeReportLogg
   }
 }
 
-/** What the boot report did with its findings. */
-export interface AccessUpgradeDelivery {
-  /**
-   * `notified`: handed to the ingress (`single`). `operator-log`: walled, so
-   * the operator's line in this log is the channel. `undelivered`: `single`
-   * findings that reached no administrator, said in the log with the cause.
-   */
-  outcome: 'clean' | 'stopped' | 'notified' | 'operator-log' | 'undelivered';
-  recipients: string[];
+/** What the boot report did with its findings: `clean` or `stopped`, else the delivery's own answer. */
+export interface AccessUpgradeDelivery extends Omit<UpgradeReportDelivery, 'outcome' | 'findingSet'> {
+  outcome: 'clean' | 'stopped' | UpgradeReportDelivery['outcome'];
   /** The finding set's digest — the notification's `dedupKey`. */
   findingSet?: string;
-  reason?: string;
 }
+
+/** Why only the operator can act on access findings under a wall: the delivery's operator line. */
+const ACCESS_OPERATOR_REASON =
+  'the activation ledger and the security catalog are shared by every organization — so only the operator can act ' +
+  'on them, through the activation and clone doors.';
 
 /**
  * The boot entry: collect, log, and raise the findings to the people who can
- * act on them. Never throws for a read or a delivery that did not happen.
- *
- * Under a wall the notification is never attempted: the findings are
- * deployment-level, the operator alone can act on them, and the notification
- * family is organization-scoped, so a walled system write with no organization
- * is refused (ADR-0131 D9) and stamping one would hand the finding to a tenant.
- * One `error` line addressed to the operator is the channel there.
+ * act on them, through `upgrade-report-delivery.ts`. Never throws for a read
+ * or a delivery that did not happen.
  */
 export async function reportAccessUpgrade(
   engine: AccessUpgradeReportEngine,
@@ -739,55 +688,6 @@ export async function reportAccessUpgrade(
   if (report.stopped) return { report, delivery: { outcome: 'stopped', recipients: [] } };
   if (!hasAccessUpgradeFindings(report)) return { report, delivery: { outcome: 'clean', recipients: [] } };
 
-  const findingSet = accessUpgradeDedupKey(report);
-  if (deps.walled) {
-    const operators = [...resolvePlatformAdminEmails().emails];
-    logError(
-      deps.logger,
-      '[security] platform operator: the access upgrade findings above are deployment-level — the activation ledger ' +
-        'and the security catalog are shared by every organization — so only the operator can act on them, through ' +
-        'the activation and clone doors. This tenancy posture has no in-app channel for a deployment-level ' +
-        'notification, so this log is where they are raised; no organization is told. ' +
-        (operators.length > 0
-          ? 'The configured operator(s) are named in this line.'
-          : 'No operator is configured: set OS_PLATFORM_OWNER_EMAIL to name the platform operator.'),
-      { findingSet, operators },
-    );
-    return { report, delivery: { outcome: 'operator-log', recipients: operators, findingSet } };
-  }
-
-  const undelivered = (
-    reason: string,
-    fix: string,
-    recipients: string[] = [],
-  ): { report: AccessUpgradeReport; delivery: AccessUpgradeDelivery } => {
-    logError(
-      deps.logger,
-      `[security] the access upgrade findings above reached no administrator: ${reason}. They are in this log only. ` +
-        `Fix: ${fix}`,
-      { findingSet },
-    );
-    return { report, delivery: { outcome: 'undelivered', recipients, findingSet, reason } };
-  };
-  if (!deps.messaging || typeof deps.messaging.emit !== 'function') {
-    return undelivered('this composition has no messaging service', 'compose the messaging service.');
-  }
-
-  let audience: AccessUpgradeAudience;
-  try {
-    audience = await resolveAccessUpgradeAudience(engine);
-  } catch (e) {
-    return undelivered(
-      `the administrators could not be read (${errorText(e)})`,
-      'restore the store the grants are read from; the next boot reads them again.',
-    );
-  }
-  if (audience.recipients.length === 0) {
-    return undelivered(
-      'no administrator is configured or granted',
-      'grant admin_full_access in the Default Organization, or set OS_PLATFORM_OWNER_EMAIL.',
-    );
-  }
   const counts = {
     reEnablements: report.reEnablements.length,
     orphans: report.orphans.length,
@@ -795,32 +695,23 @@ export async function reportAccessUpgrade(
     brokenReferences: report.brokenReferences.length,
     uncoveredDenies: report.uncoveredDenies.length,
   };
-  try {
-    await deps.messaging.emit({
-      topic: ACCESS_UPGRADE_TOPIC,
-      audience: audience.recipients,
-      severity: 'warning',
-      dedupKey: findingSet,
-      ...(audience.organizationId !== undefined ? { organizationId: audience.organizationId } : {}),
-      payload: {
-        title: 'An upgrade changed what your access settings cover',
-        body:
-          'A package upgrade renamed, removed or collided with a sharing rule, permission set, position or ' +
-          'capability your settings name. ' +
-          (counts.reEnablements > 0
-            ? `${counts.reEnablements} item(s) you switched off may be active again under a new name. `
-            : '') +
-          'Nothing was changed. The server log line "[security] access upgrade" lists each finding with its fix.',
-        counts,
-        findings: accessUpgradeSummary(report),
-      },
-    });
-  } catch (e) {
-    return undelivered(
-      `the notification ingress refused it (${errorText(e)})`,
-      'repair the cause the ingress names; the next boot raises the same findings again.',
-      audience.recipients,
-    );
-  }
-  return { report, delivery: { outcome: 'notified', recipients: audience.recipients, findingSet } };
+  const delivery = await deliverUpgradeReport(engine, deps, {
+    topic: ACCESS_UPGRADE_TOPIC,
+    findingSet: accessUpgradeDedupKey(report),
+    subject: 'the access upgrade findings above',
+    operatorReason: ACCESS_OPERATOR_REASON,
+    payload: {
+      title: 'An upgrade changed what your access settings cover',
+      body:
+        'A package upgrade renamed, removed or collided with a sharing rule, permission set, position or ' +
+        'capability your settings name. ' +
+        (counts.reEnablements > 0
+          ? `${counts.reEnablements} item(s) you switched off may be active again under a new name. `
+          : '') +
+        'Nothing was changed. The server log line "[security] access upgrade" lists each finding with its fix.',
+      counts,
+      findings: accessUpgradeSummary(report),
+    },
+  });
+  return { report, delivery };
 }

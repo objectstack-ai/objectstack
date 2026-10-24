@@ -1527,6 +1527,61 @@ class ExtensionDefaultRowScopeRefusedError extends Error {
 }
 
 /**
+ * {@link ExtensionMembershipKeysRefusedError}'s code — `INVALID_METADATA`, for
+ * the reason {@link EXTENSION_DEFAULT_ROW_SCOPE_REFUSED_CODE} gives:
+ * `ObjectExtensionSchema` is strict and declares no `membershipKeys`, so the
+ * parse refuses the same body at authoring. ⛔ Not a new code. The condition is
+ * named by the error's `name`.
+ */
+export const EXTENSION_MEMBERSHIP_KEYS_REFUSED_CODE = 'INVALID_METADATA' as const;
+
+/**
+ * [#25234 ruling A, refusal 10] An `extend` contribution carried
+ * `membershipKeys`. A membership key is declared by the package that owns the
+ * roster object whose rows define it (`ObjectExtensionSchema`'s guidance): the
+ * key decides which records a `current_user.KEY` policy lets a caller reach,
+ * so another package must not be able to add one to an object it does not own.
+ *
+ * Refused whatever the value and whatever the target, as
+ * {@link ExtensionDefaultRowScopeRefusedError} is: the fold
+ * ({@link mergeObjectDefinitions}) never carries the key onto the resolved
+ * object, so accepting it would leave a declaration its author believes the
+ * security plugin reads and nothing reads. A contribution that leaves the key
+ * alone registers exactly as before.
+ *
+ * Reachable only by a caller that skips the parse — a direct
+ * `registerObject(def, pkg, undefined, 'extend')` call: the manifest path
+ * (`ObjectQL.registerApp`) copies a closed key list off each
+ * `objectExtensions` entry, and the entry's schema refuses the key at
+ * authoring.
+ *
+ * The ADR-0112 envelope (`code` + `status: 422`), never a bare throw.
+ */
+class ExtensionMembershipKeysRefusedError extends Error {
+  readonly code = EXTENSION_MEMBERSHIP_KEYS_REFUSED_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
+  /** The object the extension targets. */
+  readonly objectName: string;
+  /** The package whose `extend` contribution this refusal stopped. */
+  readonly packageId: string | undefined;
+
+  constructor(objectName: string, packageId: string | undefined) {
+    super(
+      `Object "${objectName}": the \`extend\` contribution from package "${packageId}" carries ` +
+        '`membershipKeys`. A membership key is declared only by the package that owns the roster object ' +
+        'whose rows define it, and the extension merge never carries it onto the object. Remove ' +
+        '`membershipKeys` from the extension: declare the key on an object your own package defines, or ' +
+        'ask the owning package to declare it.',
+    );
+    this.name = 'ExtensionMembershipKeysRefusedError';
+    this.objectName = objectName;
+    this.packageId = packageId;
+  }
+}
+
+/**
  * [#16319] The registration-door field-`type` check — the single point of
  * closure the ruling names.
  *
@@ -3314,6 +3369,12 @@ export class SchemaRegistry {
     // contributor list is opened, so a refused contribution leaves nothing behind.
     if (ownership === 'extend' && (schema as { defaultRowScope?: unknown }).defaultRowScope !== undefined) {
       throw new ExtensionDefaultRowScopeRefusedError(schema.name, packageId);
+    }
+    // [#25234 ruling A, refusal 10] Nor does it declare a membership key — see
+    // {@link ExtensionMembershipKeysRefusedError}. The same door, for the same
+    // reason, so a refused contribution leaves nothing behind.
+    if (ownership === 'extend' && (schema as { membershipKeys?: unknown }).membershipKeys !== undefined) {
+      throw new ExtensionMembershipKeysRefusedError(schema.name, packageId);
     }
 
     // [#23065] A `tree` field that names no `reference` references the object

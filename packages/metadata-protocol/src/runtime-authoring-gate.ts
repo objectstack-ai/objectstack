@@ -1024,6 +1024,17 @@ export function evaluateRuntimeAuthoringGate(args: {
      * position is judged on the body as sent.
      */
     restoredCredentialPaths?: readonly string[];
+    /**
+     * [#25234] The keys the registered membership resolver owns
+     * (`IRlsMembershipResolver.keys` of the service registered under
+     * `RLS_MEMBERSHIP_RESOLVER_SERVICE`), `[]` when none is registered. A fact
+     * only the host holds, of the #6285 kind: gathered by the impure caller
+     * and handed to the shared rules, which then refuse a membership key both
+     * a declaration and the resolver own, and a policy reading a key in a
+     * membership position that nobody owns. Absent (a host without a service
+     * registry), both are judged as on the CLI: not at all.
+     */
+    rlsMembershipResolverKeys?: readonly string[];
 }): RuntimeAuthoringVerdict {
     // D1 — drafts are never gated. Publishing one runs this same function.
     // No rules ran, so there is nothing to report on either half.
@@ -1053,6 +1064,9 @@ export function evaluateRuntimeAuthoringGate(args: {
         ...(args.judgeFilter !== undefined ? { judgeFilter: args.judgeFilter } : {}),
         ...(args.restoredCredentialPaths !== undefined
             ? { restoredCredentialPaths: args.restoredCredentialPaths }
+            : {}),
+        ...(args.rlsMembershipResolverKeys !== undefined
+            ? { rlsMembershipResolverKeys: args.rlsMembershipResolverKeys }
             : {}),
     });
 

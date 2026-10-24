@@ -161,7 +161,8 @@
  * build-task inputs and `globalDependencies` come out of turbo.json, and the
  * builds Build Core does not run come out of the root manifest's `build`
  * script (`--filter=!<package>`), which is what the job's `run: pnpm build`
- * expands to. Every misreading of that script can only drop an exclusion,
+ * expands to (followed, at most, by the closed BUILD_COMMAND_FLAGS list:
+ * reporting flags that change no task, #25374). Every misreading of that script can only drop an exclusion,
  * which REQUIRES more of `core` -- a loud red, never a silent gap. The only
  * constant is turbo.json itself, which is the config being read.
  *
@@ -276,7 +277,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(6) the real tree': 10,
   '(7) WIRING: the gate and its self-test really run in CI': 2,
   '(8) the `console` selection and the dist key it must move': 20,
-  '(9) Build Core and the build inputs turbo.json declares': 33,
+  '(9) Build Core and the build inputs turbo.json declares': 42,
   '(10) Build Core and the scripts its own steps run': 30,
 });
 
@@ -644,6 +645,23 @@ export const TURBO_CONFIG = 'turbo.json';
 export const ROOT_MANIFEST = 'package.json';
 /** The step Build Core runs, verbatim; the manifest's `build` script is what it expands to. */
 const BUILD_COMMAND = 'pnpm build';
+/**
+ * The CLOSED list of words that may follow BUILD_COMMAND in that step. Each
+ * changes what turbo REPORTS, never which tasks it runs or how they hash
+ * (measured: 83 of 83 hashes identical with and without, `--dry=json`, turbo
+ * 2.11.5), and the remote-cache assertion after the step reads both
+ * (#25374). ⛔ No pattern over "any flag": a `--filter` or `--affected` here
+ * changes the task set the manifest's script says, and must refuse.
+ */
+const BUILD_COMMAND_FLAGS = Object.freeze([/^--summarize$/, /^--log-file=\S+$/]);
+
+/** Whether a `run:` is BUILD_COMMAND followed only by BUILD_COMMAND_FLAGS. */
+export function isBuildCommand(run) {
+  if (typeof run !== 'string') return false;
+  const words = run.trim().split(/\s+/);
+  if (words.slice(0, 2).join(' ') !== BUILD_COMMAND) return false;
+  return words.slice(2).every((w) => BUILD_COMMAND_FLAGS.some((re) => re.test(w)));
+}
 /** The prefix turbo.json spells a repo-root-relative input with. */
 const TURBO_ROOT = '$TURBO_ROOT$/';
 
@@ -794,7 +812,7 @@ export function judgeBuildInputs(source, turboSource, manifestSource, closureOf 
     };
   }
   const steps = Array.isArray(job.steps) ? job.steps : [];
-  if (!steps.some((s) => typeof s?.run === 'string' && s.run.trim() === BUILD_COMMAND)) {
+  if (!steps.some((s) => isBuildCommand(s?.run))) {
     return {
       refusal:
         `${CI_WORKFLOW}'s \`${BUILD_JOB}\` job has no \`run: ${BUILD_COMMAND}\` step, so ${ROOT_MANIFEST}'s \`build\` ` +
@@ -1574,7 +1592,8 @@ export async function selfTest() {
       '  build-core:',
       `    if: ${JSON.stringify(condition)}`,
       '    steps:',
-      `      - run: ${run}`,
+      // Quoted, so a multi-line `run` stays one YAML scalar.
+      `      - run: ${JSON.stringify(run)}`,
     ].join('\n');
   };
   const turboFixture = ({ globalDependencies = ['tsconfig.json', 'tsup.config.ts'], tasks } = {}) =>
@@ -1653,6 +1672,21 @@ export async function selfTest() {
   assert(/no \`build-core\` job/.test(judgeBuildInputs(fixtureWorkflow(), turboFixture(), manifestFixture()).refusal ?? ''), 'no Build Core job => REFUSAL');
   assert(/no longer names \`core\`/.test(buildRefusal({ workflow: buildWorkflow({ condition: '${{ !cancelled() }}' }) })), 'Build Core dropping `core` from its `if:` => REFUSAL');
   assert(/no \`run: pnpm build\` step/.test(buildRefusal({ workflow: buildWorkflow({ run: 'pnpm turbo run build' }) })), 'Build Core no longer running `pnpm build` => REFUSAL');
+  // The closed flag list (#25374): reporting flags pass, anything that could
+  // change the task set refuses, and so do the same flags on another command.
+  assert(!buildRefusal({ workflow: buildWorkflow({ run: 'pnpm build --summarize --log-file=.turbo/remote-cache/build-core.json' }) }), '`pnpm build --summarize --log-file=PATH` is still Build Core running `pnpm build`');
+  assert(!buildRefusal({ workflow: buildWorkflow({ run: 'pnpm build --summarize' }) }), '-- and so is `pnpm build --summarize` alone');
+  for (const [run, why] of [
+    ['pnpm build --summarize --filter=@objectstack/spec', 'a `--filter` beside the allowed flags'],
+    ['pnpm build --affected', '`--affected`'],
+    ['pnpm build --summarize --force', 'an unknown flag'],
+    ['pnpm build --log-file=', 'a `--log-file=` with no path'],
+    ['pnpm build -- --summarize', 'a `--` passthrough'],
+    ['pnpm test --summarize --log-file=x.json', 'the allowed flags on a different command'],
+    ['pnpm build --summarize\nnode scripts/x.mjs', 'a second command after the build'],
+  ]) {
+    assert(/no \`run: pnpm build\` step/.test(buildRefusal({ workflow: buildWorkflow({ run }) })), `${why} => REFUSAL`);
+  }
   assert(/turbo.json could not be read\./.test(buildRefusal({ turbo: null })), 'an unreadable turbo.json => REFUSAL');
   assert(/could not be read as JSON/.test(buildRefusal({ turbo: '{ tasks: ' })), 'a turbo.json that is not JSON => REFUSAL');
   assert(/no \`tasks\` map/.test(buildRefusal({ turbo: '{}' })), 'a turbo.json with no tasks map => REFUSAL');

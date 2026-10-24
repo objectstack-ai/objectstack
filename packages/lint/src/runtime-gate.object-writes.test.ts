@@ -156,6 +156,13 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       // Written in here the same way #15254 wrote `validateReferenceIntegrity`
       // in: a ruled join is a line in this list, a drift is a red test.
       'validateSecurityRoleWord',
+      // [#25234] Both join, as ruled joins. An object's `membershipKeys`
+      // filter is an RLS clause, and an object write can drop a declared key
+      // (or break a `defaultRowScope`) that a stored policy reads, so the RLS
+      // rule judges object writes; the declarations rule refuses a key whose
+      // two columns cannot resolve, at the only door that writes one.
+      'validateRlsPredicateEnforceability',
+      'validateMembershipKeyDeclarations',
       'validateRuleCompilability',
       'validateRuleSchemaFormats',
     ]);
@@ -431,6 +438,8 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'lintAutonumberFormats',
       'validateSecurityPosture',
       'validateSecurityRoleWord', // [#19370] — see the roster pin above
+      'validateRlsPredicateEnforceability', // [#25234] — see the roster pin above
+      'validateMembershipKeyDeclarations', // [#25234]
       'validateRuleCompilability',
       'validateRuleSchemaFormats',
     ]);

@@ -75,7 +75,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** …/packages/core/src/security → repo root */
@@ -125,18 +125,18 @@ type Classification =
 
 /** Every non-test caller of the arbiter, classified. */
 const CALLERS: Record<string, Classification> = {
-  'packages/metadata-protocol/src/protocol.ts': {
+  'packages/metadata-protocol/src/protocol-query-validation.ts': {
     kind: 'decided',
     read: "the data door's `$expand` (the list, single-record, query and export routes, every level of the tree)",
     operation: 'get',
-    decision: { file: 'packages/metadata-protocol/src/protocol.ts', fn: 'servesExpansionTarget' },
+    decision: { file: 'packages/metadata-protocol/src/protocol-query-validation.ts', fn: 'servesExpansionTarget' },
     wiring: { file: 'packages/metadata-protocol/src/protocol.ts', call: 'this.servedExpand(' },
     pin: 'packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts',
   },
   'packages/objectql/src/engine.ts': {
     kind: 'executes',
     read: "the expansion sub-read (`ObjectQL.expandRelatedRecords`), for the data door's `$expand`",
-    decidedIn: 'packages/metadata-protocol/src/protocol.ts',
+    decidedIn: 'packages/metadata-protocol/src/protocol-query-validation.ts',
     also:
       'the write-path reference-existence probe (`referenceExists`: whether a stored id resolves, no field) and ' +
       'the validation-predicate reads (`resolvePredicateRelated`: a pass/fail verdict, the value never served). ' +
@@ -162,8 +162,8 @@ const CALLERS: Record<string, Classification> = {
     kind: 'decided',
     read: "the data door's nested-relation filter condition (`ObjectQL.lowerRelationConditions` reads the related object to lower it), refused rather than withheld",
     operation: 'list',
-    decision: { file: 'packages/metadata-protocol/src/protocol.ts', fn: 'refuseUnservedRelationTarget' },
-    wiring: { file: 'packages/metadata-protocol/src/protocol.ts', call: 'this.refuseUnservedRelationTarget(' },
+    decision: { file: 'packages/metadata-protocol/src/protocol-query-validation.ts', fn: 'refuseUnservedRelationTarget' },
+    wiring: { file: 'packages/metadata-protocol/src/protocol-query-validation.ts', call: 'this.refuseUnservedRelationTarget(' },
     pin: 'packages/metadata-protocol/src/protocol.relation-condition-target-exposure.test.ts',
   },
   'packages/plugins/plugin-approvals/src/approval-service.ts': {
@@ -272,8 +272,8 @@ const codeLines = (file: string) =>
 const callsArbiter = (file: string) => codeLines(file).some(arbiterCall);
 
 /** Fixed-string prefilter over tracked plus untracked sources; the matcher decides. */
-function filesMentioningTheArbiter(): string[] {
-  return git(['grep', '--files-with-matches', '-z', '--untracked', '--fixed-strings', '-e', ARBITER, '--', 'packages'])
+function scanTree(): string[] {
+  return git(['grep', '--files-with-matches', '-z', '--untracked', '--fixed-strings', '-e', ARBITER, '--', ':(glob)packages/**/*.ts'])
     .filter(isScannedSource);
 }
 
@@ -306,7 +306,18 @@ function functionBody(file: string, fn: string): string[] {
   return body;
 }
 
+/** Shared by the census and its reach control; each file pays for one grep. */
+let treeMentions: string[];
+
+function filesMentioningTheArbiter(): string[] {
+  return treeMentions;
+}
+
 describe('[#22661] every read that reaches a second object asks that object its exposure, or is named', () => {
+  beforeAll(() => {
+    treeMentions = scanTree();
+  }, SCAN_TIMEOUT_MS);
+
   it(
     'every caller of the reference-target arbiter is classified, and every classified file still calls it',
     () => {
@@ -384,7 +395,7 @@ describe('[#22661] every read that reaches a second object asks that object its 
       expect(mentioning).toContain(declaration);
       expect(callsArbiter(declaration)).toBe(false);
       // The body reader reads the right function: the decision lives in it, not beside it.
-      expect(functionBody('packages/metadata-protocol/src/protocol.ts', 'servedExpand').some((line) => DECISION_CALL.test(line))).toBe(false);
+      expect(functionBody('packages/metadata-protocol/src/protocol-query-validation.ts', 'servedExpand').some((line) => DECISION_CALL.test(line))).toBe(false);
     },
     SCAN_TIMEOUT_MS,
   );

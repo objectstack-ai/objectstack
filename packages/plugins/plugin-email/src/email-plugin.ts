@@ -35,6 +35,7 @@ import type {
 import { bindEmailTemplateDoor, unbindEmailTemplateDoor } from './email-template-door.js';
 import { sweepStrandedOutbox, type OutboxSweepResult } from './outbox-sweep.js';
 import { readInternalHeadersJson } from './internal-header-readback.js';
+import { describeLiveMailTransport, type LiveMailTransportStatus } from './live-transport-status.js';
 import {
   EMAIL_LOG_OBJECTS,
   TENANT_EMAIL_OBJECT,
@@ -154,6 +155,11 @@ interface MailSettingsSurface {
       ctx?: { userId?: string };
     }) => Promise<unknown>,
   ): void;
+  /** State the live transport at the top of Setup → Email (service-settings' `registerLiveStatus`). */
+  registerLiveStatus?(
+    namespace: string,
+    provider: () => Promise<LiveMailTransportStatus | undefined>,
+  ): void;
 }
 
 /** The identity object a `mail/test` press reads the caller's own address from. */
@@ -180,8 +186,15 @@ const ACCOUNT_OBJECT = 'sys_user';
  * reaches the caller in the result message, and it is their own address, so
  * nothing the caller could not already read is disclosed.
  *
- * Every refusal says that nothing was sent and what to supply. A read that
+ * Every refusal says that nothing was sent and what to do. A read that
  * fails is reported as a failed read, never as "you have no address".
+ *
+ * Every refusal is admin copy the settings page shows: it names what the admin
+ * does (press Send test email signed in as an admin whose account has an email
+ * address), never a request field or an endpoint. The `to` override is for API
+ * callers — a non-empty string `to` in the `mail/test` request body wins over
+ * the account address and skips the account read — and is documented here,
+ * not in the refusal.
  */
 async function resolveMailTestRecipient(
   payload: unknown,
@@ -192,8 +205,9 @@ async function resolveMailTestRecipient(
   if (typeof named === 'string' && named.trim() !== '') return { to: named.trim() };
   if (typeof userId !== 'string' || userId === '') {
     return {
-      refusal: 'No recipient — nothing was sent. This call names no "to" address and carries no signed-in '
-        + 'user whose own address the test could go to; pass "to" in the request body.',
+      refusal: 'No recipient — nothing was sent. The test email goes to the signed-in admin\'s own email '
+        + 'address, and no one is signed in on this call. Sign in as an admin whose account has an email '
+        + 'address, then press Send test email again.',
     };
   }
   let row: Record<string, unknown> | null;
@@ -206,14 +220,16 @@ async function resolveMailTestRecipient(
   } catch (err: any) {
     return {
       refusal: `Could not read your account's email address to send the test to (${err?.message ?? String(err)}) `
-        + '— nothing was sent. Pass "to" in the request body to name a recipient.',
+        + '— nothing was sent. The test email goes to the signed-in admin\'s own address; '
+        + 'press Send test email again once your account can be read.',
     };
   }
   const email = row?.email;
   if (typeof email !== 'string' || email.trim() === '') {
     return {
       refusal: 'Your account has no email address, and the test is sent to the signed-in admin\'s own address '
-        + '— nothing was sent. Add an email address to your account, or pass "to" in the request body.',
+        + '— nothing was sent. Press Send test email while signed in as an admin whose account has an email '
+        + 'address.',
     };
   }
   return { to: email.trim() };
@@ -593,7 +609,11 @@ export class EmailServicePlugin implements Plugin {
       try {
         const settings = ctx.getService<MailSettingsSurface>('settings');
         if (settings && typeof settings.createClient === 'function') {
-          const applySettings = async (phase: 'boot' | 'saved' = 'boot') => {
+          // Re-applies still running. The page's live-transport statement
+          // waits for them, so a read made just after a save names the
+          // transport that save built, not the one it replaced.
+          const applying = new Set<Promise<void>>();
+          const applySettingsNow = async (phase: 'boot' | 'saved') => {
             try {
               const payload = await settings.getNamespace('mail');
               const values: Record<string, unknown> = {};
@@ -607,6 +627,12 @@ export class EmailServicePlugin implements Plugin {
               ctx.logger.warn('EmailServicePlugin: failed to apply mail settings: ' + (err?.message ?? err));
             }
           };
+          const applySettings = (phase: 'boot' | 'saved' = 'boot'): Promise<void> => {
+            const run = applySettingsNow(phase);
+            applying.add(run);
+            void run.finally(() => applying.delete(run));
+            return run;
+          };
           await applySettings('boot');
           // Subscribe to namespace changes; rebuild on every update.
           if (typeof settings.subscribe === 'function') {
@@ -614,6 +640,18 @@ export class EmailServicePlugin implements Plugin {
               void applySettings('saved');
             });
             ctx.logger.info('EmailServicePlugin: bound to settings:changed for namespace=mail');
+          }
+
+          // Setup → Email states which transport is LIVE. The form shows what
+          // is stored, and the stored default (provider `smtp`, no host) reads
+          // as SMTP while every message goes to the development log. Asked on
+          // each page read, after any re-apply still running, so it follows a
+          // transport swap made from the same page.
+          if (typeof settings.registerLiveStatus === 'function') {
+            settings.registerLiveStatus('mail', async () => {
+              await Promise.allSettled([...applying]);
+              return this.service ? describeLiveMailTransport(this.service) : undefined;
+            });
           }
 
           // Register the `mail/test` action handler so pressing "Send test
@@ -680,7 +718,28 @@ export class EmailServicePlugin implements Plugin {
                 } catch (err: any) {
                   return { ok: false, severity: 'error', message: `Failed to build SMTP transport: ${err?.message ?? String(err)}` };
                 }
-              } else if (provider !== 'log') {
+              } else if (provider === 'log') {
+                // "None (log only — no real delivery)" on the form tests the
+                // form's choice, as every other provider does: a one-shot
+                // LogTransport, never the live service. Testing `svc` here
+                // delivered a real mail over a live SMTP while the form said
+                // nothing would be. A live LogTransport already IS the form's
+                // choice, so that case keeps the saved-`log` answer below.
+                if (!(svc.options.transport instanceof LogTransport)) {
+                  target = new EmailService({
+                    transport: new LogTransport(ctx.logger),
+                    defaultFrom: merged.from_email
+                      ? {
+                          address: String(merged.from_email),
+                          name: merged.from_name ? String(merged.from_name) : undefined,
+                        }
+                      : undefined,
+                    // Same sys_email audit trail as the smtp test above.
+                    ...(svc.options.persistence ? { persistence: svc.options.persistence } : {}),
+                    logger: ctx.logger,
+                  });
+                }
+              } else {
                 // A provider with no transport behind it — a value stored while
                 // the settings page still offered SendGrid / Amazon SES (#5094).
                 // Refuse before asking for an API key: nothing here can use one.
@@ -750,6 +809,18 @@ export class EmailServicePlugin implements Plugin {
                     severity: 'warning',
                     message: 'No delivery transport is active — the message was only logged and recorded in sys_email. '
                       + 'Configure an SMTP host (or an API provider) and save before testing.',
+                  };
+                }
+                // The form's unsaved "None (log only)": the same severity and
+                // the same words for what happened, plus the live transport the
+                // test did not use and what saving the form will do.
+                if (target !== svc && target.options.transport instanceof LogTransport) {
+                  return {
+                    ok: false,
+                    severity: 'warning',
+                    message: 'Nothing was delivered — the provider on the form is "None (log only)", so the test message '
+                      + 'was only logged and recorded in sys_email; no mail left this machine. The live transport was '
+                      + `not used (${describeLiveMailTransport(svc).label}); save the form to stop delivery.`,
                   };
                 }
                 return {
@@ -1211,8 +1282,12 @@ export class EmailServicePlugin implements Plugin {
    *  - `provider = 'smtp'` builds a real {@link SmtpTransport} from
    *    `smtp_host` / `smtp_port` / `smtp_secure` / `smtp_user` /
    *    `smtp_password` and swaps it in (ADR-0012 — SMTP ships in core).
-   *  - `provider = 'log'` keeps the LogTransport. The from-address is
-   *    still applied.
+   *  - `provider = 'log'` installs the LogTransport, replacing whatever was
+   *    live — a boot-built SMTP (`OS_EMAIL_SMTP_*` / `providerOptions`) or a
+   *    host-supplied transport included, as every other selected provider
+   *    replaces it. The page offers it as "None (log only — no real
+   *    delivery)", so saving it stops delivery. The from-address is still
+   *    applied.
    *  - `provider = 'resend' | 'postmark'` rebuilds the transport using
    *    `api_key` from settings.
    *  - anything else — including `sendgrid` / `ses`, which the settings page
@@ -1346,9 +1421,25 @@ export class EmailServicePlugin implements Plugin {
     }
 
     if (provider === 'log') {
+      // "None (log only — no real delivery)" is a stop, and it stops: the
+      // LogTransport replaces whatever was live, exactly as a saved SMTP host
+      // or API key replaces it. Keeping the previous transport here (a
+      // leftover from when `smtp` and `log` were both transport no-ops) went
+      // on delivering over a boot-built SMTP while the page label and this
+      // line both said nothing was delivered.
+      const replaced = this.service.options.transport instanceof LogTransport
+        ? undefined
+        : describeLiveMailTransport(this.service).label;
+      if (replaced) {
+        this.service.setTransport(new LogTransport(ctx.logger));
+        this.liveSmtp = undefined;
+      }
       ctx.logger.info(
         `EmailServicePlugin: mail settings applied (provider=log, from=${appliedFrom ?? '∅'}); `
-        + 'transport unchanged — messages are logged and recorded in sys_email, never delivered.',
+        + (replaced
+          ? `the LogTransport now replaces the previous live transport (was: "${replaced}") — `
+          : 'the LogTransport stays live — ')
+        + 'messages are logged and recorded in sys_email, never delivered.',
       );
       return;
     }

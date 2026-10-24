@@ -944,6 +944,14 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // `registerMetadataEndpoints`, so it was a blind spot; its handler opened
     // with `enforceAuth`, so that control drops by one. The registrar survives
     // for the document, so `private register*Endpoints(` stays 16.
+    // [credential-environment comparison in `enforceAuth`] `enforceAuth`
+    // 111 -> 115, and nothing else on this row moved. ⛔ RE-ANCHORED, not
+    // relaxed: four PROSE mentions and no call site. They are the docblock of
+    // the new `credentialAnchoredElsewhere` predicate (`rest-server.ts:1783`),
+    // the anchored-elsewhere case in `enforceEnvironmentOwnership`'s docblock
+    // (`:2545`) and the two inline comments on the internal context keys in
+    // `computeExecCtx` (`:3444`, `:3454`). `enforceAuth`'s own body gained a
+    // comparison in lines that do not spell the term.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 62,
@@ -983,7 +991,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 111,
+      enforceAuth: 115,
     },
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +

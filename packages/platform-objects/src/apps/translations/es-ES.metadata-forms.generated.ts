@@ -2039,6 +2039,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "dimensions.dateGranularity": {
         label: "Granularidad de fecha"
       },
+      "dimensions.nullLabel": {
+        label: "Etiqueta de nulos"
+      },
       measures: {
         label: "Medidas",
         helpText: "Cada medida: nombre, agregación, campo (opcional para count) y formato de visualización/moneda"

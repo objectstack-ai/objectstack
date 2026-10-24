@@ -47,7 +47,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** …/packages/core/src/security → repo root */
@@ -77,11 +77,11 @@ type Classification =
 
 /** Every non-test caller of the read admission, classified. */
 const CALLERS: Record<string, Classification> = {
-  'packages/metadata-protocol/src/protocol.ts': {
+  'packages/metadata-protocol/src/protocol-record-reads.ts': {
     kind: 'door',
     door: 'the cross-object search (`GET /search`, `searchAll`)',
     operation: 'search',
-    decisionSite: 'packages/metadata-protocol/src/protocol.ts',
+    decisionSite: 'packages/metadata-protocol/src/protocol-record-reads.ts',
     pin: 'packages/metadata-protocol/src/protocol.search-api-exposure.test.ts',
   },
   'packages/services/service-analytics/src/plugin.ts': {
@@ -93,7 +93,13 @@ const CALLERS: Record<string, Classification> = {
   },
   'packages/plugins/plugin-security/src/security-plugin.ts': {
     kind: 'not-a-door',
-    reason: 'the provider: it implements the admission and binds it into the security service it registers; it serves no rows',
+    reason:
+      'the provider: it implements the admission, hands it to its service registration, and asks it itself only to '
+      + 'decide whether `describePositionGrants` may count a position\'s holders; it serves no rows',
+  },
+  'packages/plugins/plugin-security/src/security-plugin-security-service.ts': {
+    kind: 'not-a-door',
+    reason: 'the provider\'s service registration: it binds the admission into the `security` service the plugin registers; it serves no rows',
   },
   'packages/objectql/src/engine.ts': {
     kind: 'not-a-door',
@@ -132,8 +138,8 @@ const codeLines = (file: string) =>
 const calls = (file: string, matcher: () => RegExp) => codeLines(file).some((line) => matcher().test(line));
 
 /** Fixed-string prefilter over tracked plus untracked sources; the regex decides. */
-function filesMentioningTheAdmission(): string[] {
-  return git(['grep', '--files-with-matches', '-z', '--untracked', '--fixed-strings', '-e', ADMISSION, '--', 'packages'])
+function scanTree(): string[] {
+  return git(['grep', '--files-with-matches', '-z', '--untracked', '--fixed-strings', '-e', ADMISSION, '--', ':(glob)packages/**/*.ts'])
     .filter(isScannedSource);
 }
 
@@ -141,7 +147,18 @@ function admissionCallers(): string[] {
   return filesMentioningTheAdmission().filter((file) => calls(file, admissionCall)).sort();
 }
 
+/** Shared by the census and its reach control; each file pays for one grep. */
+let treeMentions: string[];
+
+function filesMentioningTheAdmission(): string[] {
+  return treeMentions;
+}
+
 describe('[#22640] every row-serving door outside the data routes asks the exposure decision', () => {
+  beforeAll(() => {
+    treeMentions = scanTree();
+  }, SCAN_TIMEOUT_MS);
+
   it(
     'every caller of the read admission is classified, and every classified file still calls it',
     () => {

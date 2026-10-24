@@ -69,6 +69,7 @@
  *   objects.<name>.fields.<field>.placeholder
  *   objects.<name>.fields.<field>.options.<value>
  *   objects.<name>._sections.<section>.label
+ *   objects.<name>._sections.<section>.fields.<field>.{label,placeholder,helpText}
  *   objects.<name>._views.<view>.label
  *   objects.<name>._views.<view>.description
  *   objects.<name>._views.<view>.emptyState.title / .message
@@ -147,7 +148,7 @@ import {
   pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
-import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
+import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, templateSlotSource } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
@@ -518,7 +519,12 @@ function pushBulkActionDefs(out: ExpectedEntry[], viewRoot: string[], view: any,
     // nobody wrote.
     const authoredLabel = inlineText(def.label);
     pushDerived(out, [...base, 'label'], authoredLabel ?? humanizeFieldPath(defName), def.label, 'view', { objectName });
-    pushOptional(out, [...base, 'confirmText'], def.confirmText, 'view', { objectName });
+    // [#24798] `confirmText` is a `template` slot: a bare string or the
+    // `{ dialect: 'template', source }` envelope, and either one is the same
+    // authored sentence. Read it through the template judge's one reader, so
+    // the envelope form is seeded like the string instead of being recorded
+    // as an absent key.
+    pushOptional(out, [...base, 'confirmText'], templateSlotSource(def.confirmText), 'view', { objectName });
     pushOptional(out, [...base, 'confirmLabel'], def.confirmLabel, 'view', { objectName });
     if (!Array.isArray(def.params)) continue;
     for (const param of def.params) {
@@ -949,11 +955,60 @@ function addSectionList(index: SectionIndex, sections: unknown, objectName: unkn
 }
 
 /**
+ * object name → section name → entry `field` → the override copy that entry
+ * authors, RAW — the `objects.<o>._sections.<s>.fields.<f>.*` keys.
+ */
+type SectionEntryIndex = Map<string, Map<string, Map<string, Partial<Record<SectionEntryAttr, AuthoredLabel>>>>>;
+
+/** The override copy a form section entry carries (`FormFieldSchema`). */
+type SectionEntryAttr = 'label' | 'placeholder' | 'helpText';
+const SECTION_ENTRY_ATTRS: readonly SectionEntryAttr[] = ['label', 'placeholder', 'helpText'];
+
+/**
+ * Read the override copy of a FORM VIEW's section entries into the index —
+ * the `label`, `placeholder` and `helpText` an entry object authors over the
+ * object field it renders, addressed under its section's `name` by its own
+ * `field`, which is where `translateView` reads them.
+ *
+ * Form views only: a `record:details` section and a `fieldGroups` group have
+ * no entry overrides the resolver reads. A nameless section has no address,
+ * and a bare field-name entry authors no copy, so neither contributes. One
+ * string, one key: the first authored value wins, as for a heading.
+ */
+function addSectionEntries(index: SectionEntryIndex, sections: unknown, objectName: unknown): void {
+  if (!Array.isArray(sections)) return;
+  if (typeof objectName !== 'string' || objectName.length === 0) return;
+  for (const section of sections) {
+    if (!section || typeof section !== 'object') continue;
+    const s = section as Record<string, unknown>;
+    if (typeof s.name !== 'string' || s.name.length === 0 || !Array.isArray(s.fields)) continue;
+    for (const raw of s.fields) {
+      if (!raw || typeof raw !== 'object') continue;
+      const entry = raw as Record<string, unknown>;
+      if (typeof entry.field !== 'string' || entry.field.length === 0) continue;
+      let byObject = index.get(objectName);
+      if (!byObject) index.set(objectName, (byObject = new Map()));
+      let bySection = byObject.get(s.name);
+      if (!bySection) byObject.set(s.name, (bySection = new Map()));
+      let copy = bySection.get(entry.field);
+      if (!copy) bySection.set(entry.field, (copy = {}));
+      for (const attr of SECTION_ENTRY_ATTRS) {
+        const authored = asAuthoredLabel(entry[attr]);
+        if (copy[attr] === undefined && authored !== undefined) copy[attr] = authored;
+      }
+    }
+  }
+}
+
+/**
  * Emit `objects.<object>._sections.<section>.label` for every section the
- * stack renders, from both authoring surfaces.
+ * stack renders, from both authoring surfaces, and
+ * `objects.<object>._sections.<section>.fields.<field>.{label,placeholder,helpText}`
+ * for the override copy a form view's section entries author.
  */
 function walkObjectSections(config: any, out: ExpectedEntry[]): void {
   const index: SectionIndex = new Map();
+  const entries: SectionEntryIndex = new Map();
 
   // (a) `fieldGroups` × field `group` membership. `deriveFieldGroupLayout` is
   //     the shared derivation the renderers themselves consume, so "which
@@ -986,13 +1041,18 @@ function walkObjectSections(config: any, out: ExpectedEntry[]): void {
   for (const view of views) {
     const containerObject = viewObjectName(view);
     addSectionList(index, view?.sections, containerObject);
+    addSectionEntries(entries, view?.sections, containerObject);
     if (view?.form && typeof view.form === 'object') {
-      addSectionList(index, view.form.sections, viewObjectName(view.form) ?? containerObject);
+      const formObject = viewObjectName(view.form) ?? containerObject;
+      addSectionList(index, view.form.sections, formObject);
+      addSectionEntries(entries, view.form.sections, formObject);
     }
     if (view?.formViews && typeof view.formViews === 'object') {
       for (const form of Object.values<any>(view.formViews)) {
         if (!form || typeof form !== 'object') continue;
-        addSectionList(index, form.sections, viewObjectName(form) ?? containerObject);
+        const formObject = viewObjectName(form) ?? containerObject;
+        addSectionList(index, form.sections, formObject);
+        addSectionEntries(entries, form.sections, formObject);
       }
     }
   }
@@ -1038,6 +1098,25 @@ function walkObjectSections(config: any, out: ExpectedEntry[]): void {
         'section',
         { objectName },
       );
+    }
+  }
+
+  // Authored copy only (`pushEntry`): the resolver translates an entry string
+  // only where the entry authors one, so a key for a string nobody wrote is
+  // one nothing reads.
+  for (const [objectName, sections] of entries) {
+    for (const [sectionName, fields] of sections) {
+      for (const [fieldName, copy] of fields) {
+        for (const attr of SECTION_ENTRY_ATTRS) {
+          pushEntry(
+            out,
+            ['objects', objectName, '_sections', sectionName, 'fields', fieldName, attr],
+            copy[attr],
+            'section',
+            { objectName },
+          );
+        }
+      }
     }
   }
 }

@@ -63,10 +63,11 @@ describe('invite_user role picker — the offer is what the cap admits', () => {
     });
   });
 
-  it('a delegated_admin is offered member alone; an owner the whole list', () => {
+  it('a delegated_admin is offered member and external alone; an owner the whole list', () => {
     const options = roleOptions(SysInvitation);
-    expect(offered(options, ['delegated_admin'])).toEqual(['member']);
-    expect(offered(options, ['org_admin'])).toEqual(['admin', 'delegated_admin', 'member']);
+    // [Ruling 6355206139 E3] `external` confers less than `member`, so any issuer may grant it.
+    expect(offered(options, ['delegated_admin'])).toEqual(['member', 'external']);
+    expect(offered(options, ['org_admin'])).toEqual(['admin', 'delegated_admin', 'member', 'external']);
     expect(offered(options, ['org_owner'])).toEqual([...BUILTIN_MEMBERSHIP_ROLES]);
   });
 });

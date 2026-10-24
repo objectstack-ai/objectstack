@@ -13,7 +13,7 @@
  * the retirement ledger feeds the ADR-0087 conversions downstream.
  *
  * WHY A UNIT PIN BESIDE THE SANDBOX ONE. The gate's own discrimination is
- * pinned end-to-end in `build-schemas-check-mode.test.ts` (#17969's four
+ * pinned end-to-end in `build-schemas-check-mode.retired-keys.test.ts` (#17969's four
  * controls, spawned against the real generator). What cannot be reached from
  * there is the RESOLUTION rule itself: the shipped tree exercises three of its
  * traversals and none of its refusals, so a rule that quietly stopped following

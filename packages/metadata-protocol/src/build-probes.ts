@@ -15,6 +15,8 @@
 // chat surfaces, and eval harnesses consume one stream regardless of which
 // verification plane found the problem.
 
+import type { StandardErrorCode } from '@objectstack/spec/api';
+
 /** One runtime-verification finding (ADR-0038 BuildIssue, layer 'runtime'). */
 export interface RuntimeBuildIssue {
     layer: 'runtime';
@@ -81,6 +83,19 @@ export interface RunBuildProbesOptions {
     analytics?: ProbeAnalytics;
     /** Threaded into engine/analytics reads (tenant scoping). */
     organizationId?: string | null;
+    /**
+     * The PUBLISHING caller's execution context. Widget probes run
+     * `queryDataset` as this caller, because that is what the renderer does:
+     * a widget is healthy when the person who sees it can read it, so the
+     * probe asks read admission the question the dashboard will ask.
+     *
+     * ⛔ Never substitute a system context when it is absent. A probe that
+     * reads as the system reports a widget healthy that its own publisher
+     * cannot open, and that is the false clean this plane exists to prevent.
+     * Absent, the read goes out context-less and read admission answers for
+     * it — a refusal, reported as such.
+     */
+    context?: unknown;
 }
 
 type Rec = Record<string, unknown>;
@@ -93,6 +108,57 @@ function asArr(v: unknown): unknown[] {
     return Array.isArray(v) ? v : [];
 }
 
+/**
+ * `PERMISSION_DENIED`, pinned against the STANDARD catalog — the code the
+ * analytics service's read admission throws (ADR-0112 envelope, 403).
+ */
+const PERMISSION_DENIED: StandardErrorCode = 'PERMISSION_DENIED';
+
+/**
+ * The read-admission refusal a widget query can be answered with, judged by
+ * the thrown error's ADR-0112 `code` — never by its message text.
+ *
+ * The analytics service refuses a caller who may not read an object (or a
+ * field the dataset reads) with `PERMISSION_DENIED` and names the refused
+ * object in `object` (a joined object can be the one refused, so it is read
+ * from the error before the dataset's own) and the refused fields in
+ * `fields`. That is the caller's access, not the dataset's definition.
+ *
+ * One `PERMISSION_DENIED` is NOT an access question: a member that is no
+ * column reference, refused because the gate cannot tell which fields it
+ * reads, carries `member`, and its remedy IS a dataset change — so it keeps
+ * the dataset fix.
+ */
+function readAdmissionRefusal(e: unknown): { object?: string; fields: string[] } | undefined {
+    const err = e && typeof e === 'object' ? (e as Rec) : undefined;
+    if (!err || err.code !== PERMISSION_DENIED || typeof err.member === 'string') return undefined;
+    return {
+        object: typeof err.object === 'string' && err.object ? err.object : undefined,
+        fields: asArr(err.fields).filter((f): f is string => typeof f === 'string' && f.length > 0),
+    };
+}
+
+/**
+ * `SERVICE_UNAVAILABLE`, pinned against the STANDARD catalog — the code the
+ * analytics service throws (ADR-0112 envelope, 503) when a read gate could not
+ * reach a verdict: a permission or API-exposure resolver failed.
+ */
+const SERVICE_UNAVAILABLE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
+
+/**
+ * The fault refusal a widget query can be answered with, judged by the thrown
+ * error's ADR-0112 `code` — never by its message text.
+ *
+ * Neither the dataset nor the caller's access is the cause: the server could
+ * not decide, so the remedy is the operator's. `object` names the object the
+ * server could not decide read access to, when the error carries one.
+ */
+function serviceUnavailableRefusal(e: unknown): { object?: string } | undefined {
+    const err = e && typeof e === 'object' ? (e as Rec) : undefined;
+    if (!err || err.code !== SERVICE_UNAVAILABLE) return undefined;
+    return { object: typeof err.object === 'string' && err.object ? err.object : undefined };
+}
+
 /** Result rows of a queryDataset call, tolerant of {rows}/{data}/array shapes. */
 function resultRows(result: unknown): unknown[] {
     if (Array.isArray(result)) return result;
@@ -103,17 +169,22 @@ function resultRows(result: unknown): unknown[] {
     return [];
 }
 
-/** True when the object has at least one row (probe read, isSystem). */
+/**
+ * True when the object has at least one row. A system read by default; the
+ * widget plane passes the caller's context so "the object has rows" is judged
+ * over the rows that caller can see — the same rows its dataset query saw.
+ */
 async function hasRows(
     engine: ProbeEngine,
     objectName: string,
     organizationId?: string | null,
+    readContext: unknown = { isSystem: true },
 ): Promise<boolean> {
     const rows = await engine.find(objectName, {
         fields: ['id'],
         limit: 1,
         ...(organizationId ? { where: { organization_id: organizationId } } : {}),
-        context: { isSystem: true },
+        context: readContext,
     });
     return Array.isArray(rows) && rows.length > 0;
 }
@@ -139,7 +210,7 @@ async function hasRows(
 export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<BuildProbeReport> {
     const issues: RuntimeBuildIssue[] = [];
     const checked = { seeds: 0, views: 0, widgets: 0, objects: 0 };
-    const { engine, getItem, published, analytics, organizationId } = opts;
+    const { engine, getItem, published, analytics, organizationId, context } = opts;
 
     // Memoized active-item reads (a dashboard and its widgets share datasets).
     const itemCache = new Map<string, unknown | undefined>();
@@ -340,9 +411,21 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
 
             const objectName = typeof dataset.object === 'string' ? dataset.object : undefined;
             try {
-                const result = await analytics.queryDataset(dataset, selection, undefined);
+                // [#25484] As the publishing caller — the renderer's path. With
+                // no context here, read admission refused every dataset over a
+                // permission-gated object, and a correct widget was reported as
+                // an error-tier `widget_query_failed`. A caller who genuinely
+                // cannot read the dataset is still refused, and still reported.
+                const result = await analytics.queryDataset(dataset, selection, context);
                 const rows = resultRows(result);
-                if (rows.length === 0 && objectName && (await hasRows(engine, objectName, organizationId))) {
+                // "Empty although the object has rows" is judged over the rows
+                // THIS caller can see: a system count would call a row-scoped
+                // empty answer broken.
+                const rowsContext = context && typeof context === 'object' ? context : undefined;
+                if (
+                    rows.length === 0 && objectName
+                    && (await hasRows(engine, objectName, organizationId, rowsContext))
+                ) {
                     issues.push({
                         layer: 'runtime',
                         severity: 'error',
@@ -354,6 +437,28 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                     });
                 }
             } catch (e) {
+                // The query runs as the publishing caller, so read admission
+                // can refuse a dataset that is correct. That refusal names an
+                // access remedy; telling the author to edit the dataset would
+                // send them to change something that works. A fault — the
+                // server could not decide read access at all — is neither: its
+                // remedy is the operator's.
+                const refusal = readAdmissionRefusal(e);
+                const unavailable = refusal ? undefined : serviceUnavailableRefusal(e);
+                const refusedObject = refusal?.object ?? objectName;
+                const undecidedObject = unavailable?.object ?? objectName;
+                const fix = refusal
+                    ? `Dataset "${dsName}" is not the cause and needs no change: read admission refused the publishing caller. ` +
+                      `The publisher (or the role this dashboard is for) needs read access to ` +
+                      `${refusedObject ? `object "${refusedObject}"` : 'the object this dataset reads'}` +
+                      `${refusal.fields.length ? ` and its field(s) ${refusal.fields.join(', ')}` : ''}; grant it, then republish. ` +
+                      `The finding is about this caller's access: a viewer who has that access can read the widget.`
+                    : unavailable
+                    ? `Dataset "${dsName}" is not the cause and needs no change: the server could not decide read access to ` +
+                      `${undecidedObject ? `object "${undecidedObject}"` : 'the object this dataset reads'}, ` +
+                      `so the query was not run (SERVICE_UNAVAILABLE). This is a server-side fault, not a denial: ` +
+                      `check the server log for the permission or API-exposure resolver that failed, then republish once it is healthy.`
+                    : `Fix the dataset definition (or the widget's values/dimensions) so the query compiles, then republish.`;
                 issues.push({
                     layer: 'runtime',
                     severity: 'error',
@@ -361,7 +466,7 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                     ref: { type: 'dataset', name: dsName, member: widgetId },
                     code: 'widget_query_failed',
                     message: `Dashboard "${p.name}" widget "${widgetId}" query against dataset "${dsName}" failed: ${String((e as Error)?.message ?? e)}`,
-                    fix: `Fix the dataset definition (or the widget's values/dimensions) so the query compiles, then republish.`,
+                    fix,
                 });
             }
         }

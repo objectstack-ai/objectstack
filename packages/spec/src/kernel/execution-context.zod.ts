@@ -181,10 +181,16 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   principalKind: z.enum(['human', 'agent', 'service', 'guest', 'system']).optional(),
 
   /**
-   * [ADR-0090 D10/D11 — P1 shape] Whether the principal is an internal org
-   * member or an external (portal/partner) identity. Externals reach
-   * explicitly shared rows only (the ADR-0095 `EXTERNAL` rung, never
-   * OWD-derived) and skip the BU depth axis. Absent = 'internal'.
+   * [ADR-0090 D10/D11 · ruling of record 6355206139] Whether the principal is
+   * an internal org member or an external (portal/partner) one. The shared
+   * authz resolver stamps `'external'` for the organization's `external`
+   * members (`sys_member.role = external`, the reserved identity
+   * `org_external`), whose posture rung is `EXTERNAL`. Externals reach rows
+   * through explicit grants only — shares (share links included), sharing
+   * rules, and position and permission-set grants with their RLS evaluated —
+   * never the OWD baseline (owner_only floor), the `everyone`-anchored default
+   * sets or the member directory, and they are never placed in the BU tree.
+   * Absent = 'internal'.
    */
   audience: z.enum(['internal', 'external']).optional(),
 

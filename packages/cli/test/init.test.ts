@@ -28,8 +28,10 @@ describe('init command — published scaffold', () => {
       }
     });
 
-    it('pins every @objectstack/* dep to the CLI version', () => {
-      const expected = `^${pkg.version}`;
+    // EXACT, no `^`/`~`: a breaking change may ship in a minor or a patch on
+    // the v18 line, and the docs tell a project to pin exact versions.
+    it('pins every @objectstack/* dep to the exact CLI version', () => {
+      const expected = pkg.version;
       for (const [name, range] of Object.entries(allDeps)) {
         if (name.startsWith('@objectstack/')) {
           expect(range, name).toBe(expected);

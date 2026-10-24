@@ -477,7 +477,9 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Security vocabulary freeze (ADR-0090 D3 — the reserved word, replaced by `permission_set` / `position` / `business_unit`) | ✓ | ✓ | ✓ | ✓ᵒᵖᵉᵇᵖᵒᵃ |
 | Organization-axis red lines (ADR-0105 D6) | ✓ | ✓ | ✓ | — |
 | Declared enforcement that cannot run, **declared on the object being written** — a validation rule's regex / JSON Schema (#4762) and its `format` names (#5178) | ✓ | ✓ | ✓ | ✓ᵒ |
-| Declared enforcement that cannot run, **declared on another collection** — sharing-rule conditions (#4698), row-level-security predicates (#4983) | ✓ | ✓ | ✓ | — |
+| Declared enforcement that cannot run, **declared on another collection** — sharing-rule conditions (#4698) | ✓ | ✓ | ✓ | — |
+| Row-level-security predicates (#4983) — a permission set's policies, an object's `defaultRowScope` and a membership key's `filter`; at the save door also a membership key nothing owns (#25234) | ✓ | ✓ | ✓ | ✓ᵖᵉᵒ |
+| Membership key declarations — `userField` / `valueField` columns, one key on one object, a key the registered resolver also owns (save door only) (#25234) | ✓ | ✓ | ✓ | ✓ᵒ |
 | Platform-schedule `create_record` organization (#6285) | — | — | — | ✓ᶠ |
 | Public-form anonymous intake on this deployment's tenancy posture — advisory only (#21476) | — | — | — | ✓ᵛ |
 | Autonumber `{field}` interpolation | ✓ | ✓ | ✓ | ✓ᵒ |
@@ -543,7 +545,11 @@ is answered by an `object` write at all — and each is held by something
 different: the door does not accept `sharing_rule` as a type yet, whereas
 `permissions` has been in the snapshot since #8309 and only the declaration is
 missing. The freeze kept one id whole by staying behind and then crossing whole;
-here four ids stopped agreeing, and one row cannot say two things. **When the next crossing lands on
+here four ids stopped agreeing, and one row cannot say two things. The RLS
+rule has since crossed on its own: to `permission` writes in #20158, and to
+`object` writes in #25234, where it judges an object's `defaultRowScope` and
+its membership keys' `filter`s and refuses an object write that breaks a stored
+policy, so it now has a row of its own. **When the next crossing lands on
 a shared row, check the rule ids before the cell: if they disagree, split the
 row by the collection each id reads, and neither `✓` nor `—` has to lie.**
 
@@ -735,7 +741,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (51)...
+  → Running author-time rules (52)...
   → Checking that every required capability has a provider installable in this edition...
   → Checking package docs (ADR-0046)...
 

@@ -365,17 +365,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'conditionalFormatting',
     why: "planned, not yet rendered — a field's cell formatting rules (`[{ condition, style }]`, the list view's own rule element) are validated at parse and their CEL is judged at the authoring doors (it parses, it reads only `value` and `record`), but no renderer styles a cell from them until objectui's cell renderers read them, after the spec publishes. A form control offered today would let an author set a style nothing paints",
   },
-  // #25391 — a dataset dimension's null-bucket label lands spec-first the same
-  // way: `planned` in the liveness ledger, read by no chart renderer until the
-  // consumer half (ruling 6358843349 on #25330) ships. One list down, on the
-  // `dimensions` repeater rather than the root.
-  {
-    kind: 'omit',
-    type: 'dataset',
-    path: 'dimensions',
-    key: 'nullLabel',
-    why: "planned, not yet rendered — the label of a dimension's null bucket is validated at parse (an I18nLabel), but no chart renderer draws the bucket under it until objectui reads it over its own default, after the spec publishes. A repeater column offered today would let an author set a label nothing shows",
-  },
   {
     kind: 'omit',
     type: 'view',
@@ -545,6 +534,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'defaultRowScope',
     why: "not offered by this reconciliation (#24164 ruling E′, item 1): the reader is in — the security plugin's `collectRLSPolicies` applies the object's default row scope when no held set carries a row policy for the object and operation (#24340) — but a row policy is a composite of a select, two predicate strings and a positions list, so offering it is a form-face addition rather than a reconciliation of a scalar key; its writers are to be the platform identity objects, declared in code (#24341)",
+  },
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'membershipKeys',
+    why: "not offered while nothing applies it (#25234 ruling A, PR 1, the spec half): no server stages a declared membership key until plugin-security's `stageRlsMembership` reads it (PR 2), so a form row would let an author declare a set every policy reading it fails closed on, the declared-not-enforced trap Prime Directive #10 names. The ruling makes the Studio object-form row a separate objectui card; code, REST `/meta` and MCP authoring carry the key meanwhile. Revisit when the reader lands: a key is a named map entry of two column pickers, a filter and two prose strings, a form-face addition rather than a reconciliation",
   },
   {
     kind: 'omit',

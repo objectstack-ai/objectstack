@@ -206,7 +206,7 @@ const BLOCKS: Array<{
   },
   {
     id: 'B5  settleSelfRegistrationGrant',
-    site: 'auth-manager.ts — sys_user_permission_set existence read',
+    site: 'auth-manager-membership-admission.ts — sys_user_permission_set existence read',
     populated: (e) => (withSystemReadContext(e) as never as { find: Function }).find('sys_user_permission_set', { where: { user_id: 'usr_1', permission_set_id: 'ps_1' }, limit: 1 }),
     empty: (e) => (withSystemReadContext(e) as never as { find: Function }).find('sys_user_permission_set', { where: { user_id: 'ghost', permission_set_id: 'ps_1' }, limit: 1 }),
   },

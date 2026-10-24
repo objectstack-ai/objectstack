@@ -71,6 +71,17 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  */
 const PRODUCERS: Readonly<Record<string, number>> = {
   'protocol.ts': 5,
+  // The bulk data writes, moved out of `protocol.ts` whole: their throw sites
+  // are still this family's, so the scan follows them. The floor is the
+  // module's own `new Error(` count when it was split out.
+  'protocol-batch-data.ts': 4,
+  // The query validation, moved out of `protocol.ts` whole on the same terms.
+  'protocol-query-validation.ts': 17,
+  // The lock gate and the OCC write addresses, moved out of `protocol.ts` whole
+  // on the same terms.
+  'protocol-lock-version-gates.ts': 4,
+  // The save door's refusals, moved out of `protocol.ts` whole on the same terms.
+  'protocol-save-door-refusals.ts': 5,
   'sys-metadata-repository.ts': 5,
   'runtime-authoring-gate.ts': 1,
 };

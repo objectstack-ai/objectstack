@@ -146,7 +146,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理员",
               delegated_admin: "受托管理员",
-              member: "成员"
+              member: "成员",
+              external: "外部成员"
             }
           }
         }
@@ -526,7 +527,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     description: "用于多租户分组的组织",
     fields: {
       name: {
-        label: "名称"
+        label: "名称",
+        help: "组织自身的名称。控制台显示的产品名称是另一项设置，在 设置 → 品牌 中设置。"
       },
       slug: {
         label: "标识符",
@@ -545,7 +547,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "时区",
-        help: "该组织计算日期边界所用的 IANA 时区（如 UTC、Asia/Shanghai）——所有未自行设置时区的业务单元都继承的根默认值。未设置表示 UTC。"
+        help: "IANA 时区（如 UTC、Asia/Shanghai），作为未自行设置时区的业务单元的根默认值保存。它目前不会改变任何日期计算：公式、报表和显示的日期使用 设置 → 本地化 → 默认时区。"
       },
       parent_organization_id: {
         label: "上级组织",
@@ -581,7 +583,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理员",
               delegated_admin: "受托管理员",
-              member: "成员"
+              member: "成员",
+              external: "外部成员"
             }
           }
         }
@@ -642,7 +645,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           owner: "所有者",
           admin: "管理员",
           delegated_admin: "受托管理员",
-          member: "成员"
+          member: "成员",
+          external: "外部成员"
         }
       }
     },
@@ -666,7 +670,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理员",
               delegated_admin: "受托管理员",
-              member: "成员"
+              member: "成员",
+              external: "外部成员"
             }
           }
         }
@@ -720,7 +725,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           owner: "所有者",
           admin: "管理员",
           delegated_admin: "受托管理员",
-          member: "成员"
+          member: "成员",
+          external: "外部成员"
         }
       },
       status: {
@@ -794,7 +800,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
               owner: "所有者",
               admin: "管理员",
               delegated_admin: "受托管理员",
-              member: "成员"
+              member: "成员",
+              external: "外部成员"
             }
           }
         }

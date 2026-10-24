@@ -350,12 +350,14 @@ function entryFields(
     // what narrows the optional away — the guard that made `agent` truthy is
     // this same property.
     performedBy: agent?.clientId ? { clientId: agent.clientId } : undefined,
-    // [ADR-0090 D10/D11 — P1 shape] No transport resolves an external
-    // (portal/partner) audience yet; `undefined` reads as 'internal'. Named
-    // here rather than excluded so the gap is visible in the closed set instead
-    // of being invisible outside it — when an external principal type lands,
-    // this is the line that must change, on every face at once.
-    audience: undefined,
+    // [ADR-0090 D10/D11 · ruling of record 6355206139, letter B] The resolver's
+    // population stamp: `'external'` for a holder of `org_external`, absent
+    // (read as 'internal') otherwise. It rides an AGENT envelope too: the
+    // population is the human's, and the agent's on-behalf-of leg is re-run
+    // under this same envelope by the OWD floor (`plugin-sharing`), so an
+    // agent acting for an external is floored exactly as the external is.
+    // A guest is never external: it has no membership.
+    audience: anonymous ? undefined : authz.audience,
     userId: authz.userId,
     tenantId: authz.tenantId,
     email: authz.email,

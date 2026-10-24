@@ -246,6 +246,9 @@ describe('[#20917] analytics — the field-level read gate at the door', () => {
       expect(executed.length).toBeGreaterThan(0);
     });
 
+    // [#25561] A reader that THROWS reached no verdict, so the refusal does not
+    // claim one: 503 SERVICE_UNAVAILABLE, naming the object and not the cause.
+    // A hidden field — the verdict — keeps 403 PERMISSION_DENIED (above).
     it('fails closed: a reader that throws refuses the query, and says so in the error log', async () => {
       const error = vi.fn();
       const logger = { debug() {}, info() {}, warn() {}, error, child() { return logger; } };
@@ -254,9 +257,11 @@ describe('[#20917] analytics — the field-level read gate at the door', () => {
         getReadableFields: () => { throw new Error('reader unavailable'); },
         logger,
       });
-      await expect(
-        service.query({ cube: LEDGER, measures: ['count'], dimensions: ['title'] } as never, CALLER),
-      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403, object: LEDGER });
+      const refusal = await service
+        .query({ cube: LEDGER, measures: ['count'], dimensions: ['title'] } as never, CALLER)
+        .then(() => undefined, (e: unknown) => e as Error);
+      expect(refusal).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, object: LEDGER });
+      expect(refusal?.message).not.toContain('reader unavailable');
       expect(executed).toEqual([]);
       expect(error.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(/field-level read admission could not be resolved .*\(fail-closed\)/);
     });
@@ -438,7 +443,8 @@ describe('[#20917] analytics plugin — the field-level half of the "security" b
 
   it('refuses, and says why, when the registered security service exposes no getReadableFields', async () => {
     const { service, reads, error } = await bootPlugin(() => ({ ...objectAndRowsOpen }));
-    await expect(service.query(groupedReadable as never, CALLER)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    // [#25561] The reader could not answer, so the refusal is the fault's 503.
+    await expect(service.query(groupedReadable as never, CALLER)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503, object: LEDGER });
     expect(reads).toEqual([]);
     expect(error.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(/getReadableFields\(\)/);
   });

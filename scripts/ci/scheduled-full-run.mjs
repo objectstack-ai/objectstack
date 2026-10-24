@@ -148,20 +148,41 @@ export function evaluateGroup(groupExpression, context) {
 // hands a workflow for that event on THIS repo: `schedule` and
 // `workflow_dispatch` on `main` carry no pull request and `refs/heads/main`,
 // which is precisely why they used to collide with `push`.
-export function eventContext(eventName, { workflow = 'W', prNumber = null, ref = null } = {}) {
+//
+// The RUN-VARYING fields are filled in too, from `sha` and `runId`, because the
+// verdict below asks which runs of one event SHARE a group, and a context with
+// no commit in it would answer that for a key that names a commit by accident
+// (#25373). Payload keys are the ones each event really carries: only `push`
+// (and a `pull_request` synchronize) has `event.after`; `schedule`,
+// `workflow_dispatch` and `merge_group` have none, so a key that falls through
+// `github.event.after` reaches `github.ref` on those, exactly as on the runner.
+export function eventContext(
+  eventName,
+  { workflow = 'W', prNumber = null, ref = null, sha = 'a'.repeat(40), runId = 1 } = {}
+) {
+  const pr = prNumber ?? 1;
   const refs = {
     push: 'refs/heads/main',
     schedule: 'refs/heads/main',
     workflow_dispatch: 'refs/heads/main',
-    pull_request: `refs/pull/${prNumber ?? 1}/merge`,
-    merge_group: 'refs/heads/gh-readonly-queue/main/pr-1-' + 'a'.repeat(40),
+    pull_request: `refs/pull/${pr}/merge`,
+    merge_group: `refs/heads/gh-readonly-queue/main/pr-${pr}-${sha}`,
+  };
+  const events = {
+    push: { ref: 'refs/heads/main', before: 'f'.repeat(40), after: sha },
+    schedule: { schedule: '0 * * * *' },
+    workflow_dispatch: { ref: 'refs/heads/main', inputs: {} },
+    pull_request: { action: 'synchronize', number: pr, after: sha, pull_request: { number: pr } },
+    merge_group: { action: 'checks_requested', merge_group: { head_sha: sha } },
   };
   return {
     github: {
       workflow,
       event_name: eventName,
       ref: ref ?? refs[eventName] ?? `refs/heads/${eventName}`,
-      event: prNumber === null ? {} : { pull_request: { number: prNumber } },
+      sha,
+      run_id: String(runId),
+      event: events[eventName] ?? {},
     },
   };
 }
@@ -170,8 +191,12 @@ export function eventContext(eventName, { workflow = 'W', prNumber = null, ref =
 // of them at once.
 export function concurrencyVerdict(groupExpression, { workflow = 'W' } = {}) {
   const findings = [];
+  // Two runs of each event, on two different commits with two different run
+  // ids: the first and the second merge, the hour-N and hour-N+1 run.
+  const FIRST = { sha: '1'.repeat(40), runId: 101 };
+  const SECOND = { sha: '2'.repeat(40), runId: 102 };
   const group = (eventName, options = {}) =>
-    evaluateGroup(groupExpression, eventContext(eventName, { workflow, ...options }));
+    evaluateGroup(groupExpression, eventContext(eventName, { workflow, ...FIRST, ...options }));
 
   const push = group('push');
   const schedule = group('schedule');
@@ -197,27 +222,47 @@ export function concurrencyVerdict(groupExpression, { workflow = 'W' } = {}) {
     );
   }
 
-  // POSITIVE CONTROL, and it is not decoration. The cheap way to make every
-  // comparison above unequal is to put something run-unique in the key --
-  // `github.run_id`, `github.sha` -- which also switches `cancel-in-progress`
-  // off for every event in the file. So the key must still collapse two runs of
-  // the SAME event on the same ref onto one group.
-  if (group('schedule') !== group('schedule')) {
-    findings.push('two `schedule` runs on the same ref do not share a group (the key is not stable)');
+  // EVERY PUSH RUN FINISHES (#25373). A push run is the only run that tests
+  // its own merge's `--affected` set; a cancelled one leaves that merge with
+  // no verdict on main until the next hourly run. Sharing a group between two
+  // merges lets the second cancel the first -- and `cancel-in-progress: false`
+  // does not save it, because GitHub keeps ONE pending run per group and
+  // cancels that one when a third arrives. So two pushes of two different
+  // commits must land in two different groups.
+  const nextPush = group('push', SECOND);
+  if (nextPush === push) {
+    findings.push(
+      `two pushes to main share the concurrency group '${push}', so the next merge cancels the ` +
+        "previous merge's run before its own tests finish. Put `github.event.after` in the " +
+        'key, after the PR number.'
+    );
   }
-  if (group('push', { ref: 'refs/heads/main' }) !== group('push', { ref: 'refs/heads/main' })) {
-    findings.push('two `push` runs on the same ref do not share a group (the key is not stable)');
+
+  // POSITIVE CONTROL, and it is not decoration. The cheap way to satisfy every
+  // inequality above is to put something run-unique in the key --
+  // `github.run_id`, `github.sha` -- which also switches `cancel-in-progress`
+  // off for every OTHER event in the file. So everything that is not a push
+  // must still collapse two runs onto one group: two hourly runs at two `main`
+  // heads, two on-demand runs, and two heads of the SAME pull request.
+  if (group('schedule', SECOND) !== schedule) {
+    findings.push('two `schedule` runs on two `main` heads do not share a group (the key is run-unique off push)');
+  }
+  if (group('workflow_dispatch', SECOND) !== dispatch) {
+    findings.push('two `workflow_dispatch` runs do not share a group (the key is run-unique off push)');
+  }
+  if (group('pull_request', { prNumber: 7 }) !== group('pull_request', { prNumber: 7, ...SECOND })) {
+    findings.push('two heads of one pull request do not share a group (a new push no longer cancels the stale run)');
   }
   // ...and it must still separate two different pull requests.
   if (group('pull_request', { prNumber: 7 }) === group('pull_request', { prNumber: 8 })) {
     findings.push('two different pull requests share one concurrency group (the key ignores the PR number)');
   }
   // ...and a queue build must not be cancelled by a push to main.
-  if (group('merge_group') === push) {
+  if (group('merge_group') === push || group('merge_group') === nextPush) {
     findings.push('a `merge_group` build and a `push` run share one group');
   }
 
-  return { ok: findings.length === 0, findings, groups: { push, schedule, dispatch } };
+  return { ok: findings.length === 0, findings, groups: { push, nextPush, schedule, dispatch } };
 }
 
 // ---------------------------------------------------------------------------
@@ -1003,7 +1048,7 @@ async function releaseGate(argv) {
 // count is a FLOOR -- a battery below it means cases stopped running, and the
 // remedy is to find what stopped registering, never to lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'scheduled-full-run concurrency isolation': 20,
+  'scheduled-full-run concurrency isolation': 32,
   'scheduled-full-run card identity and de-dup': 34,
   'card refresh: a stale pm:blocked (the measured #23885 sequence)': 22,
   'release gate: the selection rule on the recorded 2026-10-12 listing': 8,
@@ -1094,6 +1139,27 @@ async function selfTest() {
     const got = evaluateExpression('github.event.pull_request.number || github.ref', ctx);
     if (got !== 'refs/heads/main') throw new Error(`evaluator: '||' did not fall through, got '${got}'`);
   });
+  // The context carries each event's REAL payload keys (#25373): `after` on a
+  // push, none on schedule/dispatch/queue, and the PR number before it on a PR.
+  const KEY = 'github.event.pull_request.number || github.event.after || github.ref';
+  await check(() => {
+    const got = evaluateExpression(KEY, eventContext('push', { sha: '3'.repeat(40) }));
+    if (got !== '3'.repeat(40)) throw new Error(`context: a push did not resolve to its commit, got '${got}'`);
+  });
+  await check(() => {
+    for (const eventName of ['schedule', 'workflow_dispatch']) {
+      const got = evaluateExpression(KEY, eventContext(eventName, { sha: '3'.repeat(40) }));
+      if (got !== 'refs/heads/main') throw new Error(`context: ${eventName} grew an \`after\`, got '${got}'`);
+    }
+  });
+  await check(() => {
+    const got = evaluateExpression(KEY, eventContext('merge_group', { sha: '3'.repeat(40) }));
+    if (!got.startsWith('refs/heads/gh-readonly-queue/')) throw new Error(`context: merge_group resolved to '${got}'`);
+  });
+  await check(() => {
+    const got = evaluateExpression(KEY, eventContext('pull_request', { prNumber: 12, sha: '3'.repeat(40) }));
+    if (got !== '12') throw new Error(`context: a PR synchronize did not resolve to its number, got '${got}'`);
+  });
   await check(() => {
     if (evaluateExpression("'literal'", eventContext('push')) !== 'literal') {
       throw new Error('evaluator: a quoted literal did not evaluate');
@@ -1115,8 +1181,12 @@ async function selfTest() {
   //    name. A gate that only ever reads the good shape is a gate that has
   //    never been shown to fail.
   const BAD = 'ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}';
-  const GOOD =
+  // The #16467 key: event-separated, but every push to main in ONE group, so
+  // the next merge cancels the previous one before its tests finish (#25373).
+  const SHARED_PUSH =
     'ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}';
+  const GOOD =
+    'ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.after || github.ref }}';
   await check(() => {
     const v = concurrencyVerdict(BAD, { workflow: 'CI' });
     if (v.ok) throw new Error('firing control: the pre-#16467 key was accepted');
@@ -1132,8 +1202,28 @@ async function selfTest() {
     if (v.groups.schedule !== v.groups.push) throw new Error('firing control: the two groups were not actually equal');
   });
   await check(() => {
+    const v = concurrencyVerdict(SHARED_PUSH, { workflow: 'CI' });
+    if (v.ok) throw new Error('firing control: the shared push key (one group for every merge) was accepted');
+  });
+  await check(() => {
+    const v = concurrencyVerdict(SHARED_PUSH, { workflow: 'CI' });
+    if (!v.findings.some((f) => f.includes('two pushes to main share'))) {
+      throw new Error(`firing control: the push/push collision was not named (${v.findings.join(' | ')})`);
+    }
+  });
+  await check(() => {
+    const v = concurrencyVerdict(SHARED_PUSH, { workflow: 'CI' });
+    if (v.findings.length !== 1) {
+      throw new Error(`firing control: expected ONLY the push/push finding (${v.findings.join(' | ')})`);
+    }
+  });
+  await check(() => {
     const v = concurrencyVerdict(GOOD, { workflow: 'CI' });
     if (!v.ok) throw new Error(`the fixed key was rejected: ${v.findings.join(' | ')}`);
+  });
+  await check(() => {
+    const v = concurrencyVerdict(GOOD, { workflow: 'CI' });
+    if (v.groups.push === v.groups.nextPush) throw new Error('the fixed key still puts two merges in one group');
   });
   await check(() => {
     const v = concurrencyVerdict(GOOD, { workflow: 'CI' });
@@ -1141,18 +1231,22 @@ async function selfTest() {
   });
 
   // -- NONSENSE CONTROL. A key that separates every event by making every RUN
-  //    unique passes the inequality above and silently disables
-  //    `cancel-in-progress` everywhere. It must be refused.
-  await check(() => {
-    const v = concurrencyVerdict('ci-${{ github.run_id }}', { workflow: 'CI' });
-    if (v.ok) throw new Error('nonsense control: a run-unique key was accepted');
-  });
-  await check(() => {
-    const v = concurrencyVerdict('ci-${{ github.run_id }}', { workflow: 'CI' });
-    if (!v.findings.some((f) => f.includes('two different pull requests'))) {
-      throw new Error(`nonsense control: expected the PR-separation finding (${v.findings.join(' | ')})`);
-    }
-  });
+  //    unique passes the inequalities above and silently disables
+  //    `cancel-in-progress` for every event, not only push. It must be refused,
+  //    and so must the subtler `github.sha` spelling, which is run-unique on
+  //    `schedule` too (each hour's `main` head) although it looks per-commit.
+  for (const runUnique of ['ci-${{ github.run_id }}', 'ci-${{ github.event_name }}-${{ github.sha }}']) {
+    await check(() => {
+      const v = concurrencyVerdict(runUnique, { workflow: 'CI' });
+      if (v.ok) throw new Error(`nonsense control: the run-unique key '${runUnique}' was accepted`);
+    });
+    await check(() => {
+      const v = concurrencyVerdict(runUnique, { workflow: 'CI' });
+      if (!v.findings.some((f) => f.includes('two `schedule` runs'))) {
+        throw new Error(`nonsense control: expected the schedule-stability finding (${v.findings.join(' | ')})`);
+      }
+    });
+  }
   await check(() => {
     // ...and a constant key, the other degenerate direction: every event in one
     // group, which is the collision this gate is about at maximum strength.
@@ -1173,6 +1267,13 @@ async function selfTest() {
       const v = concurrencyVerdict(group, { workflow: file });
       if (v.groups.schedule === v.groups.push) {
         throw new Error(`${file}: schedule and push still evaluate to '${v.groups.push}'`);
+      }
+    });
+    await check(() => {
+      const group = readConcurrencyGroup(readFileSync(file, 'utf8'));
+      const v = concurrencyVerdict(group, { workflow: file });
+      if (v.groups.push === v.groups.nextPush) {
+        throw new Error(`${file}: two merges to main still share the group '${v.groups.push}'`);
       }
     });
   }
@@ -2233,9 +2334,10 @@ function checkConcurrency() {
   }
   if (bad > 0) {
     console.error(
-      `scheduled-full-run: ${bad} workflow file(s) let a push to main cancel the hourly full run. ` +
-        'That run is the only thing testing the whole workspace on main since push went affected-only, ' +
-        'so this is a coverage refusal, not a style one.'
+      `scheduled-full-run: ${bad} workflow file(s) carry a concurrency key that lets one main run cancel ` +
+        'another: the hourly full run is the only thing testing the whole workspace on main since push ' +
+        "went affected-only, and a push run is the only test of its own merge's affected set, so this is a " +
+        'coverage refusal, not a style one.'
     );
     process.exit(1);
   }

@@ -109,10 +109,11 @@ export default defineStack({
   // were removed under ADR-0049 enforce-or-remove (#9698), the same call
   // #9237 made for app-showcase's two.
   //
-  // ⛔ Do not re-add one on a public object — `sharing-rule-object-not-shareable`
-  // now fails the build, and its message states the two honest fixes. Giving
-  // this app a LIVE sharing demonstration means giving it a `private` object
-  // first; that is an access-matrix change (ADR-0090 D6 review), not a rider.
+  // ⛔ Do not re-add one for staff on a public object — such a rule reaches
+  // external (portal) members only, and `sharing-rule-object-not-shareable`
+  // says so. Giving this app a LIVE sharing demonstration for staff means
+  // giving it a `private` object first; that is an access-matrix change
+  // (ADR-0090 D6 review), not a rider.
 
   // Seed data
   data: CrmSeedData,

@@ -146,7 +146,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
               owner: "Propietario",
               admin: "Administrador",
               delegated_admin: "Administrador delegado",
-              member: "Miembro"
+              member: "Miembro",
+              external: "Externo"
             }
           }
         }
@@ -526,7 +527,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     description: "Organizaciones para agrupación multi-tenant",
     fields: {
       name: {
-        label: "Nombre"
+        label: "Nombre",
+        help: "El nombre propio de la organización. El nombre del producto que muestra la consola es otro ajuste, que se define en Configuración → Marca."
       },
       slug: {
         label: "Slug",
@@ -545,7 +547,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "Zona horaria",
-        help: "Zona horaria IANA (p. ej. UTC, Asia/Shanghai) en la que se calculan los límites de fecha de esta organización: el valor raíz que hereda toda unidad de negocio sin zona propia. Sin definir significa UTC."
+        help: "Zona horaria IANA (p. ej. UTC, Asia/Shanghai), guardada como valor raíz para las unidades de negocio sin zona propia. Hoy no cambia ningún cálculo de fechas: las fórmulas, los informes y las fechas mostradas usan Configuración → Localización → Zona horaria predeterminada."
       },
       parent_organization_id: {
         label: "Organización principal",
@@ -581,7 +583,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
               owner: "Propietario",
               admin: "Administrador",
               delegated_admin: "Administrador delegado",
-              member: "Miembro"
+              member: "Miembro",
+              external: "Externo"
             }
           }
         }
@@ -642,7 +645,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           owner: "Propietario",
           admin: "Administrador",
           delegated_admin: "Administrador delegado",
-          member: "Miembro"
+          member: "Miembro",
+          external: "Externo"
         }
       }
     },
@@ -666,7 +670,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
               owner: "Propietario",
               admin: "Administrador",
               delegated_admin: "Administrador delegado",
-              member: "Miembro"
+              member: "Miembro",
+              external: "Externo"
             }
           }
         }
@@ -720,7 +725,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           owner: "Propietario",
           admin: "Administrador",
           delegated_admin: "Administrador delegado",
-          member: "Miembro"
+          member: "Miembro",
+          external: "Externo"
         }
       },
       status: {
@@ -794,7 +800,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
               owner: "Propietario",
               admin: "Administrador",
               delegated_admin: "Administrador delegado",
-              member: "Miembro"
+              member: "Miembro",
+              external: "Externo"
             }
           }
         }

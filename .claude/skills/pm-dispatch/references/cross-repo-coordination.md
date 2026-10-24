@@ -7,10 +7,10 @@
 - 多车道仓 `objectstack`、`objectui`:中央分诊是 `domain:*`/type/定级的唯一生产者。
 - 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
 - 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡入本仓收件箱,不落 objectstack。
-- 机械三务 = 自扫 sweep、自打 `type`、自做 `finding` 首触定级。
+- 机械三务 = 自扫 sweep、自打 `type`、自做首触(含 `finding`;业务理由归召唤的总监席)。
 - 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点、写身份锁移植(deny + hooks)。
-- 新仓准入判据一句:这个仓真的需要常设席位吗。
-- hotcrm 收卡判据与宪章见 `references/lanes/hotcrm.md`。
+- 新仓三件:加入 `GOVERNED_REPOS`、安装车队 App、写 `lanes/<repo>.md` 宪章;应用仓无分诊席。
+- 新仓准入只问一句:真需要常设席位吗;hotcrm 宪章见 `references/lanes/hotcrm.md`。
 - objectui 卡按修复落点分两条车道:`domain:ui`(全部代码)与 `domain:skills`(仓根发布 `skills/**`)。
 - objectui 的 `domain:spec`、`domain:devx`、`domain:tooling` 已退役:⛔ 不贴、不认领、不再创建。
 - 协议恒归 objectstack `domain:spec`;跨层功能照规则 2,objectui 子单归 `domain:ui`。
@@ -24,7 +24,7 @@
 - 判据:正文抽掉 objectstack 还成立 ⇒ 当场转仓(console/UI 缺陷即转 objectui);不成立才是缝卡。
 - 转仓走 `issue-transfer.mjs`;名册外或平台拒才重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
 - 缝卡收窄为真协调卡:留 objectstack 带 `repo:*`,正文点名读者(哪个座位、哪一步)。
-- 决策收件箱按仓:平台在 objectstack / objectui,元数据项目在本仓;在飞卡 ⛔ 不中途转仓。
+- 决策卡留在立卡仓,总监席扫全部仓 `needs-user-decision` 呈批;在飞卡 ⛔ 不中途转仓。
 - 规则 2:跨层功能点或 objectui 消费的 `Seam:` 卡恒由分诊立父单 + 逐层子单,spec/后端先行。
 - 下游带 `Blocked-by: <owner/repo>#<n>`;`Blocked-by` 未关闭/未合并的不派发,对 GitHub 现验。
 - 被链接或同父的两单永不同批。
@@ -41,7 +41,7 @@
 - 直派的审计评论逐字引用授权指令。
 - 多车道仓分诊空缺时,会话型执行 PM 可代扫:只做分诊动作,不跨车道认领,贴上注明。
 - 代扫在分诊座位有主时立即停止。
-- 规则 5:一块板不设第二跟踪器:pm 标签就是状态机,org Project 只是维护者的聚合视图。
+- 规则 5:一块板不设第二跟踪器:pm 标签就是状态机,看板(org Project)只是维护者的聚合视图。
 - 认领即跟到 MERGED:派发后发现跨车道面(含 spec)不移卡,复核按面定档,未达档借隔离复核。
 - 复核记录带 `Implemented-by:`/`Reviewed-by:`;`pm:retriage` 改路由只对未派发卡。
 - 转移落对方队列:目标仓立单带 `pm:queue`、出处行与一行可执行判据,依赖用 `Blocked-by:`。

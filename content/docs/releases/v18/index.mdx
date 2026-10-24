@@ -62,6 +62,10 @@ ceremony**, `os migrate organization-ownership` (ADR-0131 D10).
   `os serve --dev` use a development fallback and need none, and `os start`
   generates an auth secret on its first run and persists it to
   `<home>/auth-secret`.
+  From 18.1.0, `--no-server` is not a way round the refusal, a production
+  boot whose stack mounts no auth is refused the same way, and so is one whose
+  `@objectstack/plugin-auth` fails to load
+  ([18.1.0, boot and deployment](/docs/releases/v18/18-1#boot-and-deployment)).
 
 The step-by-step is [Upgrading to 18.0](/docs/upgrading#upgrading-to-180), each
 step's measured output is in the walked
@@ -116,12 +120,26 @@ every flag is in
   without asking.
 - **18.0.0 ends the prerelease.** It is the GA cut: it leaves pre mode and
   publishes the line to `latest`.
+- **After 18.0.0, a breaking change ships in a minor or a patch.** The line
+  takes no further major. Under the maintainer's 2026-10-21 level rule
+  ([#25105](https://github.com/objectstack-ai/objectstack/issues/25105)), a
+  change to the metadata protocol (added, narrowed or semantic) takes `minor`,
+  and every other change takes `patch`, breaking or not: a non-protocol
+  breaking change keeps its **BREAKING** banner and its ADR-0087 disposition.
+  A `^18.0.0` range can therefore move you to a release that breaks you. Pin
+  exact versions, and read each release's page before you move.
 
 ## Per-release notes
 
 Each release below is a self-contained page: what it changed, what breaks, and
 its own upgrade checklist.
 
-- **[18.0.0](/docs/releases/v18/18-0)** — current; the GA cut. Its
+- **[18.1.0](/docs/releases/v18/18-1)** — the first minor, and a minor that
+  breaks: 91 of its changesets are declared breaking (ruling A grades a
+  non-protocol breaking change `patch` and a protocol narrowing `minor`). Its
+  [upgrade checklist](/docs/releases/v18/18-1#upgrade-checklist) moves an
+  18.0.0 app to 18.1.0, and was walked on 2026-10-24 from 18.0.0 on one small
+  SQLite app.
+- **[18.0.0](/docs/releases/v18/18-0)** — the GA cut. Its
   [upgrade checklist](/docs/releases/v18/18-0#upgrade-checklist) moves a 17.x
   app and its database to 18.0.0, and was walked from 17.7.0.

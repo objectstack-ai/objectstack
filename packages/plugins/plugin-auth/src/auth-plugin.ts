@@ -67,6 +67,7 @@ import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
+import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
@@ -74,6 +75,11 @@ import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runReq
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
 import { readJsonRequestBody } from './request-json-body.js';
+import {
+  seedDevWorkspaceCurrency,
+  withOrganizationDefaultCurrency,
+  type CurrencySettingsDoor,
+} from './organization-default-currency.js';
 import type { CounterStore } from './rate-limit-storage.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
@@ -678,6 +684,26 @@ export class AuthPlugin implements Plugin {
         return undefined;
       }
     };
+
+    // [#25495] A new organization takes its creator's default currency
+    // (`localization.currency`), derived from their stored language or the
+    // creating request's `Accept-Language`; nothing derivable ⇒ nothing
+    // written, a value already set ⇒ left alone. Wrapped AFTER
+    // `auth:configure` so a host's own `onOrganizationCreated`, from the
+    // plugin options or from a configure handler, still runs, and runs first.
+    // The settings service is resolved when an organization is created, not
+    // here: it starts after this plugin.
+    authConfig.onOrganizationCreated = withOrganizationDefaultCurrency(authConfig.onOrganizationCreated, {
+      dataEngine,
+      getSettings: () => {
+        try {
+          return ctx.getService<CurrencySettingsDoor>('settings');
+        } catch {
+          return undefined;
+        }
+      },
+      logger: ctx.logger,
+    });
 
     // Initialize auth manager with data engine
     this.authManager = new AuthManager(authConfig);
@@ -1662,6 +1688,12 @@ export class AuthPlugin implements Plugin {
           packageId: 'com.objectstack.plugin-auth.member-role-canonical',
           logger: ctx.logger,
         });
+        // [Ruling 6355206139 E5/E6] The `external` role is held alone, and its
+        // holder is never placed in the organization's business units — at
+        // priority 6, judging the canonical spelling the hook above wrote.
+        registerExternalMembershipGuard(engine, {
+          packageId: 'com.objectstack.plugin-auth.external-membership',
+        });
         registerIdentityWriteGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.identity-write-guard',
           logger: ctx.logger,
@@ -2480,6 +2512,17 @@ export class AuthPlugin implements Plugin {
       // creator's — see the method. Only on the seeding boot: a later boot
       // takes the database as it finds it.
       if (seededId) await this.seedDevWorkspaceTimezone(ctx, ql, seededId);
+      // [#25495] And with the host's currency, by the rule a new
+      // organization's creator gets (`organization-default-currency.ts`).
+      if (seededId) {
+        let settings: CurrencySettingsDoor | undefined;
+        try {
+          settings = ctx.getService<CurrencySettingsDoor>('settings');
+        } catch {
+          settings = undefined;
+        }
+        await seedDevWorkspaceCurrency({ settings, ql, userId: seededId, logger: ctx.logger });
+      }
       ctx.logger.info(`🔑 Dev admin seeded: ${email} / ${password}`);
       // Surface the credentials in the `serve` startup banner. The
       // ctx.logger line above is swallowed by serve's boot-quiet window

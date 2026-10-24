@@ -106,6 +106,15 @@
  * `{{ v }}`. ⛔ The template engine does not learn `$User`
  * (or any new `$` root) instead — that would widen the flow's variable set
  * with no declaration behind it.
+ *
+ * ## A closed scope reads the same grammar (#24798)
+ *
+ * A template text slot outside a flow whose renderer binds a FIXED set of
+ * roots — today a bulk action's `confirmText`, over `count` and the def's
+ * params — is judged here too, by {@link closedScopeTemplateRefusal}: the same
+ * single-brace reading, the same hole grammar, the same root rule, with the
+ * scope's roots in place of the flow's open one. ⛔ Never a second reading of
+ * the dialect for such a slot; give it a {@link ClosedTemplateScope}.
  */
 
 import {
@@ -225,10 +234,12 @@ export const FLOW_NODE_TEXT_SLOTS: readonly FlowNodeTextSlot[] = [
 /**
  * The text a text-slot value carries — the string itself, or the `source` of a
  * `{ dialect: 'template', source }` envelope (what the `tmpl` helper builds
- * for the notify pair). Anything else carries no text this judge reads: the
- * slot's own contract refuses its shape.
+ * for the notify pair, and what a parsed template slot holds). Anything else
+ * carries no text this judge reads: the slot's own contract refuses its shape.
+ * Exported (#24798) so a door judging a template slot outside a flow reads the
+ * slot the way this module does — one reading of the envelope, not two.
  */
-function textSlotSource(value: unknown): string | undefined {
+export function templateSlotSource(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
     const envelope = value as { dialect?: unknown; source?: unknown };
@@ -266,15 +277,46 @@ const HOLE = /\{\{([^}]*)\}\}/g;
 const HOLE_PATH = /^[\w$.[\]]+$/;
 
 /**
- * The `$` root of a variable path when the engine does not bind it, else
- * `undefined`. The root is the path's first segment as the engine resolves it
+ * The root of a variable path — its first segment as the engine resolves it
  * (`[i]` read as `.i`), so `$User.Id`, `$User[0]` and `$User` all root at
- * `$User`.
+ * `$User`, and `tier.label` at `tier`.
+ */
+function pathRoot(path: string): string | undefined {
+  return path.replace(/\[(\w+)\]/g, '.$1').split('.').find((segment) => segment !== '');
+}
+
+/**
+ * The `$` root of a variable path when the engine does not bind it, else
+ * `undefined`.
  */
 function unboundEngineRoot(path: string): string | undefined {
-  const root = path.replace(/\[(\w+)\]/g, '.$1').split('.').find((segment) => segment !== '');
+  const root = pathRoot(path);
   if (root === undefined || !root.startsWith('$') || ENGINE_VARIABLE_SET.has(root)) return undefined;
   return root;
+}
+
+/** One `{{ }}` hole of a text whose path compiles, as written and as its trimmed path. */
+interface PathHole {
+  /** The hole as written (`{{ count | number }}`). */
+  readonly text: string;
+  /** Its variable path, trimmed (`count`). */
+  readonly path: string;
+}
+
+/**
+ * Every hole of `text` whose path compiles ({@link HOLE_PATH}), in order — a
+ * formatter after `|` is not part of the path. A hole that does not compile is
+ * the compile step's to name, so it is not returned.
+ */
+function pathHoles(text: string): PathHole[] {
+  const out: PathHole[] = [];
+  for (const match of text.matchAll(HOLE)) {
+    const inner = match[1]!;
+    const pipe = inner.indexOf('|');
+    const path = (pipe === -1 ? inner : inner.slice(0, pipe)).trim();
+    if (HOLE_PATH.test(path)) out.push({ text: match[0], path });
+  }
+  return out;
 }
 
 /** One `{{ }}` hole of a text slot whose root is a `$` name the engine does not bind. */
@@ -290,13 +332,9 @@ interface UnboundRootHole {
 /** Every hole of `text` that compiles as a path and roots at a `$` name the engine does not bind, in order. */
 function unboundRootHoles(text: string): UnboundRootHole[] {
   const out: UnboundRootHole[] = [];
-  for (const match of text.matchAll(HOLE)) {
-    const inner = match[1]!;
-    const pipe = inner.indexOf('|');
-    const path = (pipe === -1 ? inner : inner.slice(0, pipe)).trim();
-    if (!HOLE_PATH.test(path)) continue;
-    const root = unboundEngineRoot(path);
-    if (root !== undefined) out.push({ text: match[0], path, root });
+  for (const hole of pathHoles(text)) {
+    const root = unboundEngineRoot(hole.path);
+    if (root !== undefined) out.push({ ...hole, root });
   }
   return out;
 }
@@ -321,18 +359,24 @@ function unboundRootOf(token: TemplateToken): string | undefined {
   return token.kind === 'path' ? unboundEngineRoot(token.inner) : undefined;
 }
 
+/** A flow text slot's spellable token: a path not rooted at a `$` name the engine does not bind. */
+function flowSpellable(token: TemplateToken): boolean {
+  return token.kind === 'path' && unboundRootOf(token) === undefined;
+}
+
 /**
- * `text` with each single-brace PATH token written as a hole — the spelling a
- * refusal prescribes for it. A path over a `$` root the engine does not bind
- * stays as written: its hole would be refused too, so its remedy is
- * {@link unboundRootRemedy}, never a rewrite.
+ * `text` with each single-brace token `spellable` admits written as a hole —
+ * the spelling a refusal prescribes for it. Every other token stays as
+ * written: its hole would be refused too, so its remedy is its own sentence,
+ * never a rewrite. In a flow text slot the spellable tokens are the PATH
+ * tokens not rooted at a `$` name the engine does not bind
+ * ({@link flowSpellable}); in a closed scope, the path tokens over a bound root.
  */
-function doubled(text: string, tokens: readonly TemplateToken[]): string {
+function doubled(text: string, tokens: readonly TemplateToken[], spellable: (token: TemplateToken) => boolean): string {
   let out = '';
   let at = 0;
   for (const token of tokens) {
-    const spellable = token.kind === 'path' && unboundRootOf(token) === undefined;
-    out += text.slice(at, token.index) + (spellable ? `{{ ${token.inner} }}` : token.text);
+    out += text.slice(at, token.index) + (spellable(token) ? `{{ ${token.inner} }}` : token.text);
     at = token.index + token.text.length;
   }
   return out + text.slice(at);
@@ -377,8 +421,8 @@ function singleBraceRefusal(text: string): string | undefined {
   const tokens = singleBraceTokens(text);
   if (tokens.length === 0) return undefined;
   const parts: string[] = [];
-  if (tokens.some((token) => token.kind === 'path' && unboundRootOf(token) === undefined)) {
-    parts.push(`Write \`${text}\` as \`${doubled(text, tokens)}\`.`);
+  if (tokens.some(flowSpellable)) {
+    parts.push(`Write \`${text}\` as \`${doubled(text, tokens, flowSpellable)}\`.`);
   }
   const seen = new Set<string>();
   for (const token of tokens) {
@@ -466,13 +510,113 @@ export function flowNodeTextSlotSources(nodeType: string, config: unknown): Flow
     if (slot.eachValue) {
       if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
       for (const [name, entry] of Object.entries(value as Record<string, unknown>)) {
-        const source = textSlotSource(entry);
+        const source = templateSlotSource(entry);
         if (source !== undefined) out.push({ path: `${slot.key}.${name}`, label: slot.label, source });
       }
       continue;
     }
-    const source = textSlotSource(value);
+    const source = templateSlotSource(value);
     if (source !== undefined) out.push({ path: slot.key, label: slot.label, source });
   }
   return out;
+}
+
+// ─── A CLOSED scope (#24798) ────────────────────────────────────────────────
+
+/**
+ * A template text slot whose holes read a CLOSED scope — a fixed set of roots
+ * the slot's renderer binds, and nothing else. A flow text slot's scope is
+ * open (any flow variable, any node output, so only a `$` root is judged);
+ * a closed slot binds a handful of names its contract declares, so any other
+ * root renders a blank fragment and is judged by name.
+ *
+ * Today one slot reads a closed scope: a bulk action's `confirmText`
+ * (`ui/bulk-action.zod.ts`, ADR-0032 Decisions 2–3), whose roots are
+ * `bulkConfirmTemplateRoots(def)` — `count` and the def's params by name.
+ */
+export interface ClosedTemplateScope {
+  /** The slot as a sentence names it, capitalised: ``A bulk action's `confirmText` ``. */
+  readonly slot: string;
+  /** Every root a hole may name, in the order a refusal lists them. */
+  readonly roots: readonly string[];
+}
+
+/** `roots`, each in backticks, joined for a sentence. */
+function rootList(roots: readonly string[]): string {
+  return roots.map((root) => `\`${root}\``).join(', ');
+}
+
+/** The remedy for one single-brace token a closed scope cannot spell as a hole. */
+function closedUnspellableRemedy(token: TemplateToken, scope: ClosedTemplateScope): string {
+  if (token.kind === 'path') {
+    return (
+      `\`${token.text}\` names \`${pathRoot(token.inner) ?? token.inner}\`, which this slot does not bind, so no hole `
+      + `spells it: name one of ${rootList(scope.roots)}, or reword the sentence.`
+    );
+  }
+  if (token.kind === 'expression') {
+    return (
+      `\`${token.text}\` is logic, and a hole is a bound path with an optional whitelisted formatter `
+      + '(`{{ count | number }}`), never logic (ADR-0032 §3): reword the sentence around a bound hole.'
+    );
+  }
+  return (
+    `\`${token.text}\` is not one of the roots this slot binds (${rootList(scope.roots)}), so no hole spells it: `
+    + 'delete it or reword the sentence (a text slot has no escape for literal braces).'
+  );
+}
+
+/**
+ * Why `text` — the template of a slot that reads `scope` — is refused, or
+ * `undefined` when it carries neither a single-brace `{…}` token nor a hole
+ * over a root `scope` does not bind.
+ *
+ * The same reading as {@link textSlotTemplateRefusal}, over the same token and
+ * hole grammar: a single-brace token is found exactly as there (a token
+ * touching another brace is left to the compile step), and a hole's root is
+ * its path's first segment, a formatter not included. What differs is the
+ * scope: a path token over a bound root is prescribed its `{{ }}` spelling,
+ * any other token its own remedy, and every hole whose root is not in
+ * `scope.roots` is named. A hole that does not compile as a path (logic, an
+ * unknown formatter) is left to `validateExpression('template', …)`, which
+ * every door runs next.
+ */
+export function closedScopeTemplateRefusal(text: string, scope: ClosedTemplateScope): string | undefined {
+  const bound = new Set(scope.roots);
+  const spellable = (token: TemplateToken): boolean => {
+    if (token.kind !== 'path') return false;
+    const root = pathRoot(token.inner);
+    return root !== undefined && bound.has(root);
+  };
+  const refusals: string[] = [];
+
+  const tokens = singleBraceTokens(text);
+  if (tokens.length > 0) {
+    const parts = [
+      `${scope.slot} reads \`{{ }}\` template holes (ADR-0032 §3), not the single-brace \`{…}\` dialect: a \`{…}\` `
+      + 'token there is no placeholder and is shown as literal text.',
+    ];
+    if (tokens.some(spellable)) parts.push(`Write \`${text}\` as \`${doubled(text, tokens, spellable)}\`.`);
+    const seen = new Set<string>();
+    for (const token of tokens) {
+      if (spellable(token) || seen.has(token.text)) continue;
+      seen.add(token.text);
+      parts.push(closedUnspellableRemedy(token, scope));
+    }
+    refusals.push(parts.join(' '));
+  }
+
+  const unbound: string[] = [];
+  for (const hole of pathHoles(text)) {
+    const root = pathRoot(hole.path);
+    if (root === undefined || bound.has(root) || unbound.includes(hole.text)) continue;
+    unbound.push(hole.text);
+  }
+  if (unbound.length > 0) {
+    refusals.push(
+      `${scope.slot} binds only ${rootList(scope.roots)}, so a hole over any other root renders a blank fragment: `
+      + `${unbound.map((hole) => `\`${hole}\``).join(', ')} — name one of those roots, or reword the sentence.`,
+    );
+  }
+  return refusals.length === 0 ? undefined : refusals.join(' ');
 }

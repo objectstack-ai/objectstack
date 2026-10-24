@@ -26,6 +26,7 @@
   有行必校,缺行旧记录不改判。
 - ① derived judgments 逐项:diff 引出的接受集与公开面变化逐条点名判对错。
 - ② semver 定级与 changeset 声明一致;③ 边界旗:dev 挂旗与 `open_questions` 逐旗答复或升级。
+- 另记作者:PR `user.login` 非 `objectstack-fleet[bot]` ⇒ ③ 注点名该 login(脱中继写),落地前读。
 - 复核形状:只读 diff 与卡片,check 结论取 head 的 check-runs,⛔ 永不本地重跑派生门禁族。
 - 只喂卡片、既有裁决与 PR 本体,⛔ 不喂派发令与派发席自己的结论;简报写成对抗性。
 - 简报从 `node scripts/pm/record-recognisers.mjs --brief-template` 起稿:

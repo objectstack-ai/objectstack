@@ -453,6 +453,16 @@ export {
   withoutOperationPrivateKeys,
 } from './operation-private-keys.js';
 
+// Ruling of record 6355206139 — the EXTERNAL rung's OWD seam: plugin-security
+// stamps whether a held grant's RLS speaks, plugin-sharing floors the OWD.
+export {
+  EXTERNAL_READ_GRANT_KEY,
+  EXTERNAL_WRITE_GRANT_KEY,
+  isExternalAudienceContext,
+  externalGrantSpeaks,
+  owdForAudience,
+} from './external-owd-floor.js';
+
 // The caller-scoped "which of these parent records can the caller read?" probe
 // every parent-derived read gate asks (comments, activity, ledger, attachments,
 // mail). One owner for the body two packages had hand-copied.

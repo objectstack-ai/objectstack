@@ -217,6 +217,23 @@ describe('sys_approval_request detail page — the slot map', () => {
     expect((SysApprovalAction.fields as AnyRec).request_id).toMatchObject({ type: 'lookup', reference: 'sys_approval_request' });
   });
 
+  it('names each Timeline step by its label, step_label, never by the node\'s machine id, step_name', () => {
+    // Both are stored on every `sys_approval_action` row: `step_name` is the
+    // Approval node's id (`dual_signoff`), `step_label` the step's label the
+    // service copies from the request (`actionRow`). The existence check below
+    // cannot tell them apart, since both are declared fields, so the choice is
+    // pinned here, the way the strip's `current_step_label` is.
+    const [timeline] = TAB_ITEMS[1].children as AnyRec[];
+    const columns = timeline.properties.columns as string[];
+    const fields = SysApprovalAction.fields as AnyRec;
+    expect({ label: columns.includes('step_label'), machine: columns.includes('step_name') })
+      .toEqual({ label: true, machine: false });
+    expect(fields.step_label).toMatchObject({ type: 'text', label: 'Approval Step' });
+    // Control: the machine id stays a declared field. It is dropped from the
+    // Timeline, not from the object.
+    expect(fields.step_name).toMatchObject({ type: 'text' });
+  });
+
   it('every field the page names exists on its object', () => {
     const requestFields = Object.keys(SysApprovalRequest.fields);
     const actionFields = Object.keys(SysApprovalAction.fields);

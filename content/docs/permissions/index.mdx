@@ -43,8 +43,9 @@ export const KeyAccountQualifiedContactRule = defineSharingRule({
 Note the object it is anchored on. `showcase_contact` is OWD `private`, which is
 what makes this grant one a read gate actually consults — sharing only ever
 WIDENS a baseline, so a rule on an object that is already `public_read_write`
-grants nothing and is refused at boot. That is an authoring-time build error
-(`sharing-rule-object-not-shareable`), not a runtime surprise.
+grants nothing to staff, and reaches only the external (portal) members it names.
+The authoring-time advisory `sharing-rule-object-not-shareable` says so before
+anything boots.
 
 Because AI agents act through the same permission-aware surface, these rules bound
 agent access exactly as they bound users ([Actions as Tools](/docs/ai/actions-as-tools)).

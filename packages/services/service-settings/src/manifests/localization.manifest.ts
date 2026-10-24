@@ -49,7 +49,11 @@ export const localizationSettingsManifest: SettingsManifest = {
       // Localization and the first-run timezone prompt), so it names effects,
       // not formula functions; `localization-timezone-help.pin.test.ts` holds
       // every served locale to that.
-      description: 'Decides what "today" means in formulas, how reports group dates, and how dates and times are shown. Accepts any IANA time zone name (e.g. Europe/Paris).',
+      // [#25347] The second sentence says which timezone wins: this key is the
+      // organization's zone in effect (tenant scope, one row per organization),
+      // and `sys_organization.timezone`, which no reader consults, does not
+      // change it. That field's help says the same from its side.
+      description: 'Decides what "today" means in formulas, how reports group dates, and how dates and times are shown. Accepts any IANA time zone name (e.g. Europe/Paris). This is the timezone in effect for the organization: the Timezone field on the Organization record does not change it.',
       // The description has always promised the IANA domain; since #5712 the
       // declaration matches it: any valid IANA zone is accepted on the write
       // and env doors, and the curated options below are a UI convenience
@@ -104,6 +108,15 @@ export const localizationSettingsManifest: SettingsManifest = {
       // rather than inheriting a guessed symbol (previously hard-defaulted to
       // 'USD', which surfaced an unwanted "$"/"US$" on every code-less amount).
       // A workspace can still pick a default to apply org-wide.
+      // [#25495] Where a new organization's value comes from: when an
+      // organization is created, plugin-auth writes this key as an ordinary
+      // `tenant` row for it, derived from the creator's language or region
+      // (their stored `sys_user.locale`, else the creating request's
+      // `Accept-Language`) through a CLDR region → currency table; the dev
+      // seed does the same from the host's POSIX locale. Nothing derivable ⇒
+      // nothing is written (there is no fallback to `default_country` or
+      // `locale`), and a value already set on any rung is never overwritten.
+      // `organization-default-currency.ts` in plugin-auth is the authority.
       description: 'ISO 4217 code applied when a currency field omits its own. Leave unset to render code-less amounts as plain numbers.',
       // As with `timezone`: the description promises ISO 4217, and since #5712
       // the declaration delivers it — any ISO 4217 code is accepted, the

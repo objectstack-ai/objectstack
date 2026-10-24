@@ -86,6 +86,7 @@ import {
 // decision methods' slot test and `can_act` alike (`approver-address.ts`).
 import {
   actingAddresses,
+  addressedPosition,
   equivalentApproverAddresses,
   heldSlot,
   positionAddresses,
@@ -93,6 +94,13 @@ import {
   type ActingCaller,
 } from './approver-address.js';
 import { labelOrMachineName, requestDisplayLabels, slateLabelOf } from './display-labels.js';
+import {
+  ADMIN_RESCUE_NOTE_SNAPSHOT_KEY,
+  adminRescueNoteOf,
+  adminRescueNoteText,
+  adminRescueReason,
+  type AdminRescueNote,
+} from './admin-rescue-note.js';
 import {
   localizeRequestLabels,
   readerLabelsFor,
@@ -1103,33 +1111,6 @@ function holdsTenantAdminRung(permissions: readonly string[]): boolean {
  */
 const ADMIN_RESCUE_GROUP = '#0';
 
-/**
- * [#22824] Why a slate opened on the organization's administrators, in words
- * an operator reads on the request's timeline and in its `__resolvedFrom`
- * snapshot: which approver entries resolved to no one.
- *
- * `abandoned` is the slate the node resolved (only `type:value` literals, or
- * nothing at all: an empty `manager` rung adds no slot). `fallback` says why
- * an `onEmptyApprovers: 'fallback'` node degraded here, when it is one.
- */
-function emptySlateReason(
-  abandoned: readonly string[],
-  fallback: 'not_declared' | 'resolved_to_no_one' | undefined,
-): string {
-  const parts = abandoned
-    .filter((slot) => !!slot && slot.includes(':'))
-    .map((slot) => {
-      const at = slot.indexOf(':');
-      const type = slot.slice(0, at);
-      const value = slot.slice(at + 1);
-      return type === 'position' ? `position '${value}' has no holder` : `${type} '${value}' resolved to no one`;
-    });
-  let reason = parts.length ? parts.join('; ') : 'no approver on the node resolved to a person';
-  if (fallback === 'resolved_to_no_one') reason += '; the declared fallbackApprovers resolved to no one either';
-  if (fallback === 'not_declared') reason += "; onEmptyApprovers is 'fallback' but no fallbackApprovers are declared";
-  return reason;
-}
-
 /** One OOO delegation hop applied while resolving an approver (#1322 M1/M4). */
 interface OooSubstitution {
   /** The approver who was skipped (out of office). */
@@ -1220,6 +1201,19 @@ function csvSplit(raw: unknown): string[] {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
   return String(raw).split(',').map(s => s.trim()).filter(Boolean);
+}
+
+/**
+ * [ADR-0131] The organization a value names, or `null` for none — `NULL`,
+ * absent or blank. The normalization `grantOrganizationOf`
+ * (`@objectstack/core`, `resolve-authz-context.ts`) gives a stored grant row's
+ * organization; `null` names no organization and matches none, its own
+ * included. Read by {@link ApprovalService.lookupActiveDelegation} on both
+ * sides of its comparison: the delegation row's and the request's.
+ */
+function organizationNamed(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  return String(value);
 }
 
 /**
@@ -3227,6 +3221,32 @@ export class ApprovalService implements IApprovalService {
    * shared `isGrantActive` half-open window (ADR-0091 D2), enforced here at
    * resolution time — never by a background job. When several rows are active,
    * the one expiring soonest wins (the most specific coverage window).
+   *
+   * **A delegation applies only in its own organization (ADR-0131).** A row
+   * reroutes a request's approver only when the row's `organization_id` is the
+   * request's organization: the rule `grantAppliesInTenant`
+   * (`@objectstack/core`, `resolve-authz-context.ts`) applies to a stored
+   * position or permission-set grant, read the same way here.
+   *
+   *  - A delegation of another organization reroutes nothing in this one.
+   *  - An organization-less delegation reroutes nothing anywhere. "NULL means
+   *    every organization" is the reading ADR-0131 retired (D1: nothing reads a
+   *    NULL tenant value as an owner). Under a wall no write produces such a row
+   *    any more: a session insert is stamped with its active organization, an
+   *    elevated insert with none is refused (D9), and the write wall refuses an
+   *    update that empties the column. What remains is stored state from before.
+   *    The D10 ceremony attributes it to the Default Organization under
+   *    `single`; under a wall it has no anchor, so the ceremony reports it and
+   *    leaves it NULL. Such a row is reported here at `warn` with its remedy,
+   *    because its author still sees it in Setup and nothing else says it has
+   *    stopped applying.
+   *  - A request with no organization takes no delegation: a missing
+   *    organization has no "every organization" reading either.
+   *
+   * The rule is the same in every posture (ADR-0131 D11). Under `single`, D9
+   * stamps the Default Organization on the delegation its author writes and on
+   * the record a request is about, and the request takes its record's
+   * organization, so a delegation written there applies as it did before.
    */
   private async lookupActiveDelegation(
     delegatorId: string,
@@ -3243,10 +3263,24 @@ export class ApprovalService implements IApprovalService {
         context: SYSTEM_CTX,
       } as any);
     } catch { return null; } // table absent on minimal stacks — no OOO, resolve as-is
-    const active = (rows ?? []).filter((r: any) =>
-      isGrantActive(r, now)
-      // A null-org rule applies across tenants; a scoped rule only within its tenant.
-      && (organizationId == null || r.organization_id == null || String(r.organization_id) === String(organizationId)));
+    const requestOrg = organizationNamed(organizationId);
+    const active: any[] = [];
+    for (const r of rows ?? []) {
+      if (!isGrantActive(r, now)) continue;
+      const rowOrg = organizationNamed(r?.organization_id);
+      if (rowOrg === null) {
+        this.logger?.warn?.(
+          `[approvals] out-of-office delegation '${r?.id}' (${delegatorId} → ${r?.delegate_id}) names no `
+          + `organization, so it reroutes no approval: a delegation applies only to approvals in the `
+          + `organization it belongs to. Create it again while signed in to the organization whose `
+          + `approvals it should cover, and delete this one; on a single-organization deployment, `
+          + `'os migrate organization-ownership --apply' attributes it to the Default Organization instead.`,
+          { delegationId: r?.id, delegatorId, delegateId: r?.delegate_id, requestOrganizationId: requestOrg },
+        );
+        continue;
+      }
+      if (rowOrg === requestOrg) active.push(r);
+    }
     if (!active.length) return null;
     active.sort((a: any, b: any) => {
       const au = a.valid_until ? Date.parse(String(a.valid_until)) : Number.POSITIVE_INFINITY;
@@ -3604,8 +3638,10 @@ export class ApprovalService implements IApprovalService {
     //
     // [#22824] Set when the slate below is replaced by the organization's
     // administrators: the reason, written to the request's timeline once the
-    // request row exists.
-    let routedToAdministrators: string | undefined;
+    // request row exists. [#25576] As a code and its parameters, which the
+    // snapshot stores and the approvals door renders in the reader's language
+    // (`admin-rescue-note.ts`); the row's `comment` is its English.
+    let adminRescueNote: AdminRescueNote | undefined;
     if (!slateNamesAPerson(approvers)) {
       const emptyPolicy = (input.config as any).onEmptyApprovers ?? 'admin_rescue';
       // Why a `fallback` node degraded to admin_rescue, for the reason below.
@@ -3712,7 +3748,7 @@ export class ApprovalService implements IApprovalService {
       // Re-tested rather than assumed: a `fallback` that landed people above
       // has already turned this into a normal request.
       if (!slateNamesAPerson(approvers)) {
-        const reason = emptySlateReason(approvers, fallbackDegraded);
+        const reason = adminRescueReason(approvers, fallbackDegraded);
         const found = await this.organizationAdministrators(requestOrg);
         const administrators = 'ids' in found ? found.ids : [];
         if (administrators.length) {
@@ -3738,8 +3774,12 @@ export class ApprovalService implements IApprovalService {
               resolved: approvers, administrators: administratorSlate,
             },
           );
+          adminRescueNote = {
+            action_id: uid('aact'),
+            abandoned: [...approvers],
+            ...(fallbackDegraded ? { fallback: fallbackDegraded } : {}),
+          };
           approvers = administratorSlate;
-          routedToAdministrators = reason;
         } else {
           // Break-glass stays break-glass (#3424): an organization whose
           // administrators' slate resolves to nobody opens the request on the
@@ -3789,6 +3829,7 @@ export class ApprovalService implements IApprovalService {
     if (Object.keys(resolvedFrom).length) {
       configSnapshot.__resolvedFrom = resolvedFrom;
     }
+    if (adminRescueNote) configSnapshot[ADMIN_RESCUE_NOTE_SNAPSHOT_KEY] = adminRescueNote;
     // ADR-0044 round numbering: rounds of a revise loop share the run — count
     // this (run, node)'s prior requests; the new one is round N+1. Stamped on
     // the snapshot (precedent: __flowLabel), so no schema migration.
@@ -3842,13 +3883,15 @@ export class ApprovalService implements IApprovalService {
     // one system note on its timeline (no person took it, so `actor_id` is
     // null, ADR-0118 D1 — the shape the OOO hop below records), naming which
     // approver entries resolved to no one. The same reason rides
-    // `__resolvedFrom` for the audit snapshot.
-    if (routedToAdministrators) {
+    // `__resolvedFrom` for the audit snapshot. [#25576] The row's id is the
+    // one the snapshot's note names, which is how `listActions` finds the row
+    // to render in the reader's language.
+    if (adminRescueNote) {
       await this.engine.insert('sys_approval_action', await this.actionRow(row, {
-        id: uid('aact'), request_id: id, organization_id: requestOrg,
+        id: adminRescueNote.action_id, request_id: id, organization_id: requestOrg,
         step_name: input.nodeId, step_index: 0, action: 'comment',
         actor_id: null,
-        comment: `Routed to this organization's administrators because the approver slate named no one: ${routedToAdministrators}.`,
+        comment: adminRescueNoteText(adminRescueNote),
         created_at: now,
       }), { context: SYSTEM_CTX });
     }
@@ -5460,6 +5503,10 @@ export class ApprovalService implements IApprovalService {
     } else {
       throw new Error(`FORBIDDEN: '${from}' is not a pending approver on this request`);
     }
+    // #25485 — the new slot must name someone who can take it. Asked only
+    // AFTER the authorization branches above, so a caller who may not move
+    // this slot learns nothing about the directory from the answer.
+    await this.assertReassignTargetResolves(to, raw.organization_id ?? null);
     const now = this.clock.now().toISOString();
     // Audit first, then mutate — mirrors decideNode(), so a failed audit
     // write can never leave a moved slot without a trail.
@@ -5515,6 +5562,78 @@ export class ApprovalService implements IApprovalService {
 
     const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh };
+  }
+
+  /**
+   * Refuse a reassign target that resolves to no one (#25485): a slot nobody
+   * can take strands the request, waiting on no one until an override actor
+   * moves it again. `to` is a slot address in the spellings a slate holds, and
+   * it resolves when:
+   *
+   *   - a user id or an email — a `sys_user` row carries it (`id`, or `email`
+   *     as stored: the spelling a default actor takes the slot under,
+   *     {@link actingAddresses}), and that user is not PROVABLY a member of
+   *     other organizations only. "Provably" is the posture of the
+   *     manager and team screens ({@link managerIsProvablyOutsideOrg},
+   *     {@link dropMembersProvablyOutsideOrg}), on the same `sys_member`
+   *     column: membership rows that name other organizations and not this one
+   *     refuse; no membership rows at all, or a request with no organization,
+   *     leave the target as it is;
+   *   - `position:<p>` — someone holds `p` in the request's organization
+   *     ({@link expandPositionUsers}, the routing read a position approver
+   *     opens on);
+   *   - any other `type:value` literal — never: no actor takes a `team:` /
+   *     `department:` / `org_membership_level:` / stored `role:` address
+   *     (`approver-address.ts`), so such a slot is the stranded slate itself.
+   *
+   * One refusal text for a missing user and a user of another organization,
+   * so the answer is not a probe of who exists in other tenants. A failed
+   * `sys_user` read propagates — the caller is told, and nothing moved — while
+   * an unreadable `sys_member` is an absent tenancy fact, as in the sibling
+   * screens.
+   */
+  private async assertReassignTargetResolves(to: string, organizationId: string | null): Promise<void> {
+    const why = await this.reassignTargetRefusal(to, organizationId);
+    if (why === undefined) return;
+    throw new Error(
+      `VALIDATION_FAILED: cannot reassign to '${to}' — ${why} The request and its approvers are unchanged. `
+      + `Reassign to the user id or email of a person in this request's organization, or to `
+      + `'position:<name>' for a position someone in it holds.`,
+    );
+  }
+
+  /**
+   * Why `to` resolves to no one in `organizationId` — the sentence a refusal
+   * carries — or `undefined` when someone can take a slot under it. The ONE
+   * predicate behind {@link assertReassignTargetResolves} (the door) and
+   * {@link escalateRequest}'s `reassign` (the SLA sweep, #25598); its contract
+   * is that docblock's.
+   */
+  private async reassignTargetRefusal(to: string, organizationId: string | null): Promise<string | undefined> {
+    const position = addressedPosition(to);
+    if (position !== undefined) {
+      if ((await this.expandPositionUsers(position, organizationId)).length) return undefined;
+      return `no one holds position '${position}' in this request's organization.`;
+    }
+    if (to.includes(':')) {
+      return 'it is a slot literal no approver acts under, so no one could ever decide the request.';
+    }
+    const noUser = 'it names no user in this request\'s organization.';
+    const rows = await this.engine.find('sys_user', {
+      where: to.includes('@') ? { email: to } : { id: to },
+      fields: ['id'], limit: 1, context: SYSTEM_CTX,
+    });
+    const userId = Array.isArray(rows) && rows[0]?.id != null ? String(rows[0].id) : '';
+    if (!userId) return noUser;
+    if (!organizationId) return undefined;
+    let memberships: any[] = [];
+    try {
+      memberships = await this.engine.find('sys_member', {
+        where: { user_id: userId }, fields: ['organization_id'], limit: 1000, context: SYSTEM_CTX,
+      });
+    } catch { return undefined; } // membership unreadable ⇒ no tenancy fact, as in the sibling screens
+    const orgs = (memberships ?? []).map((r: any) => String(r?.organization_id ?? '')).filter(Boolean);
+    return orgs.length && !orgs.includes(String(organizationId)) ? noUser : undefined;
   }
 
   /**
@@ -6919,12 +7038,26 @@ export class ApprovalService implements IApprovalService {
     // empty expansion falls back to the literal, so a config naming a
     // specific user id keeps working unchanged.
     let escalatees: string[] = [];
+    let literalTarget = false;
     if (escalateTo) {
       try {
         escalatees = await this.expandPositionUsers(escalateTo, raw.organization_id ?? null);
       } catch { escalatees = []; }
-      if (!escalatees.length) escalatees = [escalateTo];
+      if (!escalatees.length) { escalatees = [escalateTo]; literalTarget = true; }
     }
+    // [#25598] …but a literal must still name someone who can take the slot,
+    // by the door's own predicate (#25485). One that resolves to no one (an
+    // unstaffed position, a mistyped name, a departed user, a `team:` literal)
+    // would move the request off its real approvers onto a slate nobody can
+    // decide. So the slate stays, its approvers are told the SLA lapsed (the
+    // `notify` branch), and the audit row says why. A failed `sys_user` read
+    // throws before the audit row, so the next sweep retries the request.
+    const unresolved = action === 'reassign' && literalTarget
+      ? await this.reassignTargetRefusal(escalateTo!, raw.organization_id ?? null)
+      : undefined;
+    if (unresolved !== undefined) escalatees = [];
+    // The action this sweep TAKES: a reassign with no one to hand to notifies.
+    const taken = action === 'reassign' && !escalatees.length ? 'notify' : action;
 
     // Audit first — this row IS the idempotency marker (ADR-0042 §1), and the
     // marker is its KIND (`escalate`), not its actor. A machine has no
@@ -6936,11 +7069,12 @@ export class ApprovalService implements IApprovalService {
       id: uid('aact'), request_id: raw.id, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'escalate',
       actor_id: null,
-      comment: `${action}${escalateTo ? ` → ${escalateTo}` : ''}`,
+      comment: `${action}${escalateTo ? ` → ${escalateTo}` : ''}`
+        + (unresolved !== undefined ? ` — not applied: ${unresolved} The pending approvers were kept and notified.` : ''),
       created_at: now,
     }), { context: SYSTEM_CTX });
 
-    if (action === 'reassign' && escalatees.length) {
+    if (taken === 'reassign') {
       await this.engine.update('sys_approval_request', {
         id: raw.id, pending_approvers: escalatees.join(','), updated_at: now,
         pending_approver_labels: await this.slateLabels(escalatees),
@@ -6965,7 +7099,8 @@ export class ApprovalService implements IApprovalService {
         comment: 'SLA escalation',
       }, SYSTEM_CTX, 'escalation');
     } else {
-      // 'notify' (and the reassign-without-target fallback)
+      // 'notify' (and a reassign with no one to hand to: no target, or one
+      // that resolves to no one)
       await this.notify({
         topic: 'approval.sla_breached',
         organizationId: raw.organization_id,
@@ -6985,7 +7120,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         ...approvalNotice(approvalNotificationText({
           title: 'approvalSlaBreachedSubmitterTitle', body: 'approvalSlaBreachedSubmitterBody',
-          params: { ...subject, action },
+          params: { ...subject, action: taken },
         })),
       });
     }
@@ -8563,7 +8698,40 @@ export class ApprovalService implements IApprovalService {
       const toName = a.reassign_to ? names.get(String(a.reassign_to)) : undefined;
       if (toName) a.reassign_to_name = toName;
     }
+    await this.localizeAdminRescueNote(requestId, actions, context);
     return actions;
+  }
+
+  /**
+   * [#25576] The administrators' routing note, in the reader's language.
+   *
+   * The note's code and parameters ride the request's node-config snapshot,
+   * naming the timeline row they explain (`admin-rescue-note.ts`); that row's
+   * `comment` is overlaid, in place, with the note as the reader's locale
+   * renders it — the shape {@link readerLabels} gives the request's own labels.
+   * A read, never a write. Nothing is overlaid, and the stored English stands,
+   * when the read carries no locale or no `i18n` service is registered, when
+   * the request carries no note (a request that never routed to its
+   * administrators, or one opened before the note was stored as data), or
+   * when the pack holds no note sentence.
+   */
+  private async localizeAdminRescueNote(
+    requestId: string,
+    actions: ApprovalActionRow[],
+    context: ExecutionContext,
+  ): Promise<void> {
+    // Only a system comment can be the note: no read for any other timeline.
+    if (!actions.some((a) => a.action === 'comment' && !a.actor_id)) return;
+    const labels = this.readerLabels(context);
+    if (!labels) return;
+    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
+    const raw = await findRequestRow(this.engine, requestId, tenantOrg ?? null);
+    const note = adminRescueNoteOf(parseJson<unknown>(raw?.node_config_json, undefined));
+    if (!note) return;
+    const row = actions.find((a) => a.id === note.action_id && a.action === 'comment' && !a.actor_id);
+    if (!row) return;
+    const text = adminRescueNoteText(note, labels.sentence);
+    if (text) row.comment = text;
   }
 
   /**

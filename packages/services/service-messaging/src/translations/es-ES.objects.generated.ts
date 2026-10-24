@@ -210,11 +210,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       topic: {
         label: "Topic",
-        help: "Notification topic, or '*' for all topics."
+        help: "El tema con el que se envían las notificaciones: el tema que indica el paso de notificación de un flujo, o uno que envía la plataforma, como approval.requested o collab.mention. Escriba * para todos los temas. Un tema que nadie envía no coincide con nada."
       },
       channel: {
         label: "Channel",
-        help: "Channel id (inbox/email/push/…), or '*' for all channels."
+        help: "El canal: inbox (notificaciones dentro de la aplicación, siempre disponible), email (una vez configurado un servicio de correo electrónico), sms (una vez configurado un servicio de SMS) o el id de un canal que añada un plugin instalado. Escriba * para todos los canales. Un id que ningún canal usa no coincide con nada."
       },
       enabled: {
         label: "Enabled",

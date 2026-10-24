@@ -6,7 +6,7 @@
 
 - 整车道一次读全,本地求交:`list_issues` 带 `labels: [domain:X]` + 最小字段拿回全车道 open 集。
 - 候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`;⛔ 排除三门皆无的 `tooling` 卡。
-- 自贴 `domain:*` 卡:合域表且齐立卡门三件 ⇒ 候选;缺一 ⇒ 挂 `pm:retriage`,⛔ 只评论不算。
+- 无分诊审计评论的卡不是候选,预贴 `pm:queue` 视同无;例外一的 sub-issue 承父卡首触。
 - 已排队父单的 open sub-issue 自动是候选,`pm:epic` 父单的子树除外。
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。
 - 维护者裁决逐字引入派发词裁决分区作约束,无则写明无裁决。
@@ -118,8 +118,7 @@
 - S 机械 `medium`;M `high`(默认);L/XL/`security`/p1/契约复核/四轴分析 `xhigh`;`max` 凭维护者点名。
 - 解析顺序、pin 语义与允许名单回退陷阱以 os-dev 定义 frontmatter 注释为权威。
 - 分诊 suggestion 行是输入不是决定,不采纳给理由。
-- 派发词 ⛔ 默认不整段粘贴 issue 正文:让 dev 自己读全文与全部评论并自查正文完整性。
-- 派发词只带增量,构造细则与条款原文见 `references/dispatch-runbook.md`。
+- 派发词只带增量,⛔ 不整段贴卡正文;dev 自读全文与评论、自查完整(`dispatch-runbook.md`)。
 - 派发词引卡片的精确断言(schema 臂、判据、原文)一律逐字,⛔ 不释义转述。
 - 三分区:裁决(不可重裁)/ PM 机制假设(须实测,鼓励证伪)/ PM 建议的路线(可选,实测优先)。
 - 凡我觉得可以这样的一律降到第三区;⛔ 不把假设写成裁决。
@@ -127,7 +126,9 @@
 - ⛔ 不砍卡类特有约束:ADR 类 draft-only、tier 推导引用、棘轮实况、释义纪律。
 - 无条件条款只住角色文件,冲突时它胜、错了修那里,⛔ 不靠派发词临时覆盖。
 - 终报要求随派发词带一句:只收机器可核字段(gates / line_budget / deviations / files_changed)。
-- 派发令恒带 `Writes:` 行:只走 REST 代理、写预算(端点清单)、`mcp_calls` 计数,dev 两数都报。
+- 派发令恒带 `Writes:` 行:PR 只经中继 `pr_create`;评论/标签/正文只经中继写工具;两数都报。
+- ⛔ GitHub MCP 写:`create_pull_request`、`update_pull_request`、`issue_write`、`add_issue_comment` 等。
+- 多仓项目线程不加载仓 `settings.json` deny,此行即唯一防线;两数 = 写预算与 `mcp_calls`。
 - 清单、路径、行号在派发那一刻从树上取,⛔ 不从卡片/上次派发/记忆抄。
 - 门禁清单取 `dispatch-gates --commands --repo 仓` 逐条跑,退出码先落盘,`--ran` 对账;被拒即手推。
 - 点名单是线索不是规格,dev 对实际改动重取补跑;行级断言转述前必须自己重验。
@@ -154,8 +155,8 @@
 - 收集先扫 GitHub(各模式),标记评论在 = 报告完整;评论与返回消息皆无才进探活/判死。
 - 标记两种拼写等效(HTML 注释形、首行 `os-dev-report`);⛔ 永不把没收到失败通知读作还在跑。
 - 报告点名 PR ⇒ 会话席当即 `subscribe_pr_activity` 并记座位贴;中继开的 PR 永不自动挂会话。
-- ① 巡检首动作 `list_triggers` 确认 Routine 启用,在飞重挂加速器;唤醒归 Routine,漏挂不断链。
-- ② 在飞期间主巡检间隔 ≤45 分钟,待命期 60–70;节奏维护者明示可改。
+- ① Routine 席巡检首动作 `list_triggers` 确认 Routine 启用;项目席由事件与巡查 routine 唤醒。
+- ② Routine 席在飞期间主巡检间隔 ≤45 分钟,待命期 60–70;节奏维护者明示可改。
 - ③ 已派发未回报的 dev 逐个发状态询问;派发后 ~45 分钟无远程产出即到门槛。
 - 已有远程分支/PR 不豁免探针。
 - ④ 活着 ⇒ 进度与阻塞点;回 no active task; resumed from transcript ⇒ 生前已死,询问即复活。

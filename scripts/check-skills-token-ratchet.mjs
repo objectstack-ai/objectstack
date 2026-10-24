@@ -544,7 +544,15 @@ export const CEILINGS = new Map([
   // schema alone writes the refused shape. +63 tokens, zero headroom to absorb
   // any of it, ceiling +63. Maintainer ruling 2026-09-17 (recorded on #17359 as
   // comment 5710537499), verbatim and untranslated: 「security.md 允许增加到 2543」.
-  ['skills/objectstack-data/rules/security.md', 2543],
+  // 2543 -> 2563 (#25234): the `current_user.*` placeholder table gains the
+  // declared membership key row (`ObjectSchema.membershipKeys`, staged per
+  // request since #25528), which the table did not teach, so an author reading
+  // the bundle alone had no way to know a declared key resolves. +22 tokens on
+  // a landed 2541, 2 absorbed by headroom, ceiling +20. Maintainer ruling
+  // 2026-10-24 (project decision list item 9), verbatim and untranslated, the
+  // line for item 8 of the same message elided:
+  // 「9. 技能文档 security.md 的 token 上限 2543 → 2563 … 同意」.
+  ['skills/objectstack-data/rules/security.md', 2563],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a

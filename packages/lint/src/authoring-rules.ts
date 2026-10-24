@@ -136,6 +136,10 @@ import { validateSecurityPosture, validateSecurityRoleWord } from './validate-se
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
+import {
+  validateMembershipKeyDeclarations,
+  type MembershipKeyOwners,
+} from './validate-membership-key-declarations.js';
 import { validateRuleCompilability } from './validate-rule-compilability.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
@@ -399,6 +403,21 @@ export interface AuthoringRuleContext {
    * flow whose trigger object is outside it instead of advising.
    */
   packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
+  /**
+   * [#25234] The deployment's membership-key owners: the keys the registered
+   * `rls-membership-resolver` declares (`IRlsMembershipResolver.keys`, empty
+   * when none is registered), and every key the WHOLE live object collection
+   * declares (`ObjectSchema.membershipKeys`), read before the package-closure
+   * narrowing because a key's namespace is the deployment's.
+   *
+   * Set only by the runtime publish gate, and only when its host states the
+   * resolver's keys; ABSENT on the three CLI commands, where a self-hosted
+   * resolver may own any key. Read by `validateMembershipKeyDeclarations`
+   * (a key both sources own; a key two live objects declare) and
+   * `validateRlsPredicateEnforceability` (a key in a membership position that
+   * nobody owns).
+   */
+  membershipKeyOwners?: MembershipKeyOwners;
 }
 
 export interface AuthoringRule {
@@ -716,8 +735,23 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // entry-level change: it rides the object crossing above. MEASURED first:
     // 0 in-repo producers reference either family table, against 45 files
     // that reference an ordinary platform table.
+    //
+    // [#24798, ruling B] `view` joins, for ONE pass: a bulk action def's
+    // `confirmText`, now an ADR-0032 `template` slot over `count` and the
+    // def's params. On a view write `runStackExpressionPasses` runs that pass
+    // alone (by construction, as for an object write), and on an object write
+    // it also judges the object's own `listViews`. #24798 shipped every
+    // finding as a `warning`, because every such sentence parsed before the
+    // slot was typed; #25205 makes each an `error`, so a view or object write
+    // carrying one is refused (a narrowing no conversion carries, shipped in
+    // 18.x as its own BREAKING minor under the amended 「甲」, 6303865025).
+    // MEASURED first over the shipped corpus at `b42c621c05` and again at
+    // `925fd0772c`: 6 bulk defs carry a `confirmText` (examples/app-showcase
+    // `project.view.ts`), none with a brace → 0 findings, against an error for
+    // each of an unbound hole, a single-brace token, a hole holding logic and
+    // a blank sentence in `validate-expressions.bulk-confirm-text.test.ts`.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'action', 'hook', 'object'],
+    runtimeTypes: ['flow', 'action', 'hook', 'object', 'view'],
     run: (stack, ctx) =>
       runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
         severity: i.severity ?? 'error',
@@ -2188,12 +2222,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //    does not lower means the rule is SKIPPED by enforcement.
   //  - `object` decides whether the grant is refused outright: reconcile hands
   //    each row to `SharingService.grant`, whose ADR-0111 D7 pre-flight THROWS
-  //    `SHARING_NOT_ENABLED` when the anchor's effective sharing model is
-  //    `public` or it is a `controlled_by_parent` detail. Both are decidable
-  //    from authored metadata; the other arms of that verdict (`owner_id`, the
+  //    `SHARING_NOT_ENABLED` when the anchor is a `controlled_by_parent`
+  //    detail, and, when its effective sharing model is `public`, for every
+  //    recipient who is not an `external` member of the record's organization
+  //    (#25549: that arm is advice, a `warning`). Both are decidable from
+  //    authored metadata; the other arms of that verdict (`owner_id`, the
   //    bypass set, federated anchors) are not, and are excluded by name.
   //
-  // Either way the grant is declared and does not exist. The lint calls the
+  // Either way the grant is declared and does not exist (for staff, on the
+  // public arm). The lint calls the
   // same compiler and mirrors the same verdict function, from the same inputs
   // — the verdict cannot drift from the consumers'. Gating for the ADR-0078
   // reason `SharingRuleSchema`'s own docblock states: the whole authorable
@@ -2248,8 +2285,36 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-rls-predicate-enforceability.ts',
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['permission'],
-    run: (stack, ctx) => validateRlsPredicateEnforceability(stack, { judgeFilter: ctx.judgeFilter }),
+    // [#25234] `object` too: an object carries two predicates this rule judges,
+    // its `defaultRowScope` (#24452) and its membership keys' `filter`, and a
+    // hosted author has no other door for either. The differential charges an
+    // object write only with what it adds: a permission set's finding that
+    // the write's own declaration resolves, or a filter it writes.
+    runtimeTypes: ['permission', 'object'],
+    run: (stack, ctx) =>
+      validateRlsPredicateEnforceability(stack, {
+        judgeFilter: ctx.judgeFilter,
+        membershipKeyOwners: ctx.membershipKeyOwners,
+      }),
+  },
+  // [#25234 ruling A, refusals 3 to 6] A membership key's declaration
+  // (`ObjectSchema.membershipKeys`): its `userField` and `valueField` judged on
+  // the merged object, one key on two objects, and a key the registered
+  // resolver also owns. The security plugin resolves each declaration per
+  // request and fails closed on every one of these, so each is a key that reads
+  // as a grant and matches no rows. Across the runtime publish gate for
+  // `object` writes, the one door a hosted author has; the two deployment
+  // facts arrive as `ctx.membershipKeyOwners`, which the CLI does not have.
+  {
+    name: 'validateMembershipKeyDeclarations',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-membership-key-declarations.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack, ctx) =>
+      validateMembershipKeyDeclarations(stack, { membershipKeyOwners: ctx.membershipKeyOwners }),
   },
   // #4762 — the same "declared but enforces nothing" question, for the two
   // STATIC artifacts an object validation rule carries. A `format` rule's

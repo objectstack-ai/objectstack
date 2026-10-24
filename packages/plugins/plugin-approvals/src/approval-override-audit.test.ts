@@ -102,6 +102,8 @@ describe('approval override audit marker (#4466)', () => {
       engine: engine as any,
       clock: { now: () => new Date(baseTime + (n++) * 1000) },
     });
+    // The reassign target has an account: a reassign target must name one (#25485).
+    engine._tables['sys_user'] = [{ id: 'u7' }];
   });
 
   /** A request whose slate is properly STAFFED — one real, designated user. */

@@ -86,6 +86,7 @@ function makeHarness(opts?: {
           },
         }),
     countBoundObjects: async (n) => opts?.boundCounts?.[n] ?? 0,
+    listObjectsBoundTo: async () => [],
     registerPool: (record) => {
       registered.push(record.name);
     },
@@ -440,6 +441,7 @@ describe('listDatasources — status reflects the last connect verdict (framewor
       deleteDatasourceRecord: async () => {},
       writeSecret: async () => 'ref',
       countBoundObjects: async () => 0,
+      listObjectsBoundTo: async () => [],
       connectionStates: () => states,
     };
     return new DatasourceAdminService(config);
@@ -493,6 +495,7 @@ describe('listDatasources — status reflects the last connect verdict (framewor
       deleteDatasourceRecord: async () => {},
       writeSecret: async () => 'ref',
       countBoundObjects: async () => 0,
+      listObjectsBoundTo: async () => [],
       // no `connectionStates`
     };
     const list = await new DatasourceAdminService(config).listDatasources();

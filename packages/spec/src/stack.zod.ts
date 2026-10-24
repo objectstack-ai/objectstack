@@ -2228,6 +2228,50 @@ export interface DefineStackOptions {
    * ```
    */
   artifactObjects?: readonly string[];
+
+  /**
+   * Flow names provided by the OTHER packages of the same release artifact
+   * (ADR-0130 D1, #25514) — the {@link artifactObjects} question, asked of the
+   * one reference class whose target is a FLOW.
+   *
+   * A `type: 'flow'` action's `target` — registered (`actions[]`), authored on
+   * an object (`objects[].actions[]`) or inline on a page element — resolves
+   * against this stack's own `flows` PLUS these names. The measured shape is a
+   * sales action on an app-owned object launching a flow that a module package
+   * of the same artifact ships: the runtime registers every package's flows in
+   * one automation engine, so the launch works, and only this per-stack check
+   * could not see the flow.
+   *
+   * ⚠️ It WIDENS a check and never switches one on. A stack declaring no flows
+   * of its own keeps the existing leniency — its flow targets are not resolved
+   * at all, because a plugin may serve them — so these names are consulted only
+   * where a target used to be refused: when the stack's own `flows` is
+   * non-empty. Nothing else reads them.
+   *
+   * ## The claim is verified, not trusted — in a composition of two or more packages
+   *
+   * Every target that resolved ONLY through this list is recorded on the
+   * returned stack — a non-enumerable symbol beside the provenance mark, never
+   * a key of `ObjectStackDefinitionSchema` — and {@link composeStacks} refuses
+   * the composition when no input of it defines that flow, with the same
+   * `STACK_CROSS_REFERENCE_INVALID` envelope and the same per-finding message
+   * the per-stack pass prints. A listed name no target uses claims nothing, so
+   * it is not checked. The boundary is {@link artifactObjects}' own: a
+   * one-package composition, or a stack that is never composed, leaves the
+   * claim unverified.
+   *
+   * Omitting the option keeps `defineStack`'s behaviour byte-for-byte.
+   *
+   * @example
+   * ```ts
+   * const revenue = defineStack(revenueConfig);           // owns quote_generation
+   * const app = defineStack(appConfig, {                  // generate_quote → quote_generation
+   *   artifactFlows: revenue.flows?.map((f) => f.name),
+   * });
+   * export default composeStacks([revenue, app], { manifest: 'preserve' });
+   * ```
+   */
+  artifactFlows?: readonly string[];
 }
 
 /**
@@ -3048,6 +3092,96 @@ function collectComposedDefaultRecordPageErrors(
     }
   }
   return duplicateDefaultRecordPageFindings(entries, 'the composed stacks');
+}
+
+/**
+ * [#25234 ruling A, refusal 3] One membership key declared on two objects.
+ *
+ * `current_user.KEY` is one request-wide name (`ExecutionContext.rlsMembership`
+ * is a single bag), and `ObjectSchema.membershipKeys` gives the key its meaning
+ * from the declaring object's rows. Two objects declaring one key would give it
+ * two meanings with no author choosing between them, so the second declaration
+ * is refused. One object cannot declare a key twice (the map is keyed by name);
+ * this is the cross-object half.
+ *
+ * Counted by distinct object NAME, so two entries for one object are the
+ * duplicate {@link collectDuplicateEntryErrors} (or the composition's object
+ * conflict strategy) already answers, and are not reported a second time.
+ * {@link collectComposedMembershipKeyErrors} reuses the reading over the objects
+ * a composition brings together.
+ */
+function duplicateMembershipKeyFindings(
+  entries: Iterable<{ readonly object: unknown; readonly origin: string }>,
+  scope: string,
+): string[] {
+  // key → declaring object name → the positions that declare it there.
+  const byKey = new Map<string, Map<string, string[]>>();
+  for (const { object, origin } of entries) {
+    if (!isRecord(object) || typeof object.name !== 'string') continue;
+    const keys = object.membershipKeys;
+    if (!isRecord(keys)) continue;
+    for (const key of Object.keys(keys)) {
+      const owners = byKey.get(key) ?? new Map<string, string[]>();
+      const origins = owners.get(object.name) ?? [];
+      origins.push(origin);
+      owners.set(object.name, origins);
+      byKey.set(key, owners);
+    }
+  }
+
+  const errors: string[] = [];
+  for (const [key, owners] of byKey) {
+    if (owners.size < 2) continue;
+    const named = [...owners].map(([object, origins]) => `'${object}' (${joinDeclarationOrigins(origins)})`);
+    errors.push(
+      `Membership key '${key}' is declared on ${owners.size === 2 ? 'two' : owners.size} objects in ${scope}: ` +
+        `${joinDeclarationOrigins(named)}. Declare it on exactly one object, the roster whose rows define it, ` +
+        `and rename the others. \`current_user.${key}\` is one request-wide name, so two declarations would ` +
+        `give it two meanings.`,
+    );
+  }
+  return errors;
+}
+
+/** The one-stack door: {@link duplicateMembershipKeyFindings} over `stack.objects`. */
+function collectDuplicateMembershipKeyErrors(config: ObjectStackDefinition): string[] {
+  const objects: unknown = config.objects;
+  if (!Array.isArray(objects)) return [];
+  return duplicateMembershipKeyFindings(
+    objects.map((object, i) => ({ object, origin: `stack.objects[${i}]` })),
+    '`objects`',
+  );
+}
+
+/**
+ * The composition door: {@link duplicateMembershipKeyFindings} over the
+ * objects the composed artifact carries (after the object conflict strategy,
+ * so an object `'override'` replaced no longer counts, and one `'merge'`
+ * combined counts once). Each input passed the one-stack door alone; the key
+ * namespace is the deployment's, so two inputs declaring one key on two
+ * objects is refused here, under every manifest strategy. Each object is
+ * labelled with the input stacks that define it.
+ */
+function collectComposedMembershipKeyErrors(
+  stacks: readonly ObjectStackDefinition[],
+  composedObjects: readonly unknown[] | undefined,
+): string[] {
+  if (!Array.isArray(composedObjects)) return [];
+  const definedBy = new Map<string, string[]>();
+  for (const [i, stack] of stacks.entries()) {
+    for (const name of collectObjectNames(stack)) {
+      definedBy.set(name, [...(definedBy.get(name) ?? []), stackLabel(stack, i)]);
+    }
+  }
+  return duplicateMembershipKeyFindings(
+    composedObjects.map((object) => ({
+      object,
+      origin: joinDeclarationOrigins(
+        definedBy.get(isRecord(object) && typeof object.name === 'string' ? object.name : '') ?? ['the composition'],
+      ),
+    })),
+    'the composed stacks',
+  );
 }
 
 /**
@@ -3893,10 +4027,17 @@ function collectComposedExternalBindingDatasourceErrors(
  * single-package stack, which is every stack that does not opt in) the two
  * scopes are the same Set and this function behaves exactly as it did before
  * the option existed.
+ *
+ * `artifactFlows` (#25514) widens the flow target of a `type: 'flow'` action
+ * the same way, and every target that resolved ONLY through it is appended to
+ * `flowClaims` — the record {@link composeStacks} redeems (see
+ * {@link DefineStackOptions.artifactFlows}).
  */
 function validateCrossReferences(
   config: ObjectStackDefinition,
   artifactObjects?: ReadonlySet<string>,
+  artifactFlows?: ReadonlySet<string>,
+  flowClaims?: ArtifactFlowClaim[],
 ): string[] {
   const errors: string[] = [];
   const objectNames = collectObjectNames(config);
@@ -3914,6 +4055,9 @@ function validateCrossReferences(
   // Same placement: two default record pages for one object are two defaults
   // whether or not this stack defines that object (#23015).
   errors.push(...collectDuplicateDefaultRecordPageErrors(config));
+  // Same placement: one membership key on two objects is one request-wide name
+  // with two meanings, whatever else the stack declares (#25234).
+  errors.push(...collectDuplicateMembershipKeyErrors(config));
   // Same placement, same reason: a global `operation: 'update'` action is
   // wrong whether or not the stack declares any objects.
   errors.push(...collectGlobalUpdateActionErrors(config));
@@ -4127,6 +4271,20 @@ function validateCrossReferences(
     }
   }
 
+  // One judgement for the three positions below. The leniency is the
+  // stack's OWN flows being empty, unchanged by `artifactFlows` (#25514): the
+  // option widens where a target is refused today and switches nothing on. A
+  // target the option alone resolves is a claim on the artifact, recorded for
+  // `composeStacks` to redeem rather than trusted.
+  const checkFlowTarget = (subject: string, target: string | undefined): void => {
+    if (!target || flowNames.size === 0 || flowNames.has(target)) return;
+    if (artifactFlows?.has(target)) {
+      flowClaims?.push({ subject, target });
+      return;
+    }
+    errors.push(flowTargetMessage(subject, target));
+  };
+
   const pageNames = new Set<string>();
   if (config.pages) {
     for (const page of config.pages) {
@@ -4151,11 +4309,7 @@ function validateCrossReferences(
   if (config.actions) {
     for (const action of config.actions) {
       // Validate flow-type actions reference a defined flow
-      if (action.type === 'flow' && action.target && flowNames.size > 0 && !flowNames.has(action.target)) {
-        errors.push(
-          `Action '${action.name}' references flow '${action.target}' which is not defined in flows.`,
-        );
-      }
+      if (action.type === 'flow') checkFlowTarget(`Action '${action.name}'`, action.target);
 
       // Validate modal-type actions reference a defined page
       if (action.type === 'modal' && action.target && pageNames.size > 0 && !pageNames.has(action.target)) {
@@ -4227,11 +4381,7 @@ function validateCrossReferences(
   if (config.objects) {
     for (const obj of config.objects) {
       for (const action of obj.actions ?? []) {
-        if (action.type === 'flow' && action.target && flowNames.size > 0 && !flowNames.has(action.target)) {
-          errors.push(
-            `Action '${action.name}' on object '${obj.name}' references flow '${action.target}' which is not defined in flows.`,
-          );
-        }
+        if (action.type === 'flow') checkFlowTarget(`Action '${action.name}' on object '${obj.name}'`, action.target);
 
         if (action.type === 'modal' && action.target && pageNames.size > 0 && !pageNames.has(action.target)) {
           errors.push(
@@ -4264,11 +4414,7 @@ function validateCrossReferences(
   if (config.pages) {
     for (const page of config.pages) {
       for (const { action, where } of collectInlinePageActions(page)) {
-        if (action.type === 'flow' && action.target && flowNames.size > 0 && !flowNames.has(action.target)) {
-          errors.push(
-            `${where} references flow '${action.target}' which is not defined in flows.`,
-          );
-        }
+        if (action.type === 'flow') checkFlowTarget(where, action.target);
 
         if (action.type === 'modal' && action.target && pageNames.size > 0 && !pageNames.has(action.target)) {
           errors.push(
@@ -5143,11 +5289,16 @@ function buildDefinedStack(
     throw new StackCapabilityUnknownError(`${header}\n\n${lines.join('\n')}`, capErrors);
   }
 
+  const flowClaims: ArtifactFlowClaim[] = [];
   const crossRefErrors = validateCrossReferences(
     data,
     options?.artifactObjects && options.artifactObjects.length > 0
       ? new Set(options.artifactObjects)
       : undefined,
+    options?.artifactFlows && options.artifactFlows.length > 0
+      ? new Set(options.artifactFlows)
+      : undefined,
+    flowClaims,
   );
   if (crossRefErrors.length > 0) {
     const header = `defineStack cross-reference validation failed (${crossRefErrors.length} issue${crossRefErrors.length === 1 ? '' : 's'}):`;
@@ -5220,7 +5371,10 @@ function buildDefinedStack(
   // this value went through the judgement above. Non-enumerable, so it reaches
   // neither the schema nor the compiled artifact (`stack-provenance.ts`). The
   // conversion record rides beside it, stamped in the same act.
-  return markStackProvenance(mergeActionsIntoObjects(data), 'defineStack', appliedConversions);
+  return recordArtifactFlowClaims(
+    markStackProvenance(mergeActionsIntoObjects(data), 'defineStack', appliedConversions),
+    flowClaims,
+  );
 }
 
 /**
@@ -6464,6 +6618,113 @@ function assemblePackageBody(stack: ObjectStackDefinition): AssembledPackageBody
 }
 
 /**
+ * One `type: 'flow'` action target that resolved ONLY through
+ * {@link DefineStackOptions.artifactFlows} (#25514): `subject` is the action
+ * as the per-stack refusal names it, `target` the flow it launches.
+ */
+interface ArtifactFlowClaim {
+  readonly subject: string;
+  readonly target: string;
+}
+
+/**
+ * The per-finding line for a flow target no scope resolves — ONE spelling for
+ * the per-stack pass and the artifact pass, so a reader greps one string
+ * whichever pass refused it.
+ */
+function flowTargetMessage(subject: string, target: string): string {
+  return `${subject} references flow '${target}' which is not defined in flows.`;
+}
+
+/**
+ * The symbol key the `artifactFlows` claims of a built stack live under.
+ * `Symbol.for` for the provenance mark's reason (`stack-provenance.ts`): a CLI
+ * and the config it loads may resolve two copies of this package.
+ */
+const ARTIFACT_FLOW_CLAIMS: symbol = Symbol.for('objectstack.stack.artifact-flow-claims');
+
+/**
+ * Stamp the claims `defineStack` let past the per-stack pass on the stack it
+ * returns, and return that stack — the PROMISE half of
+ * {@link DefineStackOptions.artifactFlows}, which
+ * {@link collectArtifactFlowClaimErrors} redeems.
+ *
+ * Why a record and not a re-run (the shape {@link collectArtifactCrossReferenceErrors}
+ * uses for objects): that pass re-runs its rules over every input, and for
+ * flows a re-run judges more than the claim — it would newly refuse a dangling
+ * target in an input built with `strict: false`, which never reached the
+ * per-stack pass. The record holds exactly what the option let through, so
+ * the composition checks the promise and nothing else.
+ *
+ * Non-enumerable, non-writable, non-configurable, like the mark it sits
+ * beside: invisible to `ObjectStackDefinitionSchema`, to the compiled
+ * `dist/objectstack.json` and to every `Object.keys` walk, and dropped by any
+ * copy that drops the mark — which `composeStacks` refuses anyway. A stack
+ * with no claim is returned untouched.
+ */
+function recordArtifactFlowClaims<T>(stack: T, claims: readonly ArtifactFlowClaim[]): T {
+  if (claims.length === 0 || stack === null || typeof stack !== 'object') return stack;
+  if (!Object.isExtensible(stack)) return stack;
+  Object.defineProperty(stack, ARTIFACT_FLOW_CLAIMS, {
+    value: Object.freeze(claims.map((claim) => Object.freeze({ ...claim }))),
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+  return stack;
+}
+
+/** The claims {@link recordArtifactFlowClaims} stamped on `stack`, or `[]`. */
+function artifactFlowClaimsOf(stack: unknown): readonly ArtifactFlowClaim[] {
+  if (stack === null || typeof stack !== 'object') return [];
+  const record = (stack as Record<symbol, unknown>)[ARTIFACT_FLOW_CLAIMS];
+  return Array.isArray(record) ? (record as readonly ArtifactFlowClaim[]) : [];
+}
+
+/**
+ * Every flow name `stack` provides: its own `flows`, plus each `packages[]`
+ * body's when the input is itself a multi-package artifact — whose flows live
+ * ONLY in those bodies (#14512), so reading the top level alone would refuse
+ * a flow the input carries.
+ */
+function providedFlowNames(stack: unknown): string[] {
+  const names: string[] = [];
+  const collect = (flows: unknown): void => {
+    if (!Array.isArray(flows)) return;
+    for (const flow of flows) {
+      if (isRecord(flow) && typeof flow.name === 'string') names.push(flow.name);
+    }
+  };
+  if (!isRecord(stack)) return names;
+  collect(stack.flows);
+  if (Array.isArray(stack.packages)) {
+    for (const entry of stack.packages) {
+      if (isRecord(entry) && isRecord(entry.manifest)) collect(entry.manifest.flows);
+    }
+  }
+  return names;
+}
+
+/**
+ * The ARTIFACT pass for {@link DefineStackOptions.artifactFlows} (#25514): a
+ * claimed flow target that NO input of the composition defines is refused,
+ * with the per-stack pass's own message.
+ *
+ * Reads only the recorded claims (see {@link recordArtifactFlowClaims}), so an
+ * input that never opted in cannot newly fail here — strict or not — and the
+ * composition never judges a target the per-stack pass did not let through on
+ * the artifact's credit.
+ */
+function collectArtifactFlowClaimErrors(stacks: readonly ObjectStackDefinition[]): string[] {
+  const claims = stacks.flatMap((stack) => artifactFlowClaimsOf(stack));
+  if (claims.length === 0) return [];
+  const artifactFlowNames = new Set(stacks.flatMap((stack) => providedFlowNames(stack)));
+  return claims
+    .filter((claim) => !artifactFlowNames.has(claim.target))
+    .map((claim) => flowTargetMessage(claim.subject, claim.target));
+}
+
+/**
  * The ARTIFACT pass of the cross-reference gate (#18202, ADR-0130 D1).
  *
  * ## What it discharges
@@ -6773,13 +7034,19 @@ function composeBuiltStacks(
   //     [ADR-0015 §4.2 · #25211] …and an `external` object of one input bound
   //     to a datasource another input declares managed: see
   //     {@link collectComposedExternalBindingDatasourceErrors}.
+  //     [#25234] …and one membership key declared on two objects of the
+  //     composed artifact: see {@link collectComposedMembershipKeyErrors}.
+  //     [#25514] …and every flow target an input resolved only through
+  //     `artifactFlows`: see {@link collectArtifactFlowClaimErrors}.
   const artifactCrossRefErrors = [
     ...collectArtifactCrossReferenceErrors(
       stacks,
       objects as readonly { name: string }[] | undefined,
     ),
     ...collectComposedDefaultRecordPageErrors(stacks, opts.manifest === 'preserve'),
+    ...collectComposedMembershipKeyErrors(stacks, objects as readonly unknown[] | undefined),
     ...collectComposedExternalBindingDatasourceErrors(stacks, objects),
+    ...collectArtifactFlowClaimErrors(stacks),
   ];
   if (artifactCrossRefErrors.length > 0) {
     const count = artifactCrossRefErrors.length;

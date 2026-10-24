@@ -1778,6 +1778,28 @@ export function mayReadPendingDrafts(caller: unknown): boolean {
 }
 
 /**
+ * Was this execution context's credential validated by a DIFFERENT
+ * environment's auth service than the environment the request resolved to?
+ * The comparison `enforceAuth` makes on every route behind it.
+ *
+ * Both sides are stamped by `RestServer.computeExecCtx`: `__environmentId`
+ * (the resolved environment) and `__authEnvironmentId` (the environment whose
+ * auth service accepted the caller). `undefined` and `'platform'` are not
+ * environments — a control-plane request has nothing to own — and a context
+ * without the `__environmentId` key was not produced by that method, so
+ * neither is judged.
+ */
+function credentialAnchoredElsewhere(context: unknown): boolean {
+    if (!context || typeof context !== 'object' || !('__environmentId' in context)) return false;
+    const { __environmentId: resolved, __authEnvironmentId: anchored } = context as {
+        __environmentId?: unknown;
+        __authEnvironmentId?: unknown;
+    };
+    if (resolved === undefined || resolved === 'platform') return false;
+    return anchored !== resolved;
+}
+
+/**
  * [#22128] The ONE reading of `?package=` on the `/meta/:type/:name` item doors
  * — the read (`GET`), the save (`PUT`) and the publish
  * (`POST …/publish`): the package the request names, or `undefined` when it
@@ -2454,6 +2476,20 @@ export class RestServer {
             res.status(ANONYMOUS_DENY_STATUS).json(ANONYMOUS_DENY_BODY);
             return true;
         }
+        // The credential must belong to the environment the request resolved
+        // to. `computeExecCtx` can validate a caller against the DEFAULT
+        // environment's auth service when the resolved environment's kernel
+        // carries none, so a session minted there would otherwise authenticate
+        // a request aimed at another environment (ADR-0006: a token is not
+        // replayable across environments). Both sides are stamped by
+        // `computeExecCtx`; a context it did not produce carries neither and
+        // is not judged here. The refusal is the anonymous-deny response,
+        // byte for byte — see `enforceEnvironmentOwnership` for why a distinct
+        // status would rebuild an environment-existence oracle.
+        if (credentialAnchoredElsewhere(context)) {
+            res.status(ANONYMOUS_DENY_STATUS).json(ANONYMOUS_DENY_BODY);
+            return true;
+        }
         return false;
     }
 
@@ -2506,7 +2542,10 @@ export class RestServer {
      *     real environment id from an invented one. Refused here rather than
      *     answered — the ruling's 「信号化拒绝」, and ⛔ never a silent fallback.
      *  2. **Anchored elsewhere.** The credential was validated in an environment
-     *     other than the one resolved.
+     *     other than the one resolved. `enforceAuth` makes this same comparison
+     *     on every route behind it, from the context's own `__environmentId`;
+     *     it is repeated here against the environment this seam was handed, so
+     *     the two halves of this guard stay one call.
      *
      * ## ⚠️ Why the refusal is the ANONYMOUS-DENY response, verbatim
      *
@@ -3402,13 +3441,20 @@ export class RestServer {
                 __kernel: kernel,
                 // [commit cc837dbfe] Internal: the environment whose auth service actually
                 // validated this caller — the left-hand side of the ownership
-                // comparison at the UI-view seam. ⚠️ Unlike `__kernel` this one IS
-                // an authorization input, at exactly one reader
-                // (`enforceEnvironmentOwnership`); it is deliberately NOT an
+                // comparison at the UI-view seam and in `enforceAuth`. ⚠️ Unlike
+                // `__kernel` this one IS an authorization input, at two readers
+                // in this file (`enforceEnvironmentOwnership` and
+                // `credentialAnchoredElsewhere`); it is deliberately NOT an
                 // `ExecutionContext` field, because it describes how the context
                 // was OBTAINED rather than what the principal may do, and nothing
                 // downstream of this transport may branch on it.
                 __authEnvironmentId: authEnvironmentId,
+                // Internal: the environment this request RESOLVED to — the
+                // right-hand side of the same comparison, read by
+                // `enforceAuth` (`credentialAnchoredElsewhere`) on every route
+                // behind it. Same status as `__authEnvironmentId`: not an
+                // `ExecutionContext` field, nothing downstream branches on it.
+                __environmentId: environmentId,
             } as any;
 
             // [#2408 / #3361] Open the per-request `Server-Timing` disclosure gate

@@ -66,12 +66,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { doctorConfig } from '../utils/__tests__/doctor-config.js';
 import Doctor, { monorepoTreeSkipNotice } from './doctor.js';
-
-/** `packages/cli` — the oclif root the real command is loaded against below. */
-const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
  * `chalk` may or may not emit SGR codes depending on TTY detection.
@@ -175,7 +172,7 @@ describe('os doctor, end to end, in a user-app cwd with no packages/spec', () =>
     }) as never);
 
     try {
-      await Doctor.run(argv, { root: CLI_ROOT });
+      await Doctor.run(argv, await doctorConfig());
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
     } finally {
@@ -289,7 +286,7 @@ describe('os doctor, end to end, in a monorepo-shaped cwd — the no-regression 
     }) as never);
 
     try {
-      await Doctor.run(argv, { root: CLI_ROOT });
+      await Doctor.run(argv, await doctorConfig());
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
     } finally {

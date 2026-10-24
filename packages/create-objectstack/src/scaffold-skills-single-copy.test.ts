@@ -360,10 +360,11 @@ describe('a scaffolded project installs the package catalog, once', () => {
     ]);
   });
 
-  it("depends on @objectstack/skills at @objectstack/spec's range", () => {
+  it("depends on @objectstack/skills at @objectstack/spec's exact version", () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(run.project, 'package.json'), 'utf8'));
     const spec = pkg.dependencies?.['@objectstack/spec'];
-    expect(spec).toMatch(/^\^\d+\./);
+    // An exact version, no `^`/`~`: the docs prescribe exact pins on the v18 line.
+    expect(spec).toMatch(/^\d+\.\d+\.\d+/);
     expect(pkg.devDependencies?.[SKILLS_PACKAGE]).toBe(spec);
   });
 

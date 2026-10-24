@@ -182,6 +182,80 @@ describe('os migrate apply --allow-destructive: the organization-ownership refus
   }
 });
 
+/**
+ * The two rows that let the drop through, as each writer stores it: the boot
+ * guard's birth marker (`details.birth`, on a datastore created from empty)
+ * and the ceremony's verified run (`details: { checkpoint }`).
+ */
+const BIRTH_AT = '2026-10-23T15:07:36.127Z';
+const BIRTH_MARKER = {
+  id: 'adr-0131-organization-ownership', last_run_at: BIRTH_AT, verified_at: BIRTH_AT, applied_at: null, blocking: 0, advisory: 0,
+  details: JSON.stringify({ birth: { shapeGeneration: 1, platformVersion: '18.0.0', createdAt: BIRTH_AT } }),
+};
+const CEREMONY_RUN = {
+  ...VERIFIED,
+  details: JSON.stringify({ checkpoint: { ceremony: 'ADR-0131 D10', inventoryDigest: 'd1', shapeGeneration: 1, completed: {} } }),
+};
+
+/** The success line the human face printed for this gate. */
+function organizationSuccessLine(): string | undefined {
+  return log.mock.calls.map((c: unknown[]) => c.map(String).join(' '))
+    .find((line: string) => line.includes('organization_id on sys_platform_setting:'));
+}
+
+describe('os migrate apply --allow-destructive: the success line names the row that let the drop through', () => {
+  it('a birth marker: the database was created from empty, at its creation time, and no ceremony is claimed', async () => {
+    bootWithOrganizationDrop();
+    mocks.readOrganizationOwnershipMarker.mockResolvedValue({ verified: true, flag: BIRTH_MARKER });
+
+    const { exit } = await runApply(ARGV);
+
+    expect(exit).toBe(0);
+    expect(applyMigrationEntries).toHaveBeenCalledTimes(1);
+    const line = organizationSuccessLine();
+    expect(line, 'the gate printed its success line').toBeDefined();
+    expect(line).toContain('created from empty');
+    expect(line).toContain(BIRTH_AT);
+    expect(line).toContain('birth marker');
+    expect(line).not.toContain('ceremony verified');
+  }, RUN_TIMEOUT);
+
+  it('a ceremony run: the line keeps saying the ceremony verified, at its verified time', async () => {
+    bootWithOrganizationDrop();
+    mocks.readOrganizationOwnershipMarker.mockResolvedValue({ verified: true, flag: CEREMONY_RUN });
+
+    const { exit } = await runApply(ARGV);
+
+    expect(exit).toBe(0);
+    expect(applyMigrationEntries).toHaveBeenCalledTimes(1);
+    const line = organizationSuccessLine();
+    expect(line).toContain(`the organization-ownership ceremony verified (${CEREMONY_RUN.verified_at})`);
+    expect(line).not.toContain('birth marker');
+  }, RUN_TIMEOUT);
+
+  it('a birth marker under --json: the document is the one a ceremony run gets, and no success line is printed', async () => {
+    const payloads = [];
+    for (const flag of [BIRTH_MARKER, CEREMONY_RUN]) {
+      stdout.mockClear();
+      log.mockClear();
+      bootWithOrganizationDrop();
+      mocks.readOrganizationOwnershipMarker.mockResolvedValue({ verified: true, flag });
+      const { exit, payload } = await runApply([...ARGV, '--json']);
+      expect(exit).toBe(0);
+      expect(organizationSuccessLine()).toBeUndefined();
+      payloads.push(payload);
+    }
+    // `duration` is each run's own wall time, so it is checked for shape and
+    // normalised; every other field must be equal.
+    for (const payload of payloads) {
+      expect(typeof payload.duration).toBe('number');
+      expect(payload.duration).toBeGreaterThanOrEqual(0);
+    }
+    const [birth, ceremony] = payloads.map((payload) => ({ ...payload, duration: 0 }));
+    expect(birth).toEqual(ceremony);
+  }, RUN_TIMEOUT);
+});
+
 describe('control', () => {
   it('a verified marker lets the drop through and exits 0, so the harness can tell a refusal from a run', async () => {
     bootWithOrganizationDrop();

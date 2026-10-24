@@ -505,7 +505,10 @@ describe('authoring-rule registry wiring (#4409)', () => {
       // suite runs exactly its two list-view FIELD members on a view snapshot
       // (`runtime-gate.view-writes.test.ts` pins that member surface). Both
       // are named here rather than folded into the family.
+      // `validateStackExpressions` (#24798) runs ONE pass on a view write —
+      // the bulk `confirmText` template slots — registered ahead of the rest.
       expect(runtimeAuthoringRulesFor('view').map((r) => r.name)).toEqual([
+        'validateStackExpressions',
         'validatePresetComparands',
         'validateReferenceIntegrity',
         ...FAMILY,

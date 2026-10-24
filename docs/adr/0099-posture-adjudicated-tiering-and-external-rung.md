@@ -1,6 +1,6 @@
 # ADR-0099: Posture-Adjudicated Tiering — one axis for tier decisions, the EXTERNAL rung's enforcement path, no explicit deny
 
-**Status**: Accepted (2026-07-18; proposed 2026-07-17) — P0 equivalence gate landed with the acceptance (see the Acceptance addendum); P1 shipped (#3226). Amended 2026-07-18: **two-axis correction** — D2's Layer 1 tier input corrected to the per-object scope bits, original P2 superseded by P2′ (see the Amendment)
+**Status**: Accepted (2026-07-18; proposed 2026-07-17) — P0 equivalence gate landed with the acceptance (see the Acceptance addendum); P1 shipped (#3226). Amended 2026-07-18: **two-axis correction** — D2's Layer 1 tier input corrected to the per-object scope bits, original P2 superseded by P2′ (see the Amendment) · **Amended** (2026-10-23, ruling of record 6355206139 on #25233, letter B) — D2's EXTERNAL column, D3 and I7: the rung admits explicit grants (shares, share links, sharing rules, held grants with their RLS) and is enforced (#25541). See the notes under D2 and D3.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md) (the posture ladder + Layer 0 — Accepted, implemented; this ADR is its adjudication follow-through), [ADR-0066](./0066-unified-authorization-model.md) (superuser bypass ①; precedence), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) (D10 principal taxonomy / `audience`, D11 external OWD), [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) (membership lifecycle — where an external principal type would come from), [ADR-0094](./0094-sys-permission-set-pure-projection.md) (one-authority precedent)
 **Composes with**: [ADR-0096](./0096-execution-surface-identity-admission.md) — 0096 governs **admission** (may this call reach the engine, as whom); this ADR governs **tiering** (given an admitted principal, which tier of rows each layer grants). Orthogonal axes, deliberately separate ADRs.
@@ -147,9 +147,9 @@ it would have caught).
 | Layer | `PLATFORM_ADMIN` | `TENANT_ADMIN` | `MEMBER` | `EXTERNAL` |
 |:---|:---|:---|:---|:---|
 | **Layer 0** (tenant wall) | exempt, where object posture permits (ADR-0095 D1) | **walled** — never exempt | walled | walled |
-| **Layer 1** (business RLS) | short-circuit (side-gated by super-bits) | short-circuit within org (side-gated) | business RLS applies (ownership / depth / sharing) | **not evaluated** — the rung's rule replaces it |
-| **OWD / sharing** | n/a (already all-rows in tier) | n/a within org | OWD baseline + shares + hierarchy widening | **explicit shares only — OWD and sharing *rules* never apply** |
-| **Write path** | tier does not bypass write guards: readonly strip (#2957), identity write guard (ADR-0092), Layer 0 write wall (#2946) all still apply | same | same | shares with edit access only |
+| **Layer 1** (business RLS) | short-circuit (side-gated by super-bits) | short-circuit within org (side-gated) | business RLS applies (ownership / depth / sharing) | evaluated for the grants it holds (position and permission-set RLS); the member baseline's sets are never among them |
+| **OWD / sharing** | n/a (already all-rows in tier) | n/a within org | OWD baseline + shares + hierarchy widening | owner-only floor on every object; shares (share links included) and sharing rules widen it; a held grant's RLS lifts the floor for its object |
+| **Write path** | tier does not bypass write guards: readonly strip (#2957), identity write guard (ADR-0092), Layer 0 write wall (#2946) all still apply | same | same | same guards; the owner-only write floor (`external_default`), widened by edit shares and grant RLS as for a member |
 | **Explain** | reports the carried rung — identical input as enforcement, by construction | same | same | same |
 
 > **Amendment note (2026-07-18):** the **Layer 1** row above is corrected by
@@ -157,6 +157,12 @@ it would have caught).
 > it is selected by the per-object super-bits (a `MEMBER` holding a delegated
 > per-object `viewAllRecords` short-circuits business RLS on that object,
 > tenant-walled as ever). The Layer 0 and EXTERNAL rows stand as written.
+
+> **Amendment note (2026-10-23, ruling of record 6355206139 on #25233, letter B):**
+> the `EXTERNAL` column above is the amended one. It supersedes the 2026-07-18
+> note's "the EXTERNAL rows stand as written" for that column; the original
+> read "not evaluated — the rung's rule replaces it", "explicit shares only —
+> OWD and sharing *rules* never apply" and "shares with edit access only".
 
 Invariants (each carries a matrix cell):
 
@@ -168,6 +174,11 @@ Invariants (each carries a matrix cell):
 - **I3** — Posture is derived only by the resolver, only from capability
   grants (ADR-0095 D3); no enforcement site re-derives tier at the point of
   decision (fallback probe excepted, per D1, and it may only narrow).
+  _Amended 2026-10-23 (ruling of record 6355206139 on #25233, letter B):
+  `EXTERNAL` is the one exception to "only from capability grants". It
+  derives from the reserved `org_external` position, which the resolver
+  projects from `sys_member.role = external` (ADR-0095 D3); the resolver
+  stays the only deriver, and no enforcement site reads the role._
 - **I4** — Enforcement and explain read the same carried value; a divergence
   is a defect, not a display issue.
 - **I5** — Posture selects tier, never side: no rung grants a read or write
@@ -177,6 +188,19 @@ Invariants (each carries a matrix cell):
   `PLATFORM_ADMIN` human is not system.
 
 ### D3 — The EXTERNAL rung's enforcement path (demand-gated)
+
+> **Amended 2026-10-23 (ruling of record 6355206139 on #25233, letter B).** The
+> rung admits the channel list of [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md)
+> D2: shares and share links, sharing rules, and held position and
+> permission-set grants with their RLS evaluated. Items 2 and 3 below are read
+> through it: the injection rule is the owner-only OWD floor plus those
+> channels, not a share-only filter, and sharing rules do apply. Item 1 shipped
+> in #25541: the population is the holders of the `external` organization role
+> (stage 1, #25515). An object with no `owner_id` and a public effective model
+> is under no OWD for any principal, so an external holding an RLS-less grant
+> on it reads every row. Explain's `guest` debugger mapping to `EXTERNAL` now
+> shares the rung's name with a live population; that is harmless, because the
+> guest deny-all precedes every sharing gate.
 
 Semantics are already locked (ADR-0095 D2): an EXTERNAL principal sees only
 rows explicitly shared to it; OWD baselines and sharing *rules* never widen
@@ -388,8 +412,10 @@ amended rather than enforced:
 - **I7 (new — the I5 dual):** the scope axis never crosses a boundary the
   posture axis has not opened. A super-bit holder below `PLATFORM_ADMIN`
   stays tenant-walled (enforced by P1; pinned in the matrix), and an EXTERNAL
-  principal's explicit-share rule replaces Layer 1 regardless of any held
-  bits (pinned when P3 lands).
+  principal's rung replaces the member baseline regardless of any held bits:
+  its OWD is the owner-only floor and only the grants it holds, with their
+  RLS, widen it (amended 2026-10-23, ruling 6355206139 letter B; pinned in
+  the matrix's EXTERNAL column, #25541).
 - **I2 clarification:** nesting is a per-rung *floor* invariant. Additive
   per-object grants widen visibility within a rung (two MEMBERs may differ)
   without violating the ladder; no rung's floor exceeds the rung above.

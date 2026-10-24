@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 85 — spawns the real producer once per single-cause fixture: two served-shape boots that run the real Archiver, and six spawns of the source CLI (dry run, --apply, re-run over the archive fixture; --apply on a project with no archive; a dry run with a runtime archive row; --apply with a declared archive that cannot connect); 67.8 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
+// test-budget: 90 — spawns the real producer once per single-cause fixture: two served-shape boots that run the real Archiver, and six spawns of the source CLI (dry run, --apply, re-run over the archive fixture; --apply on a project with no archive; a dry run with a runtime archive row; --apply with a declared archive that cannot connect); 67.8 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
 
 /**
  * [#24899] `os migrate audit-mail-bodies` masks the mail-log bodies the

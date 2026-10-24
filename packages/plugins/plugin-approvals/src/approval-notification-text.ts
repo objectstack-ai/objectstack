@@ -95,9 +95,10 @@ const HOLE = /\{\{(\w+)\}\}/g;
 /**
  * `{{name}}` interpolation with the convention both `II18nService.t()`
  * implementations use — one pass, a value is never re-scanned, a hole with no
- * value stays as written — over each param's literal text.
+ * value stays as written — over each param's literal text. Also the `en`
+ * rendering of the administrators' routing note (`admin-rescue-note.ts`).
  */
-function interpolate(template: string, params: Readonly<Record<string, ApprovalTextParam>>): string {
+export function interpolate(template: string, params: Readonly<Record<string, ApprovalTextParam>>): string {
   return template.replace(HOLE, (hole, name: string) => {
     const param = params[name];
     if (param === undefined) return hole;

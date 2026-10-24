@@ -2812,6 +2812,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/ooo-delegation-organization.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/ooo-delegation-organization.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/recall-refusal-user-copy.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3532,6 +3542,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/external-population.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/field-masking-rule.test.ts",
       "verb": "findOne",
       "pinned": 2
@@ -4229,6 +4244,11 @@
     {
       "file": "packages/runtime/src/domains/meta-save-destructive-remedy.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-publish-drafts-probe-caller-context.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

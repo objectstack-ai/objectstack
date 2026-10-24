@@ -202,11 +202,14 @@ describe('#4839 evidence — a delegation cannot rescue an IN-FLIGHT approval', 
     svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
   });
 
-  /** Declare an out-of-office delegation directly (bypassing the write guard). */
+  /**
+   * Declare an out-of-office delegation directly (bypassing the write guard),
+   * in the submitter's organization: a delegation applies only there (ADR-0131).
+   */
   const seedDelegation = (delegatorId: string, delegateId: string) => {
     engine._tables['sys_approval_delegation'] = [{
       id: 'del1', delegator_id: delegatorId, delegate_id: delegateId,
-      valid_from: null, valid_until: null, reason: 'sick leave', organization_id: null,
+      valid_from: null, valid_until: null, reason: 'sick leave', organization_id: 't1',
     }];
   };
 
@@ -249,6 +252,8 @@ describe('#4839 evidence — the sanctioned admin path covers an unavailable app
     svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
     bindApprovalLockHook(engine as any);
     engine._tables['opportunity'] = [{ id: 'opp1', amount: 100, stage: 'new' }];
+    // The substitute has an account: a reassign target must name one (#25485).
+    engine._tables['sys_user'] = [{ id: 'u7' }];
   });
 
   /** An ordinary member's edit of the approval's target record. */
