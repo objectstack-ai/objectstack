@@ -139,7 +139,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请",
+        successMessage: "已向 {{ result.email }} 发送邀请",
         params: {
           role: {
             options: {
@@ -576,7 +576,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请",
+        successMessage: "已向 {{ result.email }} 发送邀请",
         params: {
           role: {
             options: {
@@ -663,7 +663,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请",
+        successMessage: "已向 {{ result.email }} 发送邀请",
         params: {
           role: {
             options: {
@@ -793,7 +793,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请",
+        successMessage: "已向 {{ result.email }} 发送邀请",
         params: {
           role: {
             options: {

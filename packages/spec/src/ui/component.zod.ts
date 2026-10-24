@@ -72,6 +72,7 @@ import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
 import { refuseDeclarativeUpdateContradictions } from './action-declarative-update';
 import { navigationTargetRefusal } from './navigation-target';
+import { actionRowConfirmText, actionRowErrorMessage, actionRowSuccessMessage } from './action-copy-template';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 // [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
 // `groupBy` union, by reference — the tile routes it exactly as the chart does.
@@ -4033,9 +4034,9 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
   operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, and `list_toolbar` is not a location'),
   patch: rowPatchRetired("An `action:button`'s"),
-  confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
-  successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
-  errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
+  confirmText: actionRowConfirmText(),
+  successMessage: actionRowSuccessMessage(),
+  errorMessage: actionRowErrorMessage(),
   refreshAfter: z.boolean().optional().describe('Refresh the surrounding data after the action runs'),
   undoable: z.boolean().optional().describe('Offer an Undo affordance after an update action'),
   recordIdField: z.string().optional().describe('Row field whose value identifies the record the action acts on'),
@@ -4133,9 +4134,9 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
   operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
   patch: rowPatchRetired("An `action:icon`'s"),
-  confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
-  successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
-  errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
+  confirmText: actionRowConfirmText(),
+  successMessage: actionRowSuccessMessage(),
+  errorMessage: actionRowErrorMessage(),
   refreshAfter: z.boolean().optional().describe('Refresh the surrounding data after the action runs'),
   locations: z.array(ActionLocationSchema).optional()
     .describe('Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one'),
@@ -4283,9 +4284,9 @@ function actionContainerMemberShape() {
     bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
     operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
     patch: rowPatchRetired('An `action:group` or `action:menu` member\'s'),
-    confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
-    successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
-    errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
+    confirmText: actionRowConfirmText(),
+    successMessage: actionRowSuccessMessage(),
+    errorMessage: actionRowErrorMessage(),
     refreshAfter: z.boolean().optional().describe('Refresh the surrounding data after the action runs'),
     locations: z.array(ActionLocationSchema).optional()
       .describe('Action locations, forwarded to the runner — an `action:group` with a `location` draws only the members that list it, and the console uses them to tell a record-scoped action from an object-level one'),

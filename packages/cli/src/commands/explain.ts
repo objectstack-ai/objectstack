@@ -341,7 +341,7 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
     optional: [
       { name: 'icon', type: 'string', description: 'Icon name' },
       { name: 'objectName', type: 'string (snake_case)', description: 'Target object this action belongs to; when set, defineStack() merges it into that object\'s actions' },
-      { name: 'confirmText', type: 'string (i18n)', description: 'Confirmation message before execution. Correct on a param-LESS action; pairing it with a non-empty `params` is refused — put the question on `description` instead.' },
+      { name: 'confirmText', type: 'template (i18n)', description: 'Confirmation message before execution — a `{{ }}` template over `record`, the record the action runs against (`Delete {{ record.name }}?`). Correct on a param-LESS action; pairing it with a non-empty `params` is refused — put the question on `description` instead.' },
       { name: 'locations', type: 'ActionLocation[]', description: 'Where the action is offered (record header, list toolbar, row, …)' },
       { name: 'params', type: 'ActionParam[]', description: 'User-input collection for the action dialog' },
       { name: 'variant', type: '"primary" | "secondary" | "danger" | "ghost" | "link"', description: 'Button visual variant' },

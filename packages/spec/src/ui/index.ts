@@ -49,6 +49,18 @@ export { datasetForm } from './dataset.form';
 export { actionForm } from './action.form';
 export { pageForm } from './page.form';
 export * from './action.zod';
+// [#24814] The CLOSED scope of an action's copy — `confirmText`,
+// `successMessage`, `errorMessage` — as the console's runner binds it: the
+// roots the doors judge each sentence against. The slot factories stay
+// package-internal.
+export {
+  ACTION_COPY_RECORD_ROOT,
+  ACTION_CONFIRM_PARAMS_ROOT,
+  ACTION_SUCCESS_RESULT_ROOT,
+  ACTION_SUCCESS_TEMPLATE_ROOTS,
+  ACTION_ERROR_TEMPLATE_ROOTS,
+  actionConfirmTemplateRoots,
+} from './action-copy-template';
 // Action-param value validation (ADR-0104 D2)
 export * from './action-params.zod';
 export * from './page.zod';

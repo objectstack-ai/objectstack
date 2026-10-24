@@ -137,7 +137,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       approval_approve: {
         label: "Aprobar",
         description: "¿Aprobar esta solicitud? Su aprobación queda registrada y la solicitud avanza cuando este paso reúne las aprobaciones que requiere.",
-        successMessage: "\"${result.request.record_title}\" aprobada",
+        successMessage: "\"{{ result.request.record_title }}\" aprobada",
         params: {
           comment: {
             label: "Comentario"
@@ -150,7 +150,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       approval_reject: {
         label: "Rechazar",
         description: "¿Rechazar esta solicitud? Un rechazo es definitivo para todos los aprobadores.",
-        successMessage: "\"${result.request.record_title}\" rechazada",
+        successMessage: "\"{{ result.request.record_title }}\" rechazada",
         params: {
           comment: {
             label: "Comentario"
@@ -162,7 +162,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_reassign: {
         label: "Reasignar",
-        successMessage: "\"${result.request.record_title}\" reasignada",
+        successMessage: "\"{{ result.request.record_title }}\" reasignada",
         params: {
           to: {
             label: "Nuevo aprobador",
@@ -175,7 +175,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_send_back: {
         label: "Devolver",
-        successMessage: "\"${result.request.record_title}\" devuelta para revisión",
+        successMessage: "\"{{ result.request.record_title }}\" devuelta para revisión",
         params: {
           comment: {
             label: "Motivo"
@@ -184,7 +184,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_request_info: {
         label: "Pedir información",
-        successMessage: "Información solicitada sobre \"${result.request.record_title}\"",
+        successMessage: "Información solicitada sobre \"{{ result.request.record_title }}\"",
         params: {
           comment: {
             label: "¿Qué necesitas?"
@@ -193,7 +193,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_remind: {
         label: "Enviar recordatorio",
-        successMessage: "Recordatorio enviado para \"${result.request.record_title}\"",
+        successMessage: "Recordatorio enviado para \"{{ result.request.record_title }}\"",
         params: {
           comment: {
             label: "Nota"
@@ -203,7 +203,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       approval_recall: {
         label: "Retirar",
         description: "¿Retirar esta solicitud? Los aprobadores ya no podrán actuar sobre ella y el registro se desbloqueará.",
-        successMessage: "\"${result.request.record_title}\" retirada",
+        successMessage: "\"{{ result.request.record_title }}\" retirada",
         params: {
           comment: {
             label: "Comentario"
@@ -212,7 +212,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_resubmit: {
         label: "Reenviar",
-        successMessage: "\"${result.request.record_title}\" reenviada",
+        successMessage: "\"{{ result.request.record_title }}\" reenviada",
         params: {
           comment: {
             label: "¿Qué ha cambiado?"
@@ -221,7 +221,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_comment: {
         label: "Responder",
-        successMessage: "Respuesta publicada en \"${result.request.record_title}\"",
+        successMessage: "Respuesta publicada en \"{{ result.request.record_title }}\"",
         params: {
           comment: {
             label: "Comentario"

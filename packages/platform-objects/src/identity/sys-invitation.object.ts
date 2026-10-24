@@ -73,9 +73,9 @@ export const SysInvitation = ObjectSchema.create({
       visible: 'features.cloudManaged != true',
       requiresFeature: 'organization',
       requiresMembershipReach: 'invite_member',
-      // `${result.email}`: the invitee's address from the invitation row
+      // `{{ result.email }}`: the invitee's address from the invitation row
       // invite-member answers (see sys_user's mirror).
-      successMessage: 'Invitation sent to ${result.email}',
+      successMessage: 'Invitation sent to {{ result.email }}',
       refreshAfter: true,
       params: [
         { field: 'email', required: true },
