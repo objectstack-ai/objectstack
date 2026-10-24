@@ -20,6 +20,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectKernel, type PluginContext } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { defineStack } from '@objectstack/spec';
+import { ObjectSchema } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
 import { describeUnboundActionTargets } from './registry.js';
@@ -349,5 +350,82 @@ describe('the bound-action boot audit', () => {
         expect(err).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
         expect(err?.message).toContain('2 top-level actions are bound');
         expect(err?.message).toContain("action 'b' (a registration with no package) is bound to object 'y'");
+    });
+});
+
+// ── The parse a bound action is stored as ─────────────────────────────────
+
+/**
+ * [#25649] A package's bound action is stored as its `ActionSchema` parse, so
+ * a declared `requiresFeature` is lowered into `visible` exactly as on a
+ * platform object's own action (`ObjectSchema.create` parses those where they
+ * are authored). Before, the registry stored the item as the package wrote it:
+ * served with `requiresFeature` riding along raw and its `visible` the bare
+ * predicate — a feature gate no reader enforces.
+ */
+describe('a bound action is served as its ActionSchema parse', () => {
+    /** One declaration, carried both by the owner's object and by a binder package. */
+    const GATED = {
+        label: 'Change slug', type: 'url' as const, target: 'https://example.com/slug',
+        locations: ['record_header' as const], visible: "record.name != ''",
+        requiresFeature: 'multiOrgEnabled' as const,
+    };
+    const LOWERED = { dialect: 'cel', source: "(record.name != '') && features.multiOrgEnabled != false" };
+
+    /** The owner's object as a platform object is authored: parsed by `ObjectSchema.create`. */
+    const platformOwner = () => ({
+        id: 'com.test.owner', name: 'owner',
+        objects: [ObjectSchema.create({
+            name: 'ba_org', label: 'Org',
+            fields: { name: { name: 'name', type: 'text', label: 'Name' } },
+            actions: [{ name: 'own_gated', ...GATED }],
+        } as any)],
+    });
+    const gatedBinder = (action: Record<string, unknown>) => ({ id: 'com.test.binder', name: 'binder', actions: [action] });
+    const servedAction = async (protocol: ObjectStackProtocolImplementation, name: string) => {
+        const served: any = await protocol.getMetaItem({ type: 'object', name: 'ba_org' } as any);
+        return (served.item.actions as any[]).find((a) => a?.name === name);
+    };
+
+    it('GET /meta/object/<target> serves the bound action with `requiresFeature` lowered into `visible`', async () => {
+        const { engine, protocol } = await hostWith([platformOwner(), gatedBinder({ name: 'change_slug', objectName: 'ba_org', ...GATED })]);
+        const bound = await servedAction(protocol, 'change_slug');
+        expect(bound.visible).toEqual(LOWERED);
+        expect(bound).not.toHaveProperty('requiresFeature');
+        // The same lowering the platform object's own action, of the same declaration, is served with.
+        expect(bound.visible).toEqual((await servedAction(protocol, 'own_gated')).visible);
+        // One parsed body: the attachment is the very item the router's rung 2 resolves.
+        expect(engine.registry.getObject('ba_org')?.actions?.find((a: any) => a.name === 'change_slug'))
+            .toBe(engine.registry.getItem('action', 'change_slug'));
+    });
+
+    it('a bound action with no `visible` of its own is served the gate alone', async () => {
+        const { requiresFeature, label, type, target, locations } = GATED;
+        const { protocol } = await hostWith([platformOwner(), gatedBinder({ name: 'change_slug', objectName: 'ba_org', label, type, target, locations, requiresFeature })]);
+        const bound = await servedAction(protocol, 'change_slug');
+        expect(bound.visible).toEqual({ dialect: 'cel', source: 'features.multiOrgEnabled != false' });
+        expect(bound).not.toHaveProperty('requiresFeature');
+    });
+
+    it('control: the platform object\'s own action is served as `ObjectSchema.create` produced it', async () => {
+        const owner = platformOwner();
+        const authored = structuredClone(owner.objects[0].actions!.find((a: any) => a.name === 'own_gated'));
+        const { protocol } = await hostWith([owner, gatedBinder({ name: 'change_slug', objectName: 'ba_org', ...GATED })]);
+        expect(await servedAction(protocol, 'own_gated')).toEqual(authored);
+        expect(authored.visible).toEqual(LOWERED);
+    });
+
+    it('a bound action that does not parse is refused loudly, naming the action and its package — never stored', async () => {
+        const host = await hostWith([platformOwner()]);
+        const err: any = (() => {
+            try { host.engine.registerApp(gatedBinder({ name: 'change_slug', objectName: 'ba_org', ...GATED, visible: false })); }
+            catch (e) { return e; }
+            return undefined;
+        })();
+        expect(err).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.message).toContain("Action 'change_slug' of package 'com.test.binder' does not satisfy the action contract");
+        expect(err.issues).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'requiresFeature' })]));
+        expect(host.engine.registry.getItem('action', 'change_slug')).toBeUndefined();
+        expect(actionNames(host.engine.registry.getObject('ba_org'))).toEqual(['own_gated']);
     });
 });
