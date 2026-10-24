@@ -1,6 +1,50 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-/** [#25467 cut 8] HEADER PLACEHOLDER */
+/**
+ * [#25467 cut 8] The runtime authoring gate of `ObjectStackProtocolImplementation`
+ * and the restored-body doors that run it — the plugin-registered authoring
+ * gate (`runAuthoringGate`), the shared runtime authoring rules with the
+ * collections, package scope and host facts they are judged against
+ * (`assertRuntimeAuthoringRules`), and the restore path's body derivation,
+ * writer and save-door refusal (`restoredBodyDerivation`, `restoredBodyWriter`,
+ * `refuseRestoredBodyTheSaveDoorRefuses`) — moved out of `protocol.ts` whole.
+ * The other class members these bodies call are reached through the host
+ * below and did not move: the credential channel, the stored-collection fold,
+ * the package scope and the host-fact reads belong to groups of their own
+ * (the save-door refusals among them already have theirs, cut 6).
+ *
+ * A MOVE, not a redesign. Each function below is the body of the
+ * `ObjectStackProtocolImplementation` method of the same name as it stood,
+ * re-indented one level and otherwise unedited: the same reads, made as the
+ * same principal, refusing exactly where they did with the same codes and
+ * messages. No module-level declaration is read by these bodies alone, so
+ * none moved with them.
+ *
+ * ## How the moved bodies reach the class
+ *
+ * The shape #23050 set for `rest-server.ts` (its `data-action-routes.ts`
+ * header carries the full reasoning), as `protocol-batch-data.ts` applies it.
+ * The class keeps every method — the published `dist/*.d.ts` lists each one's
+ * name, docblock and declared signature — and each body is one literal of
+ * exactly the {@link AuthoringGateHost} members that method reads, plus a
+ * `.call`. A method is handed over as a closure that calls it on the protocol
+ * at call time, so a test double or spy set on the instance is still the one
+ * the body reaches, and the moved bodies that call one another do so through
+ * the protocol, exactly as before.
+ *
+ * The fields the bodies read, `engine`, `authoringChannel` and
+ * `authoringGates`, go as GETTERS, so each read happens when the body makes
+ * it: tests replace them on a constructed protocol.
+ *
+ * The other module-level declarations the bodies read
+ * (`permissionSetOwnerBindingRefusal`, `runtimeHookWithoutBodyRefusal`) stay in
+ * `protocol.ts`, where code that did not move reads them too, and are imported
+ * from there: the module cycle is evaluation-safe because each is read only
+ * inside a function body, never while the two modules are first evaluated.
+ * `index.ts` names what it publishes from `protocol.ts` one by one, so the
+ * `export` they gained for this keeps them off the published surface, and
+ * nothing re-exports this module, so the published surface does not move.
+ */
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { permissionSetOwnerBindingRefusal, runtimeHookWithoutBodyRefusal } from './protocol.js';
