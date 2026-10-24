@@ -123,6 +123,7 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_team.actions.create_team',
       'sys_team.actions.update_team',
       'sys_team.actions.remove_team',
+      'sys_team.actions.add_team_member',
       'sys_team_member.actions.add_team_member',
       'sys_team_member.actions.remove_team_member',
       // Fourth mirror of the email-invite entry, at the organization record
