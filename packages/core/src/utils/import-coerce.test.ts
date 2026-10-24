@@ -212,6 +212,64 @@ describe('[#20534] parseDateCell — ISO 8601, the export shape or a year-first 
   });
 });
 
+/**
+ * [#25582, maintainer ruling 6377844879 letter A] Two more year-first spellings
+ * of a bare day: `YYYY.MM.DD` and `YYYYMMDD`, on a day that exists, for a
+ * `date` and a `datetime` — and no other form is widened.
+ */
+describe('[#25582] parseDateCell — the dotted and compact year-first day', () => {
+  it.each([
+    ['2011.07.01', 'date', '2011-07-01'],
+    ['20090615', 'date', '2009-06-15'],
+    ['  2011.07.01 ', 'date', '2011-07-01'],
+    ['2028.02.29', 'date', '2028-02-29'],
+    ['20280229', 'date', '2028-02-29'],
+    ['0500.01.01', 'date', '0500-01-01'],
+    // A `datetime` reads the bare day as midnight UTC, as it reads `2026/7/15`.
+    ['2011.07.01', 'datetime', '2011-07-01T00:00:00.000Z'],
+    ['20090615', 'datetime', '2009-06-15T00:00:00.000Z'],
+  ] as const)('reads %j as a %s cell as %j', (cell, kind, stored) => {
+    expect(parseDateCell(cell, kind)).toBe(stored);
+  });
+
+  it.each([
+    // A day that does not exist — refused, never rolled over.
+    ['20090230', 'date'], ['2009.02.30', 'date'], ['20260229', 'datetime'],
+    ['20091301', 'date'], ['20090100', 'date'], ['2009.13.01', 'datetime'],
+    // No other form is widened.
+    ['2011.7.1', 'date'], ['2011.07.01 9:00', 'datetime'], ['2011.07.01T09:00', 'datetime'],
+    ['11.07.01', 'date'], ['01.07.2011', 'date'], ['2011.07-01', 'date'],
+    ['200961', 'date'], ['2009615', 'date'], ['200906150', 'date'], ['20090615 9:00', 'datetime'],
+    // A `time` holds no day, so neither spelling is a `time` cell.
+    ['2011.07.01', 'time'], ['20090615', 'time'],
+  ] as const)('refuses %j as a %s cell', (cell, kind) => {
+    expect(parseDateCell(cell, kind)).toBeUndefined();
+  });
+
+  it('reads the compact day only from a text cell, never from a number', () => {
+    expect(parseDateCell(20090615, 'date')).toBeUndefined();
+    expect(parseDateCell(20090615, 'datetime')).toBeUndefined();
+  });
+
+  it('leaves an eight-digit cell on a number or text field as it was', async () => {
+    const metaMap = new Map<string, ExportFieldMeta>([
+      ['n', { name: 'n', type: 'number' } as ExportFieldMeta],
+      ['code', { name: 'code', type: 'text' } as ExportFieldMeta],
+      ['d', { name: 'd', type: 'date' } as ExportFieldMeta],
+    ]);
+    const { data, errors } = await coerceRow({ n: '20090615', code: '20090615', d: '20090615' }, metaMap, {});
+    expect(errors).toEqual([]);
+    expect(data).toEqual({ n: 20090615, code: '20090615', d: '2009-06-15' });
+  });
+
+  it('fails the row with invalid_date for a compact day that does not exist', async () => {
+    const metaMap = new Map<string, ExportFieldMeta>([['d', { name: 'd', type: 'date' } as ExportFieldMeta]]);
+    const { data, errors } = await coerceRow({ d: '20090230' }, metaMap, {});
+    expect(data).toEqual({});
+    expect(errors.map((e) => [e.field, e.code])).toEqual([['d', 'invalid_date']]);
+  });
+});
+
 describe('matchOption', () => {
   const options = [{ label: '高', value: 'high' }, { label: '低', value: 'low' }];
   it('matches by option value (code)', () => {
@@ -223,6 +281,31 @@ describe('matchOption', () => {
   });
   it('returns undefined when nothing matches', () => {
     expect(matchOption('medium', options)).toBeUndefined();
+  });
+
+  // [#25582, maintainer ruling 6377844879 letter A] Values match case-insensitively too.
+  it('[#25582] matches by option value case-insensitively and stores the declared value', () => {
+    const countries = [{ label: '中国', value: 'cn' }, { label: '美国', value: 'us' }];
+    expect(matchOption('CN', countries)).toBe('cn');
+    expect(matchOption(' Us ', countries)).toBe('us');
+    expect(matchOption('HIGH', options)).toBe('high');
+    // Not a substring or prefix match.
+    expect(matchOption('CHN', countries)).toBeUndefined();
+  });
+  it('[#25582] keeps a label match ahead of the case-insensitive value match', () => {
+    // `CN` is this option's label and, by case alone, the other option's value:
+    // the label match it had before the value pass existed still wins.
+    expect(matchOption('CN', [{ label: 'Other', value: 'cn' }, { label: 'cn', value: 'china' }])).toBe('china');
+  });
+  it('[#25582] refuses, rather than guesses, a cell naming two values that differ only by case', () => {
+    const pair = [{ label: 'Lower', value: 'cn' }, { label: 'Upper', value: 'CN' }];
+    // An exact value still matches exactly.
+    expect(matchOption('cn', pair)).toBe('cn');
+    expect(matchOption('CN', pair)).toBe('CN');
+    // `Cn` names both by case alone: no match, as before this pass existed.
+    expect(matchOption('Cn', pair)).toBeUndefined();
+    // The same value declared twice is one value, not two.
+    expect(matchOption('CN', [{ label: 'a', value: 'cn' }, { label: 'b', value: 'cn' }])).toBe('cn');
   });
 });
 
@@ -399,6 +482,28 @@ describe('coerceRow', () => {
     const metaMap = meta({ a: { type: 'text' }, b: { type: 'number' } });
     const { data } = await coerceRow({ a: '', b: '  ' }, metaMap, {});
     expect(data).toEqual({});
+  });
+
+  it('[#25582] matches select and multiselect option values case-insensitively, storing the declared value', async () => {
+    const metaMap = meta({
+      country: { type: 'select', options: [{ label: '中国', value: 'cn' }, { label: '美国', value: 'us' }] },
+      markets: { type: 'multiselect', options: [{ label: '中国', value: 'cn' }, { label: '美国', value: 'us' }, { label: '日本', value: 'jp' }] },
+      regions: { type: 'select', multiple: true, options: [{ label: '东部', value: 'east' }, { label: '西部', value: 'west' }] },
+    });
+    const { data, errors, keptOptionValues } = await coerceRow(
+      { country: 'CN', markets: 'CN; Us、日本', regions: 'EAST,west' },
+      metaMap,
+      {},
+    );
+    expect(errors).toEqual([]);
+    expect(data).toEqual({ country: 'cn', markets: ['cn', 'us', 'jp'], regions: ['east', 'west'] });
+    // Matched, not kept: the write carries no admission for them.
+    expect(keptOptionValues).toEqual({});
+
+    // A part that matches no value or label still fails, naming that part.
+    const bad = await coerceRow({ markets: 'CN; DE' }, metaMap, {});
+    expect(bad.errors.map((e) => [e.field, e.code])).toEqual([['markets', 'invalid_option']]);
+    expect(bad.errors[0].message).toContain('DE');
   });
 
   it('honours createMissingOptions by keeping the raw select value', async () => {
