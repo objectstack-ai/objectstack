@@ -127,6 +127,10 @@ export interface AdminUserEndpointDeps {
    * [#25338] What create-user's optional `permissionSet` needs. Absent ⇒ a
    * request that names a set is refused 501 and no user is created; a request
    * that names none never reads it. See {@link AdminCreateGrantSeam}.
+   *
+   * Its unit of work also carries create-user's optional `organizationId`, so
+   * a refused join rolls the account back as a refused grant does. Absent ⇒ a
+   * request that names an organization is refused 501 the same way.
    */
   createGrant?: AdminCreateGrantSeam;
   logger?: { warn(msg: string): void };
@@ -208,6 +212,7 @@ import { generatePlaceholderEmail } from './placeholder-email.js';
 import { revokeSessionsAndApiKeys, type ForcedResetRevocationOutcome } from './forced-reset-revocation.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
+import type { AddMemberCapableApi } from './organization-add-member.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
 import { isCloudManaged } from '@objectstack/core';
@@ -667,8 +672,41 @@ export async function runAdminCreateUser(
   const permissionSet =
     typeof rawPermissionSet === 'string' && rawPermissionSet.trim().length > 0 ? rawPermissionSet.trim() : undefined;
 
+  // The optional organization the administrator chose for the new user. Empty
+  // means none chosen: the deployment's own membership reconciliation applies.
+  const rawOrganizationId = body.organizationId ?? body.organization_id;
+  if (rawOrganizationId !== undefined && rawOrganizationId !== null && typeof rawOrganizationId !== 'string') {
+    return badRequest('organizationId must be the id of an organization');
+  }
+  const organizationId =
+    typeof rawOrganizationId === 'string' && rawOrganizationId.trim().length > 0 ? rawOrganizationId.trim() : undefined;
+
   const resolved = await resolvePassword(deps, body, 'password');
   if ('status' in resolved) return resolved;
+
+  // Joining a chosen organization is settled BEFORE the account exists too: it
+  // runs in the same unit of work as the account, so a host that cannot run
+  // one, or has no organization plugin, refuses with nothing created.
+  let join: { seam: AdminCreateGrantSeam; addMember: AddMemberCapableApi['addMember'] } | undefined;
+  if (organizationId !== undefined) {
+    const seam = deps.createGrant;
+    const authApi = (await deps.getAuthApi()) as Partial<AddMemberCapableApi>;
+    if (!seam || typeof authApi.addMember !== 'function') {
+      return {
+        status: 501,
+        body: {
+          success: false,
+          error: {
+            code: 'NOT_IMPLEMENTED',
+            message:
+              'This server cannot add a user to an organization while creating them, so no user was created. '
+              + "Create the user without an organization, then use Add Member on the organization's Members list.",
+          },
+        },
+      };
+    }
+    join = { seam, addMember: authApi.addMember.bind(authApi) };
+  }
 
   // [#25338] Everything the grant needs is settled BEFORE the account exists,
   // so a host that cannot judge the grant refuses with nothing created.
@@ -740,11 +778,15 @@ export async function runAdminCreateUser(
       ? await stampMustChangePassword(deps, userId, true)
       : false;
 
-    // Match the invite / add-member flows: give the new user a membership so a
-    // single-org deployment shows them under the Default Organization instead of
-    // as a member-less account. No-op in multi-org (≥2 orgs), and no-op under
+    // An organization the administrator chose is joined explicitly (the
+    // add-member flow, ADR-0093 D1). Otherwise match the invite / add-member
+    // flows: give the new user a membership so a single-org deployment shows
+    // them under the Default Organization instead of as a member-less account.
+    // No-op in multi-org (≥2 orgs), and no-op under
     // `membershipPolicy: 'invite-only'` (ADR-0093 D1) — see the helper.
-    const membership = await bindUserToSoleOrganization(deps, userId);
+    const membership = join && organizationId !== undefined
+      ? await joinChosenOrganization(deps, join.addMember, userId, organizationId)
+      : await bindUserToSoleOrganization(deps, userId);
 
     // [#25338] The grant, under the administrator's own context (see
     // `AdminCreateGrantSeam`). A refusal throws, and the unit of work around
@@ -757,7 +799,7 @@ export async function runAdminCreateUser(
           { context: grant.context },
         );
       } catch (error) {
-        throw new GrantRefused(grantRefusal(error));
+        throw new CreationRefused(grantRefusal(error));
       }
     }
 
@@ -765,13 +807,14 @@ export async function runAdminCreateUser(
   };
 
   let account: CreatedAccount | EndpointResult;
-  if (grant) {
+  const unitOfWork = grant?.seam ?? join?.seam;
+  if (unitOfWork) {
     try {
       // A creation that fails answers without throwing: nothing landed, so
       // there is nothing to roll back.
-      account = await grant.seam.runAtomically(createAccount);
+      account = await unitOfWork.runAtomically(createAccount);
     } catch (error) {
-      if (error instanceof GrantRefused) return error.result;
+      if (error instanceof CreationRefused) return error.result;
       throw error;
     }
   } else {
@@ -827,11 +870,66 @@ interface CreatedAccount {
 }
 
 /** [#25338] Thrown out of the unit of work so it rolls back; carries the refusal the caller answers. */
-class GrantRefused extends Error {
+class CreationRefused extends Error {
   constructor(readonly result: EndpointResult) {
-    super(result.body.error?.message ?? 'permission set grant refused');
-    this.name = 'GrantRefused';
+    super(result.body.error?.message ?? 'user creation refused');
+    this.name = 'CreationRefused';
   }
+}
+
+/**
+ * Join the new user to the organization the administrator chose, as a
+ * `member` — the same act as the organization's Add Member action, folded into
+ * the creation so the administrator does not have to perform it afterwards.
+ *
+ * It goes through better-auth's own server-only `addMember` (as the
+ * `/organization/add-member` mount does), so the vendor's checks — the
+ * organization exists, the membership limit, its hooks — all stay the
+ * vendor's. A refusal throws, and the unit of work around the creation rolls
+ * the account back with it.
+ *
+ * ADR-0093: this is NOT the reconciler choosing a target org (D3 — multi mode
+ * never guesses); the administrator named it, which makes it an explicit flow
+ * that `membershipPolicy: 'invite-only'` admits (D1). The role is `member`, the
+ * D1 default: elevation stays the separate, audited `update-member-role`.
+ *
+ * A membership already there (in single-org mode the `user.create.after`
+ * reconciler can bind the default organization first) is respected and
+ * reported as `membershipCreated: false`, exactly as the reconciler reports it.
+ */
+async function joinChosenOrganization(
+  deps: AdminUserEndpointDeps,
+  addMember: AddMemberCapableApi['addMember'],
+  userId: string,
+  organizationId: string,
+): Promise<{ organizationId: string; membershipCreated: boolean }> {
+  const engine = deps.getDataEngine();
+  if (engine?.find) {
+    const existing = await engine.find(
+      'sys_member',
+      { where: { organization_id: organizationId, user_id: userId }, limit: 1 },
+      { context: SYSTEM_CTX },
+    );
+    if (Array.isArray(existing) && existing.length > 0) return { organizationId, membershipCreated: false };
+  }
+  try {
+    await addMember({ body: { userId, role: 'member', organizationId } });
+  } catch (error) {
+    const refused = mapAuthApiError(error, 'organization/add-member failed');
+    throw new CreationRefused({
+      status: refused.status,
+      body: {
+        success: false,
+        error: {
+          code: refused.body.error?.code ?? 'INTERNAL_ERROR',
+          message: `The user could not be added to the organization, so no user was created: ${
+            refused.body.error?.message ?? 'organization/add-member failed'
+          }`,
+        },
+      },
+    });
+  }
+  return { organizationId, membershipCreated: true };
 }
 
 /**

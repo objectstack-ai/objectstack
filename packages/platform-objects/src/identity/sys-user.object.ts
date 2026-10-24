@@ -304,6 +304,23 @@ export const SysUser = ObjectSchema.create({
           required: false,
           helpText: 'Optional. Grants this permission set to the new user, so they can open their apps on first sign-in.',
         },
+        // Optional: join the new user to one organization as a `member` in the
+        // same step — the organization's Add Member action folded into the
+        // creation. It matters in multi-org mode, where the server binds no
+        // organization by itself (ADR-0093 D3 — it never guesses one). INLINE
+        // with `reference`, so the dialog renders an organization picker
+        // instead of a raw id box. The route joins it through better-auth's
+        // `addMember` in the account's own transaction: a refused join creates
+        // no user.
+        {
+          name: 'organizationId',
+          type: 'lookup',
+          reference: 'sys_organization',
+          label: 'Organization',
+          required: false,
+          helpText: 'Optional. Adds the new user to this organization as a member, so you do not have to add them on its Members list afterwards.',
+          requiresFeature: 'organization',
+        },
       ],
       resultDialog: {
         title: 'User Created',
