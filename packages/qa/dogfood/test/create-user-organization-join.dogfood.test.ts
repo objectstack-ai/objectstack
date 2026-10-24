@@ -12,9 +12,9 @@
  * `member`, inside the account's transaction.
  *
  *   J1  chosen: the user lands with exactly one membership, `member` of the
- *       chosen organization.
- *   J2  none chosen: still member-less in multi-org — the reconciler's
- *       never-guess posture is unchanged.
+ *       chosen organization — not the administrator's own.
+ *   J2  left empty: the user joins the administrator's CURRENT organization
+ *       (ADR-0093 D3 amendment), and only that one.
  *   J3  an organization that does not exist is refused, and the account rolls
  *       back with it — no member-less user is left behind.
  *
@@ -35,11 +35,13 @@ async function findRows(ql: any, object: string, where: any, limit = 50): Promis
   return Array.isArray(rows) ? rows : (rows?.records ?? []);
 }
 
-describe('Create User joins a chosen organization in multi-org mode', () => {
+describe('Create User joins an organization in multi-org mode — the chosen one, or the administrator\'s current one', () => {
   let stack: VerifyStack;
   let ql: any;
   let adminToken: string;
   let orgId: string;
+  /** The administrator's own current organization — the default. */
+  let adminOrgId: string;
   let priorScim: string | undefined;
 
   beforeAll(async () => {
@@ -55,6 +57,16 @@ describe('Create User joins a chosen organization in multi-org mode', () => {
     });
     expect(created.status, `org create: ${await created.clone().text()}`).toBe(200);
     orgId = ((await created.json()) as { id: string }).id;
+
+    const home = await stack.apiAs(adminToken, 'POST', '/auth/organization/create', {
+      name: 'Admin Home', slug: 'admin-home-create-user',
+    });
+    expect(home.status, `admin org create: ${await home.clone().text()}`).toBe(200);
+    adminOrgId = ((await home.json()) as { id: string }).id;
+    const active = await stack.apiAs(adminToken, 'POST', '/auth/organization/set-active', {
+      organizationId: adminOrgId,
+    });
+    expect(active.status, `set-active: ${await active.clone().text()}`).toBe(200);
   }, 180_000);
 
   afterAll(async () => {
@@ -70,7 +82,7 @@ describe('Create User joins a chosen organization in multi-org mode', () => {
     expect(tenancy.posture).toBe('isolated');
     expect(tenancy.isolationActive).toBe(true);
     expect(tenancy.degraded).toBe(false);
-    // The reconciler's target: none, so J2's member-less outcome is the posture's, not an accident.
+    // The reconciler's target: none — so J2's membership is the default's doing, not the reconciler's.
     expect(await tenancy.defaultOrgId()).toBeNull();
   });
 
@@ -89,15 +101,21 @@ describe('Create User joins a chosen organization in multi-org mode', () => {
     expect(members.map((m) => [m.organization_id, m.role])).toEqual([[orgId, 'member']]);
   }, 120_000);
 
-  it('J2 none chosen: member-less, as before — multi-org never guesses an organization', async () => {
+  it("J2 left empty: the user joins the administrator's current organization", async () => {
+    const session = await (await stack.apiAs(adminToken, 'GET', '/auth/get-session')).json();
+    expect(session.session.activeOrganizationId).toBe(adminOrgId);
+    expect(adminOrgId).not.toBe(orgId);
+
     const res = await stack.apiAs(adminToken, 'POST', '/auth/admin/create-user', {
-      email: 'unbound.create-user-org@example.com',
-      password: 'Unbound!Pass123',
+      email: 'defaulted.create-user-org@example.com',
+      password: 'Default!Pass123',
     });
     expect(res.status, await res.clone().text()).toBe(200);
     const body = await res.json();
-    expect(body.data.membershipCreated).toBe(false);
-    expect(await findRows(ql, 'sys_member', { user_id: String(body.data.user.id) })).toHaveLength(0);
+    expect(body.data.organizationId).toBe(adminOrgId);
+    expect(body.data.membershipCreated).toBe(true);
+    const members = await findRows(ql, 'sys_member', { user_id: String(body.data.user.id) });
+    expect(members.map((m) => [m.organization_id, m.role])).toEqual([[adminOrgId, 'member']]);
   }, 120_000);
 
   it('J3 an organization that does not exist: refused, and no user is created', async () => {

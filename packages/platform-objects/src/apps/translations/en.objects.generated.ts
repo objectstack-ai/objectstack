@@ -190,7 +190,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           organizationId: {
             label: "Organization",
-            helpText: "Optional. Adds the new user to this organization as a member, so you do not have to add them on its Members list afterwards."
+            helpText: "Optional. The new user joins this organization as a member. Leave empty to add them to your current organization."
           }
         },
         resultDialog: {

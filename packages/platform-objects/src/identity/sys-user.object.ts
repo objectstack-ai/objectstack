@@ -306,19 +306,20 @@ export const SysUser = ObjectSchema.create({
         },
         // Optional: join the new user to one organization as a `member` in the
         // same step — the organization's Add Member action folded into the
-        // creation. It matters in multi-org mode, where the server binds no
-        // organization by itself (ADR-0093 D3 — it never guesses one). INLINE
-        // with `reference`, so the dialog renders an organization picker
-        // instead of a raw id box. The route joins it through better-auth's
-        // `addMember` in the account's own transaction: a refused join creates
-        // no user.
+        // creation. Left empty, the route defaults to the administrator's own
+        // current organization (ADR-0093 D3 amendment); a param `defaultValue`
+        // is a literal, so the default lives on the server and the help text
+        // says so. INLINE with `reference`, so the dialog renders an
+        // organization picker instead of a raw id box. The route joins through
+        // better-auth's `addMember` in the account's own transaction: a
+        // refused join creates no user.
         {
           name: 'organizationId',
           type: 'lookup',
           reference: 'sys_organization',
           label: 'Organization',
           required: false,
-          helpText: 'Optional. Adds the new user to this organization as a member, so you do not have to add them on its Members list afterwards.',
+          helpText: 'Optional. The new user joins this organization as a member. Leave empty to add them to your current organization.',
           // Offered only where it is needed: single-org already binds every
           // new user to the default organization by itself.
           requiresFeature: 'multiOrgEnabled',

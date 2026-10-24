@@ -101,7 +101,17 @@ export interface AdminUserEndpointDeps {
    * mis-bind new users into the default org. Wire this everywhere tenancy
    * is registered.
    */
-  getTenancy?(): { defaultOrgId(): Promise<string | null> } | undefined;
+  getTenancy?(): {
+    defaultOrgId(): Promise<string | null>;
+    /**
+     * True iff an organization wall is in force — the same predicate
+     * `features.multiOrgEnabled` (and so the Create User dialog's organization
+     * picker) is derived from. create-user's multi-org default reads it, so
+     * the default applies exactly where the picker is shown. Optional for lean
+     * mocks: absent ⇒ not multi-org ⇒ no default.
+     */
+    readonly isolationActive?: boolean;
+  } | undefined;
   /**
    * ADR-0093 D1 — the deployment's membership policy, read LIVE through
    * `AuthManager.getMembershipPolicy()` (never a captured option).
@@ -133,6 +143,13 @@ export interface AdminUserEndpointDeps {
    * request that names an organization is refused 501 the same way.
    */
   createGrant?: AdminCreateGrantSeam;
+  /**
+   * The CALLING administrator's current (active) organization, read from their
+   * session, or `null` when they have none. create-user's default organization
+   * in multi-org mode (ADR-0093 D3 amendment). Absent ⇒ no default: a request
+   * that names no organization joins none, as before.
+   */
+  getCallerActiveOrganizationId?(): Promise<string | null>;
   logger?: { warn(msg: string): void };
 }
 
@@ -673,7 +690,9 @@ export async function runAdminCreateUser(
     typeof rawPermissionSet === 'string' && rawPermissionSet.trim().length > 0 ? rawPermissionSet.trim() : undefined;
 
   // The optional organization the administrator chose for the new user. Empty
-  // means none chosen: the deployment's own membership reconciliation applies.
+  // means none chosen: in multi-org mode the administrator's own current
+  // organization is the default (see `resolveDefaultJoinOrganization`), and
+  // otherwise the deployment's own membership reconciliation applies.
   const rawOrganizationId = body.organizationId ?? body.organization_id;
   if (rawOrganizationId !== undefined && rawOrganizationId !== null && typeof rawOrganizationId !== 'string') {
     return badRequest('organizationId must be the id of an organization');
@@ -684,14 +703,18 @@ export async function runAdminCreateUser(
   const resolved = await resolvePassword(deps, body, 'password');
   if ('status' in resolved) return resolved;
 
-  // Joining a chosen organization is settled BEFORE the account exists too: it
-  // runs in the same unit of work as the account, so a host that cannot run
-  // one, or has no organization plugin, refuses with nothing created.
+  // Joining an organization is settled BEFORE the account exists too: it runs
+  // in the same unit of work as the account, so a host that cannot run one, or
+  // has no organization plugin, refuses a CHOSEN organization with nothing
+  // created. A defaulted one is skipped instead — nobody asked for it.
   let join: { seam: AdminCreateGrantSeam; addMember: AddMemberCapableApi['addMember'] } | undefined;
-  if (organizationId !== undefined) {
+  const joinOrganizationId = organizationId ?? (await resolveDefaultJoinOrganization(deps));
+  if (joinOrganizationId !== undefined) {
     const seam = deps.createGrant;
     const authApi = (await deps.getAuthApi()) as Partial<AddMemberCapableApi>;
-    if (!seam || typeof authApi.addMember !== 'function') {
+    const capable = Boolean(seam) && typeof authApi.addMember === 'function';
+    if (capable) join = { seam: seam!, addMember: authApi.addMember!.bind(authApi) };
+    else if (organizationId !== undefined) {
       return {
         status: 501,
         body: {
@@ -705,7 +728,6 @@ export async function runAdminCreateUser(
         },
       };
     }
-    join = { seam, addMember: authApi.addMember.bind(authApi) };
   }
 
   // [#25338] Everything the grant needs is settled BEFORE the account exists,
@@ -778,14 +800,15 @@ export async function runAdminCreateUser(
       ? await stampMustChangePassword(deps, userId, true)
       : false;
 
-    // An organization the administrator chose is joined explicitly (the
-    // add-member flow, ADR-0093 D1). Otherwise match the invite / add-member
+    // An organization the administrator chose — or, in multi-org mode, their
+    // current one by default — is joined explicitly (the add-member flow,
+    // ADR-0093 D1, D3 amendment). Otherwise match the invite / add-member
     // flows: give the new user a membership so a single-org deployment shows
     // them under the Default Organization instead of as a member-less account.
     // No-op in multi-org (≥2 orgs), and no-op under
     // `membershipPolicy: 'invite-only'` (ADR-0093 D1) — see the helper.
-    const membership = join && organizationId !== undefined
-      ? await joinChosenOrganization(deps, join.addMember, userId, organizationId)
+    const membership = join && joinOrganizationId !== undefined
+      ? await joinChosenOrganization(deps, join.addMember, userId, joinOrganizationId)
       : await bindUserToSoleOrganization(deps, userId);
 
     // [#25338] The grant, under the administrator's own context (see
@@ -930,6 +953,32 @@ async function joinChosenOrganization(
     });
   }
   return { organizationId, membershipCreated: true };
+}
+
+/**
+ * The organization a new user joins when the administrator chose none: their
+ * OWN current organization, in multi-org mode only (ADR-0093 D3 amendment).
+ *
+ * - Single-org (no organization wall in force, a degraded walled request
+ *   included): none — the reconciler already binds the default organization.
+ *   Judged by `tenancy.isolationActive`, the predicate behind
+ *   `features.multiOrgEnabled`, so the default applies exactly where the
+ *   dialog shows the organization picker.
+ * - `membershipPolicy: 'invite-only'`: none — a default is not an explicit
+ *   choice, so the policy keeps withholding it (D1).
+ * - An administrator with no current organization: none — the user is
+ *   created member-less, exactly as before.
+ *
+ * This is not the reconciler guessing a tenant: it is the organization the
+ * administrator is working in, shown to them as the dialog's default, the
+ * same organization the Add Member action falls back to.
+ */
+async function resolveDefaultJoinOrganization(deps: AdminUserEndpointDeps): Promise<string | undefined> {
+  if (!deps.getCallerActiveOrganizationId) return undefined;
+  if (deps.getTenancy?.()?.isolationActive !== true) return undefined;
+  if ((deps.getMembershipPolicy?.() ?? 'auto') !== 'auto') return undefined;
+  const active = await deps.getCallerActiveOrganizationId();
+  return typeof active === 'string' && active.length > 0 ? active : undefined;
 }
 
 /**
