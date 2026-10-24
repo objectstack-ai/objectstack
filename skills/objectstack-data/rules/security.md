@@ -106,6 +106,7 @@ bridge (warns). The compiler resolves these
 | `current_user.organization_id` | the caller's tenant |
 | `current_user.org_user_ids` | ids of users in the same org (for `IN`) |
 | `current_user.positions` | the caller's positions (for `IN`; ADR-0090 D3) |
+| `current_user.KEY` | the set an object's `membershipKeys.KEY` declares (for `IN`) |
 
 - Source: `node_modules/@objectstack/spec/src/security/rls.zod.ts` (policy
   shape, predicate grammar, `check` composition).
