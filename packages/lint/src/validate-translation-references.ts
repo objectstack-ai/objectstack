@@ -370,6 +370,14 @@ interface ObjectFacts {
   actions: Map<string, AnyRec>;
   sections: Set<string>;
   /**
+   * The `_sections.<section>.fields` keys — per section name, the `field` of
+   * every entry object a FORM VIEW's section of that name declares. Those are
+   * the entries whose `label` / `placeholder` / `helpText` `translateView`
+   * overlays; a `fieldGroups` group or a `record:details` section contributes
+   * a section name and no entry.
+   */
+  sectionEntries: Map<string, Set<string>>;
+  /**
    * `_validations` names — the custom validation rules this object declares
    * (`objects[].validations[].name`, including a nested `conditional` rule's
    * `then` / `otherwise` branch — the branch is itself a full rule and is the
@@ -508,6 +516,7 @@ function emptyFacts(): ObjectFacts {
     forms: new Set(),
     actions: new Map(),
     sections: new Set(),
+    sectionEntries: new Map(),
     validations: new Set(),
     tabs: new Set(),
   };
@@ -580,7 +589,17 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
     if (!binding) return;
     for (const section of recordsOf(container.sections)) {
       const sectionName = strName(section.name);
-      if (sectionName) factsFor(binding).sections.add(sectionName);
+      if (!sectionName) continue;
+      const facts = factsFor(binding);
+      facts.sections.add(sectionName);
+      // A section's entry objects are the `_sections.<name>.fields` keys; a
+      // bare field-name entry authors no copy, so it addresses nothing.
+      let entries = facts.sectionEntries.get(sectionName);
+      if (!entries) facts.sectionEntries.set(sectionName, (entries = new Set()));
+      for (const entry of recordsOf(section.fields)) {
+        const field = strName(entry.field);
+        if (field) entries.add(field);
+      }
     }
   };
 
@@ -1790,8 +1809,25 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         }
 
         // _sections.<key>
-        for (const sectionName of Object.keys(asRecord(rawNode._sections))) {
-          if (facts.sections.has(sectionName)) continue;
+        for (const [sectionName, rawSection] of Object.entries(asRecord(rawNode._sections))) {
+          if (facts.sections.has(sectionName)) {
+            // _sections.<key>.fields.<field> — a form section entry's copy.
+            const entries = facts.sectionEntries.get(sectionName) ?? new Set<string>();
+            for (const fieldName of Object.keys(asRecord(asRecord(rawSection).fields))) {
+              if (entries.has(fieldName)) continue;
+              orphan(
+                `${inLocale} · object "${objectName}" · section "${sectionName}" · entry "${fieldName}"`,
+                `${objPath}._sections.${sectionName}.fields.${fieldName}`,
+                `Translations are keyed to entry "${fieldName}" of section "${sectionName}", which no ` +
+                  `form view section of that name on object "${objectName}" declares, so nothing reads them.` +
+                  suggest(fieldName, entries),
+                `Key the entry by its \`field\` under a form view section's \`name\`, or drop the ` +
+                  `translation. A bare field name authors no copy: translate the field itself at ` +
+                  `\`objects.${objectName}.fields.${fieldName}\`.`,
+              );
+            }
+            continue;
+          }
           orphan(
             `${inLocale} · object "${objectName}" · section "${sectionName}"`,
             `${objPath}._sections.${sectionName}`,
