@@ -141,7 +141,8 @@ describe('package upgrade model retirement — the public surface', () => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (entry.name.endsWith('.ts')) {
+        // This pin spells the specifier in its matcher fixtures, never as an import.
+        else if (entry.name.endsWith('.ts') && full !== fileURLToPath(import.meta.url)) {
           const src = fs.readFileSync(full, 'utf-8');
           if (/(?:import|export)[^;]*['"][^'"]*\/package-upgrade\.zod(?:\.js)?['"]/.test(src)) {
             importers.push(path.relative(SRC_ROOT, full));
