@@ -246,14 +246,85 @@ function notifyValuePhrase(value: unknown): string {
   return `a ${typeof value}`;
 }
 
+// ─── notify email-field recipient (ruling 6377731715 on #25496, letter B) ──
+//
+// The one recipient form that is an email ADDRESS rather than a user: the
+// address held in an `email`-typed field of the record that triggered the
+// flow — for a person who is not a user, such as an applicant who came in
+// through a public form (ADR-0138 guest model). It NAMES the field, so a free
+// string or an expression can never parse as it: a string in `recipients` is
+// a user id or an audience selector, an envelope is a CEL value, and this arm
+// is a closed object whose one key holds a field's machine name. Which field
+// that is, and that it is `email`-typed, is judged where the flow's trigger
+// and the object's fields meet — `@objectstack/lint`'s
+// `validateNotifyEmailFieldRecipients`, a reference-integrity rule, so every
+// authoring command and the runtime publish door refuse it.
+//
+// It is the WHOLE `recipients` value, never a list entry, and the node names
+// `email` as its only channel (the `superRefine` of `NotifyConfigSchema`): an
+// address that no user holds has no inbox, so the email channel is the one
+// that can deliver to it.
+
+/** A field's machine name — the grammar of `FieldSchema.name`, which `emailField` names. */
+const FIELD_MACHINE_NAME = /^[a-z_][a-z0-9_]*$/;
+
+/** What an email-field recipient is — the sentence its refusals lead with. */
+const NOTIFY_EMAIL_FIELD_RULE =
+  'An email-field recipient, `{ emailField: \'applicant_email\' }`, names an `email`-typed field of the record '
+  + 'that triggered the flow, and the address in that field is the recipient. It names the field by its machine '
+  + 'name: never an address written out, and never an expression that builds one.';
+
+/**
+ * `notify.recipients` as `{ emailField }` — the address in an `email`-typed
+ * field of the triggering record (see the section note above).
+ */
+export const NotifyEmailFieldRecipientSchema = strictObject({
+  surface: 'this notify email-field recipient',
+  history:
+    'The form was closed from the day it was declared: a key beside `emailField` would otherwise be dropped, '
+    + 'and the node would mail an address the author did not choose.',
+}, {
+  emailField: z.string({ error: () => `${NOTIFY_EMAIL_FIELD_RULE} \`emailField\` is a field name, as a string.` })
+    .regex(FIELD_MACHINE_NAME, {
+      error: () => `${NOTIFY_EMAIL_FIELD_RULE} \`emailField\` is not a field's machine name (lowercase \`snake_case\`).`,
+    })
+    .describe('Machine name of an `email`-typed field of the record that triggered the flow; the address it holds is the recipient'),
+}).meta({
+  description:
+    'An email-field recipient: the address in an `email`-typed field of the record that triggered the flow — '
+    + 'the field is named, never an address or an expression',
+});
+
+export type NotifyEmailFieldRecipient = z.infer<typeof NotifyEmailFieldRecipientSchema>;
+
+/** True when `value` is written as an email-field recipient — a plain object with an `emailField` key. */
+function isEmailFieldRecipientShaped(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    && Object.prototype.hasOwnProperty.call(value, 'emailField') && !isExpressionEnvelopeShaped(value);
+}
+
+/** An email-field recipient's refusal — {@link NOTIFY_EMAIL_FIELD_RULE}, then each issue, located. */
+function emailFieldRecipientRefusal(value: unknown): string {
+  const result = NotifyEmailFieldRecipientSchema.safeParse(value);
+  if (result.success) return NOTIFY_EMAIL_FIELD_RULE;
+  const details = result.error.issues.map((i) => {
+    const message = i.message.startsWith(NOTIFY_EMAIL_FIELD_RULE) ? i.message.slice(NOTIFY_EMAIL_FIELD_RULE.length + 1) : i.message;
+    return i.path.length > 0 ? `\`${i.path.map(String).join('.')}\`: ${message}` : message;
+  });
+  return [NOTIFY_EMAIL_FIELD_RULE, ...details].join(' ');
+}
+
 /**
  * What `recipients` holds — the sentence every refusal of a value there that is
- * neither a recipient, a list of them nor a CEL value envelope leads with.
+ * neither a recipient, a list of them, a CEL value envelope nor an email-field
+ * recipient leads with.
  */
 const NOTIFY_RECIPIENTS_RULE =
   '`recipients` is who the notification goes to: a recipient — a user id, or an audience selector such as '
-  + '`team:ID` — written as a string; a list of them, each a string or a CEL value envelope; or one CEL value '
-  + 'envelope, `{ dialect: \'cel\', source: \'…\' }`, that evaluates to a recipient or a list of them.';
+  + '`team:ID` — written as a string; a list of them, each a string or a CEL value envelope; one CEL value '
+  + 'envelope, `{ dialect: \'cel\', source: \'…\' }`, that evaluates to a recipient or a list of them; or an '
+  + 'email-field recipient, `{ emailField: \'applicant_email\' }`, the address in an `email`-typed field of the '
+  + 'record that triggered the flow.';
 
 /** Why a `recipients` value the union refuses is refused — naming the list entry that is not one. */
 function notifyRecipientsRefusal(input: unknown): string {
@@ -262,10 +333,16 @@ function notifyRecipientsRefusal(input: unknown): string {
       && !(isExpressionEnvelopeShaped(entry) && AssignmentExpressionValueSchema.safeParse(entry).success));
     const entry = input[index];
     if (isExpressionEnvelopeShaped(entry)) return envelopeRefusal(entry, `[${index}]`);
+    if (isEmailFieldRecipientShaped(entry)) {
+      return `${NOTIFY_EMAIL_FIELD_RULE} The entry at \`[${index}]\` is one, and an email-field recipient is the `
+        + 'whole `recipients` value, never a list entry: give the address its own `notify` node, with '
+        + '`channels: \'email\'`.';
+    }
     return `${NOTIFY_RECIPIENTS_RULE} The entry at \`[${index}]\` is ${notifyValuePhrase(entry)}: a list entry is a `
       + 'recipient string or an envelope.';
   }
   if (isExpressionEnvelopeShaped(input)) return envelopeRefusal(input, '');
+  if (isEmailFieldRecipientShaped(input)) return emailFieldRecipientRefusal(input);
   return `${NOTIFY_RECIPIENTS_RULE} This one is ${notifyValuePhrase(input)}.`;
 }
 
@@ -280,7 +357,10 @@ function notifyRecipientsRefusal(input: unknown): string {
  *    (a multi-user field, a list variable) adds EACH of its recipients, so a
  *    list is never handed on as one joined recipient;
  *  - a **CEL value envelope** ({@link AssignmentExpressionValueSchema}) is
- *    evaluated per run to a recipient or a list of them.
+ *    evaluated per run to a recipient or a list of them;
+ *  - an **email-field recipient** ({@link NotifyEmailFieldRecipientSchema}),
+ *    the whole value only, names an `email`-typed field of the triggering
+ *    record whose address is the recipient.
  *
  * An envelope that evaluates to `null` or a blank string adds no recipient,
  * as a token that resolved to nothing did, and the executor's guard still
@@ -293,6 +373,7 @@ const NotifyRecipientsSlotSchema = z.union([
   z.string(),
   z.array(z.union([z.string(), AssignmentExpressionValueSchema])),
   AssignmentExpressionValueSchema,
+  NotifyEmailFieldRecipientSchema,
 ], {
   error: (issue) => notifyRecipientsRefusal((issue as { input?: unknown }).input),
 })
@@ -308,8 +389,9 @@ const NotifyRecipientsSlotSchema = z.union([
     description:
       'Who the notification goes to: a recipient (a user id, or an audience selector such as `team:ID`) as a '
       + 'string; a list of them, each a string or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per '
-      + 'run (an entry that evaluates to a list adds each of its recipients); or one envelope evaluating to a '
-      + 'recipient or a list — a `{…}` template token is refused',
+      + 'run (an entry that evaluates to a list adds each of its recipients); one envelope evaluating to a '
+      + 'recipient or a list; or `{ emailField }`, the address in an `email`-typed field of the triggering record '
+      + '— a `{…}` template token is refused',
     xExpression: 'value',
   });
 
@@ -549,7 +631,11 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
       'Who the notification goes to: a recipient (a user id, or an audience selector such as `team:ID`) as a '
       + 'string; a list of them, each a string or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per '
       + 'run — an entry that evaluates to a list adds each of its recipients, and one that evaluates to null adds '
-      + 'none; or one envelope evaluating to a recipient or a list. A `{…}` template token is refused.',
+      + 'none; or one envelope evaluating to a recipient or a list. A `{…}` template token is refused. Or, as the '
+      + 'whole value, `{ emailField: \'applicant_email\' }`: the address in that `email`-typed field of the record '
+      + 'that triggered the flow, for a person who is not a user — the node then names `email` as its only channel. '
+      + 'Delivery to an email-field recipient is not live yet: until the messaging service resolves the form, a '
+      + 'run that reaches the node fails there.',
     ),
   /**
    * Inline notification title — the NON-localizable content path, and a
@@ -676,6 +762,25 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
         '`templateData` is the render context for a `template` reference, and this node names no `template` — '
         + 'nothing would ever read it. Add the `template` it feeds, or delete `templateData`.',
     });
+  }
+  // [ruling 6377731715, letter B] An email-field recipient is an address that
+  // no user holds, so it has no inbox, no SMS number and no preference row:
+  // the email channel is the one that can deliver to it. The node names that
+  // channel and no other, so no channel it would silently skip is written.
+  if (typeof cfg.recipients === 'object' && !Array.isArray(cfg.recipients) && 'emailField' in cfg.recipients) {
+    const channels = cfg.channels === undefined ? [] : Array.isArray(cfg.channels) ? cfg.channels : [cfg.channels];
+    if (channels.length !== 1 || channels[0] !== 'email') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['channels'],
+        message:
+          '`recipients` is an email-field recipient — an address that no user holds — so the email channel is the '
+          + 'only one that can deliver to it, and this node must name it alone: write `channels: \'email\'`. '
+          + (cfg.channels === undefined
+            ? 'With no `channels`, the node would fan out to the inbox, which an address has none of.'
+            : `This node names ${channels.length === 0 ? 'no channel' : channels.map((c) => `\`${c}\``).join(', ')}.`),
+      });
+    }
   }
   if (cfg.template === undefined && cfg.title === undefined) {
     ctx.addIssue({
