@@ -187,11 +187,15 @@ describe('a new organization takes its creator\'s default currency (#25495)', ()
       settingsWrites.mock.calls.filter(([namespace, key]) => namespace === 'localization' && key === 'currency');
 
     /** Sign the first user up (the bootstrap user, so no invitation is needed) and return the session cookie. */
-    const signUp = async (email: string) => {
+    const signUp = async (email: string, acceptLanguage?: string) => {
       const res = await auth.handleRequest(
         new Request(`${AUTH}/sign-up/email`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json', origin: BASE },
+          headers: {
+            'content-type': 'application/json',
+            origin: BASE,
+            ...(acceptLanguage ? { 'accept-language': acceptLanguage } : {}),
+          },
           body: JSON.stringify({ email, password: 'S3cure!Passw0rd-25495', name: 'Founder' }),
         }),
       );
@@ -299,6 +303,49 @@ describe('a new organization takes its creator\'s default currency (#25495)', ()
       expect(host).toHaveBeenCalledWith(expect.objectContaining({ organizationId: orgId, userId }));
       expect(await currencyOf(orgId)).toMatchObject({ value: 'GBP', source: 'tenant' });
       expect(currencyWrites().map(([, , value]) => value)).toEqual(['GBP']);
+    }, 30_000);
+  });
+
+  describe("the single posture's Default Organization, from its first owner (#25651)", () => {
+    // No posture variable: the `single` posture, whose Default Organization is
+    // created at boot with no creator. The first sign-up becomes its owner.
+
+    it("10. a zh-CN first sign-up leaves the Default Organization with localization.currency = 'CNY'", async () => {
+      const { ql, currencyOf, currencyWrites, signUp, defaultOrganization } = await boot();
+      const orgId = await defaultOrganization();
+      expect(await currencyOf(orgId), 'no currency before the owner is bound').toMatchObject({ source: 'default' });
+      const { userId } = await signUp('first-cn@example.com', 'zh-CN,zh;q=0.9,en;q=0.8');
+      const owner = await ql.findOne('sys_member', { where: { organization_id: orgId, role: 'owner' }, context: SYS });
+      expect(owner?.user_id, 'the first sign-up must be bound as the owner for this case to mean anything').toBe(userId);
+
+      expect(await currencyOf(orgId)).toMatchObject({ value: 'CNY', source: 'tenant' });
+      expect(currencyWrites()).toEqual([['localization', 'currency', 'CNY', { tenantId: orgId }]]);
+    }, 30_000);
+
+    it('11. a first sign-up with nothing to derive from (no stored language, no Accept-Language): nothing is stored', async () => {
+      const { ql, currencyOf, currencyWrites, signUp, defaultOrganization } = await boot();
+      const orgId = await defaultOrganization();
+      const { userId } = await signUp('first-none@example.com');
+      const owner = await ql.findOne('sys_member', { where: { organization_id: orgId, role: 'owner' }, context: SYS });
+      expect(owner?.user_id, 'the first sign-up must be bound as the owner for this case to mean anything').toBe(userId);
+
+      const resolved = await currencyOf(orgId);
+      expect(resolved).toMatchObject({ source: 'default' });
+      expect(resolved?.value ?? null).toBeNull();
+      expect(currencyWrites()).toEqual([]);
+    }, 30_000);
+
+    it("12. never over an administrator's value: a currency already stored on the Default Organization is kept", async () => {
+      const { ql, currencyOf, currencyWrites, signUp, defaultOrganization } = await boot({
+        extra: [storedCurrencyAppPlugin('USD')],
+      });
+      const orgId = await defaultOrganization();
+      const { userId } = await signUp('first-admin-set@example.com', 'zh-CN');
+      const owner = await ql.findOne('sys_member', { where: { organization_id: orgId, role: 'owner' }, context: SYS });
+      expect(owner?.user_id, 'the first sign-up must be bound as the owner for this case to mean anything').toBe(userId);
+
+      expect(await currencyOf(orgId)).toMatchObject({ value: 'USD', source: 'tenant' });
+      expect(currencyWrites()).toEqual([]);
     }, 30_000);
   });
 
