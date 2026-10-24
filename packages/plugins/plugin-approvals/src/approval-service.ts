@@ -86,6 +86,7 @@ import {
 // decision methods' slot test and `can_act` alike (`approver-address.ts`).
 import {
   actingAddresses,
+  addressedPosition,
   equivalentApproverAddresses,
   heldSlot,
   positionAddresses,
@@ -5513,6 +5514,10 @@ export class ApprovalService implements IApprovalService {
     } else {
       throw new Error(`FORBIDDEN: '${from}' is not a pending approver on this request`);
     }
+    // #25485 — the new slot must name someone who can take it. Asked only
+    // AFTER the authorization branches above, so a caller who may not move
+    // this slot learns nothing about the directory from the answer.
+    await this.assertReassignTargetResolves(to, raw.organization_id ?? null);
     const now = this.clock.now().toISOString();
     // Audit first, then mutate — mirrors decideNode(), so a failed audit
     // write can never leave a moved slot without a trail.
@@ -5568,6 +5573,69 @@ export class ApprovalService implements IApprovalService {
 
     const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh };
+  }
+
+  /**
+   * Refuse a reassign target that resolves to no one (#25485): a slot nobody
+   * can take strands the request, waiting on no one until an override actor
+   * moves it again. `to` is a slot address in the spellings a slate holds, and
+   * it resolves when:
+   *
+   *   - a user id or an email — a `sys_user` row carries it (`id`, or `email`
+   *     as stored: the spelling a default actor takes the slot under,
+   *     {@link actingAddresses}), and that user is not PROVABLY a member of
+   *     other organizations only. "Provably" is the posture of the
+   *     manager and team screens ({@link managerIsProvablyOutsideOrg},
+   *     {@link dropMembersProvablyOutsideOrg}), on the same `sys_member`
+   *     column: membership rows that name other organizations and not this one
+   *     refuse; no membership rows at all, or a request with no organization,
+   *     leave the target as it is;
+   *   - `position:<p>` — someone holds `p` in the request's organization
+   *     ({@link expandPositionUsers}, the routing read a position approver
+   *     opens on);
+   *   - any other `type:value` literal — never: no actor takes a `team:` /
+   *     `department:` / `org_membership_level:` / stored `role:` address
+   *     (`approver-address.ts`), so such a slot is the stranded slate itself.
+   *
+   * One refusal text for a missing user and a user of another organization,
+   * so the answer is not a probe of who exists in other tenants. A failed
+   * `sys_user` read propagates — the caller is told, and nothing moved — while
+   * an unreadable `sys_member` is an absent tenancy fact, as in the sibling
+   * screens.
+   */
+  private async assertReassignTargetResolves(to: string, organizationId: string | null): Promise<void> {
+    const refuse = (why: string): never => {
+      throw new Error(
+        `VALIDATION_FAILED: cannot reassign to '${to}' — ${why} The request and its approvers are unchanged. `
+        + `Reassign to the user id or email of a person in this request's organization, or to `
+        + `'position:<name>' for a position someone in it holds.`,
+      );
+    };
+    const position = addressedPosition(to);
+    if (position !== undefined) {
+      if ((await this.expandPositionUsers(position, organizationId)).length) return;
+      refuse(`no one holds position '${position}' in this request's organization.`);
+    }
+    if (to.includes(':')) {
+      refuse('it is a slot literal no approver acts under, so no one could ever decide the request.');
+    }
+    const rows = await this.engine.find('sys_user', {
+      where: to.includes('@') ? { email: to } : { id: to },
+      fields: ['id'], limit: 1, context: SYSTEM_CTX,
+    });
+    const userId = Array.isArray(rows) && rows[0]?.id != null ? String(rows[0].id) : '';
+    if (!userId) refuse('it names no user in this request\'s organization.');
+    if (!organizationId) return;
+    let memberships: any[] = [];
+    try {
+      memberships = await this.engine.find('sys_member', {
+        where: { user_id: userId }, fields: ['organization_id'], limit: 1000, context: SYSTEM_CTX,
+      });
+    } catch { return; } // membership unreadable ⇒ no tenancy fact, as in the sibling screens
+    const orgs = (memberships ?? []).map((r: any) => String(r?.organization_id ?? '')).filter(Boolean);
+    if (orgs.length && !orgs.includes(String(organizationId))) {
+      refuse('it names no user in this request\'s organization.');
+    }
   }
 
   /**
