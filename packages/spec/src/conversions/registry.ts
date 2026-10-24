@@ -17609,13 +17609,16 @@ const currencyConfigPrecisionRemoved: MetadataConversion = {
  * refuses the pair, and writes `allowDelete: true` into an entry that omits the
  * key under `modifyAllRecords: true`.
  *
- * **Why data at rest needs this entry.** Every parse before this release
- * filled an omitted `allowDelete` with its `false` default, so the refused pair
- * is in places nobody wrote it: every built artifact and every stored
- * permission set whose source set `modifyAllRecords: true` without naming
- * `allowDelete` carries `allowDelete: false` (the showcase's `showcase_ops` and
- * the measured HotCRM 17.1 artifact among them). JSON cannot say which `false`
- * was authored and which was the default, so the rewrite takes both.
+ * **Why data at rest needs this entry.** The pair reaches data at rest two
+ * ways. Authors wrote it: HotCRM's `sales_manager` profile declares
+ * `crm_forecast` with `allowDelete: false` beside `modifyAllRecords: true`, and
+ * its built 17.1 artifact carries that entry. And every parse before this
+ * release filled an omitted `allowDelete` with its `false` default, so every
+ * built artifact and every stored permission set whose source set
+ * `modifyAllRecords: true` without naming `allowDelete` carries the pair too
+ * (the showcase's `showcase_ops` among them). JSON cannot say which `false` was
+ * authored and which was the default, so the rewrite takes both; an author
+ * who rebuilds from a source that still declares the pair meets the refusal.
  *
  * **Lossless against the runtime.** The value written is the one the
  * evaluator already acted on: the holder could delete before, and still can.
@@ -17665,7 +17668,7 @@ const permissionModifyAllAllowDeleteFalseToTrue: MetadataConversion = {
         name: 'sales_manager',
         label: 'Sales Manager',
         objects: {
-          // The shape a built artifact carries: the default filled in.
+          // The pair, authored or filled in by an earlier parse.
           crm_forecast: { allowRead: true, allowEdit: true, allowDelete: false, viewAllRecords: true, modifyAllRecords: true },
           // No Modify All: the false is enforced and is left alone.
           crm_contact: { allowRead: true, allowEdit: true, allowDelete: false },

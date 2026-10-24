@@ -35,7 +35,7 @@ export const entry: SemanticMigration = {
     + 'census reading the stored entry counted a delete restriction the runtime never enforced '
     + '(ADR-0049 declared ≠ enforced). The refusal is a refinement on the AUTHORING object-permission '
     + 'schema at the allowDelete path; the response-side EffectiveObjectPermissionSchema stays tolerant '
-    + '(the #4001 authorable/wire split). Because allowDelete defaults to false, the same parse writes '
+    + '(the authorable/wire split). Because allowDelete defaults to false, the same parse writes '
     + '`allowDelete: true` into an entry that sets `modifyAllRecords: true` and omits the key; without '
     + 'that, every parse output of such an entry would be the refused pair and its next parse would fail. '
     + 'The runtime is unchanged: what the evaluator grants is exactly what it granted before. STORED ROWS '

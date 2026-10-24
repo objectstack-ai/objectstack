@@ -121,12 +121,11 @@ describe('artifact door — 17.1-built artifact converts forward and registers (
                 // here (the conversion's own byte-preservation is pinned by
                 // reference-identity in metadata-core's unit suite).
                 //
-                // [#25575] One bit is rewritten on purpose: the 17.x parse
-                // filled an omitted `allowDelete` with `false`, and beside
-                // `modifyAllRecords: true` that is the refused pair, so the
+                // [#25575] One bit is rewritten on purpose: HotCRM's source
+                // authors `sales_manager.crm_forecast` with `allowDelete: false`
+                // beside `modifyAllRecords: true`, the refused pair, so the
                 // `permission-modify-all-allow-delete-false-to-true` conversion
-                // writes the `true` the evaluator always acted on
-                // (`sales_manager.crm_forecast` in this artifact).
+                // writes the `true` the evaluator always acted on.
                 const { allowPurge: _p, allowRestore: _r, ...rest } = grantRaw;
                 const modifyAllDeleteRewritten = rest.modifyAllRecords === true && rest.allowDelete === false;
                 expect(grant).toMatchObject(modifyAllDeleteRewritten ? { ...rest, allowDelete: true } : rest);
