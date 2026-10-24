@@ -61,7 +61,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { doctorConfig } from './__tests__/doctor-config.js';
+import { doctorConfig } from '../utils/__tests__/doctor-config.js';
 import Doctor from './doctor.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));

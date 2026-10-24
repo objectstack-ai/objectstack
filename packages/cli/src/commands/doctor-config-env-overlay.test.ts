@@ -55,7 +55,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { doctorConfig } from './__tests__/doctor-config.js';
+import { doctorConfig } from '../utils/__tests__/doctor-config.js';
 import Doctor, {
   readDotenvFiles,
   withDotenvOverlay,
