@@ -6,7 +6,9 @@
 //
 //  - `name` is the organization's own name. The product name the console shows
 //    is Settings → Branding's `workspace_name`, a separate setting, and the help
-//    says so. It names no door: the rename doors are multi-organization only.
+//    says so. It names the door that changes it, Rename Organization, which is
+//    offered under `single` too (ruling 6384629949; the gate is pinned in
+//    `sys-organization-rename-action.test.ts`).
 //  - `timezone` is read by nothing in the platform (see its declaration). The
 //    zone in effect is the settings door's `localization.timezone`, and the help
 //    says so instead of claiming date boundaries are computed in this column.
@@ -22,6 +24,12 @@ describe('sys_organization: the name and timezone fields say which value is whic
   it("the organization's name points at Branding for the product name, a different setting", () => {
     expect(field('name').readonly).toBe(true);
     expect(field('name').description).toMatch(/different setting, set in Settings → Branding/);
+  });
+
+  it('the name names the door that changes it, the action labelled Rename Organization', () => {
+    expect(field('name').description).toMatch(/Change it with Rename Organization/);
+    const rename = (SysOrganization.actions ?? []).find((a) => a.name === 'rename_organization');
+    expect(rename?.label).toBe('Rename Organization');
   });
 
   it("the timezone says it changes no date calculation and that Localization's Default timezone wins", () => {

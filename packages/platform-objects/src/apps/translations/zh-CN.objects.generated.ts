@@ -528,7 +528,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       name: {
         label: "名称",
-        help: "组织自身的名称。控制台显示的产品名称是另一项设置，在 设置 → 品牌 中设置。"
+        help: "组织自身的名称。可在此记录顶部用“重命名组织”修改。控制台显示的产品名称是另一项设置，在 设置 → 品牌 中设置。"
       },
       slug: {
         label: "标识符",
