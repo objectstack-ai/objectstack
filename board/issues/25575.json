@@ -13,7 +13,7 @@
   "labels": [
     "area:access",
     "bug",
-    "domain:server",
+    "domain:spec",
     "pm:queue",
     "priority:p2",
     "security"
@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T01:28:01Z",
-  "updated_at": "2026-10-24T01:28:01Z",
+  "updated_at": "2026-10-24T10:03:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25575",
   "body": "Ruled: 6377890121 · batch #9 item 1 (#25496, 6377842908) · letter A · 2026-10-24T00:43:45Z (keep Modify All semantics; REFUSE `modifyAllRecords: true` + `allowDelete: false` at publish time; \"edit all, delete none\" is expressed by RLS / sharing rules)\n\n## Need\n\nAn app needs a role that can **edit records it does not own, but not delete them**. Today the only metadata that lets a non-owner edit on a `public_read` object is `modifyAllRecords: true`, and that bit also grants delete, even when the same entry says `allowDelete: false`.\n\nConcrete case (hotsrm, objectstack-ai/hotsrm#14): `srm_material` is a read-only copy of ERP material master data, imported by an admin (so the admin owns every row). Buyers must maintain one field (`category`) on every row, with all other fields read-only via FLS, and must not create or delete materials.\n\n```ts\n// buyer permission set, object public_read\nsrm_material: { allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false,\n                viewAllRecords: true, modifyAllRecords: true },\n```\n\nObserved on 18.0.0 (in-process `@objectstack/verify` stack): the buyer's update of `category` succeeds, and **a delete by the same buyer also succeeds**. Without `modifyAllRecords` the update is refused by row-level security (\"not permitted to update this 'srm_material' record\").\n\nIn `plugin-security`, `MODIFY_ALL_WRITE_KEYS` contains both `allowEdit` and `allowDelete`, so `modifyAllRecords` widens both. That matches Salesforce \"Modify All\", but it leaves no declarative way to express \"edit all, delete none\".\n\n## Workaround in use\n\nWe set the object's OWD to `public_read_write`, so `allowEdit` + FLS decide the edit and `allowDelete: false` still blocks delete. This widens the sharing model of the whole object, so every future permission set that grants `allowEdit` on it gets org-wide edit, which is not what the design wants (`public_read`).\n\n## Possible shapes (any one would do)\n\n1. ~~When an entry sets `modifyAllRecords: true` **and** `allowDelete: false` explicitly, honour `allowDelete: false` (bypass ownership for edit only).~~ (not chosen — changes the security semantics; ruling 6377890121)\n2. ~~A separate bit, e.g. `editAllRecords` (ownership bypass for update only), alongside `viewAllRecords` / `modifyAllRecords`.~~ (not chosen; ruling 6377890121)\n3. A sharing rule grant of edit access to a position without granting delete, if that is already intended to work, documented as the way to do this.\n\nAt minimum, a lint warning when an entry combines `modifyAllRecords: true` with `allowDelete: false`, since the `false` is silently ignored. (Ruled A goes further than a warning: the combination is **refused** at publish time.)\n\n---\n\nRe-filed as `objectstack-fleet[bot]` from #25470, same body and labels. #25470 was written off the fleet relay, under the maintainer's personal account, by a project-thread session through GitHub MCP; pm-dispatch allows content writes only through the relay. #25470's thread (triage, ruling, comments) stays there for reference; this card replaces it in the queue.\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"

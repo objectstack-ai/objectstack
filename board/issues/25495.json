@@ -2,8 +2,8 @@
   "number": 25495,
   "kind": "issue",
   "title": "localization: a new organization gets its default currency from its creator's language or region (zh-CN → CNY), written as a visible Setup → Localization value; with nothing to derive from, it stays unset (maintainer ruling 乙, 2026-10-23)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:i18n",
     "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T15:52:49Z",
-  "updated_at": "2026-10-23T15:52:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T13:05:23Z",
+  "closed_at": "2026-10-24T11:42:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25495",
   "body": "## 维护者速读\n\n- **事由：** 环境的默认货币（Setup → 本地化 → 财务 → 默认货币，`localization.currency`）在新环境里是空的。所以「动态」模式的货币字段，也就是默认模式，只显示数字，不带币种。\n- **裁定：** 维护者 2026-10-23 在分诊会话里选了乙：新环境创建时，按创建者的语言或地区预填默认货币，并把这个值写进设置，看得见也能改。实现放在 objectstack：「#8345：环境的默认币种，应该在objectstack 仓库吧」「同意乙」。\n- **完成标准：** 中文创建者新建的组织，默认货币是 CNY，金额显示带 ¥；推不出地区时保持空，和现在一样。\n\n**Filing gate ③ a task the maintainer set** (the ruling above, given in the triage seat's chat). Filed and graded by the triage seat (`session_01AavokzJ5DndAwitDXvKy4U`). ⛔ Not a claim. Under the human-ruling floor this is a \"new-tenant default\", and that is why it went to the maintainer. It is ruled.\n\n**Reader (who acts):** the `domain:server` seat, in one PR.\n\n## Today (objectstack `origin/main`)\n\n- `packages/services/service-settings/src/manifests/localization.manifest.ts`: the `currency` key has **no platform default**, and that is deliberate. Its comment says the old hard `'USD'` default \"surfaced an unwanted \"$\"/\"US$\" on every code-less amount\". The key is tenant-scoped (`scope: 'tenant'`).\n- **Readers that already honour it:**\n  - the field `currencyMode: 'dynamic'` (the default) shows amounts in it (`packages/spec/src/data/field.zod.ts`, `currencyMode`);\n  - objectui's `CurrencyField`, the grid and the components read it through `useLocalization()`;\n  - the server puts it on every `ExecutionContext` (`packages/core/src/security/resolve-authz-context.ts`).\n- **The precedent to copy:** `packages/plugins/plugin-auth/src/auth-plugin.ts` (~:2560–2620) already gives the dev seed's workspace this host's **time zone**, and only when the stored value's `source` is still `'default'`. `onOrganizationCreated` / `afterCreateOrganization` in `packages/plugins/plugin-auth/src/auth-manager.ts` (~:715, ~:3612) is the creation seam.\n\n## Ask\n\n1. **When an organization is created**, if `localization.currency` has no stored value, write one derived from the **creator's language or region** as the server knows it. That is the creating user's stored locale, if any, else the creating request's `Accept-Language`. The dev reads which of the two the seam can see, and says so.\n2. **The mapping:** the region's ISO 4217 currency (CN → CNY, JP → JPY, GB → GBP, the euro area → EUR, US → USD, and so on). A bare language is read through its usual region (zh → CNY, ja → JPY). Use a standard table, not a hand list; the dev picks the source and names it.\n3. **Nothing to derive from ⇒ write nothing.** Never fall back to the manifest's `default_country: 'US'` or `locale: 'en-US'` defaults. Those are platform defaults, not the creator's choice, and using them would bring back the \"$\" on every amount.\n4. **Never overwrite** a value an administrator has set. The write is a normal settings write, so Setup → Localization shows it and can change it.\n5. **The dev seed** follows the same rule from the host's locale, beside the existing time-zone seeding.\n\n## Not in scope\n\n- No new spec key and no change to `currencyMode`. `Metadata-protocol: none`.\n- No multi-currency or conversion work: #8345 stays on hold (「多币种暂时不是重点」).\n- **cloud:** the dev measures whether a cloud environment's first organization is created through this seam. If it is, cloud needs nothing. If cloud creates it another way, the dev names the path in the report, and triage files the cloud card.\n\n## Done when\n\n- A test: an organization created by a zh-CN creator stores `localization.currency = 'CNY'`. One created with no derivable region stores nothing. An administrator-set value is not touched.\n- A console check on a fresh local stack: a dynamic-mode currency amount shows `¥`, and the value appears in Setup → Localization.\n- The `currency` key's manifest comment says where a new organization's value comes from.\n\n**Size:** S.\n\n## Dedupe\n\nThe open objectstack-ai/objectstack issues matched on `default currency`, `localization.currency` and `tenant currency`: only #8345 (multi-currency, on hold, a different ask). **New.**\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

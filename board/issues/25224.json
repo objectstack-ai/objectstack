@@ -2,8 +2,8 @@
   "number": 25224,
   "kind": "issue",
   "title": "[maintainer] refactor(plugin-auth): split `src/auth-manager.ts` (10,338 lines, +1,867 in 30 days) along its `AuthManager` seams, one move-only slice per PR",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:devpath",
     "domain:services",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T13:21:54Z",
-  "updated_at": "2026-10-24T03:51:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T12:00:48Z",
+  "closed_at": "2026-10-24T12:00:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 53,
+  "comments": 58,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25224",
   "body": "Filing gate **③**: a task the maintainer dispatched, quoted verbatim below. Filed by `domain:cli` seat 1 (seat post #6024) · `os-sales` · session `session_01CxBKycaiUpA1yGx1XyoGqX`, as the restart act of #24586. ⛔ Not a claim.\n\n**The maintainer's words, verbatim** (#24586, recorded in `6270097840`): 「24586 同意A，是否建议这波分拆等 v18 发布之后再处理。」 The restart condition (npm `@objectstack/spec` `latest` ≥ 18.0.0) was read true by triage in `6291735609`. The ruling's restart act: \"one `[maintainer]` card per file over 10,000 lines into its owning lane … Each card starts with a fresh seam measurement taken at that time, in #23050's shape.\" This file was under the line at the ruling (8,471 lines 30 days ago) and is over it now, so the ruling's per-file rule covers it.\n\n**Reader who acts:** the `domain:services` seat (`packages/plugins/plugin-auth` is that lane's), one dispatch per slice.\n\n## Measured (on `origin/main` `123ff6f4e`, 2026-10-22)\n\nHistory note: this clone's history starts 2026-09-17, so \"total\" commit counts are lower bounds; the 7- and 30-day windows are complete, and `git blame --since=2026-09-22` agrees with a diff against the last pre-window commit `fa2980341` to within 7 lines.\n\n- **Size and churn:** 10,338 lines (8,471 thirty days ago: +1,867, +22.0%). 24 commits in 7 days, 47 in 30 days. `git blame --since=2026-09-22` attributes 2,277 lines (22.0%) to the last 30 days.\n- **Structure:** a 1,583-line module preamble (`AuthManagerOptions` alone is 470 lines), then one `AuthManager` class (8,755 lines, 181 members). Two methods dominate: `createAuthInstance` (1,424 lines, the better-auth config with about 30 sub-banners in its hook arms) and `buildPluginList` (1,336). The largest sections:\n\n| section | lines | lines from the last 30 days |\n|---|---:|---:|\n| module preamble | 1,583 | 341 |\n| plugin assembly (`resolvePasswordHasher`, `addOptionalPlugin`, `buildJwtPlugin`, `buildPluginList`) | 1,551 | 241 |\n| `createAuthInstance` | 1,423 | 324 |\n| request routing, base paths, subject erasure, SCIM, MCP URLs, `getPublicConfig`, SSO | 1,376 | 168 |\n| membership, audience admission, self-registration grants, bootstrap staging | 1,206 | **416** |\n| password policy, lockout, auth gates, session controls | 1,155 | 330 |\n| email/SMS delivery + locale | 560 | 58 |\n| actor + organization guards | 553 | 191 |\n\n- **Shared state a split must pass:** `config` (171 refs), `getDataEngine` (22), `logDurabilityDegradation` (12), `auth`, `resolveActor`, the request-scoped staging maps (`pendingSelfRegistrationGrants`, `pendingOwnerVerifiedStamps`, `pendingOperatorProvisioning`). `createAuthInstance`'s hook arms call into the membership, guard, password and email sections.\n- **What reads it by path:** 12 `scripts/` files, including the ADR anchor `scripts/adr-anchors/packages__plugins__plugin-auth__src__auth-manager.ts.json` (ADR-0093, ADR-0108), `check-auth-mount-ledger.mjs`, `check-dispatcher-error-vocabulary.mjs`, `tenant-audit-census.mjs`, `publish-smoke.sh` and four baselines; 19 files under `content/` and `docs/`; 119 test files.\n- **In flight:** none of the 10 open PRs touch the file.\n- ⚠️ This is an authentication boundary. Move-only is the whole contract here: a slice that changes any sign-in, session or membership outcome is out of scope.\n\n## The ask (from #24586's ruling and #23050's shape)\n\n1. **Split along the existing seams,** one area per PR. Each slice is **move-only**: no logic changes.\n2. **Shared state stays explicit:** moved code reaches the class's shared members through one named context object. ⛔ Not a second copy of a helper, ⛔ not a re-derivation.\n3. **Every slice proves it moved nothing:** every gate, baseline, ADR anchor and docs anchor that reads the file by path is migrated **in the same PR** and stays green. ⛔ A gate whose target moved must not go silently empty.\n4. **Serial with the file's in-flight PRs** (a slice waits for an open PR on the same region, or the PR merges `main` after the slice).\n5. ⛔ No new gate.\n\n## Not in this card\n\nAny behaviour change. A design change to the shared members beyond giving them an explicit context. Splitting files in other lanes (#24586 hands those to their own seats).\n\n## Dedupe\n\nMCP `search_issues` on this repository, closed included: \"split large file move-only service-automation engine.ts security-plugin.ts auth-manager.ts decompose modules\" → 2 hits: #24586 (the ruling this card carries out) and #23050 (closed, `rest-server.ts`). **New.**\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

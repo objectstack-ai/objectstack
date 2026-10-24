@@ -1,0 +1,36 @@
+{
+  "number": 25658,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): seat liveness, release and the main-repo release board name the director seat, and lane findings take triage's first touch",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T13:39:24Z",
+  "updated_at": "2026-10-24T14:00:44Z",
+  "closed_at": "2026-10-24T14:00:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T14:00:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25658",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DMMchS2pMx7VafJmdzGaxFv)_\n\nFixes #25490\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读(草稿)\n\n- **改了什么**:分诊瘦身(#25422)和「所有卡都分诊」(#25552)之后,有五行规则文字还把已经移走的职责写在分诊席名下:座位贴活性巡查、在飞卡敲门与释放、主仓发版板,这三样现归总监席摘要;skills 车道的 finding 也不再由本车道自分诊。五行就地改正,另把 `check-half-states.mjs` 提示语里引的「四仓全量对账」改成 runbook 现在的「两仓全量对账」。\n- **为什么改**:文字和现行规则不一致,读到旧行的席位会去做不属于自己的事。\n- **风险与代价(含回滚)**:纯文字,行数不变,无上限变动;一次 revert 可回。\n- **你要做的(一个动作)**:无。按您 14:14Z 的长期授权,复核通过、CI 全绿由席位落地。\n\n## What changed\n\n| File | Before | After |\n|:--|:--|:--|\n| `references/seat-post-protocol.md` L28 | 「常设半边是分诊轮的座位贴活性巡查」 | 「常设半边是总监席摘要的座位贴活性巡查」 (`dispatch-runbook.md` L41, `lanes/director.md` L74) |\n| `references/seat-post-protocol.md` L80 | 「生产者:主仓归分诊座位」 | 「生产者:主仓归总监席」 (`lanes/director.md` 职责四 「发版板 `target:<major>` 主仓归本席」) |\n| `references/seat-lifecycle.md` L38 | 「活性由分诊轮判定」 | 「活性归总监席摘要」 (`triage-duties.md` L5 「活性复查同归」) |\n| `references/seat-lifecycle.md` L39 | 「由分诊一笔中继释放」 | 「由总监席一笔中继释放」 |\n| `references/seat-lifecycle.md` L47 | 「三类以 `finding` 入 skills 车道由该席分诊」 | 「三类以 `finding` 入 skills 车道,首触归分诊席」 (#25552: 每张卡欠一次分诊首触,车道 ⛔ 不自分诊) |\n| `scripts/pm/check-half-states.mjs` (3 spots) | 「每日层(当日首 fire)= 四仓全量对账 …」 | 「… 两仓全量对账 …」, the runbook's current text (`dispatch-runbook.md` L69) |\n\n## Gates\n\nOn this head: `pnpm check:pm-skill-ratchet` ✓, `pnpm check:pm-skill-id-lint` ✓, `pnpm check:skill-frame-sync` ✓, `pnpm check:skill-frame-freshness` ✓, `pnpm check:pm-governed-prose` ✓, `node scripts/pm/check-half-states.mjs --self-test` ✓ (4941 cases), `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD` ✓. Widest edited line 118 bytes. No package moves: `skip-changeset`.\n\n## Acceptance notes\n\n- Scope as re-read in comment 6377494099: `seat-lifecycle.md` L76 and `cross-repo-coordination.md` L7 are moot after #25552 and are untouched.\n- **Not done here:** the `Premise:` line in the `SKILL.md` claim template. `SKILL.md` is at its 318-line ceiling and no adjacent pair merges under 120 bytes, so the line needs a ruled raise or a payable line; the format is named at `dispatch-runbook.md` L154 meanwhile.\n- **Not done here:** the same prescription in `check-half-states.mjs` also quotes 「选层按 fire 时刻,⛔ 不用计数器;简报写明本轮跑的层」 under a 〈分诊座位职责〉 heading; `triage-duties.md` L10 now words it 「选层按 fire 时刻 ⛔ 不用计数器,简报写明层」 and has no such heading. Outside the card's quoted surface; left for the next edit of that prescription.\n- Governed surface `.claude/**` (Tier S); `scripts/pm/check-half-states.mjs` is off the register.\n- Opened through the fleet-write relay `pr_create`; every later write goes through the relay too.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01REMuzhz6MWRjg8uohedMnM\n"
+}

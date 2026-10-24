@@ -1,0 +1,37 @@
+{
+  "number": 25627,
+  "kind": "pull_request",
+  "title": "fix(plugin-approvals): store the admin_rescue timeline note as a code and render it in the reader's language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T11:01:42Z",
+  "updated_at": "2026-10-24T12:11:05Z",
+  "closed_at": "2026-10-24T12:11:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T12:11:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25627",
+  "body": "Fixes #25576\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nThe system note an `admin_rescue` request writes on its own timeline (\"Routed to this organization's administrators because the approver slate named no one: position 'X' has no holder.\") was composed server-side as one English sentence and stored as the `comment` of a `sys_approval_action` row, and `listActions` served it as stored, so a zh-CN reader read English.\n\nNow the note is stored as a code plus its parameters, and the approvals door renders it in the reader's language:\n\n- **Stored shape.** `openNodeRequest` records the note on the request's node-config snapshot as `__adminRescueNote: { action_id, abandoned, fallback? }`: the id of the timeline row it explains, the abandoned approver slots (`type:value`), and, when a declared `onEmptyApprovers: 'fallback'` did not help, why (`not_declared` / `resolved_to_no_one`). The snapshot is where a request already keeps what it resolved at open time (`__flowLabel`, `__round`, `__resolvedFrom`; the open path's own comment: \"Stamped on the snapshot (precedent: __flowLabel), so no schema migration\"), so no column, object schema or spec contract moves. The row's `comment` is still the English sentence, byte-identical to what it stored before.\n- **Catalog.** The sentence and its clauses are new entries in the plugin's existing `messages` face (`translations/messages.ts`, `approvalAdminRescue*`), in `en`, `zh-CN`, `ja-JP` and `es-ES`. The stored English is those `en` entries interpolated, never a second spelling (`admin-rescue-note.ts`). The `admin_rescue:reason` audit string and the log lines are built from the same clauses (the module-private `emptySlateReason` is replaced by `adminRescueReason`).\n- **Read path.** `listActions` (`GET /api/v1/approvals/requests/:id/actions`) finds the row the snapshot names and overlays its `comment`, in place, with the note rendered at the caller's `ExecutionContext.locale`. A read, never a write. The served `ApprovalActionRow` shape is unchanged.\n\n## Precedent reused (no second mechanism)\n\n- **Reader-language render:** `reader-locale-labels.ts` (#24863) is how the approvals door already serves a request's flow, step and object labels in the reader's language: `ExecutionContext.locale`, negotiated by `resolveBundleLocale`, rendered by `II18nService.t()`, with a miss leaving the stored text standing. This PR adds one member, `ReaderLabels.sentence(key, params)`, on the same `t()` and the same negotiated locale.\n- **Catalog of keyed sentences with the English literal beside the keys:** `approval-notification-text.ts` + `translations/messages.ts` (#24978). Its `{{hole}}` interpolation is now exported and used for the stored English.\n\n## Who renders it, and the objectui half\n\nThe server half is complete on the approvals door: any reader of `GET …/approvals/requests/:id/actions` with a locale gets the localized note. Not verified from this session: which door the console's record Approvals tab reads its timeline through (objectui is not attached here). If `RecordApprovalsPanel` reads `sys_approval_action` through the generic data door rather than the approvals actions route, it is served the stored English, and the objectui half is to read the timeline through the approvals door.\n\n## Rows already stored\n\nA request opened before this change has no `__adminRescueNote` on its snapshot, so its note is served as stored, in English. No migration: the stored text stays correct English, it is display-only audit text, and its clauses survive only inside that prose. Parsing prose back into a code is the defect this replaces, so no backfill reconstructs them. Pinned by the `CONTROL` case below.\n\n## Serial constraint\n\nPR #25600 (SLA reassign) landed on `main` while this was in flight, so this branch merged `origin/main` (`b9c264fd8`, clean, no conflict). The diff stays out of the SLA-reassign bodies.\n\n## Verification (head `b9c264fd8`)\n\n- `pnpm --filter @objectstack/plugin-approvals typecheck`: exit 0. `pnpm --filter @objectstack/plugin-approvals test`: Test Files 96 passed (96), Tests 1259 passed (1259).\n- New pins: `admin-rescue-note.test.ts` (the English is the sentence the row always stored; zh-CN / ja-JP render every clause and the separator; a clause the pack lacks falls back to English; a missing note sentence renders nothing; the snapshot reader accepts only the shape it writes). `admin-rescue-named-slate.integration.test.ts` adds five cases on a real `ObjectQL` + `SqlDriver` with a real in-memory `i18n` service loaded with the plugin's own `ApprovalsTranslations`. They pin: the snapshot stores the code and names the row; a zh-CN reader of `listActions` reads `审批人名单未指向任何人，因此已转交本组织管理员处理：岗位「sales_manager」无人任职。`; the fallback case renders both clauses joined the zh way; en and no-locale readers get the stored English; and a CONTROL where a pre-change request and a neighbouring system comment stay as stored.\n- Ablation (deleting the `localizeAdminRescueNote` call in `listActions`, through `scripts/ablation-replace.mjs`): 3 failed / 13 passed in the integration file, with the zh-CN, fallback and CONTROL cases red. Restore verified byte-identical: blob after restore `3527886551f8` = HEAD, `git diff HEAD` empty.\n- `approver-address-readers.test.ts`: the new `actor_id` presence read is classified in `PERSON_SITES` (role `display`, count 2), as that pin requires of every read of the column.\n- Derived gates (`node scripts/pm/dispatch-gates.mjs --commands`): all 72 run on `b9c264fd8`, every one exit 0. `--ran` reconciliation: \"72 derived, 72 run, 0 NOT-MEASURED, 0 UNRUN\". `check:i18n`: \"all bundles in sync, no undeclared authoring keys\". eslint `--no-inline-config` on the 8 touched `.ts` files: exit 0.\n\n## Acceptance notes\n\n- The `step_name` / `step_label` half of the original card is not in this PR: triage dropped it as objectui#13248 (closed as completed).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QeMwrPsf2zjo2pQLBzdWFV)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QeMwrPsf2zjo2pQLBzdWFV\n"
+}

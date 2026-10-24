@@ -1,0 +1,32 @@
+{
+  "number": 25659,
+  "kind": "pull_request",
+  "title": "docs: scaffold examples pin exact; verify README names the scheduled-work switch",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T13:40:46Z",
+  "updated_at": "2026-10-24T14:06:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25659",
+  "body": "Part of #25510\n\nClause-②: no\nMetadata-protocol: none\n\nThese are two docs fixes the devx lane owed, with no code change.\n\n## What changed\n\n- **`content/docs/protocol/kernel/plugin-spec.mdx`**\n  - The plugin `package.json` example now pins `@objectstack/core` and `@objectstack/cli` to exact `18.0.0`. Before, it showed `^17.0.0`.\n  - The paragraph under it now says the scaffolders pin each `@objectstack/*` dependency exactly to the generating CLI's version (`getCliVersion()`), never as a caret range. That is what PR #25539 made them write.\n- **`content/docs/upgrading.mdx`, step 2:** a project scaffolded since 18.1.0 is exact-pinned. A project on a caret range (`^18.0.0`, what older scaffolds wrote) still moves at the lockfile step.\n- **`packages/verify/README.md`:** after the `flows.run(…, { system: true })` passage, the README now says three things:\n  - that call works with scheduled work off;\n  - a local stack arms time-triggered flows on their own cadence only with `OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true`;\n  - package-authored scheduled work is off by default in every posture.\n  The #25442 evaluation read \"disabled by deployment policy\" on a local verify stack with the variable unset. Ruling D on that card asked for this sentence to ride the next docs PR.\n- **`.changeset/25442-verify-readme-scheduled-work.md`:** a patch for `@objectstack/verify`, because `README.md` ships in its tarball (`files`).\n\nSources were read on `main` at the time of writing:\n- `packages/cli/src/commands/init.ts:37` (`getCliVersion`) and `:57` (`pkgVersion`);\n- `packages/cli/src/commands/create.ts:166` (`objectstackDependencySpec`);\n- `content/docs/deployment/environment-variables.mdx:103`.\n\n## Out of scope\n\nThe rest of #25510 is the template baseline and `scripts/sync-template-versions.mjs`. That work is in its own card thread, whose PR carries `Fixes #25510`. This PR only says `Part of`, so the Duplicate Fix Guard is not engaged.\n\n## Local verification\n\nRun on `origin/main` `baae6ed14e` plus this commit:\n- `node scripts/pm/dispatch-gates.mjs --ran`: 88 derived families accounted for, 79 run (all exit 0), 9 NOT MEASURED.\n- The 9 NOT MEASURED families need build artifacts this worktree does not have (`json-schema`, `dist`):\n  - `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`, `check:docs-transcript-drift`;\n  - the spec `check:docs` and `check:skill-examples`;\n  - the lint `check:doc-formula-expressions` and `check:doc-security-posture`.\n  None of them reads the three edited files. CI runs them.\n- The docs families ran and passed: `check:doc-authoring`, `check:doc-anchors`, `check:docs-single-h1`, `check:published-readme-links`, `check:docs-redirects`, `check-doc-frontmatter` and `check-issue-citations`.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01LKHDniRQSWjRJyDtacwpEd"
+}

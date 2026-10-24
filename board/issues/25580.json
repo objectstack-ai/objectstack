@@ -14,19 +14,21 @@
     "area:access",
     "domain:spec",
     "enhancement",
-    "pm:queue",
-    "priority:p2",
+    "pm:dispatched",
+    "priority:p1",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T01:30:44Z",
-  "updated_at": "2026-10-24T01:30:44Z",
+  "updated_at": "2026-10-24T13:57:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25580",
   "body": "Ruled: 6377848497 · batch #9 item 5 · letter A · 2026-10-24T00:43:45Z (flow-level `requiredPermissions` checked on every start door; action door inherits it; triage asked to consider p1)\n\n## What the app needs\n\nhotsrm (an SRM app on 18.0.0) has a \"verify bank account\" screen flow, `srm_bank_verify`. Only AP accountants may run it, and the person who created the account may not verify it (four-eyes). The flow writes `status` and `verified_by`, which are `readonly` for everyone, so it is `runAs: 'system'`.\n\n## What the platform offers today\n\n- The action that launches it can carry `requiredPermissions` (ADR-0066 D4), but that gate applies only at the action door (`POST /actions/:object/:action`).\n- After #22310, the trigger door (`POST /automation/:name/trigger`) refuses elevated **self-triggered** flows, but by design still admits every signed-in member to an elevated `screen` flow (\"an author who wants members to start elevated logic declares the target `screen` or `api`\", `action-execution.ts`).\n- `FlowSchema` has no key that says which capability, permission set or position may start the flow.\n\nSo any member can start `srm_bank_verify` through the trigger door with a `recordId`. The only defence the app can write is a `decision` node at the top of the flow: `'srm_ap_accountant' in current_user.positions`. The platform's own guidance says the positions array \"is not an authorization input\", so the app is relying on something the platform tells it not to rely on.\n\n## Wanted\n\n- A flow-level declaration of who may start it, for example `requiredPermissions: ['srm_verify_bank_account']` on the flow, checked on **every** start door (action door, trigger door, MCP `run_action`), with the ADR-0112 refusal envelope.\n- A `subflow` call from a parent run keeps working.\n- Optional: the action door could inherit the flow's declaration so an app does not state it twice.\n\n## Acceptance\n\nA screen flow declared `runAs: 'system'` with `requiredPermissions: [X]`: a member without X is refused `403` at the trigger door and the action door; a member with X starts it; `os validate` documents the key.\n\n## Duplicate check\n\nSearched issues for \"flow requiredPermissions\", \"screen flow runAs system who can start\". Closest: #22310 (closed; covered self-triggered flows, left screen flows open on purpose) and #25446 (no-self-approval switch on approvals; related to the four-eyes half, not to who may start).\n\nhotsrm workaround, documented as temporary: `src/core/flows/bank-account/bank-verify.flow.ts` gates on `current_user.positions` inside the flow.\n\n---\n\nRe-filed as `objectstack-fleet[bot]` from #25481, same body and labels. #25481 was written off the fleet relay, under the maintainer's personal account, by a project-thread session through GitHub MCP; pm-dispatch allows content writes only through the relay. #25481's thread (triage, ruling, comments) stays there for reference; this card replaces it in the queue.\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"

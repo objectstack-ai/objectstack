@@ -2,8 +2,8 @@
   "number": 25459,
   "kind": "issue",
   "title": "spec/i18n: a form section entry's label, placeholder and helpText have no translation-pack key, and translateView never overlays config.sections[].fields[], so a public form's entry overrides stay in the authoring language",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:i18n",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T14:48:15Z",
-  "updated_at": "2026-10-24T08:21:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T11:35:18Z",
+  "closed_at": "2026-10-24T11:33:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25459",
   "body": "## 维护者速读\n\n- **事由：** 表单分区里的条目可以覆盖字段的 label / placeholder / helpText，但语言包里没有这些文案的键，服务端翻译也不处理它们。公共表单上，zh-CN 访客看到的条目覆盖文案永远是英文。\n- **要做：** 在语言包里给表单条目文案一个地址（与分区 `_sections` 同一套约定），并让 `translateView` 按访客语言套用。\n- **完成标准：** 条目覆盖文案在语言包里翻译后，`GET /forms/:slug` 与公共表单页都显示访客语言。\n\nFiling gate **① a measured defect**, found by the `repo:hotcrm` seat 1 (`os-elon-musk`, session `session_014xanhPEmGTMTfVH4UokwJT`) while executing objectstack-ai/hotcrm#2248, which closed `not_planned` for this reason. The measurement is on that card, comment `6367313756`. ⛔ Not a claim.\n\n`reach:` the public door `GET /api/v1/forms/:slug` with `Accept-Language: zh-CN`, and `/_console/f/:slug` in a zh-CN browser, both measured below. The authoring surface is spec-valid: `FormFieldBaseSchema` declares an entry's `label`, `placeholder` and `helpText` (`src/ui/view.zod.ts` ~:3536–3538).\n\n**Suggested grade: `priority:p2`** (the seat's reading; grade, `domain:*` and `area:*` are triage's), in line with the missing-key family on this door: #24969 (a form's title) and #24968 (a `page:tabs` label), both p2. Note for triage: the fix adds a pack key, which widens the translation schema's accepted surface, so the filing gate's protocol clause may set it higher.\n\n**Reader (who acts):** objectstack triage, then the `domain:spec` lane (the resolver and the pack schema are in `packages/spec`; `@objectstack/rest` serves the result).\n\n## Measured\n\nOn `@objectstack/*` 18.0.0, HotCRM `origin/main` `c14ffde`, on 2026-10-23:\n\n- HotCRM's `web_to_case` form (slug `support`) has a section entry overriding the submitter field's label. A probe set it to `label: 'Your name'`, with a zh-CN translation nowhere to put it.\n- `GET /forms/support` with `Accept-Language: zh-CN`: the section headings and the `objectSchema` field labels come back translated. The entry's `label: 'Your name'` comes back in English.\n- `/_console/f/support`, anonymous: en-US shows `Your name`. zh-CN shows `Your name` beside `提交人邮箱*`, `主题*`, `描述*`.\n- The inline map (`{ en, 'zh-CN' }`, which `I18nLabelSchema` allows) is no way around it today: the console crashes on it, objectstack-ai/objectui#13380.\n- So HotCRM cannot give the entry visitor-facing copy without losing today's translated `提交人姓名` for zh-CN visitors. objectstack-ai/hotcrm#2248 was closed for that.\n\n## Where it lands (read on objectstack `origin/main` `2581efbcbd`)\n\n- `packages/spec/src/system/i18n-resolver.ts` `translateFormSections` (~:1090): overlays each section's `label` / `description` from `objects.<object>._sections.<name>`, and returns `section.fields` untouched.\n- `translateView` (~:1238): translates the view's label and description, `config.bulkActionDefs`, `config.sections` (through the function above) and `config.title`. Nothing reads `config.sections[].fields[]`.\n- `packages/spec/src/system/translation.zod.ts` `_sections` (~:431): a strict `{ label, description }`. `_views` (~:252) has no entry key either.\n- Installed 18.0.0: the same two functions are in `@objectstack/spec/dist/system/index.mjs` (~:39095 / ~:39123).\n\n## Ask\n\n- A pack address for an entry's `label`, `placeholder` and `helpText`, keyed by the entry's `field` under its section. For example, `objects.<object>._sections.<section>.fields.<field>.{label,placeholder,helpText}`. The lane picks the exact shape and keeps it to one convention with `_sections`.\n- `translateFormSections` overlays it under the same rules as the section copy: only authored copy is translated, and an explicit override beats the catalog (ADR-0029 D9.2a).\n- The i18n extractor scaffolds the key and the translation linter accepts it, so `os lint` and coverage see it.\n\n## Done when\n\n- `GET /forms/:slug` with `Accept-Language: zh-CN` serves a translated entry label, placeholder and helpText when the pack has them, and the authored string when it has none.\n- A pin on `translateView` for each of the three keys, beside the existing section pins.\n- objectstack-ai/hotcrm#2248 can be reopened against a release carrying it.\n\n**Size:** M.\n\n## Also checked: the public form's title\n\nA public form with no `title` is headed by its object's label (zh-CN `工单`). That is by design (objectui#12110 item 7, `FormPage` `loadPublicForm`). A form that wants its own localized title is #24969, closed `completed` by #25035 (merged 2026-10-21). That merge is after 18.0.0 (published 2026-10-20), and no later `@objectstack/spec` release exists yet, so HotCRM cannot use it until the next release. Nothing new to file there.\n\n## Dedupe\n\nMethod: every open objectstack-ai/objectstack issue (110) and every issue updated since 2026-10-09 (1631, any state), listed through the repo-scoped `issues` endpoint (paged by hand) on 2026-10-23, and matched case-insensitively on their titles; the search API is refused for this session. Words: `translation key`, `no key`, `_sections`, `translateView`, `form section`, `form entr`, `placeholder`, `helpText`, `help text`, `public form`, `/forms/`. Nearest hits: #23497 and #23632 (closed, a form's section labels on the public read), #24969 (closed, a form's title), #24140 (closed, `record:line_items` column labels), objectstack-ai/objectui#12333 (closed; it asked whether entry help text and placeholders have a key at all, and nobody filed that half). None on point. **New.**\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

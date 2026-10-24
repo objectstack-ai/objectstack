@@ -2,8 +2,8 @@
   "number": 25561,
   "kind": "issue",
   "title": "service-analytics: three fail-closed resolver faults answer 403 PERMISSION_DENIED, the same body as a real denial, where the platform answers a permission-store outage 503 SERVICE_UNAVAILABLE",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-24T00:34:09Z",
-  "updated_at": "2026-10-24T03:22:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T13:43:36Z",
+  "closed_at": "2026-10-24T10:14:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25561",
   "body": "Filing gate: ① a product defect with named locations (finding class (a): one closing card for the family; per-site rows below). Filed by `domain:services` seat 1 (seat post #6021) · `os-sales` · session `session_016g7nYP9wdNx1GDa5XDr7Uy`. ⛔ Not a claim.\nReader: the `domain:server` lane, `packages/services/service-analytics`, on the next PR that touches analytics admission refusals.\nDedupe (open AND closed): \"analytics fail-closed resolver fault 403 PERMISSION_DENIED 503 SERVICE_UNAVAILABLE read admission field-level exposure unresolved\". No hit (nearest: #25544 / PR #25560, where the consumer side of this was met).\nreach: `POST /api/v1/analytics/dataset/query` and the cube query door. Measured by reading `main` `b531016f6d`; no live fault injected.\nSource: the `domain:server` cli seat, while working #25544 (PR #25560).\ntype: Bug\n\n## What is wrong\n\nThree of the analytics door's refusals are **operator-side faults**: a resolver threw, or could not answer. All three answer with the same wire body as a **real** denial: `{ code: 'PERMISSION_DENIED', status: 403, object }`. A caller cannot tell \"you may not read this\" from \"the server could not decide\". A consumer that needs to tell them apart has to parse the English message.\n\n| site (`main` `b531016f6d`) | what happened | answer today |\n|---|---|---|\n| `read-admission.ts` `assertObjectsReadable`, catch branch (`throw readAdmissionDeniedError(objectName)` after \"read-admission resolution failed … (fail-closed)\") | the object-level admission **provider threw** | 403 `PERMISSION_DENIED` \"reading X is not permitted for this user\", byte-identical to the genuine denial two lines below |\n| `field-read-admission.ts` `fieldReadUnresolvedError` | the field-level read permissions **could not be resolved** | 403 `PERMISSION_DENIED` |\n| `api-exposure-door.ts` `exposureUnresolvedError` | the API exposure declaration **could not be read** | 403 `PERMISSION_DENIED` |\n\nFail-closed is right: none of these may admit. The defect is only in **what the refusal claims**. Each one asserts a denial the server never reached.\n\n## The platform already ruled this class\n\n`packages/core/src/security/authz-store-unavailable.ts` ends the same defect on the authz context. Its maintainer ruling of 2026-08-30 is quoted there verbatim: 「读失败 fail-loud —— 权限库不可达时不再解析为「已认证零能力」,而是响亮拒绝(与真实能力拒绝的 403 可区分),让宕机不再伪装成一次逐字节相同的能力否决。」\n\nThe spelling it chose is `SERVICE_UNAVAILABLE` / 503. That is an existing member of the closed ADR-0112 vocabulary (`StandardErrorCode`), mapped to 503 by `HttpStatusErrorCodeMap`. So the fix adds no new code and no new envelope key. The `reason` field or three new codes suggested at the source are not needed, and a field would be quiet by default, as that file's \"Why a THROW, and not a field\" section measures.\n\n## Expected\n\n- The three fault sites answer `503 SERVICE_UNAVAILABLE`, naming the object and nothing else. The cause stays in the server log at the site, as today.\n- A real denial (`assertObjectsReadable`'s `!admitted` branch, the field-level and exposure verdicts) keeps `403 PERMISSION_DENIED` unchanged.\n- `/analytics/dataset/query` classifies a thrown error by `code` plus a 4xx `status` (#5352). A 5xx must still render as that code, not fall through to `500 ANALYTICS_QUERY_FAILED`. Pin that path.\n- The no-oracle rule in `readAdmissionDeniedError`'s docblock still holds. A 503 names no layer, grant or existence fact. It says only that the server could not decide.\n\n## Notes for the dispatcher\n\n- This changes the wire for a fault path, so the title takes `!` and needs a changeset. Read the `Clause-②` arm against AGENTS.md at claim time.\n- Grep tests for each of the three sentences and for `PERMISSION_DENIED` beside a thrown provider: pins that assert today's 403 on a fault leg move with the fix.\n- After this lands, PR #25560's consumer can read `code` instead of the message.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

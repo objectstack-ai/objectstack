@@ -1,0 +1,34 @@
+{
+  "number": 25665,
+  "kind": "pull_request",
+  "title": "fix(create-objectstack): template baseline pins @objectstack/* exactly; specVersion stays a range",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T14:05:33Z",
+  "updated_at": "2026-10-24T14:07:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25665",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DT4vQy7pHzA3u25DpvdoWTR)_\n\nFixes #25510\n\nClause-②: no\nMetadata-protocol: none\n\nThe remaining slice after PR #25539 (which made the scaffolders write exact pins). The committed template baseline now says what the scaffold writes, and the release-time version pass keeps it that way.\n\n## What changed\n\n- **`scripts/sync-template-versions.mjs`** stamps two values where it used to stamp one:\n  - every template `@objectstack/*` dependency gets the scaffolder's **exact** version (`18.1.0`; a prerelease such as `19.0.0-rc.0` verbatim);\n  - the manifest's `specVersion` stays the major's **range** (`^18.0.0`), because it names the spec line the template is authored against.\n  - `loadScaffolderVersion()` keeps its `{ version, major, range }` shape; `range` is documented as the `specVersion` value only. The version read is now anchored at both ends (`EXACT_VERSION`), since it is written verbatim into dependencies: `18.1.0garbage` used to pass a prefix match.\n  - Header section rewritten from \"two values\" to \"three values\", stating why deps are exact and `specVersion` is not.\n- **`--self-test`**: fixtures are built in lockstep at the exact version. Two new batteries (roster floor 8 → 10):\n  - Control I: a prerelease corpus (`42.0.0-rc.1`) is judged clean at its exact version with `specVersion` still `^42.0.0`, byte-identical and unwritten;\n  - Control J: a scaffolder version that is not a whole semver exits 1 naming it, with no template surface rewritten.\n- **`template-consistency.test.ts`**: the ratchet now requires each `@objectstack/*` dep to equal `create-objectstack`'s exact version (was `^MAJOR.x`). The `specVersion` agreement test compares `specVersion` with `^<major of the pinned spec dep>.0.0` instead of string equality.\n- **`template-version-stamps.test.ts`**: the stale-to-rewritten run expects exact deps; a new case runs the CLI at `43.0.0-rc.2` and asserts the deps take it verbatim while `specVersion` and `engines.protocol` take the major. `copyWithLocalImports` gained a target-directory parameter so the second fixture copies the import closure instead of a hand list.\n- **`templates/blank/package.json`**: restamped by running the script itself (9 entries, `^18.0.0` → `18.1.0`).\n- Stale caret comments corrected in `create-objectstack/src/index.ts` (3 places) and `src/runtime-image.ts`.\n- Changeset: `create-objectstack` patch.\n\n## Post-version trees\n\nSimulated by setting `create-objectstack`'s version, running the script, then the two ratchet files:\n\n| version | script output | ratchets |\n|:--|:--|:--|\n| `18.1.1` (minor/patch train) | deps at 18.1.1, specVersion at ^18.0.0 | 50/50 passed |\n| `19.0.0-rc.0` (major rc cut) | deps at 19.0.0-rc.0, specVersion at ^19.0.0, engines.protocol ^19 | 50/50 passed |\n\n`cut-rc.yml` and `release.yml` read the stamped surface from `stampedPaths()`, which is unchanged (same three files per template), and `cut-rc.yml`'s allowlist already admits each template's `package.json`. One behaviour change on the release path: on a minor or patch train the template `package.json` now changes on every version pass (it used to log \"already pins\"). That file is already in the allowlist, so the cut still pushes.\n\n## Verification (head 3f968168)\n\n- `pnpm --filter create-objectstack test`: Test Files 18 passed (18), Tests 269 passed (269).\n- `pnpm --filter create-objectstack typecheck`: exit 0, after `pnpm --filter 'create-objectstack^...' build` exit 0.\n- `node scripts/sync-template-versions.mjs --self-test`: exit 0. Ablations, each restored after: deps stamped with the range again → 10 failures (Control A and I); the version regex back to a prefix match → Control J red; `specVersion` stamped from the exact version → Control A red on both manifests.\n- vitest ablations: the old `^18.0.0` baseline → 2 failures in `template-consistency.test.ts`; deps stamped with the range → 2 failures in `template-version-stamps.test.ts`.\n- `node scripts/sync-scaffold-emission-policy.mjs --self-test` (imports this script's declarations) exit 0, and `--check` exit 0.\n- Derived gates (`dispatch-gates --commands`): 100 families, 95 exit 0, 5 NOT MEASURED (exit 3): `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content` need a full build; `check-plugin-teardown-shape --self-test` needs an unshallow clone. `--ran` reconcile: \"100 derived famil(ies) accounted for — 95 run, 5 NOT-MEASURED\". CI runs all five.\n\n## Acceptance notes\n\n- Docs half (`content/docs/protocol/kernel/plugin-spec.mdx`, `content/docs/upgrading.mdx`) rides the devx seat's own docs PR, which carries `Part of #25510`.\n- `skills/objectstack-platform/references/bootstrap.md:147-153` still shows `^17.0.0` for five `@objectstack/*` packages in a published skill's `package.json` example. Governed surface, not edited here; for the devx seat to route.\n- Comment-only staleness left alone because the files sit outside this claim: `.github/workflows/cut-rc.yml:505-507` (\"On a minor train it logs already pins and writes nothing\"), `scripts/regen-artifacts.mjs:781` and `scripts/cross-package-test-inputs.mjs:1522` (call the stamped values \"ranges\").\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GcPmaQ9wUnUUM3ATKkiCes)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01GcPmaQ9wUnUUM3ATKkiCes\n"
+}

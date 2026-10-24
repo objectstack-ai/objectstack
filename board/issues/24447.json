@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-19T04:01:45Z",
-  "updated_at": "2026-10-23T18:12:19Z",
+  "updated_at": "2026-10-24T12:01:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/24447",
   "body": "Filing gate **③**: a task the maintainer directed. Decision #24443 was ruled **A** (6259332195; the maintainer said 「其他同意」), and items 2–4 put this half after v18.\n- **Reader who acts:** the epic seat, or whichever lane holds this card after v18.\n- **Dedupe:** none was found; this card carries #24443's after-v18 half.\n\nBlocked-by: #24446\n\n## What the ruling binds (items 2–4 of 6259332195)\n- **The other classes are reported.** That means the O overlays (views, dashboards, reports, translations, email templates), the C behavioural types (flows and actions; validations and scheduled jobs, which have no switch today), the E extensions (objects and apps) and settings. They use the same comparison #24446 builds. Each finding goes to the administrator, not only to the server log; none is refused.\n- **Retire `packages/spec/src/kernel/package-upgrade.zod.ts`** (plan, diff, conflict, snapshot, rollback; zero runtime consumers), with its ADR-0087 conversion.\n- No rename spelling is added to the spec (item 5).\n\n## Measured silent cases (`origin/main` `e22defb13c`; seat measurement behind #24443)\n| class | silent case | evidence |\n|:--|:--|:--|\n| Flow, action | A rename re-enables a disabled item, with a double fire beside a clone. A removal orphans the ledger row. One action row disables every same-named action on every object. | `service-automation/src/engine.ts:5244`; `objectql/src/action-activation.ts:49` |\n| O overlays | A removal leaves an orphan that keeps serving. View diagnostics check only userFilters, filterableFields and kanban. | `metadata-protocol/src/metadata-diagnostics.ts:207-250` |\n| E extensions | A same-named vendor field is silently overridden by the extension's. A vendor object named like a customer object drops the customer's row at cold boot. | `objectql/src/registry.ts:262`; `metadata-protocol/src/protocol.ts:31206` |\n| Settings | A renamed key orphans the stored value, and the default applies. | `platform-objects/src/system/sys-setting.object.ts:242` |"

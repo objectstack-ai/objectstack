@@ -1,0 +1,33 @@
+{
+  "number": 25662,
+  "kind": "pull_request",
+  "title": "fix(packaging): cli, hono and plugin-dev publish their @objectstack/* dependencies exact, not as caret ranges",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T13:46:47Z",
+  "updated_at": "2026-10-24T14:13:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25662",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DUhNa6cidmj22Tz1NuL5ZZQ)_\n\nFixes #25639\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nTwenty-one `dependencies` entries naming a lockstep `@objectstack/*` package were written `workspace:^`, which pnpm publishes as `^VERSION`. They are now `workspace:*`, which publishes the exact release version, like every other internal dependency of these packages:\n\n| package | entries moved | moved |\n|:--|:--|:--|\n| `packages/cli/package.json` | 8 | `core`, `driver-memory`, `driver-mongodb`, `driver-sql`, `driver-sqlite-wasm`, `objectql`, `observability`, `runtime` |\n| `packages/adapters/hono/package.json` | 1 | `runtime` |\n| `packages/plugins/plugin-dev/package.json` | 12 | `account`, `driver-memory`, `objectql`, `plugin-auth`, `plugin-hono-server`, `plugin-security`, `rest`, `runtime`, `service-i18n`, `service-realtime`, `service-storage`, `setup` |\n\nAll 21 targets are members of the changesets `fixed` group (checked against `.changeset/config.json`), so a range buys nothing: it only lets an exactly-pinned app float to a newer release through the CLI and mix two releases in one tree.\n\n- `pnpm-lock.yaml` is pnpm-regenerated (`pnpm install --lockfile-only`); its diff is exactly the 21 importer `specifier: workspace:^` lines becoming `specifier: workspace:*`, nothing resolved differently.\n- One `patch` changeset for the three packages, carrying the two declaration lines.\n- `packages/cli/src/commands/generate.ts`: a doc comment said `driver-sql` is in the CLI's `dependencies` at `workspace:^`; this PR made that false, so it now says `workspace:*`. Comment only (see Acceptance notes: surface widening approved by the seat).\n- Peer-dependency carets (`cli` and `runtime` on `driver-turso`, `service-datasource` on three drivers) are untouched, as the card scopes.\n- No new check: triage scoped it out of this card.\n\n## Verification\n\n- **Published shape, after.** `pnpm --filter PKG pack` for each of the three packages at this head, then read the packed `package/package.json`:\n  - `@objectstack/cli`: 50 internal dependencies, 0 not exact; peer `@objectstack/driver-turso` stays `^18.1.0`.\n  - `@objectstack/hono`: 3 internal dependencies, 0 not exact.\n  - `@objectstack/plugin-dev`: 15 internal dependencies, 0 not exact.\n- **Published shape, before (control).** `npm view @objectstack/cli@18.1.0 dependencies` lists the eight at `^18.1.0`; `@objectstack/hono@18.1.0` has `@objectstack/runtime: ^18.1.0`; `@objectstack/plugin-dev@18.1.0` has 12 caret entries. Same pnpm publish path, so the pack reading distinguishes the two.\n- **Source sweep.** No `dependencies` or `optionalDependencies` entry of a published workspace package names a `fixed`-group package with anything but `workspace:*` after this change (sweep over every tracked `package.json`; the remaining non-exact entries are peers, the private `examples/app-todo`, and the scaffold templates).\n- **Local gates.** `node scripts/pm/dispatch-gates.mjs --commands` derives 80 families for this diff. All 80 were run at `b18406b`, each exit code captured before any pipe: 72 exit 0 (among them `check-changeset-fixed`, `check-changeset-no-major --base origin/main`, `check-adr-0087-registration --base origin/main`, `check-empty-changeset --base origin/main`, `check:workspace-manifest-cycles`, `check-undeclared-dep-imports`, `check:published-files`, `check:override-consistency`, `check:manifest-repository-directory`, `check:nul-bytes`, `check:doc-authoring`, `check:issue-citations`), and 8 exit 3, NOT MEASURED: `check:dts-closure`, `check:dual-build-cjs-loads`, `check:i18n`, `check:i18n-coverage`, `check:i18n-walk-parity`, `check:lean-entry-closure` and `check:sourcemap-no-sources-content` need a full workspace build this worktree does not have, and `check-plugin-teardown-shape --self-test` needs an unshallowed clone. CI runs all eight. `dispatch-gates --ran` reconciles: `80 derived famil(ies) accounted for — 72 run, 8 NOT-MEASURED`. The head `ee5f527` merges `origin/main` (four files under `.claude/` and `scripts/pm/`, none on this diff's surface); the derived set is byte-identical there.\n- Unit suites of the three packages are declared to CI: the diff moves manifests and one comment, and the workspace links pnpm installs for `workspace:^` and `workspace:*` are the same local packages, so no module a test loads changes.\n\n## Acceptance notes\n\n- **Surface widening:** `packages/cli/src/commands/generate.ts` (one comment word) is outside the claim's file surface; the seat approved adding it in the card thread.\n- **Count correction:** the card says the CLI's \"other 47\" `@objectstack/*` dependencies were `workspace:*`. Measured at the base: 49 `@objectstack/*` dependencies, 41 `workspace:*` and 8 `workspace:^` (plus `create-objectstack`, also `workspace:*`). The first commit's message repeats the card's 47; the number here is the measured one.\n- `examples/app-todo/package.json` still writes three `workspace:^` dependencies. It is `private` and never published, so it is not part of this card. Noted, not filed.\n- `packages/adapters/hono/package.json` lists `@objectstack/runtime` in both `dependencies` and `devDependencies`; after this change both read `workspace:*`. Noted, not filed.\n- The scaffold templates' caret ranges are the template card (#25510), which is not addressed here.\n- Serial: #25631 regenerates `pnpm-lock.yaml` and may touch the same manifests; `origin/main` is merged before each push.\n- Whether to add a check that refuses a range on a `fixed`-group dependency is the maintainer's question per triage; this PR adds none.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ToEn6kUxajmjnSeRsFmTGn)_\n"
+}

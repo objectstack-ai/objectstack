@@ -1,0 +1,36 @@
+{
+  "number": 25616,
+  "kind": "pull_request",
+  "title": "docs(releases): 18.1.0 release facts as measured, and the upgrade checklist walked from 18.0.0",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T09:37:46Z",
+  "updated_at": "2026-10-24T10:14:23Z",
+  "closed_at": "2026-10-24T10:14:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T10:14:21Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25616",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiRwWtsarkLPmw9fMYiFZ3LY)_\n\n## Summary\n\n18.1.0 is published. This PR does the follow-up work the 18.1 page was waiting on. It is docs-only.\n\n**Release facts, as measured.** This is a new section, measured with `npm view` / `npm pack` on 2026-10-24:\n- npm tags: `latest` is 18.1.0 on every package read. `next` still points at the older `18.0.0-next.5`, and `rc` at `17.0.0-rc.6`.\n- Publish: npm at 09:06 UTC, followed by 73 per-package GitHub Releases.\n- Version commit: `e649c2d91e` (#25606), after the reverted first cut (#25605).\n\nThe section also carries two cautions:\n- **260 of the 265 CHANGELOG entries cite `3937697`.** That is the commit that reverted the first cut, not each entry's own commit. The published tarballs carry the same attribution: every entry in `@objectstack/cli@18.1.0`'s 18.1.0 section reads `3937697`.\n- **An exact pin still floats.** `@objectstack/cli` declares eight `@objectstack/*` dependencies as `workspace:^`, which publishes as a caret range. An app pinned to exactly 18.0.0 therefore installed 17 packages at 18.1.0 today. The checklist gives the pnpm override that holds them, and that override was measured.\n\n**Counts.** These are read off the published sections: 265 distinct entries, split 82 / 9 / 50 / 2 / 122 across the five sections. 91 changesets are declared breaking, 48 `minor` and 43 `patch`. The pre-cut count of 258 was low because entries whose first line is identical were merged; once every first line began with the same revert commit, the eight \"Shipped in 18.0.0\" entries collapsed into one.\n\n**Upgrade checklist, walked.** I walked one `create-objectstack@18.0.0` blank app on SQLite under `single`. It had an administrator and three notes, and was moved to 18.1.0. Each line the walk measured is marked:\n- the pins and the override\n- the `os serve` refusal without a secret, and `os start` minting `.objectstack/auth-secret` instead\n- the 18.0.0 session still being valid when the same secret is used\n- `validate` and `build` passing\n- `migrate meta --from 17`, which lists 417 manual changes; `--from 18` replays nothing\n- `migrate meta --stored`\n- `migrate plan`: 33 nullable tenant columns, schema in sync\n- probes of the `confirmText` refusal (422) and the rollback `toVersion` refusal (400)\n\nThe callout lists what was not walked.\n\n**Folded in.** #25591, #25592 (breaking) and #25596, the last changesets before the cut.\n\n## Checks\n\nThese pass locally:\n- `check:role-word`\n- `check:release-notes`\n- `check:release-page-status`\n- `check:release-index-currency-sync`\n- `check:doc-anchors`\n- `check:docs-audit-scope`\n- `check:docs-single-h1`\n- `check:docs-redirects`\n- `check:doc-authoring`\n- `check:error-code-casing`\n- `check:cli-examples-parity`\n- an MDX compile of both changed v18 pages\n\nClause-②: no\nMetadata-protocol: none\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01At7xrR4rgknXtej5ZkMJHd\n"
+}

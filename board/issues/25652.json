@@ -1,0 +1,32 @@
+{
+  "number": 25652,
+  "kind": "issue",
+  "title": "spec/i18n: a translation bundle has no key for positions or permission sets, so their labels stay in the authoring language",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T13:07:24Z",
+  "updated_at": "2026-10-24T13:57:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25652",
+  "body": "Filing gate: ① product defect (user-visible, named landing point, reproduced through `os validate`).\n\n**Business reason.** An app authored in one language (here Chinese, with an English bundle per its i18n policy) ships positions (`positions[].label`) and permission sets (`permissions[].label`). Admins assign people to positions and see \"pending on position X\" on approvals; in an `en` workspace those labels stay in the source language, while every object, field, view, flow and app label next to them is translated. `os i18n check --strict` cannot flag them, because there is nowhere to put the translation.\n\n**Reach (measured once).** In objectstack-ai/hotsrm (spec 18.0.0) adding\n```ts\npositions: { srm_legal_counsel: { label: 'Legal Counsel' } },\n```\nto the `en` `TranslationData` bundle fails `objectstack validate` with `Unrecognized key(s) on this locale of the translation bundle: positions`, and `tsc` rejects it (`'positions' does not exist in type ...`). `packages/spec/src/system/translation.zod.ts` has slots for objects, picklists, apps, messages, dashboards, pages, flows, but none for positions or permission sets (`PositionSchema` carries only `label` / `description`).\n\n**Expected.** A `positions` (and `permissions`) map in the translation bundle (`label`, `description`), overlaid wherever the console renders a position or permission-set label, and covered by `os i18n check`.\n\n**Who acts.** spec seat (translation schema + typegen), then the runtime/console seat for the overlay.\n\n**Dedupe.** Searched `translate position label permission set label i18n translation` in objectstack-ai/objectstack: 5 hits incl. closed (#25459, #24968, #16251, #7634, #3370), none about positions or permission sets.\n\nReported from hotsrm issue #22 (session https://claude.ai/code/session_01PZH89KeiPGmX6pJnBbTorL)."
+}

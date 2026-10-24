@@ -1,0 +1,32 @@
+{
+  "number": 25667,
+  "kind": "pull_request",
+  "title": "docs(skills): the bootstrap example pins every @objectstack/* dependency to one exact version, as the scaffolder writes it",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T14:14:42Z",
+  "updated_at": "2026-10-24T14:19:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25667",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DMMchS2pMx7VafJmdzGaxFv)_\n\nFixes #25666\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读(草稿)\n\n- **改了什么**:已发布技能 `objectstack-platform` 的 bootstrap 示例里,五个 `@objectstack/*` 依赖还写着 `^17.0.0`。改成和脚手架一样的精确版本 `18.1.0`,并加一句说明脚手架按自身版本精确写入、所有 `@objectstack/*` 保持同一版本。\n- **为什么改**:PR #25539 起脚手架写精确版本,v18 文档也要求锁精确版本;照技能抄的人会装到 17.x,还是 caret 范围。\n- **风险与代价(含回滚)**:纯文档,附一条 `@objectstack/skills` patch changeset;一次 revert 可回。\n- **你要做的(一个动作)**:`skills/**` 属 Tier H,复核通过、CI 全绿后请您合并。\n\n## What changed\n\n- `skills/objectstack-platform/references/bootstrap.md` 〈Complete Working Example〉 `package.json`: `@objectstack/spec`, `runtime`, `driver-memory`, `plugin-hono-server`, `cli` go from `^17.0.0` to `18.1.0`; `typescript` keeps `^5.3.0`. One sentence after the block: `npx create-objectstack` writes every `@objectstack/*` dependency as its own version, exactly, and all of them stay on that one version. (`npx create-objectstack` is the file's own spelling at 〈Scaffolding Command〉.)\n- `.changeset/25666-skills-bootstrap-exact-pins.md`: `@objectstack/skills` patch.\n\nGrounds: `packages/create-objectstack/src/pkg-utils.ts` `syncObjectStackDeps` (`deps[dep] = version`, PR #25539); `content/docs/protocol/backward-compatibility.mdx` L206 and `content/docs/deployment/self-hosting.mdx` L64 (pin exact); `packages/create-objectstack/package.json` `18.1.0`.\n\n## Gates\n\nOn this head: `pnpm check:skill-frame-sync` ✓, `pnpm check:skill-frame-freshness` ✓, `pnpm check:skill-identifier-liveness` ✓, `pnpm check:skill-compatibility` ✓, `scripts/check-empty-changeset.mjs` ✓, `scripts/check-commit-card-trailers.mjs --range origin/main..HEAD` ✓. `git grep -n '\"\\^1[0-9]\\.' skills/` finds nothing (it found these five lines before).\n\n## Acceptance notes\n\n- Not in scope: `engines: { protocol: '^17' }` in `objectstack-platform/SKILL.md` L142 is the protocol handshake range, a different value. The template baseline and its release-time stamping are PR #25665 (`domain:devx`).\n- The literal `18.1.0` will age with each release like any versioned example; the added sentence tells the reader to use the version they scaffolded with.\n- Governed surface `skills/**` (Tier H): lands by the maintainer's hand. Opened through the fleet-write relay `pr_create`; every later write goes through the relay too.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01REMuzhz6MWRjg8uohedMnM\n"
+}

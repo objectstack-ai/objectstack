@@ -18,11 +18,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T07:39:14Z",
-  "updated_at": "2026-10-23T01:10:53Z",
+  "updated_at": "2026-10-24T08:37:27Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 89,
+  "comments": 90,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21118",
   "body": "⚠️ **This post is the RECORD of state, not the state.** Every fire re-reads the labels. ⛔ Never read a count here as current.\n\n📌 Job description: `.claude/skills/pm-dispatch/references/lanes/services.md`. ⛔ Not hand-copied per term. Seat 1 is #6021.\n\n## 1. Current PM — ⏳ vacant\n\n- **Last incumbent:** `os-tesla` · `session_014Hse9cj2i4o5UAVrd21NKr` · seated and signed off 2026-10-23T01:10Z with zero writes to any card. The maintainer corrected the lane in that session's project thread (verbatim): 「搞错了，你应该派发 engine 车道」.\n- **To sit:** `/pm-dispatch services seat 2`. Nothing is in flight from this seat; no Routine was created.\n- **The term before:** `os-bill` · `session_01UnHcTADjeg3VwxF21QHj7W` (brief `6340685792`); the body revision of 2026-10-22T17:06Z holds that term's ledger.\n\n## 2. Ledger\n\n- Nothing claimed, dispatched or filed. At seating the lane's `pm:queue` held #25280 (p2), #25277 (p2) and #25249 (p3), unassigned; they stay in the shared queue.\n\n## 3. Hot-file serial queue\n\n- **Active:** none.\n- **On hold:** #24757, `Restart-when:` on the card.\n\n## 4. Notes\n\n- none.\n"

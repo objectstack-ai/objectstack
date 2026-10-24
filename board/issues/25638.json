@@ -1,0 +1,34 @@
+{
+  "number": 25638,
+  "kind": "issue",
+  "title": "release(changelog): the published 18.1.0 CHANGELOGs attribute 260 of 265 entries to 3937697, the commit that reverted the first cut, instead of each entry's own commit",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T12:05:18Z",
+  "updated_at": "2026-10-24T14:17:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25638",
+  "body": "Filing gate: ① a product defect fixed into released text. The released-text exception applies: the 18.1.0 CHANGELOGs are in the published tarballs.\nBusiness reason: anyone upgrading reads the CHANGELOG to find the change behind an entry. In 18.1.0, 260 of 265 entries link to the same revert commit, so following the hash leads nowhere useful. This happens again whenever a version commit is reverted and re-cut.\nReader: the release lane (`.changeset/config.json` `changelog: @changesets/cli/changelog`, the root `version` script), at the next cut, or in an in-place amendment of the 18.1.0 entries in the style of #24912.\nDedupe (open AND closed):\n- \"18.1.0 CHANGELOG entries cite the revert commit 3937697 instead of their own commit\" → 20 hits, none on this.\n- \"changelog commit hash attribution reverted version commit 18.1.0 annotate-shipped\" → 20 hits, none on this. The nearest are #21361 and #23818 (entries missing from a cut) and #25356 (index date), which are different defects.\nreach: published artifact, measured once. `npm pack @objectstack/cli@18.1.0`, `## 18.1.0` section: 34 of 34 entries open `- 3937697:`.\ntype: Bug\n\n## What happens\n\n#25605 (`393769720a`) reverted the unpublished first 18.1.0 version commit `74fa3cb6d` (#24876). That revert re-added every pending `.changeset/*.md`. The re-cut (#25606, `e649c2d91e`) then generated the CHANGELOGs with `@changesets/cli/changelog`. That generator stamps each entry with the commit that last added its changeset file, which is now the revert.\n\nMeasured on `main` at `e649c2d91e`, over the 73 packages with a `## 18.1.0` section, after deduplicating identical entries across packages:\n\n- 265 distinct entries, 260 of them opening `- 3937697:`.\n- The other five carry their own commits. They are the changesets merged after the revert: `a57643d` #25592, `9f39094` #25596, `4a25192` #25591, `4395cbc`, and `cb38a8c` #25586.\n- The tarball has the same attribution: all 34 entries of the `## 18.1.0` section of `@objectstack/cli@18.1.0` read `3937697`.\n\nA side effect is that the eight entries marked **Shipped in 18.0.0** now share an identical first line, `- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; …`. A reader or tool that keys on an entry's first line counts them as one.\n\n#25607 taught `annotate-shipped` to pass over a reverted cut. The changelog generator's commit attribution was not covered.\n\n## Expected\n\nEach entry names the commit that introduced its changeset. That is what an un-reverted cut produces: the 18.1.0 rehearsal at `b2c0752900` carried distinct commits.\n\n## Fix direction\n\nThere are two options:\n\n- **(a) Fix future cuts.** Wrap the changelog generator so it attributes each changeset to the commit that first added it, passing over a revert commit. A revert of a version commit is exactly the case where the last commit that added the file is wrong. Pin this with a fixture that adds a changeset, version-commits, reverts, and re-cuts.\n- **(b) Fix 18.1.0 in place.** Amend the 18.1.0 entries in the repository's CHANGELOGs to their own commits. This does not change the published tarballs.\n\nThe 18.1 release page (#25616) tells readers to search an entry's headline, and cites each entry's own commit itself."
+}
