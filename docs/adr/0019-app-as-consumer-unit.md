@@ -5,6 +5,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: ADR-0003 (Package as First-Class Citizen), ADR-0006 (Three-Layer Tenancy), ADR-0016 (Studio Package Authoring & Publish)
 **Consumers**: `@objectstack/spec/kernel` (`plugin.zod.ts`), `@objectstack/spec/cloud` (`marketplace.zod.ts`), the Console `marketplace` UI, the Studio publish flow, `docs/design/marketplace-publishing.md`
+**Related**: [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) (2026-10-24) — the separate, gated decision §Out of scope asks for on "inter-App dependencies", narrowed to a declared dependency and a pre-install check; additive cross-reference, this record's text is unchanged
 
 > **Revision history**
 > - **v1/v2** explored a much larger scheme: a metadata/code *plane* split,

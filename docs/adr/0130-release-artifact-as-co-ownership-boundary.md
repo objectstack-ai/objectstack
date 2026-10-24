@@ -9,6 +9,12 @@
 ([#14512](https://github.com/objectstack-ai/objectstack/issues/14512)): a multi-package artifact
 carries its metadata **once**, in `packages[]` — the flattened copy is no longer emitted beside
 it. D4's read-both rule and D7 are unchanged, so every artifact already on disk still loads.
+**D8's deferral end point amended by the 2026-10-24 addendum**
+([ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) D5,
+[#25403](https://github.com/objectstack-ai/objectstack/issues/25403)): a package that declares `dependencies` on an
+installed package and shares its namespace co-owns it across artifacts, so the owner field is deferred until
+marketplace publishing rather than until a module's first standalone artifact. The same addendum records that the
+2026-09-02 addendum's #14488 line is stale. D1–D7 are unchanged.
 **Deciders**: ObjectStack maintainer, 2026-09-01, live PM chat, verbatim and untranslated:
 「立 ADR 起草卡派发」and 「14122 作为epic 任务集中跟踪」— approving the proposal in
 [#14122](https://github.com/objectstack-ai/objectstack/issues/14122) into the ADR-drafting lane
@@ -743,3 +749,40 @@ fallback bolted onto the emitter.
 
   Every one of those shapes stays readable by D4's read-both rule, and none is refused: a
   composition that was legal before this change stays legal.
+
+---
+
+## Addendum (2026-10-24, #25403) — D8's deferral ends at marketplace publishing; the #14488 line is stale
+
+Recorded by [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md), which executes two maintainer
+rulings on [#25403](https://github.com/objectstack-ai/objectstack/issues/25403): letter B′
+([`6369704387`](https://github.com/objectstack-ai/objectstack/issues/25403#issuecomment-6369704387), 「同意」
+2026-10-23T16:28:30Z) and letter A
+([`6377678758`](https://github.com/objectstack-ai/objectstack/issues/25403#issuecomment-6377678758), 「同意 #8」
+2026-10-24T00:40:55Z). ⛔ This section edits no text above: D1–D8, §1–§8 and both earlier addenda read as written,
+except where the two points below say how a sentence now reads.
+
+### D8's deferral now ends at marketplace publishing
+
+D6 and D8 said the owner field becomes necessary *"the day a module ships as its own artifact"*. ADR-0141 D5 answers that
+day without the field: a package that declares `dependencies` on an installed package X and uses X's namespace is X's
+co-owner at the install gate — one-way, recognised whichever registers first — and D3's per-object-name uniqueness
+check spans those co-owners across artifacts exactly as it spans co-owners inside one artifact. Inside one tenant the
+proof is the declaration plus the administrator's install act.
+
+So D8's deferral now ends at **marketplace publishing**: when a module is published for other tenants and must assert
+*"I have the same publisher as HotCRM"* across vendors, the owner / publisher field lands, aligned to the
+`publisherOrgId` reservation of ADR-0048's 2026-08-08 addendum (still Proposed), as D8 already requires. That field is
+the later superset of ADR-0141 D5 and needs no undo of it. D6's cost statement stands for modules inside one artifact;
+a module that becomes its own artifact trades it for the separate-version cost ADR-0141's Consequences state.
+
+### The #14488 line is stale
+
+The 2026-09-02 addendum's *What was NOT decided* section lists
+[#14488](https://github.com/objectstack-ai/objectstack/issues/14488) (per-package composition of grants) as *"filed, not
+decided"*. It is decided: #14488 was closed `not_planned` on 2026-09-12 by ruling
+[`5645322259`](https://github.com/objectstack-ai/objectstack/issues/14488#issuecomment-5645322259) — an artifact installs
+whole, the app package's permission sets cover every module's objects, nothing composes grants into another package's
+set, and a module carved out as its own artifact ships its own permission sets under ADR-0086 D4. The three inherited
+inputs listed under that line remain accurate as history; none is open work. A standalone module's permission sets are
+the module author's work, not a platform blocker (ADR-0141 D4, D6).

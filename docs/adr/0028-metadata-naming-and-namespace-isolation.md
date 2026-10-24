@@ -1,6 +1,6 @@
 # ADR-0028: Metadata Naming & Namespace Isolation — Derived Physical Names, Namespace-Scoped Identity, and a Single Kernel Contract
 
-**Status**: Deferred (2026-07-16; proposed 2026-06-01) — the target model (namespace as identity dimension, short authored names, derived physical names, `namingMode` dual-read, `sys` reservation, namespaced transport segments) is entirely unbuilt, and adopting it now would be a platform-wide migration (physical table derivation, transport routes, dual-read compatibility) with no present pain to justify it: the literal-prefix current-state contract (`spec/kernel/namespace-prefix.ts`) is enforced, collision-proof (ADR-0028/0048), and working. **Re-open trigger**: real multi-package ecosystem naming pain — e.g. a marketplace package whose natural short names are unusable under literal prefixing, or cross-environment portability requiring namespace remapping. Until then this stays a recorded design, not planned work.
+**Status**: Deferred (2026-07-16; proposed 2026-06-01) — the target model (namespace as identity dimension, short authored names, derived physical names, `namingMode` dual-read, `sys` reservation, namespaced transport segments) is entirely unbuilt, and adopting it now would be a platform-wide migration (physical table derivation, transport routes, dual-read compatibility) with no present pain to justify it: the literal-prefix current-state contract (`spec/kernel/namespace-prefix.ts`) is enforced, collision-proof (ADR-0028/0048), and working. **Re-open trigger**: real multi-package ecosystem naming pain — e.g. a marketplace package whose natural short names are unusable under literal prefixing, or cross-environment portability requiring namespace remapping. Until then this stays a recorded design, not planned work. · **Amended** (2026-10-24, [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) D6 — D4 is rewritten from "no cross-app references" to "no cross-app reference without a declared dependency"; the rest of this record stays Deferred)
 **Deciders**: ObjectStack Protocol Architects
 **Supersedes**: the hand-written object-namespace-prefix authoring rule documented in `packages/spec/src/kernel/manifest.zod.ts` (the `namespace` field) and enforced by `validateNamespacePrefix()` in `packages/spec/src/stack.zod.ts` — that rule's standalone record is [ADR-0129](./0129-object-name-is-the-canonical-id.md) (2026-08-29; it governs until this ADR's re-open trigger fires).
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source per type, org overlay), [ADR-0008](./0008-metadata-repository-and-change-log.md) (Repository · ChangeLog · Cache · Registry; `MetaRef = org/type/name`), [ADR-0010](./0010-metadata-protection-model.md) (protection model), [ADR-0019](./0019-app-as-consumer-unit.md) (app as the consumer-installable unit), [ADR-0025](./0025-plugin-package-distribution.md) (package distribution), [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) (**prerequisite** — kernel object ownership; D5/D6 below assume the kernel is properly owned per ADR-0029)
@@ -33,9 +33,10 @@ metadata platform actually uses, and extends collision-freedom to **all** kinds:
    identifiers inject the namespace at generation. Uniqueness is enforced where
    it physically matters (storage tables, route table, tool registry), not on
    the authored name.
-4. **Apps are sandboxed: no cross-app references.** The only legal
-   cross-boundary reference is **app → kernel**. This doubles as a security
-   boundary.
+4. **No cross-app reference without a declared dependency** (rewritten
+   2026-10-24 by ADR-0141; first proposed as full sandboxing, app → kernel
+   only). An app reaches the kernel and the apps it declares in
+   `dependencies`, nothing else. This doubles as a security boundary.
 5. **The kernel is one unified, reserved namespace (`sys`) — one contract, but
    ownership distributed across first-party plugins.** It is the platform's
    public contract and the sole well-known import target (`sys.user`). Each
@@ -152,13 +153,23 @@ schema), resolved back to `(ns, name)` at runtime.
 **Resolution pipeline:** `route /data/todo/task` → handler resolves `(todo, task)`
 → driver derives physical `todo_task` → response payloads use short names.
 
-### D4 — Apps are sandboxed: no cross-app references (security boundary)
+### D4 — No cross-app reference without a declared dependency (security boundary)
 
-A `type: app` package may reference its own metadata (short names) and the
-kernel (qualified), but **may not reference metadata owned by another app**.
-This collapses the only remaining "two writing styles" risk to a single,
-allow-listed case (kernel imports) and simultaneously enforces a tenant-style
-isolation boundary between marketplace apps.
+> **Rewritten (2026-10-24, [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) D6**, rulings
+> [`6369704387`](https://github.com/objectstack-ai/objectstack/issues/25403#issuecomment-6369704387) and
+> [`6377678758`](https://github.com/objectstack-ai/objectstack/issues/25403#issuecomment-6377678758) on #25403). This
+> decision first read *"Apps are sandboxed: no cross-app references"* — a `type: app` package *"may not reference
+> metadata owned by another app"*. The isolation stays; its boundary is now the app's declared dependencies. The rest
+> of this record stays Deferred and unchanged.
+
+A `type: app` package may reference its own metadata (short names), the
+kernel (qualified), and the metadata of the apps its manifest declares in
+`dependencies`; it **may not reference metadata owned by any other app**.
+The closed set keeps the tenant-style isolation boundary between marketplace
+apps — an app reaches only what it declared — and keeps the "two writing
+styles" risk to declared, allow-listed cases. The runtime save door already
+judges a package write against that closure (ADR-0141 D1); installing an app
+whose declared dependency is absent or out of range is refused (ADR-0141 D2).
 
 ### D5 — The kernel is one unified, reserved namespace (`sys`) with object ownership distributed across first-party plugins
 
@@ -233,7 +244,7 @@ reference target. It is:
   `validateNamespacePrefix` into a *namespace-scope* validator over **all**
   collections — names must be bare short names (no `ns_` prefix, no `__`),
   references resolve within the package namespace or to a qualified
-  `sys.x` / (forbidden) cross-app ref. Early failure with the exact fix string.
+  `sys.x` / a cross-app ref only to a declared dependency (D4). Early failure with the exact fix string.
 - **Install time** (package registry): register every
   `(namespace, type, name)` plus every derived transport key (route,
   connector id, tool name, webhook). The only true conflict left is **two
@@ -257,7 +268,7 @@ the author/AI as a second style:
    name needs a `tableName`/`physicalName` override — derivation is the
    *default*, not mandatory (mirrors `columnName`).
 3. **Cross-package references.** Within a package: short name. To the kernel:
-   qualified `sys.x`. Cross-app: forbidden (D4). This is the one place a
+   qualified `sys.x`. Cross-app: only to a declared dependency (D4). This is the one place a
    qualified form appears, and it is a single deterministic rule (like an
    `import`), not an arbitrary second style.
 4. **Diagnostics.** Driver errors/logs will show `todo_task`; this is read-only
