@@ -166,6 +166,7 @@
     "automation/Flow:name",
     "automation/Flow:nodes",
     "automation/Flow:protection",
+    "automation/Flow:requiredPermissions",
     "automation/Flow:runAs",
     "automation/Flow:status",
     "automation/Flow:successMessage",

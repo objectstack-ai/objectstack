@@ -102,6 +102,7 @@ const RUNNER_SLOTS: Readonly<Record<string, Disposition>> = {
   ),
   'flow.successMessage': keyed('successMessage', 'the completion toast'),
   'flow.errorMessage': keyed('errorMessage', 'the failure toast'),
+  'flow.requiredPermissions[]': noReader('a capability name the start doors check, never drawn as text'),
   'flow.variables[].name': noReader('a variable name — the binding a screen field or node writes to'),
   'flow.variables[].type': noReader('a data-type token'),
   'flow.variables[].defaultValue': noReader('a value the run binds, not text it shows'),

@@ -323,10 +323,12 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      * `dashboard` moved 21 → 22 the same way when it gained
      * `requiredPermissions` (#22611, the audience gate). `position` moved
      * 12 → 13 the same way when it gained `permissionSets` (ADR-0131 D3/D4,
-     * the sets a position distributes).
+     * the sets a position distributes). `flow` moved 23 → 24 the same way
+     * when it gained `requiredPermissions` (who may start the flow, checked at
+     * every start door).
      */
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 26, app: 30, dashboard: 22, dataset: 16, field: 80, flow: 23,
+        agent: 26, app: 30, dashboard: 22, dataset: 16, field: 80, flow: 24,
         hook: 22, object: 47, page: 26, position: 13, report: 21, skill: 17, tool: 14,
     };
 

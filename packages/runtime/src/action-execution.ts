@@ -50,8 +50,12 @@ import {
     type FlowRefusalCode,
 } from './flow-dispatch-status.js';
 // Who may START a flow by name — the one rule the trigger door, this door and
-// the declared endpoint share (the maintainer's ruling, letters B and A).
-import { ELEVATED_START_REFUSAL, refusesElevatedSelfTriggeredStart } from './flow-start-admission.js';
+// the declared endpoint share (the maintainer's rulings, letters B and A, and
+// the flow's own `requiredPermissions`).
+import { flowStartRefusal } from './flow-start-admission.js';
+// [ADR-0066 D4] The capability arithmetic the action gate and the flow start
+// gate share.
+import { missingCapabilities } from './required-capabilities.js';
 import type { FlowFailureDetails } from '@objectstack/spec/api';
 // [#5138] The ONE 404 envelope a single-record path answers. Imported rather
 // than re-spelled so `callData`'s ObjectQL fallback and the protocol service it
@@ -828,8 +832,7 @@ export function actionPermissionError(_deps: ActionExecutionDeps, actionDef: any
         : [];
     if (required.length === 0) return null;
     if (ec?.isSystem) return null;
-    const held = new Set<string>(ec?.systemPermissions ?? []);
-    const missing = required.filter((perm) => !held.has(perm));
+    const missing = missingCapabilities(required, ec);
     if (missing.length === 0) return null;
     const on = objectName ? ` on '${objectName}'` : '';
     return (
@@ -1386,10 +1389,17 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     // `code` + `status` so the ADR-0112 envelope survives both entrances, as
     // the 409 / 422 rows below do; the words are the trigger door's own
     // (`flow-start-admission.ts`).
-    if (await refusesElevatedSelfTriggeredStart(automation, action.target, ec)) {
-        throw Object.assign(new Error(ELEVATED_START_REFUSAL.message), {
-            status: ELEVATED_START_REFUSAL.status,
-            code: ELEVATED_START_REFUSAL.code,
+    //
+    // [ruling record 6377848497, letter A] The same check then asks the
+    // target flow's own `requiredPermissions`, so this door INHERITS the
+    // flow's declaration: an action that names a gated flow is gated by it
+    // even when the action declares nothing. An action that declares its own
+    // list has been answered upstream, so a caller here needs both lists.
+    const startRefusal = await flowStartRefusal(automation, action.target, ec);
+    if (startRefusal) {
+        throw Object.assign(new Error(startRefusal.message), {
+            status: startRefusal.status,
+            code: startRefusal.code,
         });
     }
     // Pass a proper AutomationContext (the engine never read the former

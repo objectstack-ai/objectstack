@@ -3706,7 +3706,7 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
     // The positions are held to the rule by its test, each fired.
     'Judged at every position the key is declared: an object\'s `requiredPermissions` (the array ' +
       'form, or each operation of the per-operation map), each field\'s, each object action\'s and ' +
-      'each top-level action\'s, an app\'s and each of its nav entries (through `navigation`, ' +
+      'each top-level action\'s, each flow\'s, an app\'s and each of its nav entries (through `navigation`, ' +
       '`areas`, `tabs`, `children` and `items`), a view\'s (its own, its `config`\'s, its default ' +
       '`list`\'s and each `listViews` entry\'s, on views and on objects) and a dashboard\'s.',
     'A warning, not an error: one package\'s lint cannot see the capabilities other installed ' +

@@ -2195,6 +2195,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Run As",
         helpText: "Execute as system (admin) or user (current user permissions)"
       },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to start this flow. Every start door (the trigger route, a flow action over REST and MCP, a flow endpoint) refuses anyone else with 403, and an action that starts this flow inherits the list. A parent flow's subflow step is not checked again."
+      },
       errorHandling: {
         label: "Error Handling",
         helpText: "What to do when a node fails (fail, retry, continue)"

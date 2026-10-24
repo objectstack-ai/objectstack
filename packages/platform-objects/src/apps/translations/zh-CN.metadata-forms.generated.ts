@@ -2195,6 +2195,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "运行身份",
         helpText: "以系统（管理员）或当前用户权限执行"
       },
+      requiredPermissions: {
+        label: "所需权限",
+        helpText: "调用方启动本流程必须持有的能力（权限集的 systemPermissions），列出的每一项都要具备。每个启动入口（触发路由、经 REST 与 MCP 的流程动作、流程端点）对其他调用方一律返回 403；启动本流程的动作继承这份列表。父流程的子流程步骤不再重复检查。"
+      },
       errorHandling: {
         label: "错误处理",
         helpText: "节点失败时的处理方式（fail / retry / continue）"

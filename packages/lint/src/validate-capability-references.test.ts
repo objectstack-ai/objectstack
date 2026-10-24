@@ -96,6 +96,25 @@ describe('validateCapabilityReferences (ADR-0066 ⑨)', () => {
     expect(findings.every((f) => f.severity === 'warning')).toBe(true);
   });
 
+  // A flow's `requiredPermissions` is who may START it, checked at every start
+  // door with the action gate's arithmetic — so the same judgement here: a typo
+  // refuses every member at every door, silently.
+  it('warns on a flow requiredPermissions typo and passes a granted one', () => {
+    const findings = validateCapabilityReferences({
+      permissions: [{ name: 'srm_ap', systemPermissions: ['srm_verify_bank_account'] }],
+      flows: [
+        { name: 'srm_bank_verify', type: 'screen', runAs: 'system', requiredPermissions: ['srm_verify_bank_account'] },
+        { name: 'srm_bank_reject', type: 'screen', runAs: 'system', requiredPermissions: ['srm_verfy_bank_account'] },
+        { name: 'srm_open', type: 'screen' },
+      ],
+    });
+    expect(findings.map((f) => [f.where, f.path])).toEqual([
+      ['flow "srm_bank_reject"', 'flows[1].requiredPermissions'],
+    ]);
+    expect(findings[0]).toMatchObject({ severity: 'warning', rule: CAPABILITY_REFERENCE_UNKNOWN });
+    expect(findings[0].message).toContain('srm_verfy_bank_account');
+  });
+
   // [#22639] The `/meta` read gate serves a list view or a dashboard only to a
   // caller holding EVERY capability its `requiredPermissions` names, so a typo
   // there hides it from everyone. Every door the key is declared at resolves.
@@ -203,6 +222,7 @@ describe('[#22161] one-line verdicts — capability-reference-unknown', () => {
       'per-operation map',
       '`navigation`, `areas`, `tabs`, `children` and `items`',
       'each `listViews` entry',
+      'each flow\'s',
       'a dashboard',
       'other installed packages',
     ]) {

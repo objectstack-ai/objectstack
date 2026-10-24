@@ -64,7 +64,7 @@ import {
 } from './flow-dispatch-status.js';
 // Who may START a flow by name — the one rule the trigger door, the action door
 // and this door share (the maintainer's ruling, letters B and A).
-import { ELEVATED_START_REFUSAL, refusesElevatedSelfTriggeredStart } from './flow-start-admission.js';
+import { flowStartRefusal } from './flow-start-admission.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 
 // ============================================================================
@@ -563,11 +563,16 @@ async function executeFlow(
     // not the system one. The same code, status and words the trigger door
     // answers (`flow-start-admission.ts`), so #5040 §4's "same operation, same
     // answer" holds for this refusal too.
-    if (await refusesElevatedSelfTriggeredStart(service, plan.flow, ctx.executionContext)) {
+    //
+    // [ruling record 6377848497, letter A] The same check then asks the flow's
+    // own `requiredPermissions`: an endpoint is a door that starts a flow by
+    // name, so the flow's declaration binds here as at the other doors.
+    const startRefusal = await flowStartRefusal(service, plan.flow, ctx.executionContext);
+    if (startRefusal) {
         return apiErrorResponse({
-            message: ELEVATED_START_REFUSAL.message,
-            httpStatus: ELEVATED_START_REFUSAL.status,
-            code: ELEVATED_START_REFUSAL.code,
+            message: startRefusal.message,
+            httpStatus: startRefusal.status,
+            code: startRefusal.code,
         });
     }
 

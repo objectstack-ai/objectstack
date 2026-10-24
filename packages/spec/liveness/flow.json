@@ -46,6 +46,13 @@
       "evidence": "packages/services/service-automation/src/builtin/crud-nodes.ts: CRUD nodes pass the run identity to ObjectQL per flow.runAs; the engine sets context.runAs at run setup; resolveRunDataContext maps system->isSystem / user->trigger user (#1888)",
       "note": "ENFORCED 2026-06-24 (#1888, ADR-0049): was marker-driven experimental; the engine now switches the data-layer execution identity and restores the caller context. Proof-backed by the dogfood gate."
     },
+    "requiredPermissions": {
+      "status": "live",
+      "verifiedAt": "2026-10-24",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/runtime/src/flow-start-admission.ts#flowStartRefusal (THE start check: reads flow.requiredPermissions off the definition getFlow serves and answers 403 PERMISSION_DENIED when a non-system caller's systemPermissions do not cover it); packages/runtime/src/required-capabilities.ts#missingCapabilities (the capability arithmetic, shared with the action gate actionPermissionError); packages/runtime/src/domains/automation.ts#respondToFlowTrigger (the trigger door); packages/runtime/src/action-execution.ts#dispatchFlowAction (the action door, REST /actions and MCP run_action — inherits the flow's list); packages/runtime/src/endpoint-executor.ts#executeFlow (a declared endpoint of type flow)",
+      "note": "Flow-level twin of action.requiredPermissions (ADR-0066 D4), ruling record 6377848497 letter A: one shared check at every door that starts a flow by name; a parent flow's subflow node is not a door and is not checked again. Door pins: packages/runtime/src/flow-start-required-permissions.test.ts; sub-flow pin: packages/services/service-automation/src/subflow-required-permissions.test.ts."
+    },
     "type": {
       "status": "live",
       "verifiedAt": "2026-08-28",

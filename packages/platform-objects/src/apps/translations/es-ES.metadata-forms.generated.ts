@@ -2195,6 +2195,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ejecutar como",
         helpText: "Ejecutar como system (admin) o user (permisos del usuario actual)"
       },
+      requiredPermissions: {
+        label: "Permisos requeridos",
+        helpText: "Capacidades (systemPermissions de conjuntos de permisos) que quien llama debe tener —todas las enumeradas— para iniciar este flujo. Cada puerta de inicio (la ruta de disparo, una acción de flujo por REST y MCP, un endpoint de flujo) rechaza a cualquier otro con 403, y una acción que inicia este flujo hereda la lista. El paso de subflujo de un flujo padre no se vuelve a comprobar."
+      },
       errorHandling: {
         label: "Manejo de errores",
         helpText: "Qué hacer cuando falla un nodo (fail, retry, continue)"

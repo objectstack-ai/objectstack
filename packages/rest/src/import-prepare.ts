@@ -379,7 +379,7 @@ export interface ImportControlOptOutRefusal {
  * caller the platform already lets past those controls: the system principal,
  * `ExecutionContext.isSystem === true` — the predicate every door that starts
  * an elevated self-triggered flow asks
- * (`refusesElevatedSelfTriggeredStart`, `@objectstack/runtime`), and the only
+ * (`flowStartRefusal`, `@objectstack/runtime`), and the only
  * exemption the create-side read-only strip and the approval record lock
  * admit. ⛔ No permission, capability or administrator standing is read here:
  * none of them lets a caller past those controls anywhere else either (an
