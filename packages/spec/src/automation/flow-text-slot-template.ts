@@ -693,3 +693,28 @@ export function closedScopeTemplateRefusal(text: string, scope: ClosedTemplateSc
   }
   return refusals.length === 0 ? undefined : refusals.join(' ');
 }
+
+/**
+ * The roots of `text`'s `${…}` tokens when they are the only thing
+ * {@link closedScopeTemplateRefusal} could name in it — no `{{ }}` hole, and
+ * every single-brace token a `${…}` path token — else `undefined`.
+ *
+ * [#25680] That is the one shape the console's action runner still reads in
+ * its transitional `${…}` dialect (a sentence with no `{{ }}` hole), so a door
+ * judging an action's copy can tell it apart from text the runner shows raw.
+ * Which of these roots the runner fills is the slot's fact, not this reader's
+ * (`ACTION_COPY_DOLLAR_TRANSITION_ROOTS` in `ui/action-copy-template.ts`).
+ */
+export function dollarOnlyTokenRoots(text: string): string[] | undefined {
+  if (/\{\{[^}]*\}\}/.test(text)) return undefined;
+  const tokens = singleBraceTokens(text);
+  if (tokens.length === 0) return undefined;
+  const roots: string[] = [];
+  for (const token of tokens) {
+    if (token.kind !== 'path' || !isDollarToken(text, token)) return undefined;
+    const root = pathRoot(token.inner);
+    if (root === undefined) return undefined;
+    roots.push(root);
+  }
+  return roots;
+}
