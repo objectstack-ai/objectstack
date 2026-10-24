@@ -398,7 +398,10 @@ describe.each(STRATEGIES)('the analytics door honours the generic-exit declarati
 });
 
 describe('the exposure gate fails closed', () => {
-  it('a declaration lookup that throws refuses the query PERMISSION_DENIED / 403, and nothing runs', async () => {
+  // [#25561] A lookup that THROWS reached no verdict, so the refusal does not
+  // claim one: `503 SERVICE_UNAVAILABLE`, the door's one fault answer — never
+  // the data door's exposure codes and never the denial's `403`.
+  it('a declaration lookup that throws refuses the query SERVICE_UNAVAILABLE / 503, and nothing runs', async () => {
     const executed: string[] = [];
     const service = new AnalyticsService({
       queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
@@ -414,7 +417,7 @@ describe('the exposure gate fails closed', () => {
       () => service.query({ cube: OPEN, measures: ['count'] }),
       () => service.generateSql({ cube: OPEN, measures: ['count'] }),
     ]) {
-      expect(pick(await rejection(call))).toEqual({ code: 'PERMISSION_DENIED', status: 403, object: OPEN });
+      expect(pick(await rejection(call))).toEqual({ code: 'SERVICE_UNAVAILABLE', status: 503, object: OPEN });
     }
     expect(executed).toEqual([]);
   });
@@ -438,7 +441,7 @@ describe('the exposure gate fails closed', () => {
     } as never);
     const service = registered.analytics as AnalyticsService;
     expect(pick(await rejection(() => service.query({ cube: OPEN, measures: ['count'] })))).toEqual({
-      code: 'PERMISSION_DENIED', status: 403, object: OPEN,
+      code: 'SERVICE_UNAVAILABLE', status: 503, object: OPEN,
     });
     expect(executed).toEqual([]);
   });
