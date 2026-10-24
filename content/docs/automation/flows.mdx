@@ -74,6 +74,7 @@ const approvalFlow = {
 | `status` | `enum` | optional | `'draft'`, `'active'`, `'obsolete'`, `'invalid'` (defaults to `'draft'`) |
 | `type` | `FlowType` | ✅ | Flow trigger type (see below) |
 | `runAs` | `enum` | optional | `'system'` (elevated, bypasses RLS; after an approval decision its attribution user is the decider) or `'user'` (the default, RLS-respecting: the trigger user until a human decision, the decider after it, with the decider's permissions). A `'user'` run that resolved **no** trigger user has nothing to scope to, so its data operations are refused — declare `'system'` for schedule / time-relative / API triggers and for record-change flows fired by a write that carried no user |
+| `requiredPermissions` | `string[]` | optional | Capabilities a caller must hold, every one listed, to START the flow. Checked at every door that starts a flow by name (the trigger route, a `type: 'flow'` action over REST and MCP `run_action`, a declared `type: 'flow'` endpoint): anyone else but the system principal is refused `403` `PERMISSION_DENIED` and nothing runs. An action that starts the flow inherits the list. A parent flow's `subflow` node is not a door and is not checked again. This is how to say who may start an elevated `screen` or `api` flow; `current_user.positions` is not an authorization input |
 | `variables` | `FlowVariable[]` | optional | Input/output variables |
 | `nodes` | `FlowNode[]` | ✅ | Flow nodes |
 | `edges` | `FlowEdge[]` | ✅ | Connections between nodes |
@@ -2291,20 +2292,21 @@ curl -b cookies.txt -X POST \
 | `POST /api/v1/automation/:name/runs/:runId/restore-suspension` | Re-arm a run stranded by a failed resume — and, for a nested run, every ancestor whose pause that strand's cascade consumed, deepest first, from whichever member you name. Same gate as `cancel`; body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
 
 **Failures answer real HTTP status codes.** A flow that does not run is not a
-`200`. The route classifies six outcomes. Five of them it reads off the engine's
-own verdict — never the message text; the `403` is the door's own admission
+`200`. The route classifies seven outcomes. Five of them it reads off the engine's
+own verdict — never the message text; the two `403`s are the door's own admission
 check, made before anything is dispatched:
 
 | Status | `error.code` | What happened | What to do |
 |:---|:---|:---|:---|
 | `404` | — | No flow by that name in this deployment | Check the name; nothing was dispatched |
 | `403` | `PERMISSION_DENIED` | The caller is not the system principal, and the flow is declared `runAs: 'system'` with a self-triggered `type` (`autolaunched`, `record_change`, `schedule`). The same answer at every door that starts a flow by name: this route, a `type: 'flow'` action (REST and MCP `run_action`) and a declared `type: 'flow'` endpoint | Let it run on its own trigger, or call it from a parent flow's `subflow` node. If members are meant to start it, declare it `type: 'screen'` (or `'api'` for a signed inbound hook) |
+| `403` | `PERMISSION_DENIED` | The flow declares `requiredPermissions` and the caller, not the system principal, does not hold every capability it names. Checked after the row above, at the same doors; the message names the declared and the missing capabilities | Grant the capability through a permission set's `systemPermissions`, or start the flow as someone who holds it |
 | `409` | `FLOW_DISABLED` | The flow exists but is switched off | Enable it — the identical request then succeeds |
 | `422` | `FLOW_NO_START_NODE` | The stored definition has no `start` node | Fix the flow; retrying cannot help |
 | `422` | `FLOW_INPUT_SCHEMA_INVALID` | A node's `config` violates the `inputSchema` its own definition declares | Fix the flow; the refusal is non-retryable — even under `errorHandling.strategy: 'retry'` the engine refuses once and never enters the retry loop |
 | `400` | `FLOW_FAILED` | The flow **ran** and was rejected | Read `error.details.summary` for the failing node |
 
-The first five never dispatched anything: no node executed, no record was
+The first six never dispatched anything: no node executed, no record was
 written, and there is no run to look up. Only `400` describes a run. The
 `FLOW_INPUT_SCHEMA_INVALID` verdict is a pure function of the flow definition —
 re-running the guard cannot change the answer — so a `retry` strategy does not
