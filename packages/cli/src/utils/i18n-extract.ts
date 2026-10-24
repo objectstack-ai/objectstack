@@ -1377,7 +1377,16 @@ export function collectExpectedEntries(
           { objectName },
         );
 
-        pushOptional(out, ['objects', objectName, 'fields', fieldName, 'help'], field.help ?? field.description, 'field', { objectName });
+        // `inlineHelpText` is the key `FieldSchema` spells help text with, so it
+        // is the authored default-locale text of `help` — after `help`, before
+        // `description` — exactly as the authored label is for `label` (#15711).
+        pushOptional(
+          out,
+          ['objects', objectName, 'fields', fieldName, 'help'],
+          field.help ?? field.inlineHelpText ?? field.description,
+          'field',
+          { objectName },
+        );
         pushOptional(out, ['objects', objectName, 'fields', fieldName, 'placeholder'], field.placeholder, 'field', { objectName });
 
         // Options — accept either `{value, label}[]` arrays or a record map.
