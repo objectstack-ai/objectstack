@@ -51,6 +51,7 @@ import { resolveRecordWallOrganizationField } from './record-organization.js';
 // two entries cannot disagree; the identity is pinned in this module's test.
 export {
     anonymousFormIntakeCandidates,
+    anonymousFormIntakeOrganizations,
     anonymousFormIntakeSlug,
     anonymousFormIntakeSlugs,
     publicFormSlug,
@@ -142,6 +143,16 @@ function judgeObjectSchema(
  *    EFFECTIVE schema (its declared fields plus the injected columns, as a
  *    served object document carries them).
  *
+ * [ADR-0138 D5] A form bound to organizations at publish time
+ * (`organizations`, the form's `sharing.organizations` as
+ * `anonymousFormIntakeOrganizations` reads it) is never unavailable here: its
+ * submission carries the organization its link names, so the reason this
+ * predicate states — an anonymous submission carries no organization — does
+ * not hold for it. Whether the link names a listed organization is the door's
+ * per-request question (`resolvePublicFormOrganization`, `@objectstack/core`).
+ * The binding is a required argument, so no reader can judge a bound form by
+ * the unbound rule by omission.
+ *
  * `readObjectSchema` runs only once a wall is in force. A synchronous reader
  * gets a synchronous answer (the authoring gate); a reader that returns a
  * promise gets a promise, or `null` when nothing had to be read — `await`
@@ -156,17 +167,21 @@ export function anonymousFormIntakeUnavailability(
     object: string,
     posture: TenancyPosture | undefined,
     readObjectSchema: () => PromiseLike<unknown>,
+    organizations: readonly string[],
 ): Promise<AnonymousFormIntakeUnavailable | null> | null;
 export function anonymousFormIntakeUnavailability(
     object: string,
     posture: TenancyPosture | undefined,
     readObjectSchema: () => unknown,
+    organizations: readonly string[],
 ): AnonymousFormIntakeUnavailable | null;
 export function anonymousFormIntakeUnavailability(
     object: string,
     posture: TenancyPosture | undefined,
     readObjectSchema: () => unknown,
+    organizations: readonly string[],
 ): Promise<AnonymousFormIntakeUnavailable | null> | AnonymousFormIntakeUnavailable | null {
+    if (organizations.length > 0) return null;
     if (posture === undefined || !postureEnforcesWall(posture)) return null;
     const objectSchema = readObjectSchema();
     if (isPromiseLike(objectSchema)) {

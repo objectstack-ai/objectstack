@@ -88,6 +88,11 @@ export const SharingConfigSchema = lazySchema(() => strictObject({
     domains: 'allowedDomains',
     allowedDomain: 'allowedDomains',
     emailDomains: 'allowedDomains',
+    // The organization binding (ADR-0138 D5). Plural on purpose: one form is
+    // published to every organization it lists.
+    organization: 'organizations',
+    orgs: 'organizations',
+    tenants: 'organizations',
     expires: 'expiresAt',
     expiry: 'expiresAt',
     expiration: 'expiresAt',
@@ -109,6 +114,15 @@ export const SharingConfigSchema = lazySchema(() => strictObject({
     .describe('Expiration date/time in ISO 8601 format'),
   allowAnonymous: z.boolean().optional().default(false)
     .describe('Allow access without authentication'),
+  organizations: z.array(z.string().min(1)).min(1).optional().describe(
+    'The organizations this public form is published to, by organization slug (ADR-0138 D5). '
+    + 'Absent: the form serves the organization the deployment resolves for an anonymous caller, which '
+    + 'exists only on a deployment holding exactly one organization, and a link naming an organization '
+    + 'is refused. Set: every public link names one of these organizations, as '
+    + '`/forms/:slug?organization=<slug>`, and a submission lands in that organization, under its own '
+    + 'number sequences. A link naming no organization, or one not listed here, is answered as not found '
+    + 'by both form doors.',
+  ),
 }));
 
 // [no-door retirement] `EmbedConfigSchema` / `EmbedConfig` were REMOVED per ADR-0049

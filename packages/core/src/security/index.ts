@@ -282,6 +282,15 @@ export {
   type GuestOrganizationRefusalReason,
 } from './guest-organization.js';
 
+// [ADR-0138 D5] The organization a public form request acts in when the form
+// is bound to organizations at publish time (`sharing.organizations`) — the
+// form doors ask it before they read or write anything.
+export {
+  resolvePublicFormOrganization,
+  type PublicFormOrganizationDecision,
+  type PublicFormOrganizationRefusalReason,
+} from './public-form-organization.js';
+
 // [#18783] The EFFECTIVE object-permission map — ONE function behind both the
 // `/auth/me/permissions` `objects` slot and `ISecurityService.getEffectiveObjectPermissions`
 // (the map `current_user.can()` reads). The four folds moved here from

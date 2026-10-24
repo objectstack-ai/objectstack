@@ -67,15 +67,16 @@
 
 import {
     anonymousFormIntakeCandidates,
+    anonymousFormIntakeOrganizations,
     anonymousFormIntakePosture,
     anonymousFormIntakeUnavailability,
     anonymousFormIntakeWithdrawnIn,
     anonymousFormObjectName,
 } from '@objectstack/metadata-core';
-import { isEmptyForRequired, isMissing } from '@objectstack/core';
-import type { CreateDataRequest, GetMetaItemsRequest } from '@objectstack/spec/api';
+import { isEmptyForRequired, isMissing, resolvePublicFormOrganization } from '@objectstack/core';
+import type { CreateDataRequest, FindDataRequest, GetMetaItemsRequest } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
-import { renderValidationMessage } from '@objectstack/spec/system';
+import { renderValidationMessage, SystemObjectName } from '@objectstack/spec/system';
 import { validationFailure } from '@objectstack/types';
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import { isExpectedRouteError, mapDataError } from './error-response.js';
@@ -171,11 +172,24 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
     // supported no-tenancy composition. The wiring mirrors
     // `resolveProtocol`, so the tenancy service and the protocol always
     // come from the same kernel.
+    //
+    // [ADR-0138 D5] …and WHICH organization the request acts in. A form whose
+    // `sharing.organizations` lists organizations is published to those, and
+    // its link names one (`?organization=SLUG`); the request acts in that
+    // organization and only in it (`organizationId`, threaded by the submit
+    // door as the write's `tenantId`). A form that lists none is ADR-0138
+    // D4's, unchanged: no organization here, the engine derives the
+    // deployment's one or refuses. Every other combination — a bound form's
+    // link naming no organization or an unlisted one, an unbound form's link
+    // naming any, a listed slug no organization carries — is answered
+    // exactly as an unpublished form (`null`), so an anonymous caller learns
+    // nothing about which organizations exist or which a form lists.
+    // `resolvePublicFormOrganization` (`@objectstack/core`) is the decision.
     const resolveFormBySlug = async (
         environmentId: string | undefined,
         req: any,
         slug: string,
-    ): Promise<{ view: any; form: any; object: string } | null> => {
+    ): Promise<{ view: any; form: any; object: string; organizationId?: string } | null> => {
         const p = await this.resolveProtocol(environmentId, req);
         if (typeof (p as any).getMetaItems !== 'function') return null;
         const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
@@ -191,16 +205,42 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
         const items = listOf(await p.getMetaItems(viewsRequest));
         const match = findPublicFormView(items, slug);
         if (!match) return null;
+        const organizations = anonymousFormIntakeOrganizations(match.form?.sharing);
+        const organization = await resolvePublicFormOrganization({
+            published: organizations,
+            requested: req.query?.organization,
+            // The server's own read, as the system: the slug only selects
+            // among the organizations the form's declaration lists.
+            probeOrganizationsBySlug: async (organizationSlug) => {
+                const probe: ServerScopedDataRequest<FindDataRequest> = {
+                    object: SystemObjectName.ORGANIZATION,
+                    query: { where: { slug: organizationSlug }, fields: ['id'], limit: 2 },
+                    ...(environmentId ? { environmentId } : {}),
+                    context: { isSystem: true },
+                };
+                const found: any = await p.findData(probe);
+                const rows: any[] = Array.isArray(found?.records) ? found.records : [];
+                return rows
+                    .map((row) => row?.id)
+                    .filter((id: unknown) => id !== undefined && id !== null && String(id) !== '')
+                    .map((id: unknown) => String(id));
+            },
+        });
+        if (organization.kind === 'refuse') return null;
         // [#21476] A form that cannot take intake on this posture is not
         // offered: `null` here IS the withdrawn form's answer on both
         // doors, so an anonymous caller learns nothing about the tenancy.
+        // A bound form is never unavailable on posture: its submission
+        // carries the organization its link names.
         const unavailable = await anonymousFormIntakeUnavailability(
             match.object,
             anonymousFormIntakePosture(tenancy),
             async () => (await this.readFormObjectDefinitions(p, environmentId))
                 .find((o: any) => o?.name === match.object),
+            organizations,
         );
-        return unavailable ? null : match;
+        if (unavailable) return null;
+        return organization.kind === 'bound' ? { ...match, organizationId: organization.organizationId } : match;
     };
 
     // GET /forms/:slug — resolve and return the public form spec
@@ -559,10 +599,16 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 // the engine builds `ctx.session` and `ctx.user` without either
                 // key. With no `userId` here, `ctx.user` is unset, so a hook sees
                 // this submission as a write with no user, like any other.
+                //
+                // [ADR-0138 D5] A bound form's submission acts in the
+                // organization its link names: `tenantId` is the write
+                // target the engine stamps and the number sequences count
+                // under. An unbound form's carries none (ADR-0138 D4).
                 const context: any = {
                     publicFormGrant: { object: match.object },
                     permissions: ['guest_portal'],
                     anonymous: true,
+                    ...(match.organizationId !== undefined ? { tenantId: match.organizationId } : {}),
                 };
 
                 const p = await this.resolveProtocol(environmentId, req);

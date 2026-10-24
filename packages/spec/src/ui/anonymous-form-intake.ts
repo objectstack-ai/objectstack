@@ -80,6 +80,20 @@ export function anonymousFormIntakeSlug(sharing: unknown): string | null {
   return publicFormSlug(s.publicLink);
 }
 
+/**
+ * The organizations a form's `sharing` publishes it to (ADR-0138 D5), by
+ * organization slug, as declared — or `[]` when the form names none, which is
+ * the unbound form ADR-0138 D4 serves in the organization the deployment
+ * resolves. Reads the declaration only: whether a listed slug names an
+ * organization that exists is the server's question, asked per request.
+ */
+export function anonymousFormIntakeOrganizations(sharing: unknown): string[] {
+  if (!sharing || typeof sharing !== 'object') return [];
+  const organizations = (sharing as Record<string, unknown>).organizations;
+  if (!Array.isArray(organizations)) return [];
+  return organizations.filter((o): o is string => typeof o === 'string' && o !== '');
+}
+
 /** Every form candidate of a `view` body that is open to anonymous intake, in scan order. */
 export function anonymousFormIntakeCandidates(view: unknown): AnonymousFormIntakeCandidate[] {
   if (!view || typeof view !== 'object') return [];
