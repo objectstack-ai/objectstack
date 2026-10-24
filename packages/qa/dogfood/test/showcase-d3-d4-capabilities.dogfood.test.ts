@@ -122,17 +122,21 @@ describe('showcase: D3 compound sharing (#1887) + D4 RLS check', () => {
     expect(granted, 'a share row on a private-OWD object is accepted').toBeTruthy();
 
     // The contrast that names the retired rules' defect, on the object they
-    // used to sit on: same call, same caller, refused for the OWD alone. The
+    // used to sit on: same call, same caller, refused for the OWD. The
     // record id deliberately names no row — the D7 verdict is computed from
     // the OBJECT before any record is read, which is precisely why it is
     // caller- and record-independent. Both the code and the object are
     // asserted, so a refusal arriving for some other reason cannot pass.
+    // [#25549] A public object's share row is now consulted for an EXTERNAL
+    // member of the record's organization, so the public-OWD refusal names the
+    // recipient's standing: `u_d34_probe` resolves to no organization, and the
+    // row would still never be consulted for it.
     await expect(
       sharing.grant(
         { object: 'showcase_project', recordId: 'pj_absent', recipientType: 'user', recipientId: 'u_d34_probe', accessLevel: 'read' },
         { isSystem: true },
       ),
-    ).rejects.toThrow(/SHARING_NOT_ENABLED: 'showcase_project' is not under record-sharing enforcement/);
+    ).rejects.toThrow(/SHARING_NOT_ENABLED: 'showcase_project' has a public sharing model, so a share row on it is consulted only for an external member/);
   });
 
   // ── ADR-0058 D4 ────────────────────────────────────────────────────────────
