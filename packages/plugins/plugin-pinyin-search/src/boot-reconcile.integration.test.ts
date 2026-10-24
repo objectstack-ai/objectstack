@@ -104,7 +104,7 @@ class FixturePlugin implements Plugin {
   }
 
   async row(id: string): Promise<Record<string, any> | null> {
-    return this.engine.findOne(PROBE, { where: { id }, fields: ['id', 'title', '__search'], context: SYSTEM } as any);
+    return this.engine.findOne(PROBE, { where: { id }, fields: ['id', 'title', '__search'], context: SYSTEM });
   }
 }
 
@@ -179,7 +179,7 @@ describe('#25634 the boot reconcile reads what changed since its last completed 
     expect((await first.fixture.row('p00011'))?.__search ?? null).toBeNull();
     const receipt: any = await first.fixture.engine.findOne('sys_migration', {
       where: { id: SEARCH_COMPANION_RECONCILE_MIGRATION_ID }, context: SYSTEM,
-    } as any);
+    });
     expect(receipt?.blocking).toBe(0);
     expect(receipt?.verified_at ?? null).toBeNull();
     expect(JSON.parse(receipt.details).objects[PROBE].sources).toEqual(['title']);
@@ -212,7 +212,7 @@ describe('#25634 the boot reconcile reads what changed since its last completed 
     const gate = new Promise<void>((resolve) => { open = resolve; });
     const { fixture, plugin } = await boot({ gate, before: (f) => f.directInsert(history()) });
     // The reconcile is still parked on its first page; the write does not wait for it.
-    await fixture.engine.insert(PROBE, { id: 'p_live', title: '王芳' }, { context: SYSTEM } as any);
+    await fixture.engine.insert(PROBE, { id: 'p_live', title: '王芳' }, { context: SYSTEM });
     expect((await fixture.row('p_live'))?.__search).toBe('wangfang wf');
     open();
     await plugin.whenReconciled();

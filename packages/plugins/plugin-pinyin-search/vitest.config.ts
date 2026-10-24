@@ -17,6 +17,8 @@ export default defineConfig({
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
+      // `boot-reconcile.ts` reads the ledger's row contract from spec.
+      { find: /^@objectstack\/spec\/system$/, replacement: path.resolve(__dirname, '../../spec/src/system/index.ts') },
       {
         find: /^@objectstack\/platform-objects\/system$/,
         replacement: path.resolve(__dirname, '../../platform-objects/src/system/index.ts'),
