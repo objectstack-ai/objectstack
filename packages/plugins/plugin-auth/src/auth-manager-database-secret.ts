@@ -11,7 +11,9 @@
  * `AuthManager` method of the same name as it stood, re-indented one level
  * and otherwise unedited: the same adapter and created-user staging, the same
  * fallback store, the same secret precedence, the same production refusal and
- * development warning.
+ * development warning. (Since then that refusal's gate fails closed:
+ * the fallback is admitted on a development boot or under `NODE_ENV=test`
+ * only — see `generateSecret`.)
  *
  * ## How the moved bodies reach the class
  *
@@ -40,6 +42,7 @@
  * Nothing re-exports this module, so the published surface does not move.
  */
 
+import { isDevelopmentBoot } from '@objectstack/core';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type { AuthManager } from './auth-manager.js';
 import { createObjectQLAdapterFactory } from './objectql-adapter.js';
@@ -140,14 +143,24 @@ export function generateSecret(): string {
   const envSecret = readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true });
   if (envSecret) return envSecret;
 
-  // No secret configured. In production this is FATAL: a predictable
-  // `dev-secret-<timestamp>` makes session tokens forgeable (session
-  // forgery). Refuse to boot rather than run insecurely.
-  if (process.env.NODE_ENV === 'production') {
+  // No secret configured. Outside development this is FATAL: a predictable
+  // `dev-secret-<timestamp>` makes session tokens forgeable. The fallback is
+  // fail-CLOSED: it is admitted only on a development boot
+  // (`isDevelopmentBoot`, `@objectstack/core` — `NODE_ENV` exactly
+  // `development`) or under `NODE_ENV=test`, the pair core's own production
+  // fuse reads (`isCloudManaged`). An unset, misspelled or custom `NODE_ENV`
+  // is treated as a real deployment and refused, so an embedder who forgets
+  // to export it gets a refusal to boot, never a guessable secret. `os serve`
+  // and `os start` default an unset `NODE_ENV` to `production` (and `--dev`
+  // sets `development`), so the CLI boots are unaffected.
+  const developmentOrTest = isDevelopmentBoot(undefined) || process.env.NODE_ENV === 'test';
+  if (!developmentOrTest) {
     throw new Error(
-      '[auth] OS_AUTH_SECRET is required in production but is not set. ' +
+      '[auth] OS_AUTH_SECRET is required outside development but is not set ' +
+      `(NODE_ENV is ${process.env.NODE_ENV === undefined ? 'unset' : JSON.stringify(process.env.NODE_ENV)}). ` +
       'Refusing to boot with a temporary development secret — session tokens ' +
-      'would be forgeable. Set OS_AUTH_SECRET to a strong random value.'
+      'would be forgeable. Set OS_AUTH_SECRET to a strong random value, or set ' +
+      'NODE_ENV=development for a local development boot.'
     );
   }
 

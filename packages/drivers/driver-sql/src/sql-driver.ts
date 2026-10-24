@@ -1867,6 +1867,44 @@ function refuseAggregateFunction(func: string): never {
 }
 
 /**
+ * The window functions {@link SqlDriver.findWithWindowFunctions} compiles —
+ * a CLOSED set, keyed by the lowercased name a caller may spell in any case.
+ *
+ * The door emits a function ARGUMENT-LESS (`FUNC() OVER (…)`, see
+ * {@link SqlWindowFunctionSpec}), so the set is exactly the standard ranking
+ * functions that take no argument, each one available on every dialect this
+ * driver targets (PostgreSQL, MySQL 8, SQLite 3.25+). The name used to be
+ * spliced into the statement verbatim; it is now looked up here and only the
+ * value from this table reaches SQL, so the statement's text is never the
+ * caller's.
+ */
+const SQL_WINDOW_FUNCTIONS: ReadonlyMap<string, string> = new Map([
+  ['row_number', 'ROW_NUMBER'],
+  ['rank', 'RANK'],
+  ['dense_rank', 'DENSE_RANK'],
+  ['percent_rank', 'PERCENT_RANK'],
+  ['cume_dist', 'CUME_DIST'],
+]);
+
+/** The two `OVER (ORDER BY …)` directions, keyed by the lowercased spelling. */
+const SQL_WINDOW_SORT_DIRECTIONS: ReadonlyMap<string, 'ASC' | 'DESC'> = new Map([
+  ['asc', 'ASC'],
+  ['desc', 'DESC'],
+]);
+
+/**
+ * A `windowFunctions[]` entry this door cannot compile: an unknown function
+ * name or sort direction. A malformed query (`INVALID_QUERY`, 400), the class
+ * {@link undeclaredAggregateFunctionError} answers at the aggregate door.
+ */
+function invalidWindowFunctionQueryError(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  return err;
+}
+
+/**
  * [#6212] A `groupBy` entry asks for a date BUCKET this face cannot emit.
  *
  * `GroupByNodeSchema` declares `{ field, dateGranularity }` and `DateGranularity`
@@ -5107,13 +5145,17 @@ export interface IntrospectedSchema extends SpecIntrospectedSchema {
  *   input that works.
  */
 export interface SqlWindowFunctionSpec {
-  /** Window function name, emitted argument-less and uppercased (`rank` → `RANK()`). */
+  /**
+   * Window function name, emitted argument-less and uppercased (`rank` → `RANK()`):
+   * one of `row_number`, `rank`, `dense_rank`, `percent_rank`, `cume_dist`, in any
+   * case. Any other name is refused with `INVALID_QUERY` (400).
+   */
   function: string;
   /** Column alias the computed value is projected as. */
   alias: string;
   /** `PARTITION BY` targets, mapped through the driver's storage-name mapping. */
   partitionBy?: string[];
-  /** `ORDER BY` inside the `OVER (…)` clause; `order` defaults to `asc`. */
+  /** `ORDER BY` inside the `OVER (…)` clause; `order` defaults to `asc`, and any value but `asc` / `desc` (any case) is refused. */
   orderBy?: { field: string; order?: 'asc' | 'desc' }[];
 }
 
@@ -18573,23 +18615,43 @@ export class SqlDriver implements IDataDriver {
 
   // ── Window function builder ─────────────────────────────────────────────────
 
+  /**
+   * Compile one {@link SqlWindowFunctionSpec} to `FUNC() OVER (…)`. Nothing the
+   * caller sent reaches the statement as text: the function name and each sort
+   * direction are looked up in closed tables ({@link SQL_WINDOW_FUNCTIONS},
+   * {@link SQL_WINDOW_SORT_DIRECTIONS}) and refused when absent, and every
+   * `partitionBy` / `orderBy` field is emitted as a quoted column reference
+   * (`knex.ref`, the idiom the rest of this file quotes columns with).
+   */
   protected buildWindowFunction(spec: SqlWindowFunctionSpec): string {
-    const func = spec.function.toUpperCase();
+    const func = SQL_WINDOW_FUNCTIONS.get(String(spec.function).toLowerCase());
+    if (func === undefined) {
+      throw invalidWindowFunctionQueryError(
+        `Window function ${JSON.stringify(String(spec.function))} is not one this door compiles. ` +
+        `Supported (argument-less, any case): ${[...SQL_WINDOW_FUNCTIONS.keys()].join(', ')}. ` +
+        `Fix the "function" key of the windowFunctions[] entry.`,
+      );
+    }
+    const column = (field: string) => this.knex.ref(this.mapSortField(String(field))).toQuery();
     let sql = `${func}()`;
 
     const overParts: string[] = [];
 
     if (spec.partitionBy && Array.isArray(spec.partitionBy) && spec.partitionBy.length > 0) {
-      const partitionFields = spec.partitionBy.map((f: string) => this.mapSortField(f)).join(', ');
-      overParts.push(`PARTITION BY ${partitionFields}`);
+      overParts.push(`PARTITION BY ${spec.partitionBy.map(column).join(', ')}`);
     }
 
     if (spec.orderBy && Array.isArray(spec.orderBy) && spec.orderBy.length > 0) {
       const orderFields = spec.orderBy
         .map((s) => {
-          const field = this.mapSortField(s.field);
-          const order = (s.order || 'asc').toUpperCase();
-          return `${field} ${order}`;
+          const order = SQL_WINDOW_SORT_DIRECTIONS.get(String(s.order || 'asc').toLowerCase());
+          if (order === undefined) {
+            throw invalidWindowFunctionQueryError(
+              `Window sort direction ${JSON.stringify(String(s.order))} is not "asc" or "desc". ` +
+              `Fix the "order" key of the windowFunctions[].orderBy entry.`,
+            );
+          }
+          return `${column(s.field)} ${order}`;
         })
         .join(', ');
       overParts.push(`ORDER BY ${orderFields}`);

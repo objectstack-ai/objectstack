@@ -200,7 +200,7 @@ jobs:
       # of nothing at all. An allow-list makes each new event fail toward
       # THE FILTER CONTRACT's half 1 instead: the step is skipped, its outputs
       # are the empty string, `|| 'true'` fills them in, and everything runs.
-      - uses: dorny/paths-filter@v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: changes
         if: github.event_name == 'pull_request' || github.event_name == 'push'
         with:
@@ -807,9 +807,9 @@ jobs:
         env:
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
           TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
-          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TOKEN: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
         run: |
           FILTERS=""
           if [ -s "$RUNNER_TEMP/shard-packages.txt" ]; then
@@ -1892,9 +1892,9 @@ jobs:
       - name: Build driver-sql and its dependencies
         env:
           TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
-          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TOKEN: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
         run: pnpm exec turbo run build --filter=@objectstack/driver-sql... --concurrency=4
 
       # The whole driver-sql suite runs under the skewed process zone — not
@@ -1954,9 +1954,9 @@ jobs:
       - name: Build the non-SQL temporal backends
         env:
           TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
-          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TOKEN: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
         run: >-
           pnpm exec turbo run build
           --filter=@objectstack/service-analytics...
@@ -2038,9 +2038,9 @@ jobs:
       - name: Build metadata-protocol and its dependencies
         env:
           TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
-          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TOKEN: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
         run: pnpm exec turbo run build --filter=@objectstack/metadata-protocol... --concurrency=4
 
       - name: Run the metadata-protocol migration statements against live MySQL and PostgreSQL
@@ -2100,9 +2100,9 @@ jobs:
       - name: Build runtime and its dependencies
         env:
           TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
-          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TOKEN: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
         run: pnpm exec turbo run build --filter=@objectstack/runtime... --concurrency=4
 
       - name: Run the runtime cascade-delete matrix against live PostgreSQL
@@ -2238,9 +2238,9 @@ jobs:
         env:
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
           TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
-          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TOKEN: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
         run: |
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood-build.log" --stall-minutes 10 \
@@ -2668,12 +2668,21 @@ jobs:
       # `merge_group` and on `push` / `workflow_dispatch` against main; every
       # other event, `pull_request` and `schedule` included, only reads,
       # because read-only is the default branch of the expression. This is
-      # turbo configuration, not a property of the credential: a same-repo PR
-      # receives the secrets and runs its own copy of this file; fork PRs
-      # receive none. ⚠️ Never let it evaluate to '': turbo then disables the
-      # LOCAL cache too (`no caches are enabled`) and re-executes everything.
+      # turbo configuration, not a property of the credential: the token can
+      # write and the signing key can sign whatever holds them, which is why
+      # the two secrets below are scoped by event rather than trusted to it.
+      # ⚠️ Never let it evaluate to '': turbo then disables the LOCAL cache
+      # too (`no caches are enabled`) and re-executes everything.
       #
-      # Credentials: TURBO_TOKEN (secret) is passed only when the signing key
+      # Credentials go only to runs whose code has landed or is landing:
+      # `merge_group`, and any run on refs/heads/main (push, the hourly
+      # schedule, workflow_dispatch on main). A `pull_request` run, and a
+      # dispatch on any other branch, receives neither TURBO_TOKEN nor the
+      # signing key, so code a PR adds can neither upload to the remote nor
+      # sign an artifact that a queue or main build would replay. Such a run
+      # builds from the restored Actions-cache seed (local:rw) and the
+      # assertion step reports the remote as withheld, never as broken.
+      # TURBO_TOKEN (secret) is further passed only when the signing key
       # is non-empty, because an empty key still "signs" with a zero-length
       # HMAC key; TURBO_TEAM is a repo VARIABLE so the slug is not masked out
       # of the log; TURBO_REMOTE_CACHE_SIGNATURE_KEY (secret) must equal
@@ -2718,9 +2727,9 @@ jobs:
       - name: Build packages (excluding docs)
         env:
           TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
-          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TOKEN: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
         run: pnpm build --summarize --log-file=.turbo/remote-cache/build-core.json
 
       - name: The Turbo remote cache was on for the build
