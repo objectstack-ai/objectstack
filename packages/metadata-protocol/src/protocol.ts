@@ -3,14 +3,6 @@
 import type {
     DataProtocol, FlowRegistration, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
-// [ADR-0138 D2b] The one cross-item judge of the anonymous flow endpoint ×
-// `runAs: 'system'` flow pair, and the flow-direction refusal it words — see
-// `anonymousElevatedFlowRefusal`.
-import {
-    anonymousElevatedFlowPairs,
-    elevatedFlowAnonymousEndpointsMessage,
-    type AnonymousFlowDoorCandidate,
-} from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, resolveTenancyPosture, resolveThrownHttpError, sandboxBusinessMessage } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
@@ -176,14 +168,14 @@ import {
     discriminateDefaultValueShape,
     externalBindingDatasourceRefusal,
 } from '@objectstack/spec/data';
-import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal, METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
+import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
 import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
 import { ALL_CONVERSIONS, applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
-import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, defaultRecordPageObject } from '@objectstack/spec/ui';
+import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
 // this file imports BOTH `@objectstack/spec` (root, for
@@ -209,12 +201,11 @@ import {
     evaluateLockForDelete,
     resolveLockState,
     MetadataLockSchema,
-    MetadataProtectionFields,
     type MetadataLock,
     type MetadataLockSource,
     type MetadataProvenance,
 } from '@objectstack/spec/kernel';
-import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
+import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 // [#19417] The package-id declaration and its remedy text, imported to be
 // SURFACED rather than restated — see the gate at the top of `installPackage`.
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
@@ -359,6 +350,21 @@ import {
     storedParentForToken,
     strictDraftReadAddress,
 } from './protocol-lock-version-gates.js';
+// [#25467 cut 6] The save door's refusals (the item-name grammar, the default record
+// page and external-binding refusals, the anonymous elevated-flow pair, the authored
+// lock family, the write binding, the namespace prefix); the methods of the same names
+// below hand each body the members it reads (`SaveDoorRefusalHost`).
+import {
+    anonymousElevatedFlowRefusal,
+    authoredLockFamily,
+    defaultRecordPageSaveRefusal,
+    externalBindingDatasourceDefinition,
+    externalBindingSaveRefusal,
+    objectNamespacePrefixViolation,
+    objectsBoundExternallyTo,
+    refuseUngrammaticalMetaItemName,
+    saveWriteBinding,
+} from './protocol-save-door-refusals.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -1227,94 +1233,6 @@ function withoutProtectionBlock(type: string, item: unknown): unknown {
 }
 
 /**
- * [ADR-0010 §3.3] The lock family: the `_lock*` members of the protection
- * envelope every metadata type spreads (`MetadataProtectionFields`), read off
- * that declaration so this file keeps no list of its own.
- */
-const LOCK_FAMILY_KEYS: readonly string[] = Object.freeze(
-    Object.keys(MetadataProtectionFields).filter((key) => key.startsWith('_lock')),
-);
-
-/** The lock family `body` carries: each member with a value, and nothing else. */
-function lockFamilyOf(body: unknown): Record<string, unknown> {
-    const family: Record<string, unknown> = {};
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return family;
-    for (const key of LOCK_FAMILY_KEYS) {
-        const value = (body as Record<string, unknown>)[key];
-        if (value !== undefined) family[key] = value;
-    }
-    return family;
-}
-
-/** Do two lock families state the same members with the same values? */
-function sameLockFamily(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
-    return LOCK_FAMILY_KEYS.every((key) => a[key] === b[key]);
-}
-
-/**
- * `body` carrying exactly `family` as its lock family: every member `family`
- * states, and no other `_lock*` key. Returns `body` itself when nothing
- * changes, and a copy otherwise, so a caller's own body is never mutated.
- */
-function withLockFamily(body: Record<string, unknown>, family: Record<string, unknown>): Record<string, unknown> {
-    const unchanged = LOCK_FAMILY_KEYS.every((key) =>
-        family[key] === undefined ? !Object.prototype.hasOwnProperty.call(body, key) : body[key] === family[key]);
-    if (unchanged) return body;
-    const out: Record<string, unknown> = { ...body };
-    for (const key of LOCK_FAMILY_KEYS) {
-        if (family[key] === undefined) delete out[key];
-        else out[key] = family[key];
-    }
-    return out;
-}
-
-/**
- * [ADR-0010 §3.5 and §4.1] The save door's refusal of a body whose lock family
- * would set, change or remove the item's lock: an author's write never does
- * any of the three. See {@link ObjectStackProtocolImplementation.authoredLockFamily}
- * for what is judged against what, and for the echo it accepts.
- *
- * The refusal family {@link protectionBlockRefusal} gives the `protection`
- * block, at the same position: `VALIDATION_ERROR` / 400, no code minted, the
- * prescription first because a 4xx message crosses the REST boundary bounded
- * at 500 characters with its tail truncated. It is located twice: the message
- * names every `_lock*` key the body sent, and `issues[]` carries each as a
- * path, the shape the Studio designer keys on. The remedy is to remove them —
- * a body that sends no `_lock*` key keeps the lock the item has — and the
- * door it names for a lock is the one ADR-0010 states: a code package's
- * loader, translating `protection` (Phase 4.3).
- */
-function authoredLockFamilyRefusal(
-    type: string,
-    saveName: string,
-    sent: Record<string, unknown>,
-    served: Record<string, unknown>,
-): Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] } {
-    const keys = LOCK_FAMILY_KEYS.filter((key) => sent[key] !== undefined);
-    const servedLock = served._lock ?? 'none';
-    const sentLock = sent._lock ?? 'none';
-    const effect = servedLock === 'none'
-        ? (sentLock === 'none' ? 'add lock keys to it' : 'set a lock on it')
-        : sentLock === 'none' ? 'remove its lock' : 'change its lock';
-    const err = new Error(
-        `Remove ${keys.map((key) => `\`${key}\``).join(', ')} from ${type} '${saveName}' and send it again. `
-        + `Nothing was written. They would ${effect}, and the metadata API never sets, changes or removes a lock: `
-        + 'an item saved here is authored in this system (ADR-0010 §3.5). To lock an item, declare `protection` '
-        + "on it in a code package's source, where the package loader translates it into the item's lock "
-        + '(ADR-0010 Phase 4.3).',
-    ) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
-    err.code = 'VALIDATION_ERROR';
-    err.status = 400;
-    err.issues = keys.map((key) => ({
-        path: key,
-        message: "Not accepted through the metadata API: only a code package's loader sets an item's lock. "
-            + 'Sent back exactly as a read of this item serves it, the key is accepted and ignored.',
-        code: 'custom',
-    }));
-    return err;
-}
-
-/**
  * [#23165] The rows of an item a delete leaves stored at its address, in
  * words, for the delete receipt: its rows bound to other packages (sorted, as
  * {@link ObjectStackProtocolImplementation.packagelessAddress} answers them,
@@ -1371,7 +1289,7 @@ function packagelessPublishNoDraftRefusal(
  * a metadata-authoring diagnostic, its consumers already read raw zod codes, and
  * aligning the two vocabularies is a separate decision (#5364).
  */
-interface MetadataIssueEntry {
+export interface MetadataIssueEntry {
     path: string;
     message: string;
     code: string | undefined;
@@ -4104,7 +4022,7 @@ function metadataIssueHeadline(issues: MetadataIssueEntry[]): string {
  * attached identically on every face, and the headline still names how many
  * findings there are and where they are.
  */
-function specValidationFindings(
+export function specValidationFindings(
     face: MetadataWriteFace | undefined,
     issues: MetadataIssueEntry[],
 ): string {
@@ -5674,7 +5592,7 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * clause is its own: the import accepts no `force`, and it writes only names
  * no environment row held when it began.
  */
-type MetadataWriteFace =
+export type MetadataWriteFace =
     | 'package-duplicate'
     | 'meta-envelope'
     | 'meta-dispatch'
@@ -19856,19 +19774,8 @@ export class ObjectStackProtocolImplementation implements
      * why it runs before the {@link refuseUnmintableMetaType} probe.
      */
     private refuseUngrammaticalMetaItemName(request: { type: string, name: string }): void {
-        if (METADATA_ITEM_NAME_PATTERN.test(request.name)) return;
-        const err = new Error(
-            `${JSON.stringify(request.name)} is not a legal metadata item name. `
-            + `Item names are lowercase snake_case segments, optionally dot-qualified — `
-            + `/^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$/ — e.g. 'crm_lead' or 'crm_lead.pipeline'. `
-            + `No slashes, spaces, uppercase, empty segments, or leading/trailing dots. `
-            + `The compound '<section>/<name>' spelling is retired: qualify with a dot `
-            + `('crm_lead.pipeline') and express containment structurally, never with a `
-            + `separator inside the identity string.`,
-        );
-        (err as any).code = 'INVALID_REQUEST';
-        (err as any).status = 400;
-        throw err;
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        return refuseUngrammaticalMetaItemName(request);
     }
 
     /**
@@ -20037,76 +19944,21 @@ export class ObjectStackProtocolImplementation implements
      * refuses that write (`NOT_OVERRIDABLE`). Runtime words carry no tracker
      * number.
      */
-    private async defaultRecordPageSaveRefusal(
+    private defaultRecordPageSaveRefusal(
         type: string,
         item: unknown,
         saveName: string,
         verb: 'saved' | 'published' | 'restored' = 'saved',
     ): Promise<(Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422 }) | undefined> {
-        if (type !== 'page') return undefined;
-        const object = defaultRecordPageObject(item);
-        if (object === undefined) return undefined;
-
-        // `shipped`: a page a package ships through the registry, which no save
-        // can edit; a stored row (bound to a package or not) is editable here.
-        type Holder = { page: string; packageId?: string; shipped: boolean };
-        const holders: Holder[] = [];
-        let records: any[] = [];
-        try {
-            // [ADR-0131 D6] A save lands environment-wide, so the pages it meets
-            // are the environment-wide rows.
-            records = await this.readActiveOverlayRows({ type });
-        } catch (error) {
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-        const stored = this.storedOverlayEntries({ type }, records);
-        const storedNames = new Set(stored.map((entry) => entry.name));
-        for (const entry of stored) {
-            if (entry.name === saveName || defaultRecordPageObject(entry.data) !== object) continue;
-            holders.push(entry.packageId
-                ? { page: entry.name, packageId: entry.packageId, shipped: false }
-                : { page: entry.name, shipped: false });
-        }
-        const registry = this.engine.registry;
-        if (typeof registry?.defaultRecordPageHoldersOf === 'function') {
-            const registered = registry.defaultRecordPageHoldersOf(object) as Array<
-                { kind: 'package'; packageId: string; page: string } | { kind: 'environment'; page: string }
-            >;
-            for (const holder of registered) {
-                if (holder.page === saveName || storedNames.has(holder.page)) continue;
-                holders.push(holder.kind === 'package'
-                    ? { page: holder.page, packageId: holder.packageId, shipped: true }
-                    : { page: holder.page, shipped: false });
-            }
-        }
-        if (holders.length === 0) return undefined;
-
-        const seen = new Set<string>();
-        const unique = holders.filter((h) => {
-            const key = `${h.packageId ?? ''}|${h.page}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
-        const describe = (h: Holder) =>
-            h.packageId ? `page '${h.page}' of package '${h.packageId}'` : `page '${h.page}', authored in this system`;
-        const named = unique.map(describe);
-        const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
-        const remedy = unique.some((h) => h.shipped)
-            ? `Save '${saveName}' with \`isDefault: false\`: a page a package ships stays the default unless the `
-              + `deployment is composed without that package's page.`
-            : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
-              + `with \`isDefault: false\` to make '${saveName}' the default instead.`;
-        const err = new Error(
-            `Default record page conflict: page '${saveName}' cannot be ${verb} as the default record page of object `
-            + `'${object}': ${others}. ${remedy} At most one \`isDefault: true\` record page may exist for an object `
-            + `in a deployment: the record view opens that page with no tie-break.`,
-        ) as Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422; object: string; holders: readonly Holder[] };
-        err.code = 'DEFAULT_RECORD_PAGE_CONFLICT';
-        err.status = 422;
-        err.object = object;
-        err.holders = unique;
-        return err;
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof defaultRecordPageSaveRefusal> = {
+            get engine() { return readEngine(); },
+            readActiveOverlayRows: (...a) => this.readActiveOverlayRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            storedOverlayEntries: (...a) => this.storedOverlayEntries(...a),
+        };
+        return defaultRecordPageSaveRefusal.call(host, type, item, saveName, verb);
     }
 
     /**
@@ -20152,37 +20004,18 @@ export class ObjectStackProtocolImplementation implements
      * findings in `issues`, at `external` for an object and at `schemaMode`
      * for a datasource.
      */
-    private async externalBindingSaveRefusal(
+    private externalBindingSaveRefusal(
         singularType: string,
         item: unknown,
         name: string,
         writeFace?: MetadataWriteFace,
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
-        const body = item as { external?: unknown; datasource?: unknown };
-        const issues: MetadataIssueEntry[] = [];
-        if (singularType === 'object') {
-            if (body.external === undefined || body.external === null) return undefined;
-            const datasource = typeof body.datasource === 'string' && body.datasource !== '' ? body.datasource : undefined;
-            const definition = datasource === undefined
-                ? undefined
-                : await this.externalBindingDatasourceDefinition(datasource);
-            const refusal = externalBindingDatasourceRefusal(name, body.external, datasource, definition);
-            if (refusal) issues.push({ path: refusal.path, message: refusal.message, code: 'custom' });
-        } else if (singularType === 'datasource') {
-            for (const bound of await this.objectsBoundExternallyTo(name)) {
-                const refusal = externalBindingDatasourceRefusal(bound.name, bound.external, name, item as { schemaMode?: unknown });
-                if (refusal?.shape === 'managed') issues.push({ path: 'schemaMode', message: refusal.message, code: 'custom' });
-            }
-        }
-        if (issues.length === 0) return undefined;
-        const err = new Error(
-            `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
-        ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
-        err.code = 'INVALID_METADATA';
-        err.status = 422;
-        err.issues = issues;
-        return err;
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const host: ThisParameterType<typeof externalBindingSaveRefusal> = {
+            externalBindingDatasourceDefinition: (...a) => this.externalBindingDatasourceDefinition(...a),
+            objectsBoundExternallyTo: (...a) => this.objectsBoundExternallyTo(...a),
+        };
+        return externalBindingSaveRefusal.call(host, singularType, item, name, writeFace);
     }
 
     /**
@@ -20194,11 +20027,14 @@ export class ObjectStackProtocolImplementation implements
      * of the same refusal ({@link storedRowKnownDatasources}), so the two cannot
      * judge a binding against different datasources.
      */
-    private async externalBindingDatasourceDefinition(
+    private externalBindingDatasourceDefinition(
         datasource: string,
     ): Promise<{ readonly schemaMode?: unknown } | undefined> {
-        const definition = (await this.readMetaItem({ type: 'datasource', name: datasource }))?.item;
-        return definition && typeof definition === 'object' ? definition as { schemaMode?: unknown } : undefined;
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const host: ThisParameterType<typeof externalBindingDatasourceDefinition> = {
+            readMetaItem: (...a) => this.readMetaItem(...a),
+        };
+        return externalBindingDatasourceDefinition.call(host, datasource);
     }
 
     /**
@@ -20210,29 +20046,16 @@ export class ObjectStackProtocolImplementation implements
      * Drafts are not read: a draft does not bind anything until its publish,
      * which is judged on its own.
      */
-    private async objectsBoundExternallyTo(datasource: string): Promise<Array<{ name: string; external: unknown }>> {
-        const bound = new Map<string, unknown>();
-        let records: any[] = [];
-        try {
-            records = await this.readActiveOverlayRows({ type: 'object' });
-        } catch (error) {
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-        const stored = this.storedOverlayEntries({ type: 'object' }, records);
-        const storedNames = new Set(stored.map((entry) => entry.name));
-        const take = (name: string, obj: unknown) => {
-            const o = obj as { datasource?: unknown; external?: unknown } | null | undefined;
-            if (o?.datasource === datasource && o.external !== undefined && o.external !== null) bound.set(name, o.external);
+    private objectsBoundExternallyTo(datasource: string): Promise<Array<{ name: string; external: unknown }>> {
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof objectsBoundExternallyTo> = {
+            get engine() { return readEngine(); },
+            readActiveOverlayRows: (...a) => this.readActiveOverlayRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            storedOverlayEntries: (...a) => this.storedOverlayEntries(...a),
         };
-        for (const entry of stored) take(entry.name, entry.data);
-        const registry = this.engine.registry;
-        if (typeof registry?.getAllObjects === 'function') {
-            for (const obj of registry.getAllObjects() as Array<{ name?: unknown }>) {
-                if (typeof obj?.name !== 'string' || storedNames.has(obj.name)) continue;
-                take(obj.name, obj);
-            }
-        }
-        return [...bound].map(([name, external]) => ({ name, external }));
+        return objectsBoundExternallyTo.call(host, datasource);
     }
 
     /**
@@ -20283,45 +20106,19 @@ export class ObjectStackProtocolImplementation implements
      * message crosses the REST boundary with its tail truncated) and carries no
      * tracker number.
      */
-    private async anonymousElevatedFlowRefusal(
+    private anonymousElevatedFlowRefusal(
         singularType: string,
         item: unknown,
         name: string,
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
-        if (singularType !== 'flow') return undefined;
-        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
-        if ((item as { runAs?: unknown }).runAs !== 'system') return undefined;
-
-        const endpoints: unknown[] = [];
-        const registry = this.engine.registry;
-        if (typeof registry?.listItems === 'function') {
-            endpoints.push(...registry.listItems('api'));
-        }
-        const metadataService = this.getServicesRegistry?.()?.get('metadata');
-        if (metadataService && typeof metadataService.list === 'function') {
-            const listed = await metadataService.list('api');
-            if (Array.isArray(listed)) endpoints.push(...listed);
-        }
-
-        const pairs = anonymousElevatedFlowPairs(
-            endpoints as AnonymousFlowDoorCandidate[],
-            [{ name, runAs: 'system' }],
-        );
-        if (pairs.length === 0) return undefined;
-
-        const names = [...new Set(pairs.map((pair) => pair.endpoint))];
-        const err = new Error(elevatedFlowAnonymousEndpointsMessage(name, names)) as Error & {
-            code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[];
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const readEngine = () => this.engine;
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof anonymousElevatedFlowRefusal> = {
+            get engine() { return readEngine(); },
+            get getServicesRegistry() { return readGetServicesRegistry(); },
         };
-        err.code = 'INVALID_METADATA';
-        err.status = 422;
-        err.issues = [{
-            path: 'runAs',
-            message: `An anonymous endpoint (\`authRequired: false\`) triggers this flow: ${names.map((n) => `'${n}'`).join(', ')}. `
-                + "No anonymous door may start a `runAs: 'system'` flow (ADR-0138 D2b).",
-            code: 'custom',
-        }];
-        return err;
+        return anonymousElevatedFlowRefusal.call(host, singularType, item, name);
     }
 
     /**
@@ -20600,47 +20397,21 @@ export class ObjectStackProtocolImplementation implements
      * rewrites (`source`, `package-duplicate`) keep stamping, as before. No
      * stored lock is unbound here.
      */
-    private async authoredLockFamily(args: {
+    private authoredLockFamily(args: {
         type: string;
         name: string;
         packageId: string | null | undefined;
         mode: 'draft' | 'publish';
         item: unknown;
     }): Promise<unknown> {
-        const { item } = args;
-        if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
-        const body = item as Record<string, unknown>;
-        const sent = lockFamilyOf(body);
-        for (const [key, value] of Object.entries(sent)) {
-            const declared = overlaySchemaDeclaredKey(args.type, key);
-            if (declared !== undefined && !declared.safeParse(value).success) return item;
-        }
-        const repo = this.getOverlayRepo();
-        const ref = { type: args.type, name: args.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
-        const state: 'active' | 'draft' = args.mode === 'draft' ? 'draft' : 'active';
-        const member = itemDiscriminator(args.type, body);
-        const target = await repo.headAt(ref, { state, packageId: args.packageId ?? null, member });
-        let head = target.head;
-        if (!head && state === 'draft') {
-            head = (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head;
-        }
-        const stored = lockFamilyOf(head?.body);
-        if (Object.keys(sent).length > 0 && !sameLockFamily(sent, stored)) {
-            const address: ItemAddress = { type: args.type, name: args.name, packageId: args.packageId ?? undefined };
-            let overlayLockLayer: unknown;
-            try {
-                overlayLockLayer = await this.overlayLockLayerAt(address, { otherSpelling: true });
-            } catch (error) {
-                // [#5532] A lock read that did not happen is not an unlocked item.
-                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-            }
-            const served = lockFamilyOf(withItemLockFamily({}, resolveItemLock({
-                artifact: this.artifactLockLayerAt(address),
-                overlay: overlayLockLayer,
-            })));
-            if (!sameLockFamily(sent, served)) throw authoredLockFamilyRefusal(args.type, args.name, sent, served);
-        }
-        return withLockFamily(body, stored);
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const host: ThisParameterType<typeof authoredLockFamily> = {
+            artifactLockLayerAt: (...a) => this.artifactLockLayerAt(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            overlayLockLayerAt: (...a) => this.overlayLockLayerAt(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+        };
+        return authoredLockFamily.call(host, args);
     }
 
     /**
@@ -20663,28 +20434,17 @@ export class ObjectStackProtocolImplementation implements
      * propagates (#5532), because a guessed binding would judge a row the write
      * does not land in.
      */
-    private async saveWriteBinding(
+    private saveWriteBinding(
         singularType: string,
         request: { name: string; item?: unknown; packageId?: string | null },
         mode: 'draft' | 'publish',
     ): Promise<string | null> {
-        if (typeof request.packageId === 'string' && request.packageId !== '') return request.packageId;
-        if (singularType !== 'permission' || mode !== 'draft') return null;
-        const body = request.item;
-        if (!body || typeof body !== 'object' || typeof (body as { packageId?: unknown }).packageId !== 'string') return null;
-        try {
-            const repo = this.getOverlayRepo();
-            const ref = { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
-            const target = await repo.headAt(ref, {
-                state: 'draft',
-                packageId: null,
-                member: itemDiscriminator(singularType, body),
-            });
-            return target.packageId;
-        } catch (error) {
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-            return null;
-        }
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const host: ThisParameterType<typeof saveWriteBinding> = {
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+        };
+        return saveWriteBinding.call(host, singularType, request, mode);
     }
 
     /**
@@ -20708,8 +20468,12 @@ export class ObjectStackProtocolImplementation implements
      * prefix (`validateObjectNamespacePrefix` skips an empty namespace).
      */
     private objectNamespacePrefixViolation(name: string, packageId: string | null | undefined): string | null {
-        if (typeof packageId !== 'string' || packageId === '') return null;
-        return validateObjectNamespacePrefix(name, this.engine?.registry?.getPackage?.(packageId)?.manifest?.namespace);
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof objectNamespacePrefixViolation> = {
+            get engine() { return readEngine(); },
+        };
+        return objectNamespacePrefixViolation.call(host, name, packageId);
     }
 
     // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
