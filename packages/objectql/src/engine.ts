@@ -2068,14 +2068,22 @@ function assertProjectionHasNoDottedPaths(
  * `INVALID_FIELD`, the code #4254's explicit-override gate answers on this
  * same axis (and the one a search naming a formula title gets), not
  * `INVALID_QUERY`: the request is well-formed, and what cannot be honoured is
- * a fact about the object's FIELDS. 400 on every door, and the same answer for
- * every caller — it is derived from the declaration, never from the caller's
- * permissions (a narrowing by field-level security happens later, in the
- * predicate guard, and `searchAll` hands the engine only the queryable subset).
+ * a fact about the object's FIELDS. 400 on every door.
+ *
+ * [#25672] `withheld`: the declared set is not empty, but every field in it is
+ * one the caller may not query, so the narrowing in `expandSearchOnAst` left
+ * nothing. Same code and status — the search cannot be honoured for this
+ * caller either way — with a message that names the cause, not a declaration
+ * fault the object does not have.
  */
-function emptySearchSetError(object: string, schema: any, internalExcluded: boolean): Error {
+function emptySearchSetError(object: string, schema: any, internalExcluded: boolean, withheld = false): Error {
   const declared: unknown[] = Array.isArray(schema?.searchableFields) ? schema.searchableFields : [];
-  const err: any = new Error(
+  const err: any = withheld ? new Error(
+    `Object '${object}' has no field this caller may search, so 'search' cannot be honoured on it: `
+    + `every field it searches is one field-level security does not let this caller query. `
+    + 'Answering every row instead would read as "everything matched". Grant read access to one of '
+    + `its searchable fields, or filter on a field this caller can read.`,
+  ) : new Error(
     `Object '${object}' has no searchable field, so 'search' cannot be honoured on it`
     + (declared.length > 0
       ? `: its 'searchableFields' (${declared.join(', ')}) names no stored field`
@@ -14956,7 +14964,11 @@ export class ObjectQL implements IObjectQLEngine {
    * would hand the driver a key it does not read, which is the same silent drop
    * one layer down.
    */
-  private expandSearchOnAst(ast: QueryAST, schema: ServiceObject | undefined): void {
+  private async expandSearchOnAst(
+    ast: QueryAST,
+    schema: ServiceObject | undefined,
+    context: ExecutionContext | undefined,
+  ): Promise<void> {
     // The `$search`/`$searchFields` OData spellings are NOT read here: the
     // protocol layer normalizes them to the bare keys before the engine
     // (protocol.ts findData), and a direct engine call carrying one is an
@@ -14989,14 +15001,30 @@ export class ObjectQL implements IObjectQLEngine {
             Object.entries(schema.fields as Record<string, unknown>)
               .filter(([name]) => !internalFields.includes(name)),
           );
-      const searchFilter = expandSearchToFilter(raw, {
+      const expandOptions = {
         fields: scanFields,
         searchableFields: (schema as any).searchableFields,
         requestedFields,
         // [ADR-0079] `nameField` is the canonical primary-title pointer;
         // `displayNameField` is the deprecated alias (still honored).
         displayField: (schema as any).nameField ?? (schema as any).displayNameField,
-      });
+      };
+      // [#25672] …and never a column the CALLER may not query. The field-read
+      // predicate guard (plugin-security) runs after this expansion and judges
+      // the expanded `$or` as the caller's own predicate, so one hidden column
+      // in the server-resolved set refused the whole search with 403 —
+      // `sys_user`'s `role` / `ban_reason` / `last_login_ip` broke every user
+      // picker for members. The set is narrowed to the security service's
+      // `getQueryableFields` answer, the published complement of what that
+      // guard refuses (one derivation, no second field-permission rule here),
+      // asked with the context the middleware will see. A field the caller
+      // NAMED in `searchFields` is not withheld, so the guard still refuses it
+      // loudly. The guard itself is unchanged, and still judges every
+      // predicate the caller wrote.
+      const queryableFields = normalizeSearch(raw).query.trim()
+        ? await this.resolveSearchQueryableFields(ast.object, context)
+        : undefined;
+      const searchFilter = expandSearchToFilter(raw, { ...expandOptions, queryableFields });
       if (searchFilter) {
         ast.where = ast.where ? { $and: [ast.where, searchFilter] } : searchFilter;
       } else if (normalizeSearch(raw).query.trim()) {
@@ -15011,12 +15039,45 @@ export class ObjectQL implements IObjectQLEngine {
         // the count) and every door (REST, dispatcher, SDK, a hook's
         // `ctx.api`). An explicit override intersected to nothing falls back
         // to the allowed set inside `resolveSearchFields`, so it reaches this
-        // only when that set is empty too.
-        throw emptySearchSetError(ast.object, schema, internalFields.length > 0);
+        // only when that set is empty too. [#25672] A set the caller's
+        // queryable fields withheld down to nothing gets the same answer: the
+        // declared set expands without the narrowing, so the refusal says so.
+        const withheld = queryableFields !== undefined && expandSearchToFilter(raw, expandOptions) !== null;
+        throw emptySearchSetError(ast.object, schema, internalFields.length > 0, withheld);
       }
     }
     delete (ast as any).search;
     delete (ast as any).searchFields;
+  }
+
+  /**
+   * [#25672] The fields `context` may query on `object`, asked of the
+   * registered `security` service's `getQueryableFields` — the answer the
+   * field-read predicate guard is the complement of. `undefined` narrows
+   * nothing, and is the answer when no context is carried (a context-less
+   * read is never asked about, as `searchAll` does), when no security service
+   * is registered or it has no such method, or when it gives no answer: the
+   * guard still judges the search, so an absent answer can only leave the
+   * request as strict as it was. A throw from the method propagates.
+   */
+  private async resolveSearchQueryableFields(
+    object: string,
+    context: ExecutionContext | undefined,
+  ): Promise<ReadonlySet<string> | undefined> {
+    if (context === undefined) return undefined;
+    // Read from the engine slot at use (see SECURITY_SERVICE_SOURCE_SLOT), never cached.
+    const source = (this as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT];
+    if (typeof source !== 'function') return undefined;
+    let svc: Partial<Pick<ISecurityService, 'getQueryableFields'>> | undefined;
+    try {
+      svc = source() ?? undefined;
+    } catch {
+      // The in-repo kernels throw on a name nothing registered: no service.
+      return undefined;
+    }
+    if (typeof svc?.getQueryableFields !== 'function') return undefined;
+    const queryable = await svc.getQueryableFields(object, context as any);
+    return queryable === undefined ? undefined : new Set(queryable);
   }
 
   /**
@@ -15037,11 +15098,15 @@ export class ObjectQL implements IObjectQLEngine {
    * `opCtx.options` unexpanded. The common path — no search key — returns the
    * same reference and allocates nothing.
    */
-  private expandSearchOnOptions<T extends EngineAggregateOptions | EngineCountOptions>(object: string, query: T): T {
+  private async expandSearchOnOptions<T extends EngineAggregateOptions | EngineCountOptions>(
+    object: string,
+    query: T,
+    options: EngineReadOptions | undefined,
+  ): Promise<T> {
     if (query.search === undefined && query.searchFields === undefined) return query;
     const { search, searchFields, ...rest } = query;
     const carrier = { object, where: rest.where, search, searchFields } as QueryAST;
-    this.expandSearchOnAst(carrier, this._registry.getObject(object));
+    await this.expandSearchOnAst(carrier, this._registry.getObject(object), mergeReadContext(query.context, options?.context));
     if (carrier.where === undefined) return rest as T;
     return { ...rest, where: carrier.where } as T;
   }
@@ -15196,7 +15261,7 @@ export class ObjectQL implements IObjectQLEngine {
     // fields needed to compute the formulas after fetch.
     const _findSchema = this._registry.getObject(object);
 
-    this.expandSearchOnAst(ast, _findSchema);
+    await this.expandSearchOnAst(ast, _findSchema, mergeReadContext(query?.context, options?.context));
     // [#7642] The caller's OWN projection, captured before any planning pass
     // rewrites it — the only thing that can answer "did this caller ask for
     // `__search`?". See `stripSearchCompanionFromRead`.
@@ -15517,7 +15582,7 @@ export class ObjectQL implements IObjectQLEngine {
     const _findOneSchema = this._registry.getObject(objectName);
     // Before the guard below, so a `search` that resolves to a real filter
     // counts as the predicate it is (#4419).
-    this.expandSearchOnAst(ast, _findOneSchema);
+    await this.expandSearchOnAst(ast, _findOneSchema, mergeReadContext(query?.context, options?.context));
     this.requireFindOnePredicate(objectName, ast);
     // [#7095] Same refusal as `find`, and it matters MORE here: `findOne`
     // applies `limit: 1`, so `orderBy` is the whole of "which record" — a
@@ -21776,7 +21841,7 @@ export class ObjectQL implements IObjectQLEngine {
      // [#22790] ADR-0061 `search` → the rows are searched before they are
      // counted, by the one expander `find` runs, at the same point in the
      // sequence — so the count is the number of rows `find` returns for the bag.
-     if (query) query = this.expandSearchOnOptions(object, query);
+     if (query) query = await this.expandSearchOnOptions(object, query, options);
      const driver = this.getDriver(object);
 
      // The AST must ride on the opCtx so the security/sharing middlewares can
@@ -21919,7 +21984,7 @@ export class ObjectQL implements IObjectQLEngine {
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after
       // the `where` doors above, before the AST is built and tokens resolve).
-      query = this.expandSearchOnOptions(object, query);
+      query = await this.expandSearchOnOptions(object, query, options);
       this.rejectCredentialAggregation(object, query);
       // [#20783] …and a `groupBy` entry naming a structured-JSON field (`json`,
       // `composite`, `address`, …) is refused `INVALID_FIELD` / 400 here, before
