@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/formula": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*"

@@ -88,8 +88,29 @@
  * writes nothing, so that chunk stays owner-less and the warning says so. The
  * next chunk and the next object are still claimed. The twin made the same
  * trade.
+ *
+ * ## [#25668] …except where a stored expression reads `owner_id`: by row
+ *
+ * A stored computed field (a non-formula field declaring an `expression`) is
+ * computed by the engine on every write, and a predicate write stores ONE
+ * value per such field for every matched row: one that moves the field to
+ * different values on different rows is refused whole, by contract ("update
+ * those rows by id"). The claim's patch moves only `owner_id`, so the refusal
+ * reaches it exactly when a stored expression reads `owner_id` (directly, or
+ * one hop through it) and the rows compute different values — and then every
+ * chunk of that object stayed owner-less.
+ *
+ * So such an object ({@link storedExpressionReadsOwner}) is claimed ROW BY
+ * ROW: one compare-and-set write per seeded id,
+ * `{ organization_id, owner_id: null, id }` with `multi: true`, which the
+ * engine evaluates as a predicate over that one row and computes from it. The
+ * scope and the owner-less term stay in every write. Every other object keeps
+ * the chunked predicate write. A row whose own write is refused stays
+ * owner-less and is reported; the object's other rows are still claimed. The
+ * twin made the same change.
  */
 
+import { analyzeRelationshipTraversals } from '@objectstack/formula';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
 
@@ -194,11 +215,98 @@ async function claimChunk(
   }
 }
 
+/**
+ * [#25668] Re-own one chunk's seeded rows one write each: the chunk's scope and
+ * owner-less terms plus the row's id. Returns the sum of the affected-row
+ * counts. Never throws: a refused row stays owner-less and the chunk's
+ * refusals are reported once, with the first refusal's message.
+ */
+async function claimChunkByRow(
+  reown: (where: Record<string, unknown>) => Promise<unknown>,
+  objectName: string,
+  organizationId: string,
+  where: Record<string, unknown>,
+  logger: ClaimOwnershipOptions['logger'],
+): Promise<number> {
+  const ids = (where.id as { $in: readonly string[] }).$in;
+  let claimed = 0;
+  let countUnknown = false;
+  const refused: string[] = [];
+  let firstError: string | undefined;
+  for (const id of ids) {
+    try {
+      const count = affectedRowCount(await reown({ ...where, id }));
+      if (count === undefined) countUnknown = true;
+      else claimed += count;
+    } catch (e) {
+      refused.push(id);
+      firstError ??= (e as Error).message;
+    }
+  }
+  const at = { object: objectName, organizationId, ids: ids.length };
+  if (refused.length > 0) {
+    logger?.warn?.(
+      `[org-scoping] claimOrgSeedOwnership failed for ${objectName} in org ${organizationId}: ` +
+        `${refused.length} of the ${ids.length} seeded row(s) of this chunk stay owner-less`,
+      { ...at, refused: refused.length, refusedIds: refused.slice(0, 20), error: firstError },
+    );
+  }
+  if (countUnknown) {
+    logger?.warn?.(
+      `[org-scoping] claimOrgSeedOwnership could not read an affected-row count for ${objectName} ` +
+        `in org ${organizationId}: seeded rows were re-owned but this run cannot say how many`,
+      at,
+    );
+  }
+  return claimed;
+}
+
 function hasField(schema: ServiceObject, field: string): boolean {
   const fields: any = (schema as any)?.fields;
   if (!fields) return false;
   if (Array.isArray(fields)) return fields.some((f) => f?.name === field);
   return Object.prototype.hasOwnProperty.call(fields, field);
+}
+
+/**
+ * The `record.<field>` names one stored expression reads — a hop counts as a
+ * read of the field it goes through — or `null` when they cannot be named
+ * (another dialect, or a source that does not parse). Read with the platform's
+ * one member reader, the one the engine's stored-expression planning uses.
+ */
+function expressionReads(expression: unknown): ReadonlySet<string> | null {
+  const expr = typeof expression === 'string' ? { source: expression } : expression as { dialect?: unknown; source?: unknown };
+  if (!expr || (expr.dialect !== undefined && expr.dialect !== 'cel') || typeof expr.source !== 'string') return null;
+  const analysis = analyzeRelationshipTraversals(expr.source);
+  return analysis ? new Set([...analysis.bareFields, ...analysis.traversals.keys()]) : null;
+}
+
+/**
+ * [#25668] Does a stored computed field of this object read `owner_id` —
+ * directly, one hop through it, or through another stored field that does?
+ * The twin of plugin-security's check of the same name: a stored field is a
+ * non-`formula` field declaring an `expression`, planned off a field MAP as
+ * the engine plans it, and an expression whose reads cannot be named counts
+ * as a reader.
+ */
+function storedExpressionReadsOwner(schema: ServiceObject): boolean {
+  const fields: any = (schema as any)?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return false;
+  const stored = Object.entries(fields as Record<string, any>).filter(
+    ([, def]) => def && typeof def === 'object' && def.type !== 'formula' && def.expression,
+  );
+  const moved = new Set(['owner_id']);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [name, def] of stored) {
+      if (moved.has(name)) continue;
+      const reads = expressionReads(def.expression);
+      if (reads !== null && ![...reads].some((read) => moved.has(read))) continue;
+      moved.add(name);
+      grew = true;
+    }
+  }
+  return moved.size > 1;
 }
 
 /**
@@ -211,7 +319,8 @@ function hasField(schema: ServiceObject, field: string): boolean {
  *   (d) have rows the org's seed replay landed on ({@link ClaimOwnershipOptions.seededRecordIds}),
  * and re-owns the org's unowned seeded rows as `isSystem` with
  * `skipAutomations`, in one predicate write per chunk of
- * {@link CLAIM_CHUNK_IDS} seeded ids. Returns a per-object summary whose
+ * {@link CLAIM_CHUNK_IDS} seeded ids — [#25668] one write per row instead on an
+ * object whose stored expressions read `owner_id`. Returns a per-object summary whose
  * `count` is the sum of every write's affected-row count.
  */
 export async function claimOrgSeedOwnership(
@@ -263,6 +372,10 @@ export async function claimOrgSeedOwnership(
       { where, multi: true, context: CLAIM_WRITE_CTX },
     );
 
+    // [#25668] One predicate write cannot store a per-row value of a stored
+    // field the claim's `owner_id` moves; such an object is claimed by row.
+    const claim = storedExpressionReadsOwner(schema) ? claimChunkByRow : claimChunk;
+
     let updated = 0;
     for (let at = 0; at < seededIds.length; at += CLAIM_CHUNK_IDS) {
       const where = {
@@ -270,7 +383,7 @@ export async function claimOrgSeedOwnership(
         owner_id: null,
         id: { $in: seededIds.slice(at, at + CLAIM_CHUNK_IDS) },
       };
-      updated += await claimChunk(reown, schema.name, organizationId, where, logger);
+      updated += await claim(reown, schema.name, organizationId, where, logger);
     }
     if (updated > 0) results.push({ object: schema.name, count: updated });
   }

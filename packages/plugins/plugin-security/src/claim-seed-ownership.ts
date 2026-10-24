@@ -175,8 +175,36 @@
  * being the engine's answer to a different question, while staying well above
  * plugin-sharing's 1 000-row recompute cap — so a page is still large enough to
  * take the trailing-batch branch rather than N per-row recomputes.
+ *
+ * ## [#25668] …except where a stored expression reads `owner_id`: by row
+ *
+ * A stored computed field — a non-formula field declaring an `expression` —
+ * is computed by the engine on every write, and a predicate write stores ONE
+ * value per such field for every matched row. A predicate write that moves the
+ * field to different values on different rows is refused whole, nothing
+ * written, and the refusal is the engine's contract, not a defect: its message
+ * says "update those rows by id". The claim's patch moves only `owner_id`, so
+ * that refusal reaches it exactly when a stored expression reads `owner_id`
+ * (`record.owner_id`, or one hop through it, `record.owner_id.name`) and the
+ * rows compute different values — every row, every boot, because the next
+ * pass sent the same write. HotCRM's `crm_forecast.display_title` is the shape.
+ *
+ * So an object whose stored expressions read `owner_id`
+ * ({@link storedExpressionReadsOwner}) is claimed ROW BY ROW: one
+ * compare-and-set write per row, `{ <the arm's owner term>, id }` with
+ * `multi: true`, which the engine evaluates as a predicate over that one row
+ * and computes from that row. The owner term stays in the write, so a row
+ * someone owned in the meantime is not taken from them. The NULL arm's rows
+ * are the seeded ids it already names; the `usr_system` arm reads its ids a
+ * page at a time ({@link CLAIM_PAGE_ROWS}), the bound the paged fallback reads
+ * by. Every other object keeps the predicate write above: this is the cost of
+ * the row-by-row write — a full engine write per row — paid only where one
+ * write cannot store the result. A row whose own write is refused stays
+ * unowned and is reported with the per-predicate warning, and the object's
+ * other rows are still claimed.
  */
 
+import { analyzeRelationshipTraversals } from '@objectstack/formula';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE, MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
 import { SystemUserId } from '@objectstack/spec/system';
@@ -309,6 +337,52 @@ function hasOwnerField(schema: ServiceObject): boolean {
     return fields.some((f) => f?.name === 'owner_id');
   }
   return Object.prototype.hasOwnProperty.call(fields, 'owner_id');
+}
+
+/**
+ * The `record.<field>` names one stored expression reads — a hop counts as a
+ * read of the field it goes through — or `null` when they cannot be named
+ * (another dialect, or a source that does not parse).
+ *
+ * Read with the platform's one member reader (`analyzeRelationshipTraversals`),
+ * the reader the engine's own stored-expression planning uses, so the two
+ * cannot disagree about which spellings name a field.
+ */
+function expressionReads(expression: unknown): ReadonlySet<string> | null {
+  const expr = typeof expression === 'string' ? { source: expression } : expression as { dialect?: unknown; source?: unknown };
+  if (!expr || (expr.dialect !== undefined && expr.dialect !== 'cel') || typeof expr.source !== 'string') return null;
+  const analysis = analyzeRelationshipTraversals(expr.source);
+  return analysis ? new Set([...analysis.bareFields, ...analysis.traversals.keys()]) : null;
+}
+
+/**
+ * [#25668] Does a stored computed field of this object read `owner_id` —
+ * directly, one hop through it, or through another stored field that does?
+ *
+ * A stored field is the spec's: a non-`formula` field declaring an
+ * `expression`, computed and stored on every write. Planned off a field MAP,
+ * as the engine plans it; an expression whose reads cannot be named counts as
+ * a reader, because claiming such an object row by row costs time, while
+ * sending it the predicate write leaves every row unowned.
+ */
+function storedExpressionReadsOwner(schema: ServiceObject): boolean {
+  const fields: any = (schema as any)?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return false;
+  const stored = Object.entries(fields as Record<string, any>).filter(
+    ([, def]) => def && typeof def === 'object' && def.type !== 'formula' && def.expression,
+  );
+  const moved = new Set(['owner_id']);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [name, def] of stored) {
+      if (moved.has(name)) continue;
+      const reads = expressionReads(def.expression);
+      if (reads !== null && ![...reads].some((read) => moved.has(read))) continue;
+      moved.add(name);
+      grew = true;
+    }
+  }
+  return moved.size > 1;
 }
 
 /**
@@ -464,6 +538,92 @@ async function claimPredicate(
 }
 
 /**
+ * [#25668] Re-own the given rows of one unowned predicate one write each: the
+ * predicate's own terms plus the row's id, a compare-and-set the engine
+ * evaluates over that one row. Never throws for a row: a refused row stays
+ * unowned and is reported once for the batch, with the first refusal's message.
+ */
+async function claimRows(
+  io: ObjectWriter,
+  objectName: string,
+  where: Record<string, unknown>,
+  ids: readonly string[],
+  logger: ClaimOwnershipOptions['logger'],
+): Promise<{ claimed: number; countUnknown: boolean }> {
+  let claimed = 0;
+  let countUnknown = false;
+  const refused: string[] = [];
+  let firstError: string | undefined;
+  for (const id of ids) {
+    try {
+      const count = affectedRowCount(await io.reown({ ...where, id }));
+      if (count === undefined) countUnknown = true;
+      else claimed += count;
+    } catch (e) {
+      refused.push(id);
+      firstError ??= (e as Error).message;
+    }
+  }
+  if (refused.length > 0) {
+    logger?.warn?.(
+      `[security] claimSeedOwnership failed for ${objectName}; ${refused.length} row(s) stay unowned until the ` +
+        'claim next runs — the next seed settle (`app:seeded`, on this boot or a later one) or the next ' +
+        'platform-admin promotion',
+      { object: objectName, where: whereForLog(where), refused: refused.length, ids: refused.slice(0, 20), error: firstError },
+    );
+  }
+  if (countUnknown) {
+    logger?.warn?.(
+      `[security] claimSeedOwnership could not read an affected-row count for ${objectName} ` +
+        '— rows were re-owned but this run cannot say how many',
+      { object: objectName, where: whereForLog(where) },
+    );
+  }
+  return { claimed, countUnknown };
+}
+
+/**
+ * [#25668] Re-own every row matching one unowned predicate ROW BY ROW — the
+ * path for an object whose stored expressions read `owner_id`
+ * ({@link storedExpressionReadsOwner}), where one predicate write cannot store
+ * a value per row.
+ *
+ * The NULL arm names its rows (`id IN (seeded ids)`, one chunk), so they are
+ * written without a read. The `usr_system` arm names none, so its ids are read
+ * a page at a time and written, until a read finds none; a page that re-owns
+ * nothing ends the pass, because re-reading would return the same rows. Returns
+ * the sum of the affected-row counts the writes resolved.
+ */
+async function claimPredicateByRow(
+  io: ObjectWriter,
+  objectName: string,
+  where: Record<string, unknown>,
+  logger: ClaimOwnershipOptions['logger'],
+): Promise<number> {
+  const named = (where.id as { $in?: unknown } | undefined)?.$in;
+  if (Array.isArray(named)) {
+    return (await claimRows(io, objectName, where, named.map(String), logger)).claimed;
+  }
+  let total = 0;
+  for (let page = 0; page < MAX_CLAIM_PAGES; page += 1) {
+    const ids = idsFrom(await io.readPage(where));
+    if (ids.length === 0) return total;
+    const { claimed, countUnknown } = await claimRows(io, objectName, where, ids, logger);
+    total += claimed;
+    // Unknown counts cannot tell a page that moved from one that did not, and
+    // a page that moved nothing would be read again: stop either way.
+    if (countUnknown || claimed === 0) return total;
+  }
+  logger?.warn?.(
+    `[security] claimSeedOwnership stopped after ${MAX_CLAIM_PAGES} page(s) on ${objectName}; ` +
+      'unowned rows may remain until the claim next runs — the next seed settle (`app:seeded`, on this ' +
+      'boot or a later one) or the next platform-admin promotion',
+    { object: objectName, where: whereForLog(where), pages: MAX_CLAIM_PAGES },
+  );
+  return total;
+}
+
+/**
  * Say what this pass did AND whether its reading was FINAL — once, always.
  *
  * ## Why "claimed nothing" used to be unsayable
@@ -586,8 +746,9 @@ function reportClaimPass(
  * off ({@link CLAIM_WRITE_CTX}), in one predicate write per
  * {@link unownedPredicates} entry — the seeded ids' chunks under the NULL arm,
  * then the seed identity — paging that write only when the engine refuses it
- * for its per-row hook budget. Returns a per-object summary whose `count` is
- * the sum of every write's affected-row count.
+ * for its per-row hook budget, and [#25668] one write per row instead on an
+ * object whose stored expressions read `owner_id`. Returns a per-object summary
+ * whose `count` is the sum of every write's affected-row count.
  */
 export async function claimSeedOwnership(
   ql: any,
@@ -646,11 +807,14 @@ export async function claimSeedOwnership(
 
     const seededIds = seededRecordIds?.(schema.name) ?? [];
     seededRows += seededIds.length;
+    // [#25668] One predicate write cannot store a per-row value of a stored
+    // field the claim's `owner_id` moves; such an object is claimed by row.
+    const claim = storedExpressionReadsOwner(schema) ? claimPredicateByRow : claimPredicate;
 
     let updated = 0;
     for (const where of unownedPredicates(seededIds)) {
       try {
-        updated += await claimPredicate(io, schema.name, where, logger);
+        updated += await claim(io, schema.name, where, logger);
       } catch (e) {
         // Best-effort per predicate, exactly as the per-id loop was: one
         // predicate that cannot land must not cost the object its other one,
