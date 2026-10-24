@@ -1,8 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ExpressionSchema } from '../shared/expression.zod';
-import { templateExpressionInput } from '../shared/typed-expression-input';
+import type { TypedExpressionRefusals } from '../shared/typed-expression-input';
 import { InlineLocaleMapSchema } from './i18n.zod';
 
 /**
@@ -113,21 +112,35 @@ function dialectOnly(key: ActionCopyKey, localeMap: boolean): string {
 }
 
 /**
- * The slot one copy key declares: ADR-0032's `template` dialect, the input
- * `TemplateExpressionInputSchema` takes — a bare string is shorthand for
- * `{ dialect: 'template', source }`, an envelope must declare
- * `dialect: 'template'` — built from the package-internal constructor so its
- * refusal prescribes this key's own sentence; then a blank-string arm, so the
- * parse does not narrow (the module note); then, on `ActionSchema`, the
- * inline locale map its `I18nLabel` took.
- *
- * A factory the schemas call, not a shared constant: each key refuses with its
- * own sentence, and a schema instance shared between two lazily built rows
- * would carry one `describe()` for both.
+ * The two sentences one copy key's template input refuses with
+ * (`templateExpressionInput`'s `refusals`): both prescribe the key's own
+ * sentence, so a refusal names the slot the author wrote.
  */
-export function actionCopyTemplateSlot(key: ActionCopyKey, options: { localeMap?: boolean } = {}) {
+export function actionCopyRefusals(key: ActionCopyKey, options: { localeMap?: boolean } = {}): TypedExpressionRefusals {
   const refusal = dialectOnly(key, options.localeMap === true);
-  const template = templateExpressionInput(ExpressionSchema, { sourceRequired: refusal, dialectOnly: refusal });
+  return { sourceRequired: refusal, dialectOnly: refusal };
+}
+
+/**
+ * The slot one copy key declares, around its `template` input: ADR-0032's
+ * `template` dialect, the input `TemplateExpressionInputSchema` takes — a bare
+ * string is shorthand for `{ dialect: 'template', source }`, an envelope must
+ * declare `dialect: 'template'` — then a blank-string arm, so the parse does
+ * not narrow (the module note); then, on `ActionSchema`, the inline locale map
+ * its `I18nLabel` took.
+ *
+ * The `template` input itself is built at each declaring `.zod.ts` file
+ * (`templateExpressionInput(ExpressionSchema, actionCopyRefusals(key))`), not
+ * here: the expression-surface census (the conformance ledger's scan) reads
+ * `.zod.ts` files, and a slot whose input is constructed in a plain module is
+ * a declared expression surface that census never sees.
+ */
+export function actionCopyTemplateSlot<T extends z.ZodType>(
+  template: T,
+  key: ActionCopyKey,
+  options: { localeMap?: boolean } = {},
+) {
+  const { dialectOnly: refusal } = actionCopyRefusals(key, options);
   // `trim()`'s whitespace set is exactly `\s` (ECMA-262), so this arm takes the blank strings
   // `NON_BLANK_STRING` refuses — as a `pattern` the JSON Schema carries, not a dropped refinement.
   const blank = z.string().regex(/^\s*$/);
@@ -168,26 +181,3 @@ export const ACTION_ERROR_MESSAGE_TEMPLATE_DESCRIBE =
   "a `template` slot (ADR-0032) that binds no root: a bare string is shorthand for `{ dialect: 'template', source }`, "
   + 'and the text is shown as written, so a `{{ }}` hole, a `${…}` or a `{x}` token in it is literal text. Each of '
   + `those, and a blank sentence, is named ${DOORS}`;
-
-/**
- * The three copy keys of a page action row — `action:button`, `action:icon`
- * and an `action:group` / `action:menu` member (`ui/component.zod.ts`), each
- * of which forwards them to the runner as written. One factory per key, so
- * every row names its keys in its own shape.
- */
-export function actionRowConfirmText() {
-  return actionCopyTemplateSlot('confirmText').optional()
-    .describe(`Confirmation question asked before the action runs — ${ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE}`);
-}
-
-/** A page action row's `successMessage` — see {@link actionRowConfirmText}. */
-export function actionRowSuccessMessage() {
-  return actionCopyTemplateSlot('successMessage').optional()
-    .describe(`Toast shown when the action succeeds — ${ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE}`);
-}
-
-/** A page action row's `errorMessage` — see {@link actionRowConfirmText}. */
-export function actionRowErrorMessage() {
-  return actionCopyTemplateSlot('errorMessage').optional()
-    .describe(`Toast shown when the action fails, in place of the raw error — ${ACTION_ERROR_MESSAGE_TEMPLATE_DESCRIBE}`);
-}

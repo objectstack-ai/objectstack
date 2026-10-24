@@ -21,14 +21,16 @@ import { isActionParamValuePresent } from './action-params.zod';
 // reaches only `shared/` + `data/`, so it cannot close a cycle back to `ui/`.
 import { BulkActionExecutionSchema } from './bulk-action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
-import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema, ExpressionSchema } from '../shared/expression.zod';
 import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
 import { I18nLabelSchema } from './i18n.zod';
 import {
   ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE,
   ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE,
+  actionCopyRefusals,
   actionCopyTemplateSlot,
 } from './action-copy-template';
+import { templateExpressionInput } from '../shared/typed-expression-input';
 import { HookBodySchema } from '../data/hook-body.zod';
 // Imported file-directly (not via the kernel barrel): the module is
 // deliberately import-free, so this cannot introduce a cycle.
@@ -869,6 +871,16 @@ const ActionConditionInputSchema = z.union([z.boolean(), EvaluatedExpressionInpu
 });
 
 /**
+ * [#24814, ADR-0032 Decisions 2–3] A registered action's `confirmText` /
+ * `successMessage` — a `template` slot over the roots the console's runner
+ * binds, one family with the page action rows' copy keys
+ * (`./action-copy-template.ts`), which also keeps the inline locale map
+ * `I18nLabelSchema` took. The `template` input is built HERE, at the declaring
+ * file, so the expression-surface census sees both positions.
+ */
+const actionCopy = (key: 'confirmText' | 'successMessage') => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key, { localeMap: true })), key, { localeMap: true });
+
+/**
  * The object half of {@link ActionSchema}, before its refinements.
  *
  * A factory rather than a schema so `lazySchema`'s deferral still holds — the
@@ -1352,7 +1364,7 @@ const actionObject = () => strictObject({
   // (`./action-copy-template.ts`): the runner reads the same key from both.
   // The inline locale map `I18nLabelSchema` took stays an arm, so the parse
   // does not narrow; each of its values is a sentence the doors judge alike.
-  confirmText: actionCopyTemplateSlot('confirmText', { localeMap: true }).optional().describe(`Confirmation message before execution — ${ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE} An inline locale map ({ en, "zh-CN" }) is accepted too, each value such a sentence. On a registered action, pairing this with a non-empty \`params\` is refused — that opens a second dialog for one decision; put the question on \`description\` instead. Correct on a param-LESS action, where the confirm is the only dialog there is.`),
+  confirmText: actionCopy('confirmText').optional().describe(`Confirmation message before execution — ${ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE} An inline locale map ({ en, "zh-CN" }) is accepted too, each value such a sentence. On a registered action, pairing this with a non-empty \`params\` is refused — that opens a second dialog for one decision; put the question on \`description\` instead. Correct on a param-LESS action, where the confirm is the only dialog there is.`),
   // `result` is the payload `onSuccess.navigate` reads as `${result.*}` (see
   // that key's docblock for its members) — the copy reads the same payload,
   // as a `{{ result.* }}` hole since #24814 (the `${result.*}` spelling it
@@ -1360,7 +1372,7 @@ const actionObject = () => strictObject({
   // is phrased "on a registered action" for the same reason `confirmText`'s
   // is: this describe() also renders into the InlineAction table, which does
   // not pick `outcomeMessages`.
-  successMessage: actionCopyTemplateSlot('successMessage', { localeMap: true }).optional().describe(`Success message shown after the action succeeds — ${ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE} An inline locale map ({ en, "zh-CN" }) is accepted too, each value such a sentence. On a registered action that declares \`outcomeMessages\`, the entry named by the response's \`outcome\` is shown instead, and this message is the fallback.`),
+  successMessage: actionCopy('successMessage').optional().describe(`Success message shown after the action succeeds — ${ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE} An inline locale map ({ en, "zh-CN" }) is accepted too, each value such a sentence. On a registered action that declares \`outcomeMessages\`, the entry named by the response's \`outcome\` is shown instead, and this message is the fallback.`),
 
   /**
    * Outcome-specific success copy — ruling A on objectstack-ai/cloud#2315,
