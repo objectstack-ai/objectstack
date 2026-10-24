@@ -9,6 +9,7 @@ import {
     createEmailChannel,
     NOTIFICATION_EVENT_OBJECT,
 } from '@objectstack/service-messaging';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { AutomationEngine } from '../engine.js';
 import { EMAIL_FIELD_SENDS_PER_WINDOW, registerNotifyNode } from './notify-node.js';
 
@@ -57,10 +58,10 @@ function dataEngine(opts: { records?: Record<string, Row[]>; users?: Row[] } = {
             written.push({ object, row: stored });
             return stored;
         },
-        async update(_object: string, row: Record<string, unknown>) { return row; },
         async find() { return []; },
-        async findOne(object: string, query?: { where?: Record<string, unknown> }) {
-            const where = query?.where ?? {};
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+            assertEngineFindOnePredicate(object, query);
+            const where = (query as { where?: Record<string, unknown> } | undefined)?.where ?? {};
             const hit = (tables[object] ?? []).find((r) => Object.entries(where).every(([k, v]) => r[k] === v));
             return hit ? { ...hit } : undefined;
         },
