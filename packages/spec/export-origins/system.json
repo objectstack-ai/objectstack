@@ -572,6 +572,7 @@
     "SearchIndexConfigSchema": "src/system/search-engine.zod.ts#SearchIndexConfigSchema (const)",
     "SearchProvider": "src/system/search-engine.zod.ts#SearchProvider (type)",
     "SearchProviderSchema": "src/system/search-engine.zod.ts#SearchProviderSchema (const)",
+    "SecurityCatalogItemLike": "src/system/i18n-resolver.ts#SecurityCatalogItemLike (interface)",
     "SecurityContextConfig": "src/system/security-context.zod.ts#SecurityContextConfig (type)",
     "SecurityContextConfigParsed": "src/system/security-context.zod.ts#SecurityContextConfigParsed (type)",
     "SecurityContextConfigSchema": "src/system/security-context.zod.ts#SecurityContextConfigSchema (const)",
@@ -849,7 +850,9 @@
     "translateMetadataDocument": "src/system/i18n-resolver.ts#translateMetadataDocument (function)",
     "translateObject": "src/system/i18n-resolver.ts#translateObject (function)",
     "translatePage": "src/system/i18n-resolver.ts#translatePage (function)",
+    "translatePermissionSet": "src/system/i18n-resolver.ts#translatePermissionSet (function)",
     "translatePicklist": "src/system/i18n-resolver.ts#translatePicklist (function)",
+    "translatePosition": "src/system/i18n-resolver.ts#translatePosition (function)",
     "translateView": "src/system/i18n-resolver.ts#translateView (function)",
     "validationMessageTranslationKey": "src/system/validation-message.ts#validationMessageTranslationKey (function)",
     "walkAddressedPageComponents": "src/system/i18n-resolver.ts#walkAddressedPageComponents (function)"
