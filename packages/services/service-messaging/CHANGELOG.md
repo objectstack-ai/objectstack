@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 865d2c8: fix(service-messaging): a notification template is resolved in the recipient's organization
+- 3937697: fix(service-messaging): a notification template is resolved in the recipient's organization
   
   Clause-②: yes (widening) — `NotificationTemplateStore.load` (exported from the package's `.` entry) gains an optional fourth parameter, `organizationId`.
   
@@ -13,7 +13,7 @@
   - **An organization with no row of its own** for a `(topic, channel, locale)` renders the notification's own title and body, the documented no-template fallback.
   - **The new parameter:** `NotificationTemplateStore.load(topic, channel, locale, organizationId?)`. A call that names no organization reads no row and answers `null`, so the channel renders that same fallback. Every delivery the messaging service fans out names its organization (the event row takes it from the producer or from the engine's system-write rule, and an emit with neither is refused), so this changes nothing a composed deployment renders. A direct caller of `NotificationTemplateStore.load` passes the recipient's organization as the fourth argument.
   - **Unchanged:** the locale ladder (the recipient's locale, its language, then `en`), the `is_active` filter, how a row renders, and the best-effort answer on a failed lookup.
-- 63085c3: feat(service-messaging,spec,cli)!: `sys_notification_subscription` retires — no reader ever expanded a subscription into recipients (ADR-0030 L3, amended)
+- 3937697: feat(service-messaging,spec,cli)!: `sys_notification_subscription` retires — no reader ever expanded a subscription into recipients (ADR-0030 L3, amended)
   
   Clause-②: yes (narrowing)
   
@@ -31,7 +31,7 @@
   - **`os migrate organization-ownership` (`@objectstack/cli`).** The inventory row for `sys_notification_subscription` moves FROM fate 3 (`attribution`: organization-less rows went to the Default Organization under `single`) TO fate 4 (`report`: rows listed by id, never attributed, never deleted). The table is exempt from NOT NULL, because no declaration anchors tenancy on its column any more. The row stays, so a database that still holds the table plans instead of being refused as carrying an uninventoried platform table. The plan's `inventoryDigest` changes: a plan file written by an earlier CLI no longer matches, and `--apply --plan-file` refuses it with `plan-digest-mismatch`. Re-run `os migrate organization-ownership --out PLAN`, review it, and apply that.
   
   **Existing databases.** The table is left in place untouched: no backfill, no reaper, no migrate command. Schema sync is additive and never drops a table, so a database an earlier release provisioned keeps `sys_notification_subscription` and any rows an administrator wrote, and nothing reads them. Export any row worth keeping. Dropping the table is the operator's call, by hand: `DROP TABLE sys_notification_subscription`.
-- 58cd58f: feat(service-messaging): a notification's text can be catalog keys, rendered per recipient at delivery in that recipient's language
+- 3937697: feat(service-messaging): a notification's text can be catalog keys, rendered per recipient at delivery in that recipient's language
   
   Clause-②: yes (widening): `EmitInput` gains an optional `keyedText` member, and the package's `.` entry gains `NotificationTextRenderer`, `assertNotificationTextKeys` and their types. An emit without `keyedText` is accepted and delivered exactly as before.
   
@@ -44,7 +44,7 @@
   - **Cost.** One `sys_user` read per keyed delivery (one per digest group). A delivery without keys, or a deployment with no `i18n` service, makes no read.
   - **Unchanged.** Every emit that passes no `keyedText` (and whose payload has no member of that name): the event row, the snapshot, and what the inbox, email and SMS channels deliver. The notify `template` path, `sys_notification_template` rendering (which now falls back to the rendered text), recipients, preferences and channel availability are also unchanged.
   - **Composing it.** `MessagingServicePlugin` wires one `NotificationTextRenderer` into the service and the dispatcher. A hand-built `MessagingService` passes `textRenderer` in its context and a `NotificationDispatcher` passes it in its options. Without one, keyed text is delivered as its literal, and the service says so once.
-- d68aab6: fix(service-messaging)!: `sys_notification_template` refuses a write that leaves a row naming a channel other than `email` or `sms`, because no channel ever sends such a row
+- 3937697: fix(service-messaging)!: `sys_notification_template` refuses a write that leaves a row naming a channel other than `email` or `sms`, because no channel ever sends such a row
   
   A notification template row is read by exactly two channels: the email channel (when the notification names no email template) and the SMS channel, which also renders the phone OTP and invitation texts. The in-app inbox reads no row on any path. `channel` is free text, so a row for `inbox`, `push` or any other value was stored and then rendered nowhere; the `channel_renders_template` rule only warned about it. That rule now refuses. It is an invariant judged over the stored row overlaid with the write, so it answers rows already stored with another channel as well as new ones: such a row is refused on any edit that leaves its channel out of the set, until an edit moves it to `email` or `sms`, and it is still read, listed and deleted. No stored row is rewritten or deleted by this change.
   
@@ -58,7 +58,7 @@
   - **TO:** that write is refused. The REST data door answers `400` with `code: 'VALIDATION_FAILED'` and one finding on `channel` (`code: 'rule_violation'`); an import commit fails that row with `field: 'channel'` and `code: 'rule_violation'`; a bulk update fails that row with `code: 'VALIDATION_FAILED'` and `httpStatus: 400`, and a predicate update over a set holding such a row writes no row. Every refusal carries the prescription: set the channel to `email` or `sms`, or delete the template; in-app content is an email template (`email_template`) named in a notify step's `template`.
   - **Unchanged:** `email` and `sms` rows and every write to them; reading, listing and deleting any row; how every channel renders, so a row for another channel is still sent by none; and the `channel` column and its width.
   - **The fix for an operator:** a row for another channel was never sent. Delete it, or set its channel to `email` or `sms` if its text belongs there. For in-app content, write an email template and name it in the notify step's `template`; the inbox and email both render it.
-- a39389e: fix(service-messaging)!: an html or mjml `sys_notification_template` body escapes every hole's value for markup
+- 3937697: fix(service-messaging)!: an html or mjml `sys_notification_template` body escapes every hole's value for markup
   
   The email channel renders a notification template row whose `format` is `html` or `mjml` into the mail's html part. Its `{{ payload.x }}` holes placed each value into that markup as stored, so a text field carrying markup characters — a person's display name, a record title, a comment — was read as markup by the recipient's mail client. Each hole's value in an html or mjml body is now HTML-escaped, in element text and quoted attributes alike, and the template's own markup renders as written. Stored text is never stripped or refused: a display name may contain any character, and the mail client shows it as typed.
   
@@ -75,7 +75,7 @@
 
 ### Patch Changes
 
-- 0091d84: fix: no shipped text says the SQL driver reads organization-less rows, and the in-memory HTTP outbox no longer does
+- 3937697: fix: no shipped text says the SQL driver reads organization-less rows, and the in-memory HTTP outbox no longer does
   
   Clause-②: no (one fix and texts: the in-memory HTTP outbox's `redeliver()` now answers as `SqlHttpOutbox` already did; no accept set, served body or error code of a shipped composition moves)
   
@@ -87,7 +87,7 @@
   - **`@objectstack/lint`.** `os explain unique/legacy-organization-composite` now says that a new row carries its organization wherever the organization object is registered. A composition that registers no organization object still writes rows whose organization column is NULL.
   - **`@objectstack/spec`.** The TSDoc of `SharingRuleRow` no longer calls it a 1-to-1 stored shape: `deploymentWide` has no `sys_sharing_rule` column. The TSDoc of `DriverOptions.tenantIds` and of the events `organizationId` member describe the predicate without a NULL arm.
   - **The other packages.** Code comments only.
-- e282f32: fix(service-messaging,metadata-protocol)!: a notification preference's User is a `sys_user` reference, so the record title names the person and the write door refuses an id no user holds; the default for every user is an empty User instead of `'*'`
+- 3937697: fix(service-messaging,metadata-protocol)!: a notification preference's User is a `sys_user` reference, so the record title names the person and the write door refuses an id no user holds; the default for every user is an empty User instead of `'*'`
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -105,7 +105,7 @@
     - On SQLite and PostgreSQL, `@objectstack/metadata-protocol` rebuilds the index `uniq_sys_notification_preference_a22d7d27` at `kernel:ready` as `(organization_id, COALESCE(user_id, ''), topic, channel)`, so a second default for one topic and channel in one organization is refused (`409`). If existing rows already break that rule, it refuses to migrate: the previous index stays, no row is touched, and the boot log and `os migrate duplicates` list the rows. MySQL/MariaDB and driver-memory keep the declared index, which does not constrain empty Users, and the boot log says so on MySQL.
   - **Unchanged:** `topic = '*'` and `channel = '*'` are still the topic and channel wildcards. Most-specific-wins resolution, mandatory topics, quiet hours and digests behave as before. A row for a real user is read, matched and titled as before, except for the title text. The physical column is still a `varchar(255)`, so no DDL change is needed for it.
   - **The fix for an operator:** nothing, normally; the boot rewrites the old `'*'` rows. If the boot log reports a `'*'` row that shares its topic and channel with a default whose User is already empty, delete the one that should not apply and restart. If it reports that the one-default-per-key index could not be built because two such defaults exist, list them with `os migrate duplicates`, delete one, and restart. A script or import that wrote `user_id: '*'` writes an empty `user_id` (omit it, or send `null`) for the default for every user.
-- 0603bfa: fix(service-messaging): the `sys_notification_template` copy now says that only the email and SMS channels use a template row, and that the in-app inbox never does
+- 3937697: fix(service-messaging): the `sys_notification_template` copy now says that only the email and SMS channels use a template row, and that the in-app inbox never does
   
   A notification template row is read by exactly two channels: the email channel (when the notification names no email template) and the SMS channel, which also renders the phone OTP and invitation texts. The in-app inbox reads no row on any path. `channel` is free text, so a row saved for `inbox`, `push` or any other value was stored and then rendered nowhere, with nothing to say so.
   
@@ -115,7 +115,7 @@
   
   - **Unchanged.** Nothing this entry describes changes which writes are accepted. `email` and `sms` rows, how every channel renders, and the column and its width are unchanged.
   - **What to do.** For in-app content, write an email template and name it in the notify step's `template`; the inbox and email both render it. A row for another channel was never sent, so delete it if you no longer want it listed.
-- c24203f: fix(service-messaging): the heading of a notification digest of two or more items is rendered in its recipient's language, not as the English "You have N notifications" for everyone
+- 3937697: fix(service-messaging): the heading of a notification digest of two or more items is rendered in its recipient's language, not as the English "You have N notifications" for everyone
   
   Clause-②: no
   Metadata-protocol: none
@@ -124,7 +124,7 @@
   - **Now.** The heading is keyed (`messages.notificationDigestTitle`, with a `{{count}}` hole) in `@objectstack/service-messaging`'s own translation bundle, in en, zh-CN, ja-JP and es-ES. It is rendered at delivery by the same keyed-text renderer as the digest's items (`EmitInput.keyedText`), in the same locale read: the recipient's `sys_user.locale`, then the deployment default. A zh-CN recipient reads "您有 3 条通知".
   - **Unchanged.** The English sentence stays the literal fallback, byte for byte: with no `i18n` service, with no renderer composed, or when neither the recipient's language nor the deployment default has a pack. A one-item digest is still titled by its item. No export, option or type changes.
   - **Cost.** With an `i18n` service registered, each digest of two or more items now reads its recipient's locale once, even when none of its items is keyed, because its heading always is.
-- 284e048: fix(service-messaging)!: `sys_notification_template` refuses an html or mjml body that places a hole where the renderer's encoding is not right for it
+- 3937697: fix(service-messaging)!: `sys_notification_template` refuses an html or mjml body that places a hole where the renderer's encoding is not right for it
   
   An html or mjml notification template body HTML-escapes every hole's value. That encoding is right in two placements only: element text, and a quoted plain-text attribute value. A hole anywhere else (an attribute read as a URL, an event handler, a style, an attribute holding markup, a meta element attribute, an unquoted attribute value, inside a tag, a raw-text element, a comment, or SVG / MathML content) received an encoding that does not fit where it lands. Such a body is now refused when it is saved. A hole counts as supported only when every way an HTML parser can read the body places it in element text or a quoted plain-text attribute value. The check is the template object's own save hooks, judged over the stored row overlaid with the write, so a row stored before this change that breaks the rule is refused on any edit that leaves it breaking it: frozen, not bricked. It is still read, listed and deleted, and it keeps rendering and delivering as before. No stored row is rewritten.
   
@@ -139,7 +139,7 @@
   - **TO:** that write is refused. The REST data door answers `400` with `code: 'VALIDATION_FAILED'` and one finding at `body` (`code: 'invalid_value'`) that names each refused hole and its placement. An import commit fails that row with `field: 'body'` and `code: 'invalid_value'`. A bulk update fails that row with `code: 'VALIDATION_FAILED'` and `httpStatus: 400`, and a predicate update over a set holding such a row writes no row. Every writer is judged, system context included.
   - **Unchanged:** `markdown` and `text` bodies, whose holes render verbatim; html and mjml bodies whose every hole sits in element text or a quoted plain-text attribute value; reading, listing and deleting any row; and how every row renders and is delivered. No error code is added.
   - **The fix for an author:** move each refused hole into element text or a quoted plain-text attribute value, or set the format to `text` or `markdown`. A link whose address comes from a value belongs in an email template (`email_template`), which declares that variable as a URL; name it in the notify step's `template`.
-- 1f78b64: fix(service-messaging)!: retire `renderNotification`, the render export that takes a notification template body with no save moment
+- 3937697: fix(service-messaging)!: retire `renderNotification`, the render export that takes a notification template body with no save moment
   
   The hole-placement rule for notification templates is judged where a template is saved: the `sys_notification_template` save hooks. `renderNotification` took a template body inline and rendered it at once, with no save moment, so the rule could not see it. It leaves the published entry of `@objectstack/service-messaging`. Nothing in this repository imported it from that entry. The renderer stays inside the package: the email and sms channels still render every stored template through it, unchanged.
   
@@ -153,7 +153,7 @@
   - FROM `renderNotification` TO a `sys_notification_template` row for the topic, channel and locale, which the delivering channel renders when the notification is emitted.
   
   Unchanged: `interpolate` (the plain-text face, which the placement rule judges at no door), `NotificationTemplateStore`, `TEMPLATE_OBJECT`, `DEFAULT_LOCALE` and the template types; and how every stored template renders.
-- bc5daf0: fix(service-messaging): a notification delivery's title names the person it is for, not their raw user id (#25194)
+- 3937697: fix(service-messaging): a notification delivery's title names the person it is for, not their raw user id (#25194)
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -163,7 +163,7 @@
   The delivery object gains one optional field, `recipient_user_id` (Recipient User), a `sys_user` reference the title reads through. `emit()` sets it when the recipient is a user's id, from one `sys_user` read per emit, and leaves it empty for an address. Deleting the user empties it; the delivery stays, titled by the raw recipient. `recipient_id` keeps its type and meaning (the address: a user id, an email or a phone number), and is now labelled **Recipient**.
   
   Rows written before this change carry no `recipient_user_id` and keep their old title until the 90-day window ages them out. Nothing is migrated, and no delivery is routed by the new field.
-- ee63b47: fix: Setup field help is written for administrators, and the two access-review fields nothing uses yet are hidden from the Setup forms
+- 3937697: fix: Setup field help is written for administrators, and the two access-review fields nothing uses yet are hidden from the Setup forms
   
   Clause-②: no
   Metadata-protocol: none
@@ -178,7 +178,7 @@
   - the Data Lifecycle settings page and its retention overrides.
   
   `Last Certified At` and `Certified By` on `sys_user_permission_set` and `sys_user_position` are reserved for a future access-review feature and nothing writes or reads them. They are now `hidden: true`, so the Setup forms and detail pages no longer show them. The columns and any stored values stay.
-- 8878c36: fix(service-messaging): Setup's Notification Preferences form says which topics and channels can be entered
+- 3937697: fix(service-messaging): Setup's Notification Preferences form says which topics and channels can be entered
   
   Clause-②: no
   Metadata-protocol: none
@@ -196,95 +196,95 @@
   Both helps also say `*` means all, and that a value nothing uses matches nothing.
   
   No stored row, accepted value, default or column changes. The translation bundles carry the new help.
-- Updated dependencies [448374d]
-- Updated dependencies [94842ba]
-- Updated dependencies [7cacad5]
-- Updated dependencies [df8bb40]
-- Updated dependencies [0091d84]
-- Updated dependencies [5e9b100]
-- Updated dependencies [7532ea3]
-- Updated dependencies [fde7456]
-- Updated dependencies [de9cd1f]
-- Updated dependencies [7035682]
-- Updated dependencies [d606fc1]
-- Updated dependencies [a8b44d4]
-- Updated dependencies [78ab647]
-- Updated dependencies [73a2b52]
-- Updated dependencies [5872450]
-- Updated dependencies [9ea5afe]
-- Updated dependencies [925fd07]
-- Updated dependencies [e7befa7]
-- Updated dependencies [55d7aab]
-- Updated dependencies [644e4b2]
-- Updated dependencies [0715fac]
-- Updated dependencies [60b42cd]
-- Updated dependencies [b9a79ef]
-- Updated dependencies [63085c3]
-- Updated dependencies [0b8bce4]
-- Updated dependencies [5d2c5a1]
-- Updated dependencies [066dabc]
-- Updated dependencies [4b8f597]
-- Updated dependencies [2069b81]
-- Updated dependencies [1862d8d]
-- Updated dependencies [30d21f6]
-- Updated dependencies [eddffc3]
-- Updated dependencies [69712d5]
-- Updated dependencies [dfe60e3]
-- Updated dependencies [e939357]
-- Updated dependencies [045858f]
-- Updated dependencies [baedcec]
-- Updated dependencies [03c12a5]
-- Updated dependencies [386f60f]
-- Updated dependencies [28c9a2c]
-- Updated dependencies [2354058]
-- Updated dependencies [ba244f1]
-- Updated dependencies [edcc8ce]
-- Updated dependencies [fccbd9d]
-- Updated dependencies [c8f4c43]
-- Updated dependencies [02ad31a]
-- Updated dependencies [03966ce]
-- Updated dependencies [e3aa111]
-- Updated dependencies [863c580]
-- Updated dependencies [7f5b19d]
-- Updated dependencies [14e7239]
-- Updated dependencies [fe0ec2b]
-- Updated dependencies [dfab597]
-- Updated dependencies [9127f23]
-- Updated dependencies [24360dc]
-- Updated dependencies [ecb4e69]
-- Updated dependencies [8dfd126]
-- Updated dependencies [bda53bb]
-- Updated dependencies [b964ea1]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [4395cbc]
-- Updated dependencies [9019af9]
-- Updated dependencies [45f9962]
-- Updated dependencies [e5eab06]
-- Updated dependencies [dc532e8]
-- Updated dependencies [d196748]
-- Updated dependencies [5f30f00]
-- Updated dependencies [7db1697]
-- Updated dependencies [f5b6b3f]
-- Updated dependencies [c109bfc]
-- Updated dependencies [f4112a7]
-- Updated dependencies [f4112a7]
-- Updated dependencies [db1c7cc]
-- Updated dependencies [303aef0]
-- Updated dependencies [b3034ee]
-- Updated dependencies [d12e650]
-- Updated dependencies [830a63a]
-- Updated dependencies [1000cc7]
-- Updated dependencies [ee63b47]
-- Updated dependencies [bdf762c]
-- Updated dependencies [27b3f1f]
-- Updated dependencies [3306cad]
-- Updated dependencies [c898bd8]
-- Updated dependencies [97aa34e]
-- Updated dependencies [832a84e]
-- Updated dependencies [7c68b10]
-- Updated dependencies [915e940]
-- Updated dependencies [025f6de]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [9f39094]
-- Updated dependencies [f7d7403]
+- Updated dependencies [3937697]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0
   - @objectstack/platform-objects@18.1.0

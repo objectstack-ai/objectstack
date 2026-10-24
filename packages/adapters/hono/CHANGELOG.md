@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 02e6d73: fix(cors)!: every CORS door reads one admission rule; a loopback origin beside a list is admitted on a development boot only; an all-host pattern is refused with credentials, as `'*'` is
+- 3937697: fix(cors)!: every CORS door reads one admission rule; a loopback origin beside a list is admitted on a development boot only; an all-host pattern is refused with credentials, as `'*'` is
   
   Clause-②: yes (narrowing)
   
@@ -24,20 +24,20 @@
 
 ### Patch Changes
 
-- Updated dependencies [94842ba]
-- Updated dependencies [0091d84]
-- Updated dependencies [02e6d73]
-- Updated dependencies [4cef6e2]
-- Updated dependencies [9cfc575]
-- Updated dependencies [a1e51d6]
-- Updated dependencies [fb7501b]
-- Updated dependencies [258f4e6]
-- Updated dependencies [882372d]
-- Updated dependencies [eee2f0d]
-- Updated dependencies [c898bd8]
-- Updated dependencies [2b7c331]
-- Updated dependencies [915e940]
-- Updated dependencies [35d942e]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
   - @objectstack/runtime@18.1.0
   - @objectstack/plugin-hono-server@18.1.0
   - @objectstack/types@18.1.0

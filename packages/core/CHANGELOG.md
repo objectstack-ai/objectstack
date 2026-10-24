@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 94842ba: feat(core,plugin-security)!: a grant applies only in its own organization — an organization-less grant row confers nothing, and the Default Organization's `admin_full_access` grant is the only platform-admin anchor
+- 3937697: feat(core,plugin-security)!: a grant applies only in its own organization — an organization-less grant row confers nothing, and the Default Organization's `admin_full_access` grant is the only platform-admin anchor
   
   Clause-②: yes (narrowing)
   
@@ -20,7 +20,7 @@
   - **What a lean composition sees.** A composition that registers no organization object (`sys_organization`, which plugin-auth ships) still stores grants without an organization, and those grants now confer nothing. No shipped composition does this: `os serve` registers the security plugin only together with plugin-auth.
   
   **What an operator does.** Nothing beyond the upgrade itself: run `os migrate organization-ownership` before serving a database that 17.x or an 18.0 pre-release created. The server refuses such a database until you do. If an embedding composes `@objectstack/plugin-security` without plugin-auth, register the organization object so that grants carry an organization.
-- b964ea1: feat(spec,core,objectql): one package entry of a release artifact may state its own `source`, and the registry records it
+- 3937697: feat(spec,core,objectql): one package entry of a release artifact may state its own `source`, and the registry records it
   
   Clause-②: yes
   Metadata-protocol: added
@@ -30,7 +30,7 @@
   The `manifest` service registers each package with the `source` its entry states, so a merged artifact that carries marketplace installs beside the deployment's own code lists them as `marketplace` on `GET /api/v1/packages`. An entry that states nothing takes the registering door's statement as before (`register(artifact, { source })`, `code` when absent), so existing artifacts register unchanged. An entry's own statement wins over the door's.
   
   `@objectstack/core` adds `resolveArtifactPackageEntries(artifact)`, which returns each package to register as `{ manifest, source? }` in dependency order. `resolveArtifactPackageOrder` is unchanged and still returns the bodies alone.
-- 9019af9: feat: an `external` organization role for portal users, who read their own identity rows and reach data only through explicit grants
+- 3937697: feat: an `external` organization role for portal users, who read their own identity rows and reach data only through explicit grants
   
   Clause-②: yes (widening)
   Metadata-protocol: added
@@ -48,7 +48,7 @@
   - **`@objectstack/platform-objects`:** the `External` option label on the membership role pickers, translated.
   
   `org_external` is a reserved name from this release on, so a position can no longer be named `org_external`.
-- 45f9962: feat: a holder of the `external` organization role is the EXTERNAL principal — the org-wide default never widens it, and it reaches data only through shares, sharing rules and grant RLS
+- 3937697: feat: a holder of the `external` organization role is the EXTERNAL principal — the org-wide default never widens it, and it reaches data only through shares, sharing rules and grant RLS
   
   Clause-②: yes (widening: `@objectstack/core` gains `owdForAudience`, `isExternalAudienceContext`, `externalGrantSpeaks` and the two grant-stamp keys; every narrowing below applies only to the `external` role, which no release has shipped yet)
   Metadata-protocol: semantic
@@ -66,12 +66,12 @@
 
 ### Patch Changes
 
-- 644e4b2: fix(core): the authorization prelude's grant read names the columns it decides on, so no formula on `sys_user_permission_set` is computed in every request a grant holder makes
+- 3937697: fix(core): the authorization prelude's grant read names the columns it decides on, so no formula on `sys_user_permission_set` is computed in every request a grant holder makes
   
   Clause-②: no (a read's projection: every resolved authz answer is unchanged and pinned so; no accept set, served shape or export moves)
   
   `resolveAuthzContext` reads the principal's `sys_user_permission_set` grants on every authenticated request. That read named no columns, so the engine computed every formula field the grant table declares for it, the record title included, though the resolver reads none of them. A title that reads through a lookup (the person's name, one hop through `user_id`) would have cost each request by a principal holding a direct grant one more `sys_user` read and one more round trip: 9 reads in 5 round trips instead of 8 in 4. The read now names exactly the four columns the resolver decides on: `permission_set`, `organization_id`, `valid_from` and `valid_until`. The resolved authorization context is unchanged for every grant state (active, expired, not yet valid, organization-owned, deployment-wide, and the Default Organization's `admin_full_access` grant), and a grant holder's prelude stays at 8 reads in 4 round trips whatever display formula the grant table declares.
-- dfe60e3: fix(core): the import resolves a lookup cell by the target object's stored title field
+- 3937697: fix(core): the import resolves a lookup cell by the target object's stored title field
   
   Clause-②: no
   
@@ -79,7 +79,7 @@
   - **Now.** After the id and the lookup's `displayField`, the import asks the target's title field, resolved by ADR-0079's one rule (`resolveDisplayField`: `nameField`, then the deprecated `displayNameField` alias, then the derived title). It is read from the same object declaration the import already reads to check the target's exposure, so no extra metadata read is made. Two records that share the title answer `reference_ambiguous`, like the import's other ambiguous matches. The cell is never linked to the first hit.
   - **A formula title is not matched.** A `formula` field has no stored column, and the engine refuses a filter over it. The import no longer sends that query, for the title or for any other candidate the target declares as a formula, so a cell against a formula title still answers `reference_not_found`. How a formula title should be matched is still open.
   - **Unchanged.** The fixed fallback keys and their order. The exposure check still runs first: a target whose declared exposure does not serve `list` answers `reference_not_found` for every cell and is never read.
-- 8dfd126: fix(core,plugin-auth)!: the last-admin guard judges a `sys_organization` insert that moves the Default Organization, and one definition of the Default Organization is exported from core
+- 3937697: fix(core,plugin-auth)!: the last-admin guard judges a `sys_organization` insert that moves the Default Organization, and one definition of the Default Organization is exported from core
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -100,7 +100,7 @@
   Metadata-protocol: none
   
   `owdForAudience`'s module docblock said an external is floored on a `controlled_by_parent` detail. It is not: plugin-sharing exempts the detail, whose rows follow its master, and the master meets the floor (#25541). Comment only; no behaviour changes.
-- d196748: fix(core)!: `resolveLocalizationContext`'s direct `sys_setting` fallback reads the caller's organization's rows only, never another organization's row or a row with no organization outside a lean embedding
+- 3937697: fix(core)!: `resolveLocalizationContext`'s direct `sys_setting` fallback reads the caller's organization's rows only, never another organization's row or a row with no organization outside a lean embedding
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -118,7 +118,7 @@
   **Who is affected.** Only a deployment whose settings service fails a localization read, and only for an organization with no tenant localization row of its own, or a store holding organization-less tenant localization rows. A healthy settings service never reaches this read.
   
   **The remedy.** Run `os migrate organization-ownership --out PLAN`, review the reported `sys_setting` rows, and save each localization value again from inside the organization it belongs to (Setup → Localization, or `PUT /api/settings/localization` with that organization active).
-- db1c7cc: feat(core): `isCloudManaged()` is the one reader of `OS_CLOUD_MANAGED`, and a production boot that sets it without a bound control plane refuses to start
+- 3937697: feat(core): `isCloudManaged()` is the one reader of `OS_CLOUD_MANAGED`, and a production boot that sets it without a bound control plane refuses to start
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -127,7 +127,7 @@
   - **The fuse.** On a production boot (not `--dev`, which sets `NODE_ENV=development` only when `NODE_ENV` is unset, and not `NODE_ENV=test`; so `NODE_ENV=production os serve --dev` counts as a production boot and is refused the same way), `OS_CLOUD_MANAGED=1` with `OS_CLOUD_API_KEY` unset or empty refuses: `ObjectKernel.bootstrap()` and `LiteKernel.bootstrap()` reject before any plugin initialises, and `isCloudManaged()` throws the same error. The cloud sets both variables on the runtimes it hosts. A self-hosted deployment that has `OS_CLOUD_MANAGED=1` in a copied env file now fails to boot; remove the variable, which a self-hosted deployment never needs.
   - **One caveat:** the fuse reads the environment only. A runtime that binds its control plane solely through `CloudConnectionPlugin`'s `controlPlaneApiKey` option, and also sets `OS_CLOUD_MANAGED=1` in production, is refused. Set `OS_CLOUD_API_KEY` instead.
   - **`@objectstack/cloud-connection`:** the plugin resolves its control-plane credential through `resolveControlPlaneApiKey(controlPlaneApiKey)`, so the plugin's "platform-managed" answer and the fuse share one derivation. Its behaviour is unchanged: the option wins, then `OS_CLOUD_API_KEY`, trimmed.
-- b3034ee: refactor(core, plugin-auth, plugin-security, service-settings): one definition each for the `admin_full_access` anchor rule and the organization-reach rule, exported from core security
+- 3937697: refactor(core, plugin-auth, plugin-security, service-settings): one definition each for the `admin_full_access` anchor rule and the organization-reach rule, exported from core security
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -166,7 +166,7 @@
     These two differences are kept by design: they make the fallback, which runs only when the service has failed, the stricter reader.
   
   No configuration, metadata or HTTP behaviour changes. Code that does not import the new exports needs no action.
-- 27b3f1f: feat: the position list can say who holds each position and which permission sets it grants, read where the resolver enforces both
+- 3937697: feat: the position list can say who holds each position and which permission sets it grants, read where the resolver enforces both
   
   Clause-②: yes (widening: `GET /meta/position?include=grants` adds two read-only served keys per position, `_holderCount` and `_grantedPermissionSets`; `ISecurityService` gains the optional `describePositionGrants`)
   Metadata-protocol: none
@@ -190,67 +190,67 @@
   - **An option value in another case.** A select / multiselect cell `CN` matches the declared option value `cn` and stores `cn` — the declared value, never the cell's spelling — as labels already matched in any case. A cell that matched an exact value or a label before stores what it stored: the value pass runs after both. A cell naming, by case alone, two declared values that differ only by case (`cn` and `CN`, which the spec's lowercase option value refuses but a programmatically registered object can carry) is not resolved by guessing; it gets `invalid_option` as before.
   
   Every cell error of a row is still reported as the first one only; that half of the same request is not in this change.
-- Updated dependencies [448374d]
-- Updated dependencies [7cacad5]
-- Updated dependencies [df8bb40]
-- Updated dependencies [0091d84]
-- Updated dependencies [5e9b100]
-- Updated dependencies [7532ea3]
-- Updated dependencies [fde7456]
-- Updated dependencies [de9cd1f]
-- Updated dependencies [925fd07]
-- Updated dependencies [e7befa7]
-- Updated dependencies [55d7aab]
-- Updated dependencies [0715fac]
-- Updated dependencies [60b42cd]
-- Updated dependencies [b9a79ef]
-- Updated dependencies [63085c3]
-- Updated dependencies [0b8bce4]
-- Updated dependencies [2069b81]
-- Updated dependencies [1862d8d]
-- Updated dependencies [30d21f6]
-- Updated dependencies [eddffc3]
-- Updated dependencies [69712d5]
-- Updated dependencies [e939357]
-- Updated dependencies [045858f]
-- Updated dependencies [baedcec]
-- Updated dependencies [03c12a5]
-- Updated dependencies [386f60f]
-- Updated dependencies [28c9a2c]
-- Updated dependencies [2354058]
-- Updated dependencies [edcc8ce]
-- Updated dependencies [fccbd9d]
-- Updated dependencies [c8f4c43]
-- Updated dependencies [02ad31a]
-- Updated dependencies [03966ce]
-- Updated dependencies [e3aa111]
-- Updated dependencies [863c580]
-- Updated dependencies [7f5b19d]
-- Updated dependencies [14e7239]
-- Updated dependencies [fe0ec2b]
-- Updated dependencies [dfab597]
-- Updated dependencies [9127f23]
-- Updated dependencies [24360dc]
-- Updated dependencies [ecb4e69]
-- Updated dependencies [bda53bb]
-- Updated dependencies [b964ea1]
-- Updated dependencies [9019af9]
-- Updated dependencies [45f9962]
-- Updated dependencies [e5eab06]
-- Updated dependencies [dc532e8]
-- Updated dependencies [5f30f00]
-- Updated dependencies [7db1697]
-- Updated dependencies [f5b6b3f]
-- Updated dependencies [f4112a7]
-- Updated dependencies [303aef0]
-- Updated dependencies [d12e650]
-- Updated dependencies [830a63a]
-- Updated dependencies [1000cc7]
-- Updated dependencies [bdf762c]
-- Updated dependencies [27b3f1f]
-- Updated dependencies [7c68b10]
-- Updated dependencies [915e940]
-- Updated dependencies [025f6de]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
   - @objectstack/spec@18.1.0
   - @objectstack/types@18.1.0
 

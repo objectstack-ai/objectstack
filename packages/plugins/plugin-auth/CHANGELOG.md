@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- de9cd1f: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   fix(plugin-auth): `POST /api/v1/auth/organization/invite-member` refuses a role outside the membership vocabulary with `code: 'ROLE_NOT_FOUND'`
   
@@ -14,7 +14,7 @@
   - **Now.** invite-member answers `400` with `code: 'ROLE_NOT_FOUND'` and the same message, naming the role, the body `update-member-role` gives for the same condition. The refusal still happens before any invitation row is written. This is the answer the invitation schema's `role` docstring and the authentication docs already promise.
   - **The ledger.** `ROLE_NOT_FOUND` is registered under `@objectstack/plugin-auth` in the error-code ledger, so `ErrorCode` (and `ApiErrorSchema.code`) admits it.
   - **Unchanged.** A valid role invites as before, and every other refusal on invite-member keeps its answer.
-- 78ab647: fix(plugin-auth): the auth product name binds to `branding.workspace_name` only where the settings service offers the `branding` namespace, so a walled boot no longer warns about it
+- 3937697: fix(plugin-auth): the auth product name binds to `branding.workspace_name` only where the settings service offers the `branding` namespace, so a walled boot no longer warns about it
   
   Clause-②: no (this package stops reading a namespace `@objectstack/service-settings` no longer offers under a wall; that withholding, declared BREAKING in its changeset, is what narrows the walled deployment, and nothing here widens)
   
@@ -28,7 +28,7 @@
   - A `branding.workspace_name` row stored with no organization, for example one saved before the wall stood.
   
   Migration, FROM → TO: `OS_BRANDING_WORKSPACE_NAME=Acme` → `OS_APP_NAME=Acme`. Set `OS_APP_NAME` to the name the deployment's sign-in emails and authenticator entries should carry. A deployment that set neither source sees no change.
-- 5872450: fix(plugin-auth)!: `POST /api/v1/auth/sys-oauth-application/register` refuses an application type the OAuth provider does not judge with `400 INVALID_REQUEST`, where it registered it as a `web` client
+- 3937697: fix(plugin-auth)!: `POST /api/v1/auth/sys-oauth-application/register` refuses an application type the OAuth provider does not judge with `400 INVALID_REQUEST`, where it registered it as a `web` client
   
   Clause-②: no (narrowing) — the register door accepted any `type` value and registered every one other than `web` / `native` as a `web` client with a secret; it now refuses each of those values with 400, so it accepts exactly `web`, `native` and no type.
   
@@ -44,7 +44,7 @@
   - **Unchanged:** A request with no `type`, or with `type: null`, registers a `web` client, the provider's default. The other refusals keep their codes (their statuses are this release's refusal-status entry). Clients already registered are not touched.
   - **`@objectstack/platform-objects`:** only the code comment on the `create_oauth_application` action changes, to state this refusal; it ships in the package's JavaScript. The form offers only Web and Native (this release's register-form entry).
   - **The fix for an integrator:** send `type: 'web'` for a client whose redirect URIs are https on a host that is not a loopback address, or `type: 'native'` for a client that also redirects to `http://localhost`, `http://127.0.0.1` or `http://[::1]`. Omitting `type` registers `web`.
-- 02e6d73: fix(cors)!: every CORS door reads one admission rule; a loopback origin beside a list is admitted on a development boot only; an all-host pattern is refused with credentials, as `'*'` is
+- 3937697: fix(cors)!: every CORS door reads one admission rule; a loopback origin beside a list is admitted on a development boot only; an all-host pattern is refused with credentials, as `'*'` is
   
   Clause-②: yes (narrowing)
   
@@ -61,7 +61,7 @@
   - **Unchanged.** Same-origin requests need no CORS answer. An exact origin or a pattern that names part of the host (`https://*.example.com`) is admitted as before, credentials included; the one exception is the comma-separated `cors.origin` string above, which now admits what it lists. `'*'` with credentials off is still served. `cors: false` and `OS_CORS_ENABLED=false` still disable the middleware. Headers, methods and max-age are unchanged. `OS_TRUSTED_ORIGINS` still admits nothing to CORS.
   
   **What an operator does.** A host composing `createHonoApp` for a cross-origin front-end names its origins, in `OS_CORS_ORIGIN` or the `cors.origin` option. A deployment that reached the server from a loopback origin outside development names that origin in its list. A list holding `'*'` or an all-host pattern while credentials are on either names its origins or sets `OS_CORS_CREDENTIALS=false`.
-- 688052e: fix(objectql, plugin-auth)!: deleting an organization that still owns records is refused with 409 and a per-table count, before anything is deleted; an empty one is deleted whole, its teams and organization-admin grants with it; the engine never clears a tenant column
+- 3937697: fix(objectql, plugin-auth)!: deleting an organization that still owns records is refused with 409 and a per-table count, before anything is deleted; an empty one is deleted whole, its teams and organization-admin grants with it; the engine never clears a tenant column
   
   **The 18.0.0 defect this fixes.** `POST /api/v1/auth/organization/delete` ran better-auth's delete, which removes the organization's members, then its invitations, then the organization row, as three separate writes. The engine's delete cascade then applied the tenant column's `set_null` default to every row the organization still owned. On a database whose tenant column is NOT NULL (one that took the v18 organization-ownership ceremony), the delete answered 500 on `sys_team.organization_id` after the members and invitations were already gone, so the organization survived with no owner and nobody could delete it. On a database 18.0.0 created, where the column is still nullable, the delete answered 200 and left the organization's teams and records with `organization_id = NULL`, owned by nobody and visible to nobody. Every organization created through the door owns a default team, so on a NOT NULL database not even an empty organization could be deleted. Deployments that run `single` are not reached the same way: their one organization is the Default Organization, which the last-administrator guard answers first, and they cannot create another.
   
@@ -89,7 +89,7 @@
   - **Fix:** delete the organization's records, or move them to another organization, then delete the organization. The refusal names the tables to look at. Business units, positions and sharing rules count as records. Activity, audit and mail-log rows do not, nor do engine-owned rows (approval state, runs, deliveries, shares, settings values).
   - **Seed datasets:** on a composition with the organizations runtime (`@objectstack/organizations`) and an app that ships seed datasets, a new organization receives that seed replay at creation, so it owns records from its first moment and its delete is refused until they are removed. The refusal lists them. Delete them (or move them) like any other records, then delete the organization. Measured on the showcase: a fresh organization owns 132 seeded rows in 19 tables.
   - **Already orphaned on 18.0.0?** Rows an earlier organization delete set to `organization_id = NULL` are not touched by this release. Organization-less rows are what the v18 organization-ownership ceremony (`os migrate organization-ownership`) attributes or reports.
-- 4bf079c: fix(plugin-auth): `os migrate apply`'s `sys_account.issuer` pre-flight report names each colliding row's stored issuer instead of `(none)`
+- 3937697: fix(plugin-auth): `os migrate apply`'s `sys_account.issuer` pre-flight report names each colliding row's stored issuer instead of `(none)`
   
   Clause-②: yes (widening)
   
@@ -100,7 +100,7 @@
   - **`@objectstack/cli`.** `os migrate account-issuer` reads through the probe's reader instead of its own, so it and `os migrate apply` read one table one way. Its output is unchanged.
   
   **Unchanged.** The collision verdict (`ok`, the colliding keys, row ids, users, counts), the `apply` refusal and its exit code. A database whose `sys_account` has no `issuer` column reports each row as `(none)`, as before.
-- 9019af9: feat: an `external` organization role for portal users, who read their own identity rows and reach data only through explicit grants
+- 3937697: feat: an `external` organization role for portal users, who read their own identity rows and reach data only through explicit grants
   
   Clause-②: yes (widening)
   Metadata-protocol: added
@@ -118,7 +118,7 @@
   - **`@objectstack/platform-objects`:** the `External` option label on the membership role pickers, translated.
   
   `org_external` is a reserved name from this release on, so a position can no longer be named `org_external`.
-- 45f9962: feat: a holder of the `external` organization role is the EXTERNAL principal — the org-wide default never widens it, and it reaches data only through shares, sharing rules and grant RLS
+- 3937697: feat: a holder of the `external` organization role is the EXTERNAL principal — the org-wide default never widens it, and it reaches data only through shares, sharing rules and grant RLS
   
   Clause-②: yes (widening: `@objectstack/core` gains `owdForAudience`, `isExternalAudienceContext`, `externalGrantSpeaks` and the two grant-stamp keys; every narrowing below applies only to the `external` role, which no release has shipped yet)
   Metadata-protocol: semantic
@@ -136,7 +136,7 @@
 
 ### Patch Changes
 
-- c2d4072: fix(plugin-auth): an administrator's impersonation session is not held by the target's forced password reset or password expiry (#24762)
+- 3937697: fix(plugin-auth): an administrator's impersonation session is not held by the target's forced password reset or password expiry (#24762)
   
   Clause-②: no
   
@@ -144,7 +144,7 @@
   
   - **What moves.** On a session that carries `impersonatedBy`, the session gate (`user.authGate`, stamped in `customSession`) now shows only the first `account`-scope posture the user holds. `PASSWORD_RESET_REQUIRED` and `PASSWORD_EXPIRED` no longer hold it. `MFA_REQUIRED` still does, so an impersonation session of a user who owes MFA enrolment is still refused `403 MFA_REQUIRED`, including when the user also owes a password change.
   - **Unchanged.** The user's own sign-in stays held until they change the password. The forced reset's revocation (`revokeSessionsAndKeys`, on by default) still ends every session of the user, impersonation sessions included. API keys, the print door's refusal of an impersonation session, and the impersonation door's own check of the administrator's posture are unchanged.
-- fbb42d9: fix(plugin-auth): the Console's OAuth Application Type reaches the provider as `application_type`, so a Native client can register a loopback redirect URI (#24773)
+- 3937697: fix(plugin-auth): the Console's OAuth Application Type reaches the provider as `application_type`, so a Native client can register a loopback redirect URI (#24773)
   
   Clause-②: no — the declared type now takes effect under the OAuth provider's own redirect-URI rule, an authentication behaviour the maintainer ruled on; nothing published widens.
   
@@ -153,7 +153,7 @@
   - **Now.** `web` and `native` are forwarded as `application_type`, and the provider's own rule decides. A `native` client may use http only on exactly `localhost`, `127.0.0.1` or `[::1]` (any port), and is stored as `native`. A `web` client still needs an https URI on a non-loopback host.
   - **Refused.** Any other type, including the form's `user-agent-based` and `public`, has no `application_type` in the provider. The register route refuses it with `400 INVALID_REQUEST` and registers nothing (this release's breaking entry for the route). To use a loopback redirect URI, register the client as `native`.
   - **Unchanged.** No type at all is `web`. Refusals keep the codes and statuses they had: `400 OAUTH_REGISTER_FAILED`, with `error.details.upstreamError` `invalid_redirect_uri` when the redirect-URI rule refuses.
-- 950f949: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   fix(plugin-auth): a refused OAuth application registration answers the status the refusal declared, not 500 (#24773)
   
@@ -163,7 +163,7 @@
   
   - **Now.** The route answers the refusal's own status: `400` for the redirect-URI refusal and `401` for the missing session. The code stays `OAUTH_REGISTER_FAILED`, and `error.details.upstreamError` still carries the provider's discriminator (`invalid_redirect_uri`).
   - **Unchanged.** A throw that declares no status, such as a storage fault while the client is persisted, still answers `500`. The body-schema refusal keeps answering `400`. Which redirect URIs a client may register is unchanged: a `web` client still needs an `https` URI on a non-loopback host.
-- ad8cf92: fix(plugin-auth): the vendored auth library records and keys on the client address the server established (#24799)
+- 3937697: fix(plugin-auth): the vendored auth library records and keys on the client address the server established (#24799)
   
   Clause-②: no
   
@@ -176,7 +176,7 @@
   - A request whose client address cannot be established records no address, and better-auth's rate limiter counts it in one shared bucket.
   
   **For hosts:** `AuthManager.handleRequest` now drops any `x-objectstack-client-address` request header a caller sends. The platform writes that header itself, from the address it established, and better-auth reads no other header for the client address. A programmatic `auth.api.*` call is handed whatever headers its caller passes. Route a client's request through `handleRequest` instead.
-- 865d2c8: fix(plugin-auth): the phone OTP and invitation SMS read their template row in the organization the send resolves to
+- 3937697: fix(plugin-auth): the phone OTP and invitation SMS read their template row in the organization the send resolves to
   
   Clause-②: no
   
@@ -186,7 +186,7 @@
   - **`isolated` and `group`:** no organization is resolved, so no template row is read and the built-in text is sent. No organization's row decides the text a user receives.
   - **No tenancy service, or a failed resolution:** the built-in text. A template outage still never blocks a send.
   - **Unchanged:** the locale ladder (the recipient's stored locale, then the deployment default, then `en`), how a deactivated or blank row passes its rung on, the built-in texts themselves, and the rendered holes.
-- 2941a19: fix(plugin-auth): every in-process auth bridge judges the request it re-dispatches on the same client-address facts as the request it serves (#24877)
+- 3937697: fix(plugin-auth): every in-process auth bridge judges the request it re-dispatches on the same client-address facts as the request it serves (#24877)
   
   Clause-②: no
   
@@ -194,7 +194,7 @@
   
   - **Now.** Each route hands `handleRequest` the connection it was called on, as the main auth mount does. Each rebuilt request carries the incoming request's `X-Forwarded-For` and `X-Real-IP`. Without a declared trusted proxy, the re-dispatched request is judged on the connection's peer address, whatever those headers say. With `server.trustProxy` declared, it is judged on the forwarded client address, the same address as the request the route serves.
   - **Unchanged.** What each route accepts or refuses, and every answer it gives. `resolveClientAddress` decides exactly as before. The main auth mount, and the `allowed_ip_ranges` allow-list in front of every auth route, already judged on the connection.
-- abc25a3: fix(plugin-auth)!: the last-admin guard and the default-organization bootstrap count only the Default Organization's `admin_full_access` grant — an organization-less grant is no administrator
+- 3937697: fix(plugin-auth)!: the last-admin guard and the default-organization bootstrap count only the Default Organization's `admin_full_access` grant — an organization-less grant is no administrator
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -212,7 +212,7 @@
   **Who sees it.** No served composition: a fresh install, a certified 18.0.0 database and a ceremonied database hold no organization-less grant, and the engine derives or refuses one wherever the organization object is registered. What changes is a host that embeds the guard on an engine with no organization object (for example on driver-memory), or runs plugin-auth outside `os serve` on a database the ceremony has not certified.
   
   **What an embedder does.** Anchor your administrators the way ADR-0131 D5 names: declare them in `OS_PLATFORM_OWNER_EMAIL` (their accounts verified), or give them an owner or admin `sys_member` row. Or register the organization object (`sys_organization`, which plugin-auth ships) and own the grant by the Default Organization. On a database 17.x or an 18.0 pre-release created, run `os migrate organization-ownership`, which attributes every organization-less grant to an organization.
-- e5f194b: fix(plugin-auth): an organization delete whose admission cannot read what it decides on is refused with 503 `SERVICE_UNAVAILABLE`, before better-auth's first write
+- 3937697: fix(plugin-auth): an organization delete whose admission cannot read what it decides on is refused with 503 `SERVICE_UNAVAILABLE`, before better-auth's first write
   
   Clause-②: no
   Metadata-protocol: none
@@ -226,7 +226,7 @@
   - **Unchanged.** What better-auth answers itself still goes to it: no session, no membership, no permission, no organization row, and a member row whose role the vendor's own permission check cannot evaluate (its identical check runs before its first write). The `409 DELETE_RESTRICTED` refusal and the Default Organization's `403` are unchanged.
   
   **What a client does.** Treat `503 SERVICE_UNAVAILABLE` from an organization delete as "retry later": nothing was deleted.
-- 2aaee3b: feat(plugin-auth, plugin-email): under the `open` and `email_domain` postures, a sign-up for an address that already has an account answers like a new sign-up and mails that address, while mail is really delivered
+- 3937697: feat(plugin-auth, plugin-email): under the `open` and `email_domain` postures, a sign-up for an address that already has an account answers like a new sign-up and mails that address, while mail is really delivered
   
   Clause-②: yes
   Metadata-protocol: none
@@ -243,7 +243,7 @@
   - **For a client of the sign-up door.** In the configurations above, a screen that showed an "already registered" message on the refusal now receives the success answer instead, and should show its usual "check your email" step.
   - **A send that fails after the answer.** The answer is still the success, and the server logs one error-level line saying the mail was not sent. A verification mail that fails for a new address leaves the same gap.
   - **Unchanged.** A sign-up for a new address, every refusal the audience posture raises, and every other auth mail.
-- c6bdcac: fix(plugin-auth)!: a cloud-managed environment (`OS_CLOUD_MANAGED=1`) refuses local self-registration, invitations, user creation and import, and sets passwords only on local accounts — self-hosted deployments are unchanged
+- 3937697: fix(plugin-auth)!: a cloud-managed environment (`OS_CLOUD_MANAGED=1`) refuses local self-registration, invitations, user creation and import, and sets passwords only on local accounts — self-hosted deployments are unchanged
   
   Clause-②: yes (narrowing) — one widening and one narrowing. The widening: the package entry now exports `cloudManagedRefusal`, `CLOUD_MANAGED_REFUSAL_CODE`, `CLOUD_MANAGED_REFUSAL_STATUS`, `CLOUD_MANAGED_REFUSAL_MESSAGES` and `CloudManagedDoor`, so a host that mounts its own twin of one of these doors (the cloud's per-environment `set-initial-password`, objectstack-ai/cloud#3169) refuses with the same status, code and message. The narrowing: under the managed mode only, doors that admitted a request now refuse it: every audience posture but `invite_only`, email sign-up, member invitations, admin create-user and import-users, an admin password set on an identity-provider account, and a first password for a caller without platform-admin standing. A process that does not set `OS_CLOUD_MANAGED=1` answers every one of these doors exactly as before.
   Metadata-protocol: none
@@ -261,7 +261,7 @@
   - **New exports.** `cloudManagedRefusal(door)` and the constants behind it, for a host twin of one of these doors.
   - **Unchanged:** every door on a process without `OS_CLOUD_MANAGED=1`, including one running SSO-only; existing users, invitations and credentials.
   - **The fix for an operator:** nothing on a self-hosted deployment. On a hosted environment, invite people from the organisation in the cloud console; their account arrives on their first sign-in. Keep a local password only for the break-glass administrator.
-- 03966ce: fix(plugin-auth)!: lift the better-auth family from 1.7.3 to 1.7.12 for the security fixes published since
+- 3937697: fix(plugin-auth)!: lift the better-auth family from 1.7.3 to 1.7.12 for the security fixes published since
   
   `@objectstack/plugin-auth` declares the better-auth family exactly, so a fresh install resolves what this package tested. All five declared ranges (`better-auth`, `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/scim`, `@better-auth/sso`) move from `1.7.3` to `1.7.12`, still exact. The lift takes the fixes published in 1.7.4 to 1.7.12 for packages this plugin mounts: GHSA-965c-763c-88jm and GHSA-r4xp-prcw-77qf (1.7.7), and the oauth-provider, SSO, SCIM, JWT and password-reset fixes up to 1.7.12. Every symbol this package imports from the family is still exported. It also pulls in `better-call` 1.4.4, `@better-auth/utils` 0.5.0 and `@better-fetch/fetch` 1.3.2, the versions 1.7.12 declares.
   
@@ -291,7 +291,7 @@
   - **`@objectstack/spec` and `@objectstack/cli` (patch, text only, not breaking):** the TSDoc on the organization schema's optional `updatedAt` now records that its better-auth measurement still holds on 1.7.12, and the `os migrate account-issuer` description no longer names a better-auth version. No schema, type, flag or behaviour changes in either package.
   - **`@objectstack/service-datasource` (patch, text only, not breaking):** the `resolveSqliteDriver` docs now describe the error better-sqlite3 13 actually throws for an addon that was never built: its loader's `require()` of the absent `build/Release/better_sqlite3.node`, which Node answers with `MODULE_NOT_FOUND`. The docs used to name a helper package's message that 13.x no longer produces. Development still steps down to wasm SQLite on that error, as before. No code changes.
   - **What to do as an operator:** tell users that a Magic Link, social, SSO or account-linking sign-in begun before the upgrade must be started again after it. Check each OIDC SSO provider's configured issuer against its discovery document and set it to the exact `issuer` string the document publishes. An OAuth client that branched on `401` for a PKCE failure should branch on `400 invalid_grant`. A browser client that read every non-`200` `/get-session` answer as "signed out" should treat a `500` as "try again".
-- 425c743: fix(plugin-auth): SSO domain verification accepts the DNS TXT record that request-domain-verification tells the operator to publish (#25111)
+- 3937697: fix(plugin-auth): SSO domain verification accepts the DNS TXT record that request-domain-verification tells the operator to publish (#25111)
   
   Clause-②: no — the verify door now accepts the record the platform already names, as `@better-auth/sso` designed it; the one record it stops accepting is `undefined=TOKEN`, which only the defect produced and nothing instructs.
   Metadata-protocol: none
@@ -301,14 +301,14 @@
   - **Now.** The adapter hands better-auth the row's `identifier` the same way it already hands back `value`. The instructed record verifies on both doors and marks the provider verified.
   - **Still refused.** A wrong token, the token under another provider's label, the record published under another provider's name, and `undefined=TOKEN`: each answers `502 DOMAIN_VERIFICATION_FAILED` and leaves the provider unverified.
   - **Unchanged.** A record holding only the token is still accepted, as the vendor designed it. The generic data API still omits `identifier` from every `sys_verification` row.
-- d609f60: fix(plugin-auth): the Magic Link mail states the lifetime the link really has, five minutes
+- 3937697: fix(plugin-auth): the Magic Link mail states the lifetime the link really has, five minutes
   
   Clause-②: no
   
   Metadata-protocol: none
   
   The `auth.magic_link` mail said "This link expires in 10 minutes", while the link it carried lived 300 seconds: `magicLink()` was mounted without `expiresIn`, so better-auth's own default applied, and the mail's `expiresInMinutes` was a separate hard-coded `10`. The mount now states `expiresIn: 300` explicitly, and the mail's `expiresInMinutes` is derived from that same value, so every locale of the mail now reads "5 minutes". The link's lifetime does not change. Nothing to do on upgrade; a customised `auth.magic_link` template that hard-codes its own number should read `expiresInMinutes` instead.
-- 6b44efa: fix(plugin-auth): an MCP client that registers over OAuth dynamic client registration with a loopback or custom-scheme redirect, and no `application_type`, is registered as a native client instead of being refused
+- 3937697: fix(plugin-auth): an MCP client that registers over OAuth dynamic client registration with a loopback or custom-scheme redirect, and no `application_type`, is registered as a native client instead of being refused
   
   Clause-②: no (a runtime security-boundary change the maintainer ruled; no published type, export or metadata key moves)
   Metadata-protocol: none
@@ -323,7 +323,7 @@
   - PKCE stays required at `/oauth2/authorize` for every one of these clients, and every token still needs the user's sign-in and consent.
   
   The Setup form's own OAuth application door (`/sys-oauth-application/register`) is not affected.
-- 8dfd126: fix(core,plugin-auth)!: the last-admin guard judges a `sys_organization` insert that moves the Default Organization, and one definition of the Default Organization is exported from core
+- 3937697: fix(core,plugin-auth)!: the last-admin guard judges a `sys_organization` insert that moves the Default Organization, and one definition of the Default Organization is exported from core
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -338,7 +338,7 @@
   - **One definition of the Default Organization (`@objectstack/core`).** New exports: `findDefaultOrganization(read)` (the rule, over a read the caller supplies), `DEFAULT_ORGANIZATION_SLUG`, and `readDefaultOrganizationId(ql)` (the resolver's own read, which fails loud on an unreachable store). plugin-auth's boot invariant, default-organization bootstrap, tenancy service and last-admin guard, plugin-security's `resolveDefaultOrganizationId`, and the ownership ceremony's plan now name the organization through it. Each keeps its own read policy: whether a failed read throws or reads as none, the guard's simulation of a pending write, and the ceremony's raw SQL. Two edge answers align with the resolver's. A `default`-slugged row with a blank id now falls through to the only-organization reading in the ceremony's plan. A numeric id is now read as its string in plugin-security's reader.
   
   **What an operator does.** Before you create a second organization on a `single` deployment whose only organization has another slug, either give that organization the slug `default` (while it is the only one, that changes nothing else), or make sure another account can administer: an organization owner or admin, or an address in `OS_PLATFORM_OWNER_EMAIL`.
-- 829cb77: feat(plugin-auth): a JIT sign-in reads the IdP `locale` claim into the user's language preference, so a hosted environment follows the cloud account language
+- 3937697: feat(plugin-auth): a JIT sign-in reads the IdP `locale` claim into the user's language preference, so a hosted environment follows the cloud account language
   
   Clause-②: no
   Metadata-protocol: none
@@ -351,7 +351,7 @@
   - **No claim:** nothing changes.
   
   What the IdP last wrote is recorded per user in `sys_verification` (identifier `idp-locale:` plus the user id), so an IdP-written value can be told apart from a local choice; no schema changes. Applying the claim never fails a sign-in: a store that refuses the write is reported at `warn` and the user keeps the language they had.
-- 09e07c2: fix(plugin-auth)!: under `single`, no slug change makes another organization the Default Organization — re-slugging to `default` captured the platform-admin anchor
+- 3937697: fix(plugin-auth)!: under `single`, no slug change makes another organization the Default Organization — re-slugging to `default` captured the platform-admin anchor
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -366,7 +366,7 @@
   - **Unchanged:** a slug changed to any other value; every slug change under a walled posture (`isolated`, `group`), where no grant anchors and a slug is just a slug; the data API, whose user-context PATCH and update-mode import were already refused a `slug` by the ADR-0092 identity write guard.
   
   **What an operator does.** Keep another slug. To move the anchor, move the grant rather than the slug: an `admin_full_access` grant re-owned by the Default Organization anchors, and a grant owned elsewhere does not. To name a Default Organization on a `single` deployment that holds several organizations, hold one organization (merge the others into it; the sole organization is the Default Organization and may then take the slug `default`), or declare a walled posture (`OS_TENANCY_POSTURE=group` or `isolated`), as the tenancy organization census already prescribes.
-- f4112a7: feat(plugin-auth): `GET /api/v1/auth/config` serves `features.cloudManaged`
+- 3937697: feat(plugin-auth): `GET /api/v1/auth/config` serves `features.cloudManaged`
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -374,7 +374,7 @@
   The public auth config's `features` gains `cloudManaged`, a boolean read from `isCloudManaged()` in `@objectstack/core` (true when the process runs with `OS_CLOUD_MANAGED=1`). It is `false` on every other deployment. The console reads it to hide the doors that add people by hand (invite, create user, set password) in a cloud-managed environment, whose people arrive from the organisation's identity provider.
   
   What to do: nothing. The payload only gains a key.
-- b3034ee: refactor(core, plugin-auth, plugin-security, service-settings): one definition each for the `admin_full_access` anchor rule and the organization-reach rule, exported from core security
+- 3937697: refactor(core, plugin-auth, plugin-security, service-settings): one definition each for the `admin_full_access` anchor rule and the organization-reach rule, exported from core security
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -413,7 +413,7 @@
     These two differences are kept by design: they make the fallback, which runs only when the service has failed, the stricter reader.
   
   No configuration, metadata or HTTP behaviour changes. Code that does not import the new exports needs no action.
-- b3f3298: fix: the degraded rate-limit warning names the remedy that boots: a shared `ICacheService` registered as `cache`
+- 3937697: fix: the degraded rate-limit warning names the remedy that boots: a shared `ICacheService` registered as `cache`
   
   Clause-②: no
   Metadata-protocol: none
@@ -421,7 +421,7 @@
   With no `cache` service registered, the lazy counter store falls back to a per-process store and logs one warning. That warning told a multi-node deployment to use "Redis via @objectstack/service-cache". But `CacheServicePlugin` throws at `init` when `adapter: 'redis'` is set, so an operator who followed it got a boot failure.
   
   The warning now names the working path: an `ICacheService` backed by a store every node reaches, registered as the `cache` service (`ctx.registerService('cache', impl)`). It no longer names a bundled adapter, so the text cannot go stale when one ships. The ADR-0069 D2 reference and the per-caller impact suffix are unchanged. The same applies to every counter built on `createLazyCounterStore`: better-auth's rate limit, the per-number OTP send budget, the SMS quotas and the runtime's inbound and endpoint limiters.
-- 3306cad: feat: Create User can grant a permission set in the same step, judged by the same delegated-administration gate as Setup's grant form
+- 3937697: feat: Create User can grant a permission set in the same step, judged by the same delegated-administration gate as Setup's grant form
   
   Clause-②: yes (widening: `POST /api/v1/auth/admin/create-user` and the `sys_user` `create_user` action accept an optional `permissionSet`; a request without it is answered exactly as before)
   Metadata-protocol: none
@@ -433,13 +433,13 @@
   - **Refused before anything is written:** a `permissionSet` that is not a string (400), a caller whose own context does not resolve (403), and a host that wires no grant seam (501).
   - **Response.** The success body carries `permissionSet` beside the user, and the result dialog shows it.
   - **Cloud-managed environments are unchanged.** `create_user` stays hidden while `features.cloudManaged` is on.
-- 431327b: Clause-②: no
+- 3937697: Clause-②: no
   Metadata-protocol: none
   
   The session activity heartbeat now runs on every deployment. `sys_session.last_activity_at` is "the last request on this session", and Setup → Sessions shows it so an administrator can tell two of one user's sessions apart. Until now it was written only while `sessionIdleTimeoutMinutes` was above 0, so on a default deployment (no idle or absolute limit) the Last Activity column stayed empty.
   
   It is still written at most once a minute per session. When neither the idle nor the absolute limit is configured, the `sys_session` read that feeds it is throttled too: a per-process memo, per session and bounded in size, skips the read for 60 seconds after one. With a limit configured, every request still reads the session row, as enforcement needs.
-- 8a49e37: fix(plugin-auth): the last-administrator guard answers a read it could not complete with 503 `SERVICE_UNAVAILABLE`, the code the sibling guards on the same doors answer their read faults with
+- 3937697: fix(plugin-auth): the last-administrator guard answers a read it could not complete with 503 `SERVICE_UNAVAILABLE`, the code the sibling guards on the same doors answer their read faults with
   
   Clause-②: no
   Metadata-protocol: none
@@ -451,7 +451,7 @@
   - **better-auth's endpoints** (`organization/update`, the admin ban and remove-user endpoints, and every other endpoint that writes through the adapter) answer it 503 `SERVICE_UNAVAILABLE`. The adapter now maps any engine error that declares `status: 503` and `code: 'SERVICE_UNAVAILABLE'` to that answer; before, such an error reached better-auth's router as an unhandled 500 with an empty body. The driver's message is not relayed.
   - **`organization/delete`** of the Default Organization answers the guard's read fault 503 `SERVICE_UNAVAILABLE`, the code the admission's own read faults answer with. A refusal on the merits there stays 403 `PERMISSION_DENIED`.
   - **For a client:** branch on the code. `SERVICE_UNAVAILABLE` means retry once the data store is reachable; `PERMISSION_DENIED` means the write itself is refused.
-- 6abee03: fix(plugin-auth)!: the temporary auth secret is used on a development boot only; any other boot without `OS_AUTH_SECRET` refuses to start
+- 3937697: fix(plugin-auth)!: the temporary auth secret is used on a development boot only; any other boot without `OS_AUTH_SECRET` refuses to start
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -466,113 +466,113 @@
   - **TO:** the same boot throws `OS_AUTH_SECRET is required outside development`.
   - **Unchanged:** `os serve` and `os start` default an unset `NODE_ENV` to `production` and `os dev` / `--dev` set `development`, so CLI boots behave as before. A configured secret is used exactly as before in every environment.
   - **Fix:** set `OS_AUTH_SECRET` to a strong random value. For a local development boot, set `NODE_ENV=development`.
-- Updated dependencies [448374d]
-- Updated dependencies [94842ba]
-- Updated dependencies [7cacad5]
-- Updated dependencies [df8bb40]
-- Updated dependencies [0091d84]
-- Updated dependencies [5e9b100]
-- Updated dependencies [7532ea3]
-- Updated dependencies [fde7456]
-- Updated dependencies [de9cd1f]
-- Updated dependencies [7035682]
-- Updated dependencies [d606fc1]
-- Updated dependencies [a8b44d4]
-- Updated dependencies [78ab647]
-- Updated dependencies [73a2b52]
-- Updated dependencies [5872450]
-- Updated dependencies [9ea5afe]
-- Updated dependencies [925fd07]
-- Updated dependencies [e7befa7]
-- Updated dependencies [55d7aab]
-- Updated dependencies [865d2c8]
-- Updated dependencies [e282f32]
-- Updated dependencies [644e4b2]
-- Updated dependencies [0715fac]
-- Updated dependencies [60b42cd]
-- Updated dependencies [b9a79ef]
-- Updated dependencies [63085c3]
-- Updated dependencies [0603bfa]
-- Updated dependencies [0b8bce4]
-- Updated dependencies [5d2c5a1]
-- Updated dependencies [066dabc]
-- Updated dependencies [4b8f597]
-- Updated dependencies [f802213]
-- Updated dependencies [86d2360]
-- Updated dependencies [2069b81]
-- Updated dependencies [1862d8d]
-- Updated dependencies [30d21f6]
-- Updated dependencies [eddffc3]
-- Updated dependencies [58cd58f]
-- Updated dependencies [69712d5]
-- Updated dependencies [dfe60e3]
-- Updated dependencies [d68aab6]
-- Updated dependencies [e939357]
-- Updated dependencies [045858f]
-- Updated dependencies [baedcec]
-- Updated dependencies [03c12a5]
-- Updated dependencies [386f60f]
-- Updated dependencies [c24203f]
-- Updated dependencies [28c9a2c]
-- Updated dependencies [2354058]
-- Updated dependencies [ba244f1]
-- Updated dependencies [edcc8ce]
-- Updated dependencies [a39389e]
-- Updated dependencies [fccbd9d]
-- Updated dependencies [c8f4c43]
-- Updated dependencies [4f97aeb]
-- Updated dependencies [c4b49c3]
-- Updated dependencies [284e048]
-- Updated dependencies [02ad31a]
-- Updated dependencies [03966ce]
-- Updated dependencies [1b3b65e]
-- Updated dependencies [e3aa111]
-- Updated dependencies [863c580]
-- Updated dependencies [7f5b19d]
-- Updated dependencies [14e7239]
-- Updated dependencies [fe0ec2b]
-- Updated dependencies [dfab597]
-- Updated dependencies [9127f23]
-- Updated dependencies [1f78b64]
-- Updated dependencies [bc5daf0]
-- Updated dependencies [24360dc]
-- Updated dependencies [ecb4e69]
-- Updated dependencies [8dfd126]
-- Updated dependencies [bda53bb]
-- Updated dependencies [b964ea1]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [4395cbc]
-- Updated dependencies [9019af9]
-- Updated dependencies [45f9962]
-- Updated dependencies [e5eab06]
-- Updated dependencies [dc532e8]
-- Updated dependencies [d196748]
-- Updated dependencies [5f30f00]
-- Updated dependencies [7db1697]
-- Updated dependencies [f5b6b3f]
-- Updated dependencies [c109bfc]
-- Updated dependencies [f4112a7]
-- Updated dependencies [f4112a7]
-- Updated dependencies [db1c7cc]
-- Updated dependencies [303aef0]
-- Updated dependencies [b3034ee]
-- Updated dependencies [d12e650]
-- Updated dependencies [830a63a]
-- Updated dependencies [1000cc7]
-- Updated dependencies [ee63b47]
-- Updated dependencies [bdf762c]
-- Updated dependencies [27b3f1f]
-- Updated dependencies [3306cad]
-- Updated dependencies [c898bd8]
-- Updated dependencies [97aa34e]
-- Updated dependencies [8878c36]
-- Updated dependencies [832a84e]
-- Updated dependencies [7c68b10]
-- Updated dependencies [915e940]
-- Updated dependencies [0fab7ba]
-- Updated dependencies [025f6de]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [9f39094]
-- Updated dependencies [1361a5a]
-- Updated dependencies [f7d7403]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0
   - @objectstack/service-messaging@18.1.0

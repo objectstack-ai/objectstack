@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 7cacad5: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   feat(plugin-sharing,plugin-approvals,metadata-protocol)!: the organization-less readers of sharing rules, approval units and the seed loader retire (ADR-0131 D2/D8, 18.x step 7)
   
@@ -25,7 +25,7 @@
 
 ### Patch Changes
 
-- 9a06f0b: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   fix(plugin-approvals): a reminder's `notified` counts each approver address once, not once per slate slot
   
@@ -34,7 +34,7 @@
   `POST /api/v1/approvals/requests/:id/remind` (`ApprovalService.remind()`) answers `notified` as the number of reminders it handed to messaging: one per distinct approver address on the pending slate. A `per_group` slate lists a person once per group they resolved into, and `pending_approvers` keeps every one of those slots until the first vote, so a person placed in two groups was counted twice while messaging delivered them one reminder. They are now reminded once and counted once, the rule the opening `approval.requested` notice already applies.
   
   A user id and the same account's email are still two addresses: the person holds two slots and receives two reminders, exactly as at the opening. Unchanged: who is reminded, each reminder's topic, payload, deep link and dedup key, the throttle, the submitter check, the `remind` audit row, and `position:*`-style literals, which still notify no one and add nothing to the count.
-- 28ff8a9: fix(plugin-approvals): every step of a multi-step approval names the person who submitted the run, not the previous step's approver
+- 3937697: fix(plugin-approvals): every step of a multi-step approval names the person who submitted the run, not the previous step's approver
   
   Clause-②: no
   
@@ -42,7 +42,7 @@
   - **Now.** Every step of a run records the user who triggered the run as its `submitter_id`, and as the actor of the step's `submit` timeline entry, whoever decided the steps before it. That holds on both `runAs` postures, after any number of decisions by different people, and on a step that a decision node reaches by routing around another. A run whose trigger resolved no user (a schedule, a write that carried no user) opens its later steps with no submitter, as it opens its first one.
   - **Unchanged.** The decider still runs the nodes after their decision: their identity, permissions and attribution, as the resume-as-decider change ships them. The first step of every run, and every single-step approval, are unchanged. Compared with the last release nothing moves: later steps named the run's submitter there too, so recall and resubmit on a later step go back to the person they reached before.
   - **`ApprovalService.openNodeRequest`.** A caller that passes `submitterId: null` now opens the request with no submitter. Before, `null` fell back to the calling context's user, the same as leaving `submitterId` out, which still falls back.
-- ba69b16: fix(plugin-approvals): the approvals inbox, the record's approval panel and the request page name the flow, the step and the record's object in the reader's language
+- 3937697: fix(plugin-approvals): the approvals inbox, the record's approval panel and the request page name the flow, the step and the record's object in the reader's language
   
   Clause-②: no
   
@@ -51,7 +51,7 @@
   - **Fallback.** A label the pack does not carry, a locale no pack holds, a read without a locale and a stack without an `i18n` service all get the label the request stored, exactly as before. An `en` reader of an app authored in English sees no change.
   - **Unchanged.** The stored `process_label` and `current_step_label` columns keep the authored text they were written with: nothing is migrated or rewritten, and the generic data door, the list views and the one-tap action page still show the stored text. Who may read a request is unchanged. The `approval.requested` notification body is still English.
   - **`ApprovalServiceOptions.i18nServiceSource`.** A new optional option: a lazy reader of the `i18n` service. `ApprovalsServicePlugin` wires it from the kernel's `i18n` service. A host that constructs `ApprovalService` by hand and leaves it out keeps the stored labels.
-- 58cd58f: fix(plugin-approvals): approval notifications reach each recipient in their own language
+- 3937697: fix(plugin-approvals): approval notifications reach each recipient in their own language
   
   Every approval notification now hands the messaging service its sentence as catalog keys beside the English literal (`EmitInput.keyedText`). The messaging service renders it at delivery in each recipient's `sys_user.locale`, else the deployment default. This plugin's translation bundle gains the sentences in en, zh-CN, ja-JP and es-ES, in its `messages` face (`messages.approvalRequestedTitle` and the rest).
   
@@ -59,7 +59,7 @@
   - **The record is named as before:** the object's label and the record id (`Deal D_123`), never a title. The label is rendered from the app's `objects.<object>.label` when its language pack holds one, else the schema label.
   - **The English is unchanged.** The payload's `title` and `body` are the `en` catalog entries, byte for byte the sentences each notification carried before. A messaging service that does not render keyed text delivers them as it always did.
   - **Unchanged.** Who is notified, each notification's topic, payload fields, deep link, dedup key and organization, and every channel's delivery behaviour apart from the text.
-- b3fddd1: fix(plugin-approvals): an out-of-office delegation applies only in its own organization, and an organization-less delegation reroutes no approval
+- 3937697: fix(plugin-approvals): an out-of-office delegation applies only in its own organization, and an organization-less delegation reroutes no approval
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -76,7 +76,7 @@
   - **Setup.** The delegation form's Organization help says what the code does, in every shipped locale.
   
   **What an operator does.** On a `single` deployment, run `os migrate organization-ownership --apply` if it has not run yet; it attributes these rows to the Default Organization. On a walled deployment, ask the delegator to create the delegation again while signed in to the organization whose approvals it should cover, then delete the organization-less row the warning names.
-- d12e650: feat: `ExecutionStatus` gains `missed`, the run status for a scheduled flow's due time that passed while no kernel was ticking
+- 3937697: feat: `ExecutionStatus` gains `missed`, the run status for a scheduled flow's due time that passed while no kernel was ticking
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -90,7 +90,7 @@
   `@objectstack/plugin-approvals`: `RUN_STATUS_LIVENESS` maps `missed` to `terminal`, so an approval pending on a missed run is swept like one pending on any other finished run.
   
   This release only declares the value. The engine writes `missed` rows in a later release.
-- ee63b47: fix: Setup field help is written for administrators, and the two access-review fields nothing uses yet are hidden from the Setup forms
+- 3937697: fix: Setup field help is written for administrators, and the two access-review fields nothing uses yet are hidden from the Setup forms
   
   Clause-②: no
   Metadata-protocol: none
@@ -105,7 +105,7 @@
   - the Data Lifecycle settings page and its retention overrides.
   
   `Last Certified At` and `Certified By` on `sys_user_permission_set` and `sys_user_position` are reserved for a future access-review feature and nothing writes or reads them. They are now `hidden: true`, so the Setup forms and detail pages no longer show them. The columns and any stored values stay.
-- d0a1361: fix: a new out-of-office delegation opens with the Delegator already set to the signed-in user, and the field's help says why no one else can be chosen
+- 3937697: fix: a new out-of-office delegation opens with the Delegator already set to the signed-in user, and the field's help says why no one else can be chosen
   
   Clause-②: no
   Metadata-protocol: none
@@ -131,103 +131,103 @@
   - **Unchanged.** A caller who may not move the slot is still refused `403 FORBIDDEN` first, before any directory read. An empty `to`, and a `to` that is already pending, are refused as before. The SLA escalation `reassign` action is not this door and is unchanged.
   
   **What a caller does.** Reassign to the user id or email of a person in the request's organization, or to `position:<name>` for a position someone in it holds.
-- b8c9590: fix: the approval request page's Timeline shows each action's step by its label, not the node's machine id
+- 3937697: fix: the approval request page's Timeline shows each action's step by its label, not the node's machine id
   
   Clause-②: no
   Metadata-protocol: none
   
   The Timeline tab of the `sys_approval_request` record page lists the request's `sys_approval_action` rows. Its step column asked for `step_name`, which holds the Approval node's id (for example `dual_signoff`), so every row showed that id. The column is now `step_label`, the step's label that the service writes on every row and the boot backfill fills on older rows. The strip's step chip (`current_step_label`) and the object's own lists already show this label.
-- Updated dependencies [448374d]
-- Updated dependencies [94842ba]
-- Updated dependencies [7cacad5]
-- Updated dependencies [df8bb40]
-- Updated dependencies [0091d84]
-- Updated dependencies [5e9b100]
-- Updated dependencies [7532ea3]
-- Updated dependencies [fde7456]
-- Updated dependencies [b42c621]
-- Updated dependencies [de9cd1f]
-- Updated dependencies [7035682]
-- Updated dependencies [d606fc1]
-- Updated dependencies [a8b44d4]
-- Updated dependencies [78ab647]
-- Updated dependencies [73a2b52]
-- Updated dependencies [5872450]
-- Updated dependencies [9ea5afe]
-- Updated dependencies [925fd07]
-- Updated dependencies [e7befa7]
-- Updated dependencies [55d7aab]
-- Updated dependencies [644e4b2]
-- Updated dependencies [0715fac]
-- Updated dependencies [60b42cd]
-- Updated dependencies [b9a79ef]
-- Updated dependencies [63085c3]
-- Updated dependencies [0b8bce4]
-- Updated dependencies [5d2c5a1]
-- Updated dependencies [066dabc]
-- Updated dependencies [4b8f597]
-- Updated dependencies [2069b81]
-- Updated dependencies [1862d8d]
-- Updated dependencies [30d21f6]
-- Updated dependencies [eddffc3]
-- Updated dependencies [69712d5]
-- Updated dependencies [dfe60e3]
-- Updated dependencies [e939357]
-- Updated dependencies [045858f]
-- Updated dependencies [baedcec]
-- Updated dependencies [03c12a5]
-- Updated dependencies [386f60f]
-- Updated dependencies [28c9a2c]
-- Updated dependencies [2354058]
-- Updated dependencies [ba244f1]
-- Updated dependencies [edcc8ce]
-- Updated dependencies [fccbd9d]
-- Updated dependencies [c8f4c43]
-- Updated dependencies [02ad31a]
-- Updated dependencies [03966ce]
-- Updated dependencies [e3aa111]
-- Updated dependencies [863c580]
-- Updated dependencies [7f5b19d]
-- Updated dependencies [14e7239]
-- Updated dependencies [fe0ec2b]
-- Updated dependencies [dfab597]
-- Updated dependencies [9127f23]
-- Updated dependencies [24360dc]
-- Updated dependencies [ecb4e69]
-- Updated dependencies [8dfd126]
-- Updated dependencies [bda53bb]
-- Updated dependencies [b964ea1]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [4395cbc]
-- Updated dependencies [9019af9]
-- Updated dependencies [45f9962]
-- Updated dependencies [e5eab06]
-- Updated dependencies [dc532e8]
-- Updated dependencies [d196748]
-- Updated dependencies [9d96b2b]
-- Updated dependencies [5f30f00]
-- Updated dependencies [7db1697]
-- Updated dependencies [f5b6b3f]
-- Updated dependencies [c109bfc]
-- Updated dependencies [f4112a7]
-- Updated dependencies [f4112a7]
-- Updated dependencies [db1c7cc]
-- Updated dependencies [303aef0]
-- Updated dependencies [b3034ee]
-- Updated dependencies [d12e650]
-- Updated dependencies [830a63a]
-- Updated dependencies [1000cc7]
-- Updated dependencies [ee63b47]
-- Updated dependencies [bdf762c]
-- Updated dependencies [27b3f1f]
-- Updated dependencies [3306cad]
-- Updated dependencies [c898bd8]
-- Updated dependencies [97aa34e]
-- Updated dependencies [832a84e]
-- Updated dependencies [7c68b10]
-- Updated dependencies [915e940]
-- Updated dependencies [025f6de]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [9f39094]
-- Updated dependencies [f7d7403]
+- Updated dependencies [3937697]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0
   - @objectstack/metadata-core@18.1.0

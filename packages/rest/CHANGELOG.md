@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- eddffc3: feat(spec): a form view's `title` is translated through `objects.<object>._views.<view>.title`, and `GET /forms/:slug` serves it in the visitor's language
+- 3937697: feat(spec): a form view's `title` is translated through `objects.<object>._views.<view>.title`, and `GET /forms/:slug` serves it in the visitor's language
   
   Clause-②: yes (widening)
   
@@ -17,7 +17,7 @@
 
 ### Patch Changes
 
-- f802213: fix(rest): a lookup cell in the list export names the record by the target object's title field (#24944)
+- 3937697: fix(rest): a lookup cell in the list export names the record by the target object's title field (#24944)
   
   Clause-②: no
   
@@ -28,7 +28,7 @@
   - **Field-level security.** When the caller cannot read the target's title field, the `$expand` read leaves it off the record. The cell then shows the record's id. Another column, such as the job title, no longer stands in for the name.
   - **Visible change.** A target with a literal `name` column and a different declared title now exports the declared title. For example, an account with `nameField: 'display_title'` exports its display title instead of `name`.
   - **Unchanged.** No query parameter, header, column set or payload shape moves. Only the text of a lookup cell changes.
-- 86d2360: fix(rest): a boolean cell in the list export is written in the caller's language (#24945)
+- 3937697: fix(rest): a boolean cell in the list export is written in the caller's language (#24945)
   
   Clause-②: no
   
@@ -38,12 +38,12 @@
   - **No locale at all.** When the request names no locale and the deployment declares no default, the cells read `yes` / `no`, the same words the import template writes then.
   - **Re-import.** A file exported in either language re-imports its boolean column: the importer reads `yes` / `no` and `是` / `否`.
   - **Unchanged.** No query parameter, header, column set or payload shape moves. Only the text of a boolean cell changes, and a Chinese caller's file is byte-for-byte what it was.
-- 4f97aeb: fix(rest): the API docs viewer escapes the request-derived openapi URL for the attribute it lands in
+- 3937697: fix(rest): the API docs viewer escapes the request-derived openapi URL for the attribute it lands in
   
   The `GET {base}/docs` viewer page builds the sibling openapi URL from the request and places it into a `data-url="…"` attribute of a script element. It interpolated that value into the attribute with no escaping, so a character the attribute context interprets reached the served markup as itself rather than as the matching HTML entity. The value is now escaped for its attribute context (ruling 3C on #25040: every outlet that renders a value into HTML escapes it by the context it lands in): the five characters a quoted attribute or element text interprets become their entities, and a browser decodes each back to the original character for the page script. A URL carrying none of those characters is served byte-identically.
   
   Clause-②: no
-- c4b49c3: fix(rest)!: the CSV export writes a text cell its consumer would interpret in a form that consumer reads as text, and the CSV import reverses exactly that
+- 3937697: fix(rest)!: the CSV export writes a text cell its consumer would interpret in a form that consumer reads as text, and the CSV import reverses exactly that
   
   Clause-②: no (narrowing) — the CSV export serves different bytes for some text cells, and the CSV import parse reads a cell of the same shape differently; nothing is widened.
   Metadata-protocol: none (a REST export's bytes and a REST import's parse; nothing a metadata author writes changes)
@@ -60,7 +60,7 @@
   - **Measured.** A value beginning with TAB or CR is marked; the import removes the mark, and the default `trimWhitespace: true` then trims the leading TAB or CR exactly as it did before. With `trimWhitespace: false` it returns exactly.
   - **Unchanged.** Every other cell; numeric, boolean, date and datetime cells; the xlsx and json export formats; json and xlsx import payloads.
   - **What to do.** Nothing for a file that goes back through these import doors. A program that reads the CSV export some other way and needs the stored text applies the same reversal: remove one leading apostrophe from a cell whose rest the export would mark, by the rule in this repository's `packages/rest/src/export-format.ts`.
-- 1b3b65e: feat(rest)!: `GET {base}/docs`, the OpenAPI document's HTML viewer page, is retired; `GET {base}/openapi.json` stays
+- 3937697: feat(rest)!: `GET {base}/docs`, the OpenAPI document's HTML viewer page, is retired; `GET {base}/openapi.json` stays
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -76,7 +76,7 @@
   - `api.enableOpenApi` now gates one route, the document.
   
   What changes for you. If you opened the page, load the document from `GET {base}/openapi.json` into an OpenAPI viewer of your choice.
-- 27b3f1f: feat: the position list can say who holds each position and which permission sets it grants, read where the resolver enforces both
+- 3937697: feat: the position list can say who holds each position and which permission sets it grants, read where the resolver enforces both
   
   Clause-②: yes (widening: `GET /meta/position?include=grants` adds two read-only served keys per position, `_holderCount` and `_grantedPermissionSets`; `ISecurityService` gains the optional `describePositionGrants`)
   Metadata-protocol: none
@@ -89,7 +89,7 @@
   - **`_holderCount`** counts the people who hold the position in the caller's active organization, by the rule the resolver uses to give a caller positions: `sys_user_position` rows in their validity window, membership roles, and `everyone` for every active member. A switched-off position keeps its holders (ADR-0049). The count is `null`, never `0`, with no active organization, for `platform_admin` and `guest`, after a truncated read, and for a caller who may not read `sys_user_position`.
   - **`ISecurityService.describePositionGrants`** (`@objectstack/spec` contract, served by `@objectstack/plugin-security`) is optional. A security service without it serves the list undecorated, never with empty values.
   - **`@objectstack/core`** exports `readPositionGrantsInForce` and `countPositionHolders`. `resolveUserAuthzGrants` now asks the same two rules for a caller, with no change in what it resolves.
-- 0fab7ba: fix(rest)!: `POST /api/v1/meta/:type/:name/rollback` accepts only a positive integer as `toVersion`, and refuses everything else with its own `400 INVALID_REQUEST` instead of coercing it into a version
+- 3937697: fix(rest)!: `POST /api/v1/meta/:type/:name/rollback` accepts only a positive integer as `toVersion`, and refuses everything else with its own `400 INVALID_REQUEST` instead of coercing it into a version
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -104,7 +104,7 @@
   - **TO:** the body value must be a JSON number that is a whole number of at least 1. A `?toVersion=` query string is read the way `/diff` reads its versions (`readDeclaredQueryNumber`), so `?toVersion=3` still restores version 3. Everything else, `true`, `[2]`, `"2"`, `1.5`, `0`, `-1`, `"abc"`, a blank or non-finite query value, answers `400 INVALID_REQUEST` with the same message as before, and nothing is restored.
   - **Unchanged:** the precedence (`toVersion`, then `version`, then `?toVersion=`), the capability and walled-catalog gates in front of it, and every answer for a valid version. The client SDK's `rollbackItem` and the console's metadata client already send a JSON number.
   - **Fix:** send `toVersion` as a JSON number, for example `{"toVersion": 2}`.
-- 1361a5a: fix(rest)!: a credential is honoured only in the environment whose auth service validated it, on every route behind the shared auth gate
+- 3937697: fix(rest)!: a credential is honoured only in the environment whose auth service validated it, on every route behind the shared auth gate
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -119,96 +119,96 @@
   - **Who sees it.** Only a multi-environment host whose per-environment kernels carry no `auth` service while the default environment's does. Such a request now answers `401`.
   
   **The remedy.** Give each environment's kernel its own `auth` service, and sign in to the environment you call.
-- Updated dependencies [448374d]
-- Updated dependencies [94842ba]
-- Updated dependencies [7cacad5]
-- Updated dependencies [df8bb40]
-- Updated dependencies [0091d84]
-- Updated dependencies [5e9b100]
-- Updated dependencies [7532ea3]
-- Updated dependencies [fde7456]
-- Updated dependencies [b42c621]
-- Updated dependencies [de9cd1f]
-- Updated dependencies [7035682]
-- Updated dependencies [d606fc1]
-- Updated dependencies [a8b44d4]
-- Updated dependencies [78ab647]
-- Updated dependencies [73a2b52]
-- Updated dependencies [5872450]
-- Updated dependencies [9ea5afe]
-- Updated dependencies [925fd07]
-- Updated dependencies [e7befa7]
-- Updated dependencies [55d7aab]
-- Updated dependencies [644e4b2]
-- Updated dependencies [0715fac]
-- Updated dependencies [60b42cd]
-- Updated dependencies [b9a79ef]
-- Updated dependencies [63085c3]
-- Updated dependencies [0b8bce4]
-- Updated dependencies [5d2c5a1]
-- Updated dependencies [066dabc]
-- Updated dependencies [4b8f597]
-- Updated dependencies [2069b81]
-- Updated dependencies [1862d8d]
-- Updated dependencies [30d21f6]
-- Updated dependencies [eddffc3]
-- Updated dependencies [69712d5]
-- Updated dependencies [dfe60e3]
-- Updated dependencies [e939357]
-- Updated dependencies [045858f]
-- Updated dependencies [baedcec]
-- Updated dependencies [03c12a5]
-- Updated dependencies [386f60f]
-- Updated dependencies [28c9a2c]
-- Updated dependencies [2354058]
-- Updated dependencies [ba244f1]
-- Updated dependencies [edcc8ce]
-- Updated dependencies [fccbd9d]
-- Updated dependencies [c8f4c43]
-- Updated dependencies [02ad31a]
-- Updated dependencies [03966ce]
-- Updated dependencies [e3aa111]
-- Updated dependencies [863c580]
-- Updated dependencies [7f5b19d]
-- Updated dependencies [14e7239]
-- Updated dependencies [fe0ec2b]
-- Updated dependencies [dfab597]
-- Updated dependencies [9127f23]
-- Updated dependencies [24360dc]
-- Updated dependencies [ecb4e69]
-- Updated dependencies [8dfd126]
-- Updated dependencies [bda53bb]
-- Updated dependencies [b964ea1]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [4395cbc]
-- Updated dependencies [9019af9]
-- Updated dependencies [45f9962]
-- Updated dependencies [e5eab06]
-- Updated dependencies [dc532e8]
-- Updated dependencies [d196748]
-- Updated dependencies [5f30f00]
-- Updated dependencies [7db1697]
-- Updated dependencies [f5b6b3f]
-- Updated dependencies [c109bfc]
-- Updated dependencies [f4112a7]
-- Updated dependencies [f4112a7]
-- Updated dependencies [db1c7cc]
-- Updated dependencies [303aef0]
-- Updated dependencies [b3034ee]
-- Updated dependencies [d12e650]
-- Updated dependencies [830a63a]
-- Updated dependencies [1000cc7]
-- Updated dependencies [ee63b47]
-- Updated dependencies [bdf762c]
-- Updated dependencies [27b3f1f]
-- Updated dependencies [3306cad]
-- Updated dependencies [c898bd8]
-- Updated dependencies [97aa34e]
-- Updated dependencies [832a84e]
-- Updated dependencies [7c68b10]
-- Updated dependencies [915e940]
-- Updated dependencies [025f6de]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [9f39094]
-- Updated dependencies [f7d7403]
+- Updated dependencies [3937697]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0
   - @objectstack/metadata-core@18.1.0

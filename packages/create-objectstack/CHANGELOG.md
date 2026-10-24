@@ -4,13 +4,13 @@
 
 ### Patch Changes
 
-- 80ec71d: fix(cli): retire the scaffold's five stale `peerDependencyRules` entries on the better-auth 1.7.12 pin
+- 3937697: fix(cli): retire the scaffold's five stale `peerDependencyRules` entries on the better-auth 1.7.12 pin
   
   Clause-②: no
   Metadata-protocol: none
   
   A project scaffolded by `objectstack init` or `npx create-objectstack` no longer carries a `peerDependencyRules.allowedVersions` block in its `pnpm-workspace.yaml`. All five entries suppressed peer mismatches that better-auth 1.7.12 no longer has: `better-auth` declares no `better-sqlite3` peer, and `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/scim` and `@better-auth/sso` each peer `@better-auth/utils` as `^0.4.2 || ^0.5.0`, which the resolved 0.5.0 satisfies. `allowedVersions` only silences a report, so a scaffold resolves the same lockfile as before and its first `pnpm install` stays free of unmet-peer warnings. Projects scaffolded earlier can keep or delete the block; either way nothing changes.
-- b6e8707: fix(cli,create-objectstack): new projects declare vitest `~4.1.12`, outside GHSA-qxg6-89mg-rqv8, and still install on npm 10
+- 3937697: fix(cli,create-objectstack): new projects declare vitest `~4.1.12`, outside GHSA-qxg6-89mg-rqv8, and still install on npm 10
   
   Clause-②: no
   Metadata-protocol: none
@@ -20,7 +20,7 @@
   npm 10, the npm Node 22 bundles, still installs every scaffold. The `overrides.vitest` entry, which equals `devDependencies.vitest`, is what makes that hold: it settles vitest 4.1.12's contradictory optional peer (`@vitest/browser-webdriverio`), which npm 10 otherwise crashes on with `Cannot read properties of null (reading 'edgesOut')`. Measured on npm 10.9.4, 10.9.9 and 11.21.1. pnpm ignores npm's `overrides` field.
   
   **An existing project made by an earlier `create-objectstack`, `os init` or `os create plugin`** keeps its own `~4.0.0`. To move it, set `overrides.vitest` to `~4.1.12` in `package.json`, and `devDependencies.vitest` too where the project declares it, then run `npm install`. npm refuses an override that differs from the direct dependency (`EOVERRIDE`), so the two move together.
-- d0c56a2: fix(cli,create-objectstack): new projects override `uuid` below 12.0.0 to `^11.1.1`, so `npm audit` lists no GHSA-w5hq-g745-h8pq entry
+- 3937697: fix(cli,create-objectstack): new projects override `uuid` below 12.0.0 to `^11.1.1`, so `npm audit` lists no GHSA-w5hq-g745-h8pq entry
   
   Clause-②: no
   Metadata-protocol: none
@@ -30,7 +30,7 @@
   The selector stops at `<12.0.0`, so a project can still add a newer `uuid` of its own: `npm install uuid@14` installs. A spec-less `npm install uuid` is refused with `EOVERRIDE` (npm reads it as `uuid@*`, which meets the selector); name the major instead.
   
   **An existing project made by an earlier `create-objectstack`, `os init` or `os create plugin`**, or any other npm project that installs `@objectstack/rest`, directly or through `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/plugin-auth` or `@objectstack/verify`: add `"uuid@<12.0.0": "^11.1.1"` to the `overrides` block of its root `package.json` and run `npm install`. npm reads `overrides` only from the root manifest, so no `@objectstack/*` release can apply it for you.
-- 975d5b3: fix(create-objectstack, cli): a scaffolded project pins every `@objectstack/*` dependency to the exact version of the tool that wrote it, not a `^` range
+- 3937697: fix(create-objectstack, cli): a scaffolded project pins every `@objectstack/*` dependency to the exact version of the tool that wrote it, not a `^` range
   
   Clause-②: no
   Metadata-protocol: none

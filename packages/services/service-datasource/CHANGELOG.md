@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 6b9e6df: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
+- 3937697: **Shipped in 18.0.0**, whose CHANGELOG missed this entry; listed here one release late.
   
   fix(service-datasource): Setup → Datasources: Test answers truthfully for the platform's primary datasource and for drivers that cannot introspect, and Sync on the primary datasource refuses with the true reason
   
@@ -17,7 +17,7 @@
   - **New, optional: `ExternalDatasourceServiceConfig.liveDriver`.** `(datasource) => driver | undefined` returns the live driver registered for a datasource, resolved by the primary datasource's naming rule. `ExternalDatasourceServicePlugin` wires it. Test reads it to reach the primary datasource and drivers without schema introspection.
   
   What to do: nothing, if the plugin builds the service. If you build `ExternalDatasourceService` yourself, pass `liveDriver` to get the new Test answers; without it, Test stays the introspection round trip, as before.
-- 7f99616: fix(driver-sql): a SQLite file whose bytes are not a SQLite database fails `connect()` at once, naming the file, and a development boot no longer moves it aside and replaces it with an empty database (#24960)
+- 3937697: fix(driver-sql): a SQLite file whose bytes are not a SQLite database fails `connect()` at once, naming the file, and a development boot no longer moves it aside and replaces it with an empty database (#24960)
   
   `SqlDriver.connect()` runs `PRAGMA auto_vacuum` as the connection's first statement. On a file that is not a SQLite database (plain text, another format, a file encrypted by another engine) SQLite answers `SQLITE_NOTADB`, which `connect()` logged as "Failed to set PRAGMA auto_vacuum=INCREMENTAL" and swallowed. It resolved over a file it could not read. In production the first query failed later. On a development boot, `resolveSqliteDriver` (`@objectstack/service-datasource`) answered the failed probe by stepping down to wasm SQLite, whose open renamed the file to `<file>.corrupt-<timestamp>`, wrote an empty database in its place and read `connected`, under a warning that blamed the native addon.
   
@@ -32,7 +32,7 @@
   - **Before:** `connect()` resolved; in production the first query failed with `DATABASE_ERROR`, and on a development boot the file was renamed to `<file>.corrupt-<timestamp>` and an empty database was written in its place.
   - **Now:** `connect()` rejects with `SqliteDatabaseFileError`, `code: 'SQLITE_NOTADB'`, naming the file; the file is untouched.
   - **Fix:** point the datasource at a SQLite database file, or move the file aside yourself (an absent file is created empty on the next connect).
-- d6a5fa3: fix(driver-sql): a SQLite database whose header SQLite cannot read fails `connect()` at once, naming the file, and a dangling symbolic link as the database's directory is refused on the boot that writes, as the read-only boot already refused it (#25019)
+- 3937697: fix(driver-sql): a SQLite database whose header SQLite cannot read fails `connect()` at once, naming the file, and a dangling symbolic link as the database's directory is refused on the boot that writes, as the read-only boot already refused it (#25019)
   
   Three more SQLite files a declared datasource cannot use, each now classified by the file's own driver at connect:
   
@@ -51,7 +51,7 @@
   - **Before:** `connect()` resolved; in production the first query failed with `DATABASE_ERROR`, and on a development boot a damaged file was renamed to `<file>.corrupt-<timestamp>` and replaced with an empty database, and a dangling-link directory stepped down to wasm SQLite under a warning that blamed the native addon. The read-only boot reported a dangling file link connected.
   - **Now:** `connect()` rejects with `SqliteDatabaseFileError`, `code: 'SQLITE_CORRUPT'` for the damaged file and `code: 'ENOENT'` for the dangling-link directory, naming the file (and the link); the read-only boot rejects the dangling file link with `code: 'ENOENT'`, naming its target. The file is untouched.
   - **Fix:** restore the database from a backup, or move the damaged file aside yourself (an absent file is created empty on the next connect); point the dangling link at a directory that exists, or point the datasource at a real path.
-- 2354058: feat(spec,driver-turso)!: turso `config.encryptionKey` is removed — it never encrypted anything, in any mode, and is now refused everywhere it is written instead of accepted on a remote datasource
+- 3937697: feat(spec,driver-turso)!: turso `config.encryptionKey` is removed — it never encrypted anything, in any mode, and is now refused everywhere it is written instead of accepted on a remote datasource
   
   Clause-②: no (narrowing)
   
@@ -91,7 +91,7 @@
   ### Blast radius
   
   Measured on this tree: no example, template, CLI scaffold, published skill, host default or environment variable authors the key. A tree-scoped absence pin now holds that. Whether any out-of-repo deployment declares it is not measured, and is not claimed to be zero.
-- b9c7a8f: fix(service-datasource)!: the datasource admin API refuses to make a datasource managed while objects bind it with `external`, as the metadata save door does
+- 3937697: fix(service-datasource)!: the datasource admin API refuses to make a datasource managed while objects bind it with `external`, as the metadata save door does
   
   Clause-②: no (narrowing)
   
@@ -111,7 +111,7 @@
 
 ### Patch Changes
 
-- 72a302a: fix(service-datasource)!: Sync (remote tables, object draft, import, catalog refresh) refuses a managed datasource with the existing `400`, because ADR-0015 §4.2 reserves federation for a datasource whose `schemaMode` is not `managed`
+- 3937697: fix(service-datasource)!: Sync (remote tables, object draft, import, catalog refresh) refuses a managed datasource with the existing `400`, because ADR-0015 §4.2 reserves federation for a datasource whose `schemaMode` is not `managed`
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -124,7 +124,7 @@
   - **TO:** each of those requests answers `400` with the code its door already serves for a refusal, `EXTERNAL_DATASOURCE_ERROR` (the import: `EXTERNAL_IMPORT_ERROR`), and a message naming the rule and the remedy. Nothing is introspected, drafted, saved or stored. A name with no datasource definition gets the same refusal: nothing declares it a federation source.
   - **Unchanged:** `default` keeps its own refusal and message. A datasource declared `schemaMode: 'external'` or `'validate-only'` lists, drafts, imports and refreshes as before. Test (`POST /api/v1/datasources/:name/test`) and validation (`POST /api/v1/datasources/:name/external/validate`) answer as before; validation already skipped a managed datasource, and it now asks the same predicate the guard asks. No status code or error code is added.
   - **The fix for an integrator:** sync from a datasource the platform does not own. Declare it with `schemaMode: 'external'` (or `'validate-only'`) and its `external` settings; for a runtime datasource, send both in `PATCH /api/v1/datasources/:name`. A managed datasource's tables are the platform's own objects: define objects on it directly instead of importing them.
-- ea08ce5: fix(service-datasource): a datasource whose database client is not installed (`pg`, `mysql2`, `better-sqlite3`) is refused with the install of that client, not with "Run `pnpm install && pnpm build`"
+- 3937697: fix(service-datasource): a datasource whose database client is not installed (`pg`, `mysql2`, `better-sqlite3`) is refused with the install of that client, not with "Run `pnpm install && pnpm build`"
   
   Clause-②: no
   
@@ -133,7 +133,7 @@
   - **Unchanged.** A driver package whose build output is missing, or a required `@objectstack/…` driver package that is not installed (any but the optional `@objectstack/driver-turso`, `@objectstack/driver-mongodb` and `@objectstack/driver-sqlite-wasm`), still ends on `pnpm install && pnpm build`. A refused connection, a wrong DSN or a rejected password still ends on the same sentence as before. When the boot is refused, the error type, the retained connection state and the `OS_ALLOW_DRIVER_CONNECT_FAILURE` degraded boot do not change: only the closing sentence of the refusal is different.
   
   What to do: install the client the refusal names next to the server that opens the datasource, then start again.
-- b811c73: fix(service-datasource): a datasource whose optional driver package is not installed (`@objectstack/driver-turso`, `@objectstack/driver-mongodb`, `@objectstack/driver-sqlite-wasm`) is refused with that package's install alone, no longer followed by "Run `pnpm install && pnpm build`"
+- 3937697: fix(service-datasource): a datasource whose optional driver package is not installed (`@objectstack/driver-turso`, `@objectstack/driver-mongodb`, `@objectstack/driver-sqlite-wasm`) is refused with that package's install alone, no longer followed by "Run `pnpm install && pnpm build`"
   
   Clause-②: no
   
@@ -142,7 +142,7 @@
   - **Unchanged.** A driver package whose build output is missing (the error names a path into its `dist/`, which is what a monorepo checkout that has been installed but not built reports), or a required `@objectstack/…` package that is not installed, still ends on `pnpm install && pnpm build`. A missing `pg`, `mysql2` or `better-sqlite3` client still ends on the install of that client. A refused connection, a wrong DSN or a rejected password still ends on the same sentence as before. When the boot is refused, the error type, the retained connection state and the `OS_ALLOW_DRIVER_CONNECT_FAILURE` degraded boot do not change, and the driver factory's own messages are unchanged: only the closing sentence of the refusal is different.
   
   What to do: install the driver package the refusal names next to the server that opens the datasource, then start again.
-- 5d27d32: fix(service-datasource): in development, a SQLite datasource whose file cannot be opened or created fails its connect, as in production, instead of stepping down to an in-memory engine
+- 3937697: fix(service-datasource): in development, a SQLite datasource whose file cannot be opened or created fails its connect, as in production, instead of stepping down to an in-memory engine
   
   Clause-②: no
   
@@ -152,7 +152,7 @@
   - **Unchanged:** a native addon that cannot load (an ABI mismatch, an addon that was never built, a missing `better-sqlite3`) still steps down to wasm SQLite, with the same warning. An absent file in a directory that exists, or that the driver can make, still opens natively and is created. Production behaviour is unchanged.
   
   What to do: if a development boot now refuses a SQLite datasource, fix its `filename`. The boot names the path it could not open.
-- 27dc53b: fix(driver-sqlite-wasm)!: a file wasm SQLite cannot read is refused at connect, naming the file, and left as it was found, instead of being renamed and replaced with an empty database (#25019)
+- 3937697: fix(driver-sqlite-wasm)!: a file wasm SQLite cannot read is refused at connect, naming the file, and left as it was found, instead of being renamed and replaced with an empty database (#25019)
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -165,7 +165,7 @@
   - **TO:** `SqliteWasmDriver.connect()` rejects with the native driver's `SqliteDatabaseFileError`: `code: 'SQLITE_NOTADB'` for bytes that are not a database, `code: 'SQLITE_CORRUPT'` for a database it cannot read, `filename`, and a message naming the file and how to move it aside. Nothing is renamed, nothing is written beside it, and a stale write-ahead log beside a refused file stays where it is. `WasmSqliteConnection.open()` rejects with the same code and `filename`. `resolveSqliteDriver` re-throws that refusal at the wasm rung instead of trying the in-memory driver, so the datasource's connect fails and its connection state says so. Any other wasm failure, sql.js itself not loading first among them, still goes on to the in-memory driver.
   - **Unchanged:** a real database opens and answers; an absent file is created; an empty file opens as an empty database; a native addon that cannot load over a real or absent file still steps down to wasm SQLite.
   - **The fix for an operator:** restore the database from a backup, or move the unreadable file aside yourself (`mv '<file>' '<file>.unreadable'`) and start again: an absent file is created empty on the next connect. A development server whose own wasm image is damaged no longer starts itself clean; this is that step, done by hand.
-- 28c9a2c: fix(spec,driver-turso)!: a turso datasource that declares `encryptionKey` on a local file or an embedded replica is refused where it is written and when the driver is built, instead of being accepted and written in plaintext
+- 3937697: fix(spec,driver-turso)!: a turso datasource that declares `encryptionKey` on a local file or an embedded replica is refused where it is written and when the driver is built, instead of being accepted and written in plaintext
   
   Clause-②: no (narrowing) — the accept set of the `turso` `datasource.config` contract, of the published `TursoConfigSchema` mirror and of `new TursoDriver()` narrows by one key beside a `file:` url or `:memory:`, in every mode. No key is added, removed or renamed, and no exported symbol moves. `@objectstack/service-datasource` is graded `patch`: the TSDoc of its exported `TursoDriverConfigInput.encryptionKey` no longer promises an encrypted file, and nothing else in it changes.
   
@@ -194,7 +194,7 @@
   Blast radius, measured on this tree: no example, template, CLI scaffold or published skill authors the key, and no host default or environment variable sets it (a turso `encryptionKey` reaches the driver only from an authored `datasource.config`). Whether any out-of-repo deployment declares such a config is NOT measured and is not claimed to be zero.
   
   <!-- adr-0087: registered turso-config-local-encryption-key-refused -->
-- 03966ce: fix(plugin-auth)!: lift the better-auth family from 1.7.3 to 1.7.12 for the security fixes published since
+- 3937697: fix(plugin-auth)!: lift the better-auth family from 1.7.3 to 1.7.12 for the security fixes published since
   
   `@objectstack/plugin-auth` declares the better-auth family exactly, so a fresh install resolves what this package tested. All five declared ranges (`better-auth`, `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/scim`, `@better-auth/sso`) move from `1.7.3` to `1.7.12`, still exact. The lift takes the fixes published in 1.7.4 to 1.7.12 for packages this plugin mounts: GHSA-965c-763c-88jm and GHSA-r4xp-prcw-77qf (1.7.7), and the oauth-provider, SSO, SCIM, JWT and password-reset fixes up to 1.7.12. Every symbol this package imports from the family is still exported. It also pulls in `better-call` 1.4.4, `@better-auth/utils` 0.5.0 and `@better-fetch/fetch` 1.3.2, the versions 1.7.12 declares.
   
@@ -224,91 +224,91 @@
   - **`@objectstack/spec` and `@objectstack/cli` (patch, text only, not breaking):** the TSDoc on the organization schema's optional `updatedAt` now records that its better-auth measurement still holds on 1.7.12, and the `os migrate account-issuer` description no longer names a better-auth version. No schema, type, flag or behaviour changes in either package.
   - **`@objectstack/service-datasource` (patch, text only, not breaking):** the `resolveSqliteDriver` docs now describe the error better-sqlite3 13 actually throws for an addon that was never built: its loader's `require()` of the absent `build/Release/better_sqlite3.node`, which Node answers with `MODULE_NOT_FOUND`. The docs used to name a helper package's message that 13.x no longer produces. Development still steps down to wasm SQLite on that error, as before. No code changes.
   - **What to do as an operator:** tell users that a Magic Link, social, SSO or account-linking sign-in begun before the upgrade must be started again after it. Check each OIDC SSO provider's configured issuer against its discovery document and set it to the exact `issuer` string the document publishes. An OAuth client that branched on `401` for a PKCE failure should branch on `400 invalid_grant`. A browser client that read every non-`200` `/get-session` answer as "signed out" should treat a `500` as "try again".
-- Updated dependencies [448374d]
-- Updated dependencies [94842ba]
-- Updated dependencies [7cacad5]
-- Updated dependencies [df8bb40]
-- Updated dependencies [0091d84]
-- Updated dependencies [d5d8146]
-- Updated dependencies [5e9b100]
-- Updated dependencies [7532ea3]
-- Updated dependencies [fde7456]
-- Updated dependencies [74fcec1]
-- Updated dependencies [b42c621]
-- Updated dependencies [de9cd1f]
-- Updated dependencies [925fd07]
-- Updated dependencies [e7befa7]
-- Updated dependencies [55d7aab]
-- Updated dependencies [eee65af]
-- Updated dependencies [644e4b2]
-- Updated dependencies [0715fac]
-- Updated dependencies [60b42cd]
-- Updated dependencies [b9a79ef]
-- Updated dependencies [63085c3]
-- Updated dependencies [0b8bce4]
-- Updated dependencies [2069b81]
-- Updated dependencies [5d66021]
-- Updated dependencies [7f99616]
-- Updated dependencies [4d99158]
-- Updated dependencies [1862d8d]
-- Updated dependencies [30d21f6]
-- Updated dependencies [eddffc3]
-- Updated dependencies [69712d5]
-- Updated dependencies [dfe60e3]
-- Updated dependencies [e939357]
-- Updated dependencies [045858f]
-- Updated dependencies [baedcec]
-- Updated dependencies [03c12a5]
-- Updated dependencies [386f60f]
-- Updated dependencies [d6a5fa3]
-- Updated dependencies [27dc53b]
-- Updated dependencies [28c9a2c]
-- Updated dependencies [8c73398]
-- Updated dependencies [2354058]
-- Updated dependencies [edcc8ce]
-- Updated dependencies [fccbd9d]
-- Updated dependencies [c8f4c43]
-- Updated dependencies [4e2c42f]
-- Updated dependencies [02ad31a]
-- Updated dependencies [03966ce]
-- Updated dependencies [e3aa111]
-- Updated dependencies [863c580]
-- Updated dependencies [7f5b19d]
-- Updated dependencies [14e7239]
-- Updated dependencies [fe0ec2b]
-- Updated dependencies [dfab597]
-- Updated dependencies [9127f23]
-- Updated dependencies [3a440b0]
-- Updated dependencies [24360dc]
-- Updated dependencies [ecb4e69]
-- Updated dependencies [8dfd126]
-- Updated dependencies [bda53bb]
-- Updated dependencies [b62f959]
-- Updated dependencies [b964ea1]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [4395cbc]
-- Updated dependencies [9019af9]
-- Updated dependencies [45f9962]
-- Updated dependencies [e5eab06]
-- Updated dependencies [dc532e8]
-- Updated dependencies [d196748]
-- Updated dependencies [5f30f00]
-- Updated dependencies [7db1697]
-- Updated dependencies [f5b6b3f]
-- Updated dependencies [f4112a7]
-- Updated dependencies [db1c7cc]
-- Updated dependencies [303aef0]
-- Updated dependencies [b3034ee]
-- Updated dependencies [d12e650]
-- Updated dependencies [830a63a]
-- Updated dependencies [1000cc7]
-- Updated dependencies [ee63b47]
-- Updated dependencies [bdf762c]
-- Updated dependencies [27b3f1f]
-- Updated dependencies [7c68b10]
-- Updated dependencies [915e940]
-- Updated dependencies [025f6de]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [9f39094]
-- Updated dependencies [6abee03]
+- Updated dependencies [3937697]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0
   - @objectstack/driver-sql@18.1.0

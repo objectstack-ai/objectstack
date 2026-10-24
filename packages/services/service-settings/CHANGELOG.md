@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 78ab647: fix(service-settings)!: the Branding settings drive the console's name, logo and colour on a single-organization deployment, retire `theme_mode` and `support_email`, and are not offered under a walled tenancy posture
+- 3937697: fix(service-settings)!: the Branding settings drive the console's name, logo and colour on a single-organization deployment, retire `theme_mode` and `support_email`, and are not offered under a walled tenancy posture
   
   Clause-②: no (narrowing)
   
@@ -37,7 +37,7 @@
   - On a walled deployment, set the console's branding with `OS_PRODUCT_NAME`, `OS_LOGO_URL` and `OS_BRAND_COLOR`. If you set `OS_BRANDING_WORKSPACE_NAME` there, move its value to `OS_APP_NAME`.
   
   It ships as `minor` under the launch-window convention for narrowings.
-- 3b3830c: fix(service-settings)!: a settings value that misses the format its `email`, `url`, `phone` or `color` type declares is refused, both when it is saved and when it arrives as an `OS_*` override (#24882)
+- 3937697: fix(service-settings)!: a settings value that misses the format its `email`, `url`, `phone` or `color` type declares is refused, both when it is saved and when it arrives as an `OS_*` override (#24882)
   
   ADR-0007 declares a format for four specifier types: `email`, `url` and `phone` take "format validation", and `color` takes a hex string. Until now nothing enforced it. `PUT /api/settings/branding` stored a Logo URL of `not a url` and answered `200`, and an `OS_*` override was served whatever it held. Both doors now judge the format through one shared check, after every other declared constraint, and refuse a value that misses it.
   
@@ -67,7 +67,7 @@
 
 ### Patch Changes
 
-- fcb40ad: fix(service-settings): Setup → Authentication saves "Enable Google login" ON when the Google credentials come from the server (#24844)
+- 3937697: fix(service-settings): Setup → Authentication saves "Enable Google login" ON when the Google credentials come from the server (#24844)
   
   Clause-②: no
   
@@ -76,14 +76,14 @@
   `auth.google_client_id` and `auth.google_client_secret` are no longer `required`. Google sign-in needs the two credentials to resolve, saved on the page or set on the server; it never needed them stored. The `google_enabled` help already says so: Google is offered once both resolve, and the server's pair wins over saved values.
   
   Who may sign in, and which providers the login page offers, do not change for any deployment. Saving the toggle ON while neither pair resolves is now accepted; the login page then shows no Google button, as it does with the toggle left at its default.
-- 42b60b9: fix(service-settings): Setup → Company → Legal name help no longer points to an organization name under Branding
+- 3937697: fix(service-settings): Setup → Company → Legal name help no longer points to an organization name under Branding
   
   Clause-②: no
   
   Metadata-protocol: none
   
   The `legal_name` help in the Company settings page (the manifest description and the `en`, `zh-CN`, `ja-JP` and `es-ES` bundles) said the legal name "may differ from the organization name set under Branding". Branding's workspace name is the product name, not an organization name, and the Branding page is not offered at all under the `group` and `isolated` postures, where Company is. The help now reads "Registered legal name of the organization, as it appears on contracts and invoices." in every locale. Copy only; no key, value or behaviour changes.
-- 279fdcf: fix(service-settings)!: a tenant- or user-scope setting stored with no organization no longer answers every organization's read, and a caller with no organization reads and writes as the one organization the deployment derives
+- 3937697: fix(service-settings)!: a tenant- or user-scope setting stored with no organization no longer answers every organization's read, and a caller with no organization reads and writes as the one organization the deployment derives
   
   Clause-②: yes (narrowing)
   Metadata-protocol: none
@@ -101,7 +101,7 @@
   **Who is affected.** Only a store holding a tenant- or user-scope `sys_setting` row with a NULL `organization_id`. A fresh install holds none, nor does an 18.0.0-born store written through `os serve`: the measured 18.0.0 fixture holds two `sys_setting` rows, both owned. A v17 store holds none after `os migrate organization-ownership` under `single`, which gives such rows to the Default Organization. Under a walled posture the ceremony leaves such a row NULL and reports it, and from this release that row stops answering any organization.
   
   **The remedy.** Run `os migrate organization-ownership --out PLAN`, review the reported `sys_setting` rows, and save each value again from inside the organization it belongs to (Setup → the settings page, or `PUT /api/settings/:namespace` with that organization active). A value meant for every organization belongs on a key declared at scope `global`.
-- 9d60b42: fix(service-settings)!: a host that binds its own engine and states no organization source reads and writes as the organization ADR-0131 D9 derives through that engine, not as no organization
+- 3937697: fix(service-settings)!: a host that binds its own engine and states no organization source reads and writes as the organization ADR-0131 D9 derives through that engine, not as no organization
   
   Clause-②: no (narrowing)
   Metadata-protocol: none
@@ -116,7 +116,7 @@
   **Who is affected.** Only a host that binds its own engine and states no source: a control-plane mock or an embedded runtime. On a composition with an organization object it now reads and writes the derived organization's rows, and its rows with no organization stop answering. On one without, it meets the refusal above. A deployment booted through `SettingsServicePlugin` is not affected.
   
   **The fix.** State the composition at the bind site: `service.bindEngine(engine, audit, { organization: async () => ({ kind: 'no-organization-object' }) })` (a host that hands its engine to the constructor binds it this way instead), or hand over an engine whose `registry.getObject` can answer.
-- b3034ee: refactor(core, plugin-auth, plugin-security, service-settings): one definition each for the `admin_full_access` anchor rule and the organization-reach rule, exported from core security
+- 3937697: refactor(core, plugin-auth, plugin-security, service-settings): one definition each for the `admin_full_access` anchor rule and the organization-reach rule, exported from core security
   
   Clause-②: yes (widening)
   Metadata-protocol: none
@@ -155,7 +155,7 @@
     These two differences are kept by design: they make the fallback, which runs only when the service has failed, the stricter reader.
   
   No configuration, metadata or HTTP behaviour changes. Code that does not import the new exports needs no action.
-- ab510f4: feat: Setup → Email states which mail transport is live, and says so when no mail leaves this machine
+- 3937697: feat: Setup → Email states which mail transport is live, and says so when no mail leaves this machine
   
   Clause-②: yes (widening: service-settings exports SettingsService.registerLiveStatus / liveStatusOf, SettingsLiveStatus, SettingsLiveStatusProvider and SETTINGS_LIVE_STATUS_BANNER_ID; nothing is refused)
   Metadata-protocol: none
@@ -164,7 +164,7 @@
   
   - **`@objectstack/service-settings`:** `SettingsService.registerLiveStatus(namespace, provider)` lets the package that owns a live object state it on that namespace's page. `GET /api/settings/:namespace` asks the provider on every read and puts its answer first in the manifest's specifiers, as an `info_banner` with the reserved id `live_status` (`SETTINGS_LIVE_STATUS_BANNER_ID`). The registered manifest and in-process `getNamespace()` are unchanged. If the provider throws, the page says the live status could not be read; the statement is never silently dropped. New exports: `SettingsLiveStatus`, `SettingsLiveStatusProvider`, `SETTINGS_LIVE_STATUS_BANNER_ID`.
   - **`@objectstack/plugin-email`:** registers the `mail` statement from `EmailService.isConfigured()`. When it answers `false` (the log transport), the banner reads "No mail leaves this machine". When it answers `true`, the banner names the live transport, for example "Mail is delivered through SMTP (smtp.example.com:587)". The statement waits for any settings re-apply still running, so a read made just after a save names the transport that save built.
-- 832a84e: fix(service-settings): Settings → Branding's name is labelled the product name, shows no default the console never uses, and Localization's timezone says it is the one in effect
+- 3937697: fix(service-settings): Settings → Branding's name is labelled the product name, shows no default the console never uses, and Localization's timezone says it is the one in effect
   
   Clause-②: yes
   Metadata-protocol: none
@@ -175,7 +175,7 @@
   - **No default.** The `'ObjectStack'` default is gone. Neither reader ever served it: the runtime config and the auth readers use only a value somebody saved, and otherwise the deployment's own name (`OS_PRODUCT_NAME`, `OS_APP_NAME`, or the host options). So an unsaved page showed a name nothing used. An unsaved page now shows the field empty, and `GET /api/settings/branding` answers `workspace_name` as `value: null`, `source: 'default'`.
   - **Not required.** A key with no default stays optional, as `accent_color` already is, so the console can save the page without one. This widens the write: an empty `workspace_name` is accepted (it was refused as required) and means "use the deployment's name", which is how both readers already treat an empty value. Nothing served changes.
   - **`localization.timezone`.** Its help adds that it is the timezone in effect for the organization, and that the Timezone field on the Organization record does not change it (in all four bundles).
-- 74496c6: fix: Setup → AI's "Reset to environment defaults" button is now translated in zh-CN, ja-JP and es-ES
+- 3937697: fix: Setup → AI's "Reset to environment defaults" button is now translated in zh-CN, ja-JP and es-ES
   
   Clause-②: no
   Metadata-protocol: none
@@ -183,95 +183,95 @@
   The `ai` settings manifest declares an `action_button` with id `reset`, but no locale bundle carried `settings.ai.actions.reset.label`, so the button rendered in English beside its translated siblings. The bundles now carry it (en, zh-CN, ja-JP, es-ES).
   
   The settings translation coverage test now reads every manifest's `action_button` labels: each shipped non-English locale must carry `settings.<namespace>.actions.<id>.label` for every action button, and no bundle may carry action copy for a button no manifest declares.
-- Updated dependencies [448374d]
-- Updated dependencies [94842ba]
-- Updated dependencies [7cacad5]
-- Updated dependencies [df8bb40]
-- Updated dependencies [0091d84]
-- Updated dependencies [5e9b100]
-- Updated dependencies [7532ea3]
-- Updated dependencies [fde7456]
-- Updated dependencies [de9cd1f]
-- Updated dependencies [7035682]
-- Updated dependencies [d606fc1]
-- Updated dependencies [a8b44d4]
-- Updated dependencies [78ab647]
-- Updated dependencies [73a2b52]
-- Updated dependencies [5872450]
-- Updated dependencies [9ea5afe]
-- Updated dependencies [925fd07]
-- Updated dependencies [e7befa7]
-- Updated dependencies [55d7aab]
-- Updated dependencies [644e4b2]
-- Updated dependencies [0715fac]
-- Updated dependencies [60b42cd]
-- Updated dependencies [b9a79ef]
-- Updated dependencies [63085c3]
-- Updated dependencies [0b8bce4]
-- Updated dependencies [5d2c5a1]
-- Updated dependencies [066dabc]
-- Updated dependencies [4b8f597]
-- Updated dependencies [2069b81]
-- Updated dependencies [1862d8d]
-- Updated dependencies [30d21f6]
-- Updated dependencies [eddffc3]
-- Updated dependencies [69712d5]
-- Updated dependencies [dfe60e3]
-- Updated dependencies [e939357]
-- Updated dependencies [045858f]
-- Updated dependencies [baedcec]
-- Updated dependencies [03c12a5]
-- Updated dependencies [386f60f]
-- Updated dependencies [28c9a2c]
-- Updated dependencies [2354058]
-- Updated dependencies [ba244f1]
-- Updated dependencies [edcc8ce]
-- Updated dependencies [fccbd9d]
-- Updated dependencies [c8f4c43]
-- Updated dependencies [02ad31a]
-- Updated dependencies [03966ce]
-- Updated dependencies [e3aa111]
-- Updated dependencies [863c580]
-- Updated dependencies [7f5b19d]
-- Updated dependencies [14e7239]
-- Updated dependencies [fe0ec2b]
-- Updated dependencies [dfab597]
-- Updated dependencies [9127f23]
-- Updated dependencies [24360dc]
-- Updated dependencies [ecb4e69]
-- Updated dependencies [8dfd126]
-- Updated dependencies [bda53bb]
-- Updated dependencies [b964ea1]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [4395cbc]
-- Updated dependencies [9019af9]
-- Updated dependencies [45f9962]
-- Updated dependencies [e5eab06]
-- Updated dependencies [dc532e8]
-- Updated dependencies [d196748]
-- Updated dependencies [5f30f00]
-- Updated dependencies [7db1697]
-- Updated dependencies [f5b6b3f]
-- Updated dependencies [c109bfc]
-- Updated dependencies [f4112a7]
-- Updated dependencies [f4112a7]
-- Updated dependencies [db1c7cc]
-- Updated dependencies [303aef0]
-- Updated dependencies [b3034ee]
-- Updated dependencies [d12e650]
-- Updated dependencies [830a63a]
-- Updated dependencies [1000cc7]
-- Updated dependencies [ee63b47]
-- Updated dependencies [bdf762c]
-- Updated dependencies [27b3f1f]
-- Updated dependencies [3306cad]
-- Updated dependencies [c898bd8]
-- Updated dependencies [97aa34e]
-- Updated dependencies [832a84e]
-- Updated dependencies [7c68b10]
-- Updated dependencies [915e940]
-- Updated dependencies [025f6de]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
 - Updated dependencies [9f39094]
-- Updated dependencies [f7d7403]
+- Updated dependencies [3937697]
   - @objectstack/spec@18.1.0
   - @objectstack/core@18.1.0
   - @objectstack/platform-objects@18.1.0
