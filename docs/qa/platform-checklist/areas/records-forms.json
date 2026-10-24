@@ -5053,7 +5053,7 @@
       "title": "A script action whose server-side hook refuses the write with a user-facing sentence answers a 4xx, the console shows exactly one error toast carrying that sentence, and the record is left unchanged",
       "since": "v17.5",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -5062,7 +5062,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the refusal pair on showcase_task: the hook showcase_guard_task_reopen (examples/app-showcase/src/data/hooks/index.ts — beforeUpdate, condition previous.done == true && record.done != true, sandboxed body throws new Error(TASK_REOPEN_REFUSAL), onError:'abort') and the script action showcase_reopen_task (examples/app-showcase/src/ui/actions/index.ts — body writes { id, done: false } through ctx.api, execution perRecord, visible 'has(record.done) && record.done == true', locations list_item only — the Task Detail page is kind:'full' and renders no record_header bar)",
+          "the refusal pair on showcase_task: the hook showcase_guard_task_reopen (examples/app-showcase/src/data/hooks/index.ts — beforeUpdate, condition previous.done == true && record.done != true, sandboxed body throws new Error(TASK_REOPEN_REFUSAL), onError:'abort') and the action showcase_reopen_task (examples/app-showcase/src/ui/actions/index.ts — a declared record write: operation 'update' with patch { done: false } and no body, which the action route performs as the caller, execution perRecord, visible 'has(record.done) && record.done == true', locations list_item only — the Task Detail page is kind:'full' and renders no record_header bar)",
           "the refusal sentence, verbatim: 'A finished task cannot be reopened. Create a follow-up task instead.' (TASK_REOPEN_REFUSAL in the hooks file — re-read it there before the run, never from this line)",
           "a seeded FINISHED task (done: true) — 'Audit current IA' or 'App wireframes' (examples/app-showcase/src/data/seed/index.ts) — which is the only kind of record the action is offered on",
           "a console built at this repo's .objectui-sha (pnpm objectui:build), served by the same boot the run drives",
@@ -5123,10 +5123,10 @@
       ],
       "source": [
         "examples/app-showcase/src/data/hooks/index.ts#GuardTaskReopenHook (the refusing beforeUpdate hook; the sentence is TASK_REOPEN_REFUSAL in the same file)",
-        "examples/app-showcase/src/ui/actions/index.ts#ReopenTaskAction (the script action whose ctx.api write the hook refuses)",
+        "examples/app-showcase/src/ui/actions/index.ts#ReopenTaskAction (the action whose declared write, performed by the action route as the caller, the hook refuses)",
         "examples/app-showcase/test/task-reopen-hook-refusal.test.ts (pins the fixture: the hook refuses with the sentence and leaves the row unchanged on the real engine, and the action writes the refused shape)",
-        "packages/runtime/src/sandbox/quickjs-runner.ts#sandboxRefusalMessage (a nested sandboxed hook refusal keeps its business message across the action VM hop, so the action route answers 4xx — #17265 / PR #17679)",
-        "packages/runtime/src/sandbox/nested-hook-refusal-is-a-rejection.test.ts (the wire half: 400 VALIDATION_ERROR with the sentence, unit-level)",
+        "packages/runtime/src/domains/actions.ts (the declarative-update branch runs inside the route's one catch, which serves a data-plane refusal with its own status and code: the hook's refusal arrives as 400 VALIDATION_ERROR carrying the sentence, the answer /data gives the same write since #11588)",
+        "packages/qa/dogfood/test/showcase-record-write-actions.dogfood.test.ts (the wire half over real HTTP on the stock showcase: a caller who may edit the task gets a 4xx carrying the sentence and the task stays finished; a caller who may not edit it is refused 403 before the hook is reached)",
         "objectui packages/app-shell/src/utils/__tests__/consoleServerAction.errorToast.test.ts (objectui#9252 — the console failure chain characterized end to end with the transport stubbed)",
         "objectui packages/app-shell/src/chrome/ConsoleToaster.tsx (sonner Toaster: richColors, duration 4000, toast nodes carry data-sonner-toast and data-type)",
         "objectui#9151 (the zero-toast symptom this item re-observes on a current build); #21596 (this item)"
@@ -5143,6 +5143,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot the showcase isolated (RUNNER canonical boot line: own port, own file DB, --seed-admin)' → 'boot the showcase with RUNNER's canonical checklist boot (own port, own file DB, --seed-admin)'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-23",
+          "change": "fixtures.requires[0] and source respelled for #25468: showcase_reopen_task no longer writes from a script body through ctx.api (an elevated write); it declares its write (operation 'update', patch { done: false }), which the action route performs as the caller, so the hook now refuses the caller's own update and the nested action-VM hop is gone from this path. Its type stays 'script', the schema default. The answer is unchanged: measured on a dogfood boot of the change, the seeded admin's Reopen on a finished task answers 400 VALIDATION_ERROR whose error.message is TASK_REOPEN_REFUSAL, and the console dispatches an operation 'update' action through the same registered script handler (objectui ActionRunner.executeUpdateOperation at the .objectui-sha pin 6fb31dc), so the toast chain knownGaps[0] cites is the one this item observes. The two source rows for the nested action-VM hop (quickjs-runner.ts#sandboxRefusalMessage and the unit pin nested-hook-refusal-is-a-rejection.test.ts) no longer describe this path and leave source; the route's catch in domains/actions.ts and the dogfood pin showcase-record-write-actions.dogfood.test.ts replace them. No clause changed",
+          "ref": "#25468"
         }
       ]
     },

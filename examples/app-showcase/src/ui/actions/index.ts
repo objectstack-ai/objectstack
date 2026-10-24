@@ -23,13 +23,29 @@ const fieldZoo = 'showcase_field_zoo';
  */
 
 /**
- * script — inline sandboxed handler, shown on each row and the record header.
+ * The declarative record write (`operation: 'update'` + `patch`), shown on each
+ * row and the record header.
  *
- * The `body` (L2 sandboxed JS) is what makes this action *executable*: AppPlugin
- * walks the bundle's actions on bind and only registers an engine handler for
- * those carrying a `body` (or `target` -> bundle function). Without it the
- * runtime has nothing to invoke and `POST /actions/showcase_task/showcase_mark_done`
- * fails with "Action ... not found".
+ * ## Why a declared write and not a script body
+ *
+ * The platform action route performs this write itself, ONCE, on the current
+ * record, as the CALLER — never system-elevated — so the caller's object, row
+ * and field permissions, the task's hooks and its validations apply exactly as
+ * they do to the Edit button (`executeDeclarativeUpdateAction`,
+ * `packages/runtime/src/action-execution.ts`). A member who may read a task but
+ * not edit it is refused here with the same `403 PERMISSION_DENIED` an edit
+ * gets, and nothing is written.
+ *
+ * It used to be a `type: 'script'` body writing through `ctx.api`. A body is
+ * trusted application code: its `ctx.api` runs `isSystem`
+ * (`buildActionExecutionContext`), outside the caller's RLS and FLS, so a body
+ * that writes is an elevation for everyone who can see the button. The rule
+ * this app models:
+ *   - a record action that only sets fields of the current record DECLARES the
+ *     write, as here, and inherits the edit grant it is a shortcut for;
+ *   - a script body is for logic the caller's own permissions cannot express;
+ *     one that writes gates itself with `requiredPermissions` (ADR-0066 D4),
+ *     because nothing else stands between a caller and its elevated `ctx.api`.
  *
  * It flips the dedicated `done` flag and `progress` rather than the `status`
  * select on purpose: `status` is governed by the `task_status_flow`
@@ -42,21 +58,13 @@ export const MarkDoneAction = defineAction({
   label: 'Mark Done',
   icon: 'check',
   objectName: task,
-  type: 'script',
-  body: {
-    language: 'js',
-    source:
-      "var id = ctx.recordId || (ctx.record && ctx.record.id) || input.recordId;" +
-      "if (!id) throw new Error('No record to mark done');" +
-      "await ctx.api.object('showcase_task').update({ id: id, done: true, progress: 100 });" +
-      "return { ok: true, id: id };",
-    capabilities: ['api.write'],
-  },
-  // #17319 — the dispatch contract this BODY is written for. It reads
-  // `ctx.recordId` and throws 'No record to mark done' without one, so an
-  // aggregate wiring would fail on every click with a message that reads like
-  // a selection bug. Declaring it makes that wiring a build-time refusal
-  // (`action-dispatch-contract-mismatch`) instead.
+  operation: 'update',
+  patch: { done: true, progress: 100 },
+  // #17319 — the dispatch contract this write is declared for: it writes the
+  // CURRENT record, and the route refuses an update with no record id (400).
+  // An aggregate wiring would dispatch once with none, so declaring it makes
+  // that wiring a build-time refusal (`action-dispatch-contract-mismatch`)
+  // instead of a failure on every click.
   execution: 'perRecord',
   successMessage: 'Task marked done.',
   // Hide once the task is complete. Gate on `record.done` (the boolean this
@@ -85,14 +93,16 @@ export const MarkDoneAction = defineAction({
 });
 
 /**
- * script — the hook-REFUSAL specimen. Reopening a finished task is refused by
- * the `showcase_guard_task_reopen` beforeUpdate hook
- * (`src/data/hooks/index.ts`), so a click on this action always fails, by
- * design: the body's `ctx.api` write is aborted and the hook's sentence is what
- * the user must be told. The action route answers it as a 4xx carrying that
- * sentence, and the console owes exactly one error toast that contains it.
- * Platform checklist item `records-forms.script-action-hook-refusal-toast`
- * drives this.
+ * The hook-REFUSAL specimen, a declarative record write like Mark Done above.
+ * Reopening a finished task is refused by the `showcase_guard_task_reopen`
+ * beforeUpdate hook (`src/data/hooks/index.ts`), so a click on this action
+ * always fails, by design: the write the platform performs as the caller is
+ * aborted and the hook's sentence is what the user must be told. The action
+ * route answers it as a 4xx carrying that sentence, and the console owes
+ * exactly one error toast that contains it. Platform checklist item
+ * `records-forms.script-action-hook-refusal-toast` drives this. A caller who may
+ * not edit the task never reaches the hook: the write is refused `403` first,
+ * as an edit would be.
  *
  * Shown only on finished tasks — the only records the refusal applies to.
  */
@@ -101,16 +111,8 @@ export const ReopenTaskAction = defineAction({
   label: 'Reopen',
   icon: 'rotate-ccw',
   objectName: task,
-  type: 'script',
-  body: {
-    language: 'js',
-    source:
-      "var id = ctx.recordId || (ctx.record && ctx.record.id) || input.recordId;" +
-      "if (!id) throw new Error('No record to reopen');" +
-      "await ctx.api.object('showcase_task').update({ id: id, done: false });" +
-      "return { ok: true, id: id };",
-    capabilities: ['api.write'],
-  },
+  operation: 'update',
+  patch: { done: false },
   execution: 'perRecord',
   // #8990 — `has()` guards the sparse `list_item` face, as on Mark Done.
   visible: 'has(record.done) && record.done == true',
@@ -307,30 +309,26 @@ export const NewTaskAction = defineAction({
 });
 
 /**
- * script — Submit an invoice for finance + legal sign-off (§1 demo entry point).
+ * Submit an invoice for finance + legal sign-off (§1 demo entry point), a
+ * declarative record write like Mark Done above.
  *
  * Flipping `status` to `sent` is exactly the transition the `showcase_invoice_signoff`
  * flow's start gate watches (`status == "sent" && previous.status != "sent"`), so
  * this button opens a fresh 会签 (finance ∧ legal) approval request from the record
  * header — the same request the boot-time demo seeds (src/security/seed-approval-demo.ts),
- * but on demand. The sandboxed body's write fires the record-change trigger like any
- * user edit. Gated to draft invoices so it disappears once submitted.
+ * but on demand. The write is an edit of the invoice performed as the caller, so
+ * it fires the record-change trigger like any user edit, and only someone who
+ * may edit the invoice can submit it: a read-only holder (the auditor's
+ * View-All, the ops set's read) is refused `403`. Gated to draft invoices so it
+ * disappears once submitted.
  */
 export const SubmitForSignoffAction = defineAction({
   name: 'showcase_submit_signoff',
   label: 'Submit for Sign-off',
   icon: 'send',
   objectName: invoice,
-  type: 'script',
-  body: {
-    language: 'js',
-    source:
-      "var id = ctx.recordId || (ctx.record && ctx.record.id) || input.recordId;" +
-      "if (!id) throw new Error('No invoice to submit');" +
-      "await ctx.api.object('showcase_invoice').update({ id: id, status: 'sent' });" +
-      "return { ok: true, id: id };",
-    capabilities: ['api.write'],
-  },
+  operation: 'update',
+  patch: { status: 'sent' },
   successMessage: 'Invoice submitted for finance + legal sign-off.',
   // Only on invoices not yet sent. `record.`-prefixed comparison, per the
   // ActionEngine's fail-closed CEL evaluation (see MarkDoneAction's note).

@@ -16,63 +16,72 @@ import { allActions, MarkDoneAction, NewTaskAction, PortfolioSnapshotAction } fr
  * registered no engine handler and clicking "Mark Done" failed at runtime with
  * `Action 'showcase_mark_done' on object '*' not found`.
  *
- * These tests drive the **real** runtime path — `actionBodyRunnerFactory` +
- * the QuickJS sandbox, the exact bridge AppPlugin uses — against the actions as
- * shipped. A body that fails to parse, references the wrong field, or is missing
- * entirely fails here, not in production.
+ * A `script` action is executable in exactly three shapes: a `body`
+ * (auto-registered by AppPlugin), a `target` (a handler wired imperatively), or
+ * the declarative record write `operation: 'update'` + `patch`, which carries
+ * neither because the platform action route performs the write itself, as the
+ * caller (`isHeadlessInvokableAction` asks for it first). Mark Done is that
+ * third shape now, so the #2169 regression is pinned on the bodies that remain:
+ * these tests drive the **real** runtime path — `actionBodyRunnerFactory` +
+ * the QuickJS sandbox, the exact bridge AppPlugin uses — against them as
+ * shipped. A body that fails to parse, or is missing entirely, fails here, not
+ * in production.
  */
 describe('showcase actions — executability', () => {
   const runner = new QuickJSScriptRunner();
+  const scriptActions = allActions.filter((a) => a.type === 'script');
+  const isDeclaredWrite = (a: object) => (a as { operation?: unknown }).operation === 'update';
+  const bodyActions = scriptActions.filter((a) => Boolean((a as { body?: unknown }).body));
 
-  it('every declared `script` action is executable (has a body or a target)', () => {
+  it('every declared `script` action is executable (a body, a target, or a declared write)', () => {
     // Mirrors the platform invariant enforced by ActionSchema: a script action
     // must be bound to *something* runnable. `target` actions are wired
-    // imperatively (e.g. via onEnable); `body` actions are auto-registered.
-    const scriptActions = allActions.filter((a) => a.type === 'script');
+    // imperatively (e.g. via onEnable); `body` actions are auto-registered; a
+    // declared write is performed by the route and must say what it writes.
     expect(scriptActions.length).toBeGreaterThan(0);
     for (const a of scriptActions) {
+      const declaredWrite = isDeclaredWrite(a) && Object.keys((a as { patch?: object }).patch ?? {}).length > 0;
       expect(
-        Boolean((a as { body?: unknown }).body) || Boolean((a as { target?: unknown }).target),
-        `script action '${a.name}' has neither body nor target — it cannot be invoked`,
+        Boolean((a as { body?: unknown }).body) || Boolean((a as { target?: unknown }).target) || declaredWrite,
+        `script action '${a.name}' has no body, no target and no declared write — it cannot be invoked`,
       ).toBe(true);
     }
   });
 
-  it('the runtime produces a handler for Mark Done (regression: #2169)', () => {
+  it('the runtime produces a handler for every body action (regression: #2169)', () => {
+    expect(bodyActions.length).toBeGreaterThan(0);
     const factory = actionBodyRunnerFactory(runner, { ql: {}, appId: 'showcase' });
-    const handler = factory(MarkDoneAction as never);
-    expect(typeof handler).toBe('function');
+    for (const a of bodyActions) {
+      expect(typeof factory(a as never), `no handler for '${a.name}'`).toBe('function');
+    }
   });
 
-  it('Mark Done flips `done` + `progress` via the sandboxed body', async () => {
-    // Capture what the action writes through the proxied ObjectQL engine.
-    let written: { object: string; data: Record<string, unknown> } | undefined;
-    const ql = {
-      object: (object: string) => ({
-        update: async (data: Record<string, unknown>) => {
-          written = { object, data };
-          return { id: data.id };
-        },
-      }),
-    };
+  it('Mark Done declares the completion write: `done` + `progress`, never `status`', () => {
+    // The route writes exactly this patch to the current record. It
+    // deliberately does NOT touch `status` (the state-machine only permits
+    // in_review -> done).
+    expect(MarkDoneAction.operation).toBe('update');
+    expect(MarkDoneAction.patch).toEqual({ done: true, progress: 100 });
+    expect(MarkDoneAction).not.toHaveProperty('body');
+    expect(MarkDoneAction.execution).toBe('perRecord');
+  });
 
-    const factory = actionBodyRunnerFactory(runner, { ql, appId: 'showcase' });
-    const handler = factory(MarkDoneAction as never);
-    expect(typeof handler).toBe('function');
-
-    const result = await handler!({
-      recordId: 'task_1',
-      record: { id: 'task_1', status: 'in_progress', progress: 40, done: false },
-      params: {},
-      user: { id: 'u1' },
-    });
-
-    // It updates the right object with the completion fields — and deliberately
-    // does NOT touch `status` (the state-machine only permits in_review -> done).
-    expect(written?.object).toBe('showcase_task');
-    expect(written?.data).toMatchObject({ id: 'task_1', done: true, progress: 100 });
-    expect(written?.data).not.toHaveProperty('status');
-    expect(result).toEqual({ ok: true, id: 'task_1' });
+  it('no action body writes without a capability gate', () => {
+    // A body's `ctx.api` runs system-elevated, outside the caller's RLS and
+    // FLS, so a body that may write is an elevation for every caller who can
+    // reach the action, unless `requiredPermissions` names who may run it
+    // (ADR-0066 D4). This app's record writes are declared writes, performed as
+    // the caller; the second half keeps a writing body from coming back ungated.
+    expect(scriptActions.filter(isDeclaredWrite).map((a) => a.name).sort()).toEqual([
+      'showcase_mark_done',
+      'showcase_reopen_task',
+      'showcase_submit_signoff',
+    ]);
+    const ungated = bodyActions
+      .filter((a) => ((a as { body?: { capabilities?: string[] } }).body?.capabilities ?? []).includes('api.write'))
+      .filter((a) => ((a as { requiredPermissions?: string[] }).requiredPermissions ?? []).length === 0)
+      .map((a) => a.name);
+    expect(ungated, 'script bodies that may write, with no requiredPermissions').toEqual([]);
   });
 
   it('a body-less `script` action yields no handler (the #2169 failure mode)', () => {

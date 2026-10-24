@@ -153,8 +153,9 @@ export const TaskViews = defineView({
     // Runner-dispatched bulk actions come in TWO execution modes:
     //
     //   Per-record (default) — each selected record is one dispatch:
-    //   `showcase_mark_done`       — type `script`; its sandboxed body flips
-    //     `done`/`progress` per record via the platform action route.
+    //   `showcase_mark_done`       — a declared write (`operation: 'update'`);
+    //     the platform action route writes `done`/`progress` per record, as
+    //     the caller.
     //   `showcase_recalc_estimate` — type `api`; POSTs the showcase's declared
     //     `/api/v1/apps/showcase/recalc` endpoint, with `recordIdParam: 'recordId'`
     //     (already declared for the row surface) carrying each record's id.
