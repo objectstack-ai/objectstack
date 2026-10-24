@@ -214,7 +214,7 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
             probeOrganizationsBySlug: async (organizationSlug) => {
                 const probe: ServerScopedDataRequest<FindDataRequest> = {
                     object: SystemObjectName.ORGANIZATION,
-                    query: { where: { slug: organizationSlug }, fields: ['id'], limit: 2 },
+                    query: { object: SystemObjectName.ORGANIZATION, where: { slug: organizationSlug }, fields: ['id'], limit: 2 },
                     ...(environmentId ? { environmentId } : {}),
                     context: { isSystem: true },
                 };
