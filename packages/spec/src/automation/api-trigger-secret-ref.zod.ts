@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { resolveFlowTriggerKind } from './flow-trigger-kind';
 
 /**
- * # An inbound `api` hook's secret, by reference
+ * An inbound `api` hook's secret, by reference.
  *
  * An `api` flow's start node arms an inbound hook that verifies every post
  * against a per-flow HMAC secret (ADR-0041). Until this key the only way to
@@ -76,7 +76,7 @@ export const ApiTriggerSecretRefSchema = z
       'literal `secret`, never beside it; not in the `OS_` namespace.',
   );
 
-export type ApiTriggerSecretRef = z.infer<typeof ApiTriggerSecretRefSchema>;
+export type ApiTriggerSecretRef = z.input<typeof ApiTriggerSecretRefSchema>;
 
 /**
  * The usable reference on a start node's `config`, or `undefined` when the key
