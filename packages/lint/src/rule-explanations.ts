@@ -1670,22 +1670,31 @@ const SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION: RuleExplanation = {
 
 const SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION: RuleExplanation = {
   rule: 'sharing-rule-object-not-shareable',
-  covers: 'why a rule on a public object grants nothing',
+  covers: 'why a rule on a public object reaches externals only',
   paragraphs: [
-    'Sharing only ever WIDENS an organization-wide default (OWD) baseline, and on the widest baseline there is ' +
-      'nothing left to widen. An object\'s effective sharing model is `public` when it declares ' +
-      '`sharingModel: \'public_read_write\'`, or when it declares none and is a system object (`isSystem: true` ' +
-      'or a `sys_` name), which ADR-0090 D1 resolves to public. A custom object with no `sharingModel` resolves ' +
-      'to private and is not reported.',
-    SHARING_INERT_GRANT,
-    'Here the refusal reads "\'OBJECT\' is not under record-sharing enforcement". Measured: `buildReadFilter` ' +
-      'returns `null` for such an object — NO record-level filter at all — so every principal already reads ' +
-      'every row, and the rule advertises a restriction that does not exist.',
-    'To fix it, decide which half is wrong. If the ACCESS is right — everyone should read and write these ' +
-      'records — the rule is dead metadata: delete it (ADR-0049 enforce-or-remove). If the RULE is right — ' +
-      'only the named audience should reach these records — the object\'s OWD is the defect: set ' +
-      '`sharingModel: \'private\'` (the owner plus explicit shares) or `\'public_read\'`, and the rule starts ' +
-      'enforcing. Do not re-home the rule onto another public object; that moves the inertness instead of ' +
+    'Sharing only ever WIDENS an organization-wide default (OWD) baseline, and for the people who work in the ' +
+      'organization a public baseline has nothing left to widen. An object\'s effective sharing model is ' +
+      '`public` when it declares `sharingModel: \'public_read_write\'`, or when it declares none and is a ' +
+      'system object (`isSystem: true` or a `sys_` name), which ADR-0090 D1 resolves to public. A custom object ' +
+      'with no `sharingModel` resolves to private and is not reported.',
+    'An EXTERNAL member of the organization (`sys_member.role` exactly `external`: a supplier\'s or a ' +
+      'customer\'s portal user) is different. Its baseline on every object is the rows it owns, so a share is ' +
+      'how it reaches a record of a public object. `SharingService.grant` therefore admits a grant on such an ' +
+      'object for a recipient who is an external member of the record\'s organization, and its ' +
+      '`assertNotInertGrant` pre-flight (ADR-0111 D7) refuses everyone else with SHARING_NOT_ENABLED: "\'OBJECT\' ' +
+      'has a public sharing model, so a share row on it is consulted only for an external member". The rule\'s ' +
+      'pass writes rows for the external recipients it expands to, skips the internal ones, and says so in one ' +
+      'line (`note` on the evaluate result, and one log line per pass).',
+    'Measured for an internal reader: `buildReadFilter` returns `null` on such an object — NO record-level ' +
+      'filter at all — so every member already reads every row, and for them the rule advertises a restriction ' +
+      'that does not exist. That is why this is advice and not an error: it is right when the rule\'s audience ' +
+      'is external, and only half of what it says when the audience includes staff.',
+    'To act on it, decide which half is wrong. If the audience is external — the rule hands a supplier the ' +
+      'records it should see — keep it. If the ACCESS is right for staff and the rule names staff, the staff ' +
+      'half is dead metadata: narrow the recipients (ADR-0049 enforce-or-remove). If only the named audience ' +
+      'should reach these records, staff included, the object\'s OWD is the defect: set ' +
+      '`sharingModel: \'private\'` (the owner plus explicit shares) or `\'public_read\'`, and the rule enforces ' +
+      'for everyone. Do not re-home the rule onto another public object; that moves the inertness instead of ' +
       'removing it.',
   ],
 };

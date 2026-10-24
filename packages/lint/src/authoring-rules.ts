@@ -2222,12 +2222,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //    does not lower means the rule is SKIPPED by enforcement.
   //  - `object` decides whether the grant is refused outright: reconcile hands
   //    each row to `SharingService.grant`, whose ADR-0111 D7 pre-flight THROWS
-  //    `SHARING_NOT_ENABLED` when the anchor's effective sharing model is
-  //    `public` or it is a `controlled_by_parent` detail. Both are decidable
-  //    from authored metadata; the other arms of that verdict (`owner_id`, the
+  //    `SHARING_NOT_ENABLED` when the anchor is a `controlled_by_parent`
+  //    detail, and, when its effective sharing model is `public`, for every
+  //    recipient who is not an `external` member of the record's organization
+  //    (#25549: that arm is advice, a `warning`). Both are decidable from
+  //    authored metadata; the other arms of that verdict (`owner_id`, the
   //    bypass set, federated anchors) are not, and are excluded by name.
   //
-  // Either way the grant is declared and does not exist. The lint calls the
+  // Either way the grant is declared and does not exist (for staff, on the
+  // public arm). The lint calls the
   // same compiler and mirrors the same verdict function, from the same inputs
   // — the verdict cannot drift from the consumers'. Gating for the ADR-0078
   // reason `SharingRuleSchema`'s own docblock states: the whole authorable

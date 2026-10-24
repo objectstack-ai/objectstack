@@ -137,6 +137,12 @@ the rows it owns and the rows granted to it:
   the object (for example `supplier in current_user.<key>`). Such a policy
   lifts the owner-only floor for that object, and the policy bounds the rows.
 
+On a `public_read_write` object, or a system object with no `sharingModel`, a
+share or sharing rule takes effect for external recipients only: the grant is
+accepted for a recipient who is an `external` member of the record's
+organization, every other recipient is refused with `SHARING_NOT_ENABLED`
+(422), and a rule's evaluation writes rows for its external recipients alone.
+
 `externalSharingModel`, the external dial ADR-0090 D11 declared, was removed
 in `@objectstack/spec` 18 (ADR-0049 enforce-or-remove): while it existed no
 request resolved an external principal, so the value changed no answer. The schema
