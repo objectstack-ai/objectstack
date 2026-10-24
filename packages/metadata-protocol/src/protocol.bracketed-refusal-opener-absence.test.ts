@@ -82,6 +82,8 @@ const PRODUCERS: Readonly<Record<string, number>> = {
   'protocol-lock-version-gates.ts': 4,
   // The save door's refusals, moved out of `protocol.ts` whole on the same terms.
   'protocol-save-door-refusals.ts': 5,
+  // Package install and update, moved out of `protocol.ts` whole on the same terms.
+  'protocol-package-install.ts': 3,
   'sys-metadata-repository.ts': 5,
   'runtime-authoring-gate.ts': 1,
 };
