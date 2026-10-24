@@ -541,3 +541,51 @@ describe('#6216 — the measured residual: keys that were present-with-undefined
     expect(observable(now)).toEqual(observable(before));
   });
 });
+
+// [Ruling of record 6355206139, letter B] The population stamp is an ENTRY
+// decision made once, by the resolver: an `external` member's envelope carries
+// `audience: 'external'` on every face, its agent's envelope too (the OWD floor
+// re-runs the on-behalf-of leg under that envelope), and an internal principal
+// or a guest never carries it.
+describe('ruling 6355206139 — the resolver’s audience stamp rides the envelope', () => {
+  const EXTERNAL_MEMBER = baseAuthz({
+    userId: 'u_ext',
+    tenantId: 'org1',
+    positions: ['org_external'],
+    permissions: ['external_default'],
+    posture: 'EXTERNAL',
+    audience: 'external',
+    accessible_org_ids: ['org1'],
+  });
+  const assemble = (authz: ResolvedAuthzContext, oauth?: OAuthTokenProvenance) =>
+    assembleExecutionContextOrGuest({
+      authz,
+      oauth,
+      localization: undefined,
+      requestLocale: undefined,
+      accessToken: undefined,
+      authGate: undefined,
+    });
+
+  it('an external member’s envelope carries audience external beside its EXTERNAL rung, and parses', () => {
+    const ctx = assemble(EXTERNAL_MEMBER);
+    expect(ctx.audience).toBe('external');
+    expect(ctx.posture).toBe('EXTERNAL');
+    expect(ExecutionContextSchema.safeParse(ctx).success).toBe(true);
+  });
+
+  it('an agent acting for an external member carries the human’s audience', () => {
+    const ctx = assemble(EXTERNAL_MEMBER, {
+      userId: 'u_ext', scopes: ['data:read'], clientId: 'cli1',
+      scopePermissions: ['agent_data_read'], delegatesActions: false,
+    } as OAuthTokenProvenance);
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.audience).toBe('external');
+  });
+
+  it('CONTROL: an internal principal and a guest carry no audience', () => {
+    expect(Object.keys(assemble(HUMAN_FULL))).not.toContain('audience');
+    expect(Object.keys(assemble(ANONYMOUS))).not.toContain('audience');
+    expect(Object.keys(assemble({ ...ANONYMOUS, audience: 'external' }))).not.toContain('audience');
+  });
+});

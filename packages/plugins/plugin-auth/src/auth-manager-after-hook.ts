@@ -218,9 +218,10 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   }
 
   // ── Ruling 6355206139 E2: the directory doors, narrowed for an external ──
-  // list-members and get-full-organization check membership only, so an
-  // `external` caller would read every fellow member (and every pending
-  // invitation) there. See `external-directory-door.ts`.
+  // list-members, get-full-organization, list-teams and list-invitations
+  // check membership only, so an `external` caller would read every
+  // fellow member, team and pending invitation there. See
+  // `external-directory-door.ts`.
   await narrowDirectoryForExternalCaller(ctx, this.externalDirectoryDoorDeps());
 
   // ── #24750: invite-member's unknown-role refusal carries its code ──

@@ -6764,6 +6764,13 @@ export class AuthManager {
         (await first('sys_member', { user_id: userId, organization_id: organizationId }))?.role,
       readUserEmail: async (userId) => (await first('sys_user', { id: userId }))?.email,
       resolveOrganizationSlug: async (slug) => (await first('sys_organization', { slug }))?.id,
+      readUserTeamIds: async (userId) => {
+        if (!sys) return [];
+        const rows: any[] = await sys.find('sys_team_member', { where: { user_id: userId }, fields: ['team_id'], limit: 1000 });
+        return (Array.isArray(rows) ? rows : [])
+          .map((r) => r?.team_id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0);
+      },
       isExternalRole: isExternalMembershipRole,
     };
   }

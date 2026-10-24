@@ -84,7 +84,7 @@ const result = AccessMatrixSchema.parse(data);
 
 ## AuthzPosture
 
-ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows.
+ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL (an external organization member) reaches explicit grants only — shares, sharing rules, and grant RLS — never the OWD baseline.
 
 ### Allowed Values
 
@@ -120,7 +120,7 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **permissionSets** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
 | **onBehalfOf** | `{ userId: string }` | optional |  |
-| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL (an external organization member) reaches explicit grants only — shares, sharing rules, and grant RLS — never the OWD baseline. |
 
 ### Nested Shape: `ExplainDecision.layers[number]`
 

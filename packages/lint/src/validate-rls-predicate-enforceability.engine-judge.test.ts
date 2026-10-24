@@ -206,11 +206,12 @@ describe('the judge reaches the rule through BOTH run signatures (#20158)', () =
     }
   });
 
-  it('the rule now runs at the runtime publish gate for `permission` writes', () => {
+  it('the rule now runs at the runtime publish gate for `permission` and (#25234) `object` writes', () => {
     const entry = AUTHORING_RULES.find((r) => r.name === 'validateRlsPredicateEnforceability');
     expect(entry?.surfaces).toEqual(['cli', 'runtime-publish']);
-    expect(entry?.runtimeTypes).toEqual(['permission']);
+    expect(entry?.runtimeTypes).toEqual(['permission', 'object']);
     expect(runtimeAuthoringRulesFor('permission').map((r) => r.name)).toContain('validateRlsPredicateEnforceability');
+    expect(runtimeAuthoringRulesFor('object').map((r) => r.name)).toContain('validateRlsPredicateEnforceability');
   });
 
   it('`runRuntimeAuthoringRules` hands `judgeFilter` to the rule, and attributes only what the WRITE adds', () => {

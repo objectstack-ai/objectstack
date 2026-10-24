@@ -294,6 +294,7 @@ jobs:
               - 'scripts/check-lean-entry-closure.mjs'
               - 'scripts/check-sourcemap-no-sources-content.mjs'
               - 'scripts/ci/assert-turbo-remote-cache.mjs'
+              - 'scripts/ci/prune-turbo-cache.mjs'
               - 'scripts/population-floor.mjs'
             # Build inputs of the vendored Console SPA — see the Console Pin Gate
             # job at the bottom of this file. `.objectui-sha` is a ROOT DOTFILE, so
@@ -1459,12 +1460,33 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # ⛔ PRUNE THE SEED TO THIS RUN'S TASKS BEFORE SAVING IT (#25452). The
+      # restore step above takes the newest seed by prefix and turbo never
+      # evicts its local cache, so a seed saved whole was every seed before it
+      # plus this run: on push run 39982654692 all six shard seeds were
+      # 2.41-2.44 GB, against 0.048 GB for Build Core's full 76-task build --
+      # ~14.6 GB per merge into the 10 GB Actions cache pool, which evicted the
+      # seeds PR runs restore. The script keeps the entries the test step's run
+      # summary (`.turbo/runs/`) and the closure build's (moved to
+      # $RUNNER_TEMP/turbo-remote-cache by the assertion above) name, and drops
+      # the rest. No run summary from the test step -- a cancelled run, or an
+      # empty shard -- means no save: such a run has no test results to seed,
+      # and the previous seed stays the newest. Exits 0 on every run-time path,
+      # so it cannot withhold the attestation below.
+      - name: Prune the Turbo cache to this run's tasks (main only)
+        id: prune-turbo-cache
+        if: always() && github.event_name == 'push'
+        run: |
+          node scripts/ci/prune-turbo-cache.mjs --site 'Test Core (${{ matrix.shard }}/6)' \
+            --cache .turbo/cache --run-summaries .turbo/runs \
+            --extra-summaries "$RUNNER_TEMP/turbo-remote-cache"
+
       # Seed the shared Turbo cache from main only (see the restore step
       # above). always(): keep the seed fresh even when a test fails, matching
       # the old actions/cache post-step behavior. Shard-scoped key so the two
       # matrix jobs don't collide.
       - name: Save Turbo cache (main only)
-        if: always() && github.event_name == 'push'
+        if: always() && github.event_name == 'push' && steps.prune-turbo-cache.outputs.save == 'true'
         uses: actions/cache/save@v6
         with:
           path: .turbo/cache
@@ -2618,6 +2640,12 @@ jobs:
       # lanes), is one script; its self-test runs here, once.
       - name: assert-turbo-remote-cache self-test
         run: node scripts/ci/assert-turbo-remote-cache.mjs --self-test
+
+      # Test Core's seed prune (the step before its "Save Turbo cache") runs
+      # on main pushes only, six times; its self-test runs here, once, on
+      # every event, so a PR that breaks it reds before the push that uses it.
+      - name: prune-turbo-cache self-test
+        run: node scripts/ci/prune-turbo-cache.mjs --self-test
 
       # ── Turbo remote cache (#21186) ─────────────────────────────────────
       # Vercel's managed Turborepo remote cache. objectstack-ai/cloud's

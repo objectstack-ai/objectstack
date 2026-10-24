@@ -8,6 +8,7 @@ import {
   ORGANIZATION_ADMIN_NO_BYPASS,
   BUILTIN_IDENTITY_ORG_ADMIN,
   BUILTIN_IDENTITY_ORG_OWNER,
+  BUILTIN_IDENTITY_ORG_EXTERNAL,
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
 } from '@objectstack/spec';
 import {
@@ -1266,8 +1267,18 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   // external every newly declared identity table. Data beyond its own rows
   // comes only through explicit grants — positions, permission sets, sharing.
   //
-  // No `owner_only_*` floor either: those bind `org_member`, and an external's
-  // writes are exactly what its explicit grants declare, under their own RLS.
+  // [Stage 2 — the owner_only floor] The platform's write ownership floor,
+  // `owner_only_writes` / `owner_only_deletes`, in the same spelling as
+  // `member_default`'s and bound to `org_external`: an external may modify and
+  // delete the records it created, not other users', whatever object grant it
+  // holds. Same object, name and predicate, so the floor's provenance
+  // (`platform-ownership-policies.ts`) recognises it, and every composition
+  // that relieves a member's floor relieves this one identically — an
+  // edit-level share, a `public_read_write` update, a covering master gate.
+  // Without it an external's by-id write reached every row its grant opened
+  // while a member's stopped at its own: the EXTERNAL ⊆ MEMBER nesting
+  // (ADR-0095 D2) broken on the write side. The OWD half of the same floor is
+  // plugin-sharing's (`owdForAudience`, `@objectstack/core`).
   PermissionSetSchema.parse({
     name: EXTERNAL_DEFAULT_PERMISSION_SET,
     label: 'External Member — Own Records',
@@ -1380,6 +1391,21 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       },
       // [ADR-0131 D7] For a ledger read an explicit grant may give.
       ...auditLedgerRowScope(),
+      // The owner_only write floor (see the note above the set).
+      {
+        name: 'owner_only_writes',
+        object: '*',
+        operation: 'update',
+        using: 'created_by == current_user.id',
+        positions: [BUILTIN_IDENTITY_ORG_EXTERNAL],
+      },
+      {
+        name: 'owner_only_deletes',
+        object: '*',
+        operation: 'delete',
+        using: 'created_by == current_user.id',
+        positions: [BUILTIN_IDENTITY_ORG_EXTERNAL],
+      },
     ],
   }),
 

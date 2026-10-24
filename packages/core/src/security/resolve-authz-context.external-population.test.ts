@@ -8,6 +8,10 @@
 // an accepted package default) never reach it. What reaches it is what its own
 // identity position names, plus its explicit grants. An ordinary member is
 // unchanged, and the stamp is per organization.
+//
+// Stage 2: the same holder is the EXTERNAL rung — `posture: 'EXTERNAL'` and
+// `audience: 'external'` ride the grants — while an ordinary member's posture
+// and audience are unchanged.
 
 import { describe, it, expect } from 'vitest';
 import { countPositionHolders, resolveUserAuthzGrants } from './resolve-authz-context.js';
@@ -72,6 +76,8 @@ describe('the external population at the provisioning boundary', () => {
     expect(grants.positions).not.toContain('everyone');
     expect(grants.positions).not.toContain('org_member');
     expect([...grants.permissions].sort()).toEqual(['external_default', 'supplier_portal']);
+    expect(grants.posture).toBe('EXTERNAL');
+    expect(grants.audience).toBe('external');
   });
 
   it('an ordinary member is unchanged: everyone, and the baseline it names', async () => {
@@ -80,6 +86,8 @@ describe('the external population at the provisioning boundary', () => {
     expect(grants.positions).toEqual(expect.arrayContaining(['org_member', 'everyone']));
     expect(grants.positions).not.toContain('org_external');
     expect([...grants.permissions].sort()).toEqual(['app_default', 'member_default']);
+    expect(grants.posture).toBe('MEMBER');
+    expect(grants.audience).toBeUndefined();
   });
 
   it('the stamp is per organization: external in one, a member in the other', async () => {
@@ -90,10 +98,14 @@ describe('the external population at the provisioning boundary', () => {
     const inAlpha = await resolveUserAuthzGrants(ql, 'u3', { tenantId: ALPHA });
     expect(inAlpha.positions).not.toContain('everyone');
     expect([...inAlpha.permissions].sort()).toEqual(['external_default']);
+    expect(inAlpha.posture).toBe('EXTERNAL');
+    expect(inAlpha.audience).toBe('external');
     const inBeta = await resolveUserAuthzGrants(ql, 'u3', { tenantId: BETA });
     expect(inBeta.positions).toContain('everyone');
     expect(inBeta.positions).not.toContain('org_external');
     expect([...inBeta.permissions].sort()).toEqual(['app_default', 'member_default']);
+    expect(inBeta.posture).toBe('MEMBER');
+    expect(inBeta.audience).toBeUndefined();
   });
 
   it('with no active organization an external membership withholds the anchor (fail closed)', async () => {
@@ -105,6 +117,8 @@ describe('the external population at the provisioning boundary', () => {
     expect(grants.positions).toContain('org_external');
     expect(grants.positions).not.toContain('everyone');
     expect(grants.permissions).not.toContain('member_default');
+    expect(grants.posture).toBe('EXTERNAL');
+    expect(grants.audience).toBe('external');
   });
 
   it('the holder count agrees: an external is counted under org_external, never under everyone', async () => {

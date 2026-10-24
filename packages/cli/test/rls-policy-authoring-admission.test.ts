@@ -34,6 +34,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
+import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
 import { runAuthoringRules, type AuthoringFinding } from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
@@ -109,7 +110,7 @@ afterEach(async () => {
 });
 
 /** A live engine holding the same objects, as the protocol's host — real tables, real DDL. */
-async function runtimeHost() {
+async function runtimeHost(services: () => Map<string, unknown> = () => new Map()) {
   const engine = new ObjectQL({ logger: createLogger({ level: 'silent' }) });
   liveEngines.push(engine);
   engine.registry.logLevel = 'silent';
@@ -119,7 +120,7 @@ async function runtimeHost() {
     engine.registry.registerObject(structuredClone(obj) as never, 'objectstack-test');
   }
   await engine.syncSchemas();
-  return { engine, protocol: new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') };
+  return { engine, protocol: new ObjectStackProtocolImplementation(engine, services as () => Map<string, any>, 'env_test') };
 }
 
 interface SaveOutcome {
@@ -129,8 +130,12 @@ interface SaveOutcome {
   issues: Array<{ rule: string; path: string; message: string }>;
 }
 
-async function runtimeDoor(using: string, set = permissionSet(using)): Promise<SaveOutcome> {
-  const { protocol } = await runtimeHost();
+async function runtimeDoor(
+  using: string,
+  set = permissionSet(using),
+  services?: () => Map<string, unknown>,
+): Promise<SaveOutcome> {
+  const { protocol } = await runtimeHost(services);
   try {
     await protocol.saveMetaItem({ type: 'permission', name: 'sales', item: set });
     return { accepted: true, issues: [] };
@@ -222,19 +227,38 @@ describe('RLS read-scope admission at authoring time — fifteen classes, two do
 });
 
 describe('the judge pass binds an app-staged membership key to [] (#20158)', () => {
+  // [#25234] The app stages `holidays` through the registered membership
+  // resolver (ADR-0105 D11). The runtime door reads that resolver's `keys`, so
+  // the key is owned there only while one is registered — the last case below.
+  const holidaysResolver = () =>
+    new Map<string, unknown>([[RLS_MEMBERSHIP_RESOLVER_SERVICE, { keys: ['holidays'], resolve: async () => ({}) }]]);
+
   it('`close_date in current_user.holidays` is ACCEPTED at both doors — the probe string is not a date, the app data may be', async () => {
     const using = 'close_date in current_user.holidays';
     expect(cliDoor(using)).toEqual([]);
-    expect(await runtimeDoor(using)).toEqual({ accepted: true, issues: [] });
+    expect(await runtimeDoor(using, undefined, holidaysResolver)).toEqual({ accepted: true, issues: [] });
   });
 
   it('the binding does not switch the judge off: the same clause beside an engine-refused arm is REFUSED at both', async () => {
     const using = "close_date in current_user.holidays && amount.startsWith('5')";
     const cli = cliDoor(using);
-    const saved = await runtimeDoor(using);
+    const saved = await runtimeDoor(using, undefined, holidaysResolver);
     expect(cli.map((f) => f.rule)).toEqual([UNENFORCEABLE]);
     expect(cli[0].message).toContain('(INVALID_FILTER / 400): ');
     expect(saved.issues.map((i) => i.message)).toEqual([cli[0].message]);
+  });
+
+  it('[#25234] with no resolver registered, nothing stages the key: the runtime door refuses what the CLI cannot judge', async () => {
+    const using = 'close_date in current_user.holidays';
+    expect(cliDoor(using)).toEqual([]);
+    const saved = await runtimeDoor(using);
+    expect({ accepted: saved.accepted, code: saved.code, status: saved.status }).toEqual({
+      accepted: false, code: 'INVALID_METADATA', status: 422,
+    });
+    expect(saved.issues.map((i) => ({ rule: i.rule, path: i.path }))).toEqual([
+      { rule: 'rls-predicate-unknown-user-variable', path: 'permissions.sales.rowLevelSecurity[0].using' },
+    ]);
+    expect(saved.issues[0].message).toContain('`current_user.holidays` as a membership set');
   });
 });
 

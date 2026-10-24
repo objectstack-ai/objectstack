@@ -12,6 +12,10 @@
  *   owner_only_deletes  object '*'  operation 'delete'  created_by == current_user.id
  * ```
  *
+ * `external_default` carries the same two policies, bound to `org_external`
+ * (ruling of record 6355206139): the same identity key, so every relief below
+ * that lifts a member's floor lifts an external's as well.
+ *
  * They are the platform's answer to #1985 (a by-id write builds no `ast`, so a
  * row predicate would never be applied), and they are a **second implementation
  * of "ownership"** — the one that knows nothing about the wideners the platform

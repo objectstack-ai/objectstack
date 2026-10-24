@@ -78,6 +78,8 @@ import {
   type UnresolvedPostureCause,
 } from './unresolved-posture.js';
 import { grantSetNameOf } from './grant-permission-set-name.js';
+import { holdsExternalPosition, humanBaselineFor } from './external-baseline.js';
+import { isExternalAudienceContext } from '@objectstack/core';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
@@ -114,9 +116,9 @@ function isAuthzPosture(v: unknown): v is AuthzPosture {
  *
  *  1. **guest / anonymous → EXTERNAL.** Explain layers one thing on top the
  *     enforcement resolver deliberately does NOT: a guest principal is EXTERNAL
- *     for the debugger. The enforcement floor is MEMBER (no external principal
- *     type exists yet — ADR-0095 D2), so this mapping lives here, and it wins
- *     first.
+ *     for the debugger. The resolver gives a guest no rung at all (its
+ *     EXTERNAL rung is the organization's `external` members — ruling of record
+ *     6355206139), so this mapping lives here, and it wins first.
  *  2. **Reuse `ctx.posture` verbatim when present.** A principal resolved through
  *     the full `resolveAuthzContext` already carries the enforcement-derived
  *     rung; consuming it directly makes drift structurally impossible.
@@ -162,6 +164,9 @@ function derivePosture(context: any): AuthzPosture {
   return deriveAdminPosture({
     isPlatformAdmin: context?.hasPlatformAdminGrant === true,
     isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n)),
+    // [Ruling of record 6355206139] The same evidence the resolver reads: the
+    // projected `org_external` identity.
+    isExternal: holdsExternalPosition(context?.positions),
   });
 }
 
@@ -326,6 +331,14 @@ export interface ExplainEngineDeps {
    * Supply the enforcement composition, never a re-derivation of it: explain's
    * module contract is that it "matches enforcement by construction".
    */
+  /**
+   * [Ruling of record 6355206139] Does a grant `sets` holds carry an RLS
+   * predicate for `object` on the operation class — the question the CRUD
+   * middleware answers for the EXTERNAL OWD seam (`external-owd-grant-stamp.ts`)?
+   * Asked only for an external principal. Absent → no grant speaks, so the
+   * report shows the owner_only floor, the narrow reading.
+   */
+  externalGrantSpeaks?: (sets: PermissionSet[], object: string, opClass: 'read' | 'write', dataOp: string, context: any) => boolean;
   getPartialMaskRules: (
     sets: PermissionSet[],
     object: string,
@@ -340,6 +353,10 @@ export interface ExplainEngineDeps {
    * of them would label the other "resolved" — the vaguest bucket `viaOf` has,
    * on the grant most likely to be the answer to "why can this member read
    * anything at all".
+   *
+   * [Ruling of record 6355206139] The CONFIGURED list. An external principal
+   * resolves `external_default` in its place, and the report attributes that
+   * name instead (`humanBaselineFor`).
    */
   baselinePermissionSets: string[];
   /**
@@ -728,6 +745,9 @@ export async function buildContextForUser(
     ...(grants.tabPermissions ? { tabPermissions: grants.tabPermissions } : {}),
     ...(grants.email != null ? { email: grants.email } : {}),
     ...(grants.posture ? { posture: grants.posture } : {}),
+    // [Ruling of record 6355206139] The population stamp the resolver made, so
+    // the explained context is floored at the OWD seam as enforcement is.
+    ...(grants.audience ? { audience: grants.audience } : {}),
     droppedGrants,
     delegatedPositions,
     // [ADR-0068 D2] Not a second derivation: `derivePosture` returns
@@ -1006,6 +1026,27 @@ export function intersectFieldMasks(
  */
 function describeMaskingRule(rule: FieldMaskingRule): string {
   return typeof rule === 'string' ? rule : `keepHead ${rule.keepHead}, keepTail ${rule.keepTail}`;
+}
+
+/**
+ * [Ruling of record 6355206139] The OWD an EXTERNAL principal meets, as
+ * plugin-sharing applies it (`owdForAudience`, `@objectstack/core`): the
+ * object's own reading for an internal principal, or when a held grant's RLS
+ * speaks for the object; otherwise owner_only, whatever the object declares.
+ */
+function owdForPrincipal(
+  owd: ReturnType<typeof describeOwd>,
+  context: any,
+  grantSpeaks: boolean,
+): ReturnType<typeof describeOwd> {
+  // A controlled_by_parent detail derives from its master (ADR-0055), whose
+  // own model meets the floor — plugin-sharing does not floor the detail.
+  if (owd.effect === 'private' || owd.model === 'controlled_by_parent' || !isExternalAudienceContext(context) || grantSpeaks) return owd;
+  return {
+    model: `${owd.model} → owner_only for an external principal (no held grant's RLS speaks for this object)`,
+    declared: owd.declared,
+    effect: 'private',
+  };
 }
 
 /** D1-equivalent OWD reading (mirrors plugin-sharing's effectiveSharingModel). */
@@ -2407,8 +2448,15 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   }
   const delegatorRefused = delegatorMissing || delegatorUnresolved || delegatorOutsideOrganization !== undefined;
   const positions: string[] = context?.positions ?? [];
+  // [Ruling of record 6355206139] The baseline THIS principal resolves: an
+  // external's is `external_default`, never the configured member baseline,
+  // and it is attributed by that name (`external-baseline.ts`).
+  const baselineNames = humanBaselineFor(positions, deps.baselinePermissionSets);
+  const externalBaseline = holdsExternalPosition(positions);
   const viaOf = (name: string): string => {
-    if (deps.baselinePermissionSets.includes(name)) return 'additive baseline (ADR-0090 D5)';
+    if (baselineNames.includes(name)) {
+      return externalBaseline ? 'external baseline (org_external)' : 'additive baseline (ADR-0090 D5)';
+    }
     if (positions.includes(name)) return `position:${name}`;
     if ((context?.permissions ?? []).includes(name)) return 'direct grant';
     return 'resolved';
@@ -2656,7 +2704,15 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   });
 
   // ── 5. owd_baseline ────────────────────────────────────────────────────
-  const owd = describeOwd(schema);
+  // [Ruling of record 6355206139] An external principal meets the owner_only
+  // floor unless a held grant's RLS speaks — the same answer the middleware
+  // stamps for plugin-sharing, so the report and the query cannot disagree.
+  const owdOpClass: 'read' | 'write' = dataOp === 'find' ? 'read' : 'write';
+  const owd = owdForPrincipal(
+    describeOwd(schema),
+    context,
+    isExternalAudienceContext(context) && deps.externalGrantSpeaks?.(sets, object, owdOpClass, dataOp, context) === true,
+  );
   layers.push({
     layer: 'owd_baseline',
     verdict: owd.effect === 'public' ? 'neutral' : 'narrows',
