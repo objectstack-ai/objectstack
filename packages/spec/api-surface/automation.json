@@ -204,6 +204,8 @@
     "NotifyConfig (type)",
     "NotifyConfigParsed (type)",
     "NotifyConfigSchema (const)",
+    "NotifyEmailFieldRecipient (type)",
+    "NotifyEmailFieldRecipientSchema (const)",
     "ORG_MEMBERSHIP_LEVELS (const)",
     "OS_CONSTRUCT_EXT (const)",
     "PARALLEL_NODE_TYPE (const)",

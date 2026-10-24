@@ -199,6 +199,8 @@
     "NotifyConfig": "src/automation/io-node-config.zod.ts#NotifyConfig (type)",
     "NotifyConfigParsed": "src/automation/io-node-config.zod.ts#NotifyConfigParsed (type)",
     "NotifyConfigSchema": "src/automation/io-node-config.zod.ts#NotifyConfigSchema (const)",
+    "NotifyEmailFieldRecipient": "src/automation/io-node-config.zod.ts#NotifyEmailFieldRecipient (type)",
+    "NotifyEmailFieldRecipientSchema": "src/automation/io-node-config.zod.ts#NotifyEmailFieldRecipientSchema (const)",
     "ORG_MEMBERSHIP_LEVELS": "src/automation/approval.zod.ts#ORG_MEMBERSHIP_LEVELS (const)",
     "OS_CONSTRUCT_EXT": "src/automation/bpmn-mapping.ts#OS_CONSTRUCT_EXT (const)",
     "PARALLEL_NODE_TYPE": "src/automation/control-flow.zod.ts#PARALLEL_NODE_TYPE (const)",

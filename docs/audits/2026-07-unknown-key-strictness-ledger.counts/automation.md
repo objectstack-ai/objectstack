@@ -21,7 +21,7 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `automation/` | 61 | 37 | 0 | 1 | 23 |
+| `automation/` | 62 | 38 | 0 | 1 | 23 |
 
 ## `automation/` — sites
 
@@ -38,12 +38,12 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `execution.zod.ts` | 12 |
 | `flow-function.zod.ts` | 1 |
 | `flow.zod.ts` | 11 |
-| `io-node-config.zod.ts` | 2 |
+| `io-node-config.zod.ts` | 3 |
 | `node-executor.zod.ts` | 4 |
 | `schemaless-node-config.zod.ts` | 4 |
 | `time-relative-trigger.zod.ts` | 1 |
 | `webhook.zod.ts` | 1 |
-| **total** | **61** |
+| **total** | **62** |
 
 ## `automation/` — open
 
@@ -51,7 +51,7 @@ Per file, how many of its sites still silently discard unknown keys. The `Class`
 column that decides the bucket split is hand-written in the ledger; the arithmetic
 over it is here.
 
-**23 strip of 61**, in 5 file(s).
+**23 strip of 62**, in 5 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -60,7 +60,7 @@ over it is here.
 | `execution.zod.ts` | 12 | 12 |
 | `flow.zod.ts` | 1 | 11 |
 | `node-executor.zod.ts` | 4 | 4 |
-| **total** | **23** | **61** |
+| **total** | **23** | **62** |
 
 | Bucket | Sites |
 |---|---|
