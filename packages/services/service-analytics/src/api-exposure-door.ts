@@ -64,8 +64,11 @@
  * ## Fail direction
  *
  * The provider is access-NARROWING, so it fails CLOSED: a lookup that throws
- * refuses the query (`403 PERMISSION_DENIED`, logged at `error`), and the
- * plugin's bridge throws when no data engine can answer. An object the
+ * refuses the query, logged at `error`, and the plugin's bridge throws when no
+ * data engine can answer. No declaration was read, so the refusal claims no
+ * verdict: `503 SERVICE_UNAVAILABLE`, the door's one fault answer
+ * (`readAdmissionUnresolvedError`, `read-admission.ts`), never the `403` a
+ * real denial answers. An object the
  * provider answers no declaration for (`undefined`) declares nothing, and the
  * spec decision answers "served" for it — the same default every door reads.
  * A host that constructs `AnalyticsService` with no provider gets no gate and
@@ -103,6 +106,7 @@ import {
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 import { collectInternalWriteResponseFields } from '@objectstack/core';
 import type { NamedField, NamedRead } from './field-read-admission.js';
+import { readAdmissionUnresolvedError } from './read-admission.js';
 
 /**
  * The slice of an object's registered definition the door reads: its `enable`
@@ -152,9 +156,6 @@ const OBJECT_API_METHOD_NOT_ALLOWED_CODE: RegisteredErrorCode = 'OBJECT_API_METH
 
 /** The member refusal every sibling refusal at this door answers. */
 const INVALID_FIELD: StandardErrorCode = 'INVALID_FIELD';
-
-/** The fail-closed refusal, the read admission's code. */
-const PERMISSION_DENIED: StandardErrorCode = 'PERMISSION_DENIED';
 
 type DoorRefusal = Error & {
   code?: string;
@@ -227,18 +228,6 @@ function unexposedDefinitionError(
   return err;
 }
 
-/** `403 PERMISSION_DENIED` — the declaration could not be read, so nothing runs. */
-function exposureUnresolvedError(object: string): Error {
-  const err = new Error(
-    `[Analytics] Access denied: the API exposure declaration for "${object}" could not be resolved, ` +
-      'so the query was not run.',
-  ) as DoorRefusal;
-  err.code = PERMISSION_DENIED;
-  err.status = 403;
-  err.object = object;
-  return err;
-}
-
 /**
  * `400 INVALID_FIELD` for a member that reads an `internal: true` field. Names
  * the object and the field — the field the member resolved to — and no value.
@@ -273,7 +262,7 @@ function declarationOf(
       'denying the query (fail-closed)';
     if (logger?.error) logger.error(report, cause);
     else logger?.warn(`${report}: ${cause.message}`);
-    throw exposureUnresolvedError(object);
+    throw readAdmissionUnresolvedError(object);
   }
 }
 

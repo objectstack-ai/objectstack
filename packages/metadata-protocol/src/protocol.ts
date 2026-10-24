@@ -337,6 +337,28 @@ import {
     readAsCaller,
     searchAll,
 } from './protocol-record-reads.js';
+// [#25467 cut 5] The lock gate and the optimistic-concurrency write addresses
+// (`getEffectiveLock`, `assertLockAllowsWrite`/`Delete`, `readVersionToken`, the
+// draft and read addresses, `metadataConflictRefusal`); the methods of the same names
+// below hand each body the members it reads (`LockVersionGateHost`).
+import {
+    assertLockAllowsDelete,
+    assertLockAllowsWrite,
+    getEffectiveLock,
+    lockWriteRefusal,
+    metadataConflictRefusal,
+    packagelessDraftAddress,
+    packagelessReadAddress,
+    readLockGateOverlayLayer,
+    readVersionToken,
+    receiptVersion,
+    recordMetadataAudit,
+    recordPendingDenialAudit,
+    storedHashDigest,
+    storedHeadAt,
+    storedParentForToken,
+    strictDraftReadAddress,
+} from './protocol-lock-version-gates.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -414,7 +436,7 @@ const TYPE_TO_FORM: Readonly<Record<string, FormView>> = METADATA_FORM_REGISTRY;
  * spelling-tolerant lookup this comment has rejected since #4432, and it would
  * still persist the row under the plural `type`.
  */
-function canonicalMetaType(type: string): string {
+export function canonicalMetaType(type: string): string {
     return canonicalMetaUrlType(type);
 }
 
@@ -3666,28 +3688,6 @@ function declaresClientRefusal(err: unknown): boolean {
 }
 
 /**
- * [#21207] A caller's version token that names no current stored head, found by
- * the protocol's own KEYED comparison before the repository is asked (see
- * {@link ObjectStackProtocolImplementation.storedParentForToken}).
- *
- * A `ConflictError`, so each door's existing conflict branch — the 409
- * `METADATA_CONFLICT` and its decision-audit row — handles it unchanged; told
- * apart from the repository's own race conflict because its `expectedParent`
- * is the CALLER's token rather than a stored hash. The message is replaced:
- * the base class prints both values, and one of them is the stored hash.
- */
-class InboundVersionConflictError extends ConflictError {
-    constructor(
-        ref: { org: string; type: string; name: string },
-        token: string,
-        currentStored: string | null,
-    ) {
-        super(ref as ConstructorParameters<typeof ConflictError>[0], token, currentStored);
-        this.message = `Conflict on ${ref.type}/${ref.name}: the version token sent is not the current version`;
-    }
-}
-
-/**
  * [#8136] The client-facing sentence for a failed overlay delete: the caller's
  * own refusal when they declared one, and otherwise a stable line that names
  * the operation and quotes nothing.
@@ -6161,7 +6161,7 @@ export type MetadataAuthoringChannel = 'environment' | 'package-author';
  * it is inside (it cannot know, and guessing is what broke) and puts the
  * placement decision where the transaction actually is: in the caller.
  */
-interface MetadataAuditEntry {
+export interface MetadataAuditEntry {
     type: string;
     name: string;
     /**
@@ -6180,16 +6180,6 @@ interface MetadataAuditEntry {
     requestId?: string;
     note?: string;
 }
-
-/**
- * An `Error` carrying the denial row it still owes (see {@link MetadataAuditEntry}).
- *
- * The property is name-mangled like `__batchItem` beside it: it is an internal
- * hand-off between one private helper and its callers inside this file, never a
- * wire field. `clientFacingFailureText` / `clientFacingFailureCode` read
- * `message` / `code`, so nothing here reaches a response body.
- */
-type ErrorWithPendingAudit = Error & { __pendingAudit?: MetadataAuditEntry };
 
 /** Attach the denial row `err` owes, and return `err` so call sites read as one `throw`. */
 function withPendingAudit<E extends Error>(err: E, audit: MetadataAuditEntry): E {
@@ -17110,7 +17100,7 @@ export class ObjectStackProtocolImplementation implements
      * the fail-closed direction and the assert doing its job — not a hole to
      * paper over here by folding the ledger key too.
      */
-    private async getEffectiveLock(
+    private getEffectiveLock(
         type: string,
         name: string,
         packageId?: string,
@@ -17119,25 +17109,12 @@ export class ObjectStackProtocolImplementation implements
         lockReason: string | undefined;
         lockSource: 'artifact' | 'overlay' | undefined;
     }> {
-        // [#9009] ONE key for BOTH limbs — see this method's header.
-        const canonicalType = canonicalMetaType(type);
-        // [#21738] The one item-lock resolution decides; the two readers below
-        // only gather its layers, the second only when it can bind.
-        const resolved = await resolveItemLockLazily({
-            // 1. Artifact. `lookupArtifactItem` is shadow-immune: a
-            //    sys_metadata overlay row hydrated into the registry's plain
-            //    key cannot mask the packaged artifact's `_lock` envelope.
-            //    [#21803] Every installed package that ships the name, through
-            //    the reads' own selection, from the same address — see this
-            //    method's header.
-            artifact: () => this.artifactLockLayerAt({
-                type: canonicalType,
-                name,
-                packageId,
-            }),
-            overlay: () => this.readLockGateOverlayLayer(canonicalType, name, packageId),
-        });
-        return { lock: resolved.lock, lockReason: resolved.lockReason, lockSource: resolved.layer };
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof getEffectiveLock> = {
+            artifactLockLayerAt: (...a) => this.artifactLockLayerAt(...a),
+            readLockGateOverlayLayer: (...a) => this.readLockGateOverlayLayer(...a),
+        };
+        return getEffectiveLock.call(host, type, name, packageId);
     }
 
     /**
@@ -17147,66 +17124,17 @@ export class ObjectStackProtocolImplementation implements
      * `sys_metadata` is not provisioned yet). Throws when the rows cannot be
      * read (#5706).
      */
-    private async readLockGateOverlayLayer(
+    private readLockGateOverlayLayer(
         canonicalType: string,
         name: string,
         packageId: string | undefined,
     ): Promise<unknown> {
-        // 2. Overlay rows — addressed by the SAME canonical key the repository
-        //    stores them under (`SysMetadataRepository.whereFor`), which is
-        //    what makes this limb read the rows the artifact limb already
-        //    folded to. [#21761] Through the reads' own selection, from the
-        //    same address —
-        //    see {@link getEffectiveLock}'s header. Canonical spelling only
-        //    (#4432), the one declared difference — see
-        //    {@link overlayLockLayerAt}.
-        try {
-            return await this.overlayLockLayerAt({
-                type: canonicalType,
-                name,
-                packageId,
-            }, { otherSpelling: false });
-        } catch (error) {
-            // #5706 — A LOCK GATE MUST NOT FAIL OPEN. This `catch` used to
-            // swallow every read failure and fall through to `'none'`, and
-            // `'none'` is not a neutral value here: it is the verdict "the
-            // author declared no protection", which `evaluateLockForWrite` /
-            // `evaluateLockForDelete` turn straight into "allow". So an
-            // unreadable `sys_metadata` silently converted a write that had to
-            // be refused into a write that was performed — measured on
-            // `origin/main`: with the overlay row declaring `_lock:
-            // 'no-overlay'` and only the read above failing, `saveMetaItem`
-            // returned `success: true` after an `update` on `sys_metadata`
-            // (and `deleteMetaItem` the same, on `_lock: 'no-delete'`).
-            //
-            // Note what that also costs the audit trail: the allowed path
-            // writes its ordinary `outcome: 'allowed'` row, so nothing
-            // afterwards records that this write should have been denied.
-            //
-            // The window is not "the metadata store is down" — a fully dead
-            // store fails the write too. It is "the READ failed and the write
-            // still succeeded": a transient error, a single timed-out query, a
-            // read-replica fault, partial pool exhaustion. Narrow, but the
-            // shape is wrong at any width, and it is the inverse of ADR-0049's
-            // fail-closed direction.
-            //
-            // The discrimination is the same one #5532 / PR #5705 installed for
-            // the overlay READS in this file, reused verbatim rather than
-            // reinvented: an unprovisioned `sys_metadata` genuinely has no
-            // overlay row, so `'none'` IS the truth and first boot must not
-            // explode; every other error is an outage and becomes a 503, whose
-            // `cause` carries the driver error. ADR-0010 §3.3 is the decision
-            // this defends; ADR-0110 D3 is the rule it was breaking — a miss
-            // and an outage are different facts, and here reading one as the
-            // other disarmed a protection gate.
-            //
-            // Consequence, deliberate and wire-visible: `save` / `publish` /
-            // `rollback` / `delete` now fail with 503 when the lock state
-            // cannot be read, instead of proceeding as if unlocked. Refusing
-            // one uncertain write beats performing one that had to be refused.
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-        return undefined;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof readLockGateOverlayLayer> = {
+            overlayLockLayerAt: (...a) => this.overlayLockLayerAt(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+        };
+        return readLockGateOverlayLayer.call(host, canonicalType, name, packageId);
     }
 
     /**
@@ -17256,49 +17184,13 @@ export class ObjectStackProtocolImplementation implements
      * never be refused by this gate — the same positive-control-by-construction
      * `metaUrlSpellingRefusal` is built on).
      */
-    private async recordMetadataAudit(entry: MetadataAuditEntry): Promise<void> {
-        const canonical = canonicalMetaType(entry.type);
-        if (canonical !== entry.type) {
-            const err: any = new Error(
-                `Refusing to write a sys_metadata_audit row under the `
-                + `non-canonical metadata type '${entry.type}' (canonical: '${canonical}') for `
-                + `'${entry.name}'. ADR-0010's trail is keyed on (type, name) and read back through `
-                + `the '/meta' boundary, which folds — a row filed under '${entry.type}' is a row no `
-                + `compliance query can reach. Fold the type at the call site (canonicalMetaType) `
-                + `rather than here; see this method's header for why the writer no longer does it.`,
-            );
-            err.code = 'AUDIT_TYPE_NOT_CANONICAL';
-            err.status = 500;
-            throw err;
-        }
-        try {
-            await this.engine.insert('sys_metadata_audit', {
-                occurred_at: new Date().toISOString(),
-                actor: entry.actor ?? 'system',
-                source: entry.source ?? 'protocol',
-                // [#8908] Verbatim — the assert above is what makes this
-                // canonical, and a fold here would make the assert unfalsifiable.
-                type: entry.type,
-                name: entry.name,
-                operation: entry.operation,
-                outcome: entry.outcome,
-                code: entry.code,
-                lock_state: entry.lockState ?? 'none',
-                lock_overridden: entry.lockOverridden ?? false,
-                request_id: entry.requestId ?? null,
-                note: entry.note ?? null,
-            } as any, {
-                // [#21911] The explicit system opt-in: the platform writes its
-                // own trail row; the `actor` column above names who acted.
-                context: { isSystem: true },
-            });
-        } catch (err: any) {
-            // Don't promote audit-table failures to API errors. Log so
-            // operators can spot a misconfigured deployment.
-            console.warn(
-                `[Protocol] sys_metadata_audit write failed for ${entry.type}/${entry.name}: ${err?.message ?? err}`,
-            );
-        }
+    private recordMetadataAudit(entry: MetadataAuditEntry): Promise<void> {
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof recordMetadataAudit> = {
+            get engine() { return readEngine(); },
+        };
+        return recordMetadataAudit.call(host, entry);
     }
 
     /**
@@ -17335,7 +17227,7 @@ export class ObjectStackProtocolImplementation implements
      * is each caller's ordering, and it is the same on every topology: see the
      * `saveMetaItem` and `deleteMetaItem` call sites.
      */
-    private async lockWriteRefusal(args: {
+    private lockWriteRefusal(args: {
         type: string;
         name: string;
         /**
@@ -17350,35 +17242,11 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<{ err: Error; audit: MetadataAuditEntry } | null> {
-        const state = await this.getEffectiveLock(args.type, args.name, args.packageId);
-        const refusal = evaluateLockForWrite(state.lock);
-        if (!refusal) return null;
-        const reason = state.lockReason ?? refusal.reason;
-        const err = new Error(
-            `${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
-            + `${reason} — See ADR-0010 §3.3.`,
-        );
-        (err as any).code = 'ITEM_LOCKED';
-        (err as any).status = 403;
-        (err as any).lock = state.lock;
-        (err as any).lockReason = reason;
-        return {
-            err,
-            audit: {
-                type: args.type,
-                name: args.name,
-                organizationId: null,
-                operation: args.operation,
-                outcome: 'denied',
-                // adr0112-ok: D6b — persisted audit column, its own vocabulary
-                code: 'item_locked',
-                lockState: state.lock,
-                actor: args.actor,
-                source: args.source ?? `protocol.${args.operation}MetaItem`,
-                requestId: args.requestId,
-                note: reason,
-            },
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof lockWriteRefusal> = {
+            getEffectiveLock: (...a) => this.getEffectiveLock(...a),
         };
+        return lockWriteRefusal.call(host, args);
     }
 
     /**
@@ -17393,7 +17261,7 @@ export class ObjectStackProtocolImplementation implements
      * {@link lockWriteRefusal} and hand the row to the caller that owns the
      * transaction (see `promoteDraftForPublish`).
      */
-    private async assertLockAllowsWrite(args: {
+    private assertLockAllowsWrite(args: {
         type: string;
         name: string;
         /** [#21761] See {@link lockWriteRefusal}. */
@@ -17403,17 +17271,19 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<Error | null> {
-        const refusal = await this.lockWriteRefusal(args);
-        if (!refusal) return null;
-        await this.recordMetadataAudit(refusal.audit);
-        return refusal.err;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof assertLockAllowsWrite> = {
+            lockWriteRefusal: (...a) => this.lockWriteRefusal(...a),
+            recordMetadataAudit: (...a) => this.recordMetadataAudit(...a),
+        };
+        return assertLockAllowsWrite.call(host, args);
     }
 
     /**
      * Counterpart of {@link assertLockAllowsWrite} for delete. [#21694]
      * Topology-independent for the same reason — see {@link lockWriteRefusal}.
      */
-    private async assertLockAllowsDelete(args: {
+    private assertLockAllowsDelete(args: {
         type: string;
         name: string;
         /**
@@ -17429,33 +17299,12 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<Error | null> {
-        const state = await this.getEffectiveLock(args.type, args.name, args.packageId);
-        const refusal = evaluateLockForDelete(state.lock);
-        if (!refusal) return null;
-        const reason = state.lockReason ?? refusal.reason;
-        const err = new Error(
-            `${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
-            + `${reason} — See ADR-0010 §3.3.`,
-        );
-        (err as any).code = 'ITEM_LOCKED';
-        (err as any).status = 403;
-        (err as any).lock = state.lock;
-        (err as any).lockReason = reason;
-        await this.recordMetadataAudit({
-            type: args.type,
-            name: args.name,
-            organizationId: null,
-            operation: 'delete',
-            outcome: 'denied',
-            // adr0112-ok: D6b — persisted audit column, its own vocabulary
-            code: 'item_locked',
-            lockState: state.lock,
-            actor: args.actor,
-            source: args.source ?? 'protocol.deleteMetaItem',
-            requestId: args.requestId,
-            note: reason,
-        });
-        return err;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof assertLockAllowsDelete> = {
+            getEffectiveLock: (...a) => this.getEffectiveLock(...a),
+            recordMetadataAudit: (...a) => this.recordMetadataAudit(...a),
+        };
+        return assertLockAllowsDelete.call(host, args);
     }
 
     /**
@@ -17518,10 +17367,12 @@ export class ObjectStackProtocolImplementation implements
      * the optimistic lock failing OPEN.
      */
     private storedHashDigest(): StoredHashDigest {
-        const accessor = this.engine?.getKeyedDigest;
-        const provider: StoredHashDigest | undefined =
-            typeof accessor === 'function' ? accessor.call(this.engine) : undefined;
-        return provider ?? ephemeralStoredHashDigest;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof storedHashDigest> = {
+            get engine() { return readEngine(); },
+        };
+        return storedHashDigest.call(host);
     }
 
     /**
@@ -17529,8 +17380,12 @@ export class ObjectStackProtocolImplementation implements
      * `If-Match` — for a write whose stored content hash is `stored`: its keyed
      * digest ({@link storedHashDigest}). Never empty, never the stored value.
      */
-    private async receiptVersion(stored: string): Promise<string> {
-        return this.storedHashDigest()(stored);
+    private receiptVersion(stored: string): Promise<string> {
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof receiptVersion> = {
+            storedHashDigest: (...a) => this.storedHashDigest(...a),
+        };
+        return receiptVersion.call(host, stored);
     }
 
     /**
@@ -17556,7 +17411,7 @@ export class ObjectStackProtocolImplementation implements
      * was `null`, the repository's lock refused the unpinned save 409, and the
      * `?state=draft` read served `version: null` while the draft existed.
      */
-    private async storedHeadAt(
+    private storedHeadAt(
         repo: SysMetadataRepository,
         ref: Parameters<SysMetadataRepository['headAt']>[0],
         state: 'active' | 'draft',
@@ -17567,7 +17422,8 @@ export class ObjectStackProtocolImplementation implements
          */
         member?: string,
     ): Promise<string | null> {
-        return (await repo.headAt(ref, { state, packageId, member })).head?.hash ?? null;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        return storedHeadAt(repo, ref, state, packageId, member);
     }
 
     /**
@@ -17595,7 +17451,7 @@ export class ObjectStackProtocolImplementation implements
      * item several packages hold, that save and that delete are refused
      * whatever they carry, and the token stays the package-unbound row's.
      */
-    private async readVersionToken(
+    private readVersionToken(
         /** [#22877] `member` — the bundle member the read addressed; omitted, the canonical one. */
         request: { type: string; name: string; packageId?: string; member?: string },
         state: 'active' | 'draft',
@@ -17606,19 +17462,14 @@ export class ObjectStackProtocolImplementation implements
          */
         packagelessPackageId?: string | null,
     ): Promise<string | null> {
-        const repo = this.getOverlayRepo();
-        const ref = {
-            type: PLURAL_TO_SINGULAR[request.type] ?? request.type,
-            name: request.name,
-            org: 'env',
-        } as Parameters<typeof repo.headAt>[0];
-        const packageId = request.packageId == null && state === 'active'
-            ? packagelessPackageId !== undefined
-                ? packagelessPackageId
-                : (await this.packagelessAddress(ref.type, ref.name, request.member)).packageId
-            : request.packageId ?? null;
-        const stored = await this.storedHeadAt(repo, ref, state, packageId, request.member);
-        return stored === null ? null : this.receiptVersion(stored);
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof readVersionToken> = {
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            packagelessAddress: (...a) => this.packagelessAddress(...a),
+            receiptVersion: (...a) => this.receiptVersion(...a),
+            storedHeadAt: (...a) => this.storedHeadAt(...a),
+        };
+        return readVersionToken.call(host, request, state, packagelessPackageId);
     }
 
     /**
@@ -17632,8 +17483,12 @@ export class ObjectStackProtocolImplementation implements
      * strict draft read asks {@link strictDraftReadAddress} instead: the draft
      * its `version` names.
      */
-    private async packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
-        return (await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member)).packageId ?? undefined;
+    private packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof packagelessReadAddress> = {
+            packagelessAddress: (...a) => this.packagelessAddress(...a),
+        };
+        return packagelessReadAddress.call(host, type, name, member);
     }
 
     /**
@@ -17658,14 +17513,16 @@ export class ObjectStackProtocolImplementation implements
      * a package-agnostic lookup returned (#8907) while the `version` was the
      * package-unbound draft's.
      */
-    private async strictDraftReadAddress(
+    private strictDraftReadAddress(
         type: string,
         name: string,
         member?: string,
     ): Promise<{ packageId: string | null; bestEffort: boolean }> {
-        const address = await this.packagelessDraftAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
-        if (address.kind === 'ambiguous') return { packageId: null, bestEffort: true };
-        return { packageId: address.key, bestEffort: false };
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof strictDraftReadAddress> = {
+            packagelessDraftAddress: (...a) => this.packagelessDraftAddress(...a),
+        };
+        return strictDraftReadAddress.call(host, type, name, member);
     }
 
     /**
@@ -17795,7 +17652,7 @@ export class ObjectStackProtocolImplementation implements
      * under, and `drafts` the bindings of every draft row of the item, which
      * the doors' receipts name.
      */
-    private async packagelessDraftAddress(
+    private packagelessDraftAddress(
         type: string,
         name: string,
         /** [#22877] The bundle member the door addresses; omitted, the canonical one. */
@@ -17809,20 +17666,11 @@ export class ObjectStackProtocolImplementation implements
             drafts: { packageId: string | null; candidates: readonly string[]; unbound: boolean };
         }
     > {
-        const active = await this.packagelessAddress(type, name, member, 'active');
-        if (active.candidates.length > 1) return { kind: 'ambiguous', candidates: active.candidates };
-        const drafts = await this.packagelessAddress(type, name, member, 'draft');
-        const own = active.packageId;
-        if (own !== null) {
-            if (drafts.candidates.includes(own)) return { kind: 'draft', key: own, into: own, drafts };
-            if (drafts.unbound) return { kind: 'draft', key: null, into: own, drafts };
-            return { kind: 'none', key: own, into: own, drafts };
-        }
-        // [#23657] Bound to none: the rule the draft save's address takes too
-        // ({@link unboundItemDraftAddress}, in `resolveWriteHead`).
-        const address = unboundItemDraftAddress(drafts);
-        if (address.kind === 'ambiguous') return address;
-        return { kind: address.kind, key: address.key, into: address.key, drafts };
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof packagelessDraftAddress> = {
+            packagelessAddress: (...a) => this.packagelessAddress(...a),
+        };
+        return packagelessDraftAddress.call(host, type, name, member);
     }
 
     /**
@@ -17836,16 +17684,16 @@ export class ObjectStackProtocolImplementation implements
      * {@link InboundVersionConflictError}, which the door's conflict branch
      * answers 409. ⛔ A sent token is never read as "no pin".
      */
-    private async storedParentForToken(
+    private storedParentForToken(
         ref: { org: string; type: string; name: string },
         token: string | null,
         currentStored: string | null,
     ): Promise<string | null> {
-        if (token === null) return null;
-        if (currentStored !== null && token !== '' && (await this.storedHashDigest()(currentStored)) === token) {
-            return currentStored;
-        }
-        throw new InboundVersionConflictError(ref, token, currentStored);
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof storedParentForToken> = {
+            storedHashDigest: (...a) => this.storedHashDigest(...a),
+        };
+        return storedParentForToken.call(host, ref, token, currentStored);
     }
 
     /**
@@ -17876,34 +17724,17 @@ export class ObjectStackProtocolImplementation implements
      * that contradicts it instead. The code, the status and every attribute
      * are the same as for any other conflict.
      */
-    private async metadataConflictRefusal(
+    private metadataConflictRefusal(
         err: ConflictError,
         subject: string,
         prefix: string,
         firstWritePin?: 'draft' | 'active',
     ): Promise<Error> {
-        const conflict: any = new Error(subject);
-        conflict.code = 'METADATA_CONFLICT';
-        conflict.status = 409;
-        const digest = this.storedHashDigest();
-        const show = (served: string | null | undefined) => (served === undefined ? '(withheld)' : served ?? 'null');
-        const current = await servedContentHash(err.actualHead, digest);
-        if (current !== undefined) {
-            conflict.actualHead = current;
-            conflict.currentVersion = current;
-        }
-        if (err instanceof InboundVersionConflictError) {
-            conflict.message = `${prefix} The version token sent is not the current version (current is ${show(current)}).`;
-            return conflict;
-        }
-        const expected = await servedContentHash(err.expectedParent, digest);
-        if (expected !== undefined) conflict.expectedParent = expected;
-        conflict.message = firstWritePin !== undefined && expected === null
-            ? `${subject}: this save asserted that no ${firstWritePin} row exists (the first-write pin, `
-                + `If-None-Match: * on the REST door), but one does (current is ${show(current)}). Send that `
-                + `version as If-Match to save over it, or re-read the item to merge first.`
-            : `${prefix} Expected parent ${show(expected)} but current is ${show(current)}.`;
-        return conflict;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof metadataConflictRefusal> = {
+            storedHashDigest: (...a) => this.storedHashDigest(...a),
+        };
+        return metadataConflictRefusal.call(host, err, subject, prefix, firstWritePin);
     }
 
     /**
@@ -17963,16 +17794,15 @@ export class ObjectStackProtocolImplementation implements
      * `protocol.publishMetaItem`, which is the name the shared Phase-1 helper
      * passes for both of them.
      */
-    private async recordPendingDenialAudit(
+    private recordPendingDenialAudit(
         err: unknown,
         overrides?: { source?: string },
     ): Promise<void> {
-        const pending = (err as ErrorWithPendingAudit | null | undefined)?.__pendingAudit;
-        if (!pending) return;
-        await this.recordMetadataAudit({
-            ...pending,
-            ...(overrides?.source ? { source: overrides.source } : {}),
-        });
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof recordPendingDenialAudit> = {
+            recordMetadataAudit: (...a) => this.recordMetadataAudit(...a),
+        };
+        return recordPendingDenialAudit.call(host, err, overrides);
     }
 
     /**

@@ -5593,38 +5593,47 @@ export class ApprovalService implements IApprovalService {
    * screens.
    */
   private async assertReassignTargetResolves(to: string, organizationId: string | null): Promise<void> {
-    const refuse = (why: string): never => {
-      throw new Error(
-        `VALIDATION_FAILED: cannot reassign to '${to}' — ${why} The request and its approvers are unchanged. `
-        + `Reassign to the user id or email of a person in this request's organization, or to `
-        + `'position:<name>' for a position someone in it holds.`,
-      );
-    };
+    const why = await this.reassignTargetRefusal(to, organizationId);
+    if (why === undefined) return;
+    throw new Error(
+      `VALIDATION_FAILED: cannot reassign to '${to}' — ${why} The request and its approvers are unchanged. `
+      + `Reassign to the user id or email of a person in this request's organization, or to `
+      + `'position:<name>' for a position someone in it holds.`,
+    );
+  }
+
+  /**
+   * Why `to` resolves to no one in `organizationId` — the sentence a refusal
+   * carries — or `undefined` when someone can take a slot under it. The ONE
+   * predicate behind {@link assertReassignTargetResolves} (the door) and
+   * {@link escalateRequest}'s `reassign` (the SLA sweep, #25598); its contract
+   * is that docblock's.
+   */
+  private async reassignTargetRefusal(to: string, organizationId: string | null): Promise<string | undefined> {
     const position = addressedPosition(to);
     if (position !== undefined) {
-      if ((await this.expandPositionUsers(position, organizationId)).length) return;
-      refuse(`no one holds position '${position}' in this request's organization.`);
+      if ((await this.expandPositionUsers(position, organizationId)).length) return undefined;
+      return `no one holds position '${position}' in this request's organization.`;
     }
     if (to.includes(':')) {
-      refuse('it is a slot literal no approver acts under, so no one could ever decide the request.');
+      return 'it is a slot literal no approver acts under, so no one could ever decide the request.';
     }
+    const noUser = 'it names no user in this request\'s organization.';
     const rows = await this.engine.find('sys_user', {
       where: to.includes('@') ? { email: to } : { id: to },
       fields: ['id'], limit: 1, context: SYSTEM_CTX,
     });
     const userId = Array.isArray(rows) && rows[0]?.id != null ? String(rows[0].id) : '';
-    if (!userId) refuse('it names no user in this request\'s organization.');
-    if (!organizationId) return;
+    if (!userId) return noUser;
+    if (!organizationId) return undefined;
     let memberships: any[] = [];
     try {
       memberships = await this.engine.find('sys_member', {
         where: { user_id: userId }, fields: ['organization_id'], limit: 1000, context: SYSTEM_CTX,
       });
-    } catch { return; } // membership unreadable ⇒ no tenancy fact, as in the sibling screens
+    } catch { return undefined; } // membership unreadable ⇒ no tenancy fact, as in the sibling screens
     const orgs = (memberships ?? []).map((r: any) => String(r?.organization_id ?? '')).filter(Boolean);
-    if (orgs.length && !orgs.includes(String(organizationId))) {
-      refuse('it names no user in this request\'s organization.');
-    }
+    return orgs.length && !orgs.includes(String(organizationId)) ? noUser : undefined;
   }
 
   /**
@@ -7029,12 +7038,26 @@ export class ApprovalService implements IApprovalService {
     // empty expansion falls back to the literal, so a config naming a
     // specific user id keeps working unchanged.
     let escalatees: string[] = [];
+    let literalTarget = false;
     if (escalateTo) {
       try {
         escalatees = await this.expandPositionUsers(escalateTo, raw.organization_id ?? null);
       } catch { escalatees = []; }
-      if (!escalatees.length) escalatees = [escalateTo];
+      if (!escalatees.length) { escalatees = [escalateTo]; literalTarget = true; }
     }
+    // [#25598] …but a literal must still name someone who can take the slot,
+    // by the door's own predicate (#25485). One that resolves to no one (an
+    // unstaffed position, a mistyped name, a departed user, a `team:` literal)
+    // would move the request off its real approvers onto a slate nobody can
+    // decide. So the slate stays, its approvers are told the SLA lapsed (the
+    // `notify` branch), and the audit row says why. A failed `sys_user` read
+    // throws before the audit row, so the next sweep retries the request.
+    const unresolved = action === 'reassign' && literalTarget
+      ? await this.reassignTargetRefusal(escalateTo!, raw.organization_id ?? null)
+      : undefined;
+    if (unresolved !== undefined) escalatees = [];
+    // The action this sweep TAKES: a reassign with no one to hand to notifies.
+    const taken = action === 'reassign' && !escalatees.length ? 'notify' : action;
 
     // Audit first — this row IS the idempotency marker (ADR-0042 §1), and the
     // marker is its KIND (`escalate`), not its actor. A machine has no
@@ -7046,11 +7069,12 @@ export class ApprovalService implements IApprovalService {
       id: uid('aact'), request_id: raw.id, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'escalate',
       actor_id: null,
-      comment: `${action}${escalateTo ? ` → ${escalateTo}` : ''}`,
+      comment: `${action}${escalateTo ? ` → ${escalateTo}` : ''}`
+        + (unresolved !== undefined ? ` — not applied: ${unresolved} The pending approvers were kept and notified.` : ''),
       created_at: now,
     }), { context: SYSTEM_CTX });
 
-    if (action === 'reassign' && escalatees.length) {
+    if (taken === 'reassign') {
       await this.engine.update('sys_approval_request', {
         id: raw.id, pending_approvers: escalatees.join(','), updated_at: now,
         pending_approver_labels: await this.slateLabels(escalatees),
@@ -7075,7 +7099,8 @@ export class ApprovalService implements IApprovalService {
         comment: 'SLA escalation',
       }, SYSTEM_CTX, 'escalation');
     } else {
-      // 'notify' (and the reassign-without-target fallback)
+      // 'notify' (and a reassign with no one to hand to: no target, or one
+      // that resolves to no one)
       await this.notify({
         topic: 'approval.sla_breached',
         organizationId: raw.organization_id,
@@ -7095,7 +7120,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         ...approvalNotice(approvalNotificationText({
           title: 'approvalSlaBreachedSubmitterTitle', body: 'approvalSlaBreachedSubmitterBody',
-          params: { ...subject, action },
+          params: { ...subject, action: taken },
         })),
       });
     }
