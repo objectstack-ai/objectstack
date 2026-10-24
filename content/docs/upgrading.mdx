@@ -610,8 +610,10 @@ and the deprecation window a property must sit through before it can be removed 
 ## Not this page
 
 **Upgrading an installed package** — a template app or a third-party package
-already installed into a deployment — is a different operation with its own
-lifecycle (pre-check, plan, snapshot, execute, validate, commit or roll back).
-It is neither of the two halves above: it moves *someone else's* metadata inside
-your deployment. See the [package upgrade
-protocol](/docs/references/kernel/package-upgrade).
+already installed into a deployment — is a different operation. It is neither of
+the two halves above: it moves *someone else's* metadata inside your deployment.
+The platform has no separate upgrade engine (no upgrade plan, pre-upgrade
+snapshot or three-way merge): installing the new version over the old one is a
+re-install with `overwrite: true`, and the package rollback it serves restores a
+package commit. See [Package Management](/docs/api/metadata-api#package-management)
+in the Metadata API.
