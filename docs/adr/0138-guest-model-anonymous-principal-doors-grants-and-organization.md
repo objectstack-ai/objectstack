@@ -25,6 +25,11 @@ D11 are unchanged.
 maintainer 「23267 我们的系统 和 salesforce 类似，暂时没有 没有公开站点或门户的产品计划」) — D3 item 5: the
 guest's bind door is built implementation-first, when a named deployment needs to grant the guest on
 a public surface; until then no door binds a set to `guest`, and the record carries the door's shape.
+· **Note** (2026-10-24, ruling B on [#25447](https://github.com/objectstack-ai/objectstack/issues/25447),
+[`6377889413`](https://github.com/objectstack-ai/objectstack/issues/25447#issuecomment-6377889413),
+maintainer 「#9 同意」; card [#25574](https://github.com/objectstack-ai/objectstack/issues/25574)) — D5 is
+built for the public form doors, in the shape [the note under D5](#d5--the-public-site-binding-shape-only-built-when-demand-arrives)
+records; every other decision of this record is unchanged.
 **Decided by**: the maintainer's ruling on [#22146](https://github.com/objectstack-ai/objectstack/issues/22146)
 (comment [`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537),
 decision batch #290 item 1, 2026-10-08, 「22146 同意」): **A on all eight questions, and G2 on the
@@ -474,6 +479,27 @@ Built implementation-first (ADR-0049, ADR-0078): the card that builds it declare
 enforcer in the same change. The measured demand at `7b926f7600` is none: the repository's example
 apps open public forms on a single organization, and the measurement round found the same in the
 hotcrm tree. The trigger is a named deployment that needs it.
+
+**Note (2026-10-24): built for the public form doors.** Ruling B on
+[#25447](https://github.com/objectstack-ai/objectstack/issues/25447)
+([`6377889413`](https://github.com/objectstack-ai/objectstack/issues/25447#issuecomment-6377889413),
+maintainer 「#9 同意」; the governing record per the reconciliation
+[`6377958424`](https://github.com/objectstack-ai/objectstack/issues/25447#issuecomment-6377958424)),
+verbatim: 「公共表单发布时绑定一个组织（URL 携带组织，授予通道按 #23224 解析 D4 的方式解析它），访客锚点的绑定在该组织下求值，ADR-0138
+其余不变」. The demand is a group of legal entities on one hosted environment, one organization each, each
+publishing the same package's registration form. [#25641](https://github.com/objectstack-ai/objectstack/pull/25641) builds it, declaring the key with its
+enforcer in the same change:
+
+| Element | As built |
+|:--|:--|
+| organization | `sharing.organizations` on the form (`@objectstack/spec/ui` `SharingConfigSchema`): a non-empty list of organization slugs the form is published to. The link names one, `/forms/SLUG?organization=ORG_SLUG`; the server reads the organization carrying a listed slug, as the system, and the submission acts in it (the write's `tenantId`: the row lands there and its number sequences count there). |
+| match | the link's `organization` parameter, not a host or a path prefix. A bound form's link naming no organization, or one the form does not list, is answered as an unpublished form (`404 FORM_NOT_FOUND`) on both form doors; an unbound form's link naming one is refused the same way. Nothing falls back to the default organization. |
+| guest grants | unchanged: the form doors keep the form grant (D2 class 1), now resolved under the bound organization. No set is bound to `guest` (D3 item 5). |
+| allowed doors | the two public form doors (D2 class 1) only. The class 4 and 5 endpoint doors keep D4's located refusal on a multi-organization deployment. |
+
+A form that lists no organization keeps D4 exactly. The decision is
+`packages/core/src/security/public-form-organization.ts#resolvePublicFormOrganization`; the doors ask it in
+`packages/rest/src/form-routes.ts#registerFormEndpoints`.
 
 ### D6 — Disclosure and explain: unchanged
 
