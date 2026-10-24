@@ -351,6 +351,12 @@ await stack.stop();
   true })` starts a flow as the system principal through the `automation`
   service's own `execute`, the call the schedule trigger's tick makes, never
   through the trigger route, and hands back the engine's result unchanged.
+  That call does not wait for a schedule, so it works with scheduled work off.
+  For a local stack to arm time-triggered flows on their own cadence (rather
+  than list them as disabled by deployment policy), set
+  `OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true` in its environment:
+  package-authored scheduled work is off by default in every posture (see
+  Deployment › Environment variables in the docs).
 - A refusal from `flows.*` / `actions.run` is the route's ADR-0112 envelope
   (`VerifyRefusal`: `code`, `status`, `details`; `isVerifyRefusal(e)`); a
   refusal from `hooks.run` / `hooks.updateWhere` / `validate` / `rows` /
