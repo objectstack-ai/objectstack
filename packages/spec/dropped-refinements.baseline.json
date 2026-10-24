@@ -1135,18 +1135,6 @@
         ""
       ]
     },
-    "kernel/UpgradePackageRequest": {
-      "sites": [
-        "manifest.navigationContributions.element.items.element.lazy",
-        "manifest.navigationContributions.element.items.element.lazy.options[0]"
-      ]
-    },
-    "kernel/UpgradeSnapshot": {
-      "sites": [
-        "previousManifest.navigationContributions.element.items.element.lazy",
-        "previousManifest.navigationContributions.element.items.element.lazy.options[0]"
-      ]
-    },
     "security/CriteriaSharingRule": {
       "sites": [
         "sharedWith"
