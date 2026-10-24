@@ -32,7 +32,11 @@ import {
   // [#23367] The API-key lifecycle policy source, and its branded refusal.
   apiKeyLifecyclePolicySourceOf,
   isApiKeyLifecycleRefusalError,
+  // [#25693] The organization wall's one verdict, asked for an unclaimed
+  // file's download (`isWithinCallerOrganization`).
+  computeTenantLayer0Verdict,
 } from '@objectstack/core';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type {
   IHttpServer,
   IDataEngine,
@@ -1448,6 +1452,10 @@ async function resolveAdmissionTenancyPosture(
  * to exactly ONE record, so its readable-by set is that record's and nothing
  * more. A shared model would have had to union field references too, silently
  * widening access whenever one file id was copied into a more public record.
+ *
+ * [#25693] A file with no parent at all — neither an attachments scope nor a
+ * field owner — is judged here too, after the same owner shortcut: it is
+ * served only within its organization ({@link isWithinCallerOrganization}).
  */
 function buildFileReadAuthorizer(
   registry: StorageGateRegistry,
@@ -1534,6 +1542,16 @@ function buildFileReadAuthorizer(
         return readable.has(ownerId) ? 'allow' : 'deny';
       }
 
+      // [#25693] Unclaimed (neither an attachments scope nor a field owner):
+      // no parent record to derive access from, so the file is read as every
+      // other organization-scoped row is — within the caller's organization,
+      // by the organization wall's own verdict ({@link isWithinCallerOrganization}).
+      if (file.scope !== 'attachments') {
+        return (await isWithinCallerOrganization(engine, file.id, context, tenancyServiceResolver(registry)))
+          ? 'allow'
+          : 'deny';
+      }
+
       // Otherwise: readable via any parent record this file is attached to.
       const links = (await (engine as any).find('sys_attachment', {
         where: { file_id: file.id },
@@ -1581,6 +1599,75 @@ function buildFileReadAuthorizer(
       return 'deny'; // fail closed
     }
   };
+}
+
+/**
+ * [#25693] Is this unclaimed file within the caller's organization — the
+ * download door's verdict for a file no record owns?
+ *
+ * The rule: such a file is served only within its organization, as every
+ * other organization-scoped row is read. It is decided in the two places that
+ * decide it for every other row, and in no third place:
+ *
+ *  - **the organization wall's verdict** (`computeTenantLayer0Verdict`,
+ *    ADR-0131 D8), asked over the caller's resolved context for the posture in
+ *    force. A `deny` — a walled posture whose caller carries no organization
+ *    scope — is answered here, because a by-id system read cannot carry it:
+ *    the engine projects that verdict onto the driver as no scope at all.
+ *    The facts are the engine's own (no platform-admin exemption: neither
+ *    the engine nor this door holds the permission sets that grant one);
+ *  - **the driver's tenant term**: the file's row is read by id under the
+ *    caller's active organization (`tenantId`) and, for the `group` posture,
+ *    their organization access set (`accessible_org_ids`), so the engine's
+ *    `buildDriverOptions` scopes the read exactly as it scopes any other.
+ *    The file is within reach when that read finds it.
+ *
+ * ⛔ No organization is compared here. Whether the posture walls at all
+ * (`single` does not, so every signed-in caller is served as before), what a
+ * row with no organization means (ADR-0131: out of every organization's
+ * reach) and whether `group` reads a union are the platform's answers.
+ *
+ * The context's organization is the VETTED one: `resolveRequestExecutionContext`
+ * drops a session's organization claim its user no longer holds a membership
+ * for under a walled posture, so a claim that outlived its membership reaches
+ * no organization here.
+ *
+ * Throws what the posture read throws (`AuthzStoreUnavailableError`, relayed
+ * by the door as its `503`); a failed row read throws into the authorizer's
+ * fail-closed `deny`.
+ */
+async function isWithinCallerOrganization(
+  engine: IDataEngine,
+  fileId: string,
+  context: ExecutionContext,
+  tenancy: TenancyServiceResolver | undefined,
+): Promise<boolean> {
+  const tenantId =
+    typeof context.tenantId === 'string' && context.tenantId.length > 0 ? context.tenantId : undefined;
+  const accessibleOrgIds = Array.isArray(context.accessible_org_ids) ? context.accessible_org_ids : undefined;
+  const posture = tenancy ? await classifyAdmissionTenancyPosture(tenancy) : undefined;
+  const wall = computeTenantLayer0Verdict({
+    tenancyPosture: posture ?? 'single',
+    organizationId: tenantId,
+    accessibleOrgIds,
+    objectHasOrgIdField: undefined,
+    tenancyDisabled: false,
+    posturePermitsCrossTenant: false,
+    isPlatformAdmin: false,
+  });
+  if (wall.kind === 'deny') return false;
+  const row = await engine.findOne(
+    'sys_file',
+    { where: { id: fileId }, fields: ['id'] },
+    {
+      context: {
+        isSystem: true,
+        ...(tenantId !== undefined ? { tenantId } : {}),
+        ...(accessibleOrgIds !== undefined ? { accessible_org_ids: accessibleOrgIds } : {}),
+      },
+    },
+  );
+  return row != null;
 }
 
 /**
