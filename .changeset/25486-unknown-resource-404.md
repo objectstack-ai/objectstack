@@ -12,7 +12,7 @@ Metadata-protocol: none
 
 **BREAKING** (a served-set narrowing) for a caller that sends one of these doors a package id, flow name or datasource name that does not exist. Five of them used to answer such a request `200` with an empty result. All eight now refuse it.
 
-Eight doors answered a request about a resource that does not exist as if it were an empty or a bad request, while their sibling doors answered `404` for the same name. An SDK or AI caller could not tell "no such thing" from "nothing yet". Each now answers `404 RESOURCE_NOT_FOUND`, with the status, code and message its sibling gives for the same name. FROM → TO, per door:
+Eight doors answered a request about a resource that does not exist as if it were an empty or a bad request, while their sibling doors answered `404` for the same name. An SDK or AI caller could not tell "no such thing" from "nothing yet". Each now answers `404 RESOURCE_NOT_FOUND`, with the status, code and message its sibling gives for the same name. The answer before and after, per door:
 
 - `POST /api/v1/packages/:id/publish-drafts`, for a package the registry does not hold: `200 { success: false, outcome: 'nothing_to_publish' }` → `404 RESOURCE_NOT_FOUND "Package '<id>' not found"`. That is the answer of `GET /api/v1/packages/:id`.
 - `POST /api/v1/packages/:id/discard-drafts`: `200 { success: true, discardedCount: 0 }` → the same `404`.
