@@ -102,6 +102,9 @@ import {
 // [#25522 cut 1] The validation-message localisation helpers; the methods of the
 // same names below hand each body the members it reads (`ValidationMessageHost`).
 import { negotiatedMessageLocale, objectDisplayLabel, validationMessageContext } from './engine-validation-messages.js';
+// [#25522 cut 2] The datasource-routing bodies; the methods of the same names
+// below hand each body the members it reads (`DatasourceRoutingHost`).
+import { getDriver, matchPattern, resolveDatasourceFromMapping } from './engine-datasource-routing.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 // [#21120] The family-wide stored-metadata-body seam. A `data.record.*` event
 // carries the written row in `after` (and the input patch in `changes`), so a
@@ -12369,62 +12372,17 @@ export class ObjectQL implements IObjectQLEngine {
    * that driver is missing.
    */
   private getDriver(objectName: string): IDataDriver {
-    const binding = this.resolveDatasourceBinding(objectName);
-
-    if (binding) {
-      const driver = this.drivers.get(binding.datasource);
-      if (driver) {
-        // Debug lines kept at the DECISION they describe, but emitted here so
-        // the resolver stays free of side effects: it also answers the public
-        // {@link resolveEffectiveDatasource} probe, which must be able to name
-        // a datasource without logging a routing event that never happened.
-        if (binding.via === 'mapping') {
-          this.logger.debug('Resolved datasource from mapping', {
-            object: objectName,
-            datasource: binding.datasource
-          });
-        } else if (binding.via === 'package') {
-          this.logger.debug('Resolved datasource from package manifest', {
-            object: objectName,
-            package: binding.packageId,
-            datasource: binding.datasource
-          });
-        }
-        return driver;
-      }
-
-      // Only steps 1 and 2 reach here. Steps 3-5 answer ONLY when their driver
-      // is registered (that registration is what opts the deployment into
-      // lifecycle separation / a package default / a global default at all), so
-      // a binding they produce always resolves.
-      //
-      // The datasource layer may have recorded WHY this one has no driver —
-      // refused by the host policy, or failed to connect under
-      // OS_ALLOW_DRIVER_CONNECT_FAILURE (framework#3828). Saying so beats
-      // sending the reader hunting for a typo that isn't there.
-      const unavailable = this.unavailableDatasources.get(binding.datasource);
-      if (unavailable) {
-        throw new DatasourceUnavailableError(
-          binding.datasource,
-          objectName,
-          unavailable.kind,
-          unavailable.publicDetail,
-        );
-      }
-      if (binding.via === 'mapping') {
-        throw new Error(
-          `[ObjectQL] Datasource '${binding.datasource}' mapped for object '${objectName}' is not registered. ` +
-          `A datasourceMapping rule routes this object to it, so falling back to the default store would ` +
-          `write the object's data to a different database than the one it declares. Fix the datasource ` +
-          `configuration, or remove the mapping rule.`,
-        );
-      }
-      // No record: nothing ever tried to connect this name, so it is genuinely
-      // undeclared (or misspelled). Unchanged message — there is nothing to add.
-      throw new Error(`[ObjectQL] Datasource '${binding.datasource}' configured for object '${objectName}' is not registered.`);
-    }
-
-    throw new Error(`[ObjectQL] No driver available for object '${objectName}'`);
+    // [#25522 cut 2] The body moved to `engine-datasource-routing.ts` (see `DatasourceRoutingHost`).
+    const readDrivers = () => this.drivers;
+    const readLogger = () => this.logger;
+    const readUnavailableDatasources = () => this.unavailableDatasources;
+    const host: ThisParameterType<typeof getDriver> = {
+      resolveDatasourceBinding: (...a) => this.resolveDatasourceBinding(...a),
+      get drivers() { return readDrivers(); },
+      get logger() { return readLogger(); },
+      get unavailableDatasources() { return readUnavailableDatasources(); },
+    };
+    return getDriver.call(host, objectName);
   }
 
   /**
@@ -12576,40 +12534,13 @@ export class ObjectQL implements IObjectQLEngine {
     objectName: string,
     object?: any
   ): string | null {
-    if (!this.datasourceMapping || this.datasourceMapping.length === 0) {
-      return null;
-    }
-
-    // Sort rules by priority if any have priority set
-    const sortedRules = [...this.datasourceMapping].sort((a, b) => {
-      const aPriority = a.priority ?? 1000;
-      const bPriority = b.priority ?? 1000;
-      return aPriority - bPriority;
-    });
-
-    for (const rule of sortedRules) {
-      // 1. Match by namespace
-      if (rule.namespace && object?.namespace === rule.namespace) {
-        return rule.datasource;
-      }
-
-      // 2. Match by package ID
-      if (rule.package && object?.packageId === rule.package) {
-        return rule.datasource;
-      }
-
-      // 3. Match by object name pattern (glob-style)
-      if (rule.objectPattern && this.matchPattern(objectName, rule.objectPattern)) {
-        return rule.datasource;
-      }
-
-      // 4. Default fallback rule
-      if (rule.default) {
-        return rule.datasource;
-      }
-    }
-
-    return null;
+    // [#25522 cut 2] The body moved to `engine-datasource-routing.ts` (see `DatasourceRoutingHost`).
+    const readDatasourceMapping = () => this.datasourceMapping;
+    const host: ThisParameterType<typeof resolveDatasourceFromMapping> = {
+      get datasourceMapping() { return readDatasourceMapping(); },
+      matchPattern: (...a) => this.matchPattern(...a),
+    };
+    return resolveDatasourceFromMapping.call(host, objectName, object);
   }
 
   /**
@@ -12617,13 +12548,8 @@ export class ObjectQL implements IObjectQLEngine {
    * Supports * (any chars) and ? (single char)
    */
   private matchPattern(objectName: string, pattern: string): boolean {
-    const regexPattern = pattern
-      .replace(/[.+^${}()|[\]\\]/g, '\\$&')  // Escape regex special chars
-      .replace(/\*/g, '.*')                   // * → .*
-      .replace(/\?/g, '.');                   // ? → .
-
-    const regex = new RegExp(`^${regexPattern}$`);
-    return regex.test(objectName);
+    // [#25522 cut 2] The body moved to `engine-datasource-routing.ts`; it reads no member.
+    return matchPattern(objectName, pattern);
   }
 
   /**
