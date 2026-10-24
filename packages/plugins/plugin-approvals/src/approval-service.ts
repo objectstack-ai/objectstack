@@ -95,6 +95,13 @@ import {
 } from './approver-address.js';
 import { labelOrMachineName, requestDisplayLabels, slateLabelOf } from './display-labels.js';
 import {
+  ADMIN_RESCUE_NOTE_SNAPSHOT_KEY,
+  adminRescueNoteOf,
+  adminRescueNoteText,
+  adminRescueReason,
+  type AdminRescueNote,
+} from './admin-rescue-note.js';
+import {
   localizeRequestLabels,
   readerLabelsFor,
   type ReaderLabelI18n,
@@ -1103,33 +1110,6 @@ function holdsTenantAdminRung(permissions: readonly string[]): boolean {
  * and the display drops the key as it drops every unnamed `#N` group.
  */
 const ADMIN_RESCUE_GROUP = '#0';
-
-/**
- * [#22824] Why a slate opened on the organization's administrators, in words
- * an operator reads on the request's timeline and in its `__resolvedFrom`
- * snapshot: which approver entries resolved to no one.
- *
- * `abandoned` is the slate the node resolved (only `type:value` literals, or
- * nothing at all: an empty `manager` rung adds no slot). `fallback` says why
- * an `onEmptyApprovers: 'fallback'` node degraded here, when it is one.
- */
-function emptySlateReason(
-  abandoned: readonly string[],
-  fallback: 'not_declared' | 'resolved_to_no_one' | undefined,
-): string {
-  const parts = abandoned
-    .filter((slot) => !!slot && slot.includes(':'))
-    .map((slot) => {
-      const at = slot.indexOf(':');
-      const type = slot.slice(0, at);
-      const value = slot.slice(at + 1);
-      return type === 'position' ? `position '${value}' has no holder` : `${type} '${value}' resolved to no one`;
-    });
-  let reason = parts.length ? parts.join('; ') : 'no approver on the node resolved to a person';
-  if (fallback === 'resolved_to_no_one') reason += '; the declared fallbackApprovers resolved to no one either';
-  if (fallback === 'not_declared') reason += "; onEmptyApprovers is 'fallback' but no fallbackApprovers are declared";
-  return reason;
-}
 
 /** One OOO delegation hop applied while resolving an approver (#1322 M1/M4). */
 interface OooSubstitution {
@@ -3658,8 +3638,10 @@ export class ApprovalService implements IApprovalService {
     //
     // [#22824] Set when the slate below is replaced by the organization's
     // administrators: the reason, written to the request's timeline once the
-    // request row exists.
-    let routedToAdministrators: string | undefined;
+    // request row exists. [#25576] As a code and its parameters, which the
+    // snapshot stores and the approvals door renders in the reader's language
+    // (`admin-rescue-note.ts`); the row's `comment` is its English.
+    let adminRescueNote: AdminRescueNote | undefined;
     if (!slateNamesAPerson(approvers)) {
       const emptyPolicy = (input.config as any).onEmptyApprovers ?? 'admin_rescue';
       // Why a `fallback` node degraded to admin_rescue, for the reason below.
@@ -3766,7 +3748,7 @@ export class ApprovalService implements IApprovalService {
       // Re-tested rather than assumed: a `fallback` that landed people above
       // has already turned this into a normal request.
       if (!slateNamesAPerson(approvers)) {
-        const reason = emptySlateReason(approvers, fallbackDegraded);
+        const reason = adminRescueReason(approvers, fallbackDegraded);
         const found = await this.organizationAdministrators(requestOrg);
         const administrators = 'ids' in found ? found.ids : [];
         if (administrators.length) {
@@ -3792,8 +3774,12 @@ export class ApprovalService implements IApprovalService {
               resolved: approvers, administrators: administratorSlate,
             },
           );
+          adminRescueNote = {
+            action_id: uid('aact'),
+            abandoned: [...approvers],
+            ...(fallbackDegraded ? { fallback: fallbackDegraded } : {}),
+          };
           approvers = administratorSlate;
-          routedToAdministrators = reason;
         } else {
           // Break-glass stays break-glass (#3424): an organization whose
           // administrators' slate resolves to nobody opens the request on the
@@ -3843,6 +3829,7 @@ export class ApprovalService implements IApprovalService {
     if (Object.keys(resolvedFrom).length) {
       configSnapshot.__resolvedFrom = resolvedFrom;
     }
+    if (adminRescueNote) configSnapshot[ADMIN_RESCUE_NOTE_SNAPSHOT_KEY] = adminRescueNote;
     // ADR-0044 round numbering: rounds of a revise loop share the run — count
     // this (run, node)'s prior requests; the new one is round N+1. Stamped on
     // the snapshot (precedent: __flowLabel), so no schema migration.
@@ -3896,13 +3883,15 @@ export class ApprovalService implements IApprovalService {
     // one system note on its timeline (no person took it, so `actor_id` is
     // null, ADR-0118 D1 — the shape the OOO hop below records), naming which
     // approver entries resolved to no one. The same reason rides
-    // `__resolvedFrom` for the audit snapshot.
-    if (routedToAdministrators) {
+    // `__resolvedFrom` for the audit snapshot. [#25576] The row's id is the
+    // one the snapshot's note names, which is how `listActions` finds the row
+    // to render in the reader's language.
+    if (adminRescueNote) {
       await this.engine.insert('sys_approval_action', await this.actionRow(row, {
-        id: uid('aact'), request_id: id, organization_id: requestOrg,
+        id: adminRescueNote.action_id, request_id: id, organization_id: requestOrg,
         step_name: input.nodeId, step_index: 0, action: 'comment',
         actor_id: null,
-        comment: `Routed to this organization's administrators because the approver slate named no one: ${routedToAdministrators}.`,
+        comment: adminRescueNoteText(adminRescueNote),
         created_at: now,
       }), { context: SYSTEM_CTX });
     }
@@ -8684,7 +8673,40 @@ export class ApprovalService implements IApprovalService {
       const toName = a.reassign_to ? names.get(String(a.reassign_to)) : undefined;
       if (toName) a.reassign_to_name = toName;
     }
+    await this.localizeAdminRescueNote(requestId, actions, context);
     return actions;
+  }
+
+  /**
+   * [#25576] The administrators' routing note, in the reader's language.
+   *
+   * The note's code and parameters ride the request's node-config snapshot,
+   * naming the timeline row they explain (`admin-rescue-note.ts`); that row's
+   * `comment` is overlaid, in place, with the note as the reader's locale
+   * renders it — the shape {@link readerLabels} gives the request's own labels.
+   * A read, never a write. Nothing is overlaid, and the stored English stands,
+   * when the read carries no locale or no `i18n` service is registered, when
+   * the request carries no note (a request that never routed to its
+   * administrators, or one opened before the note was stored as data), or
+   * when the pack holds no note sentence.
+   */
+  private async localizeAdminRescueNote(
+    requestId: string,
+    actions: ApprovalActionRow[],
+    context: ExecutionContext,
+  ): Promise<void> {
+    // Only a system comment can be the note: no read for any other timeline.
+    if (!actions.some((a) => a.action === 'comment' && !a.actor_id)) return;
+    const labels = this.readerLabels(context);
+    if (!labels) return;
+    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
+    const raw = await findRequestRow(this.engine, requestId, tenantOrg ?? null);
+    const note = adminRescueNoteOf(parseJson<unknown>(raw?.node_config_json, undefined));
+    if (!note) return;
+    const row = actions.find((a) => a.id === note.action_id && a.action === 'comment' && !a.actor_id);
+    if (!row) return;
+    const text = adminRescueNoteText(note, labels.sentence);
+    if (text) row.comment = text;
   }
 
   /**
