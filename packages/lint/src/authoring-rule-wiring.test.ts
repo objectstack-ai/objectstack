@@ -511,6 +511,8 @@ describe('authoring-rule registry wiring (#4409)', () => {
         'validateStackExpressions',
         'validatePresetComparands',
         'validateReferenceIntegrity',
+        // #25650 — a form open to anonymous intake declaring a file field.
+        'validatePublicFormFileFields',
         ...FAMILY,
       ]);
     });
