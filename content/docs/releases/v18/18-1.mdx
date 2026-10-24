@@ -5,14 +5,14 @@ description: "Release notes and upgrade checklist for 18.1.0, the first minor of
 
 <Callout type="warn">
 **How this page was compiled.** From the 18.1.0 changesets on `main` at
-`03243fc637` (2026-10-24), before the 18.1.0 cut: a rehearsed
+`ba9e0c3749` (2026-10-24), before the 18.1.0 cut: a rehearsed
 `pnpm run version` in a throwaway clone at `b2c0752900` (73 packages move to
-18.1.0, and their `## 18.1.0` sections held 227 distinct entries), and the 26
-changesets merged after it, graded the same way. That makes **253 distinct
+18.1.0, and their `## 18.1.0` sections held 227 distinct entries), and the 31
+changesets merged after it, graded the same way. That makes **258 distinct
 entries**. The five sections below use the grouping the GitHub Release body
-uses, and the counts are that grouping's: **78** need you to act, **9** are
-converted for you, **47** add capabilities, **2** declare a semantic change,
-and **117** are other fixes. Nothing here was
+uses, and the counts are that grouping's: **81** need you to act, **9** are
+converted for you, **47** add capabilities, **3** declare a semantic change,
+and **118** are other fixes. Nothing here was
 read off a published 18.1.0 package or walked on an upgrade yet: every refusal
 is described as its changeset describes it. Anything that lands on `main` before
 the cut is in the CHANGELOG and not on this page.
@@ -20,7 +20,7 @@ the cut is in the CHANGELOG and not on this page.
 
 ## Highlights — 18.1.0
 
-- ⚠️ **A minor that breaks.** 18.1.0 is a minor version, and 87 of its
+- ⚠️ **A minor that breaks.** 18.1.0 is a minor version, and 90 of its
   changesets are declared breaking. Under the level rule the maintainer ruled
   on 2026-10-21 (#25105, "ruling A"), the v18 line takes no further major: a
   change to the metadata protocol takes `minor`, and every other change takes
@@ -88,7 +88,7 @@ else:
 | Everything else: REST, drivers, services, the CLI, the Console, `feat:` and `fix!:` alike | `patch` |
 
 So a **patch** release can break a REST client, a boot or a deployment
-script, and 18.1.0 carries 39 changesets graded `patch` that say **BREAKING**,
+script, and 18.1.0 carries 42 changesets graded `patch` that say **BREAKING**,
 beside 48 graded `minor` ones. Pin exact `@objectstack/*` versions, and read the
 release notes for every version you cross. Each entry in a CHANGELOG states its
 kind on its own `Metadata-protocol:` line, and the GitHub Release body groups the
@@ -102,7 +102,7 @@ you change them.
 
 ### Breaking changes you must act on
 
-The 78 entries that are breaking and have no ADR-0087 conversion, and one boot
+The 81 entries that are breaking and have no ADR-0087 conversion, and one boot
 refusal (`db1c7cc`) that its changeset declares as an addition. Each line names
 the one fix; the CHANGELOG entry carries the full FROM → TO.
 
@@ -116,6 +116,14 @@ the one fix; the CHANGELOG entry carries the full FROM → TO.
   is too. Fix: set `OS_AUTH_SECRET`, and enable auth on a stack that mounts
   none. A development boot (`os dev`, `--dev`) and an embedded kernel are not
   affected.
+- **A boot with no `OS_AUTH_SECRET` uses the temporary secret on a development
+  boot only** (`6abee03`, #25563). It used it whenever `NODE_ENV` was anything
+  but exactly `production` (unset, `staging`, a typo); now any boot other than
+  `NODE_ENV=development` or `test` throws `OS_AUTH_SECRET is required outside
+  development`. `os serve` and `os start` already default an unset `NODE_ENV`
+  to `production`, so CLI boots behave as before: an embedder that builds its
+  own kernel is the one that meets it. Fix: set `OS_AUTH_SECRET`, or
+  `NODE_ENV=development` for a local boot.
 - **A production `os serve` whose `@objectstack/plugin-auth` fails to load is
   refused, naming the load error** (`b2e964f`, #25231), `os start` included.
   18.0.0 booted it without auth, silently or with one
@@ -253,6 +261,14 @@ door (`422 INVALID_METADATA`), where 18.0.0 accepted it.
   starts empty, and a read-only boot no longer opens an empty in-memory database
   over a file it cannot open or create (`4d99158`, #25007). Fix: restore from a
   backup, or move the file aside yourself; an absent file is created empty.
+- **`SqlDriver.findWithWindowFunctions()` serves a closed set** (`6abee03`,
+  #25563), and so do `driver-sqlite-wasm` and `driver-turso`'s local and
+  replica transports: the function is one of `row_number`, `rank`,
+  `dense_rank`, `percent_rank` or `cume_dist`, the direction `asc` or `desc`,
+  and every `partitionBy` / `orderBy` field is quoted as a column. Anything
+  else answers `400 INVALID_QUERY`. Fix: use one of those; send a window that
+  takes an argument (`lag`, `lead`, `ntile`) through `execute()` with bound
+  parameters.
 - **On PostgreSQL, `introspectSchema` reads each table in its own schema**, and
   refuses a `search_path` that reaches one table name in two schemas (`74fcec1`,
   #24920). Fix: point the connection at one schema.
@@ -302,6 +318,16 @@ door (`422 INVALID_METADATA`), where 18.0.0 accepted it.
   naming the parameter (`17f3c65`, #25260), and the published list-query
   schemas declare it a non-negative integer (`5f30f00`, #25300). Fix: send a
   whole count of zero or more, or leave it out.
+- **A credential is honoured only in the environment whose auth service
+  validated it** (`1361a5a`, #25565), on every route behind the shared REST
+  auth gate: crud, actions, import and export, batch, sharing, approvals,
+  analytics, search and security, scoped and unscoped. Before, an environment
+  with no `auth` service of its own fell back to the default environment's.
+  A mismatch now answers the same `401` as an unauthenticated request. Only a
+  multi-environment host whose per-environment kernels carry no `auth`
+  service meets it; a single-kernel deployment is unchanged. Fix: give each
+  environment's kernel its own `auth` service, and sign in to the environment
+  you call.
 - **`GET {base}/docs`, the OpenAPI HTML viewer page, is retired**
   (`1b3b65e`, #25124). `GET {base}/openapi.json` stays: point your own viewer
   at it.
@@ -472,6 +498,12 @@ rows.
   `controlled_by_parent` detail follows its master. Nothing changes for a
   principal that does not hold the `external` grade, and no earlier release
   shipped it.
+- **`FlowSchema.runAs` now says what a `system` run may not write**
+  (`025f6de`, #25564): its description names the refused writes to the four
+  identity-assignment objects (above, under security), and ADR-0087 D3 records
+  the change of meaning as `flow-run-as-system-identity-assignment-write-refused`,
+  so `os migrate meta` lists it for a flow that wrote those rows. It carries no
+  conversion, and every flow parses as before.
 
 A change of meaning that also breaks is listed with the breaking changes above.
 
@@ -585,7 +617,8 @@ reinstall.
 #### 2. Before the first boot
 
 - Production `os serve` or `os start`: set `OS_AUTH_SECRET`, and do not rely on
-  `--no-server` or `OS_MIGRATE_AND_EXIT=1` to boot without it.
+  `--no-server` or `OS_MIGRATE_AND_EXIT=1` to boot without it. A kernel you
+  embed needs it too, unless it boots with `NODE_ENV=development` or `test`.
 - A stack that mounts no auth (`auth` tier off, `--preset minimal`) fails a
   production boot: enable auth.
 - CORS: list every cross-origin front-end in `OS_CORS_ORIGIN`, loopback origins
@@ -628,3 +661,5 @@ managed datasource.
   assignments, invitations or memberships, and move it to `runAs: 'user'` or
   the organization endpoints.
 - Read the boot's upgrade impact report beside the access upgrade report.
+- On a multi-environment host, give each environment's kernel its own `auth`
+  service before callers reach it, or they get `401`.
