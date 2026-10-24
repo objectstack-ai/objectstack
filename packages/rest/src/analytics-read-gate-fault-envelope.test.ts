@@ -56,8 +56,8 @@ function mockRes() {
   return res;
 }
 
-/** Build a RestServer over an analytics provider (positional arg #15). */
-function buildRoute(analyticsProvider: unknown) {
+/** Build a RestServer over an analytics provider (positional arg #15) — a resolver of the service. */
+function buildRoute(analyticsProvider: () => Promise<AnalyticsService>) {
   const rest = new RestServer(
     mockServer() as any, mockProtocol() as any, { api: { requireAuth: false } } as any,
     undefined, undefined, undefined, undefined, undefined, undefined, undefined,
@@ -101,7 +101,8 @@ const body = {
 
 async function post(gates: Gates) {
   const executed: string[] = [];
-  const route = buildRoute(analytics(gates, executed));
+  const service = analytics(gates, executed);
+  const route = buildRoute(async () => service);
   const res = mockRes();
   const logSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   try {
