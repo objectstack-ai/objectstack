@@ -3404,7 +3404,9 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'entries are declared and translated by the package that owns it. `dashboards.DASH` a ' +
       'dashboard, `.widgets.ID` a widget `id` on it, and `.actions.URL` a header action\'s ' +
       '`actionUrl`, not its label. `picklists.LIST` a picklist\'s `name` that a package of this ' +
-      'stack declares.',
+      'stack declares. `positions.NAME` a position\'s `name` that a package of this stack ' +
+      'declares, or an audience anchor (`everyone`, `guest`); `permissions.NAME` a permission ' +
+      'set\'s `name` that a package of this stack declares.',
     // The terminal toast keys are held to `FLOW_TERMINAL_MESSAGE_KEYS` by the rule's test.
     '`flows.FLOW` a flow\'s machine `name`; `.successMessage` / `.errorMessage` a toast the flow ' +
       'itself authors (a bundle cannot add one); `.screens.NODE` the `id` of a `type: \'screen\'` ' +

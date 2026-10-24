@@ -1061,6 +1061,8 @@ beneath an action entry are judged the same way under either.
 | `apps.{app}.navigation.{id}` | a navigation item `id` the app declares (nested `children` and `areas[]` included) or one contributed into it; under an app that is only contributed into, the contributed ids alone |
 | `dashboards.{dash}` / `.widgets.{id}` / `.actions.{actionUrl}` | a dashboard declared / a widget `id` on it / a header action's `actionUrl` on it |
 | `flows.{flow}` | a flow's machine `name`, declared |
+| `positions.{name}` | a position's `name`, declared, or an audience anchor (`everyone`, `guest`) |
+| `permissions.{name}` | a permission set's `name`, declared |
 | `flows.{flow}.screens.{node}` | the `id` of a `type: 'screen'` node in that flow, nodes nested in loop, parallel and try/catch regions included |
 | `flows.{flow}.screens.{node}.fields.{field}` | a `config.fields[].name` on that screen — an object-form screen (`config.objectName`) declares none, and its input labels live under `objects.{objectName}.fields` |
 
@@ -1092,9 +1094,6 @@ metadata-type registry rather than by this stack's metadata, so there is no set
 of legal names to resolve against. (`settings` is not checked either, and since
 it left the per-app bundle it cannot appear in one at all — the parse refuses it
 before any lint runs.)
-`positions` and `permissions` are not checked either: a key there is resolved
-by the position's or permission set's `name` at read time, and one that names
-nothing simply translates nothing.
 
 ### Translation Service Integration
 
