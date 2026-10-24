@@ -1445,8 +1445,19 @@ export const RecordDetailsProps = strictObject({
      * asked for the default". Defaults in the describe() texts are MEASURED on
      * the renderer (read points recorded in `liveness/page.json`, row
      * `regions`), not transcribed from a TS interface.
+     *
+     * What `hideEmpty: false` renders was re-ruled (ruling C on
+     * objectstack-ai/objectui#13386, maintainer 2026-10-23): in read-only mode
+     * an all-empty section renders its heading plus ONE fold row — the same
+     * fold a partly-filled section uses — instead of a column of empty rows;
+     * edit mode is unchanged and renders every row, editable. No key, shape or
+     * default changed, and the describe() states the ruled rendering, which
+     * objectui's `DetailSection` follows. The key governs only the ALL-empty
+     * case: a partly-filled section's empty rows follow the renderer's own
+     * fold (objectui#7129 Q2-C) in either polarity, so the old lead "hide this
+     * section's empty fields" no longer told the two values apart.
      */
-    hideEmpty: z.boolean().optional().describe('Hide this section\'s empty fields (renderer default: on — and a section whose fields are ALL empty then renders nothing at all: no heading, no skeleton). Set `false` to render empty rows, keeping the section\'s label skeleton on an all-empty record (e.g. a brand-new one).'),
+    hideEmpty: z.boolean().optional().describe('Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode it renders its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row.'),
     /** Collapsible card. Initial state is expanded; the toggle is the heading. */
     collapsible: z.boolean().optional().describe('Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off).'),
     /** Card chrome; the renderer derives it from the presence of a title. */
