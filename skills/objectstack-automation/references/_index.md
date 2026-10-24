@@ -21,6 +21,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Transitive dependencies
 
+- `node_modules/@objectstack/spec/src/automation/api-trigger-secret-ref.zod.ts` — An inbound `api` hook's secret, by reference
 - `node_modules/@objectstack/spec/src/automation/control-flow.zod.ts` — Structured control-flow constructs (ADR-0031) — the **native + AI-authored**
 - `node_modules/@objectstack/spec/src/automation/schemaless-node-config.zod.ts` — Config contracts for the **descriptor-schemaless** builtins whose designer
 - `node_modules/@objectstack/spec/src/data/context-tokens.zod.ts` — Context Tokens — the declarative placeholders that resolve against the

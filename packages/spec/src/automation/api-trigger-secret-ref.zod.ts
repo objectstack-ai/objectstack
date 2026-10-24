@@ -76,6 +76,8 @@ export const ApiTriggerSecretRefSchema = z
       'literal `secret`, never beside it; not in the `OS_` namespace.',
   );
 
+export type ApiTriggerSecretRef = z.infer<typeof ApiTriggerSecretRefSchema>;
+
 /**
  * The usable reference on a start node's `config`, or `undefined` when the key
  * is absent or does not parse. The one reader the lint rule and the engine
