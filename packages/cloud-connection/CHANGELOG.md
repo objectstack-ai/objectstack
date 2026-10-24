@@ -1,5 +1,214 @@
 # @objectstack/cloud-connection
 
+## 18.1.0
+
+### Minor Changes
+
+- 3937697: feat(cloud-connection): `GET /api/v1/runtime/config` serves the Branding settings' name, logo and colour, falling back to `OS_PRODUCT_NAME`, `OS_LOGO_URL` and `OS_BRAND_COLOR`
+  
+  Clause-②: no (the served `branding` block keeps its shape and no exported type changes; only where its values come from moves)
+  
+  `RuntimeConfigPlugin` reads the `branding` settings namespace on every request, so Setup → Branding changes the console and the sign-in page on their next load:
+  
+  - `branding.productName` ← `branding.workspace_name`
+  - `branding.logoUrl` ← `branding.logo_url`
+  - `branding.brandColor` ← `branding.accent_color`
+  
+  A value somebody set wins (saved in Setup, or pinned by the settings layer's own `OS_BRANDING_*` variable). A key nobody set falls back exactly as before: the host's constructor option, then `OS_PRODUCT_NAME` / `OS_LOGO_URL` / `OS_BRAND_COLOR`, then the built-in default. `productShortName`, `pwaDescription` and `pwaThemeColor` follow the name and colour actually served, unless configured themselves. `brandColor` keeps its meaning: the console's browser and installed-app theme colour, beside each app's own `AppBranding` colours.
+  
+  The door reads the settings only when the settings service lists the `branding` namespace. `@objectstack/service-settings` withholds it under the `group` and `isolated` tenancy postures, so on a walled deployment no tenant data reaches this anonymous door and the deployment's `OS_*` branding is served, as before. A settings read that fails serves the deployment's branding and logs one warning; the door never answers 500 for it.
+- 3937697: fix(cloud-connection)!: a runtime holding the environment service key is platform-managed, so it registers no Cloud Connection Setup page and refuses to disconnect; everywhere else the Cloud Connection entry moves to Setup's Integrations group
+  
+  A runtime whose control-plane credential is the environment service key (`controlPlaneApiKey`, or `OS_CLOUD_API_KEY`, which the cloud sets on the environments it hosts) is connected by the platform, not by anyone on the runtime. It still registered the Cloud Connection page in Setup's Apps group, which read "Connected" and offered Disconnect. Disconnecting there cleared the runtime's stored device credential while the service key stayed in use, so the page went on reading "Connected", and the control plane was asked to revoke a connection the platform had made.
+  
+  Such a runtime now registers neither the page nor its navigation entry, and says so once at boot. A request to disconnect it is refused with `409` and `RESOURCE_CONFLICT`, after the sign-in and capability checks and before anything is revoked or cleared. The message says the platform manages the connection.
+  
+  A self-hosted or local runtime, connected through the device-code flow, keeps the page and its disconnect unchanged. Its Cloud Connection entry moves from the Apps group to the Integrations group, after Webhooks, Datasources and Connect an Agent. That group requires `manage_platform_settings`, so a user who holds Setup Access without it, such as an organization administrator, no longer sees the entry.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is what a runtime holding the environment service key serves: it no longer registers the Cloud Connection page or its navigation entry, and it refuses a disconnect it used to carry out. The navigation entry's new group is a value inside an exported constant whose type is unchanged. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (on a runtime holding the environment service key, a disconnect request it carried out is now refused, and the Cloud Connection page and its navigation entry are no longer served), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **Unchanged:** a runtime without the service key, apart from the entry's group and the permission its connect and disconnect requests and its connection details require, which another change in this release raises to `manage_platform_settings`. The connection status answer is otherwise unchanged on every runtime.
+  - **Nothing to rewrite:** a cloud-hosted environment's connection is the platform's to manage. A self-hosted server leaves `OS_CLOUD_API_KEY` unset, as the deployment guide says; one that sets it is platform-managed by this rule.
+
+### Patch Changes
+
+- 3937697: feat(cloud-connection, plugin-security, spec, cli): a marketplace upgrade that would un-make an access choice is refused until it is confirmed (ADR-0126 §6 wall 3)
+  
+  Clause-②: yes (narrowing): a marketplace re-install that installed before is now refused `409` while it would un-make an access choice made in this system, until the same call confirms it (narrowing); the door gains the `confirmAccessUpgrade` body field and the `ACCESS_UPGRADE_CONFIRMATION_REQUIRED` code, plugin-security gains the `security.accessUpgradeCheck` service and its exports, and the CLI gains `--confirm-access-upgrade <token>` (widening).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What narrows is one install door's answer on an upgrade that would un-make an access choice; the caller's migration is the confirmation the refusal itself names (`confirmAccessUpgrade` with the finding set's token), stated below. -->
+  
+  **BREAKING** — `POST /api/v1/marketplace/install-local` stops an upgrade it used to run. A managed re-install over an installed package now asks the security plugin what replacing that package with the incoming version would un-make, and refuses when the answer is not empty.
+  
+  - **What it compares.** The boot report's comparison (`collectAccessUpgradeFindings`, unchanged) runs twice: over the registry as it stands, and over the registry with the package's permission sets, positions, capabilities, declared sharing rules, objects and fields taken from the incoming manifest. The door refuses on what the second run finds that the first does not, so a finding that predates the upgrade, or that another package caused, never blocks it; the boot report keeps raising those.
+  - **What it refuses on.** A switch-off whose name the upgrade drops while it ships a new name of the same type (a suspected re-enablement, naming the positions that bind a renamed permission set), a switch whose name it drops, a declared sharing rule whose name a rule authored in this system holds, an object, field or capability a permission set or sharing rule authored in this system names and the upgrade drops, and a field deny the upgraded set gains that a permission set authored in this system granting the object lacks. A clone records no base (ADR-0126 §9), so "the old name carrying a clone" is carried by the switch-off half: the sanctioned ceremony is clone plus switch-off.
+  - **The refusal.** `409 ACCESS_UPGRADE_CONFIRMATION_REQUIRED`, before any write. `error.details.findings` names each finding with a one-line `describe`; `error.details.findingSet` is the finding set's token; `error.details.confirmWith` is the retry.
+  - **The confirmation.** FROM a re-install that ran on any answer TO the same request carrying `"confirmAccessUpgrade": "<findingSet>"` (CLI: `os package install <package> --confirm-access-upgrade <findingSet>`). The token confirms exactly the findings it names: when they change, it no longer matches and the call is refused again with the fresh set. A bare `true` confirms nothing. A confirmed install records `accessUpgradeConfirmation` (the token, who, when) in its ledger entry; the next boot's report still raises whatever stands.
+  - **Who sees it.** Under `group` and `isolated` the platform operator alone reaches the check: the walled-catalog refusal answers a tenant administrator `403` first, and shows no finding. Under `single`, the administrator (`manage_metadata`).
+  - **Fail closed.** A check that could not read the activation ledger, the security catalog or the declared sharing rules answers `503 SERVICE_UNAVAILABLE` and writes nothing: a comparison that did not run is never "no finding". A composition without the security plugin does not check the re-install against the access choices it could un-make; the upgrade proceeds and one `warn` line says no check ran.
+  - **Unchanged.** A fresh install is never checked. An upgrade with no finding installs exactly as before.
+  
+  The error-code ledger registers `ACCESS_UPGRADE_CONFIRMATION_REQUIRED` under `@objectstack/cloud-connection`. `@objectstack/plugin-security` exports `ACCESS_UPGRADE_CHECK_SERVICE`, `createAccessUpgradeCheck` and `accessUpgradeDelta`, and `SecurityPlugin` registers the check under `security.accessUpgradeCheck`.
+- 3937697: fix(cloud-connection)!: one rule for the Cloud Connection capability — the page's record and its three connection-changing requests require `manage_platform_settings`, like its Setup entry; a server holding the environment service key also refuses `bind/start` and `bind/poll`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is which signed-in callers the Cloud Connection routes serve: the capability they read moves from `setup.access` to `manage_platform_settings`, and a server holding the environment service key refuses two more of them. The navigation entry's added `requiredPermissions` is a value inside an exported constant whose type is unchanged. -->
+  
+  **BREAKING** (a signed-in user who holds Setup Access, `setup.access`, without Manage Platform Settings, `manage_platform_settings`, such as an organization administrator under the default permission sets, can no longer connect or disconnect the server, and is no longer served the connection's details), shipped as `patch`: the change is to which callers the routes serve, not to the metadata protocol.
+  
+  The Cloud Connection page's Setup entry sits in the Integrations group, which requires `manage_platform_settings`. The page's routes still took `setup.access` alone, so an organization administrator, whose default permission set carries Setup Access but not Manage Platform Settings, was not shown the entry but could open the page by its address and connect or disconnect the server. One rule now covers the entry, the page and the routes:
+  
+  - **Refused now:** `POST /api/v1/cloud-connection/bind/start`, `POST /api/v1/cloud-connection/bind/poll` and `POST /api/v1/cloud-connection/unbind` answer a signed-in user who does not hold `manage_platform_settings` with `403` and the standard `PERMISSION_DENIED` code, and the message names that capability. Holding `setup.access` is no longer enough. The refusal still comes before any call to the cloud and before the stored credential is touched.
+  - **Narrowed now:** `GET /api/v1/cloud-connection/status` serves `environmentId` and `connection` only to a user who holds `manage_platform_settings`. Every other caller, an organization administrator included, is served `bound`, `runtimeId` and `provider`, as an anonymous caller is.
+  - **Declared on the entry:** the Cloud Connection navigation entry now declares `requiredPermissions: ['manage_platform_settings']` itself, the capability its group already required, so the entry and the routes read one rule from this package. The page carries no permission key of its own (a page has none); what it shows is served by these routes.
+  - **Refused on a platform-managed server:** a server holding the environment service key (`controlPlaneApiKey`, or `OS_CLOUD_API_KEY`) already refused `unbind` with `409` and `RESOURCE_CONFLICT`. It now refuses `bind/start` and `bind/poll` the same way, after the sign-in and capability checks and before any call to the cloud or any write to the stored credential. A device connection completed there used to store a credential the service key always overrode, while presenting that key to the cloud, which could move the environment's cloud-side connection record. The message now says the connection cannot be connected or disconnected here, and that nothing was sent to the cloud and nothing was stored or cleared.
+  - **Unchanged:** a user who holds `manage_platform_settings`, which the default platform-administrator permission set carries, is served exactly as before on a server without the service key. Anonymous callers still get `401`, and a session the authentication policy is holding still gets its `403`. The device-code flow's steps, the status answer for a permitted caller, and the four other session routes (`install`, `installation`, `installed`, `org-packages`) are unchanged.
+  
+  **Who acts:** a deployment that relies on organization administrators, or another set holding only Setup Access, to connect its server grants `manage_platform_settings` to those users, through a permission set or a position, and they are served as before.
+- 3937697: feat(core): `isCloudManaged()` is the one reader of `OS_CLOUD_MANAGED`, and a production boot that sets it without a bound control plane refuses to start
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **New exports of `@objectstack/core`:** `isCloudManaged()`, `resolveControlPlaneApiKey(configured?)` and `resetCloudManagedForTesting()`. `isCloudManaged()` is synchronous and answers `true` when `OS_CLOUD_MANAGED` is exactly `1`, `false` when it is unset or empty; any other value is refused with an error that names it. The answer is memoized for the process; tests that set the variable call `resetCloudManagedForTesting()` before and after.
+  - **The fuse.** On a production boot (not `--dev`, which sets `NODE_ENV=development` only when `NODE_ENV` is unset, and not `NODE_ENV=test`; so `NODE_ENV=production os serve --dev` counts as a production boot and is refused the same way), `OS_CLOUD_MANAGED=1` with `OS_CLOUD_API_KEY` unset or empty refuses: `ObjectKernel.bootstrap()` and `LiteKernel.bootstrap()` reject before any plugin initialises, and `isCloudManaged()` throws the same error. The cloud sets both variables on the runtimes it hosts. A self-hosted deployment that has `OS_CLOUD_MANAGED=1` in a copied env file now fails to boot; remove the variable, which a self-hosted deployment never needs.
+  - **One caveat:** the fuse reads the environment only. A runtime that binds its control plane solely through `CloudConnectionPlugin`'s `controlPlaneApiKey` option, and also sets `OS_CLOUD_MANAGED=1` in production, is refused. Set `OS_CLOUD_API_KEY` instead.
+  - **`@objectstack/cloud-connection`:** the plugin resolves its control-plane credential through `resolveControlPlaneApiKey(controlPlaneApiKey)`, so the plugin's "platform-managed" answer and the fuse share one derivation. Its behaviour is unchanged: the option wins, then `OS_CLOUD_API_KEY`, trimmed.
+- 3937697: fix(cloud-connection)!: a cloud-fetched marketplace install whose package ships a position, permission set or capability name an environment-authored item holds is refused before any write, as the file-import install already was
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. No export, type, flag or error code is added, removed or renamed: the refusal reuses the door's own `PLUGIN_REGISTER_FAILED` code and the registry's existing security-catalog sentence. What narrows is one install door's answer for a package the registry already refused to load; the remedy for a deployment that already took such an install is an operator one, stated below. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this door (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (the install door's accept set narrows), shipped as `patch`: it refuses only installs that could never load.
+  
+  `POST /api/v1/marketplace/install-local` fetching a package from the marketplace (`packageId` plus `versionId`) used to answer `200` with `hotLoaded: false` when the registry refused the package because an item authored in this system already holds a security catalog name the package ships, for example a customer's clone of a vendor permission set saved under a name the vendor's next version also uses. The door wrote the package to its install ledger anyway and said it would load at the next restart. It never could: the environment's item is loaded at every boot, so the restart met the same refusal. Measured on a real restart, the boot runs, logs `rehydrate failed for <package id>` with the security-catalog sentence, and the package is not loaded at all. On an upgrade, not even its earlier version loads, because the ledger entry that named that version was overwritten.
+  
+  - **Now:** that install is refused `422 PLUGIN_REGISTER_FAILED` before anything is registered or written, with the registry's sentence naming each colliding name and its holder. The earlier version, on an upgrade, stays installed and loaded. This is the answer an install from an imported file (`manifest` in the body) already gave.
+  - **Unchanged:** an install with no such collision, fresh or upgrade. A cloud-fetched install the registry refuses for any other reason keeps its lenient `200` answer. A name another package or a built-in holds is not part of this change. `POST /api/v1/packages` cannot ship a catalog name at all: its body parse refuses a `positions`, `capabilities` or permission-set list before any write.
+  - **Who sees it:** under `single`, the administrator who installs packages. Under `group` and `isolated`, the platform operator, who alone reaches marketplace installs.
+  
+  **If a deployment already took such an install.** Its boot log carries `rehydrate failed for <package id>` with `Security catalog name conflict`, and the package's apps, objects and permission sets are missing although `GET /api/v1/marketplace/install-local` lists it. Choose one of these:
+  
+  - To stay on the earlier version, install that version again through the same door (`POST /api/v1/marketplace/install-local` with its `versionId`). It loads at once, and its ledger entry replaces the one that cannot load, so it also loads after a restart.
+  - To take the new version, first move the environment's item off the name. Save it again under a new name, point every assignment that named the old name at the new one, then delete the item under the old name. Then restart, or install the new version again. Only after that does the old name belong to the package, so an assignment left on the old name grants the package's definition from then on.
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [4395cbc]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [3937697]
+- Updated dependencies [9f39094]
+  - @objectstack/spec@18.1.0
+  - @objectstack/core@18.1.0
+  - @objectstack/runtime@18.1.0
+  - @objectstack/metadata-protocol@18.1.0
+  - @objectstack/objectql@18.1.0
+  - @objectstack/metadata-core@18.1.0
+  - @objectstack/types@18.1.0
+
 ## 18.0.0
 
 ### Minor Changes
