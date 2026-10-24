@@ -235,7 +235,12 @@ async function seed(protocol: any, registry: SchemaRegistry) {
     // [#24210] One item of every declared type, as a code package ships it:
     // the registry layer, stamped with the package that registered it.
     for (const type of BY_NAME_TYPES) {
-      registry.registerItem(type, { name: shippedName(type, pkg), label: 'Shipped' } as any, 'name', pkg);
+      // [#25649] A package's action is stored as its `ActionSchema` parse, so it
+      // is shipped as a declaration that parses.
+      const body = type === 'action'
+        ? { name: shippedName(type, pkg), label: 'Shipped', type: 'url', target: 'https://example.com/shipped' }
+        : { name: shippedName(type, pkg), label: 'Shipped' };
+      registry.registerItem(type, body as any, 'name', pkg);
     }
   }
 }
