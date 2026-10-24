@@ -104,18 +104,18 @@ describe('anonymousFormIntakeUnavailability — the intake-availability predicat
     const raw = (extra: Record<string, unknown> = {}) => ({ name: 'inquiry', fields: { email: { type: 'text' } }, ...extra });
 
     it.each(['isolated', 'group'] as const)("'%s': a walled object is unavailable, naming the object, the posture and the column", (posture) => {
-        expect(anonymousFormIntakeUnavailability('inquiry', posture, () => served()))
+        expect(anonymousFormIntakeUnavailability('inquiry', posture, () => served(), []))
             .toEqual({ object: 'inquiry', posture, tenantField: 'organization_id' });
     });
 
     it('judges the EFFECTIVE schema: a stored body with no declared organization_id is walled all the same', () => {
-        expect(anonymousFormIntakeUnavailability('inquiry', 'isolated', () => raw()))
+        expect(anonymousFormIntakeUnavailability('inquiry', 'isolated', () => raw(), []))
             .toEqual({ object: 'inquiry', posture: 'isolated', tenantField: 'organization_id' });
     });
 
     it('a declared tenancy.tenantField the object really has is the column named', () => {
         const schema = served({ tenancy: { tenantField: 'company_id' }, fields: { company_id: { type: 'text' } } });
-        expect(anonymousFormIntakeUnavailability('inquiry', 'isolated', () => schema)?.tenantField).toBe('company_id');
+        expect(anonymousFormIntakeUnavailability('inquiry', 'isolated', () => schema, [])?.tenantField).toBe('company_id');
     });
 
     it.each<[string, unknown]>([
@@ -123,7 +123,7 @@ describe('anonymousFormIntakeUnavailability — the intake-availability predicat
         ['an object the universe does not hold', undefined],
         ['an object with no fields record and no wall', { name: 'inquiry', systemFields: false }],
     ])('CONTROL, walled posture — %s: available', (_label, schema) => {
-        expect(anonymousFormIntakeUnavailability('inquiry', 'isolated', () => schema)).toBeNull();
+        expect(anonymousFormIntakeUnavailability('inquiry', 'isolated', () => schema, [])).toBeNull();
     });
 
     it.each<[string, 'single' | undefined]>([
@@ -131,15 +131,23 @@ describe('anonymousFormIntakeUnavailability — the intake-availability predicat
         ['no tenancy service (no posture)', undefined],
     ])('CONTROL — %s: available, and the object is never read', (_label, posture) => {
         let reads = 0;
-        expect(anonymousFormIntakeUnavailability('inquiry', posture, () => { reads += 1; return served(); })).toBeNull();
+        expect(anonymousFormIntakeUnavailability('inquiry', posture, () => { reads += 1; return served(); }, [])).toBeNull();
         expect(reads).toBe(0);
     });
 
     it('an asynchronous reader gets a promise when a wall is in force, and null without reading otherwise', async () => {
-        const walled = anonymousFormIntakeUnavailability('inquiry', 'group', async () => served());
+        const walled = anonymousFormIntakeUnavailability('inquiry', 'group', async () => served(), []);
         expect(walled).toBeInstanceOf(Promise);
         expect(await walled).toEqual({ object: 'inquiry', posture: 'group', tenantField: 'organization_id' });
-        expect(anonymousFormIntakeUnavailability('inquiry', 'single', async () => served())).toBeNull();
+        expect(anonymousFormIntakeUnavailability('inquiry', 'single', async () => served(), [])).toBeNull();
+    });
+
+    // [ADR-0138 D5] A form bound to organizations at publish time carries the
+    // organization its link names, so the posture reason never applies to it.
+    it.each(['isolated', 'group'] as const)("'%s': a form bound to organizations is available, and the object is never read", (posture) => {
+        let reads = 0;
+        expect(anonymousFormIntakeUnavailability('inquiry', posture, () => { reads += 1; return served(); }, ['acme'])).toBeNull();
+        expect(reads).toBe(0);
     });
 });
 
@@ -325,6 +333,7 @@ describe('anonymousFormIntakeWithdrawnIn — an explicit withdrawal of the same 
 describe('the candidates half is the spec binding itself, re-exported (one copy, not a copy)', () => {
     const NAMES = [
         'publicFormSlug',
+        'anonymousFormIntakeOrganizations',
         'anonymousFormIntakeSlug',
         'anonymousFormIntakeCandidates',
         'anonymousFormIntakeSlugs',
