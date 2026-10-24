@@ -870,6 +870,50 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
   approvers: z.array(ApprovalNodeApproverSchema).min(1).describe('Allowed approvers for this node'),
 
   /**
+   * Segregation of duties: keep the request's submitter off the slate this
+   * node resolves, so a manager who submits their own request cannot approve
+   * it (ruling 6377731715 on #25496, letter B for #25446: "default off").
+   *
+   * - **Where it lives.** On the node config, because ADR-0019 made each
+   *   approval STEP an approval NODE — this is the step-level option the
+   *   ruling names. It applies to the whole slate `approvers` resolves to,
+   *   whatever approver type produced each person (`field`, `position`, any
+   *   other), so it is one switch per node, never one per approver row: the
+   *   approver shape stays closed and refuses it.
+   * - **Who the submitter is.** The user whose action started the flow run —
+   *   `plugin-approvals` hands the run's trigger user to `openNodeRequest` and
+   *   records it on the request as `sys_approval_request.submitter_id`.
+   * - **An emptied slate.** Takes the node's `onEmptyApprovers` route, never a
+   *   silent pass, and the approval record shows that the exclusion changed
+   *   the route (the ruled behaviour, built in `plugin-approvals` by #25573).
+   * - **Off by default, and ABSENT when off.** `.optional()`, not
+   *   `.default(false)`: a node that does not author the key parses to
+   *   exactly the output it parsed to before the key existed, so every stored
+   *   approval node, and the config snapshot each request row keeps, is
+   *   unchanged — "off, behaviour is unchanged" holds at the parse as well as
+   *   at the run.
+   *
+   * PLANNED, not yet read: `plugin-approvals` parses the key with the rest of
+   * the config and nothing reads it yet, so the submitter is NOT removed until
+   * #25573 lands. The liveness record is the `liveness/flow.json` `_note`
+   * (the ledger walk ends at `flow/nodes.config`, a record of `unknown`, so
+   * no row can carry a node-config key) and the `[PLANNED — not yet
+   * enforced]` marker this describe opens with; when #25573 lands, the marker
+   * and the describe's last sentence leave and the `_note` sentence is
+   * rewritten.
+   */
+  excludeSubmitter: z.boolean().optional().describe(
+    '[PLANNED — not yet enforced] Segregation of duties for this step: when true, the request\'s submitter '
+    + '(the user whose action started the flow run, recorded on the approval request as `submitter_id`) is '
+    + 'removed from the slate `approvers` resolves to, whatever approver type produced them. If that leaves '
+    + 'nobody, the request takes the node\'s `onEmptyApprovers` route (`admin_rescue` by default, or '
+    + '`fallbackApprovers` under `\'fallback\'`) and never passes silently, and the approval record shows that '
+    + 'the exclusion changed the route. Omitted or false (the default), the slate stays as resolved. '
+    + 'The approval engine does not read this key yet, so today the submitter is NOT removed: keep any guard '
+    + 'you rely on (an `expression` approver or a validation rule) until it does.',
+  ),
+
+  /**
    * How multiple approvers combine (#3266):
    *  - `first_response` — any one approval (or rejection) finalizes the node.
    *  - `unanimous` — every resolved approver must approve.
