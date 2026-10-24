@@ -34,6 +34,6 @@
     "@object-ui/core": "workspace:*",
     "@object-ui/react": "workspace:*",
     "@object-ui/types": "workspace:*",
-    "@objectstack/spec": "^18.0.0-next.1"
+    "@objectstack/spec": "workspace:^"
   }
 }

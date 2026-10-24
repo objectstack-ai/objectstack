@@ -37,7 +37,7 @@
     "react": "^18.0.0 || ^19.0.0"
   },
   "dependencies": {
-    "@objectstack/spec": "^18.0.0-next.1",
+    "@objectstack/spec": "workspace:^",
     "better-auth": "^1.7.2"
   },
   "devDependencies": {

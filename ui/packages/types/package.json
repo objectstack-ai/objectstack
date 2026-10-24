@@ -93,7 +93,7 @@
     "directory": "packages/types"
   },
   "dependencies": {
-    "@objectstack/spec": "^18.0.0-next.5",
+    "@objectstack/spec": "workspace:^",
     "zod": "^4.6.5"
   },
   "devDependencies": {

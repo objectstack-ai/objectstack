@@ -42,7 +42,7 @@
     "@object-ui/react": "workspace:*",
     "@object-ui/types": "workspace:*",
     "@radix-ui/react-slot": "^1.3.3",
-    "@objectstack/spec": "^18.0.0-next.1",
+    "@objectstack/spec": "workspace:^",
     "@radix-ui/react-use-controllable-state": "^1.2.6",
     "ai": "^7.0.65",
     "class-variance-authority": "^0.7.1",

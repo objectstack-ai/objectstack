@@ -42,7 +42,7 @@
     "@object-ui/plugin-grid": "workspace:*",
     "@object-ui/react": "workspace:*",
     "@object-ui/types": "workspace:*",
-    "@objectstack/spec": "^18.0.0-next.1",
+    "@objectstack/spec": "workspace:^",
     "clsx": "^2.1.1",
     "lucide-react": "^1.43.0",
     "sonner": "^2.0.8",
