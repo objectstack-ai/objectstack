@@ -9,10 +9,10 @@
  * matched the labels. Through the real route over a real `SqlDriver`
  * (better-sqlite3 `:memory:`).
  *
- * Measured through this route at the base (`ce18e73483`), CSV and JSON alike:
- * the row below failed whole, with `invalid_date` on its first bad cell — the
- * dotted day, then the compact one, then `invalid_option` on `CN` — so the
- * operator fixed one cell per round. At head it imports.
+ * Measured through this route by ablating each half on the built
+ * `@objectstack/core` the route reads: with either half removed, the ledger row
+ * below fails whole (`ok: 0`, `errors: 1`) on the CSV import and on the JSON
+ * dry run alike, as it did at the base (`ce18e73483`). At head it imports.
  *
  * The reader's own case table is `import-coerce.test.ts`'s `[#25582]` blocks
  * in `@objectstack/core`; this file pins the door.
