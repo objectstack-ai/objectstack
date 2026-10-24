@@ -14,8 +14,8 @@
  *
  * This module records instead, per object, that a walk COMPLETED: one
  * receipt row in the `sys_migration` deployment ledger. A later boot then
- * walks only the rows written since that walk started (`updated_at`), which
- * is what can still need a companion: rows written while the switch was off,
+ * walks only the rows written since that walk started (`updated_at`) that
+ * still carry no companion, which is what can still need one: rows written while the switch was off,
  * seed rows written before the hooks were bound, and rows a hook-bypassing
  * writer stamped. An unchanged object reads zero rows. Writes that bypass the
  * audit stamp too are the explicit rebuild's job (`rebuildSearchCompanion`).
@@ -55,6 +55,7 @@
  */
 
 import { DATA_MIGRATION_FLAG_OBJECT, type DataMigrationFlag } from '@objectstack/spec/system';
+import { SEARCH_COMPANION_FIELD } from '@objectstack/objectql';
 import {
   companionObjects,
   walkCompanionObject,
@@ -172,7 +173,7 @@ export async function reconcileSearchCompanion(
       {
         batchSize,
         signal: options?.signal,
-        where: usable ? { [WATERMARK_FIELD]: { $gte: entry!.since } } : undefined,
+        where: usable ? sinceLastWalk(entry!.since) : undefined,
       },
       logger,
     );
@@ -211,6 +212,19 @@ export async function reconcileSearchCompanion(
     result.recorded = await writeReceipt(engine, next, skipped, now().toISOString(), logger);
   }
   return result;
+}
+
+/**
+ * The rows that can still need a companion after a completed walk: written
+ * since it started AND still without one. A row that has a blob never needs
+ * a backfill. The `null` test alone is not enough (a non-CJK row is `null`
+ * forever, so it would match on every boot), and the watermark alone is not
+ * either: the walk's own writes go through the audit stamp, so every row it
+ * filled carries a fresh `updated_at` and the next boot would read them all
+ * again. Together they match only rows nothing has looked at.
+ */
+function sinceLastWalk(since: string): Record<string, unknown> {
+  return { $and: [{ [WATERMARK_FIELD]: { $gte: since } }, { [SEARCH_COMPANION_FIELD]: null }] };
 }
 
 function hasLedger(engine: MinimalEngine): boolean {
