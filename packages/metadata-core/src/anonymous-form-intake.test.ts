@@ -149,6 +149,11 @@ describe('anonymousFormIntakeUnavailability — the intake-availability predicat
         expect(anonymousFormIntakeUnavailability('inquiry', posture, () => { reads += 1; return served(); }, ['acme'])).toBeNull();
         expect(reads).toBe(0);
     });
+
+    it('the binding omitted is judged unbound: it fails closed, never open', () => {
+        expect(anonymousFormIntakeUnavailability('inquiry', 'isolated', () => served()))
+            .toEqual({ object: 'inquiry', posture: 'isolated', tenantField: 'organization_id' });
+    });
 });
 
 describe('anonymousFormIntakePosture — the posture IN FORCE, as the tenancy service reports it', () => {

@@ -150,8 +150,8 @@ function judgeObjectSchema(
  * predicate states — an anonymous submission carries no organization — does
  * not hold for it. Whether the link names a listed organization is the door's
  * per-request question (`resolvePublicFormOrganization`, `@objectstack/core`).
- * The binding is a required argument, so no reader can judge a bound form by
- * the unbound rule by omission.
+ * Omitting the binding judges the form as unbound, which fails closed: a bound
+ * form is withheld on a walled posture, never opened by mistake.
  *
  * `readObjectSchema` runs only once a wall is in force. A synchronous reader
  * gets a synchronous answer (the authoring gate); a reader that returns a
@@ -167,19 +167,19 @@ export function anonymousFormIntakeUnavailability(
     object: string,
     posture: TenancyPosture | undefined,
     readObjectSchema: () => PromiseLike<unknown>,
-    organizations: readonly string[],
+    organizations?: readonly string[],
 ): Promise<AnonymousFormIntakeUnavailable | null> | null;
 export function anonymousFormIntakeUnavailability(
     object: string,
     posture: TenancyPosture | undefined,
     readObjectSchema: () => unknown,
-    organizations: readonly string[],
+    organizations?: readonly string[],
 ): AnonymousFormIntakeUnavailable | null;
 export function anonymousFormIntakeUnavailability(
     object: string,
     posture: TenancyPosture | undefined,
     readObjectSchema: () => unknown,
-    organizations: readonly string[],
+    organizations: readonly string[] = [],
 ): Promise<AnonymousFormIntakeUnavailable | null> | AnonymousFormIntakeUnavailable | null {
     if (organizations.length > 0) return null;
     if (posture === undefined || !postureEnforcesWall(posture)) return null;
