@@ -235,6 +235,29 @@ already relies on ("whichever runs first wins and the other no-ops"). "Framework
 never guesses in multi mode" is therefore not a hedge — it is exactly the
 division of labor the production host already assumes.
 
+#### D3 amendment (2026-10-24) — Setup's Create User joins an organization in multi mode
+
+Decided by the maintainer: in multi mode an administrator creating a user from
+Setup had to add the account to an organization as a second step, every time.
+`POST /admin/create-user` now joins the new user to an organization in the
+same step, as `member`, through better-auth's `addMember` (the Add Member act),
+inside the account's own transaction — a refused join creates no user:
+
+| Request | Joins |
+|:---|:---|
+| `organizationId` given | that organization, under either policy — an organization the administrator names is an explicit flow (D1) |
+| omitted, multi mode (`tenancy.isolationActive`), policy `auto` | the **calling administrator's current (active) organization**; none when they have none |
+| omitted, single mode (a degraded wall included) | unchanged — the reconciler binds the default org |
+| omitted, policy `invite-only` | none — a default is not an explicit choice |
+
+The default is not the reconciler guessing a tenant: it is the organization
+the administrator is working in, read from their own session — the same
+fallback the Add Member action already has. The reconciler itself, and every
+other creation path (self sign-up, bulk import, SSO JIT, host hooks), still
+binds nothing in multi mode. The Create User dialog's organization picker is
+shown only in multi mode (`features.multiOrgEnabled`, the same predicate as
+`isolationActive`), and its help text names the default.
+
 ### D4 — The `tenancy` kernel service
 
 Registered under the service name **`tenancy`**:

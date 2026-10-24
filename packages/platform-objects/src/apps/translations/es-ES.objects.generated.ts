@@ -190,7 +190,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           organizationId: {
             label: "Organización",
-            helpText: "Opcional. Añade el nuevo usuario a esta organización como miembro, para que no tenga que añadirlo después en su lista de miembros."
+            helpText: "Opcional. El nuevo usuario se une a esta organización como miembro. Déjelo vacío para añadirlo a su organización actual."
           }
         },
         resultDialog: {

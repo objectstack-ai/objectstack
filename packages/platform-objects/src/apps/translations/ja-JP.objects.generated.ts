@@ -190,7 +190,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           organizationId: {
             label: "組織",
-            helpText: "任意。新しいユーザーをメンバーとしてこの組織に追加します。後から組織のメンバー一覧で追加する必要はありません。"
+            helpText: "任意。新しいユーザーはメンバーとしてこの組織に参加します。空欄の場合は、現在の組織に追加されます。"
           }
         },
         resultDialog: {

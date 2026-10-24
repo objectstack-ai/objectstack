@@ -190,7 +190,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           },
           organizationId: {
             label: "组织",
-            helpText: "可选。将新用户以成员身份加入该组织，无需再到组织的成员列表中手动添加。"
+            helpText: "可选。新用户将以成员身份加入该组织。留空则加入你当前所在的组织。"
           }
         },
         resultDialog: {
