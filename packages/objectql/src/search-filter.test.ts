@@ -249,3 +249,31 @@ describe('expandSearchToFilter', () => {
     });
   });
 });
+
+describe('[#25672] queryableFields withholds what the caller may not query', () => {
+  const fields = { name: { type: 'text' }, email: { type: 'email' }, ban_reason: { type: 'text' } };
+  const searchableFields = ['name', 'email', 'ban_reason'];
+  const queryableFields = new Set(['name', 'email']);
+  const named = (f: unknown) => (f as { $or: Array<Record<string, unknown>> }).$or.map((c) => Object.keys(c)[0]);
+
+  it('withholds a resolved field outside the set', () => {
+    expect(named(expandSearchToFilter('ann', { fields, searchableFields, queryableFields }))).toEqual(['name', 'email']);
+  });
+
+  it('keeps a field the caller named, in either spelling', () => {
+    expect(named(expandSearchToFilter('x', { fields, searchableFields, queryableFields, requestedFields: ['ban_reason'] })))
+      .toEqual(['ban_reason']);
+    expect(named(expandSearchToFilter('x', { fields, searchableFields, queryableFields, requestedFields: 'name, ban_reason' })))
+      .toEqual(['name', 'ban_reason']);
+    expect(named(expandSearchToFilter({ query: 'x', fields: ['ban_reason'] }, { fields, searchableFields, queryableFields })))
+      .toEqual(['ban_reason']);
+  });
+
+  it('answers null when it withholds every declared field — never the auto-default', () => {
+    expect(expandSearchToFilter('x', { fields, searchableFields: ['ban_reason'], queryableFields })).toBeNull();
+  });
+
+  it('is a no-op when absent', () => {
+    expect(named(expandSearchToFilter('ann', { fields, searchableFields }))).toEqual(['name', 'email', 'ban_reason']);
+  });
+});
