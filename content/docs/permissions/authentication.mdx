@@ -1009,8 +1009,8 @@ the account's transaction: an organization that does not exist or is at its
 membership limit refuses the call with that verdict, and **no user is
 created**. On the Users list the **Create User** dialog shows an optional
 **Organization** picker under a walled posture only; left empty, the default
-above applies. To grant a higher organization role, use **Change Role**
-afterwards.
+above applies. Raising the new member above `member` stays a separate, audited
+step on the organization's Members list.
 
 A generated temporary password is returned **once** in the response (the
 Users-list action reveals it in a one-shot dialog) and is never persisted or

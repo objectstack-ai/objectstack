@@ -1303,7 +1303,14 @@ describe('create-user: an optional organization the new user joins as a member',
     const callerActiveOrganizationId = vi.fn(async () => opts.callerActiveOrg ?? null);
     const m = makeDeps({
       getAuthApi: async () => ({ createUser, addMember }) as any,
-      getDataEngine: () => ({ update: vi.fn(async () => ({})), insert: engineInsert, find }),
+      getDataEngine: () => ({
+        update: vi.fn(async (_obj: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
+        return {};
+      }),
+        insert: engineInsert,
+        find,
+      }),
       getTenancy: () => ({ defaultOrgId: async () => null, isolationActive: opts.isolationActive ?? true }),
       ...(opts.policy ? { getMembershipPolicy: () => opts.policy } : {}),
       ...(opts.callerActiveOrg !== undefined ? { getCallerActiveOrganizationId: callerActiveOrganizationId } : {}),
@@ -1489,7 +1496,10 @@ describe('create-user: an optional organization the new user joins as a member',
     const callerActive = vi.fn(async () => 'org_elsewhere');
     const m = makeDeps({
       getDataEngine: () => ({
-        update: vi.fn(async () => ({})),
+        update: vi.fn(async (_obj: string, data: any, options?: any) => {
+          assertEngineUpdateDispatch(data, options);
+          return {};
+        }),
         insert,
         find: vi.fn(async (object: string) => (object === 'sys_organization' ? [{ id: 'org_default', slug: 'default' }] : [])),
       }),
