@@ -758,7 +758,7 @@ const SECURITY_WILDCARD_VAMA_EXPLANATION: RuleExplanation = {
 
 const SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION: RuleExplanation = {
   rule: 'security-modify-all-delete-withheld',
-  covers: 'why Modify All cannot withhold delete, and the route that can',
+  covers: 'why Modify All cannot withhold delete, and what can',
   paragraphs: [
     '`modifyAllRecords` (Modify All Records) is the write bypass for edit, delete and transfer, as ' +
       'Salesforce\'s Modify All is. The permission evaluator grants delete on the bypass bit before it reads ' +
