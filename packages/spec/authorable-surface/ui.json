@@ -1321,6 +1321,7 @@
     "ui/SharingConfig:allowedDomains",
     "ui/SharingConfig:enabled",
     "ui/SharingConfig:expiresAt",
+    "ui/SharingConfig:organizations",
     "ui/SharingConfig:password",
     "ui/SharingConfig:publicLink",
     "ui/TimelineConfig:colorField",

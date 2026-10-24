@@ -492,6 +492,7 @@
     "WidgetColorVariantSchema (const)",
     "actionForm (const)",
     "anonymousFormIntakeCandidates (function)",
+    "anonymousFormIntakeOrganizations (function)",
     "anonymousFormIntakeSlug (function)",
     "anonymousFormIntakeSlugs (function)",
     "appForm (const)",

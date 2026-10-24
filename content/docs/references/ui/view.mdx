@@ -491,6 +491,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | **allowedDomains** | `string[]` | optional | Restrict access to specific email domains (e.g. ["example.com"]) |
 | **expiresAt** | `string` | optional | Expiration date/time in ISO 8601 format |
 | **allowAnonymous** | `boolean` | optional (default: `false`) | Allow access without authentication |
+| **organizations** | `string[]` | optional | The organizations this public form is published to, by organization slug (ADR-0138 D5). Absent: the form serves the organization the deployment resolves for an anonymous caller, which exists only on a deployment holding exactly one organization, and a link naming an organization is refused. Set: every public link names one of these organizations, as `/forms/:slug?organization=<slug>`, and a submission lands in that organization, under its own number sequences. A link naming no organization, or one not listed here, is answered as not found by both form doors. |
 
 ### Nested Shape: `FormView.submitBehavior[kind='redirect']`
 

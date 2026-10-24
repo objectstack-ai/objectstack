@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { SharingConfigSchema } from './sharing.zod';
 import {
   anonymousFormIntakeCandidates,
+  anonymousFormIntakeOrganizations,
   anonymousFormIntakeSlug,
   anonymousFormIntakeSlugs,
   publicFormSlug,
@@ -23,6 +24,7 @@ describe('the /ui entry exports the candidates half', () => {
     'anonymousFormIntakeSlug',
     'anonymousFormIntakeCandidates',
     'anonymousFormIntakeSlugs',
+    'anonymousFormIntakeOrganizations',
   ] as const)('%s is the module function', (name) => {
     expect(typeof uiEntry[name]).toBe('function');
   });
@@ -32,6 +34,26 @@ describe('the /ui entry exports the candidates half', () => {
     expect(uiEntry.anonymousFormIntakeSlug).toBe(anonymousFormIntakeSlug);
     expect(uiEntry.anonymousFormIntakeCandidates).toBe(anonymousFormIntakeCandidates);
     expect(uiEntry.anonymousFormIntakeSlugs).toBe(anonymousFormIntakeSlugs);
+    expect(uiEntry.anonymousFormIntakeOrganizations).toBe(anonymousFormIntakeOrganizations);
+  });
+});
+
+describe('anonymousFormIntakeOrganizations: the organizations a form is published to (ADR-0138 D5)', () => {
+  it('the declared list, as written', () => {
+    expect(anonymousFormIntakeOrganizations({ ...OPEN, organizations: ['acme', 'globex'] })).toEqual(['acme', 'globex']);
+  });
+
+  it.each<[string, unknown]>([
+    ['no organizations key', OPEN],
+    ['no sharing', undefined],
+    ['not a list', { ...OPEN, organizations: 'acme' }],
+  ])('%s: unbound, []', (_label, sharing) => {
+    expect(anonymousFormIntakeOrganizations(sharing)).toEqual([]);
+  });
+
+  it('a parsed body reads the same as the raw one', () => {
+    const raw = { ...OPEN, organizations: ['acme'] };
+    expect(anonymousFormIntakeOrganizations(SharingConfigSchema.parse(raw))).toEqual(anonymousFormIntakeOrganizations(raw));
   });
 });
 

@@ -84,6 +84,7 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 // location and in the words the admin read uses.
 import {
     anonymousFormIntakeCandidates,
+    anonymousFormIntakeOrganizations,
     anonymousFormIntakeUnavailability,
     anonymousFormIntakeUnavailableMessage,
     anonymousFormIntakeUnavailableRemedy,
@@ -439,6 +440,7 @@ export function findPublicFormIntakeGaps(args: {
             object,
             args.tenancyPostureInForce,
             (): unknown => args.objects.find((o) => isRec(o) && o.name === object),
+            anonymousFormIntakeOrganizations(candidate.form.sharing),
         );
         if (!unavailable) continue;
         issues.push({

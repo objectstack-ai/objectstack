@@ -477,6 +477,7 @@
     "WidgetColorVariantSchema": "src/ui/dashboard.zod.ts#WidgetColorVariantSchema (const)",
     "actionForm": "src/ui/action.form.ts#actionForm (const)",
     "anonymousFormIntakeCandidates": "src/ui/anonymous-form-intake.ts#anonymousFormIntakeCandidates (function)",
+    "anonymousFormIntakeOrganizations": "src/ui/anonymous-form-intake.ts#anonymousFormIntakeOrganizations (function)",
     "anonymousFormIntakeSlug": "src/ui/anonymous-form-intake.ts#anonymousFormIntakeSlug (function)",
     "anonymousFormIntakeSlugs": "src/ui/anonymous-form-intake.ts#anonymousFormIntakeSlugs (function)",
     "appForm": "src/ui/app.form.ts#appForm (const)",

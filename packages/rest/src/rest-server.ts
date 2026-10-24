@@ -79,6 +79,7 @@ import {
     // Which form candidates the anonymous form doors serve — the one rule the
     // metadata protocol also judges organization-scoped `view` writes by.
     anonymousFormIntakeCandidates,
+    anonymousFormIntakeOrganizations,
     // `anonymousFormIntakeWithdrawnIn` (whether another body of the same view name withdraws a
     // candidate), read only by the anonymous form doors, moved with `registerFormEndpoints`'
     // body to `form-routes.ts` (#23050 slice 11).
@@ -5875,6 +5876,7 @@ export class RestServer {
                 object,
                 posture,
                 async () => (await readObjects()).find((o: any) => o?.name === object),
+                anonymousFormIntakeOrganizations(candidate.form.sharing),
             );
             if (!unavailable) continue;
             warnings.push({
