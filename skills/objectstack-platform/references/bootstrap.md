@@ -156,9 +156,6 @@ A minimal but complete project from scratch:
 }
 ```
 
-`npx create-objectstack` writes every `@objectstack/*` dependency as its own version, exactly (no
-caret) — keep all `@objectstack/*` packages on that one version.
-
 **`src/objects/task.object.ts`** — one `ObjectSchema.create({ … })` call. Field
 types, `indexes:` and the rest of the object surface are **objectstack-data**'s;
 the scaffolder's own `note.object.ts` is the shape to copy.
