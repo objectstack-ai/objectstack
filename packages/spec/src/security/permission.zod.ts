@@ -349,8 +349,9 @@ const MODIFY_ALL_ALLOW_DELETE_FALSE_MESSAGE =
   'permission evaluator grants delete on the bypass bit before it reads allowDelete, so this false is ' +
   'never enforced. If the set should delete every record, delete allowDelete (or set it to true). If it ' +
   'should edit records it does not own but delete none, remove modifyAllRecords, keep allowEdit: true ' +
-  "and allowDelete: false, and grant the edit with a sharing rule: a `criteria` rule with accessLevel: 'edit' " +
-  'shared with the position that holds this set. An edit share opens update and never delete; delete stays ' +
+  "and allowDelete: false, and grant the edit with a sharing rule: a `criteria` rule with accessLevel: 'edit', " +
+  "a condition every row satisfies (record.id != ''), shared with the position that holds this set. An edit " +
+  'share opens update and never delete; delete stays ' +
   'with the record owner. The object needs an owner field and an owner-write default (`private` or ' +
   '`public_read`).';
 

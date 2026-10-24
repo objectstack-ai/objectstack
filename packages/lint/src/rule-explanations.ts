@@ -773,7 +773,8 @@ const SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION: RuleExplanation = {
       '`allowDelete: false`, and grant the edit with a `criteria` sharing rule with `accessLevel: \'edit\'` ' +
       'shared with the position that holds the set. An edit share opens update and never delete (ADR-0111 D3). ' +
       'The object needs an owner field and an owner-write default (`private` or `public_read`), and the ' +
-      'rule\'s `condition` must be a field predicate: a literal `true` is refused as a match-all criteria.',
+      'rule\'s `condition` must be a field predicate every row satisfies, such as `record.id != \'\'`: a literal ' +
+      '`true` lowers to an empty filter, which the sharing service never serves.',
   ],
 };
 

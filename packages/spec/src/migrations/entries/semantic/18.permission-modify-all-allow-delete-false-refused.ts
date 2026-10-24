@@ -22,8 +22,10 @@ export const entry: SemanticMigration = {
     + 'the edit with a sharing rule: `{ type: \'criteria\', object, condition, accessLevel: \'edit\', '
     + 'sharedWith: { type: \'position\', value: \'<the position that holds this set>\' } }`. An edit '
     + 'share opens update and never delete (ADR-0111 D3); the object needs an owner field and an '
-    + 'owner-write default (`private` or `public_read`). The `condition` must be a field predicate: a '
-    + 'literal `true` compiles to an empty filter, which the sharing service refuses as match-all.',
+    + 'owner-write default (`private` or `public_read`). The `condition` must be a field predicate that '
+    + 'every row satisfies, such as `record.id != \'\'`: a literal `true` lowers to an empty filter, which '
+    + 'the sharing service never serves (it logs the rule as not served at boot, because it would share '
+    + 'every record).',
   reason:
     'Maintainer ruling A, 2026-10-24: keep the Modify All semantics, which match Salesforce '
     + '"Modify All", and refuse the contradictory pair at publish time; "edit all, delete none" is '
