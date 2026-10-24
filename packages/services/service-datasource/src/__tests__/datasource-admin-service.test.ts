@@ -346,9 +346,9 @@ describe('updateDatasource', () => {
     ).rejects.toThrow(/code-defined/i);
   });
 
-  it('rejects updating a missing datasource', async () => {
+  it('rejects updating a missing datasource with the not-found envelope', async () => {
     const { service } = makeHarness();
-    await expect(service.updateDatasource('nope', { label: 'x' })).rejects.toThrow(/not found/i);
+    await expect(service.updateDatasource('nope', { label: 'x' })).rejects.toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404, message: "Datasource 'nope' not found." });
   });
 });
 
@@ -382,9 +382,9 @@ describe('removeDatasource', () => {
     await expect(service.removeDatasource('crm_primary')).rejects.toThrow(/code-defined/i);
   });
 
-  it('rejects removing a missing datasource', async () => {
+  it('rejects removing a missing datasource with the not-found envelope', async () => {
     const { service } = makeHarness();
-    await expect(service.removeDatasource('nope')).rejects.toThrow(/not found/i);
+    await expect(service.removeDatasource('nope')).rejects.toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404, message: "Datasource 'nope' not found." });
   });
 });
 
@@ -679,9 +679,9 @@ describe('migrateCredential (#8155)', () => {
     expect(h.store.get('warehouse')!.config?.passwd).toBe('stale');
   });
 
-  it('throws for an unknown datasource — the one arm the route answers 400 for', async () => {
+  it('throws the not-found envelope for an unknown datasource — the route answers it 404', async () => {
     const h = makeHarness();
-    await expect(h.service.migrateCredential('nope')).rejects.toThrow("Datasource 'nope' not found.");
+    await expect(h.service.migrateCredential('nope')).rejects.toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404, message: "Datasource 'nope' not found." });
   });
 });
 

@@ -83,7 +83,10 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  * naming that service rather than the one this module is named after (#4225) —
  * and refusals surface as `400` with the service's message, under the
  * `error.code` registered for the service that refused (#4249):
- * `DATASOURCE_ADMIN_ERROR` or `EXTERNAL_DATASOURCE_ERROR`.
+ * `DATASOURCE_ADMIN_ERROR` or `EXTERNAL_DATASOURCE_ERROR`. A name that resolves
+ * no stored datasource is not a refusal: every `datasource-admin` door that
+ * takes `:name` answers it `404` `RESOURCE_NOT_FOUND`, the read and the writes
+ * alike (see `badRequest`).
  *
  * Served by `datasource-admin`:
  *
@@ -631,11 +634,22 @@ export function registerDatasourceAdminRoutes(
    * itself. `sendError`'s parameter type is the closed `ErrorCode` union, so
    * the code below is checked at compile time rather than trusted from the
    * throw site.
+   *
+   * A second relay of the same kind: a service that threw the `404` /
+   * `RESOURCE_NOT_FOUND` envelope has said the NAME resolves nothing, and is
+   * answered exactly as `GET /datasources/:name` answers that name — so an
+   * unknown datasource reads the same at every by-name door, and a caller can
+   * tell "no such datasource" from "your request was refused". The throwers
+   * today are the admin service's `updateDatasource`, `removeDatasource` and
+   * `migrateCredential` (`datasourceNotFoundError`).
    */
   const badRequest = (res: any, service: ServiceName, err: unknown) => {
     const envelope = err as { code?: unknown; status?: unknown } | null | undefined;
     if (envelope?.status === 503 && envelope?.code === 'SERVICE_UNAVAILABLE') {
       return sendError(res, 503, 'SERVICE_UNAVAILABLE', (err as Error).message);
+    }
+    if (envelope?.status === 404 && envelope?.code === 'RESOURCE_NOT_FOUND') {
+      return sendError(res, 404, 'RESOURCE_NOT_FOUND', (err as Error).message);
     }
     return sendError(res, 400, SERVICE_ERROR_CODE[service], err instanceof Error ? err.message : String(err));
   };
