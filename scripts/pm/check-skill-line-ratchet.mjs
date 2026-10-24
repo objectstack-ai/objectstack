@@ -1261,6 +1261,11 @@ export const CEILINGS = new Map([
   // `domain:*` seat. A NEW file, so this is not a raise and funds nothing —
   // set at the landed line count, headroom 0, same convention as above.
   ['.claude/skills/pm-dispatch/references/coordinator.md', 49],
+  // The external-text reference (whose text instructs, whose is data) and the
+  // fork-PR flow it amends. Both are NEW to this map, so neither is a raise —
+  // set at the landed line count, headroom 0, same convention as above.
+  ['.claude/skills/pm-dispatch/references/untrusted-text.md', 49],
+  ['.claude/skills/pm-dispatch/references/external-contributions.md', 22],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
   ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 51],
   // Unchanged at 120 through the maintainer's revocation of every autonomous-
@@ -2162,6 +2167,8 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   // row (their tables stayed in SKILL.md), so each pin is the measurement 0.
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 0],
   ['.claude/skills/pm-dispatch/references/coordinator.md', 0],
+  ['.claude/skills/pm-dispatch/references/untrusted-text.md', 0],
+  ['.claude/skills/pm-dispatch/references/external-contributions.md', 0],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 0],
   ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 0],
   ['.claude/skills/pm-dispatch/references/triage-duties.md', 0],
