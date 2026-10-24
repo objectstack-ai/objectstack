@@ -3,23 +3,29 @@
 /**
  * The Plugin Extension API of {@link AutomationEngine}: how a plugin registers
  * a node executor (or a deprecated alias of one), a trigger and a connector,
- * and how a flow's trigger binding is read off its start node.
+ * and unregisters each; and how a flow's trigger binding is read off its start
+ * node.
  *
- * [#25222] Slice 2 of the `engine.ts` split, move-only. Each function here is
- * the body of the `AutomationEngine` method of the same name, moved unedited.
- * The class keeps that method (its name, docblock and position are in the
- * published `.d.ts`) and calls the body with a {@link PluginExtensionHost}
- * literal holding exactly the members the body reads. Two signatures here omit
- * a parameter default the class method declares, so the default is written
- * once: the class resolves it and passes the value.
+ * [#25222] Slices 2 and 8 of the `engine.ts` split, move-only. Each function
+ * here is the body of the `AutomationEngine` method of the same name, moved
+ * unedited. The class keeps that method (its name, docblock and position are
+ * in the published `.d.ts`) and calls the body with a {@link
+ * PluginExtensionHost} literal holding exactly the members the body reads. Two
+ * signatures here omit a parameter default the class method declares, so the
+ * default is written once: the class resolves it and passes the value.
  *
- * The section's members with bodies of one to five lines stayed in the class,
- * and so did five longer ones. `getConnectorDescriptors` stayed because the
- * spec liveness ledger cites `engine.ts` for the connector properties that body
- * reads, one property at a time. `unregisterNodeExecutor`, `unregisterTrigger`,
- * `activateFlowTrigger` and `deactivateFlowTrigger` stayed because each deletes
- * from one of the engine's maps, and the tenant-audit census can type such a
- * receiver only through the class's own field declarations.
+ * In slice 2, the section's members with bodies of one to five lines stayed in
+ * the class, and so did five longer ones. `getConnectorDescriptors` stayed
+ * because the spec liveness ledger cites `engine.ts` for the connector
+ * properties that body reads, one property at a time. `unregisterNodeExecutor`,
+ * `unregisterTrigger`, `activateFlowTrigger` and `deactivateFlowTrigger` stayed
+ * because each deletes from one of the engine's maps, and the tenant-audit
+ * census could then type such a receiver only through the class's own field
+ * declarations. Slice 8 moved `unregisterNodeExecutor`, `unregisterTrigger` and
+ * `unregisterConnector` here, once the census read a moved body's receiver
+ * through its host (#25660). `activateFlowTrigger` and `deactivateFlowTrigger`
+ * still stay: `registerFlow` reaches their warnings through same-file calls,
+ * and same-file calls are all `check-startup-registry-verdict` follows.
  */
 
 import type { ActionDescriptor, FlowParsed } from '@objectstack/spec/automation';
@@ -393,4 +399,53 @@ export function assertSameOriginOrFree(this: Pick<PluginExtensionHost, 'connecto
         );
     }
     this.logger.warn(`Connector '${name}' replaced`);
+}
+
+/** The body of {@link AutomationEngine.unregisterNodeExecutor}, moved unedited; that method's docblock is its contract. */
+export function unregisterNodeExecutor(this: Pick<PluginExtensionHost, 'nodeExecutors' | 'actionDescriptors' | 'logger'>, type: string): void {
+    const executor = this.nodeExecutors.get(type);
+    this.nodeExecutors.delete(type);
+    // Drop the published descriptor (keyed by descriptor.type, which may
+    // differ from the executor type).
+    this.actionDescriptors.delete(type);
+    if (executor?.descriptor) {
+        this.actionDescriptors.delete(executor.descriptor.type);
+    }
+    this.logger.info(`Node executor unregistered: ${type}`);
+}
+
+/** The body of {@link AutomationEngine.unregisterTrigger}, moved unedited; that method's docblock is its contract. */
+export function unregisterTrigger(this: Pick<PluginExtensionHost, 'boundFlowTriggers' | 'triggers' | 'logger'>, type: string): void {
+    // Tear down every flow bound to this trigger before dropping it.
+    for (const [name, boundType] of [...this.boundFlowTriggers]) {
+        if (boundType !== type) continue;
+        try {
+            this.triggers.get(type)?.stop(name);
+        } catch (err) {
+            // #6499 — the thrown text is PLUGIN-SUPPLIED (`FlowTrigger.stop`),
+            // so it goes to the structured slot; see `forgetSuspendedRun`'s
+            // catch above for the full mechanism (#6299).
+            //
+            // #4632 verdict: FUNCTIONAL — stays `warn`: nothing
+            // claimed-persisted is involved. The binding bookkeeping is
+            // dropped either way; the worst case is the trigger's own
+            // subscription staying armed, and a fired flow still lands in
+            // run history visibly, behind execute()'s own guards.
+            this.logger.warn(
+                `Trigger '${type}' stop('${name}') failed while unregistering the trigger — the flow is ` +
+                    `unbound anyway; whatever the trigger armed for it may keep firing until the process ` +
+                    `restarts. The trigger's own failure is in this record's meta.`,
+                describeThrownForLog(err),
+            );
+        }
+        this.boundFlowTriggers.delete(name);
+    }
+    this.triggers.delete(type);
+    this.logger.info(`Trigger unregistered: ${type}`);
+}
+
+/** The body of {@link AutomationEngine.unregisterConnector}, moved unedited; that method's docblock is its contract. */
+export function unregisterConnector(this: Pick<PluginExtensionHost, 'connectors' | 'logger'>, name: string): void {
+    this.connectors.delete(name);
+    this.logger.info(`Connector unregistered: ${name}`);
 }
