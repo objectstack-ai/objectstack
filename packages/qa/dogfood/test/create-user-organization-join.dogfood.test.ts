@@ -64,9 +64,14 @@ describe('Create User joins a chosen organization in multi-org mode', () => {
   });
 
   it('guard the guard: a real multi-org posture', async () => {
-    const tenancy = await stack.kernel.getServiceAsync<{ mode: string; degraded: boolean }>('tenancy');
-    expect(tenancy.mode).toBe('multi');
+    const tenancy = await stack.kernel.getServiceAsync<{
+      posture: string; isolationActive: boolean; degraded: boolean; defaultOrgId(): Promise<string | null>;
+    }>('tenancy');
+    expect(tenancy.posture).toBe('isolated');
+    expect(tenancy.isolationActive).toBe(true);
     expect(tenancy.degraded).toBe(false);
+    // The reconciler's target: none, so J2's member-less outcome is the posture's, not an accident.
+    expect(await tenancy.defaultOrgId()).toBeNull();
   });
 
   it('J1 chosen: the user lands as a member of that organization, and only that one', async () => {
