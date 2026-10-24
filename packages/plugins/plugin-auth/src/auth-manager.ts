@@ -1320,8 +1320,12 @@ export function authEmailLocaleFromRequest(source: unknown): string | undefined 
  * context, or anything carrying either. Never throws: a vendor changing the
  * shape it hands a callback must degrade to the deployment default, never fail
  * the send.
+ *
+ * Exported for `organization-default-currency.ts`, which reads the creating
+ * request's language off the endpoint context the same way (#25495): one
+ * reader, not two.
  */
-function acceptLanguageHeader(source: unknown): string | undefined {
+export function acceptLanguageHeader(source: unknown): string | undefined {
   if (!source || typeof source !== 'object') return undefined;
   const nested = (source as { request?: unknown }).request;
   const bags = [

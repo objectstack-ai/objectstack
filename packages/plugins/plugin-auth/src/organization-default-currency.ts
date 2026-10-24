@@ -49,6 +49,7 @@
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { preferredLocaleFromHeader, SystemObjectName } from '@objectstack/spec/system';
+import { acceptLanguageHeader } from './auth-manager.js';
 
 /**
  * Region (ISO 3166-1 alpha-2 and the CLDR territory codes beside it) → the
@@ -204,25 +205,11 @@ export type CreatorLocaleSource = 'the creator\'s stored language' | 'the creati
 
 /** The `accept-language` value on the better-auth endpoint context this call runs inside, if any. */
 function acceptLanguageOfCurrentRequest(): string | undefined {
-  let endpoint: unknown;
   try {
-    endpoint = tryGetCurrentAuthEndpointContext();
+    return acceptLanguageHeader(tryGetCurrentAuthEndpointContext());
   } catch {
     return undefined;
   }
-  if (!endpoint || typeof endpoint !== 'object') return undefined;
-  const request = (endpoint as { request?: { headers?: unknown } }).request;
-  for (const bag of [(endpoint as { headers?: unknown }).headers, request?.headers]) {
-    const get = (bag as { get?: unknown } | undefined)?.get;
-    if (typeof get !== 'function') continue;
-    try {
-      const value = (bag as Headers).get('accept-language');
-      if (typeof value === 'string' && value) return value;
-    } catch {
-      // A header bag that throws on read leaves the request's language unknown.
-    }
-  }
-  return undefined;
 }
 
 /**
