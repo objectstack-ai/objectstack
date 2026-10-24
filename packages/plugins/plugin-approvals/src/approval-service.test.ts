@@ -1592,12 +1592,12 @@ describe('ApprovalService (node era)', () => {
 
     /** Open on `slate` and hand back the request id, with the opening's notices cleared. */
     async function openOn(slate: string[]): Promise<string> {
-      const req = await svc.openNodeRequest(openInput(slate), CTX);
+      const { id } = (await svc.openNodeRequest(openInput(slate), CTX)) as { id: string };
       // The request takes the acting context's organization here (no schema on
       // the double), and every screen below is judged against it.
-      expect(engine._tables['sys_approval_request'].find(r => r.id === req.id)?.organization_id).toBe('t1');
+      expect(engine._tables['sys_approval_request'].find(r => r.id === id)?.organization_id).toBe('t1');
       emitted.splice(0);
-      return req.id;
+      return id;
     }
 
     async function expectRefusedUnchanged(id: string, move: Promise<unknown>, message: RegExp, slate: string[]) {
