@@ -2223,10 +2223,12 @@ describe('corpus — every rendered description is well-formed markdown', () => 
     // `marketplace-admin` and the `environment-artifact` re-export; `tenant`
     // opened at level 2 and was never counted. `marketplace.zod.ts`, the one
     // level-1 opener among the four modules that moved to `marketplace/`,
-    // still counts.)
-    expect(shifted.length).toBe(31);
+    // still counts. 31 -> 30: `kernel/package-upgrade.zod.ts` — a level-1
+    // opener (`# Package Upgrade Protocol`) — was removed whole by #25608's
+    // ADR-0049 retirement.)
+    expect(shifted.length).toBe(30);
     // …and every one of them was shifted because it opened at level 1.
-    expect(shifted.filter(d => /^ {0,3}#(?:[ \t]|$)/m.test(withoutFences(d.untouched)))).toHaveLength(31);
+    expect(shifted.filter(d => /^ {0,3}#(?:[ \t]|$)/m.test(withoutFences(d.untouched)))).toHaveLength(30);
   });
 
   it('never opens a page on the `@module` marker (#13796)', () => {
