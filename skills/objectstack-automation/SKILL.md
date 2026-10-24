@@ -346,9 +346,9 @@ node `config`** (the start `config` is a free-form record with no Zod shape):
 | `config` key | Purpose |
 |:-------------|:--------|
 | `hookId` | URL path token (default `'default'`). **Rotate it to revoke** a leaked endpoint |
-| `secretRef` / `secret` | HMAC-SHA256 shared secret, **required** — without one the flow is refused at registration (`os validate` too). Ship `secretRef: 'NAME'` (an env var the deployment fills, not `OS_*`; unfilled ⇒ `503`), never a literal |
+| `secret` | HMAC-SHA256 shared secret. **Required** — without a non-blank one the flow is refused at registration (`os validate` too) and never armed at boot; the signature goes in `x-objectstack-signature` |
 
-- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — `v1` = HMAC-SHA256 of `<t>.<raw body>` under the secret; refused when `t` is over 300 s from the server clock.
+- **Signature:** `t=<unix seconds>,v1=<hex>` — `v1` = HMAC-SHA256 of `<t>.<raw body>` under `secret`; refused when `t` is over 300 s from the server clock.
 - **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
 - **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer, never in-band.
 - The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
