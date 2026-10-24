@@ -33,6 +33,14 @@
 //   - list-teams and get-full-organization's teams answer an external the
 //     teams it sits on; list-invitations answers it its own invitations.
 //
+// [#25549] A share to an external on a `public_read_write` object:
+//
+//   - the record's owner shares one invoice with an external over the REST
+//     share door and gets 201; the external then reads that invoice, and no
+//     other, where before it read none;
+//   - the same share to an ordinary member is refused 422
+//     `SHARING_NOT_ENABLED`: on a public object no gate consults it for staff.
+//
 // Fixtures are synthetic. ⚠️ No test title states a value.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -179,12 +187,12 @@ describe('[#25233] an external organization member reads its own identity rows a
     // same read on both objects, and neither owns any of the rows.
     const portalLines = await catalogPermissionSet(ql, portalLinesSet.name);
     expect(portalLines, 'fixture invoice permission set served by the security catalog').toBeTruthy();
-    for (const who of ['supplierD', 'member'] as const) {
+    for (const who of ['supplierD', 'member', 'supplierB'] as const) {
       await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set: portalLines.name, organization_id: orgId }, { context: SYS });
     }
     const account = await ql.insert('showcase_account', { name: 'Account 25233', status: 'active', organization_id: orgId }, { context: SYS });
     const product = await ql.insert('showcase_product', { name: 'Product 25233', organization_id: orgId }, { context: SYS });
-    for (const key of ['shared', 'other'] as const) {
+    for (const key of ['shared', 'other', 'grant'] as const) {
       const inv = await ql.insert(MASTER, {
         name: `INV-25233-${key}`, account: String(account.id), status: 'draft', owner_id: uid.owner, organization_id: orgId,
       }, { context: SYS });
@@ -360,6 +368,35 @@ describe('[#25233] an external organization member reads its own identity rows a
     expect(mine.status).toBe(200);
     expect(mine.body.map((i: any) => i.email)).toEqual([`suppliera@${DOMAIN}`]);
     expect((await auth('supplierB', `list-invitations?organizationId=${orgId}`)).body).toEqual([]);
+  });
+
+  it('[#25549] the owner shares one public_read_write invoice with an external, who then reads it and no other', async () => {
+    // Before: the floored external owns no invoice and holds no share, so it reads none.
+    const before = await ids('supplierB', `/data/${MASTER}?limit=200`);
+    expect(before.status).toBe(200);
+    expect(before.ids).toEqual([]);
+
+    const res = await stack.apiAs(token.owner, 'POST', `/data/${MASTER}/${row.inv_grant}/shares`, {
+      recipientId: uid.supplierB, accessLevel: 'read',
+    });
+    expect(res.status).toBe(201);
+    const share = await res.json() as Row;
+    expect(share).toMatchObject({ object_name: MASTER, record_id: row.inv_grant, recipient_id: uid.supplierB, organization_id: orgId });
+
+    const after = await ids('supplierB', `/data/${MASTER}?limit=200`);
+    expect(after.status).toBe(200);
+    expect(after.ids).toEqual([row.inv_grant]);
+  });
+
+  it('[#25549] the same share to an ordinary member is refused 422 SHARING_NOT_ENABLED', async () => {
+    const res = await stack.apiAs(token.owner, 'POST', `/data/${MASTER}/${row.inv_grant}/shares`, {
+      recipientId: uid.member, accessLevel: 'read',
+    });
+    expect(res.status).toBe(422);
+    const body = await res.json() as { error?: { code?: string; message?: string } };
+    expect(body.error?.code).toBe('SHARING_NOT_ENABLED');
+    const rows = await findRows(ql, 'sys_record_share', { object_name: MASTER, record_id: row.inv_grant, recipient_id: uid.member });
+    expect(rows).toHaveLength(0);
   });
 
   it('E5: an owner cannot give a member external beside another role', async () => {
