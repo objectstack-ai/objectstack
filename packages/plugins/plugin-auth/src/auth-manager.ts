@@ -2,7 +2,6 @@
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
 import type { JSONWebKeySet } from 'jose';
-import type { OrganizationOptions } from 'better-auth/plugins/organization';
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
 // import() in getOrCreateAuth() / buildPluginList() so that disabled plugins
@@ -29,7 +28,6 @@ import {
 import {
   type LinkingAuthContext,
 } from './implicit-account-linking.js';
-import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import { IdpLocaleSync } from './idp-locale-claim.js';
 import type { IDataEngine } from '@objectstack/core';
 import {
@@ -40,7 +38,6 @@ import {
   // [#25083] Is this process a cloud-managed (hosted) environment? The ONE
   // accessor every managed-mode judgement here asks, and nothing else.
   isCloudManaged,
-  resolveUserAuthzGrants,
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -54,18 +51,12 @@ import type {
 } from '@objectstack/spec/contracts';
 import {
   resolveTenancyPosture,
-  resolveOrgLimit,
   isMcpServerEnabled,
 } from '@objectstack/types';
-import { resolveMembershipLimitOption } from './membership-limit.js';
-import {
-  MEMBERSHIP_ROLE_DELEGATED_ADMIN,
-  MEMBERSHIP_ROLE_EXTERNAL,
-} from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
-import { createObjectQLAdapterFactory, withSystemContext, withSystemReadContext } from './objectql-adapter.js';
+import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { type ExternalDirectoryDoorDeps } from './external-directory-door.js';
 import { isExternalMembershipRole } from './external-membership.js';
 import { permissionSetInEffect } from './catalog-set-in-effect.js';
@@ -77,19 +68,9 @@ import {
   type BetterAuthRouteOwnership,
 } from './better-auth-route-ownership.js';
 import {
-  applyPlatformAdminImpersonation,
-} from './admin-impersonate-endpoint.js';
-import {
   mintPrincipalSession,
   type PrincipalSessionAuthContext,
 } from './principal-session-mint.js';
-import {
-  applyDeclaredInvitationVerificationToListing,
-} from './list-user-invitations-verification.js';
-import {
-  invitationRoleCapFailure,
-  isPlainMemberInvitation,
-} from './invitation-role-cap.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { resolveClientAddress } from './client-address.js';
 import {
@@ -104,19 +85,6 @@ import {
   applyUserUnban,
   SCIM_DEACTIVATION_BAN_REASON,
 } from './user-ban-write.js';
-import { invitationRoleLabel } from './invitation-role-label.js';
-import {
-  buildOrganizationPluginSchema,
-  buildTwoFactorPluginSchema,
-  buildOauthProviderPluginSchema,
-  buildDeviceAuthorizationPluginSchema,
-  buildAdminPluginSchema,
-  buildPhoneNumberPluginSchema,
-} from './auth-schema-config.js';
-import {
-  isDefaultOrganizationTarget,
-  removeOrganizationAuthStructure,
-} from './organization-delete.js';
 // [#25224 cut 1] The actor and organization guards; the methods of the same
 // names below hand each body the members it reads (`ActorGuardHost`).
 import {
@@ -234,6 +202,11 @@ import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
 // after-hook (cut 12) and before-hook (cut 13) are now imported there, by the
 // two arrows that moved with it.
 import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-instance.js';
+// [#25224 cut 16] The body of `buildPluginList`; the method of the same name
+// below hands it the members it reads (`PluginListHost`). The organization
+// plugin's factory (cut 15) is now imported there, by the arrow that moved
+// with it.
+import { buildPluginList, type PluginListHost } from './auth-manager-plugin-list.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -361,7 +334,7 @@ class SubjectErasureRollback extends Error {
   }
 }
 
-function readBooleanEnv(name: string, legacyName?: string): boolean | undefined {
+export function readBooleanEnv(name: string, legacyName?: string): boolean | undefined {
   const env = (globalThis as any)?.process?.env as Record<string, string | undefined> | undefined;
   const raw = env?.[name] ?? (legacyName ? env?.[legacyName] : undefined);
   if (raw == null) return undefined;
@@ -1337,8 +1310,12 @@ export function authEmailLocaleFromRequest(source: unknown): string | undefined 
  * context, or anything carrying either. Never throws: a vendor changing the
  * shape it hands a callback must degrade to the deployment default, never fail
  * the send.
+ *
+ * Exported for `organization-default-currency.ts`, which reads the creating
+ * request's language off the endpoint context the same way (#25495): one
+ * reader, not two.
  */
-function acceptLanguageHeader(source: unknown): string | undefined {
+export function acceptLanguageHeader(source: unknown): string | undefined {
   if (!source || typeof source !== 'object') return undefined;
   const nested = (source as { request?: unknown }).request;
   const bags = [
@@ -1377,7 +1354,7 @@ const SLUG_GUARD_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
  * never "allowed", which is what swallowing the fault used to answer. The
  * driver's own failure rides `cause`, so its diagnostic is not lost.
  */
-async function slugGuardReadFaultApiError(object: string, cause: unknown): Promise<Error> {
+export async function slugGuardReadFaultApiError(object: string, cause: unknown): Promise<Error> {
   const { APIError } = await import('better-auth/api');
   const err = new APIError('SERVICE_UNAVAILABLE', {
     message:
@@ -1398,17 +1375,17 @@ async function slugGuardReadFaultApiError(object: string, cause: unknown): Promi
 // `ApiErrorSchema` rejects.
 
 /** `beforeCreateOrganization`: the reserved `__global__` id or slug (ADR-0120 D3), a value the request may not carry. */
-const ORGANIZATION_RESERVED_IDENTIFIER_CODE: StandardErrorCode = 'VALIDATION_ERROR';
+export const ORGANIZATION_RESERVED_IDENTIFIER_CODE: StandardErrorCode = 'VALIDATION_ERROR';
 /** `beforeCreateOrganization`: the effective tenancy posture enforces no organization wall, so no caller may create one. */
-const ORGANIZATION_CREATION_DISABLED_CODE: RegisteredErrorCode = 'ORGANIZATION_CREATION_DISABLED';
+export const ORGANIZATION_CREATION_DISABLED_CODE: RegisteredErrorCode = 'ORGANIZATION_CREATION_DISABLED';
 /** `beforeCreateInvitation`: placement intent, and no delegated-administration runtime to authorize it. */
-const INVITE_PLACEMENT_UNSUPPORTED_CODE: RegisteredErrorCode = 'INVITE_PLACEMENT_UNSUPPORTED';
+export const INVITE_PLACEMENT_UNSUPPORTED_CODE: RegisteredErrorCode = 'INVITE_PLACEMENT_UNSUPPORTED';
 /** `beforeCreateInvitation`: the delegated-administration gate's own verdict that the placement is outside the issuer's scope. */
-const INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE_CODE: RegisteredErrorCode = 'INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE';
+export const INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE_CODE: RegisteredErrorCode = 'INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE';
 /** `beforeCreateInvitation`: the placement check failed before the gate reached a verdict — the status's own name. */
 const INVITE_PLACEMENT_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
 /** `beforeUpdateOrganization`: a change to a new slug while the organization has an active environment. */
-const ORGANIZATION_SLUG_LOCKED_CODE: RegisteredErrorCode = 'ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS';
+export const ORGANIZATION_SLUG_LOCKED_CODE: RegisteredErrorCode = 'ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS';
 
 /**
  * [#24243] Is this throw out of `assertIssuable` the delegated-administration
@@ -1418,7 +1395,7 @@ const ORGANIZATION_SLUG_LOCKED_CODE: RegisteredErrorCode = 'ORGANIZATION_SLUG_LO
  * no runtime dependency on plugin-security (see
  * {@link InvitationPlacementServiceLike}).
  */
-function isInvitationPlacementGateRefusal(err: unknown): boolean {
+export function isInvitationPlacementGateRefusal(err: unknown): boolean {
   return !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'PERMISSION_DENIED';
 }
 
@@ -1435,7 +1412,7 @@ function isInvitationPlacementGateRefusal(err: unknown): boolean {
  * invitation row is written. The thrown failure rides `cause`, and its message
  * is not relayed, so a driver's text does not reach the caller.
  */
-async function invitationPlacementReadFaultApiError(cause: unknown): Promise<Error> {
+export async function invitationPlacementReadFaultApiError(cause: unknown): Promise<Error> {
   const { APIError } = await import('better-auth/api');
   const err = new APIError('SERVICE_UNAVAILABLE', {
     message:
@@ -1467,7 +1444,7 @@ export const OAUTH_ORGANIZATION_CLAIM = 'organization_id';
  * token carries no claim, which is the ruled outcome for a user with no
  * organization, never a guessed or default one.
  */
-function consentOrganizationOf(session: Record<string, unknown> | null | undefined): string | undefined {
+export function consentOrganizationOf(session: Record<string, unknown> | null | undefined): string | undefined {
   const organizationId = session?.activeOrganizationId;
   return typeof organizationId === 'string' && organizationId ? organizationId : undefined;
 }
@@ -1889,1347 +1866,41 @@ export class AuthManager {
    *   core auth stays up): organization, admin, phoneNumber, magicLink,
    *   genericOAuth, jwt+oauthProvider, sso, scim, deviceAuthorization.
    */
-  private async buildPluginList(): Promise<any[]> {
-    this.degradedFeatures.clear();
-    // Same lifecycle as degradedFeatures: an operator who fixes the cause and
-    // triggers a rebuild gets a fresh verdict, and a fresh log line if it is
-    // still broken. (The Ed25519 probe itself is NOT reset — it is a property
-    // of the runtime, which a rebuild cannot change.)
-    this.jwtSigningFailureReported = false;
-    const pluginConfig: Partial<AuthPluginConfig> = this.config.plugins ?? {};
-    const plugins: any[] = [];
-
-    // Defaults — kept in sync with `AuthPluginConfigSchema` in
-    // @objectstack/spec/system/auth-config.zod.ts. The frontend AuthProvider
-    // (in @object-ui/app-shell) calls `/api/v1/auth/organization/list` on
-    // every load; making the org plugin opt-out (default true) avoids
-    // 404s and the noisy "Failed to load organizations" warning.
-    //
-    // `OS_OIDC_PROVIDER_ENABLED` lets operators flip the OIDC IdP on
-    // without re-deploying with a code change (mirrors the
-    // `OS_MULTI_ORG_ENABLED` / `OS_DISABLE_SIGNUP` pattern). When set, the
-    // env var WINS over the config-file setting so platform operators can
-    // override per-environment without touching the application bundle.
-    // Use the shared `readBooleanEnv` parser (same as OS_AUTH_TWO_FACTOR /
-    // OS_AUTH_PASSWORD_REJECT_BREACHED / OS_DISABLE_SIGNUP) so these accept the
-    // platform-standard truthy set (`true`/`1`/`yes`/`on`, case-insensitive)
-    // instead of only the literal string `'true'` — a repeated operator footgun
-    // (`OS_SSO_ENABLED=1` silently parsed as disabled).
-    //
-    // Precedence for `scim` / `sso` / `ssoDomainVerification` (#13439,
-    // maintainer ruling 2026-08-31): an EXPLICIT config value wins over the
-    // env var; the env var decides only where the config leaves the key unset
-    // (tri-state `z.boolean().optional()` in AuthPluginConfigSchema). This is
-    // deliberately the OPPOSITE of the env-wins order the OIDC/2FA/HIBP keys
-    // above keep: for these three, config is how the code constructing the
-    // AuthPlugin states a value the deployment env must not silently outrank
-    // (the cloud control plane's plan-derived `plugins.scim` is the known
-    // writer), while the operator per-environment override survives for every
-    // deployment that leaves the keys unset.
-    const ssoFromEnv = readBooleanEnv('OS_SSO_ENABLED');
-    // Opt-in DNS domain-verification for external SSO providers (ADR-0135 D6).
-    // OFF by default → today's behavior exactly (register → login immediately).
-    // ON → @better-auth/sso mounts /sso/{request-domain-verification,verify-domain}
-    // AND enforces a HARD login gate: a provider whose domain is not DNS-verified
-    // rejects logins ("Provider domain has not been verified"). The two are
-    // coupled in @better-auth/sso (the endpoints only register when
-    // `domainVerification.enabled`), so this single flag governs both. Requires
-    // `OS_SSO_ENABLED` (the sso plugin must be loaded to honor it).
-    const ssoDomainVerifyFromEnv = readBooleanEnv('OS_SSO_DOMAIN_VERIFICATION');
-    // @better-auth/scim's `active:false` → ban runs through the admin plugin,
-    // and org-scoped tokens need the organization plugin — so enabling SCIM
-    // forces `admin` on (organization already defaults on). See ADR-0134.
-    // An explicit `plugins.admin: false` beside effective SCIM is a
-    // contradiction refused below (#13816) — never silently honoured.
-    const scimEffective = resolveScimEnabled(pluginConfig);
-    // Re-checked here (the constructor already refused a conflicted BOOT
-    // config) because this is where the env var is actually read: an
-    // OS_SCIM_ENABLED that appears between construction and the lazy
-    // better-auth build would otherwise mount SCIM with its ADR-0134
-    // deprovisioning path silently declined.
-    assertScimAdminCoherence(pluginConfig);
-    const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
-    const hibpFromEnv = readBooleanEnv('OS_AUTH_PASSWORD_REJECT_BREACHED');
-    const enabled = {
-      organization: pluginConfig.organization ?? true,
-      twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false,
-      passwordRejectBreached: hibpFromEnv ?? pluginConfig.passwordRejectBreached ?? false,
-      passkeys: pluginConfig.passkeys ?? false,
-      magicLink: pluginConfig.magicLink ?? false,
-      // Shared decision point (env → config → follows OS_MCP_SERVER_ENABLED),
-      // see resolveOidcProviderEnabled — keep auth-plugin.ts / features in sync.
-      oidcProvider: resolveOidcProviderEnabled(pluginConfig),
-      deviceAuthorization: pluginConfig.deviceAuthorization ?? false,
-      admin: pluginConfig.admin ?? scimEffective,
-      // #2766 V1.5 — phone+password sign-in. Opt-in; OTP flows stay off until
-      // SMS infrastructure exists (tracked separately).
-      phoneNumber: (pluginConfig as any).phoneNumber ?? false,
-      sso: pluginConfig.sso ?? ssoFromEnv ?? false,
-      ssoDomainVerification: pluginConfig.ssoDomainVerification ?? ssoDomainVerifyFromEnv ?? false,
-      scim: scimEffective,
+  private buildPluginList(): Promise<any[]> {
+    // [#25224 cut 16] The body moved to `auth-manager-plugin-list.ts` (see `PluginListHost`).
+    const readConfig = () => this.config;
+    const readDegradedFeatures = () => this.degradedFeatures;
+    const readJwtSigningFailureReported = () => this.jwtSigningFailureReported;
+    const writeJwtSigningFailureReported = (v: AuthManager['jwtSigningFailureReported']) => { this.jwtSigningFailureReported = v; };
+    const readOrgRolesMap = () => this.orgRolesMap;
+    const writeOrgRolesMap = (v: AuthManager['orgRolesMap']) => { this.orgRolesMap = v; };
+    const host: PluginListHost = {
+      addOptionalPlugin: (...a) => this.addOptionalPlugin(...a),
+      buildJwtPlugin: (...a) => this.buildJwtPlugin(...a),
+      computeAuthGate: (...a) => this.computeAuthGate(...a),
+      get config() { return readConfig(); },
+      get degradedFeatures() { return readDegradedFeatures(); },
+      deliverPhoneOtp: (...a) => this.deliverPhoneOtp(...a),
+      emailLocaleArg: (...a) => this.emailLocaleArg(...a),
+      enforceSessionControls: (...a) => this.enforceSessionControls(...a),
+      getAppName: (...a) => this.getAppName(...a),
+      getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
+      getDataEngine: (...a) => this.getDataEngine(...a),
+      getEmailService: (...a) => this.getEmailService(...a),
+      getMcpResourceUrl: (...a) => this.getMcpResourceUrl(...a),
+      isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
+      get jwtSigningFailureReported() { return readJwtSigningFailureReported(); },
+      set jwtSigningFailureReported(v) { writeJwtSigningFailureReported(v); },
+      multiOrgPostureEffective: (...a) => this.multiOrgPostureEffective(...a),
+      get orgRolesMap() { return readOrgRolesMap(); },
+      set orgRolesMap(v) { writeOrgRolesMap(v); },
+      reconcileScimUserLifecycle: (...a) => this.reconcileScimUserLifecycle(...a),
+      resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
+      resolveMembershipRole: (...a) => this.resolveMembershipRole(...a),
+      resolveTwoFactorAccountLockout: (...a) => this.resolveTwoFactorAccountLockout(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
     };
-
-    // bearer() — ALWAYS enabled.
-    //
-    // Enables token-based authentication for cross-origin and mobile clients
-    // where third-party cookies are blocked (e.g. Safari ITP, Chrome CHIPS,
-    // native apps). The plugin:
-    //   • Accepts `Authorization: Bearer <token>` on incoming requests and
-    //     transparently resolves the session as if a cookie had been sent.
-    //   • Emits a `set-auth-token` response header on sign-in / session-refresh
-    //     that the client can store (e.g. in `localStorage`) and replay on
-    //     subsequent requests.
-    //
-    // This mirrors how Salesforce, Notion, Supabase and first-party mobile
-    // SDKs handle auth. Cookie-based auth remains available for same-origin
-    // browser deployments; bearer is additive, not a replacement.
-    const { bearer } = await import('better-auth/plugins/bearer');
-    plugins.push(bearer());
-
-    if (enabled.organization) {
-      await this.addOptionalPlugin(plugins, 'organization', async () => {
-      const { organization } = await import('better-auth/plugins/organization');
-      // [ADR-0108 / #3723] The org-role vocabulary is CLOSED — better-auth's
-      // own `owner`/`admin`/`member` plus `delegated_admin`. App-declared
-      // `position` / `permission` names are NOT registered here.
-      //
-      // They were, until this change: an app role registered with better-auth
-      // became storable in `sys_member.role`, and every value in that column is
-      // projected into `current_user.positions` by `resolve-authz-context`. So
-      // the membership role was a capability channel carrying none of ADR-0090
-      // D12's controls — no `granted_by`, no validity window, no subtree or
-      // allowlist check — which is exactly what ADR-0057 D4 ("never as the
-      // authority for RBAC") and ADR-0090 D3's word ban forbid. An app that
-      // wants `sales_rep` declares a POSITION; the one-step admission flow is
-      // an invitation carrying placement (ADR-0105 D8), which is governed and
-      // reaches further (a delegated admin may use it; this never could).
-      //
-      // [ADR-0105 D8 / #3697] The map registers `delegated_admin` — the one
-      // role that may reach `/organization/invite-member` without being an org
-      // admin. Without it D8's scope-bounded issuance gate has no caller:
-      // better-auth grants `invitation:["create"]` to owner/admin only, and
-      // under a wall-enforcing posture those two are auto-elevated to tenant
-      // admins, for whom the gate short-circuits and narrows nothing.
-      //
-      // Deliberately `create` WITHOUT `cancel`: better-auth's cancel route
-      // (`crud-invites.mjs`) checks only `invitation:["cancel"]` — no inviterId
-      // attribution — so the permission would mean "cancel anyone's pending
-      // invitation in the org". Attributed cancel needs its own guard first.
-      let customOrgRoles: Record<string, any> | undefined;
-      try {
-        const accessMod = await import('better-auth/plugins/organization/access');
-        const { defaultAc, memberAc, defaultRoles } = accessMod as any;
-        // Better-Auth's `hasPermission` does `{...options.roles || defaultRoles}`
-        // (precedence: `||` then spread). When we pass our own `roles`, the
-        // built-in owner/admin/member are silently dropped, so even the org
-        // owner loses `invitation:create` and every mutation 403s. We must
-        // re-include the defaults alongside `delegated_admin` — and if the
-        // library ever stops exporting them, build NOTHING and let better-auth
-        // fall back to its own defaults rather than ship a map missing `owner`.
-        if (defaultAc && memberAc && defaultRoles && typeof memberAc.statements === 'object') {
-          const built: Record<string, any> = { ...defaultRoles };
-          const stmts = memberAc.statements;
-          built[MEMBERSHIP_ROLE_DELEGATED_ADMIN] = defaultAc.newRole({
-            ...stmts,
-            invitation: ['create'],
-          });
-          // [Ruling 6355206139] `external` — a portal user inside the
-          // organization: no organization, member, invitation, team or
-          // access-control statement at all. It confers less than `member`,
-          // which is why any issuer may invite to it (E3).
-          built[MEMBERSHIP_ROLE_EXTERNAL] = defaultAc.newRole(
-            Object.fromEntries(Object.keys(stmts).map((resource) => [resource, []])),
-          );
-          customOrgRoles = built;
-        }
-      } catch {
-        customOrgRoles = undefined;
-      }
-      // [#8289] Same map, same request lifetime — see the field's doc for why
-      // the before-hook cannot read it back off `ctx`.
-      this.orgRolesMap = customOrgRoles;
-      // [#16569] Held as a named object rather than an inline literal: the
-      // rebuilt `/organization/list-user-invitations` endpoint below needs the
-      // VERY object the vendor plugin was constructed with — it is what the
-      // vendor's own `getOrgAdapter(ctx.context, options)` reads, and the
-      // declaration it honours lives on it.
-      const organizationOptions = {
-        schema: buildOrganizationPluginSchema(),
-        // Enable the team sub-feature so the framework's `sys_team` /
-        // `sys_team_member` tables (already declared in platform-objects)
-        // are actually wired up to better-auth's CRUD endpoints
-        // (`/organization/{create,update,remove,list}-team[s]` and
-        // `/organization/{add,remove,list}-team-member[s]`). The Account
-        // portal exposes a Teams page; without this flag those endpoints
-        // 404 and the section silently breaks.
-        teams: { enabled: true },
-        // Without a mailer wired in framework, requiring email verification
-        // before accepting invitations dead-ends every invite flow with
-        // FORBIDDEN EMAIL_VERIFICATION_REQUIRED…. Default-off here keeps
-        // the built-in /accept-invitation route usable for pilots; operators
-        // who wire a real mailer can re-enable downstream.
-        requireEmailVerificationOnInvitation: false,
-        // Cap how many orgs a user can CREATE (OS_ORG_LIMIT). Counts only orgs
-        // the user OWNS (role=owner) — never orgs they were merely invited into —
-        // so a generous cap stops scripted org/free-env spam (each new org can
-        // auto-provision a free environment on the cloud control plane) WITHOUT
-        // ever blocking a collaborator who belongs to many orgs. Unset → no
-        // limit (self-host default). Fail-open: if the count can't be taken we
-        // allow creation rather than block a legitimate user on an infra hiccup.
-        organizationLimit: async (user: { id?: string }) => {
-          const limit = resolveOrgLimit();
-          if (limit == null) return false;
-          const engine = this.config.dataEngine;
-          const uid = typeof user?.id === 'string' ? user.id : '';
-          if (!engine || !uid) return false;
-          try {
-            // `sys_member` is tenant-scoped (organization_id). We need to count
-            // the user's owned orgs ACROSS tenants, so read with the system
-            // context (isSystem) to bypass org-scoping — otherwise the query
-            // returns nothing and the limit never fires.
-            const owned = await withSystemReadContext(engine).count('sys_member', {
-              where: { user_id: uid, role: 'owner' },
-            });
-            return (owned ?? 0) >= limit;
-          } catch {
-            return false;
-          }
-        },
-        // How many MEMBERS one organization may hold — a different question
-        // from `organizationLimit` above, and one this platform does not limit:
-        // entitlements meter AI seats, and plain membership is not a billed
-        // axis. It must still be stated, because better-auth substitutes a
-        // vendor default of 100 for an absent `membershipLimit`
-        // (`count >= (membershipLimit || 100)`), which reaches the operator as
-        // `Organization membership limit reached` — a refusal nobody here ever
-        // chose, on an axis nothing here bills. A deployment that DOES want a
-        // ceiling sets `OS_ORG_MEMBERSHIP_LIMIT`.
-        //
-        // MAX_SAFE_INTEGER rather than Infinity: the value is compared, but it
-        // also travels through option plumbing that may assume a finite number,
-        // and nine quadrillion members is unlimited by any measure that matters.
-        membershipLimit: resolveMembershipLimitOption(),
-        ...(customOrgRoles ? { roles: customOrgRoles } : {}),
-        // ── Slug-change guard ─────────────────────────────────────
-        // An org's slug is baked into every env hostname at creation
-        // time (see service-tenant `project-provisioning.ts`). Renaming
-        // it while live envs exist would silently desync the URL from
-        // the org identity. Block the change here; the cloud Console
-        // surfaces this as an actionable error and points users to
-        // `change_hostname` or archiving the env. Org `name` (display
-        // label) is unaffected — only `slug` is guarded.
-        //
-        // We resolve the data engine lazily so non-cloud apps (which
-        // never seed `sys_environment`) keep working: any lookup error
-        // is treated as "no envs to protect".
-        organizationHooks: {
-          // Gate fresh organization creation behind the deployment's TENANCY
-          // POSTURE. The plugin itself is always installed (so list/update/invite
-          // endpoints keep responding); only the `create` operation is denied,
-          // and only where no organization wall is enforced — creating an
-          // organization there would mint a boundary nothing keeps (ADR-0049 at
-          // the deployment layer).
-          //
-          // [#5233] The judge is the tenancy POSTURE, never the
-          // `OS_MULTI_ORG_ENABLED` boolean ADR-0105 D1 demoted — that one reads
-          // `false` on a deployment configured with only the authoritative
-          // `OS_TENANCY_POSTURE=isolated`, so the whole organization wall
-          // mounted and every org-less user's guided "create your workspace"
-          // path still 403'd. Same defect shape as cloud#1020.
-          //
-          // [#5261] And the judge is the EFFECTIVE posture
-          // (`multiOrgPostureEffective()` — the `tenancy` service's answer),
-          // not the requested one, so this gate and `/auth/config`'s
-          // `features.multiOrgEnabled` are literally the same derivation. On the
-          // ADR-0093 D5 degraded shape they used to disagree: the console hid
-          // the button while the route minted organizations no engine walls.
-          beforeCreateOrganization: async ({ organization }: any = {}) => {
-            // [ADR-0120 D3] `'__global__'` is the platform's name for the
-            // NULL-organization bucket: the autonumber sequence table keys
-            // org-less rows by it, and every organization-scoped unique index
-            // folds NULL into it via `COALESCE(organization_id, '__global__')`.
-            // An organization minted with that token as its id (or slug — the
-            // only caller-controllable identifier here) would collide with the
-            // platform bucket, so the token is reserved at this seam.
-            if (organization?.id === '__global__' || organization?.slug === '__global__') {
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('BAD_REQUEST', {
-                message:
-                  "'__global__' is reserved for the platform (no-organization) bucket " +
-                  '(ADR-0120 D3) and cannot be used as an organization id or slug.',
-                code: ORGANIZATION_RESERVED_IDENTIFIER_CODE,
-              });
-            }
-            if (!this.multiOrgPostureEffective()) {
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('FORBIDDEN', {
-                message:
-                  'Creating additional organizations is disabled on this deployment.',
-                code: ORGANIZATION_CREATION_DISABLED_CODE,
-              });
-            }
-          },
-          // Run host-provided org-creation side effects (e.g. the cloud control
-          // plane provisions the org's born-with production environment). The
-          // org-plugin's models don't fire core databaseHooks, so this is the
-          // only server-side seam for "every org is born with its prod env".
-          // Failure-isolated: org creation must not roll back on a side-effect miss.
-          afterCreateOrganization: async ({ organization, member, user }: any) => {
-            const cb = this.config.onOrganizationCreated;
-            if (typeof cb !== 'function') return;
-            try {
-              await cb({
-                organizationId: organization?.id,
-                userId: user?.id ?? member?.userId,
-                name: organization?.name,
-                slug: organization?.slug,
-              });
-            } catch (err: any) {
-              console.warn('[auth] onOrganizationCreated callback failed:', err?.message ?? String(err));
-            }
-          },
-          // [ADR-0105 D8] Issuance gate. A placement intent on an invitation
-          // is a REQUEST; the authority to honour it is the ISSUER's
-          // `adminScope` (ADR-0090 D12), judged HERE — at issuance, while the
-          // actor is the inviter — not at acceptance, when the actor is the
-          // invitee. Rejecting throws out of the endpoint, so no invitation
-          // row is created.
-          //
-          // Fail closed on a missing service: without plugin-security there
-          // is no gate, and honouring an unchecked placement would hand
-          // `organization_admin` the RBAC-write authority it is deliberately
-          // denied (auto-org-admin-grant.ts keeps it read-only on those
-          // tables precisely so a fresh org admin cannot rebind themselves).
-          beforeCreateInvitation: async ({ invitation, inviter, organization }: any) => {
-            // [#25083] A cloud-managed environment creates no invitation at
-            // all: the organisation that hosts it invites its people in the
-            // cloud. The `before` hook refuses `/organization/invite-member`
-            // first, resends included; this arm is the second line, for any
-            // other path that reaches the hook. First here, before the role
-            // cap and the placement gate, because no invitation is issuable
-            // whatever its role or placement.
-            if (isCloudManaged()) {
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('CONFLICT', {
-                message: CLOUD_MANAGED_REFUSAL_MESSAGES.invitation,
-                code: CLOUD_MANAGED_REFUSAL_CODE,
-              });
-            }
-            const inviterUserId = inviter?.id ?? inviter?.userId ?? null;
-            const organizationId = organization?.id ?? invitation?.organizationId;
-
-            // [#3697] Role cap — FIRST, and for EVERY invitation, placement or
-            // not: the escalation it closes (invite an `admin`, acceptance
-            // auto-elevates to `organization_admin` → tenant admin) needs no
-            // placement intent at all. Skipped for a plain `member` invitation,
-            // which can never trip the cap — so the ordinary path pays nothing.
-            if (!isPlainMemberInvitation(invitation?.role)) {
-              // [#23945] Each refusal carries its ADR-0112 code beside its
-              // message, the way better-auth's own `owner` refusal on this
-              // endpoint does. A membership read that THROWS never reaches
-              // this verdict: `resolveMembershipRole` answers it as an outage
-              // (503 `SERVICE_UNAVAILABLE`), not as a refusal.
-              const refusal = invitationRoleCapFailure(
-                invitation?.role,
-                await this.resolveMembershipRole(inviterUserId, organizationId),
-              );
-              if (refusal) {
-                const { APIError } = await import('better-auth/api');
-                throw new APIError('FORBIDDEN', { message: refusal.message, code: refusal.code });
-              }
-            }
-
-            const intent = readInvitationPlacementIntent(invitation);
-            if (!intent) return;
-
-            const svc = await this.config.invitationPlacement?.().catch(() => undefined);
-            if (!svc) {
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('FORBIDDEN', {
-                message:
-                  'Invitation placement (business unit + positions) requires the delegated-administration runtime; this deployment cannot authorize it.',
-                code: INVITE_PLACEMENT_UNSUPPORTED_CODE,
-              });
-            }
-
-            try {
-              await svc.assertIssuable({
-                intent,
-                // WHO is issuing — not a context. The service resolves this
-                // user's real grants through the shared authz resolver; a
-                // hand-built context here would carry no positions and refuse
-                // every delegate.
-                actorUserId: inviterUserId,
-                organizationId,
-              });
-            } catch (err: any) {
-              // [#24243] Only the gate's own refusal is a scope verdict. A throw
-              // that is not one (the issuer's grants could not be read) reached
-              // no verdict, so it answers 503 with its code rather than wearing
-              // the refusal's 403, its code and a driver's message.
-              if (!isInvitationPlacementGateRefusal(err)) {
-                throw await invitationPlacementReadFaultApiError(err);
-              }
-              const { APIError } = await import('better-auth/api');
-              throw new APIError('FORBIDDEN', {
-                message: err?.message ?? 'Invitation placement is outside your delegated administration scope.',
-                code: INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE_CODE,
-              });
-            }
-          },
-          // [ADR-0105 D8] Accept-time application + host seam. The placement
-          // the issuance gate approved lands WITH the better-auth membership,
-          // so the invitee arrives already in the right unit and role. The
-          // apply is idempotent (a replayed acceptance converges) and
-          // failure-isolated — a placement miss must not undo a valid
-          // membership; the host seam still fires either way.
-          afterAcceptInvitation: async ({ invitation, member, user, organization }: any) => {
-            const intent = readInvitationPlacementIntent(invitation);
-            if (intent) {
-              try {
-                const svc = await this.config.invitationPlacement?.();
-                if (svc) {
-                  await svc.apply({
-                    intent,
-                    userId: String(user?.id ?? member?.userId),
-                    organizationId: organization?.id ?? invitation?.organizationId ?? member?.organizationId,
-                    grantedBy: invitation?.inviterId ?? invitation?.inviter_id ?? null,
-                  });
-                }
-              } catch (err: any) {
-                console.warn(
-                  '[auth] invitation placement failed (membership kept):',
-                  err?.message ?? String(err),
-                );
-              }
-            }
-
-            const cb = this.config.onInvitationAccepted;
-            if (typeof cb !== 'function') return;
-            try {
-              await cb({
-                invitationId: invitation?.id,
-                organizationId: organization?.id ?? invitation?.organizationId ?? member?.organizationId,
-                userId: user?.id ?? member?.userId,
-                memberId: member?.id,
-                role: member?.role ?? invitation?.role,
-                email: invitation?.email,
-                invitation,
-                member,
-              });
-            } catch (err: any) {
-              console.warn('[auth] onInvitationAccepted callback failed:', err?.message ?? String(err));
-            }
-          },
-          beforeUpdateOrganization: async ({ organization, member }: any) => {
-            const newSlug = organization?.slug;
-            const orgId = member?.organizationId;
-            if (!newSlug || !orgId) return;
-
-            // [#21941] The guard reads only what this composition registers,
-            // and FAILS CLOSED when a registered read cannot answer.
-            //
-            //  - NO DATA ENGINE ⇒ the guard does not apply. Only a standalone
-            //    `AuthManager` lacks one (`AuthPlugin` declares ObjectQL a hard
-            //    dependency), and it then runs on better-auth's in-memory store:
-            //    no engine registers `sys_environment`, so no environment can
-            //    reference the organization.
-            //  - `sys_environment` NOT REGISTERED ⇒ the guard does not apply,
-            //    for the same reason, and nothing is read. It is a cloud-provided
-            //    object (`CLOUD_PROVIDED_OBJECT_NAMES`), so this is the
-            //    open-source composition's answer. The question is the
-            //    registry's own (`getSchema`), never a caught throw; an engine
-            //    that cannot be asked reads as before — it is asked, and a fault
-            //    refuses.
-            //  - A REGISTERED READ THAT THROWS ⇒ refused, `503
-            //    SERVICE_UNAVAILABLE` (`slugGuardReadFaultApiError`). It used to
-            //    end the hook without refusing, which let the slug change through
-            //    whenever either read faulted.
-            const rawEngine = this.config.dataEngine;
-            if (!rawEngine) return;
-            const schemaOf = (rawEngine as { getSchema?: (object: string) => unknown }).getSchema;
-            if (typeof schemaOf === 'function' && !schemaOf.call(rawEngine, 'sys_environment')) return;
-
-            // Both reads run as the platform (`withSystemContext`): this hook
-            // IS the slug guard — the organization id is the `where`, not the
-            // reader — so neither read reaches the engine with no principal
-            // and no opt-in (the security middleware's former principal-less
-            // hand-off, which ADR-0096 D5 replaced with a refusal).
-            const dataEngine = withSystemContext(rawEngine) as any;
-
-            let currentSlug: string | undefined;
-            try {
-              const current = await dataEngine.findOne('sys_organization', {
-                where: { id: orgId },
-              });
-              currentSlug = current?.slug;
-            } catch (err) {
-              throw await slugGuardReadFaultApiError('sys_organization', err);
-            }
-            if (!currentSlug || currentSlug === newSlug) return;
-
-            let activeEnvs = 0;
-            try {
-              const envs = await dataEngine.find('sys_environment', {
-                where: { organization_id: orgId },
-              });
-              activeEnvs = (envs ?? []).filter(
-                (e: any) => e?.status !== 'archived' && e?.status !== 'failed',
-              ).length;
-            } catch (err) {
-              throw await slugGuardReadFaultApiError('sys_environment', err);
-            }
-
-            if (activeEnvs > 0) {
-              const { APIError } = await import('better-auth/api');
-              // [#24243] The message states only what the guard read: environment
-              // rows by `organization_id`, counted by `status`. No hostname is
-              // read, so none is named as a remedy.
-              throw new APIError('FORBIDDEN', {
-                message:
-                  `Cannot change the organization slug while the organization has ${activeEnvs} ` +
-                  `active environment(s), meaning any environment that is neither archived nor ` +
-                  `failed. Archive those environments first, or keep the current slug.`,
-                code: ORGANIZATION_SLUG_LOCKED_CODE,
-              });
-            }
-          },
-          // [#24948] The teams, their members and the organization-admin
-          // grants are the organization's own auth structure, and better-auth's
-          // delete leaves them behind. They go here, inside the request's
-          // transaction (`handleRequest`), after the `hooks.before` refusal has
-          // found no records left. The Default Organization is the
-          // last-administrator guard's to answer, so its structure is not
-          // touched: when that guard admits the delete, the engine's own
-          // refusal still holds while anything names it.
-          beforeDeleteOrganization: async ({ organization }: any) => {
-            const engine = this.getDataEngine();
-            const organizationId = organization?.id;
-            if (!engine || typeof organizationId !== 'string' || !organizationId) return;
-            if (await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()))) return;
-            await removeOrganizationAuthStructure(engine, organizationId);
-          },
-        },
-        // No mailer is wired in framework yet — log the accept URL so
-        // operators / UI can fall back to copy-paste flows. Replace this
-        // with a real mail integration when available.
-        sendInvitationEmail: async ({ email: recipientEmail, invitation, organization: org, inviter }) => {
-          // The accept-invitation page is a Console SPA route; the Console
-          // builds the very same link for its "copy invitation link" action
-          // (`${origin}${BASE_URL}accept-invitation/<id>`). Compose it through
-          // the single-source helper so the `/_console` prefix and absolute
-          // https origin are guaranteed.
-          const acceptUrl = this.getConsolePageUrl(`/accept-invitation/${invitation.id}`);
-          // #2766 V1.5 — placeholder addresses are never real recipients.
-          if (isPlaceholderEmail(recipientEmail)) {
-            throw new Error(
-              `Invitation email refused: ${recipientEmail} is a placeholder address (PLACEHOLDER_EMAIL).`,
-            );
-          }
-          const emailService = this.getEmailService();
-          if (!emailService) {
-            // #2766 — the accept URL is a bearer credential; only print it in
-            // dev, never in production logs.
-            const dev = (globalThis as any)?.process?.env?.NODE_ENV !== 'production';
-            console.warn(
-              `[AuthManager] Invitation email not configured. ` +
-              `To: ${recipientEmail} (org: ${org?.name ?? invitation.organizationId}, ` +
-              `role: ${invitation.role}, inviter: ${inviter?.user?.email ?? 'unknown'})` +
-              (dev ? ` URL: ${acceptUrl}` : ' (accept URL suppressed outside dev)'),
-            );
-            return;
-          }
-          // #14641 — the invitee's OWN stored language, when the address
-          // already carries a `sys_user` row. Two branches, and the split is
-          // the whole point:
-          //
-          //  1. the address HAS a row — an existing platform user invited into
-          //     a second organization, or a re-invitation (better-auth's
-          //     `create-invitation` refuses only an address that is already a
-          //     member of THIS org, measured in the installed 1.7.x
-          //     `routes/crud-invites.mjs`, so an existing account being invited
-          //     elsewhere reaches this callback normally). Their column is a
-          //     language they chose for themselves — the same authority the
-          //     reset / verification sends read since commit 35e94c96b.
-          //  2. NO row — a genuinely new invitee. Their language is still truly
-          //     unknown at invitation time, so the deployment default stands,
-          //     exactly as before.
-          //
-          // Matched EXACTLY on the address, which is safe here rather than
-          // merely tolerable: better-auth lowercases the invitee address on the
-          // invite route (`crud-invites.mjs` — both the create and the resend
-          // branch) and lowercases the stored `user.email` on sign-up
-          // (`api/routes/sign-up.mjs`), so both sides of this predicate are
-          // already in the same case. A spelling that resolves no row lands on
-          // the deployment default, which is the documented floor rather than a
-          // failure.
-          const storedLocale = await this.storedRecipientLocale({ email: recipientEmail });
-          // #14319 — DELIBERATELY no request argument, and the only one of
-          // the five sends without one. better-auth DOES hand this callback
-          // a `ctx.request`, but it is the INVITER's: stamping their
-          // browser language onto the invitee's mail would recreate this
-          // very card one seat over. The 2026-09-02 ruling enumerates
-          // signup, sign-in and password reset — sends where the requester
-          // IS the recipient — and the superseded 2026-08-13 ruling named
-          // invitations as its own counterexample. #13881's ruling item 3
-          // fixes the chain as RECIPIENT locale → deployment default, so
-          // the inviter direction stays rejected: what #14641 added above
-          // is the invitee's own column, never the inviter's header.
-          const mailLocale = this.emailLocaleArg(undefined, storedLocale);
-          // #24154 — `{{role}}` names the membership role by its option LABEL
-          // in the mail's own locale (`成员`, not `member`): every body of the
-          // template interpolates this one value, so the zh-CN mail stops
-          // printing the stored enum inside a Chinese sentence. Never throws;
-          // a value with no label is named as stored, with one warn.
-          const roleLabel = await invitationRoleLabel(invitation.role || '', mailLocale.locale, {
-            getI18n: this.config.getI18n,
-            warn: (msg, meta) =>
-              this.config.logger ? this.config.logger.warn(msg, meta) : console.warn(msg, meta),
-          });
-          try {
-            await emailService.sendTemplate({
-              template: 'auth.invitation',
-              to: recipientEmail,
-              ...mailLocale,
-              data: {
-                inviter: {
-                  name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
-                  email: inviter?.user?.email ?? '',
-                },
-                organization: { name: org?.name ?? invitation.organizationId },
-                role: roleLabel,
-                acceptUrl,
-                appName: this.getAppName(),
-              },
-              relatedObject: 'sys_invitation',
-              relatedId: invitation.id,
-              // commit b706af987 — the invitation HOLDS its organization; thread it so
-              // the sys_email row is stamped: tenant mail. Mail about a person
-              // (reset / verification / magic link) is identity mail instead.
-              ...(invitation.organizationId
-                ? { organizationId: String(invitation.organizationId) }
-                : {}),
-            });
-          } catch (err: any) {
-            // Do NOT rethrow: the invitation row was already persisted by
-            // better-auth; an email-transport failure must not turn the
-            // invite request into a 500. The admin can resend the invite.
-            console.error(`[AuthManager] sendInvitationEmail failed (swallowed): ${err?.message ?? err}`);
-          }
-        },
-      } satisfies OrganizationOptions;
-      const organizationPlugin: any = organization(organizationOptions);
-
-      // [#16569] `GET /organization/list-user-invitations` — make the vendor's
-      // listing honour the `requireEmailVerificationOnInvitation: false`
-      // declared above, the way `accept-invitation`, `reject-invitation` and
-      // `get-invitation` already do. better-auth 1.7.2's `listUserInvitations`
-      // refuses every unverified session UNCONDITIONALLY (it never reads the
-      // option), so on exactly the no-mailer deployment the declaration exists
-      // for, an invitee could accept an invitation but never list it and the
-      // SDK's `organizations.invitations.listMine()` inbox was empty-by-403.
-      // Rebuilt IN PLACE on this plugin's own endpoints record — the same
-      // shape as `applyPlatformAdminImpersonation` above, for the same reasons
-      // (one owner for the path; every hook keyed on it still fires; the
-      // request contract is the vendor's own options object, never a copy).
-      // The listing itself stays the vendor's `getOrgAdapter(...)
-      // .listUserInvitations(sessionEmail)`: no second definition of which
-      // rows a session may see. `list-user-invitations-verification.ts`
-      // carries the full reading.
-      const listingRewired = await applyDeclaredInvitationVerificationToListing(
-        organizationPlugin,
-        organizationOptions,
-      );
-      if (!listingRewired) {
-        // The vendor renamed or dropped the endpoint. Say so loudly: the
-        // route then falls back to the vendor's own handler, which refuses
-        // every unverified session — an empty inbox, not an open door.
-        // `warn`, not `error` (AGENTS.md → Degradation log levels): the
-        // system is VISIBLY smaller — the inbox answers a 403 the caller sees
-        // — and nothing claims a persistence it did not perform.
-        console.warn(
-          '[AuthManager] better-auth\'s organization plugin no longer exposes a ' +
-          '`listUserInvitations` endpoint at /organization/list-user-invitations, ' +
-          'so the declared `requireEmailVerificationOnInvitation` could NOT be ' +
-          'applied to the invitation inbox. Unverified users will be refused ' +
-          '(403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION) until ' +
-          'list-user-invitations-verification.ts is updated for the new vendor shape.',
-        );
-      }
-      return organizationPlugin;
-      });
-    }
-
-    if (enabled.twoFactor) {
-      const { twoFactor } = await import('better-auth/plugins/two-factor');
-      plugins.push(twoFactor({
-        schema: buildTwoFactorPluginSchema(),
-        // ADR-0069 D2 (#3690) — the operator's lockout policy governs BOTH
-        // stages of sign-in, not just the password one.
-        accountLockout: this.resolveTwoFactorAccountLockout(),
-      }));
-    }
-
-    // Breached-password rejection (ADR-0069 D1). Native, stateless: a
-    // k-anonymity range check against Have I Been Pwned on better-auth's
-    // password-mutating endpoints (sign-up / change / reset — the plugin's
-    // defaults). The plaintext password is never sent; only the first 5 SHA-1
-    // hex chars leave the process. Rejects with PASSWORD_COMPROMISED.
-    if (enabled.passwordRejectBreached) {
-      const { haveIBeenPwned } = await import('better-auth/plugins/haveibeenpwned');
-      plugins.push(haveIBeenPwned({
-        customPasswordCompromisedMessage:
-          'This password has appeared in a known data breach. Please choose a different one.',
-      }));
-    }
-
-    if (enabled.admin) {
-      await this.addOptionalPlugin(plugins, 'admin', async () => {
-        const { admin } = await import('better-auth/plugins/admin');
-        // Platform admin: ban/unban, set-password, impersonate, set-role.
-        // Schema mapping ensures the plugin's added user/session columns
-        // match ObjectStack's snake_case conventions (ban_reason,
-        // ban_expires, impersonated_by). `role` and `banned` are already
-        // snake_case-compatible.
-        const adminPlugin: any = admin({
-          schema: buildAdminPluginSchema(),
-        });
-
-        // ADR-0068 D2 — re-authorize `/admin/impersonate-user` on ObjectStack's
-        // platform-admin predicate, IN PLACE on this plugin's own endpoints
-        // record. See `admin-impersonate-endpoint.ts` for the measurement that
-        // picked this shape over a second plugin (which boots and serves, but
-        // makes `checkEndpointConflicts` log an error on every start) and over
-        // a raw Hono mount (forbidden: hand-rolled signed cookies, and it would
-        // silently detach the #8243 rotation hook keyed on this path).
-        //
-        // Every OTHER better-auth-native `/admin/*` route still gates on the
-        // legacy scalar and still refuses platform admins — that is the parent
-        // card's remaining surface, deliberately untouched here. (A caller the
-        // ADR-0069 policy holds is refused on those ahead of the vendor, by the
-        // global before-hook — `VENDOR_ROLE_SCALAR_ADMIN_PATHS`.)
-        //
-        // ADR-0069 D3 — the same endpoint refuses a caller the policy holds,
-        // asked of the session gate's own posture carrier (`computeAuthGate`,
-        // the first entry of `resolveUserAuthGates`); see the endpoint module.
-        const rewired = await applyPlatformAdminImpersonation(
-          adminPlugin,
-          (userId: string) => this.isPlatformAdminUserId(userId),
-          (userId: string, organizationId: string | undefined) =>
-            this.computeAuthGate(userId, organizationId, false),
-        );
-        if (!rewired) {
-          // The vendor renamed or dropped the endpoint. Say so loudly: the
-          // route then falls back to the vendor's own handler, which refuses
-          // every platform admin — a broken button, not an open door.
-          console.error(
-            '[AuthManager] better-auth\'s admin plugin no longer exposes a ' +
-            '`impersonateUser` endpoint at /admin/impersonate-user, so the ' +
-            'ADR-0068 platform-admin authorization could NOT be applied. ' +
-            'Impersonation will refuse every ObjectStack platform admin until ' +
-            'admin-impersonate-endpoint.ts is updated for the new vendor shape.',
-          );
-        }
-        return adminPlugin;
-      });
-    }
-
-    if (enabled.phoneNumber) {
-      await this.addOptionalPlugin(plugins, 'phoneNumber', async () => {
-      const { phoneNumber } = await import('better-auth/plugins/phone-number');
-      // #2766 V1.5 wired phone+password sign-in; #2780 opens the OTP surface
-      // (`/phone-number/send-otp` + `/verify`, `/request-password-reset` +
-      // `/reset-password`) whenever an SMS service is available — resolved
-      // lazily per send so the plugin list stays stable while the capability
-      // upgrades at kernel:ready. Without one, sendOTP still fails loudly
-      // (400 SMS_SERVICE_REQUIRED) instead of silently logging. signUpOnVerification
-      // stays deliberately NOT configured — phone-only accounts are created
-      // by the admin create-user/import routes with a placeholder email
-      // (see placeholder-email.ts), never by OTP self-signup.
-      const otpCfg = this.config.phoneOtp ?? {};
-      return phoneNumber({
-        schema: buildPhoneNumberPluginSchema(),
-        // Wrong-code attempts before the stored OTP is invalidated. Explicit
-        // (even though 3 is the better-auth default) — #2780 names it a
-        // security requirement, so it must not drift with a dependency bump.
-        allowedAttempts: otpCfg.allowedAttempts ?? 3,
-        ...(otpCfg.expiresIn != null ? { expiresIn: otpCfg.expiresIn } : {}),
-        ...(otpCfg.otpLength != null ? { otpLength: otpCfg.otpLength } : {}),
-        // Reject garbage before an SMS is paid for (same shape rule as the
-        // admin endpoints' normalizePhoneNumber).
-        phoneNumberValidator: (phone: string) =>
-          /^\+?[0-9]{6,15}$/.test(String(phone ?? '').replace(/[\s\-().]/g, '')),
-        // Sign-in / verify OTP. Throws surface to the endpoint (better-auth
-        // awaits this callback on /phone-number/send-otp), so the guard's
-        // TOO_MANY_REQUESTS becomes an honest 429 to the client.
-        sendOTP: async ({ phoneNumber: phone, code }) => {
-          await this.deliverPhoneOtp(phone, code);
-        },
-        // Self-service password reset OTP (`/phone-number/request-password-
-        // reset`). better-auth invokes this via runInBackgroundOrAwait —
-        // errors are logged, the route still answers {status:true} — so a
-        // throw here can neither 500 the request nor leak whether the number
-        // is registered.
-        sendPasswordResetOTP: async ({ phoneNumber: phone, code }) => {
-          await this.deliverPhoneOtp(phone, code);
-        },
-      });
-      });
-    }
-
-    if (enabled.magicLink) {
-      await this.addOptionalPlugin(plugins, 'magicLink', async () => {
-      const { magicLink } = await import('better-auth/plugins/magic-link');
-      // magic-link reuses the `verification` table — no extra schema mapping needed.
-      //
-      // The link's lifetime, in seconds, and the ONE source for it: the mount
-      // states it and the mail's `expiresInMinutes` is derived from it, so the
-      // copy says what the link does. 300 s is the lifetime the link already
-      // had through the vendor default (`opts.expiresIn || 300`, better-auth
-      // 1.7.12 `plugins/magic-link/index.mjs`), now written down so a
-      // dependency bump cannot move it under the mail. ⛔ Lengthening it
-      // relaxes a sign-in credential's validity — a security-boundary change
-      // for the maintainer, not a copy fix.
-      const magicLinkExpiresInSec = 5 * 60;
-      return magicLink({
-        expiresIn: magicLinkExpiresInSec,
-        // #14319 — this one is called with the endpoint CTX, not a Request
-        // (measured; magic-link/index.mjs `sendMagicLink({...}, ctx)`).
-        sendMagicLink: async ({ email: recipientEmail, url, token }, ctx?: unknown) => {
-          // #2766 V1.5 — placeholder addresses are never real recipients.
-          if (isPlaceholderEmail(recipientEmail)) {
-            throw new Error(
-              `Magic-link email refused: ${recipientEmail} is a placeholder address (PLACEHOLDER_EMAIL).`,
-            );
-          }
-          const emailService = this.getEmailService();
-          if (!emailService) {
-            // #2766 — a magic link IS a session credential; only print it in
-            // dev, never in production logs.
-            const dev = (globalThis as any)?.process?.env?.NODE_ENV !== 'production';
-            console.warn(
-              `[AuthManager] Magic-link requested for ${recipientEmail} but no email service is wired.` +
-              (dev ? ` URL: ${url}` : ' (link suppressed outside dev)'),
-            );
-            return;
-          }
-          // #15106 — the recipient's OWN stored language, the last auth mail
-          // to reach the top rung of the #14788 option-D ladder. Same rung and
-          // same helper as the other four sends; only the predicate differs,
-          // because this callback is handed an address rather than a user row
-          // — the #14641 invitation shape, and for the same reason it has two
-          // branches:
-          //
-          //  1. the address HAS a `sys_user` row — the ordinary case, since a
-          //     magic link is how an existing account signs in without a
-          //     password → their own `locale`;
-          //  2. NO row — magic link doubles as sign-up (measured in the
-          //     installed 1.7.x: `/sign-in/magic-link` sends WITHOUT checking
-          //     for an account, and `/magic-link/verify` creates one unless
-          //     `disableSignUp`), so an unknown address is legitimate here and
-          //     its language is genuinely unknown → the rungs below stand.
-          //
-          // ⚠️ Lowercased, unlike the invitation predicate, and the difference
-          // is measured rather than stylistic: better-auth lowercases the
-          // invitee address on the invite route, but `signInMagicLinkBodySchema`
-          // applies no such transform, so what arrives here is whatever the
-          // caller typed. `internalAdapter.findUserByEmail` — the lookup
-          // `/magic-link/verify` resolves this very link with — matches on
-          // `email.toLowerCase()`. Reading the column on the same spelling
-          // keeps the row the mail is ABOUT identical to the row the link will
-          // sign into; an address that resolves nothing lands on the rungs
-          // below, which is the documented floor rather than a failure.
-          //
-          // ⛔ The request rung is NOT removed: ruling D inserts the column
-          // ABOVE `Accept-Language`, it does not replace it. A magic link is
-          // requested by its own recipient, so `ctx` here carries the
-          // recipient's own header and stays a legitimate second rung for an
-          // account that has stated no language.
-          const storedLocale = await this.storedRecipientLocale({
-            email: recipientEmail.toLowerCase(),
-          });
-          try {
-            await emailService.sendTemplate({
-              template: 'auth.magic_link',
-              to: recipientEmail,
-              ...this.emailLocaleArg(ctx, storedLocale),
-              data: {
-                magicLinkUrl: url,
-                token,
-                expiresInMinutes: Math.round(magicLinkExpiresInSec / 60),
-                appName: this.getAppName(),
-              },
-              // [ADR-0131 D7, Q2 A] A sign-in link for a person: identity mail.
-              identityMail: true,
-            });
-          } catch (err: any) {
-            console.error(`[AuthManager] sendMagicLink failed: ${err?.message ?? err}`);
-            throw err;
-          }
-        },
-      });
-      });
-    }
-
-    // OIDC / Generic OAuth2 providers (enterprise SSO via genericOAuth plugin)
-    if (this.config.oidcProviders?.length) {
-      const oidcProviders = this.config.oidcProviders;
-      await this.addOptionalPlugin(plugins, 'genericOAuth', async () => {
-      const { genericOAuth } = await import('better-auth/plugins/generic-oauth');
-      return genericOAuth({
-        config: oidcProviders.map(p => ({
-          providerId: p.providerId,
-          ...(p.discoveryUrl ? { discoveryUrl: p.discoveryUrl } : {}),
-          ...(p.issuer ? { issuer: p.issuer } : {}),
-          ...(p.authorizationUrl ? { authorizationUrl: p.authorizationUrl } : {}),
-          ...(p.tokenUrl ? { tokenUrl: p.tokenUrl } : {}),
-          ...(p.userInfoUrl ? { userInfoUrl: p.userInfoUrl } : {}),
-          clientId: p.clientId,
-          clientSecret: p.clientSecret,
-          ...(p.scopes ? { scopes: p.scopes } : {}),
-          ...(p.pkce != null ? { pkce: p.pkce } : {}),
-        })),
-      });
-      });
-    }
-
-    // OAuth/OIDC Provider — turn this server into an OpenID Connect Identity
-    // Provider so external apps can SSO via ObjectStack. Adds the
-    // `/oauth2/{authorize,token,userinfo,register,consent,endsession}` and
-    // `/.well-known/openid-configuration` endpoints under the auth route.
-    //
-    // Migrated from the deprecated `better-auth/plugins/oidc-provider` to the
-    // standalone `@better-auth/oauth-provider` package. The new plugin uses
-    // `oauthClient`, `oauthAccessToken`, `oauthRefreshToken`, and `oauthConsent`
-    // models — see `buildOauthProviderPluginSchema()` for the snake_case
-    // mappings to ObjectStack's `sys_oauth_*` tables.
-    if (enabled.oidcProvider) {
-      // jwt + oauthProvider are one atomic unit: on failure neither lands.
-      // This is the plugin that broke every fresh 15.1.0 project (modelName
-      // TypeError from a 1.6/1.7 version mix) — see addOptionalPlugin.
-      await this.addOptionalPlugin(plugins, 'oidcProvider', async () => {
-      // The new @better-auth/oauth-provider package requires the `jwt`
-      // plugin (used to sign id_tokens / JWT access tokens). Register it
-      // automatically — it is otherwise an internal implementation detail
-      // and forcing every consumer to opt in would be poor DX.
-      const { jwt } = await import('better-auth/plugins');
-      const jwtPlugin = await this.buildJwtPlugin(jwt);
-
-      const { oauthProvider } = await import('@better-auth/oauth-provider');
-      const dcr = resolveDcrEnabled(pluginConfig);
-      return [jwtPlugin, oauthProvider({
-        // Console SPA renders both pages (replaces the legacy Account SPA at
-        // /_account). Override `uiBasePath` in AuthConfig if Console is
-        // mounted elsewhere.
-        loginPage: this.getConsolePageUrl('/login'),
-        consentPage: this.getConsolePageUrl('/oauth/consent'),
-        schema: buildOauthProviderPluginSchema(),
-        // ⛔ No `silenceWarnings` here. It was added for the #3420 double
-        // print of oauth-provider's "Please ensure /.well-known/… exists"
-        // notice — a false positive, because registerOidcDiscoveryRoutes
-        // mounts those documents at the issuer ROOT where RFC 8414 §3 requires
-        // them. The pinned 1.7.2 emits no such notice: neither the option name
-        // nor the `oauthAuthServerConfig` key nor the notice text occurs
-        // anywhere in `@better-auth/oauth-provider` or `better-auth`, so the
-        // option silenced nothing and was the same dead-option shape as the
-        // `validAudiences` defect below. If a future bump reintroduces the
-        // notice, re-add the silencer with a fresh reading — do NOT restore it
-        // on the strength of this comment.
-        // ── MCP OAuth track (#2698) ────────────────────────────────
-        // Coarse tool-family scopes for the platform's own MCP endpoint,
-        // advertised alongside the standard OIDC scopes. Names are
-        // single-sourced in @objectstack/spec so AS / resource server /
-        // tool layer cannot drift.
-        scopes: ['openid', 'profile', 'email', 'offline_access', ...MCP_OAUTH_SCOPES],
-        // MCP clients bind tokens to the resource via RFC 8707
-        // (`resource=<mcp url>`). In @better-auth/oauth-provider 1.7.2 a
-        // requested `resource` is resolved from the `oauthResource` table
-        // (`sys_oauth_resource`) — a miss is refused at /oauth2/authorize with
-        // `invalid_target: requested resource <id> is not configured` — and
-        // `enforcePerClientResources` defaults to TRUE, so the client must
-        // additionally be linked in `oauthClientResource`
-        // (`sys_oauth_client_resource`). Both rows have to exist before the
-        // first Connect, so both are declared here:
-        //
-        //   • `resources` seeds the sys_oauth_resource row from the plugin's
-        //     own `init` (idempotent, `resourceSeedMode: "insertOnly"` by
-        //     default, so an admin's later CRUD edits are never reverted);
-        //   • `clientRegistrationDefaultResources` links every newly
-        //     registered client to it inside the DCR transaction — a client
-        //     that registers anonymously one second before the login cannot
-        //     be linked by an admin in between.
-        //
-        // ⛔ `enforcePerClientResources` is deliberately NOT passed: the
-        // per-client linkage check stays at its `true` default. The fix makes
-        // the link happen; it does not switch the check off. A client with no
-        // link row is still refused, and
-        // auth-manager.mcp-oauth-resource.test.ts asserts exactly that.
-        //
-        // ⛔ Do not reintroduce `validAudiences`: 1.7.2 reads no such option
-        // (0 occurrences in its dist), and audience validation now runs
-        // through the resource table instead. A field that is passed and read
-        // by nobody looks like configuration and enforces nothing — that is
-        // how this defect survived a version bump.
-        resources: [this.getMcpResourceUrl()],
-        clientRegistrationDefaultResources: [this.getMcpResourceUrl()],
-        // RFC 7591 Dynamic Client Registration. `allowUnauthenticated…` is
-        // required: MCP clients register BEFORE any user is logged in (the
-        // whole point of the self-serve flow). Registration is rate-limited
-        // by the plugin, clients get only the scopes advertised above, and
-        // every token still requires an interactive PKCE login + consent —
-        // an anonymous registration mints no authority by itself.
-        allowDynamicClientRegistration: dcr,
-        allowUnauthenticatedClientRegistration: dcr,
-        // ── Native MCP clients that omit `application_type` (#25118, ruling 6329352251, A1) ──
-        // Local MCP clients (Claude Code, Cursor, VS Code, Codex CLI) register
-        // over DCR with a loopback `http` or a custom-scheme redirect, as RFC
-        // 8252 §7.3 and the MCP authorization spec have native clients do, and
-        // send no `application_type`. The provider's default fills a missing
-        // type with `web` (OIDC Registration §2), whose redirect rule refuses
-        // both forms, so every such client was refused before its browser
-        // opened.
-        //
-        // `'infer'` is the provider's own classifier; there is no second rule
-        // here. A dynamic registration that omits the type becomes `native`
-        // when ANY redirect uses a non-http(s) scheme or `http` on exactly
-        // `localhost`, `127.0.0.1` or `[::1]`, and each redirect is then held to
-        // the native rule; otherwise it stays `web`. A type the client sends is
-        // never overridden. It acts on `/oauth2/register` only (the Setup
-        // form's managed `create-client` door is unaffected) and only while
-        // `dcr` is on: with DCR off the provider refuses every registration.
-        //
-        // The measured boundary, pinned on the real provider in
-        // auth-manager.mcp-oauth-dcr-infer.test.ts:
-        //   • a public client with a loopback or custom-scheme redirect → `native`;
-        //   • `https://evil.example/cb` alone stays `web`; `http://evil.example/cb`,
-        //     `http://localhost.evil.example`, and an explicit `web` with a
-        //     loopback redirect stay refused;
-        //   • NOT "public clients only": the classifier reads redirect URIs and
-        //     never `token_endpoint_auth_method`, so a CONFIDENTIAL registration
-        //     (`client_secret_basic`, or the method omitted, which the provider
-        //     fills as `client_secret_basic`) with a loopback or custom-scheme
-        //     redirect and no type also registers as `native` and is issued a
-        //     `client_secret`. That body was already accepted with
-        //     `application_type: 'native'` spelled out, so no registrable client
-        //     shape is added; only the meaning of an omitted field changes
-        //     (RFC 8252 §8.4 allows a per-instance secret provisioned by DCR);
-        //   • PKCE stays required at /oauth2/authorize for every one of these
-        //     clients: unconditionally for a public client, and for a
-        //     confidential DCR client because `clientRegistrationRequirePKCE`
-        //     keeps its `true` default. ⛔ Do not pass it as `false`.
-        //
-        // ⛔ No hook on `/oauth2/register` and no second classification rule
-        // beside this one: ruling A1 declined both.
-        clientRegistrationDefaultApplicationType: 'infer',
-        // ── The organization an OAuth consent binds (ruling 6232069920, A) ──
-        // At consent the consenting session's active organization becomes the
-        // consent's `reference_id`, and the installed provider carries that
-        // value onto the authorization code, the refresh family it starts, and
-        // every access token minted from either, where `customAccessTokenClaims`
-        // emits it as `organization_id` (`verifyMcpAccessToken` reads it back).
-        //
-        // ⛔ The value is the SESSION's, never the client's: the hook reads the
-        // session the provider hands it and nothing else. The authorize query,
-        // the consent body and the client's metadata never reach it, so no
-        // request parameter can choose the organization a token acts in.
-        //
-        // ⛔ No session organization ⇒ no reference and no claim. Never a
-        // guessed or default one: the principal then resolves with global
-        // grants only.
-        //
-        // Existing consents re-confirm once, by the provider's own lookup: it
-        // finds a consent by (client, user, reference) whenever this hook
-        // answers a reference, so a consent stored before this binding (its
-        // `reference_id` is null) no longer satisfies an authorize made in an
-        // organization, and the user sees the consent page again. Until then an
-        // old refresh family keeps minting tokens with no claim, because a
-        // refresh carries the family's own reference, never the session's.
-        //
-        // `postLogin` is declared as one object, so its two other members are
-        // required beside the hook. `shouldRedirect` answers false: the
-        // organization is the one the session already has, not a choice made
-        // on an extra page. `page` is read only when `shouldRedirect` answers
-        // true, which it never does here; it names the consent page so that it
-        // could only ever point at a page that exists.
-        postLogin: {
-          page: this.getConsolePageUrl('/oauth/consent'),
-          shouldRedirect: () => false,
-          consentReferenceId: ({ session }) => consentOrganizationOf(session),
-        },
-        // `organization_id` is not in the provider's reserved access-token
-        // claim set, which it strips at issuance. This is the claim the
-        // `IAuthService.verifyMcpAccessToken` contract names.
-        customAccessTokenClaims: ({ referenceId }) =>
-          referenceId ? { [OAUTH_ORGANIZATION_CLAIM]: referenceId } : {},
-      })];
-      });
-    }
-
-    // External SSO (OIDC / SAML) relying-party — lets this environment federate
-    // login to a customer's own IdP (Okta / Entra / Google …). Per-env, runtime-
-    // registered providers live in `sys_sso_provider` (ADR-0135 D6: the OPEN SSO
-    // mechanism — cloud-free for self-host). Endpoints mount under
-    // /api/v1/auth/sso/{register,providers,delete-provider,callback,…}.
-    //
-    // Toggle with `OS_SSO_ENABLED` (mirrors `OS_OIDC_PROVIDER_ENABLED`).
-    if (enabled.sso) {
-      await this.addOptionalPlugin(plugins, 'sso', async () => {
-      const { sso } = await import('@better-auth/sso');
-      // NOTE: the `ssoProvider` model is bridged to `sys_sso_provider` by the
-      // better-auth adapter / a global model map, not per-plugin here (see the
-      // `ssoProvider` NOTE in auth-schema-config.ts).
-      //
-      // That bridge dates from 1.6.20, where @better-auth/sso hardcoded the
-      // model and read no `schema` option. Re-measured against the installed
-      // 1.7.1 (`node_modules/@better-auth/sso/dist`) on 2026-08-19 — the pin
-      // moved off 1.7.0-rc.2, so the previous stamp here had itself expired
-      // (#8224): still no longer true — `SSOOptions.schema.ssoProvider` exists
-      // (index-CZytzKv6.d.mts) and the runtime honours `modelName` plus a
-      // per-field `fieldName` map (index.mjs, the plugin's `schema:` block). The
-      // adapter-level bridge is kept as-is here because it is what the rest of
-      // the auth stack is wired to; whether to move it onto the plugin option is
-      // a separate change, not a silent one. Only the mapping surface below was
-      // re-verified in depth — see register-sso-provider.ts for the
-      // `oidcConfig.mapping` strict-object findings.
-      //
-      // `organizationProvisioning.defaultRole` (cloud ADR-0024 V1): a first-time
-      // federated login is JIT-provisioned into the user's domain-matched org
-      // with this role, so a member who arrives via an external IdP lands with
-      // an explicit default role (belt-and-suspenders over SecurityPlugin's
-      // `member_default` fallback, which already grants baseline access to any
-      // authenticated user). Requires the `organization` plugin — on by default.
-      // `domainVerification.enabled` (ADR-0135 D6, opt-in via OS_SSO_DOMAIN_VERIFICATION):
-      // when on, @better-auth/sso mounts /sso/request-domain-verification +
-      // /sso/verify-domain (DNS TXT proof-of-ownership) AND enforces that an
-      // external IdP's email domain be DNS-verified before it may complete a
-      // login — preventing an org admin from registering a provider for a domain
-      // they don't control. Off by default to preserve the register→login flow.
-      return sso({
-        organizationProvisioning: { defaultRole: 'member' },
-        ...(enabled.ssoDomainVerification ? { domainVerification: { enabled: true } } : {}),
-      });
-      });
-    }
-
-    // External SCIM 2.0 Service Provider (@better-auth/scim, MIT) — lets an
-    // external IdP (Okta / Entra) auto-provision / deprovision THIS env's users
-    // (the paid Identity lifecycle, cloud ADR-0071). The env is the SCIM Service
-    // Provider; SCIM 2.0 endpoints mount under /api/v1/auth/scim/v2/{Users,…}.
-    // `active:false` → ban + session revoke (needs the admin plugin, forced on
-    // above). This plugin still accepts no `schema` option (`SCIMOptions`
-    // declares no `schema` / `modelName` / `fields` member on the installed
-    // 1.7.1), so its seven models are bridged to the `sys_scim_*` platform
-    // objects via AUTH_MODEL_TO_PROTOCOL. Toggle with `OS_SCIM_ENABLED`.
-    //
-    // Connections are RUNTIME DATA, not boot config (#3653): the stable
-    // constructor's three-way requirement (static `connections` | bearer
-    // verifier | managed catalog) is satisfied with an application-owned
-    // `verifyBearerToken` that resolves the connection from a
-    // `sys_scim_connection_credential` row at request time. ObjectStack owns
-    // the whole credential lifecycle — mint / store / verify — in
-    // `scim-connection-service.ts`; only a keyed one-way digest is ever
-    // persisted (pinned by `credential-at-rest-posture.test.ts`). The rc.1
-    // `storeSCIMToken` / `/scim/generate-token` surface no longer exists on
-    // stable, and the upstream `managedConnections` catalog is deliberately
-    // NOT adopted (maintainer ruling 2026-08-25).
-    if (enabled.scim) {
-      await this.addOptionalPlugin(plugins, 'scim', async () => {
-        const { scim } = await import('@better-auth/scim');
-        const { verifyScimBearerToken } = await import('./scim-connection-service.js');
-        const secret = this.resolveAuthSecret();
-        return scim({
-          connections: [],
-          authentication: {
-            verifyBearerToken: async (input) => {
-              // ⛔ No `scimRequestScope.enterWith(...)` here. The SCIM request
-              // scope that makes the adapter open a REAL engine transaction is
-              // opened by `handleRequest` with `run(...)` around the whole
-              // request (see `SCIM_PROTOCOL_PATH_PREFIX`). It used to be
-              // stamped from this callback and never reached the writes: an
-              // `enterWith` marks only the async resource it runs in and that
-              // resource's descendants, and the vendor resumes the endpoint
-              // handler from a continuation captured BEFORE this verifier ran
-              // (measured on 1.7.2 — zero engine transactions across a SCIM
-              // POST + PATCH; pinned by `scim-transaction-scope.test.ts`).
-              const engine = this.config.dataEngine;
-              if (!engine) return null; // no store to verify against — fail closed
-              return verifyScimBearerToken(engine as never, secret, input.token);
-            },
-          },
-          // [#14360] The host half of `active`: stable @better-auth/scim
-          // writes no `banned` itself any more (the 1.6.x coupling left the
-          // package in 1.7.0) — it hands the aggregate lifecycle state to
-          // this callback inside the SCIM transaction and only revokes
-          // sessions. Routed to the platform's own ban write; the break-glass
-          // last-administrator guard judges it at the engine. See
-          // `reconcileScimUserLifecycle` for the contract and the measurement.
-          identity: {
-            reconcileUser: (state, context) => this.reconcileScimUserLifecycle(state, context),
-          },
-        });
-      });
-    }
-
-    // Device Authorization Grant (RFC 8628) — for CLI / TV-style devices.
-    // Exposes the standard `/device/{code,token,approve,deny}` endpoints
-    // and persists pending requests in `sys_device_code`.
-    //
-    // The verification URI points at the account portal page that lets a
-    // signed-in user approve or deny a pending CLI login. The page reads
-    // the `user_code` query parameter that better-auth appends to
-    // `verification_uri_complete`.
-    if (enabled.deviceAuthorization) {
-      await this.addOptionalPlugin(plugins, 'deviceAuthorization', async () => {
-        const { deviceAuthorization } = await import('better-auth/plugins/device-authorization');
-        return deviceAuthorization({
-          verificationUri: this.getConsolePageUrl('/auth/device'),
-          schema: buildDeviceAuthorizationPluginSchema(),
-        });
-      });
-    }
-
-    // customSession() — augments the session payload with the canonical
-    // `positions: string[]` array (ADR-0068 D1/D2, renamed ADR-0090 D3) and its
-    // derived `isPlatformAdmin` alias.
-    //
-    // [#15136] `positions[]` is the SECURITY axis — the same set
-    // `/auth/me/permissions` reports and every server-side evaluator resolves:
-    // the active organization's membership mapped to canonical
-    // `org_owner`/`org_admin`/`org_member`, the ADR-0057 D4 `sys_user_position`
-    // assignments, the ADR-0090 D5 `everyone` anchor, and `platform_admin`. It
-    // is not derived here; it is asked of `resolveUserAuthzGrants`, the ONE
-    // authority, for the reason spelled out at the call site below.
-    //
-    // ⛔ The better-auth `user.role` scalar is NOT a source of it. It used to be
-    // (split on commas and unioned in), which put auth-layer role names on an
-    // array whose declared meaning — `EvalUserSchema`, "built-in identity names
-    // + position names" — is the security axis, and left the real position names
-    // off it entirely.
-    //
-    // IMPORTANT: `user.role` is NOT overwritten — consumers must gate on
-    // `positions[]` / `isPlatformAdmin` (e.g. via objectui's
-    // `useWorkspaceAdminStatus`), never on `user.role === 'admin'`. A consumer
-    // that genuinely wants the better-auth role reads `user.role`, which stays
-    // on the payload verbatim; the raw membership role stays on the organization
-    // plugin's `member` payload.
-    const dataEngine = this.config.dataEngine;
-    if (dataEngine) {
-      const { customSession } = await import('better-auth/plugins/custom-session');
-      plugins.push(customSession(async ({ user, session }) => {
-        if (!user?.id) return { user, session };
-
-        // ADR-0068 D1/D2 (renamed ADR-0090 D3) — emit ONE canonical
-        // positions[] (identity names + position names), with NO singular
-        // overwrite. isPlatformAdmin is a DERIVED alias of
-        // `'platform_admin' in positions`, retained for back-compat clients.
-        // [#10348] Asked through the ONE authority, exactly as `/sso/register`
-        // and `/admin/impersonate-user` ask it — so the session payload can no
-        // longer disagree with the gates about who a platform admin is.
-        //
-        // [#15136 — maintainer ruling 2026-09-05, option A] ONE name, ONE
-        // meaning: `positions[]` is the SECURITY axis on every surface.
-        //
-        // This used to be a hand-rolled union — the better-auth `sys_user.role`
-        // scalar split on commas, plus the active membership mapped to `org_*`,
-        // plus `platform_admin`. It read NOTHING from `sys_user_position`, the
-        // ADR-0057 D4 table that is the source of truth for custom positions, so
-        // a user genuinely holding a business position got a payload without it
-        // and every client-side gate narrowed by that position answered FALSE —
-        // silently, because the root and the key were both bound and CEL raised
-        // nothing. `EvalUserSchema` had declared the opposite all along
-        // ("built-in identity names + position names", "evaluates identically
-        // wherever it is written"); the Console binds this array straight through
-        // as `current_user`, so the payload WAS the contract violation.
-        //
-        // The derivation is not repaired here — it is DELETED and asked of the
-        // authority instead. `resolve-authz-context.ts` states that every entry
-        // point must resolve authorization through it and never re-read the
-        // `sys_*` grant tables itself; this callback was doing exactly what that
-        // forbids, which is how it drifted out of agreement with
-        // `/auth/me/permissions` (served from the same `grants.positions`) and
-        // with every server-side evaluator (`ExecutionContext.positions`) in the
-        // first place. The same move `isPlatformAdminUserId` made at #10348.
-        //
-        // Scoped to the session's ACTIVE organization, so a position held in one
-        // organization does not answer while the caller operates in another —
-        // the resolver's own rule, now applied to the payload too.
-        //
-        // `isPlatformAdmin` comes from the posture RUNG on the same envelope,
-        // never from the array. ⛔ `positions.includes('platform_admin')` is the
-        // form `resolve-authz-context.ts` explicitly forbids, because an
-        // ADR-0057 D4 `sys_user_position` row MAY SPELL THAT VERY NAME and a
-        // platform-RBAC assignment is not the ADR-0068 D2 capability grant.
-        // Under ruling A that stopped being theoretical: moving `positions` to
-        // the security axis moved the string `platform_admin` into a space a
-        // tenant admin can WRITE (`sys_user_position` is `apiEnabled`), so an
-        // array read here would have let a tenant mint platform standing and
-        // pass the `/admin/*` mount gate. `grants.posture === 'PLATFORM_ADMIN'`
-        // is byte-for-byte what `hasPlatformAdminStanding` returns, so the
-        // payload, that predicate and `judgePlatformAdmin` cannot disagree.
-        // ADR-0068 D2 defines the alias as `'platform_admin' in roles`; that
-        // wording predates D4 rows being able to spell built-in names, and
-        // core's later ⛔ is the specific rule.
-        //
-        // Fail CLOSED on an unreadable grant store, matching what both halves of
-        // the old derivation already did (`isPlatformAdminUserId` returns false
-        // on any lookup error; `activeOrgRoles` caught to `[]`). Warned rather
-        // than swallowed — an empty `positions[]` hides UI, and this card is
-        // about exactly that going unannounced.
-        //
-        // The seed email is the session's own, spelled as `resolveAuthzContext`
-        // spells it for this session (`String(user.email)` when present), so an
-        // in-process session read that `resolveAuthzContext` makes asks for
-        // EXACTLY the resolution its own step 2 asks for — and core's
-        // request-scoped memo serves that step this resolution instead of
-        // issuing every grant read twice per request. It shapes nothing read
-        // here: `grants.email` is the only output it reaches, and the
-        // platform-admin config anchor compares the STORED `sys_user.email`,
-        // never a seed (core §6b-config).
-        let positions: string[] = [];
-        let platformAdmin = false;
-        try {
-          const grants = await resolveUserAuthzGrants(dataEngine as any, user.id, {
-            tenantId: (session as any)?.activeOrganizationId ?? undefined,
-            seedEmail: user.email ? String(user.email) : undefined,
-          });
-          positions = grants.positions;
-          platformAdmin = grants.posture === 'PLATFORM_ADMIN';
-        } catch (err: any) {
-          console.warn(
-            '[auth] could not resolve authorization grants for the session payload; '
-            + 'positions[] is empty and position-gated UI will be hidden:',
-            err?.message ?? String(err),
-          );
-        }
-
-        // ADR-0069 — authentication-policy gate posture (password expiry,
-        // enforced MFA). Computed only when a gate feature is enabled (else
-        // zero extra reads on the hot path); surfaced as `user.authGate` for
-        // the transport seams to enforce. See computeAuthGate().
-        // ADR-0069 D4 — session controls (idle / absolute). Best-effort;
-        // revokes the session in place when exceeded (next request → 401).
-        await this.enforceSessionControls((session as any)?.id, (session as any)?.createdAt);
-
-        // An impersonation session carries the administrator who started it
-        // (`impersonatedBy`, written by the admin plugin's impersonation and
-        // stored as `sys_session.impersonated_by`); which postures hold the
-        // session depends on it — see computeAuthGate().
-        const impersonatedBy = (session as any)?.impersonatedBy;
-        const authGate = await this.computeAuthGate(
-          user.id,
-          (session as any)?.activeOrganizationId,
-          (user as any)?.twoFactorEnabled === true,
-          { impersonation: typeof impersonatedBy === 'string' && impersonatedBy.trim() !== '' },
-        );
-
-        return {
-          user: { ...user, positions, isPlatformAdmin: platformAdmin, ...(authGate ? { authGate } : {}) },
-          session,
-        };
-      }));
-    }
-
-    return plugins;
+    return buildPluginList.call(host);
   }
 
   /**

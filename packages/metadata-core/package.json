@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/metadata-core",
-  "version": "18.0.0",
+  "version": "18.1.0",
   "license": "Apache-2.0",
   "description": "Metadata Repository contracts: types, canonicalization, errors, interface (ADR-0008).",
   "type": "module",
@@ -43,7 +43,7 @@
   ],
   "dependencies": {
     "@objectstack/spec": "workspace:*",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",

@@ -1215,7 +1215,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 678 since #25330: the dataset form's dimensions repeater offers
       // `nullLabel` once its liveness verdict went live — one row label,
       // authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(678);
+      // 679 since the flow form offers `requiredPermissions` (who may start the
+      // flow) — one row label, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(679);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

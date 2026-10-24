@@ -187,3 +187,120 @@ describe('translateView — a form section\'s copy loses to an explicit override
     expect(section(translateView(doc, BUNDLE, { locale: 'zh-CN' }), 'basics').label).toBe('基本信息');
   });
 });
+
+/**
+ * A section's ENTRIES override an object field's `label`, `placeholder` and
+ * `helpText` for that form alone, and those three are addressed under the
+ * section's own node: `objects.<object>._sections.<section>.fields.<field>`.
+ */
+const ENTRY_CONTAINER = {
+  form: {
+    type: 'simple' as const,
+    data: { provider: 'object' as const, object: 'crm_case' },
+    sections: [
+      {
+        name: 'submitter',
+        label: 'About you',
+        fields: [
+          { field: 'contact_name', label: 'Your name', placeholder: 'Jane Doe', helpText: 'As on your ID' },
+          // Authors only a label: the catalog never adds a placeholder or help text.
+          { field: 'contact_email', label: 'Your email' },
+          // A bare name authors no copy at all.
+          'subject',
+          // No bundle entry — the negative control for a missing key.
+          { field: 'phone', label: 'Your phone', placeholder: '+1 555', helpText: 'Optional' },
+        ],
+      },
+      // No `name`: its entries have no address, whatever the bundle carries.
+      { label: 'Details', fields: [{ field: 'description', label: 'What happened' }] },
+    ],
+  },
+};
+
+const ENTRY_PACKAGED: any = expandViewContainer('crm_case', ENTRY_CONTAINER).find((v) => v.name === 'crm_case.form');
+
+const CASE_ZH = {
+  _sections: {
+    submitter: {
+      label: '关于您',
+      fields: {
+        contact_name: { label: '您的姓名', placeholder: '张三', helpText: '与证件一致' },
+        contact_email: { label: '您的邮箱', placeholder: 'MUST-NOT-APPLY', helpText: 'MUST-NOT-APPLY' },
+        subject: { label: 'MUST-NOT-APPLY' },
+      },
+    },
+    details: { fields: { description: { label: 'MUST-NOT-APPLY' } } },
+  },
+};
+
+const ENTRY_BUNDLE: TranslationBundle = { 'zh-CN': { objects: { crm_case: CASE_ZH } } as any };
+
+const entry = (view: any, sectionIndex: number, field: string): any =>
+  view.config.sections[sectionIndex].fields.find((f: any) => (typeof f === 'string' ? f : f.field) === field);
+
+describe('translateView — a form section entry\'s copy, keyed under `_sections.<section>.fields.<field>`', () => {
+  it('composes legal fixtures — the container and the pack node both parse', () => {
+    expect(ViewSchema.safeParse(ENTRY_CONTAINER).success).toBe(true);
+    expect(ObjectTranslationDataSchema.safeParse(CASE_ZH).success).toBe(true);
+    expect(ENTRY_PACKAGED.config.sections[0].fields).toHaveLength(4);
+  });
+
+  it('a zh-CN pack yields the translated entry `label`', () => {
+    const out = translateView(clone(ENTRY_PACKAGED), ENTRY_BUNDLE, { locale: 'zh-CN' });
+    expect(entry(out, 0, 'contact_name').label).toBe('您的姓名');
+  });
+
+  it('a zh-CN pack yields the translated entry `placeholder`', () => {
+    const out = translateView(clone(ENTRY_PACKAGED), ENTRY_BUNDLE, { locale: 'zh-CN' });
+    expect(entry(out, 0, 'contact_name').placeholder).toBe('张三');
+  });
+
+  it('a zh-CN pack yields the translated entry `helpText`', () => {
+    const out = translateView(clone(ENTRY_PACKAGED), ENTRY_BUNDLE, { locale: 'zh-CN' });
+    expect(entry(out, 0, 'contact_name').helpText).toBe('与证件一致');
+    // The section heading beside it is translated by the same reading.
+    expect(out.config.sections[0].label).toBe('关于您');
+  });
+
+  it('a missing key yields the authored entry copy', () => {
+    const out = translateView(clone(ENTRY_PACKAGED), ENTRY_BUNDLE, { locale: 'zh-CN' });
+    expect(entry(out, 0, 'phone')).toEqual(ENTRY_PACKAGED.config.sections[0].fields[3]);
+  });
+
+  it('only authored copy is translated — the catalog never adds a placeholder or help text, nor copy to a bare name', () => {
+    const out = translateView(clone(ENTRY_PACKAGED), ENTRY_BUNDLE, { locale: 'zh-CN' });
+    expect(entry(out, 0, 'contact_email')).toEqual({ field: 'contact_email', label: '您的邮箱' });
+    expect(entry(out, 0, 'subject')).toBe('subject');
+  });
+
+  it('an entry of a section with no `name` is left as authored', () => {
+    const doc = clone(ENTRY_PACKAGED);
+    const out = translateView(doc, ENTRY_BUNDLE, { locale: 'zh-CN' }) as any;
+    expect(out.config.sections[1]).toBe(doc.config.sections[1]);
+  });
+
+  it('an edited entry string keeps its value against the packaged base, judged apart from its siblings', () => {
+    const doc = clone(ENTRY_PACKAGED);
+    doc.config.sections[0].fields[0].label = 'Full name (edited)';
+    const out = translateView(doc, ENTRY_BUNDLE, { locale: 'zh-CN', packagedBase: ENTRY_PACKAGED });
+    expect(entry(out, 0, 'contact_name')).toMatchObject({
+      label: 'Full name (edited)', placeholder: '张三', helpText: '与证件一致',
+    });
+    // NO packaged base supplied → the catalog applies (the control).
+    expect(entry(translateView(doc, ENTRY_BUNDLE, { locale: 'zh-CN' }), 0, 'contact_name').label).toBe('您的姓名');
+  });
+
+  it('an entry the packaged section does not carry was authored after the fact and keeps its strings', () => {
+    const base = clone(ENTRY_PACKAGED);
+    base.config.sections[0].fields = base.config.sections[0].fields.slice(1);
+    const out = translateView(clone(ENTRY_PACKAGED), ENTRY_BUNDLE, { locale: 'zh-CN', packagedBase: base });
+    expect(entry(out, 0, 'contact_name').label).toBe('Your name');
+  });
+
+  it('never mutates its input', () => {
+    const doc = clone(ENTRY_PACKAGED);
+    const before = clone(doc);
+    translateView(doc, ENTRY_BUNDLE, { locale: 'zh-CN' });
+    expect(doc).toEqual(before);
+  });
+});

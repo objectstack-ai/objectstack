@@ -76,7 +76,10 @@
  *
  * - A provider THROWS → the query is refused (fail-closed) and the failure is
  *   logged at `error`. That holds for the queryable provider exactly as for
- *   the readable one.
+ *   the readable one. No verdict was reached, so the refusal does not claim
+ *   one: `503 SERVICE_UNAVAILABLE`, the door's one fault answer
+ *   (`readAdmissionUnresolvedError`, `read-admission.ts`), never the `403` a
+ *   hidden field answers.
  * - The provider answers `undefined` for an object → the reader has no field
  *   answer for it (its contract's "no answer"), and no field of that object is
  *   judged: an object the security service cannot resolve is one the engine
@@ -88,6 +91,7 @@
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { StandardErrorCode } from '@objectstack/spec/api';
+import { readAdmissionUnresolvedError } from './read-admission.js';
 
 /**
  * `PERMISSION_DENIED`, pinned against the STANDARD catalog — the code and the
@@ -224,21 +228,6 @@ export function fieldReadUnjudgeableError(object: string, member: string): Error
 }
 
 /**
- * The fail-closed refusal: the reader could not answer for `object`. Names the
- * object and nothing else — the cause is the operator's, logged at the site.
- */
-function fieldReadUnresolvedError(object: string): Error {
-  const err = new Error(
-    `[Analytics] Access denied: the field-level read permissions for "${object}" could not be resolved, ` +
-      'so the query was not run.',
-  ) as FieldRefusal;
-  err.code = PERMISSION_DENIED;
-  err.status = 403;
-  err.object = object;
-  return err;
-}
-
-/**
  * Refuse the query unless the caller may read — and query on — every field it
  * names.
  *
@@ -289,7 +278,7 @@ export async function assertNamedFieldsReadable(
         `denying query (fail-closed): ${cause.message}`;
       if (logger?.error) logger.error(report, cause);
       else logger?.warn(report);
-      throw fieldReadUnresolvedError(object);
+      throw readAdmissionUnresolvedError(object);
     }
     if (readable === undefined && queryableFields === undefined) continue;
 

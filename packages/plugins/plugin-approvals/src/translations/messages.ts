@@ -33,6 +33,17 @@
  *  - `{{person}}` — a display name; `{{action}}` — the escalation action's
  *    configured token; `{{limit}}` — the revision limit; `{{comment}}` — the
  *    decider's comment, as they wrote it.
+ *
+ * ## The administrators' routing note
+ *
+ * [#25576] `approvalAdminRescue*` are not notifications: they are the system
+ * note an `admin_rescue` request writes on its own timeline, rendered by the
+ * approvals door in the READER's language (`admin-rescue-note.ts`). The note
+ * is `approvalAdminRescueNote` around `{{reason}}`, and the reason is one
+ * clause per approver entry that resolved to no one (`{{type}}` is the
+ * approver type's machine token, `{{value}}` its configured value), joined by
+ * `approvalAdminRescueReasonSeparator`. The `en` note, rendered, is the
+ * `comment` the row stores.
  */
 
 import type { TranslationData } from '@objectstack/spec/system';
@@ -69,6 +80,13 @@ export const enMessages = {
   approvalReturnedBody: 'Your {{object}} {{record}} needs rework before it can be approved.',
   approvalRequestInfoTitle: 'More information requested',
   approvalCommentTitle: 'New comment on an approval',
+  approvalAdminRescueNote: "Routed to this organization's administrators because the approver slate named no one: {{reason}}.",
+  approvalAdminRescuePositionUnheld: "position '{{value}}' has no holder",
+  approvalAdminRescueSlotUnresolved: "{{type}} '{{value}}' resolved to no one",
+  approvalAdminRescueNoApprover: 'no approver on the node resolved to a person',
+  approvalAdminRescueFallbackUnresolved: 'the declared fallbackApprovers resolved to no one either',
+  approvalAdminRescueFallbackUndeclared: "onEmptyApprovers is 'fallback' but no fallbackApprovers are declared",
+  approvalAdminRescueReasonSeparator: '; ',
 } as const satisfies Messages;
 
 /** One approval notification sentence's id. */
@@ -105,6 +123,13 @@ export const zhCNMessages: ApprovalMessages = {
   approvalReturnedBody: '您的{{object}} {{record}} 需要修改后才能获批。',
   approvalRequestInfoTitle: '需要补充信息',
   approvalCommentTitle: '审批有新评论',
+  approvalAdminRescueNote: '审批人名单未指向任何人，因此已转交本组织管理员处理：{{reason}}。',
+  approvalAdminRescuePositionUnheld: '岗位「{{value}}」无人任职',
+  approvalAdminRescueSlotUnresolved: '{{type}}「{{value}}」未解析到任何人',
+  approvalAdminRescueNoApprover: '节点上没有任何审批人解析到具体人员',
+  approvalAdminRescueFallbackUnresolved: '声明的 fallbackApprovers 也未解析到任何人',
+  approvalAdminRescueFallbackUndeclared: "onEmptyApprovers 为 'fallback'，但未声明 fallbackApprovers",
+  approvalAdminRescueReasonSeparator: '；',
 };
 
 export const jaJPMessages: ApprovalMessages = {
@@ -136,6 +161,13 @@ export const jaJPMessages: ApprovalMessages = {
   approvalReturnedBody: 'あなたの{{object}} {{record}} は、承認を受ける前に修正が必要です。',
   approvalRequestInfoTitle: '追加情報が求められています',
   approvalCommentTitle: '承認に新しいコメントがあります',
+  approvalAdminRescueNote: '承認者リストが誰も指していなかったため、この組織の管理者に回されました：{{reason}}。',
+  approvalAdminRescuePositionUnheld: '役職「{{value}}」に就いている人がいません',
+  approvalAdminRescueSlotUnresolved: '{{type}}「{{value}}」は誰にも解決されませんでした',
+  approvalAdminRescueNoApprover: 'ノード上のどの承認者も個人に解決されませんでした',
+  approvalAdminRescueFallbackUnresolved: '宣言された fallbackApprovers も誰にも解決されませんでした',
+  approvalAdminRescueFallbackUndeclared: "onEmptyApprovers は 'fallback' ですが、fallbackApprovers が宣言されていません",
+  approvalAdminRescueReasonSeparator: '；',
 };
 
 export const esESMessages: ApprovalMessages = {
@@ -167,6 +199,13 @@ export const esESMessages: ApprovalMessages = {
   approvalReturnedBody: 'Su {{object}} {{record}} necesita cambios antes de poder aprobarse.',
   approvalRequestInfoTitle: 'Se solicita más información',
   approvalCommentTitle: 'Nuevo comentario en una aprobación',
+  approvalAdminRescueNote: 'Asignada a los administradores de esta organización porque la lista de aprobadores no nombraba a nadie: {{reason}}.',
+  approvalAdminRescuePositionUnheld: "el puesto '{{value}}' no tiene titular",
+  approvalAdminRescueSlotUnresolved: "{{type}} '{{value}}' no se resolvió a nadie",
+  approvalAdminRescueNoApprover: 'ningún aprobador del nodo se resolvió a una persona',
+  approvalAdminRescueFallbackUnresolved: 'los fallbackApprovers declarados tampoco se resolvieron a nadie',
+  approvalAdminRescueFallbackUndeclared: "onEmptyApprovers es 'fallback' pero no se han declarado fallbackApprovers",
+  approvalAdminRescueReasonSeparator: '; ',
 };
 
 /** The four shipped locales, keyed as the bundle beside this file keys them. */

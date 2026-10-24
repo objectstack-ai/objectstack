@@ -17,6 +17,8 @@ import {
     resolveNamedMapping, applyMappingToRows, refuseUnknownMappingTargets, type MappingArtifactLike,
 } from './import-mapping.js';
 import { asXlsxLoadInput, loadExcelJs } from './xlsx-module.js';
+import { isBlank } from '@objectstack/core';
+import { isMatchKeySets } from '@objectstack/spec/api';
 
 /**
  * Minimal RFC-4180-style CSV parser used by the bulk-import endpoint
@@ -194,12 +196,149 @@ export async function parseXlsxToRows(
     return out;
 }
 
+/**
+ * [#25491] The per-cell rules of one inline `FieldMappingEntry`
+ * (`ImportRequestSchema.mapping` in its array form), keyed by the entry's
+ * target: the column has already been renamed to it when the rules run.
+ */
+interface InlineEntryRule {
+    sourceField: string;
+    targetField: string;
+    transform: InlineTransform;
+    hasDefault: boolean;
+    defaultValue?: unknown;
+    required: boolean;
+}
+
+/**
+ * The transforms an inline mapping entry may declare that this path applies,
+ * each to a string cell (any other value passes through). `none` and `lookup`
+ * copy the cell: a `lookup` cell is resolved to a record id by the import's
+ * reference resolution downstream, as the named mapping's `lookup` is.
+ */
+const INLINE_TRANSFORMS = {
+    none: (s: string) => s,
+    lookup: (s: string) => s,
+    trim: (s: string) => s.trim(),
+    uppercase: (s: string) => s.toUpperCase(),
+    lowercase: (s: string) => s.toLowerCase(),
+} as const;
+type InlineTransform = keyof typeof INLINE_TRANSFORMS;
+
+type ImportRefusal = { ok: false; status: number; code: string; error: string };
+
+/**
+ * Read one inline entry's rules, refusing a transform this path does not
+ * apply instead of running the import without it. `date_format` is declared
+ * by the spec, but an entry carries no format for it to apply. Returns no
+ * rule for a plain rename (no transform, no default, not required), which
+ * leaves the row exactly as the rename built it.
+ */
+function readInlineEntryRule(
+    e: { sourceField: string; targetField: string; transform?: unknown; defaultValue?: unknown; required?: unknown },
+): { ok: true; rule?: InlineEntryRule } | ImportRefusal {
+    const transform = e.transform === undefined ? 'none' : e.transform;
+    if (typeof transform !== 'string' || !Object.prototype.hasOwnProperty.call(INLINE_TRANSFORMS, transform)) {
+        const named = typeof transform === 'string' ? `"${transform}"` : String(transform);
+        const why = transform === 'date_format'
+            ? 'a mapping entry carries no date format for it to apply; a cell mapped to a date or datetime field is already parsed as a date, so drop the transform'
+            : `the transforms a mapping entry may declare are ${Object.keys(INLINE_TRANSFORMS).join(', ')}`;
+        return {
+            ok: false, status: 400, code: 'UNSUPPORTED_TRANSFORM',
+            error: `Mapping entry "${e.sourceField}" to "${e.targetField}" declares transform ${named}, which the import path does not apply, `
+                + `so the import is refused rather than run with that transform skipped: ${why}.`,
+        };
+    }
+    const hasDefault = e.defaultValue !== undefined;
+    const required = e.required === true;
+    if (transform === 'none' && !hasDefault && !required) return { ok: true };
+    return {
+        ok: true,
+        rule: {
+            sourceField: e.sourceField, targetField: e.targetField,
+            transform: transform as InlineTransform, hasDefault, defaultValue: e.defaultValue, required,
+        },
+    };
+}
+
+/**
+ * Apply each inline entry's rules to every row, in place, before the cells
+ * are coerced: the transform to a non-blank string cell, then `defaultValue` to a cell
+ * that is blank (what cell coercion calls blank: absent, empty, whitespace or
+ * one of the request's `nullValues`), then `required` to what is left. A
+ * required cell still blank refuses the whole request before any row is
+ * written, on the dry run and the commit alike, naming the column and the
+ * rows (numbered as the row report numbers them).
+ */
+function applyInlineEntryRules(
+    rows: Array<Record<string, any>>,
+    rules: InlineEntryRule[],
+    nullValues: string[] | undefined,
+): ImportRefusal | undefined {
+    const misses = new Map<InlineEntryRule, number[]>();
+    rows.forEach((row, i) => {
+        for (const rule of rules) {
+            let value = row[rule.targetField];
+            // Blankness is judged on the raw cell: a case transform would rewrite a
+            // `nullValues` sentinel (matched exactly) out of being one, so a blank
+            // cell is never transformed and stays blank for the rules below and
+            // for cell coercion.
+            if (typeof value === 'string' && !isBlank(value, nullValues)) value = INLINE_TRANSFORMS[rule.transform](value);
+            if (rule.hasDefault && isBlank(value, nullValues)) value = rule.defaultValue;
+            if (value !== undefined) row[rule.targetField] = value;
+            if (rule.required && isBlank(value, nullValues)) {
+                const at = misses.get(rule) ?? [];
+                at.push(i + 1);
+                misses.set(rule, at);
+            }
+        }
+    });
+    if (misses.size === 0) return undefined;
+    const listed = [...misses].map(([rule, at]) => {
+        const shown = at.length > 10 ? `${at.slice(0, 10).join(', ')} and ${at.length - 10} more` : at.join(', ');
+        return `"${rule.sourceField}" to "${rule.targetField}" (row${at.length === 1 ? '' : 's'} ${shown})`;
+    });
+    return {
+        ok: false, status: 400, code: 'MISSING_REQUIRED_FIELD',
+        error: `The mapping marks ${listed.length === 1 ? 'a column' : 'columns'} required that some rows leave blank: ${listed.join('; ')}. `
+            + 'The import is refused before any row, on the dry run and the commit alike. '
+            + 'Fill those cells, give the entry a defaultValue, or drop required from it.',
+    };
+}
+
+/**
+ * [#25578] Read a request's `matchFields`. One key set (`string[]`) is read
+ * as it always was, non-string and empty names dropped. Ordered key sets
+ * (`string[][]`) are read strictly: every set non-empty and every name a
+ * non-empty string, and an array mixing names with sets is refused, because
+ * a dropped set or name would silently change which record a row matches.
+ */
+function readMatchFieldsBody(raw: unknown): { ok: true; matchFields: string[] | string[][] } | ImportRefusal {
+    if (!Array.isArray(raw)) return { ok: true, matchFields: [] };
+    if (!raw.some((x) => Array.isArray(x))) {
+        return { ok: true, matchFields: raw.filter((f: any) => typeof f === 'string' && f.length > 0) };
+    }
+    const malformed = !isMatchKeySets(raw)
+        || raw.some((set) => set.length === 0 || set.some((f: unknown) => typeof f !== 'string' || f.length === 0));
+    if (malformed) {
+        return {
+            ok: false, status: 400, code: 'INVALID_REQUEST',
+            error: 'matchFields is one key set of field names (["email"]) or ordered key sets, each a non-empty list of field names '
+                + '([["credit_code"], ["country", "registration_no"]]); it cannot mix names with sets or carry an empty set or name.',
+        };
+    }
+    return { ok: true, matchFields: raw as string[][] };
+}
+
 /** Everything the import runner needs, parsed & validated from a request body. */
 export interface PreparedImport {
     rows: Array<Record<string, any>>;
     metaMap: Map<string, ExportFieldMeta>;
     writeMode: 'insert' | 'update' | 'upsert';
-    matchFields: string[];
+    /** One key set, or ordered key sets (first all-non-blank set per row). */
+    matchFields: string[] | string[][];
+    /** Targets of the inline entries declaring `applyOn: 'create'`. */
+    createOnlyFields: string[];
     dryRun: boolean;
     runAutomations: boolean;
     /** #3479 — import established historical facts: skip the state_machine rule
@@ -272,7 +411,7 @@ export interface ImportControlOptOutRefusal {
  * caller the platform already lets past those controls: the system principal,
  * `ExecutionContext.isSystem === true` — the predicate every door that starts
  * an elevated self-triggered flow asks
- * (`refusesElevatedSelfTriggeredStart`, `@objectstack/runtime`), and the only
+ * (`flowStartRefusal`, `@objectstack/runtime`), and the only
  * exemption the create-side read-only strip and the approval record lock
  * admit. ⛔ No permission, capability or administrator standing is read here:
  * none of them lets a caller past those controls anywhere else either (an
@@ -396,9 +535,12 @@ export async function prepareImportRequest(
 
     let writeMode: 'insert' | 'update' | 'upsert' =
         body?.writeMode === 'update' || body?.writeMode === 'upsert' ? body.writeMode : 'insert';
-    let matchFields: string[] = Array.isArray(body?.matchFields)
-        ? body.matchFields.filter((f: any) => typeof f === 'string' && f.length > 0)
-        : [];
+    // `matchFields` is one key set (`string[]`, read as it always was) or
+    // ordered key sets (`string[][]`), which are read strictly: a malformed
+    // set would change which rows match, so it refuses the request.
+    const readMatchFields = readMatchFieldsBody(body?.matchFields);
+    if (!readMatchFields.ok) return readMatchFields;
+    let matchFields: string[] | string[][] = readMatchFields.matchFields;
     // The two control flags, read where the door's gate reads them (#24348):
     // the import doors refuse either opt-out from any caller but the system
     // principal BEFORE this parse (`importControlOptOutRefusal`), so a value
@@ -451,14 +593,38 @@ export async function prepareImportRequest(
     if (writeMode !== 'insert' && matchFields.length === 0) {
         return { ok: false, status: 400, code: 'INVALID_REQUEST', error: `writeMode "${writeMode}" requires a non-empty matchFields[]` };
     }
+    if (skipBlankMatchKey && isMatchKeySets(matchFields)) {
+        return {
+            ok: false, status: 400, code: 'INVALID_REQUEST',
+            error: 'skipBlankMatchKey applies to one key set only. With ordered key sets in matchFields, a row blank on every set '
+                + 'is reported as a row error (BLANK_MATCH_KEY) rather than skipped: drop skipBlankMatchKey, or give matchFields one key set.',
+        };
+    }
 
     // Normalize `mapping` to a `{ sourceColumn: targetField }` record. Accepts
-    // either that compact form or a FieldMappingEntry[].
+    // either that compact form or a FieldMappingEntry[]. An entry's own
+    // per-cell rules (`transform` / `defaultValue` / `required`) are kept
+    // beside the rename and applied once the rows are built (#25491).
     const mapping: Record<string, string> = {};
+    const entryRules: InlineEntryRule[] = [];
+    // [#25577] Targets of the entries declaring `applyOn: 'create'`: written
+    // when the runner creates the row, left out of the patch when it updates one.
+    const createOnlyFields: string[] = [];
     if (Array.isArray(body?.mapping)) {
         for (const e of body.mapping) {
             if (e && typeof e.sourceField === 'string' && typeof e.targetField === 'string') {
                 mapping[e.sourceField] = e.targetField;
+                const read = readInlineEntryRule(e);
+                if (!read.ok) return read;
+                if (read.rule) entryRules.push(read.rule);
+                if (e.applyOn !== undefined && e.applyOn !== 'always' && e.applyOn !== 'create') {
+                    return {
+                        ok: false, status: 400, code: 'INVALID_REQUEST',
+                        error: `Mapping entry "${e.sourceField}" to "${e.targetField}" declares applyOn ${JSON.stringify(e.applyOn)}; `
+                            + 'applyOn is "always" (the default: written on create and update) or "create" (written only when the row is created).',
+                    };
+                }
+                if (e.applyOn === 'create' && !createOnlyFields.includes(e.targetField)) createOnlyFields.push(e.targetField);
             }
         }
     } else if (body?.mapping && typeof body.mapping === 'object') {
@@ -497,6 +663,11 @@ export async function prepareImportRequest(
 
     if (rows.length > maxRows) {
         return { ok: false, status: 413, code: 'PAYLOAD_TOO_LARGE', error: `Import limit is ${maxRows} rows per request (got ${rows.length}).` };
+    }
+
+    if (entryRules.length > 0) {
+        const refused = applyInlineEntryRules(rows, entryRules, nullValues);
+        if (refused) return refused;
     }
 
     // Resolve the object's field metadata so cells coerce to storage values
@@ -558,7 +729,7 @@ export async function prepareImportRequest(
     return {
         ok: true,
         prepared: {
-            rows, metaMap, writeMode, matchFields, dryRun, runAutomations,
+            rows, metaMap, writeMode, matchFields, createOnlyFields, dryRun, runAutomations,
             treatAsHistorical,
             trimWhitespace, nullValues, createMissingOptions, skipBlankMatchKey,
         },

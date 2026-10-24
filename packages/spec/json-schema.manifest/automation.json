@@ -55,6 +55,7 @@
     "automation/MapConfig",
     "automation/NodeExecutorDescriptor",
     "automation/NotifyConfig",
+    "automation/NotifyEmailFieldRecipient",
     "automation/ParallelBranch",
     "automation/ParallelConfig",
     "automation/RetryPolicy",

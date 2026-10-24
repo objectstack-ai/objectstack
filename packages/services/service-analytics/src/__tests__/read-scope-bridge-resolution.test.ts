@@ -217,15 +217,18 @@ describe('analytics row-scope bridge — resolving the "security" service', () =
 
   it('refuses a throwing resolver with BOTH auto-bridges live (no door falls open)', async () => {
     // With no `admitObjectRead` override the object-level bridge (commit 041d9fdc6)
-    // answers first, with `PERMISSION_DENIED`. Pinned so the file-level
-    // property — a broken security service serves no analytics rows through
-    // EITHER door — cannot regress from the other side.
+    // answers first. It reached no verdict, so it answers the fault refusal,
+    // `SERVICE_UNAVAILABLE` / 503 naming the object, not a denial's 403
+    // (#25561). Pinned so the file-level property — a broken security service
+    // serves no analytics rows through EITHER door — cannot regress from the
+    // other side.
     const boom = () => { throw new Error('security service is initialising'); };
     const { service, reads } = await bootAnalytics(boom);
 
     await expect(runProbe(service)).rejects.toMatchObject({
-      code: 'PERMISSION_DENIED',
-      status: 403,
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      object: 'employer_member',
     });
     expect(reads).toEqual([]);
   });

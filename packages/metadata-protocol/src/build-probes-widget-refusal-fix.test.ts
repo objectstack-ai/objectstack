@@ -7,9 +7,11 @@
  * The widget plane runs `queryDataset` as the publishing caller, so read
  * admission can refuse a dataset that is correct. That refusal is told apart
  * by the thrown error's ADR-0112 `code` (`PERMISSION_DENIED`), and its `fix`
- * names the caller's read access — never a dataset edit. Every other throw
+ * names the caller's read access — never a dataset edit. A read gate that
+ * could not decide at all answers `SERVICE_UNAVAILABLE`, and its `fix` names
+ * the server-side fault — neither a grant nor a dataset edit. Every other throw
  * (a selection the dataset does not declare, an unjudgeable member) keeps the
- * dataset fix. `code`, `severity` and `message` are the same on both arms.
+ * dataset fix. `code`, `severity` and `message` are the same on every arm.
  *
  * The errors below are the analytics service's envelopes field for field
  * (`read-admission.ts`, `field-read-admission.ts`, `dataset-refusal.ts`); the
@@ -82,6 +84,31 @@ describe('widget_query_failed — the fix follows the failure', () => {
             { code: 'PERMISSION_DENIED', status: 403, object: 'task_item', fields: ['salary'] },
         ));
         expect(issue.fix).toContain('read access to object "task_item" and its field(s) salary');
+    });
+
+    it('a read gate that could not decide (SERVICE_UNAVAILABLE) names neither the dataset nor an access grant', async () => {
+        // The analytics service's fault refusal (`readAdmissionUnresolvedError`):
+        // a permission or exposure resolver failed, so no verdict was reached.
+        const issue = await probeThrowing(envelope(
+            '[Analytics] Read access to "project" could not be determined, so the query was not run. '
+                + 'This is a server-side fault, not a permission denial.',
+            { code: 'SERVICE_UNAVAILABLE', status: 503, object: 'project' },
+        ));
+        expect(issue.fix).toContain('Dataset "ds" is not the cause');
+        expect(issue.fix).toContain('could not decide read access to object "project"');
+        expect(issue.fix).toContain('server log');
+        expect(issue.fix).not.toContain(DATASET_FIX);
+        // Not the denial's remedy: nobody is told to grant anything.
+        expect(issue.fix).not.toContain('grant it');
+    });
+
+    it('a SERVICE_UNAVAILABLE that names no object falls back to the dataset\'s object', async () => {
+        const issue = await probeThrowing(envelope(
+            'unavailable',
+            { code: 'SERVICE_UNAVAILABLE', status: 503 },
+        ));
+        expect(issue.fix).toContain('could not decide read access to object "task_item"');
+        expect(issue.fix).not.toContain(DATASET_FIX);
     });
 
     it('a selection the dataset does not declare keeps the dataset fix', async () => {

@@ -56,6 +56,72 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Wait until npm serves the CLI's install tree
+        # On a release, this job starts about a minute after `changeset
+        # publish` returns. npm can still answer 404 for some of the group's
+        # tarballs at that point, and the image build's `npm install -g` then
+        # fails (18.1.0: spec-18.1.0.tgz, run 40078805767, #25613). So poll the
+        # registry before building: walk @objectstack/cli@VERSION's
+        # @objectstack/* dependency tree, and wait until every manifest and
+        # tarball answers 200. The wait is bounded at 10 minutes, and on a
+        # timeout the error names each package still missing. A rebuild of a
+        # version that is already out passes at once.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node --input-type=module - <<'NODE'
+          const version = process.env.VERSION;
+          const registry = 'https://registry.npmjs.org';
+          const deadline = Date.now() + 10 * 60 * 1000;
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          // A lockstep group: an @objectstack/* range names the version it was
+          // published with (`^18.1.0` or `18.1.0`), so strip the operator.
+          const pinOf = (range) => range.replace(/^[\^~=v]+/, '');
+          // A network error counts as a miss and is retried like a 404.
+          async function ready(name, ver) {
+            try {
+              const res = await fetch(`${registry}/${name.replace('/', '%2f')}/${ver}`);
+              if (!res.ok) return null;
+              const manifest = await res.json();
+              const tarball = await fetch(manifest.dist.tarball, { method: 'HEAD' });
+              return tarball.ok ? manifest : null;
+            } catch {
+              return null;
+            }
+          }
+          const seen = new Map();
+          let pending = [['@objectstack/cli', version]];
+          let delay = 5000;
+          while (pending.length > 0) {
+            const missing = [];
+            const found = [];
+            for (const [name, ver] of pending) {
+              const manifest = await ready(name, ver);
+              if (!manifest) { missing.push([name, ver]); continue; }
+              seen.set(name, ver);
+              for (const [dep, range] of Object.entries(manifest.dependencies ?? {})) {
+                if (dep.startsWith('@objectstack/') && !seen.has(dep)
+                    && ![...pending, ...found].some(([n]) => n === dep)) {
+                  found.push([dep, pinOf(range)]);
+                }
+              }
+            }
+            pending = [...missing, ...found];
+            // Newly found dependencies are read at once; only a miss waits.
+            if (missing.length === 0) continue;
+            if (Date.now() + delay > deadline) {
+              for (const [name, ver] of missing) {
+                console.log(`::error::npm does not serve ${name}@${ver} (manifest or tarball) after 10 minutes`);
+              }
+              process.exit(1);
+            }
+            console.log(`waiting ${delay / 1000}s for ${missing.length} package(s): ${missing.map(([n, v]) => `${n}@${v}`).join(', ')}`);
+            await sleep(delay);
+            delay = Math.min(delay * 2, 60000);
+          }
+          console.log(`npm serves @objectstack/cli@${version} and ${seen.size - 1} @objectstack/* dependencies.`);
+          NODE
+
       - name: Set up QEMU (arm64 emulation)
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 

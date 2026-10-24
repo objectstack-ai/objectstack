@@ -139,7 +139,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请",
+        successMessage: "已向 {{ result.email }} 发送邀请",
         params: {
           role: {
             options: {
@@ -532,7 +532,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       name: {
         label: "名称",
-        help: "组织自身的名称。控制台显示的产品名称是另一项设置，在 设置 → 品牌 中设置。"
+        help: "组织自身的名称。可在此记录顶部用“重命名组织”修改。控制台显示的产品名称是另一项设置，在 设置 → 品牌 中设置。"
       },
       slug: {
         label: "标识符",
@@ -580,7 +580,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请",
+        successMessage: "已向 {{ result.email }} 发送邀请",
         params: {
           role: {
             options: {
@@ -667,7 +667,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请",
+        successMessage: "已向 {{ result.email }} 发送邀请",
         params: {
           role: {
             options: {
@@ -797,7 +797,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请",
+        successMessage: "已向 {{ result.email }} 发送邀请",
         params: {
           role: {
             options: {
@@ -872,6 +872,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       update_team: {
         label: "编辑团队",
         successMessage: "团队已更新"
+      },
+      add_team_member: {
+        label: "添加成员",
+        successMessage: "团队成员已添加"
       },
       remove_team: {
         label: "删除团队",

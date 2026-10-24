@@ -2333,7 +2333,7 @@
         "ref": "packages/services/service-automation/src/flow-cel-current-user.test.ts + packages/services/service-automation/src/flow-cel-record-binding.test.ts + packages/runtime/src/action-flow-elevated-door.test.ts + packages/runtime/src/endpoint-flow-elevated-door.test.ts + packages/services/service-automation/src/builtin/decision-overlapping-edge-conditions.pin.test.ts"
       },
       "source": [
-        "packages/runtime/src/flow-start-admission.ts#refusesElevatedSelfTriggeredStart",
+        "packages/runtime/src/flow-start-admission.ts#flowStartRefusal",
         "packages/services/service-automation/src/engine.ts",
         "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22310-elevated-flow-trigger-door, 22407-flow-door-elevated-start, 19939-flow-value-slot-run-user-refused"
       ],

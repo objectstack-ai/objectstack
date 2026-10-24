@@ -86,8 +86,8 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { doctorConfig } from '../utils/__tests__/doctor-config.js';
 import Doctor, {
   installedPackageLedgerFailureCheck,
   installedPackageLedgerReaderFailureCheck,
@@ -99,10 +99,6 @@ import Doctor, {
 // `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
 // where the same shape cost 30 ejected merge-queue builds in one night.
 import '@objectstack/cloud-connection';
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-/** `packages/cli` — the oclif root the real command is loaded against below. */
-const CLI_ROOT = path.resolve(HERE, '..', '..');
 
 /**
  * The escape is written as `\x1b`, never as the byte itself: one raw control
@@ -439,7 +435,7 @@ describe('os doctor, end to end, against an unreadable installed-package ledger'
     }) as never);
 
     try {
-      await Doctor.run(argv, { root: CLI_ROOT });
+      await Doctor.run(argv, await doctorConfig());
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
     } finally {
@@ -765,7 +761,7 @@ describe('the optional package INSTALLED BUT UNLOADABLE is reported (#5644)', ()
     }) as never);
 
     try {
-      await FreshDoctor.run(['--verbose'], { root: CLI_ROOT });
+      await FreshDoctor.run(['--verbose'], await doctorConfig());
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
     } finally {
@@ -837,7 +833,7 @@ describe('the optional package INSTALLED BUT UNLOADABLE is reported (#5644)', ()
 
     let exitCode: number | undefined;
     try {
-      await FreshDoctor.run(['--verbose'], { root: CLI_ROOT });
+      await FreshDoctor.run(['--verbose'], await doctorConfig());
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
       exitCode = Number(err.message.split(':')[1]);
@@ -931,7 +927,7 @@ describe('the optional package being genuinely ABSENT stays completely silent (#
     }) as never);
 
     try {
-      await FreshDoctor.run(['--verbose'], { root: CLI_ROOT });
+      await FreshDoctor.run(['--verbose'], await doctorConfig());
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
     } finally {

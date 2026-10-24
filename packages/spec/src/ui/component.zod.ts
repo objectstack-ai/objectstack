@@ -72,6 +72,14 @@ import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
 import { refuseDeclarativeUpdateContradictions } from './action-declarative-update';
 import { navigationTargetRefusal } from './navigation-target';
+import {
+  ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE,
+  ACTION_ERROR_MESSAGE_TEMPLATE_DESCRIBE,
+  ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE,
+  actionCopyRefusals,
+  actionCopyTemplateSlot,
+  type ActionCopyKey,
+} from './action-copy-template';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 // [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
 // `groupBy` union, by reference — the tile routes it exactly as the chart does.
@@ -88,7 +96,8 @@ import { DashboardWidgetSchema } from './dashboard.zod';
 import { ReportSchema } from './report.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
-import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema, ExpressionSchema } from '../shared/expression.zod';
+import { templateExpressionInput } from '../shared/typed-expression-input';
 import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
 import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 // The retired page-component TYPES' prescriptions — one string per type, three
@@ -1436,8 +1445,19 @@ export const RecordDetailsProps = strictObject({
      * asked for the default". Defaults in the describe() texts are MEASURED on
      * the renderer (read points recorded in `liveness/page.json`, row
      * `regions`), not transcribed from a TS interface.
+     *
+     * What `hideEmpty: false` renders was re-ruled (ruling C on
+     * objectstack-ai/objectui#13386, maintainer 2026-10-23): in read-only mode
+     * an all-empty section renders its heading plus ONE fold row — the same
+     * fold a partly-filled section uses — instead of a column of empty rows;
+     * edit mode is unchanged and renders every row, editable. No key, shape or
+     * default changed, and the describe() states the ruled rendering, which
+     * objectui's `DetailSection` follows. The key governs only the ALL-empty
+     * case: a partly-filled section's empty rows follow the renderer's own
+     * fold (objectui#7129 Q2-C) in either polarity, so the old lead "hide this
+     * section's empty fields" no longer told the two values apart.
      */
-    hideEmpty: z.boolean().optional().describe('Hide this section\'s empty fields (renderer default: on — and a section whose fields are ALL empty then renders nothing at all: no heading, no skeleton). Set `false` to render empty rows, keeping the section\'s label skeleton on an all-empty record (e.g. a brand-new one).'),
+    hideEmpty: z.boolean().optional().describe('Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode it renders its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row.'),
     /** Collapsible card. Initial state is expanded; the toggle is the heading. */
     collapsible: z.boolean().optional().describe('Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off).'),
     /** Card chrome; the renderer derives it from the presence of a title. */
@@ -3531,6 +3551,24 @@ const elementListHistory = (type: string) =>
   + '`element:` type although objectui renders it, so no key inside `properties` was ever judged.';
 
 /**
+ * [#24814, ADR-0032 Decisions 2–3] A page action row's copy key —
+ * `confirmText`, `successMessage`, `errorMessage` on `action:button`,
+ * `action:icon` and an `action:group` / `action:menu` member — as a `template`
+ * slot over the roots the console's runner binds (`./action-copy-template.ts`
+ * holds the roots, the refusals and the blank arm). The `template` input is
+ * built HERE, at the declaring file, so the expression-surface census sees each
+ * row's position. A factory, so each row's key carries its own instance.
+ */
+const actionRowCopy = (key: ActionCopyKey) => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key)), key);
+
+/** The describe of each row copy key — the row's wording, then the slot's grammar and roots. */
+const ACTION_ROW_COPY_DESCRIBE: Record<ActionCopyKey, string> = {
+  confirmText: `Confirmation question asked before the action runs — ${ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE}`,
+  successMessage: `Toast shown when the action succeeds — ${ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE}`,
+  errorMessage: `Toast shown when the action fails, in place of the raw error — ${ACTION_ERROR_MESSAGE_TEMPLATE_DESCRIBE}`,
+};
+
+/**
  * The action-level condition shape the renderers evaluate — `visible` on all
  * four, `disabled` on `action:button` / `action:icon`: a boolean literal, a
  * CEL string (normalized to the `{ dialect, source }` envelope on parse), or
@@ -4033,9 +4071,9 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
   operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, and `list_toolbar` is not a location'),
   patch: rowPatchRetired("An `action:button`'s"),
-  confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
-  successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
-  errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
+  confirmText: actionRowCopy('confirmText').optional().describe(ACTION_ROW_COPY_DESCRIBE.confirmText),
+  successMessage: actionRowCopy('successMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.successMessage),
+  errorMessage: actionRowCopy('errorMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.errorMessage),
   refreshAfter: z.boolean().optional().describe('Refresh the surrounding data after the action runs'),
   undoable: z.boolean().optional().describe('Offer an Undo affordance after an update action'),
   recordIdField: z.string().optional().describe('Row field whose value identifies the record the action acts on'),
@@ -4133,9 +4171,9 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
   operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
   patch: rowPatchRetired("An `action:icon`'s"),
-  confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
-  successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
-  errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
+  confirmText: actionRowCopy('confirmText').optional().describe(ACTION_ROW_COPY_DESCRIBE.confirmText),
+  successMessage: actionRowCopy('successMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.successMessage),
+  errorMessage: actionRowCopy('errorMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.errorMessage),
   refreshAfter: z.boolean().optional().describe('Refresh the surrounding data after the action runs'),
   locations: z.array(ActionLocationSchema).optional()
     .describe('Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one'),
@@ -4283,9 +4321,9 @@ function actionContainerMemberShape() {
     bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
     operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
     patch: rowPatchRetired('An `action:group` or `action:menu` member\'s'),
-    confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
-    successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
-    errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
+    confirmText: actionRowCopy('confirmText').optional().describe(ACTION_ROW_COPY_DESCRIBE.confirmText),
+    successMessage: actionRowCopy('successMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.successMessage),
+    errorMessage: actionRowCopy('errorMessage').optional().describe(ACTION_ROW_COPY_DESCRIBE.errorMessage),
     refreshAfter: z.boolean().optional().describe('Refresh the surrounding data after the action runs'),
     locations: z.array(ActionLocationSchema).optional()
       .describe('Action locations, forwarded to the runner — an `action:group` with a `location` draws only the members that list it, and the console uses them to tell a record-scoped action from an object-level one'),

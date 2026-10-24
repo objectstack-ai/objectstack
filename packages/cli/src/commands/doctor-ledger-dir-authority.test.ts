@@ -48,8 +48,8 @@ import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { doctorConfig } from '../utils/__tests__/doctor-config.js';
 import Doctor, {
   installedPackageLedgerDirAuthorityMissingCheck,
   installedPackageLedgerSkippedEntriesCheck,
@@ -61,10 +61,6 @@ import Doctor, {
 // `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
 // where the same shape cost 30 ejected merge-queue builds in one night.
 import '@objectstack/cloud-connection';
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-/** `packages/cli` — the oclif root the real command is loaded against below. */
-const CLI_ROOT = path.resolve(HERE, '..', '..');
 
 /**
  * The escape is written as `\x1b`, never as the byte itself: one raw control
@@ -258,7 +254,7 @@ describe('os doctor, end to end, against a reader that declares no ledger direct
     }) as never);
 
     try {
-      await FreshDoctor.run(argv, { root: CLI_ROOT });
+      await FreshDoctor.run(argv, await doctorConfig());
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
     } finally {
@@ -410,7 +406,7 @@ describe('os doctor, end to end, skipped-entries fix quotes the resolved directo
     }) as never);
 
     try {
-      await Doctor.run(['--verbose'], { root: CLI_ROOT });
+      await Doctor.run(['--verbose'], await doctorConfig());
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
     } finally {

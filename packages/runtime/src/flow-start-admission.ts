@@ -14,30 +14,46 @@
  *    (`action-execution.ts`);
  *  - a declared endpoint of `type: 'flow'` (`endpoint-executor.ts`).
  *
- * The rule (the maintainer's ruling, letter B at the trigger door, extended to
- * every door that starts a flow by name by letter A): a caller that is not the
- * system principal may not start a flow declared `runAs: 'system'` whose
- * `type` is self-triggered — `autolaunched`, `record_change` or `schedule`.
- * Those types run on their own trigger, or as a sub-flow from a parent flow's
- * `subflow` node, and are never an entry, so a button, an action or an
- * endpoint that happens to name one is wiring, not a design. `screen` and
- * `api` flows stay the doors their author designed, elevated or not.
+ * Two rules, asked in this order through ONE entry, {@link flowStartRefusal}:
+ *
+ *  1. **The elevated self-triggered rule** (the maintainer's ruling, letter B at
+ *     the trigger door, extended to every door that starts a flow by name by
+ *     letter A): a caller that is not the system principal may not start a flow
+ *     declared `runAs: 'system'` whose `type` is self-triggered —
+ *     `autolaunched`, `record_change` or `schedule`. Those types run on their
+ *     own trigger, or as a sub-flow from a parent flow's `subflow` node, and are
+ *     never an entry, so a button, an action or an endpoint that happens to name
+ *     one is wiring, not a design. No capability opens it, which is why it
+ *     answers first.
+ *  2. **The flow's own `requiredPermissions`** (ruling record 6377848497,
+ *     letter A): `screen` and `api` flows stay the doors their author designed,
+ *     elevated or not, and the flow says who may walk through them. A caller
+ *     that is not the system principal must hold EVERY capability the flow
+ *     names — the action gate's arithmetic (ADR-0066 D4,
+ *     `required-capabilities.ts`), so an action and a flow declaring the same
+ *     list admit the same callers. Because the action door asks this too, an
+ *     action that starts the flow inherits the flow's declaration: the app
+ *     states it once, on the thing it protects, and an action that forgets to
+ *     repeat it is no hole. An action that declares its OWN list keeps its own
+ *     gate, which answers first (`actionPermissionError`), so a caller at that
+ *     door needs both lists.
  *
  * ## Why a module, and why every door asks it
  *
  * The same reason `flow-dispatch-status.ts` is one: a rule each door spells
  * for itself is a rule that drifts, and a door left out is the defect, not a
- * gap. The type set, the refusal's code and status, and its words live here
- * once, so a caller refused at one door is refused alike at the other two —
+ * gap. The type set, the capability check, the refusals' code and status, and
+ * their words live here once, so a caller refused at one door is refused alike
+ * at the other two —
  * an MCP agent and a person are judged at the same door by the same rule.
  * ⛔ A second copy of the type set or the refusal, at any door, is the defect
  * by construction.
  *
  * ## What the predicate does NOT decide
  *
- * Admission only. Elevation stays the engine's: the predicate reads two
- * declared keys off the definition the service serves and never re-implements
- * the engine's run-as policy. A door's own gates are untouched and keep their
+ * Admission only. Elevation stays the engine's: the check reads three
+ * declared keys (`type`, `runAs`, `requiredPermissions`) off the definition the
+ * service serves and never re-implements the engine's run-as policy. A door's own gates are untouched and keep their
  * place: the action's declared `requiredPermissions` (ADR-0066 D4) still
  * answers first at the action door, and a declared endpoint's policy chain
  * (`authRequired`, `rateLimit`) still runs before its executor. This check
@@ -46,6 +62,8 @@
  */
 
 import type { FlowParsed } from '@objectstack/spec/automation';
+
+import { missingCapabilities } from './required-capabilities.js';
 
 /**
  * The three flow types that start on their OWN trigger — or as a sub-flow
@@ -82,22 +100,60 @@ export const ELEVATED_START_REFUSAL = Object.freeze({
 } as const);
 
 /**
- * Whether a door refuses this caller starting `flowName`: the caller is not
- * the system principal, AND the flow is declared `runAs: 'system'`, AND its
- * `type` is one of {@link SELF_TRIGGERED_FLOW_TYPES}.
+ * The refusal a door answers when the caller lacks a capability the flow's
+ * `requiredPermissions` names — the same code and status as
+ * {@link ELEVATED_START_REFUSAL} and as the action gate's 403 (ADR-0112). ⛔ No
+ * new code is minted here.
  *
- * What stays exactly as it was, and why each is outside this predicate:
+ * The message names the declared and the missing capabilities, as the action
+ * gate's does — the remedy is a grant, and a caller cannot ask for one it
+ * cannot name — and nothing else about the flow: not its name, its type or its
+ * run-as declaration.
+ */
+export function requiredPermissionsRefusal(required: readonly string[], missing: readonly string[]): FlowStartRefusal {
+    return {
+        code: 'PERMISSION_DENIED',
+        status: 403,
+        message:
+            `Starting this flow requires capability [${required.join(', ')}] — `
+            + `caller is missing [${missing.join(', ')}]`,
+    };
+}
+
+/** The ADR-0112 refusal a door answers for a start it does not admit. */
+export interface FlowStartRefusal {
+    code: 'PERMISSION_DENIED';
+    status: 403;
+    message: string;
+}
+
+/**
+ * Whether a flow definition is elevated AND self-triggered — rule 1's subject,
+ * judged on the declaration alone (the caller is {@link flowStartRefusal}'s).
+ */
+export function isElevatedSelfTriggered(flow: { type?: FlowParsed['type']; runAs?: unknown }): boolean {
+    return flow.runAs === 'system' && flow.type !== undefined && SELF_TRIGGERED_FLOW_TYPES.has(flow.type);
+}
+
+/**
+ * THE CHECK every door that starts a flow by name asks: the refusal it
+ * answers for this caller starting `flowName`, or `null` when the start is
+ * admitted. Rule 1 ({@link isElevatedSelfTriggered}) answers first, then rule 2
+ * (the flow's `requiredPermissions`).
+ *
+ * What stays exactly as it was, and why each is outside this check:
  *
  *  - **The system principal** (`executionContext.isSystem`, never set on
- *    inbound HTTP; an in-process caller such as a job) still starts every flow.
- *    The guest principal an `authRequired: false` endpoint admits carries
- *    `isSystem: false` and is refused like any other caller.
+ *    inbound HTTP; an in-process caller such as a job) still starts every flow,
+ *    whatever it declares — the same bypass the action gate grants. The guest
+ *    principal an `authRequired: false` endpoint admits carries
+ *    `isSystem: false` and is judged like any other caller.
  *  - **A parent flow's `subflow` node** starts its child through the engine
- *    (`engine.execute`), never through a door, so an elevated sub-flow called
- *    from its parent is untouched — the check lives at the doors precisely so
- *    that path stays open.
- *  - **`screen` and `api` flows**, elevated or not, and every flow that does
- *    not declare `runAs: 'system'`.
+ *    (`engine.execute`), never through a door, so a sub-flow called from its
+ *    parent is untouched by both rules — the check lives at the doors
+ *    precisely so that path stays open. The parent's own start was the door.
+ *  - **A flow that declares no `requiredPermissions`** (or an empty list) and is
+ *    not elevated-and-self-triggered: admitted, as before.
  *
  * Reads the flow through the automation service's own `getFlow` — the probe
  * `flowIsUnknown` (`flow-dispatch-status.ts`) uses, which serves the same
@@ -106,15 +162,21 @@ export const ELEVATED_START_REFUSAL = Object.freeze({
  * asked, and the door dispatches as before, exactly as the existence check
  * does.
  */
-export async function refusesElevatedSelfTriggeredStart(
+export async function flowStartRefusal(
     automation: unknown,
     flowName: string,
-    executionContext: { isSystem?: boolean } | null | undefined,
-): Promise<boolean> {
-    if (executionContext?.isSystem === true) return false;
+    executionContext: { isSystem?: boolean; systemPermissions?: readonly string[] } | null | undefined,
+): Promise<FlowStartRefusal | null> {
+    if (executionContext?.isSystem === true) return null;
     const svc = automation as { getFlow?: (name: string) => Promise<unknown> } | null | undefined;
-    if (typeof svc?.getFlow !== 'function') return false;
-    const flow = (await svc.getFlow(flowName)) as { type?: FlowParsed['type']; runAs?: unknown } | null | undefined;
-    if (!flow) return false;
-    return flow.runAs === 'system' && flow.type !== undefined && SELF_TRIGGERED_FLOW_TYPES.has(flow.type);
+    if (typeof svc?.getFlow !== 'function') return null;
+    const flow = (await svc.getFlow(flowName)) as
+        | { type?: FlowParsed['type']; runAs?: unknown; requiredPermissions?: unknown }
+        | null
+        | undefined;
+    if (!flow) return null;
+    if (isElevatedSelfTriggered(flow)) return ELEVATED_START_REFUSAL;
+    const missing = missingCapabilities(flow.requiredPermissions, executionContext);
+    if (missing.length > 0) return requiredPermissionsRefusal(flow.requiredPermissions as string[], missing);
+    return null;
 }

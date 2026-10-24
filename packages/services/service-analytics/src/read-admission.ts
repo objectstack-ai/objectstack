@@ -51,17 +51,24 @@
  * The provider is access-NARROWING, so it fails CLOSED, and it is worth saying
  * which states are which:
  *
- *   - a wired provider that THROWS, or answers `false`, denies (this module);
+ *   - a wired provider that answers `false` denies, `403 PERMISSION_DENIED`
+ *     (this module);
+ *   - a wired provider that THROWS refuses too, but it reached no verdict, so
+ *     it does not answer as one: `503 SERVICE_UNAVAILABLE`
+ *     ({@link readAdmissionUnresolvedError}), the cause in the server log;
  *   - a `security` service that is wired but cannot be used — resolving it
- *     throws, or it exposes neither `canReadObject` nor `explain` — denies at
+ *     throws, or it exposes neither `canReadObject` nor `explain` — refuses at
  *     the bridge, because `/data`'s middleware does not fall open in those
- *     states either (`plugin.ts`);
- *   - [#22235] a deployment that registers NO security service denies at the
+ *     states either (`plugin.ts`). The bridge reached no verdict, so it throws
+ *     and the refusal answers `503 SERVICE_UNAVAILABLE` (#25561);
+ *   - [#22235] a deployment that registers NO security service refuses at the
  *     bridge too, by declaration: the in-repo kernels (`ObjectKernel`,
  *     `LiteKernel`) throw on a `security` service nothing ever registered, so
- *     the bridge takes its UNUSABLE branch and refuses with a located error.
+ *     the bridge takes its UNUSABLE branch and refuses with a located error,
+ *     `503 SERVICE_UNAVAILABLE` like the broken service above (the service is
+ *     "not loaded"; #25561).
  *     `/data` carries no object-level gate on such a deployment, so there the
- *     two doors do NOT agree: a loud deny is preferred over a silent admit. A
+ *     two doors do NOT agree: a loud refusal is preferred over a silent admit. A
  *     composition that wants analytics to answer registers a security service,
  *     or its host supplies its own `admitObjectRead`;
  *   - a context that answers the `security` lookup with NOTHING (ABSENT) is a
@@ -100,7 +107,12 @@ const PERMISSION_DENIED: StandardErrorCode = 'PERMISSION_DENIED';
  * layer refused, which permission set the caller holds, or whether the object
  * exists with different grants — an admission refusal that explains itself is
  * an oracle over exactly the metadata the refusal exists to withhold. The
- * server-side log at the producing site carries the detail.
+ * server-side log at the producing site carries the detail. The same rule
+ * binds the FAULT refusal below ({@link readAdmissionUnresolvedError}): it
+ * names no layer, no grant and no existence fact either.
+ *
+ * This is the answer for a VERDICT only — the gate asked and was told "no".
+ * A gate that could not ask answers {@link readAdmissionUnresolvedError}.
  */
 export function readAdmissionDeniedError(objectName: string): Error {
   const err = new Error(
@@ -113,11 +125,61 @@ export function readAdmissionDeniedError(objectName: string): Error {
 }
 
 /**
+ * `SERVICE_UNAVAILABLE`, pinned against the STANDARD catalog — an existing
+ * ADR-0112 member that `HttpStatusErrorCodeMap` maps to 503.
+ */
+const SERVICE_UNAVAILABLE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
+
+/**
+ * The FAULT refusal, in the ADR-0112 envelope — `SERVICE_UNAVAILABLE` / 503 —
+ * for a read gate at this door that could not reach a verdict: the object-level
+ * admission provider threw (this module), the field-level read permissions
+ * could not be resolved (`field-read-admission.ts`), or the API exposure
+ * declaration could not be read (`api-exposure-door.ts`).
+ *
+ * ## Why not the denial's 403
+ *
+ * Fail-closed is unchanged: nothing is admitted on this path. What changes is
+ * what the refusal CLAIMS. Answered as {@link readAdmissionDeniedError}, an
+ * outage was byte-identical to a real denial — the server asserted "you may
+ * not read this" when it never decided — so a caller, a retry policy or a
+ * build probe could not tell an access remedy from an operator one. That is
+ * the class `@objectstack/core`'s `authz-store-unavailable.ts` ends for the
+ * authz context, under the maintainer ruling quoted there; this answer takes
+ * its spelling, `SERVICE_UNAVAILABLE` / 503, so no code is added to the
+ * vocabulary and no envelope gains a key.
+ *
+ * ## One answer for the three gates
+ *
+ * ⛔ The message names the OBJECT and nothing else, the no-oracle rule of
+ * {@link readAdmissionDeniedError}: not WHICH gate could not answer, not why,
+ * not whether the object exists. It says only that the server could not
+ * decide. The cause stays in the server log at the producing site.
+ *
+ * `/analytics/dataset/query` relays a declared 5xx's status and code (the
+ * declared-fault arm), withholding the message as it does for every declared
+ * server fault; the cube query door relays the status the same way. So this
+ * reaches the wire as `503 SERVICE_UNAVAILABLE`, never as
+ * `500 ANALYTICS_QUERY_FAILED`.
+ */
+export function readAdmissionUnresolvedError(objectName: string): Error {
+  const err = new Error(
+    `[Analytics] Read access to "${objectName}" could not be determined, so the query was not run. ` +
+      'This is a server-side fault, not a permission denial.',
+  ) as Error & { code?: string; status?: number; object?: string };
+  err.code = SERVICE_UNAVAILABLE;
+  err.status = 503;
+  err.object = objectName;
+  return err;
+}
+
+/**
  * The object-level read admission provider the service asks.
  *
  * MAY be async — the production bridge resolves the verdict from the
  * `security` service, which can hit the database. Returns `true` to admit and
- * `false` to refuse; a throw is a refusal (fail-closed).
+ * `false` to refuse; a throw is a refusal too (fail-closed), answered as a
+ * fault rather than a denial ({@link readAdmissionUnresolvedError}).
  */
 export type ObjectReadAdmissionProvider = (
   objectName: string,
@@ -178,7 +240,9 @@ export async function assertObjectsReadable(
       // either way. This is the guarantee the required `warn` above buys.
       if (logger?.error) logger.error(report, cause);
       else logger?.warn(`${report}: ${cause.message}`);
-      throw readAdmissionDeniedError(objectName);
+      // No verdict was reached, so the refusal does not claim one: 503, not
+      // the 403 a real denial answers below.
+      throw readAdmissionUnresolvedError(objectName);
     }
     if (!admitted) {
       logger?.warn(

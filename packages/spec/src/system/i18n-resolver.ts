@@ -23,10 +23,15 @@
  *   objects.<object>._tabs.<tab_name>.label
  *   objects.<object>._sections.<section_name>.label
  *   objects.<object>._sections.<section_name>.description
+ *   objects.<object>._sections.<section_name>.fields.<field>.label
+ *   objects.<object>._sections.<section_name>.fields.<field>.placeholder
+ *   objects.<object>._sections.<section_name>.fields.<field>.helpText
  *
  * `<section_name>` is a form section's own `name` — the served form view's
  * `config.sections[]`, see {@link translateView}. A section authored without a
- * `name` has no key and keeps its authored text.
+ * `name` has no key and keeps its authored text, its entries' copy included.
+ * `<field>` is a section entry's own `field` — the override copy one entry of
+ * that section authors over the object field it renders.
  *
  * `<view_key>` is the BARE authoring key (`listViews.<key>`, or the default
  * list/form key) — never the `<object>.<key>` identity the registry assigns a
@@ -147,8 +152,27 @@ interface FormSectionLike {
   name?: unknown;
   label?: unknown;
   description?: unknown;
+  /** `FormSectionSchema.fields` — a bare field name, or an entry object. */
+  fields?: unknown;
   [key: string]: unknown;
 }
+
+/**
+ * Minimal form-section entry shape consumed by {@link translateView} —
+ * `FormFieldSchema` (`ui/view.zod.ts`) narrowed to the override copy the
+ * overlay reads. The three are `I18nLabel`s, so they stay `unknown`.
+ */
+interface FormSectionEntryLike {
+  /** `FormFieldSchema.field` — the `_sections.<section>.fields` key. */
+  field?: unknown;
+  label?: unknown;
+  placeholder?: unknown;
+  helpText?: unknown;
+  [key: string]: unknown;
+}
+
+/** The override copy a section entry carries, each one keyed by its own name. */
+type FormSectionEntryAttr = 'label' | 'placeholder' | 'helpText';
 
 /**
  * Minimal bulk-action-def shape consumed by {@link translateView} —
@@ -190,8 +214,14 @@ export interface ActionLike {
    * a resolver answers with ONE locale's string.
    */
   description?: string;
-  confirmText?: string;
-  successMessage?: string;
+  /**
+   * `template` slots (#24814): the bare string, or the parsed
+   * `{ dialect: 'template', source }` envelope a served action carries. A
+   * translation replaces either with the bundle's sentence, a string; with no
+   * translation the authored value is answered as it is.
+   */
+  confirmText?: string | { dialect: 'template'; source: string };
+  successMessage?: string | { dialect: 'template'; source: string };
   /**
    * `ActionSchema.outcomeMessages` — success copy per handler `outcome`,
    * narrowed to `string` values for the same reason `successMessage` is.
@@ -647,13 +677,15 @@ export function resolveActionLabel(
 
 /**
  * Resolve a translated confirmation prompt for an action, returning
- * `undefined` if neither the bundle nor the action defines one.
+ * `undefined` if neither the bundle nor the action defines one. With no
+ * translation the authored value is answered as written — on a parsed action
+ * the `template` envelope (#24814), which the console's runner reads.
  */
 export function resolveActionConfirm(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
   opts?: ResolveOptions,
-): string | undefined {
+): ActionLike['confirmText'] {
   return lookupActionField(bundle, action, 'confirmText', opts) ?? action.confirmText;
 }
 
@@ -725,13 +757,14 @@ export function resolveActionResultDialog<T extends ResultDialogLike>(
 
 /**
  * Resolve a translated success message for an action, returning `undefined`
- * if neither the bundle nor the action defines one.
+ * if neither the bundle nor the action defines one. With no translation the
+ * authored value is answered as written, as {@link resolveActionConfirm} does.
  */
 export function resolveActionSuccess(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
   opts?: ResolveOptions,
-): string | undefined {
+): ActionLike['successMessage'] {
   return (
     lookupActionField(bundle, action, 'successMessage', opts) ??
     action.successMessage
@@ -1037,6 +1070,28 @@ function lookupSectionText(
 }
 
 /**
+ * One string off a form section entry's
+ * `objects.<object>._sections.<section>.fields.<field>` node, across the
+ * locale chain — `undefined` when no locale carries it, and the caller then
+ * leaves the authored value in place.
+ */
+function lookupSectionEntryText(
+  bundle: TranslationBundle,
+  objectName: string,
+  sectionName: string,
+  fieldName: string,
+  attr: FormSectionEntryAttr,
+  opts: ResolveOptions | undefined,
+): string | undefined {
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.objects?.[objectName]?._sections?.[sectionName]
+      ?.fields?.[fieldName]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
  * Whether a section authored this piece of copy — a non-empty string, or (for
  * an `I18nLabel` heading) an inline locale map.
  */
@@ -1062,9 +1117,11 @@ function formSectionObjectName(config: Record<string, unknown>, viewObject: stri
 
 /**
  * Overlay `objects.<object>._sections.<section>.{label,description}` onto a
- * form view's authored `sections[]`, returning the SAME array reference when
- * nothing matched (so {@link translateView} rebuilds `config` only when a
- * section moved).
+ * form view's authored `sections[]`, and
+ * `objects.<object>._sections.<section>.fields.<field>.{label,placeholder,helpText}`
+ * onto each entry of a section's `fields[]`, returning the SAME array
+ * reference when nothing matched (so {@link translateView} rebuilds `config`
+ * only when a section moved).
  *
  * Three rules. The first and the third are the ones its sibling translators
  * already follow ({@link translateBulkActionDefs} keys each def by its own
@@ -1086,6 +1143,12 @@ function formSectionObjectName(config: Record<string, unknown>, viewObject: stri
  *    that diverged from its packaged counterpart keeps its value
  *    ({@link valueOverridesPackagedBase}; ⛔ never a second comparison). A
  *    section the base does not carry was authored after the fact.
+ *
+ * A section's entries follow the same three rules, one level down
+ * ({@link translateFormSectionEntries}): the key is the entry's own `field`
+ * under its section's `name`, only the copy the entry authors is translated,
+ * and a string that diverged from the packaged section's entry for the same
+ * `field` keeps its value.
  */
 function translateFormSections(
   sections: unknown,
@@ -1108,15 +1171,76 @@ function translateFormSections(
 
     const label = text('label', section.label);
     const description = text('description', section.description);
-    if (label === undefined && description === undefined) return raw;
+    const fields = translateFormSectionEntries(
+      section.fields,
+      bundle,
+      objectName,
+      sectionName,
+      opts,
+      packagedSection,
+    );
+    if (label === undefined && description === undefined && fields === section.fields) return raw;
     changed = true;
     return {
       ...section,
       ...(label !== undefined ? { label } : {}),
       ...(description !== undefined ? { description } : {}),
+      ...(fields !== section.fields ? { fields } : {}),
     };
   });
   return changed ? next : sections;
+}
+
+/**
+ * Overlay `objects.<object>._sections.<section>.fields.<field>.{label,placeholder,helpText}`
+ * onto one named section's `fields[]`, returning the SAME array reference when
+ * nothing matched. The three rules are {@link translateFormSections}' own, one
+ * level down:
+ *
+ *  - **The key is the entry's own `field`** under its section's `name`. A bare
+ *    field-name entry authors no copy (the object field's own label renders,
+ *    translated through `objects.<object>.fields.<field>`), so only an entry
+ *    object is read; sub-`fields` of a composite entry are not addressed.
+ *  - **Only authored copy is translated.** An entry that overrides no
+ *    `placeholder` keeps the field's own; the catalog never adds one.
+ *  - **The catalog loses to an explicit override** (ADR-0029 D9.2a): each
+ *    entry is found in the packaged section's `fields` by its `field`
+ *    ({@link packagedPart}), and a string that diverged from its packaged
+ *    counterpart keeps its value ({@link valueOverridesPackagedBase}).
+ */
+function translateFormSectionEntries(
+  entries: unknown,
+  bundle: TranslationBundle,
+  objectName: string,
+  sectionName: string,
+  opts: ResolveOptions | undefined,
+  packagedSection: Record<string, unknown> | undefined,
+): unknown {
+  if (!Array.isArray(entries)) return entries;
+  let changed = false;
+  const next = entries.map((raw) => {
+    const entry = asRecord(raw) as FormSectionEntryLike | undefined;
+    if (entry === undefined || typeof entry.field !== 'string' || entry.field.length === 0) return raw;
+    const fieldName = entry.field;
+    const packagedEntry = packagedPart(packagedSection, 'fields', (candidate) => candidate.field === fieldName);
+    const text = (attr: FormSectionEntryAttr): string | undefined =>
+      !sectionCopyAuthored(entry[attr]) || valueOverridesPackagedBase(packagedEntry, attr, entry[attr])
+        ? undefined
+        : lookupSectionEntryText(bundle, objectName, sectionName, fieldName, attr, opts);
+
+    const label = text('label');
+    const placeholder = text('placeholder');
+    const helpText = text('helpText');
+    if (label === undefined && placeholder === undefined && helpText === undefined) return raw;
+    changed = true;
+    return {
+      ...entry,
+      ...(label !== undefined ? { label } : {}),
+      ...(placeholder !== undefined ? { placeholder } : {}),
+      ...(helpText !== undefined ? { helpText } : {}),
+    };
+  });
+  return changed ? next : entries;
 }
 
 /**
@@ -1221,6 +1345,12 @@ function translateFormTitle(
  * locale chain and the same override rule as every other string here; a
  * container's form slot receives it through the same `config` projection its
  * bulk-action defs do.
+ *
+ * A section's entries override an object field's `label`, `placeholder` and
+ * `helpText` for that form alone, and those three are addressed under the
+ * same node, at `objects.<object>._sections.<name>.fields.<field>` — so an
+ * entry's copy is served in the reader's language beside its section heading,
+ * by the same reading and the same rules.
  *
  * ## A form view's `title` is translated HERE too
  *
@@ -1611,7 +1741,8 @@ function isOptionValue(value: unknown): value is string | number | boolean {
 /**
  * [#20680] The packaged counterpart of one addressable part of a translated
  * document — a dashboard's widget, global filter or filter option; a view's
- * bulk-action def or its param (#20731), or a form view's section (#23632) —
+ * bulk-action def or its param (#20731), a form view's section (#23632) or one
+ * of that section's entries —
  * found in `parent[key]` (an array) by the key the bundle addresses it by.
  *
  * Three answers, and the difference between the first two is the point:
@@ -1630,7 +1761,7 @@ function isOptionValue(value: unknown): value is string | number | boolean {
  */
 function packagedPart(
   parent: Record<string, unknown> | undefined,
-  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params' | 'sections',
+  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params' | 'sections' | 'fields',
   matches: (candidate: Record<string, any>) => boolean,
 ): Record<string, unknown> | undefined {
   if (parent === undefined) return undefined;
@@ -3367,8 +3498,9 @@ export function scalarOverridesPackagedBase(
  * object scalars its two callers ask about, and the dashboard translator
  * ({@link translateDashboard}) asks the same question of `title`, which that
  * union does not carry; the view translator ({@link translateView}, #20731)
- * asks it of a bulk-action def's `confirmText`, its params' `help` and a form
- * section's `label` / `description` (#23632). One
+ * asks it of a bulk-action def's `confirmText`, its params' `help`, a form
+ * section's `label` / `description` (#23632) and its entries' `label` /
+ * `placeholder` / `helpText`. One
  * implementation, so the three conservative edges documented on the exported
  * predicate hold for every caller alike; ⛔ never a second copy of the
  * comparison.

@@ -3,14 +3,6 @@
 import type {
     DataProtocol, FlowRegistration, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
-// [ADR-0138 D2b] The one cross-item judge of the anonymous flow endpoint ×
-// `runAs: 'system'` flow pair, and the flow-direction refusal it words — see
-// `anonymousElevatedFlowRefusal`.
-import {
-    anonymousElevatedFlowPairs,
-    elevatedFlowAnonymousEndpointsMessage,
-    type AnonymousFlowDoorCandidate,
-} from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, resolveTenancyPosture, resolveThrownHttpError, sandboxBusinessMessage } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
@@ -176,14 +168,14 @@ import {
     discriminateDefaultValueShape,
     externalBindingDatasourceRefusal,
 } from '@objectstack/spec/data';
-import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal, METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
+import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
 import { RLS_MEMBERSHIP_RESOLVER_SERVICE } from '@objectstack/spec/contracts';
 import { ALL_CONVERSIONS, applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
-import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, defaultRecordPageObject } from '@objectstack/spec/ui';
+import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
 // this file imports BOTH `@objectstack/spec` (root, for
@@ -209,18 +201,14 @@ import {
     evaluateLockForDelete,
     resolveLockState,
     MetadataLockSchema,
-    MetadataProtectionFields,
     type MetadataLock,
     type MetadataLockSource,
     type MetadataProvenance,
 } from '@objectstack/spec/kernel';
-import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
+import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 // [#19417] The package-id declaration and its remedy text, imported to be
 // SURFACED rather than restated — see the gate at the top of `installPackage`.
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
-// [#24086] The install door's own manifest declaration — `ManifestSchema` with
-// `scope` narrowed to `project` — judged whole at the top of `installPackage`.
-import { PackageInstallManifestSchema } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { REFERENCE_SITES } from './reference-sites.js';
 // [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
@@ -337,6 +325,50 @@ import {
     readAsCaller,
     searchAll,
 } from './protocol-record-reads.js';
+// [#25467 cut 5] The lock gate and the optimistic-concurrency write addresses
+// (`getEffectiveLock`, `assertLockAllowsWrite`/`Delete`, `readVersionToken`, the
+// draft and read addresses, `metadataConflictRefusal`); the methods of the same names
+// below hand each body the members it reads (`LockVersionGateHost`).
+import {
+    assertLockAllowsDelete,
+    assertLockAllowsWrite,
+    getEffectiveLock,
+    lockWriteRefusal,
+    metadataConflictRefusal,
+    packagelessDraftAddress,
+    packagelessReadAddress,
+    readLockGateOverlayLayer,
+    readVersionToken,
+    receiptVersion,
+    recordMetadataAudit,
+    recordPendingDenialAudit,
+    storedHashDigest,
+    storedHeadAt,
+    storedParentForToken,
+    strictDraftReadAddress,
+} from './protocol-lock-version-gates.js';
+// [#25467 cut 6] The save door's refusals (the item-name grammar, the default record
+// page and external-binding refusals, the anonymous elevated-flow pair, the authored
+// lock family, the write binding, the namespace prefix); the methods of the same names
+// below hand each body the members it reads (`SaveDoorRefusalHost`).
+import {
+    anonymousElevatedFlowRefusal,
+    authoredLockFamily,
+    defaultRecordPageSaveRefusal,
+    externalBindingDatasourceDefinition,
+    externalBindingSaveRefusal,
+    objectNamespacePrefixViolation,
+    objectsBoundExternallyTo,
+    refuseUngrammaticalMetaItemName,
+    saveWriteBinding,
+} from './protocol-save-door-refusals.js';
+// [#25467 cut 7] Package install and update.
+import {
+    installPackage,
+    packageInstallUndo,
+    packagePersistService,
+    updatePackage,
+} from './protocol-package-install.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -414,7 +446,7 @@ const TYPE_TO_FORM: Readonly<Record<string, FormView>> = METADATA_FORM_REGISTRY;
  * spelling-tolerant lookup this comment has rejected since #4432, and it would
  * still persist the row under the plural `type`.
  */
-function canonicalMetaType(type: string): string {
+export function canonicalMetaType(type: string): string {
     return canonicalMetaUrlType(type);
 }
 
@@ -1205,94 +1237,6 @@ function withoutProtectionBlock(type: string, item: unknown): unknown {
 }
 
 /**
- * [ADR-0010 §3.3] The lock family: the `_lock*` members of the protection
- * envelope every metadata type spreads (`MetadataProtectionFields`), read off
- * that declaration so this file keeps no list of its own.
- */
-const LOCK_FAMILY_KEYS: readonly string[] = Object.freeze(
-    Object.keys(MetadataProtectionFields).filter((key) => key.startsWith('_lock')),
-);
-
-/** The lock family `body` carries: each member with a value, and nothing else. */
-function lockFamilyOf(body: unknown): Record<string, unknown> {
-    const family: Record<string, unknown> = {};
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return family;
-    for (const key of LOCK_FAMILY_KEYS) {
-        const value = (body as Record<string, unknown>)[key];
-        if (value !== undefined) family[key] = value;
-    }
-    return family;
-}
-
-/** Do two lock families state the same members with the same values? */
-function sameLockFamily(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
-    return LOCK_FAMILY_KEYS.every((key) => a[key] === b[key]);
-}
-
-/**
- * `body` carrying exactly `family` as its lock family: every member `family`
- * states, and no other `_lock*` key. Returns `body` itself when nothing
- * changes, and a copy otherwise, so a caller's own body is never mutated.
- */
-function withLockFamily(body: Record<string, unknown>, family: Record<string, unknown>): Record<string, unknown> {
-    const unchanged = LOCK_FAMILY_KEYS.every((key) =>
-        family[key] === undefined ? !Object.prototype.hasOwnProperty.call(body, key) : body[key] === family[key]);
-    if (unchanged) return body;
-    const out: Record<string, unknown> = { ...body };
-    for (const key of LOCK_FAMILY_KEYS) {
-        if (family[key] === undefined) delete out[key];
-        else out[key] = family[key];
-    }
-    return out;
-}
-
-/**
- * [ADR-0010 §3.5 and §4.1] The save door's refusal of a body whose lock family
- * would set, change or remove the item's lock: an author's write never does
- * any of the three. See {@link ObjectStackProtocolImplementation.authoredLockFamily}
- * for what is judged against what, and for the echo it accepts.
- *
- * The refusal family {@link protectionBlockRefusal} gives the `protection`
- * block, at the same position: `VALIDATION_ERROR` / 400, no code minted, the
- * prescription first because a 4xx message crosses the REST boundary bounded
- * at 500 characters with its tail truncated. It is located twice: the message
- * names every `_lock*` key the body sent, and `issues[]` carries each as a
- * path, the shape the Studio designer keys on. The remedy is to remove them —
- * a body that sends no `_lock*` key keeps the lock the item has — and the
- * door it names for a lock is the one ADR-0010 states: a code package's
- * loader, translating `protection` (Phase 4.3).
- */
-function authoredLockFamilyRefusal(
-    type: string,
-    saveName: string,
-    sent: Record<string, unknown>,
-    served: Record<string, unknown>,
-): Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] } {
-    const keys = LOCK_FAMILY_KEYS.filter((key) => sent[key] !== undefined);
-    const servedLock = served._lock ?? 'none';
-    const sentLock = sent._lock ?? 'none';
-    const effect = servedLock === 'none'
-        ? (sentLock === 'none' ? 'add lock keys to it' : 'set a lock on it')
-        : sentLock === 'none' ? 'remove its lock' : 'change its lock';
-    const err = new Error(
-        `Remove ${keys.map((key) => `\`${key}\``).join(', ')} from ${type} '${saveName}' and send it again. `
-        + `Nothing was written. They would ${effect}, and the metadata API never sets, changes or removes a lock: `
-        + 'an item saved here is authored in this system (ADR-0010 §3.5). To lock an item, declare `protection` '
-        + "on it in a code package's source, where the package loader translates it into the item's lock "
-        + '(ADR-0010 Phase 4.3).',
-    ) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
-    err.code = 'VALIDATION_ERROR';
-    err.status = 400;
-    err.issues = keys.map((key) => ({
-        path: key,
-        message: "Not accepted through the metadata API: only a code package's loader sets an item's lock. "
-            + 'Sent back exactly as a read of this item serves it, the key is accepted and ignored.',
-        code: 'custom',
-    }));
-    return err;
-}
-
-/**
  * [#23165] The rows of an item a delete leaves stored at its address, in
  * words, for the delete receipt: its rows bound to other packages (sorted, as
  * {@link ObjectStackProtocolImplementation.packagelessAddress} answers them,
@@ -1349,7 +1293,7 @@ function packagelessPublishNoDraftRefusal(
  * a metadata-authoring diagnostic, its consumers already read raw zod codes, and
  * aligning the two vocabularies is a separate decision (#5364).
  */
-interface MetadataIssueEntry {
+export interface MetadataIssueEntry {
     path: string;
     message: string;
     code: string | undefined;
@@ -3666,28 +3610,6 @@ function declaresClientRefusal(err: unknown): boolean {
 }
 
 /**
- * [#21207] A caller's version token that names no current stored head, found by
- * the protocol's own KEYED comparison before the repository is asked (see
- * {@link ObjectStackProtocolImplementation.storedParentForToken}).
- *
- * A `ConflictError`, so each door's existing conflict branch — the 409
- * `METADATA_CONFLICT` and its decision-audit row — handles it unchanged; told
- * apart from the repository's own race conflict because its `expectedParent`
- * is the CALLER's token rather than a stored hash. The message is replaced:
- * the base class prints both values, and one of them is the stored hash.
- */
-class InboundVersionConflictError extends ConflictError {
-    constructor(
-        ref: { org: string; type: string; name: string },
-        token: string,
-        currentStored: string | null,
-    ) {
-        super(ref as ConstructorParameters<typeof ConflictError>[0], token, currentStored);
-        this.message = `Conflict on ${ref.type}/${ref.name}: the version token sent is not the current version`;
-    }
-}
-
-/**
  * [#8136] The client-facing sentence for a failed overlay delete: the caller's
  * own refusal when they declared one, and otherwise a stable line that names
  * the operation and quotes nothing.
@@ -4104,7 +4026,7 @@ function metadataIssueHeadline(issues: MetadataIssueEntry[]): string {
  * attached identically on every face, and the headline still names how many
  * findings there are and where they are.
  */
-function specValidationFindings(
+export function specValidationFindings(
     face: MetadataWriteFace | undefined,
     issues: MetadataIssueEntry[],
 ): string {
@@ -5674,7 +5596,7 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * clause is its own: the import accepts no `force`, and it writes only names
  * no environment row held when it began.
  */
-type MetadataWriteFace =
+export type MetadataWriteFace =
     | 'package-duplicate'
     | 'meta-envelope'
     | 'meta-dispatch'
@@ -6161,7 +6083,7 @@ export type MetadataAuthoringChannel = 'environment' | 'package-author';
  * it is inside (it cannot know, and guessing is what broke) and puts the
  * placement decision where the transaction actually is: in the caller.
  */
-interface MetadataAuditEntry {
+export interface MetadataAuditEntry {
     type: string;
     name: string;
     /**
@@ -6180,16 +6102,6 @@ interface MetadataAuditEntry {
     requestId?: string;
     note?: string;
 }
-
-/**
- * An `Error` carrying the denial row it still owes (see {@link MetadataAuditEntry}).
- *
- * The property is name-mangled like `__batchItem` beside it: it is an internal
- * hand-off between one private helper and its callers inside this file, never a
- * wire field. `clientFacingFailureText` / `clientFacingFailureCode` read
- * `message` / `code`, so nothing here reaches a response body.
- */
-type ErrorWithPendingAudit = Error & { __pendingAudit?: MetadataAuditEntry };
 
 /** Attach the denial row `err` owes, and return `err` so call sites read as one `throw`. */
 function withPendingAudit<E extends Error>(err: E, audit: MetadataAuditEntry): E {
@@ -17110,7 +17022,7 @@ export class ObjectStackProtocolImplementation implements
      * the fail-closed direction and the assert doing its job — not a hole to
      * paper over here by folding the ledger key too.
      */
-    private async getEffectiveLock(
+    private getEffectiveLock(
         type: string,
         name: string,
         packageId?: string,
@@ -17119,25 +17031,12 @@ export class ObjectStackProtocolImplementation implements
         lockReason: string | undefined;
         lockSource: 'artifact' | 'overlay' | undefined;
     }> {
-        // [#9009] ONE key for BOTH limbs — see this method's header.
-        const canonicalType = canonicalMetaType(type);
-        // [#21738] The one item-lock resolution decides; the two readers below
-        // only gather its layers, the second only when it can bind.
-        const resolved = await resolveItemLockLazily({
-            // 1. Artifact. `lookupArtifactItem` is shadow-immune: a
-            //    sys_metadata overlay row hydrated into the registry's plain
-            //    key cannot mask the packaged artifact's `_lock` envelope.
-            //    [#21803] Every installed package that ships the name, through
-            //    the reads' own selection, from the same address — see this
-            //    method's header.
-            artifact: () => this.artifactLockLayerAt({
-                type: canonicalType,
-                name,
-                packageId,
-            }),
-            overlay: () => this.readLockGateOverlayLayer(canonicalType, name, packageId),
-        });
-        return { lock: resolved.lock, lockReason: resolved.lockReason, lockSource: resolved.layer };
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof getEffectiveLock> = {
+            artifactLockLayerAt: (...a) => this.artifactLockLayerAt(...a),
+            readLockGateOverlayLayer: (...a) => this.readLockGateOverlayLayer(...a),
+        };
+        return getEffectiveLock.call(host, type, name, packageId);
     }
 
     /**
@@ -17147,66 +17046,17 @@ export class ObjectStackProtocolImplementation implements
      * `sys_metadata` is not provisioned yet). Throws when the rows cannot be
      * read (#5706).
      */
-    private async readLockGateOverlayLayer(
+    private readLockGateOverlayLayer(
         canonicalType: string,
         name: string,
         packageId: string | undefined,
     ): Promise<unknown> {
-        // 2. Overlay rows — addressed by the SAME canonical key the repository
-        //    stores them under (`SysMetadataRepository.whereFor`), which is
-        //    what makes this limb read the rows the artifact limb already
-        //    folded to. [#21761] Through the reads' own selection, from the
-        //    same address —
-        //    see {@link getEffectiveLock}'s header. Canonical spelling only
-        //    (#4432), the one declared difference — see
-        //    {@link overlayLockLayerAt}.
-        try {
-            return await this.overlayLockLayerAt({
-                type: canonicalType,
-                name,
-                packageId,
-            }, { otherSpelling: false });
-        } catch (error) {
-            // #5706 — A LOCK GATE MUST NOT FAIL OPEN. This `catch` used to
-            // swallow every read failure and fall through to `'none'`, and
-            // `'none'` is not a neutral value here: it is the verdict "the
-            // author declared no protection", which `evaluateLockForWrite` /
-            // `evaluateLockForDelete` turn straight into "allow". So an
-            // unreadable `sys_metadata` silently converted a write that had to
-            // be refused into a write that was performed — measured on
-            // `origin/main`: with the overlay row declaring `_lock:
-            // 'no-overlay'` and only the read above failing, `saveMetaItem`
-            // returned `success: true` after an `update` on `sys_metadata`
-            // (and `deleteMetaItem` the same, on `_lock: 'no-delete'`).
-            //
-            // Note what that also costs the audit trail: the allowed path
-            // writes its ordinary `outcome: 'allowed'` row, so nothing
-            // afterwards records that this write should have been denied.
-            //
-            // The window is not "the metadata store is down" — a fully dead
-            // store fails the write too. It is "the READ failed and the write
-            // still succeeded": a transient error, a single timed-out query, a
-            // read-replica fault, partial pool exhaustion. Narrow, but the
-            // shape is wrong at any width, and it is the inverse of ADR-0049's
-            // fail-closed direction.
-            //
-            // The discrimination is the same one #5532 / PR #5705 installed for
-            // the overlay READS in this file, reused verbatim rather than
-            // reinvented: an unprovisioned `sys_metadata` genuinely has no
-            // overlay row, so `'none'` IS the truth and first boot must not
-            // explode; every other error is an outage and becomes a 503, whose
-            // `cause` carries the driver error. ADR-0010 §3.3 is the decision
-            // this defends; ADR-0110 D3 is the rule it was breaking — a miss
-            // and an outage are different facts, and here reading one as the
-            // other disarmed a protection gate.
-            //
-            // Consequence, deliberate and wire-visible: `save` / `publish` /
-            // `rollback` / `delete` now fail with 503 when the lock state
-            // cannot be read, instead of proceeding as if unlocked. Refusing
-            // one uncertain write beats performing one that had to be refused.
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-        return undefined;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof readLockGateOverlayLayer> = {
+            overlayLockLayerAt: (...a) => this.overlayLockLayerAt(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+        };
+        return readLockGateOverlayLayer.call(host, canonicalType, name, packageId);
     }
 
     /**
@@ -17256,49 +17106,13 @@ export class ObjectStackProtocolImplementation implements
      * never be refused by this gate — the same positive-control-by-construction
      * `metaUrlSpellingRefusal` is built on).
      */
-    private async recordMetadataAudit(entry: MetadataAuditEntry): Promise<void> {
-        const canonical = canonicalMetaType(entry.type);
-        if (canonical !== entry.type) {
-            const err: any = new Error(
-                `Refusing to write a sys_metadata_audit row under the `
-                + `non-canonical metadata type '${entry.type}' (canonical: '${canonical}') for `
-                + `'${entry.name}'. ADR-0010's trail is keyed on (type, name) and read back through `
-                + `the '/meta' boundary, which folds — a row filed under '${entry.type}' is a row no `
-                + `compliance query can reach. Fold the type at the call site (canonicalMetaType) `
-                + `rather than here; see this method's header for why the writer no longer does it.`,
-            );
-            err.code = 'AUDIT_TYPE_NOT_CANONICAL';
-            err.status = 500;
-            throw err;
-        }
-        try {
-            await this.engine.insert('sys_metadata_audit', {
-                occurred_at: new Date().toISOString(),
-                actor: entry.actor ?? 'system',
-                source: entry.source ?? 'protocol',
-                // [#8908] Verbatim — the assert above is what makes this
-                // canonical, and a fold here would make the assert unfalsifiable.
-                type: entry.type,
-                name: entry.name,
-                operation: entry.operation,
-                outcome: entry.outcome,
-                code: entry.code,
-                lock_state: entry.lockState ?? 'none',
-                lock_overridden: entry.lockOverridden ?? false,
-                request_id: entry.requestId ?? null,
-                note: entry.note ?? null,
-            } as any, {
-                // [#21911] The explicit system opt-in: the platform writes its
-                // own trail row; the `actor` column above names who acted.
-                context: { isSystem: true },
-            });
-        } catch (err: any) {
-            // Don't promote audit-table failures to API errors. Log so
-            // operators can spot a misconfigured deployment.
-            console.warn(
-                `[Protocol] sys_metadata_audit write failed for ${entry.type}/${entry.name}: ${err?.message ?? err}`,
-            );
-        }
+    private recordMetadataAudit(entry: MetadataAuditEntry): Promise<void> {
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof recordMetadataAudit> = {
+            get engine() { return readEngine(); },
+        };
+        return recordMetadataAudit.call(host, entry);
     }
 
     /**
@@ -17335,7 +17149,7 @@ export class ObjectStackProtocolImplementation implements
      * is each caller's ordering, and it is the same on every topology: see the
      * `saveMetaItem` and `deleteMetaItem` call sites.
      */
-    private async lockWriteRefusal(args: {
+    private lockWriteRefusal(args: {
         type: string;
         name: string;
         /**
@@ -17350,35 +17164,11 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<{ err: Error; audit: MetadataAuditEntry } | null> {
-        const state = await this.getEffectiveLock(args.type, args.name, args.packageId);
-        const refusal = evaluateLockForWrite(state.lock);
-        if (!refusal) return null;
-        const reason = state.lockReason ?? refusal.reason;
-        const err = new Error(
-            `${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
-            + `${reason} — See ADR-0010 §3.3.`,
-        );
-        (err as any).code = 'ITEM_LOCKED';
-        (err as any).status = 403;
-        (err as any).lock = state.lock;
-        (err as any).lockReason = reason;
-        return {
-            err,
-            audit: {
-                type: args.type,
-                name: args.name,
-                organizationId: null,
-                operation: args.operation,
-                outcome: 'denied',
-                // adr0112-ok: D6b — persisted audit column, its own vocabulary
-                code: 'item_locked',
-                lockState: state.lock,
-                actor: args.actor,
-                source: args.source ?? `protocol.${args.operation}MetaItem`,
-                requestId: args.requestId,
-                note: reason,
-            },
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof lockWriteRefusal> = {
+            getEffectiveLock: (...a) => this.getEffectiveLock(...a),
         };
+        return lockWriteRefusal.call(host, args);
     }
 
     /**
@@ -17393,7 +17183,7 @@ export class ObjectStackProtocolImplementation implements
      * {@link lockWriteRefusal} and hand the row to the caller that owns the
      * transaction (see `promoteDraftForPublish`).
      */
-    private async assertLockAllowsWrite(args: {
+    private assertLockAllowsWrite(args: {
         type: string;
         name: string;
         /** [#21761] See {@link lockWriteRefusal}. */
@@ -17403,17 +17193,19 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<Error | null> {
-        const refusal = await this.lockWriteRefusal(args);
-        if (!refusal) return null;
-        await this.recordMetadataAudit(refusal.audit);
-        return refusal.err;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof assertLockAllowsWrite> = {
+            lockWriteRefusal: (...a) => this.lockWriteRefusal(...a),
+            recordMetadataAudit: (...a) => this.recordMetadataAudit(...a),
+        };
+        return assertLockAllowsWrite.call(host, args);
     }
 
     /**
      * Counterpart of {@link assertLockAllowsWrite} for delete. [#21694]
      * Topology-independent for the same reason — see {@link lockWriteRefusal}.
      */
-    private async assertLockAllowsDelete(args: {
+    private assertLockAllowsDelete(args: {
         type: string;
         name: string;
         /**
@@ -17429,33 +17221,12 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<Error | null> {
-        const state = await this.getEffectiveLock(args.type, args.name, args.packageId);
-        const refusal = evaluateLockForDelete(state.lock);
-        if (!refusal) return null;
-        const reason = state.lockReason ?? refusal.reason;
-        const err = new Error(
-            `${args.type}/${args.name} is locked (_lock=${state.lock}${state.lockSource ? `, source=${state.lockSource}` : ''}). `
-            + `${reason} — See ADR-0010 §3.3.`,
-        );
-        (err as any).code = 'ITEM_LOCKED';
-        (err as any).status = 403;
-        (err as any).lock = state.lock;
-        (err as any).lockReason = reason;
-        await this.recordMetadataAudit({
-            type: args.type,
-            name: args.name,
-            organizationId: null,
-            operation: 'delete',
-            outcome: 'denied',
-            // adr0112-ok: D6b — persisted audit column, its own vocabulary
-            code: 'item_locked',
-            lockState: state.lock,
-            actor: args.actor,
-            source: args.source ?? 'protocol.deleteMetaItem',
-            requestId: args.requestId,
-            note: reason,
-        });
-        return err;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof assertLockAllowsDelete> = {
+            getEffectiveLock: (...a) => this.getEffectiveLock(...a),
+            recordMetadataAudit: (...a) => this.recordMetadataAudit(...a),
+        };
+        return assertLockAllowsDelete.call(host, args);
     }
 
     /**
@@ -17518,10 +17289,12 @@ export class ObjectStackProtocolImplementation implements
      * the optimistic lock failing OPEN.
      */
     private storedHashDigest(): StoredHashDigest {
-        const accessor = this.engine?.getKeyedDigest;
-        const provider: StoredHashDigest | undefined =
-            typeof accessor === 'function' ? accessor.call(this.engine) : undefined;
-        return provider ?? ephemeralStoredHashDigest;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof storedHashDigest> = {
+            get engine() { return readEngine(); },
+        };
+        return storedHashDigest.call(host);
     }
 
     /**
@@ -17529,8 +17302,12 @@ export class ObjectStackProtocolImplementation implements
      * `If-Match` — for a write whose stored content hash is `stored`: its keyed
      * digest ({@link storedHashDigest}). Never empty, never the stored value.
      */
-    private async receiptVersion(stored: string): Promise<string> {
-        return this.storedHashDigest()(stored);
+    private receiptVersion(stored: string): Promise<string> {
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof receiptVersion> = {
+            storedHashDigest: (...a) => this.storedHashDigest(...a),
+        };
+        return receiptVersion.call(host, stored);
     }
 
     /**
@@ -17556,7 +17333,7 @@ export class ObjectStackProtocolImplementation implements
      * was `null`, the repository's lock refused the unpinned save 409, and the
      * `?state=draft` read served `version: null` while the draft existed.
      */
-    private async storedHeadAt(
+    private storedHeadAt(
         repo: SysMetadataRepository,
         ref: Parameters<SysMetadataRepository['headAt']>[0],
         state: 'active' | 'draft',
@@ -17567,7 +17344,8 @@ export class ObjectStackProtocolImplementation implements
          */
         member?: string,
     ): Promise<string | null> {
-        return (await repo.headAt(ref, { state, packageId, member })).head?.hash ?? null;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        return storedHeadAt(repo, ref, state, packageId, member);
     }
 
     /**
@@ -17595,7 +17373,7 @@ export class ObjectStackProtocolImplementation implements
      * item several packages hold, that save and that delete are refused
      * whatever they carry, and the token stays the package-unbound row's.
      */
-    private async readVersionToken(
+    private readVersionToken(
         /** [#22877] `member` — the bundle member the read addressed; omitted, the canonical one. */
         request: { type: string; name: string; packageId?: string; member?: string },
         state: 'active' | 'draft',
@@ -17606,19 +17384,14 @@ export class ObjectStackProtocolImplementation implements
          */
         packagelessPackageId?: string | null,
     ): Promise<string | null> {
-        const repo = this.getOverlayRepo();
-        const ref = {
-            type: PLURAL_TO_SINGULAR[request.type] ?? request.type,
-            name: request.name,
-            org: 'env',
-        } as Parameters<typeof repo.headAt>[0];
-        const packageId = request.packageId == null && state === 'active'
-            ? packagelessPackageId !== undefined
-                ? packagelessPackageId
-                : (await this.packagelessAddress(ref.type, ref.name, request.member)).packageId
-            : request.packageId ?? null;
-        const stored = await this.storedHeadAt(repo, ref, state, packageId, request.member);
-        return stored === null ? null : this.receiptVersion(stored);
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof readVersionToken> = {
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            packagelessAddress: (...a) => this.packagelessAddress(...a),
+            receiptVersion: (...a) => this.receiptVersion(...a),
+            storedHeadAt: (...a) => this.storedHeadAt(...a),
+        };
+        return readVersionToken.call(host, request, state, packagelessPackageId);
     }
 
     /**
@@ -17632,8 +17405,12 @@ export class ObjectStackProtocolImplementation implements
      * strict draft read asks {@link strictDraftReadAddress} instead: the draft
      * its `version` names.
      */
-    private async packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
-        return (await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member)).packageId ?? undefined;
+    private packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof packagelessReadAddress> = {
+            packagelessAddress: (...a) => this.packagelessAddress(...a),
+        };
+        return packagelessReadAddress.call(host, type, name, member);
     }
 
     /**
@@ -17658,14 +17435,16 @@ export class ObjectStackProtocolImplementation implements
      * a package-agnostic lookup returned (#8907) while the `version` was the
      * package-unbound draft's.
      */
-    private async strictDraftReadAddress(
+    private strictDraftReadAddress(
         type: string,
         name: string,
         member?: string,
     ): Promise<{ packageId: string | null; bestEffort: boolean }> {
-        const address = await this.packagelessDraftAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
-        if (address.kind === 'ambiguous') return { packageId: null, bestEffort: true };
-        return { packageId: address.key, bestEffort: false };
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof strictDraftReadAddress> = {
+            packagelessDraftAddress: (...a) => this.packagelessDraftAddress(...a),
+        };
+        return strictDraftReadAddress.call(host, type, name, member);
     }
 
     /**
@@ -17795,7 +17574,7 @@ export class ObjectStackProtocolImplementation implements
      * under, and `drafts` the bindings of every draft row of the item, which
      * the doors' receipts name.
      */
-    private async packagelessDraftAddress(
+    private packagelessDraftAddress(
         type: string,
         name: string,
         /** [#22877] The bundle member the door addresses; omitted, the canonical one. */
@@ -17809,20 +17588,11 @@ export class ObjectStackProtocolImplementation implements
             drafts: { packageId: string | null; candidates: readonly string[]; unbound: boolean };
         }
     > {
-        const active = await this.packagelessAddress(type, name, member, 'active');
-        if (active.candidates.length > 1) return { kind: 'ambiguous', candidates: active.candidates };
-        const drafts = await this.packagelessAddress(type, name, member, 'draft');
-        const own = active.packageId;
-        if (own !== null) {
-            if (drafts.candidates.includes(own)) return { kind: 'draft', key: own, into: own, drafts };
-            if (drafts.unbound) return { kind: 'draft', key: null, into: own, drafts };
-            return { kind: 'none', key: own, into: own, drafts };
-        }
-        // [#23657] Bound to none: the rule the draft save's address takes too
-        // ({@link unboundItemDraftAddress}, in `resolveWriteHead`).
-        const address = unboundItemDraftAddress(drafts);
-        if (address.kind === 'ambiguous') return address;
-        return { kind: address.kind, key: address.key, into: address.key, drafts };
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof packagelessDraftAddress> = {
+            packagelessAddress: (...a) => this.packagelessAddress(...a),
+        };
+        return packagelessDraftAddress.call(host, type, name, member);
     }
 
     /**
@@ -17836,16 +17606,16 @@ export class ObjectStackProtocolImplementation implements
      * {@link InboundVersionConflictError}, which the door's conflict branch
      * answers 409. ⛔ A sent token is never read as "no pin".
      */
-    private async storedParentForToken(
+    private storedParentForToken(
         ref: { org: string; type: string; name: string },
         token: string | null,
         currentStored: string | null,
     ): Promise<string | null> {
-        if (token === null) return null;
-        if (currentStored !== null && token !== '' && (await this.storedHashDigest()(currentStored)) === token) {
-            return currentStored;
-        }
-        throw new InboundVersionConflictError(ref, token, currentStored);
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof storedParentForToken> = {
+            storedHashDigest: (...a) => this.storedHashDigest(...a),
+        };
+        return storedParentForToken.call(host, ref, token, currentStored);
     }
 
     /**
@@ -17876,34 +17646,17 @@ export class ObjectStackProtocolImplementation implements
      * that contradicts it instead. The code, the status and every attribute
      * are the same as for any other conflict.
      */
-    private async metadataConflictRefusal(
+    private metadataConflictRefusal(
         err: ConflictError,
         subject: string,
         prefix: string,
         firstWritePin?: 'draft' | 'active',
     ): Promise<Error> {
-        const conflict: any = new Error(subject);
-        conflict.code = 'METADATA_CONFLICT';
-        conflict.status = 409;
-        const digest = this.storedHashDigest();
-        const show = (served: string | null | undefined) => (served === undefined ? '(withheld)' : served ?? 'null');
-        const current = await servedContentHash(err.actualHead, digest);
-        if (current !== undefined) {
-            conflict.actualHead = current;
-            conflict.currentVersion = current;
-        }
-        if (err instanceof InboundVersionConflictError) {
-            conflict.message = `${prefix} The version token sent is not the current version (current is ${show(current)}).`;
-            return conflict;
-        }
-        const expected = await servedContentHash(err.expectedParent, digest);
-        if (expected !== undefined) conflict.expectedParent = expected;
-        conflict.message = firstWritePin !== undefined && expected === null
-            ? `${subject}: this save asserted that no ${firstWritePin} row exists (the first-write pin, `
-                + `If-None-Match: * on the REST door), but one does (current is ${show(current)}). Send that `
-                + `version as If-Match to save over it, or re-read the item to merge first.`
-            : `${prefix} Expected parent ${show(expected)} but current is ${show(current)}.`;
-        return conflict;
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof metadataConflictRefusal> = {
+            storedHashDigest: (...a) => this.storedHashDigest(...a),
+        };
+        return metadataConflictRefusal.call(host, err, subject, prefix, firstWritePin);
     }
 
     /**
@@ -17963,16 +17716,15 @@ export class ObjectStackProtocolImplementation implements
      * `protocol.publishMetaItem`, which is the name the shared Phase-1 helper
      * passes for both of them.
      */
-    private async recordPendingDenialAudit(
+    private recordPendingDenialAudit(
         err: unknown,
         overrides?: { source?: string },
     ): Promise<void> {
-        const pending = (err as ErrorWithPendingAudit | null | undefined)?.__pendingAudit;
-        if (!pending) return;
-        await this.recordMetadataAudit({
-            ...pending,
-            ...(overrides?.source ? { source: overrides.source } : {}),
-        });
+        // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
+        const host: ThisParameterType<typeof recordPendingDenialAudit> = {
+            recordMetadataAudit: (...a) => this.recordMetadataAudit(...a),
+        };
+        return recordPendingDenialAudit.call(host, err, overrides);
     }
 
     /**
@@ -20026,19 +19778,8 @@ export class ObjectStackProtocolImplementation implements
      * why it runs before the {@link refuseUnmintableMetaType} probe.
      */
     private refuseUngrammaticalMetaItemName(request: { type: string, name: string }): void {
-        if (METADATA_ITEM_NAME_PATTERN.test(request.name)) return;
-        const err = new Error(
-            `${JSON.stringify(request.name)} is not a legal metadata item name. `
-            + `Item names are lowercase snake_case segments, optionally dot-qualified — `
-            + `/^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$/ — e.g. 'crm_lead' or 'crm_lead.pipeline'. `
-            + `No slashes, spaces, uppercase, empty segments, or leading/trailing dots. `
-            + `The compound '<section>/<name>' spelling is retired: qualify with a dot `
-            + `('crm_lead.pipeline') and express containment structurally, never with a `
-            + `separator inside the identity string.`,
-        );
-        (err as any).code = 'INVALID_REQUEST';
-        (err as any).status = 400;
-        throw err;
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        return refuseUngrammaticalMetaItemName(request);
     }
 
     /**
@@ -20207,76 +19948,21 @@ export class ObjectStackProtocolImplementation implements
      * refuses that write (`NOT_OVERRIDABLE`). Runtime words carry no tracker
      * number.
      */
-    private async defaultRecordPageSaveRefusal(
+    private defaultRecordPageSaveRefusal(
         type: string,
         item: unknown,
         saveName: string,
         verb: 'saved' | 'published' | 'restored' = 'saved',
     ): Promise<(Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422 }) | undefined> {
-        if (type !== 'page') return undefined;
-        const object = defaultRecordPageObject(item);
-        if (object === undefined) return undefined;
-
-        // `shipped`: a page a package ships through the registry, which no save
-        // can edit; a stored row (bound to a package or not) is editable here.
-        type Holder = { page: string; packageId?: string; shipped: boolean };
-        const holders: Holder[] = [];
-        let records: any[] = [];
-        try {
-            // [ADR-0131 D6] A save lands environment-wide, so the pages it meets
-            // are the environment-wide rows.
-            records = await this.readActiveOverlayRows({ type });
-        } catch (error) {
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-        const stored = this.storedOverlayEntries({ type }, records);
-        const storedNames = new Set(stored.map((entry) => entry.name));
-        for (const entry of stored) {
-            if (entry.name === saveName || defaultRecordPageObject(entry.data) !== object) continue;
-            holders.push(entry.packageId
-                ? { page: entry.name, packageId: entry.packageId, shipped: false }
-                : { page: entry.name, shipped: false });
-        }
-        const registry = this.engine.registry;
-        if (typeof registry?.defaultRecordPageHoldersOf === 'function') {
-            const registered = registry.defaultRecordPageHoldersOf(object) as Array<
-                { kind: 'package'; packageId: string; page: string } | { kind: 'environment'; page: string }
-            >;
-            for (const holder of registered) {
-                if (holder.page === saveName || storedNames.has(holder.page)) continue;
-                holders.push(holder.kind === 'package'
-                    ? { page: holder.page, packageId: holder.packageId, shipped: true }
-                    : { page: holder.page, shipped: false });
-            }
-        }
-        if (holders.length === 0) return undefined;
-
-        const seen = new Set<string>();
-        const unique = holders.filter((h) => {
-            const key = `${h.packageId ?? ''}|${h.page}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
-        const describe = (h: Holder) =>
-            h.packageId ? `page '${h.page}' of package '${h.packageId}'` : `page '${h.page}', authored in this system`;
-        const named = unique.map(describe);
-        const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
-        const remedy = unique.some((h) => h.shipped)
-            ? `Save '${saveName}' with \`isDefault: false\`: a page a package ships stays the default unless the `
-              + `deployment is composed without that package's page.`
-            : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
-              + `with \`isDefault: false\` to make '${saveName}' the default instead.`;
-        const err = new Error(
-            `Default record page conflict: page '${saveName}' cannot be ${verb} as the default record page of object `
-            + `'${object}': ${others}. ${remedy} At most one \`isDefault: true\` record page may exist for an object `
-            + `in a deployment: the record view opens that page with no tie-break.`,
-        ) as Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422; object: string; holders: readonly Holder[] };
-        err.code = 'DEFAULT_RECORD_PAGE_CONFLICT';
-        err.status = 422;
-        err.object = object;
-        err.holders = unique;
-        return err;
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof defaultRecordPageSaveRefusal> = {
+            get engine() { return readEngine(); },
+            readActiveOverlayRows: (...a) => this.readActiveOverlayRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            storedOverlayEntries: (...a) => this.storedOverlayEntries(...a),
+        };
+        return defaultRecordPageSaveRefusal.call(host, type, item, saveName, verb);
     }
 
     /**
@@ -20322,37 +20008,18 @@ export class ObjectStackProtocolImplementation implements
      * findings in `issues`, at `external` for an object and at `schemaMode`
      * for a datasource.
      */
-    private async externalBindingSaveRefusal(
+    private externalBindingSaveRefusal(
         singularType: string,
         item: unknown,
         name: string,
         writeFace?: MetadataWriteFace,
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
-        const body = item as { external?: unknown; datasource?: unknown };
-        const issues: MetadataIssueEntry[] = [];
-        if (singularType === 'object') {
-            if (body.external === undefined || body.external === null) return undefined;
-            const datasource = typeof body.datasource === 'string' && body.datasource !== '' ? body.datasource : undefined;
-            const definition = datasource === undefined
-                ? undefined
-                : await this.externalBindingDatasourceDefinition(datasource);
-            const refusal = externalBindingDatasourceRefusal(name, body.external, datasource, definition);
-            if (refusal) issues.push({ path: refusal.path, message: refusal.message, code: 'custom' });
-        } else if (singularType === 'datasource') {
-            for (const bound of await this.objectsBoundExternallyTo(name)) {
-                const refusal = externalBindingDatasourceRefusal(bound.name, bound.external, name, item as { schemaMode?: unknown });
-                if (refusal?.shape === 'managed') issues.push({ path: 'schemaMode', message: refusal.message, code: 'custom' });
-            }
-        }
-        if (issues.length === 0) return undefined;
-        const err = new Error(
-            `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
-        ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
-        err.code = 'INVALID_METADATA';
-        err.status = 422;
-        err.issues = issues;
-        return err;
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const host: ThisParameterType<typeof externalBindingSaveRefusal> = {
+            externalBindingDatasourceDefinition: (...a) => this.externalBindingDatasourceDefinition(...a),
+            objectsBoundExternallyTo: (...a) => this.objectsBoundExternallyTo(...a),
+        };
+        return externalBindingSaveRefusal.call(host, singularType, item, name, writeFace);
     }
 
     /**
@@ -20364,11 +20031,14 @@ export class ObjectStackProtocolImplementation implements
      * of the same refusal ({@link storedRowKnownDatasources}), so the two cannot
      * judge a binding against different datasources.
      */
-    private async externalBindingDatasourceDefinition(
+    private externalBindingDatasourceDefinition(
         datasource: string,
     ): Promise<{ readonly schemaMode?: unknown } | undefined> {
-        const definition = (await this.readMetaItem({ type: 'datasource', name: datasource }))?.item;
-        return definition && typeof definition === 'object' ? definition as { schemaMode?: unknown } : undefined;
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const host: ThisParameterType<typeof externalBindingDatasourceDefinition> = {
+            readMetaItem: (...a) => this.readMetaItem(...a),
+        };
+        return externalBindingDatasourceDefinition.call(host, datasource);
     }
 
     /**
@@ -20380,29 +20050,16 @@ export class ObjectStackProtocolImplementation implements
      * Drafts are not read: a draft does not bind anything until its publish,
      * which is judged on its own.
      */
-    private async objectsBoundExternallyTo(datasource: string): Promise<Array<{ name: string; external: unknown }>> {
-        const bound = new Map<string, unknown>();
-        let records: any[] = [];
-        try {
-            records = await this.readActiveOverlayRows({ type: 'object' });
-        } catch (error) {
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-        const stored = this.storedOverlayEntries({ type: 'object' }, records);
-        const storedNames = new Set(stored.map((entry) => entry.name));
-        const take = (name: string, obj: unknown) => {
-            const o = obj as { datasource?: unknown; external?: unknown } | null | undefined;
-            if (o?.datasource === datasource && o.external !== undefined && o.external !== null) bound.set(name, o.external);
+    private objectsBoundExternallyTo(datasource: string): Promise<Array<{ name: string; external: unknown }>> {
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof objectsBoundExternallyTo> = {
+            get engine() { return readEngine(); },
+            readActiveOverlayRows: (...a) => this.readActiveOverlayRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            storedOverlayEntries: (...a) => this.storedOverlayEntries(...a),
         };
-        for (const entry of stored) take(entry.name, entry.data);
-        const registry = this.engine.registry;
-        if (typeof registry?.getAllObjects === 'function') {
-            for (const obj of registry.getAllObjects() as Array<{ name?: unknown }>) {
-                if (typeof obj?.name !== 'string' || storedNames.has(obj.name)) continue;
-                take(obj.name, obj);
-            }
-        }
-        return [...bound].map(([name, external]) => ({ name, external }));
+        return objectsBoundExternallyTo.call(host, datasource);
     }
 
     /**
@@ -20453,45 +20110,19 @@ export class ObjectStackProtocolImplementation implements
      * message crosses the REST boundary with its tail truncated) and carries no
      * tracker number.
      */
-    private async anonymousElevatedFlowRefusal(
+    private anonymousElevatedFlowRefusal(
         singularType: string,
         item: unknown,
         name: string,
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
-        if (singularType !== 'flow') return undefined;
-        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
-        if ((item as { runAs?: unknown }).runAs !== 'system') return undefined;
-
-        const endpoints: unknown[] = [];
-        const registry = this.engine.registry;
-        if (typeof registry?.listItems === 'function') {
-            endpoints.push(...registry.listItems('api'));
-        }
-        const metadataService = this.getServicesRegistry?.()?.get('metadata');
-        if (metadataService && typeof metadataService.list === 'function') {
-            const listed = await metadataService.list('api');
-            if (Array.isArray(listed)) endpoints.push(...listed);
-        }
-
-        const pairs = anonymousElevatedFlowPairs(
-            endpoints as AnonymousFlowDoorCandidate[],
-            [{ name, runAs: 'system' }],
-        );
-        if (pairs.length === 0) return undefined;
-
-        const names = [...new Set(pairs.map((pair) => pair.endpoint))];
-        const err = new Error(elevatedFlowAnonymousEndpointsMessage(name, names)) as Error & {
-            code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[];
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const readEngine = () => this.engine;
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof anonymousElevatedFlowRefusal> = {
+            get engine() { return readEngine(); },
+            get getServicesRegistry() { return readGetServicesRegistry(); },
         };
-        err.code = 'INVALID_METADATA';
-        err.status = 422;
-        err.issues = [{
-            path: 'runAs',
-            message: `An anonymous endpoint (\`authRequired: false\`) triggers this flow: ${names.map((n) => `'${n}'`).join(', ')}. `
-                + "No anonymous door may start a `runAs: 'system'` flow (ADR-0138 D2b).",
-            code: 'custom',
-        }];
-        return err;
+        return anonymousElevatedFlowRefusal.call(host, singularType, item, name);
     }
 
     /**
@@ -20770,47 +20401,21 @@ export class ObjectStackProtocolImplementation implements
      * rewrites (`source`, `package-duplicate`) keep stamping, as before. No
      * stored lock is unbound here.
      */
-    private async authoredLockFamily(args: {
+    private authoredLockFamily(args: {
         type: string;
         name: string;
         packageId: string | null | undefined;
         mode: 'draft' | 'publish';
         item: unknown;
     }): Promise<unknown> {
-        const { item } = args;
-        if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
-        const body = item as Record<string, unknown>;
-        const sent = lockFamilyOf(body);
-        for (const [key, value] of Object.entries(sent)) {
-            const declared = overlaySchemaDeclaredKey(args.type, key);
-            if (declared !== undefined && !declared.safeParse(value).success) return item;
-        }
-        const repo = this.getOverlayRepo();
-        const ref = { type: args.type, name: args.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
-        const state: 'active' | 'draft' = args.mode === 'draft' ? 'draft' : 'active';
-        const member = itemDiscriminator(args.type, body);
-        const target = await repo.headAt(ref, { state, packageId: args.packageId ?? null, member });
-        let head = target.head;
-        if (!head && state === 'draft') {
-            head = (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head;
-        }
-        const stored = lockFamilyOf(head?.body);
-        if (Object.keys(sent).length > 0 && !sameLockFamily(sent, stored)) {
-            const address: ItemAddress = { type: args.type, name: args.name, packageId: args.packageId ?? undefined };
-            let overlayLockLayer: unknown;
-            try {
-                overlayLockLayer = await this.overlayLockLayerAt(address, { otherSpelling: true });
-            } catch (error) {
-                // [#5532] A lock read that did not happen is not an unlocked item.
-                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-            }
-            const served = lockFamilyOf(withItemLockFamily({}, resolveItemLock({
-                artifact: this.artifactLockLayerAt(address),
-                overlay: overlayLockLayer,
-            })));
-            if (!sameLockFamily(sent, served)) throw authoredLockFamilyRefusal(args.type, args.name, sent, served);
-        }
-        return withLockFamily(body, stored);
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const host: ThisParameterType<typeof authoredLockFamily> = {
+            artifactLockLayerAt: (...a) => this.artifactLockLayerAt(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            overlayLockLayerAt: (...a) => this.overlayLockLayerAt(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+        };
+        return authoredLockFamily.call(host, args);
     }
 
     /**
@@ -20833,28 +20438,17 @@ export class ObjectStackProtocolImplementation implements
      * propagates (#5532), because a guessed binding would judge a row the write
      * does not land in.
      */
-    private async saveWriteBinding(
+    private saveWriteBinding(
         singularType: string,
         request: { name: string; item?: unknown; packageId?: string | null },
         mode: 'draft' | 'publish',
     ): Promise<string | null> {
-        if (typeof request.packageId === 'string' && request.packageId !== '') return request.packageId;
-        if (singularType !== 'permission' || mode !== 'draft') return null;
-        const body = request.item;
-        if (!body || typeof body !== 'object' || typeof (body as { packageId?: unknown }).packageId !== 'string') return null;
-        try {
-            const repo = this.getOverlayRepo();
-            const ref = { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
-            const target = await repo.headAt(ref, {
-                state: 'draft',
-                packageId: null,
-                member: itemDiscriminator(singularType, body),
-            });
-            return target.packageId;
-        } catch (error) {
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-            return null;
-        }
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const host: ThisParameterType<typeof saveWriteBinding> = {
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+        };
+        return saveWriteBinding.call(host, singularType, request, mode);
     }
 
     /**
@@ -20878,8 +20472,12 @@ export class ObjectStackProtocolImplementation implements
      * prefix (`validateObjectNamespacePrefix` skips an empty namespace).
      */
     private objectNamespacePrefixViolation(name: string, packageId: string | null | undefined): string | null {
-        if (typeof packageId !== 'string' || packageId === '') return null;
-        return validateObjectNamespacePrefix(name, this.engine?.registry?.getPackage?.(packageId)?.manifest?.namespace);
+        // [#25467 cut 6] The body moved to `protocol-save-door-refusals.ts` (see `SaveDoorRefusalHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof objectNamespacePrefixViolation> = {
+            get engine() { return readEngine(); },
+        };
+        return objectNamespacePrefixViolation.call(host, name, packageId);
     }
 
     // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
@@ -30256,239 +29854,15 @@ export class ObjectStackProtocolImplementation implements
      * environment, which this request does not carry); see the comment on the
      * flag arms below.
      */
-    async installPackage(request: InstallPackageRequest): Promise<InstallPackageResponse> {
-        // [#19417] ⭐ THE PRIMITIVE PARSES THE `id` LEG — the declaration, by
-        // reference, ahead of every write and every derivation below.
-        //
-        // `MANIFEST_ID_PATTERN` (`packages/spec/src/kernel/manifest.zod.ts`) is
-        // the reverse-domain rule declared ONCE and referenced by BOTH faces of
-        // this identity — `ManifestSchema.id`, what an author writes, and
-        // `PackageSchema.manifestId`, what the registry stores and publishes by.
-        // This primitive read `request.manifest` POSITIONALLY: it spread the
-        // request into `any` and handed it to
-        // `this.engine.registry.installPackage` with a second `as any`, so
-        // `id: 'pkg-a'` — or `com.example.my_erp` — installed and PERSISTED,
-        // while `defineStack()`, `os build`, `os validate` and the publish face
-        // all refuse the same id. That is «declared ≠ enforced» on a PUBLISHED
-        // contract, the shape Prime Directive #10 refuses outright and
-        // 北极星 clause 4 names in as many words:
-        // 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
-        //
-        // ⭐ THE GATE IS ON THE PRIMITIVE, NOT ON ONE DOOR. #19473 landed the
-        // same parse at `POST /packages`
-        // (`packages/runtime/src/domains/packages.ts`), which is ONE caller of
-        // this method — that door calls `protocol.installPackage` whenever the
-        // protocol service resolves, and falls back to the bare registry write
-        // when it does not. {@link duplicatePackage} below is a second caller,
-        // and an embedder holding this object is a third. Gating a door alone
-        // buys that door; the rule belongs where every caller passes.
-        //
-        // ⭐ THE SENTENCE IS THE DECLARATION'S, NOT THIS FILE'S — surfaced
-        // rather than reworded, exactly as #19473 did it: `manifestIdRefusal`
-        // names the key, echoes what the author wrote, lists the examples, and
-        // offers a mechanical repair only after VERIFYING that candidate
-        // against the pattern. A fourth sentence for one rule would drop the
-        // repair.
-        //
-        // The throw carries `statusCode` so an HTTP boundary answers `400`
-        // rather than the `500` an unannotated throw earns
-        // (`resolveThrownHttpError`, `@objectstack/types`) — the same status
-        // the HTTP door serves for this refusal, and the spelling this file
-        // already uses for its `404`.
-        //
-        // ⛔ THE RAW VALUE IS PARSED, before the spread and before the version
-        // and namespace defaults: an id the declaration refuses must never
-        // reach `deriveNamespaceFromPackageId` below, which already ASSUMES the
-        // reverse-domain shape it was never given a chance to enforce.
-        //
-        // The id leg keeps its own gate, ahead of the whole-manifest parse
-        // below (#24086), so its sentence and its repair arm are not
-        // displaced by a generic issue list.
-        const rawId = (request.manifest as { id?: unknown } | undefined)?.id;
-        const declaredId = ManifestSchema.shape.id.safeParse(rawId);
-        if (!declaredId.success) {
-            const [issue] = declaredId.error.issues;
-            throw Object.assign(
-                new Error(issue?.message || manifestIdRefusal('manifest.id', rawId)),
-                { statusCode: 400 },
-            );
-        }
-
-        // #2532 — runtime-created base packages routinely arrive versionless
-        // ({id, name} from the builder / Setup). `sys_packages.version` is NOT
-        // NULL, and the old guard here (`pkgSvc?.publish && manifest.version`)
-        // silently SKIPPED persistence for exactly those packages — so they
-        // lived only in the in-memory registry and vanished on restart, while
-        // their metadata (objects, tables) survived. Default the version
-        // instead of skipping: the registry and the durable row must agree.
-        const manifest: any = { ...(request.manifest as any) };
-        if (typeof manifest.version !== 'string' || !manifest.version) {
-            manifest.version = '0.1.0';
-        }
-
-        // [#24086] ⭐ THE WHOLE MANIFEST IS JUDGED BY THE DOOR'S DECLARATION —
-        // `PackageInstallManifestSchema`, the one `POST /api/v1/packages`
-        // parses its body through, ⛔ not `ManifestSchema`, which still admits
-        // the platform scopes (`cloud` / `system`) that declaration refuses
-        // for an authored install. The id leg above was the only leg judged
-        // here, so an in-process caller could store what the door answers
-        // `400` for — an off-spec `type` such as `'application'`, an off-spec
-        // `scope` such as `'environment'`, an unknown key — and the row was
-        // read back on every boot.
-        //
-        // Placed AFTER the version default and BEFORE the namespace one, on
-        // purpose: the declaration REQUIRES `version`, and the versionless
-        // manifest this primitive has completed since #2532 keeps installing;
-        // `namespace` is optional in the declaration, so its derivation needs
-        // nothing from the parse. Nothing else is supplied — a manifest with
-        // no `type` is refused, as the door refuses it.
-        //
-        // A GATE, not a normaliser, as at the door: the parse's defaults
-        // (`scope`, `defaultDatasource`) are not copied onto the manifest that
-        // is stored. Each issue is surfaced as the declaration words it, under
-        // its `manifest.<key>` path — no sentence of this file's own for a rule.
-        //
-        // ⛔ Rows already in `sys_packages` are not judged by this: they are
-        // data at rest, and the boot hydration (`PackageServicePlugin.start`,
-        // `@objectstack/service-package`) replays them as stored — see the
-        // tolerance stated there.
-        const declaredManifest = PackageInstallManifestSchema.safeParse(manifest);
-        if (!declaredManifest.success) {
-            const located = declaredManifest.error.issues
-                .map((issue) => `${['manifest', ...issue.path.map(String)].join('.')}: ${issue.message}`)
-                .join('; ');
-            throw Object.assign(
-                new Error(`Invalid package manifest — ${located}`),
-                { statusCode: 400 },
-            );
-        }
-
-        // Studio-authored writable packages arrive WITHOUT a namespace. The
-        // protocol mandates a package namespace whose prefix every object name
-        // must carry (manifest.zod `namespace`); `defineStack` enforces it at
-        // compile time, but runtime-created packages never take that path — so
-        // the rule was silently inert for them. Derive a default namespace from
-        // the package id (`com.example.leave` → `leave`) so the prefix can be
-        // enforced at publish. An explicitly declared namespace always wins.
-        // Set it on the single `manifest` object shared by the in-memory
-        // registry and the durable `sys_packages` row below, so both agree.
-        if (typeof manifest.namespace !== 'string' || !manifest.namespace) {
-            const derived = deriveNamespaceFromPackageId(manifest.id);
-            if (derived) manifest.namespace = derived;
-        }
-
-        // ADR-0087 D1 — protocol handshake. Refuse a package whose declared
-        // `engines.protocol` range excludes this runtime's major BEFORE writing
-        // it to the registry, with a structured diagnostic naming the migrate
-        // command — instead of letting the mismatch surface later as a deep
-        // schema/renderer crash. Packages with no range are grandfathered (warn
-        // only); an unparsed range never causes a false rejection.
-        assertProtocolCompat(manifest);
-
-        // [#21243] What the registry holds for this id BEFORE the write, so a
-        // failed persist below can put exactly that back. Read here because the
-        // install REPLACES the row object (and may register the namespace).
-        const undoInstall = this.packageInstallUndo(manifest);
-
-        // [#23972] Every package this primitive installs is AUTHORED — a Studio
-        // base, a duplicate, an HTTP install — persisted to `sys_packages` below.
-        //
-        // ADR-0087 D2 — this door is AUTHORING-side, so the registry judges the
-        // manifest exactly as handed, and no forward conversion runs here (the
-        // window the registration door, the `sys_packages` hydration and the
-        // marketplace install open is for bodies at rest). Its callers hand it
-        // a manifest being written now, and the declaration parse above
-        // (#24086, the one `POST /api/v1/packages` also runs) has already
-        // refused a metadata collection such as `pages` outright; `duplicatePackage`
-        // copies the registry's own record, already judged; the unmanaged
-        // install's base carries identity keys only; and AI Studio's blueprint
-        // tools author in-process. A retired declaration there is the author's
-        // to fix, refused loudly at the moment of writing. Once the body sits
-        // in `sys_packages` it is data at rest, and the boot hydration
-        // (`@objectstack/service-package`) converts it at every load.
-        let pkg = this.engine.registry.installPackage(manifest as any, 'authored', request.settings);
-
-        // [#19277] HONOUR `enableOnInstall` — the key THIS request contract
-        // declares and this primitive read past. `InstallPackageRequestSchema`
-        // (`packages/spec/src/kernel/package-registry.zod.ts`) has carried the
-        // key since it was written, and the implementation here read
-        // `request.manifest` and `request.settings` and nothing else: a caller
-        // that switched the option off got an ENABLED install, with no refusal
-        // and no warning. That is «declared but not enforced» on a published
-        // option — what ADR-0049 (enforce-or-remove) and Prime Directive #10
-        // refuse outright. Ruling batch #153 item 5 letter 1 (#18605) kept the
-        // kernel declaration as a COPY of the HTTP request key with the SAME
-        // meaning, so the disposition is ENFORCE, not retire.
-        //
-        // ⭐ The contract is 「缺省 = 保持，有旗 = 设置」 — maintainer ruling batch
-        // #157 item 5 letter C, the same rule the HTTP door implements
-        // (`packages/runtime/src/domains/packages.ts`). Three states, three
-        // outcomes, through the SAME registry verbs `PATCH /packages/:id/enable`
-        // and `PATCH /packages/:id/disable` use:
-        //
-        //   true    ⇒ enablePackage
-        //   false   ⇒ disablePackage
-        //   absent  ⇒ nothing at all; the row the registry returned stands
-        //
-        // ⚠️ The `true` arm is not decoration. `SchemaRegistry.installPackage`
-        // has preserved an existing row's `enabled` / `status` /
-        // `statusChangedAt` since #18877, so on a re-install nothing else will
-        // clear a disable any more — dropping this arm would silently stop
-        // honouring `true` on exactly the path an upgrade takes.
-        //
-        // ⚠️ `=== true` / `=== false`, never a truthiness test and never a `??`
-        // default: the THREE states of this key are the contract, and
-        // collapsing absent into either one is the defect. The declaration's own
-        // `.default(true)` never reaches here — nothing parses an install
-        // request through `InstallPackageRequestSchema` on this path — so
-        // absence arrives intact and is read as absence.
-        //
-        // ⛔ What this seam does NOT write, recorded so it is not mistaken for
-        // an oversight: the runtime's durable disabled-package file. That record
-        // is keyed by ENVIRONMENT (`setPackageDisabled(environmentId, id,
-        // disabled)`, `packages/runtime/src/package-state-store.ts`) and this
-        // request carries no environment, so the key cannot even be formed here;
-        // the module also lives in `@objectstack/runtime`, which depends on this
-        // package and not the other way round. The HTTP door owns that half and
-        // writes it from the row it returned. So `enableOnInstall` through this
-        // primitive moves the registry row — what every in-process reader serves
-        // from — for the life of the process, and a caller that needs the choice
-        // to survive a restart goes through the door that owns the durable
-        // record.
-        const requestedEnabled = request.enableOnInstall;
-        if (requestedEnabled === true) {
-            const enabled = this.engine.registry.enablePackage(manifest.id);
-            if (enabled) pkg = enabled;
-        } else if (requestedEnabled === false) {
-            const disabled = this.engine.registry.disablePackage(manifest.id);
-            if (disabled) pkg = disabled;
-        }
-
-        // Durable persistence to `sys_packages`. Without the `package` service
-        // the install stays visible for the process lifetime (the documented
-        // degraded path above), never SILENTLY: a skipped persist is a
-        // restart-loss, so it leaves a trace.
-        //
-        // [#21243] WITH the service, a failed persist is the install's failure.
-        // Both halves, in this order: the registry write is undone FIRST, so
-        // that by the time the caller reads the error nothing in this process
-        // claims a package the store refused; then the failure is thrown. The
-        // `catch` that used to sit here turned both a thrown and a returned
-        // failure into a `console.warn` and an answer of success.
-        const pkgSvc = this.packagePersistService();
-        if (pkgSvc) {
-            const failure = await persistPackageManifest(pkgSvc, manifest);
-            if (failure) {
-                undoInstall();
-                throw packagePersistFailureError(failure.cause, manifest.id, 'install');
-            }
-        } else {
-            console.warn(
-                `[protocol.installPackage] no 'package' service — '${manifest?.id}' registered in-memory only (will not survive a restart)`,
-            );
-        }
-
-        return { package: pkg as any, message: `Installed package: ${manifest?.id}` };
+    installPackage(request: InstallPackageRequest): Promise<InstallPackageResponse> {
+        // [#25467 cut 7] The body moved to `protocol-package-install.ts` (see `PackageInstallHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof installPackage> = {
+            get engine() { return readEngine(); },
+            packageInstallUndo: (...a) => this.packageInstallUndo(...a),
+            packagePersistService: (...a) => this.packagePersistService(...a),
+        };
+        return installPackage.call(host, request);
     }
 
     /**
@@ -30509,30 +29883,17 @@ export class ObjectStackProtocolImplementation implements
      * #17676 ruling A' item 2 keeps — see `installPackage`'s note for which
      * capability owns the service and for the measured state of that split.
      */
-    async updatePackage(request: {
+    updatePackage(request: {
         packageId: string;
         patch: { name?: string; description?: string; version?: string; dependencies?: Record<string, string> };
     }): Promise<{ package: any; message: string }> {
-        // [#21243] The row as it stood before the patch — copied, because
-        // `updatePackageManifest` edits the row and its manifest IN PLACE.
-        const prior = snapshotPackageRow(this.engine.registry.getPackage?.(request.packageId));
-        const pkg = this.engine.registry.updatePackageManifest(request.packageId, request.patch);
-        if (!pkg) {
-            throw Object.assign(new Error(`Package '${request.packageId}' not found`), { statusCode: 404 });
-        }
-        const pkgSvc = this.packagePersistService();
-        if (pkgSvc) {
-            const failure = await persistPackageManifest(pkgSvc, (pkg as any).manifest);
-            if (failure) {
-                if (prior) restorePackageRow(pkg, prior);
-                throw packagePersistFailureError(failure.cause, request.packageId, 'update');
-            }
-        } else {
-            console.warn(
-                `[protocol.updatePackage] no 'package' service — '${request.packageId}' edited in-memory only (will not survive a restart)`,
-            );
-        }
-        return { package: pkg as any, message: `Updated package: ${request.packageId}` };
+        // [#25467 cut 7] The body moved to `protocol-package-install.ts` (see `PackageInstallHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof updatePackage> = {
+            get engine() { return readEngine(); },
+            packagePersistService: (...a) => this.packagePersistService(...a),
+        };
+        return updatePackage.call(host, request);
     }
 
     /**
@@ -30541,8 +29902,12 @@ export class ObjectStackProtocolImplementation implements
      * {@link installPackage}).
      */
     private packagePersistService(): PackagePersistService | undefined {
-        const svc = this.getServicesRegistry?.()?.get('package') as Partial<PackagePersistService> | undefined;
-        return typeof svc?.publish === 'function' ? (svc as PackagePersistService) : undefined;
+        // [#25467 cut 7] The body moved to `protocol-package-install.ts` (see `PackageInstallHost`).
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof packagePersistService> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return packagePersistService.call(host);
     }
 
     /**
@@ -30569,27 +29934,12 @@ export class ObjectStackProtocolImplementation implements
      *    it; a namespace the id already owned stays owned.
      */
     private packageInstallUndo(manifest: { id: string; namespace?: unknown }): () => void {
-        const registry = this.engine.registry;
-        const priorRow = registry.getPackage?.(manifest.id);
-        const namespace = typeof manifest.namespace === 'string' && manifest.namespace !== ''
-            ? manifest.namespace
-            : undefined;
-        const owners = namespace === undefined ? undefined : registry.getNamespaceOwners?.(namespace);
-        // An owner list the registry cannot give is no evidence the id did not
-        // own the namespace, and releasing one it did own would hand the
-        // namespace to the next package that asks.
-        const namespaceWasOwned = !Array.isArray(owners) || owners.includes(manifest.id);
-        return () => {
-            if (priorRow === undefined) {
-                registry.unregisterItem('package', manifest.id);
-            } else {
-                const current = registry.getPackage(manifest.id);
-                if (current !== undefined && current !== priorRow) restorePackageRow(current, priorRow);
-            }
-            if (namespace !== undefined && !namespaceWasOwned) {
-                registry.unregisterNamespace(namespace, manifest.id);
-            }
+        // [#25467 cut 7] The body moved to `protocol-package-install.ts` (see `PackageInstallHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof packageInstallUndo> = {
+            get engine() { return readEngine(); },
         };
+        return packageInstallUndo.call(host, manifest);
     }
 }
 
@@ -30604,31 +29954,8 @@ export class ObjectStackProtocolImplementation implements
  * RETURNED `{ success: false, driverFault }` when the INSERT broke, or THROWN
  * when the failure declared its own HTTP answer.
  */
-interface PackagePersistService {
+export interface PackagePersistService {
     publish(data: { manifest: unknown; metadata: unknown }): Promise<unknown>;
-}
-
-/**
- * [#21243] Write `manifest` to `sys_packages`, and say whether it failed.
- *
- * `undefined` means the write landed. Otherwise `cause` is what the failure
- * WAS — the thrown value, or the returned `{ success: false, … }` outcome —
- * wrapped so that a thrown `undefined` still reads as a failure.
- */
-async function persistPackageManifest(
-    svc: PackagePersistService,
-    manifest: unknown,
-): Promise<{ cause: unknown } | undefined> {
-    let out: unknown;
-    try {
-        out = await svc.publish({ manifest, metadata: {} });
-    } catch (cause) {
-        return { cause };
-    }
-    if (typeof out === 'object' && out !== null && (out as { success?: unknown }).success === false) {
-        return { cause: out };
-    }
-    return undefined;
 }
 
 /**
@@ -30668,7 +29995,7 @@ function packagePersistFailureMessage(packageId: string, verb: 'install' | 'upda
  *    `500 DATABASE_ERROR`; a returned `driverFault` declares nothing, so the
  *    door derives `INTERNAL_ERROR` from the 500. No code is minted.
  */
-function packagePersistFailureError(cause: unknown, packageId: string, verb: 'install' | 'update' | 'delete'): Error {
+export function packagePersistFailureError(cause: unknown, packageId: string, verb: 'install' | 'update' | 'delete'): Error {
     const { declaredStatus } = resolveThrownHttpError(cause);
     if (declaredStatus !== undefined && declaredStatus >= 400 && declaredStatus < 500) return cause as Error;
     const err = new Error(packagePersistFailureMessage(packageId, verb)) as Error & {
@@ -30681,38 +30008,3 @@ function packagePersistFailureError(cause: unknown, packageId: string, verb: 'in
     return err;
 }
 
-/**
- * [#21243] A copy of a registry package row deep enough to undo
- * `updatePackageManifest`, which edits the row and its `manifest` in place.
- */
-function snapshotPackageRow(row: unknown): Record<string, unknown> | undefined {
-    if (typeof row !== 'object' || row === null) return undefined;
-    const copy: Record<string, unknown> = { ...(row as Record<string, unknown>) };
-    const manifest = copy.manifest;
-    if (typeof manifest === 'object' && manifest !== null) copy.manifest = { ...(manifest as Record<string, unknown>) };
-    return copy;
-}
-
-/**
- * [#21243] Put `prior`'s content back into the registry's row object, IN
- * PLACE — the registry hands out and keeps that object, so replacing it would
- * restore nothing. The `manifest` is restored in place too when both sides
- * carry one, for the same reason.
- */
-function restorePackageRow(target: Record<string, unknown>, prior: Record<string, unknown>): void {
-    const assignInPlace = (into: Record<string, unknown>, from: Record<string, unknown>) => {
-        for (const key of Object.keys(into)) if (!(key in from)) delete into[key];
-        Object.assign(into, from);
-    };
-    const targetManifest = target.manifest;
-    const priorManifest = prior.manifest;
-    assignInPlace(target, prior);
-    if (
-        typeof targetManifest === 'object' && targetManifest !== null
-        && typeof priorManifest === 'object' && priorManifest !== null
-        && targetManifest !== priorManifest
-    ) {
-        assignInPlace(targetManifest as Record<string, unknown>, priorManifest as Record<string, unknown>);
-        target.manifest = targetManifest;
-    }
-}

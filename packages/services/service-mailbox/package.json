@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-mailbox",
-  "version": "18.0.0",
+  "version": "18.1.0",
   "license": "Apache-2.0",
   "description": "Mailbox Service for ObjectStack \u2014 inbound mail: the mirrored message (sys_mail_message), its record associations and their read gates.",
   "type": "module",
@@ -29,7 +29,7 @@
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "postal-mime": "^4.0.5"
+    "postal-mime": "^4.0.8"
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",

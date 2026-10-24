@@ -42,9 +42,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { bindSecurityCatalogReader, type SecurityCatalogEntry, type SecurityCatalogReader } from '@objectstack/core';
+import {
+  bindSecurityCatalogReader, createMemoryI18n, type SecurityCatalogEntry, type SecurityCatalogReader,
+} from '@objectstack/core';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
+import { ApprovalsTranslations } from './translations/index.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
@@ -339,6 +342,86 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
       const decision = (await actionsOf(row.id)).find((a) => a.action === 'approve');
       expect(decision).toMatchObject({ actor_id: 'u_root' });
       expect(Boolean(decision?.via_override)).toBe(true);
+    });
+  });
+
+  // [#25576] The note is stored as a code and its parameters, and the
+  // approvals door renders it in the reader's language through the plugin's
+  // own `messages` catalog, loaded into a real in-memory `i18n` service the
+  // way the plugin loads it at `kernel:ready`.
+  describe('[#25576] the note is stored as data and read in the reader\'s language', () => {
+    let reader: ApprovalService;
+    const sub = (locale?: string) => ({ ...as('u_sub', ORG), ...(locale ? { locale } : {}) });
+    const noteOf = async (requestId: string, locale?: string) => {
+      const served = await reader.listActions(requestId, sub(locale));
+      return served.filter((a) => a.action === 'comment' && !a.actor_id);
+    };
+    const ENGLISH = "Routed to this organization's administrators because the approver slate named no one: "
+      + "position 'sales_manager' has no holder.";
+
+    beforeAll(() => {
+      const i18n = createMemoryI18n();
+      for (const [locale, data] of Object.entries(ApprovalsTranslations)) {
+        i18n.loadTranslations(locale, data as Record<string, unknown>);
+      }
+      reader = new ApprovalService({
+        engine: engine as any,
+        clock: { now: () => new Date(now += 1000) },
+        logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
+        i18nServiceSource: () => i18n,
+      });
+    });
+
+    it('the snapshot stores the note\'s code and parameters, naming the row; the row stores its English', async () => {
+      const row = await open('note_data', UNSTAFFED);
+      const [note] = (await actionsOf(row.id)).filter((a) => a.action === 'comment');
+      expect(note.comment).toBe(ENGLISH);
+      expect((await snapshotOf(row.id)).__adminRescueNote).toEqual({
+        action_id: note.id, abandoned: ['position:sales_manager'],
+      });
+    });
+
+    it('a zh-CN reader of the timeline reads the note in Chinese', async () => {
+      const row = await open('note_zh', UNSTAFFED);
+      const served = await noteOf(row.id, 'zh-CN');
+      expect(served.map((a) => a.comment)).toEqual(['审批人名单未指向任何人，因此已转交本组织管理员处理：岗位「sales_manager」无人任职。']);
+      // A read, never a write: the stored row still carries the English.
+      expect((await actionsOf(row.id)).find((a) => a.id === served[0].id)?.comment).toBe(ENGLISH);
+    });
+
+    it('a fallback that found no one renders both clauses, joined the reader\'s way', async () => {
+      const row = await open('note_zh_fallback', UNSTAFFED, {
+        onEmptyApprovers: 'fallback', fallbackApprovers: [{ type: 'position', value: 'treasury' }],
+      });
+      expect((await snapshotOf(row.id)).__adminRescueNote).toMatchObject({ fallback: 'resolved_to_no_one' });
+      expect((await noteOf(row.id, 'zh-CN')).map((a) => a.comment)).toEqual([
+        '审批人名单未指向任何人，因此已转交本组织管理员处理：岗位「sales_manager」无人任职；'
+          + '声明的 fallbackApprovers 也未解析到任何人。',
+      ]);
+    });
+
+    it('an en reader, and a reader with no locale, are served the stored English', async () => {
+      const row = await open('note_en', UNSTAFFED);
+      for (const locale of ['en', undefined]) {
+        expect((await noteOf(row.id, locale)).map((a) => a.comment), String(locale)).toEqual([ENGLISH]);
+      }
+    });
+
+    it('CONTROL: a request opened before the note was data, and another system comment, stay as stored', async () => {
+      const row = await open('note_legacy', UNSTAFFED);
+      // The stored shape of a request opened before #25576: no snapshot entry.
+      const snapshot = await snapshotOf(row.id);
+      delete snapshot.__adminRescueNote;
+      await engine.update('sys_approval_request', { id: row.id, node_config_json: JSON.stringify(snapshot) },
+        { context: SYSTEM } as any);
+      expect((await noteOf(row.id, 'zh-CN')).map((a) => a.comment)).toEqual([ENGLISH]);
+
+      const noted = await open('note_neighbour', UNSTAFFED);
+      await reader.comment(noted.id, { actorId: 'system', comment: 'Checked by the nightly audit.' }, SYSTEM);
+      expect((await noteOf(noted.id, 'zh-CN')).map((a) => a.comment)).toEqual([
+        '审批人名单未指向任何人，因此已转交本组织管理员处理：岗位「sales_manager」无人任职。',
+        'Checked by the nightly audit.',
+      ]);
     });
   });
 });

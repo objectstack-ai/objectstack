@@ -52,7 +52,7 @@ The official image is `ghcr.io/objectstack-ai/objectstack`, and its tags mirror
 
 ```bash
 # docker-compose.yml, or your orchestrator's manifest
-image: ghcr.io/objectstack-ai/objectstack:18.0.0
+image: ghcr.io/objectstack-ai/objectstack:18.1.0
 ```
 
 On a host running the artifact directly under systemd, the same move is a file
@@ -78,8 +78,9 @@ command for this move; it is four steps you run yourself.
    *previous* release's author-time rules over your metadata.
 2. **Regenerate the lockfile, and commit it** (`pnpm install` / `npm install` /
    `yarn install`). This is the step that actually moves the code. A project
-   pinned to exact versions moves because step 1 edited the pins; a project on the
-   scaffold's default ranges (`^17.0.0`) moves entirely here. Read whatever
+   pinned to exact versions (what the scaffolders write since 18.1.0) moves
+   because step 1 edited the pins; a project still on a caret range (`^18.0.0`,
+   what older scaffolds wrote) moves entirely here. Read whatever
    peer-dependency warnings this prints — the `--frozen-lockfile` install your CI
    runs skips resolution and will never print them.
 3. **Check the two protocol declarations your app ships** — `specVersion` in

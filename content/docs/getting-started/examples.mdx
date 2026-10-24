@@ -446,6 +446,15 @@ The rules worth knowing before you split a product this way:
   stack untouched, so composing one package on its own does not check the claim.
   Hooks are the deliberate exception: a hook still belongs to the package that
   owns its object.
+- **Actions may launch a sibling package's flow; dashboards may bind its dataset.**
+  A `type: 'flow'` action resolves its `target` against the artifact once you
+  hand `defineStack` the sibling flow names:
+  `defineStack(appConfig, { artifactFlows: ordersStack.flows?.map((f) => f.name) })`.
+  The claim is checked the same way: in a composition of two or more packages,
+  `composeStacks` refuses a claimed flow that no package defines. A dashboard
+  widget's `dataset` needs no option. `os build`, `os validate` and `os lint`
+  resolve it against every package of the artifact, and still refuse a dataset
+  that no package declares.
 - **One artifact, one version.** Everything inside ships, installs and upgrades
   together; you cannot hot-fix one module on its own. A module that needs its
   own release cadence belongs in its own artifact.

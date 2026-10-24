@@ -123,6 +123,7 @@ import { validateAiAgentAuthoring } from './validate-ai-agent-authoring.js';
 import { validateHookBodyWrites } from './validate-hook-body-writes.js';
 import { validateActionBodyWrites } from './validate-action-body-writes.js';
 import { validateFlowNodeWrites } from './validate-flow-node-writes.js';
+import { validateNotifyEmailFieldRecipients } from './validate-notify-email-field-recipients.js';
 import { validateReadonlyFlowWrites } from './validate-readonly-flow-writes.js';
 import { validateReadonlyHookWrites } from './validate-readonly-hook-writes.js';
 import { validateReadonlyActionWrites } from './validate-readonly-action-writes.js';
@@ -589,6 +590,12 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // standing "prefer a flow node, it's checked" advice was the least true of
   // the three until it landed.
   { name: 'validateFlowNodeWrites', run: validateFlowNodeWrites },
+  // [ruling 6377731715, letter B] A `notify` node's email-field recipient,
+  // `{ emailField }`, names a field of the triggering record whose address is
+  // the recipient — resolved here against the trigger object's declared
+  // fields, and refused unless it is `email`-typed. A literal name against a
+  // literal object, so it gates; the `flow` default covers the publish door.
+  { name: 'validateNotifyEmailFieldRecipients', run: validateNotifyEmailFieldRecipients },
   // The OTHER question about that same `config.fields` map: not "does this
   // field exist?" but "is it writable?" — a `runAs:'user'` update_record
   // writing a static-`readonly` field is stripped by the engine and the step

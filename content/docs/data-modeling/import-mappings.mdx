@@ -198,13 +198,52 @@ sending both is `400 CONFLICTING_MAPPING`.
 | | inline `mapping` | `mappingName` |
 |:---|:---|:---|
 | Shape | A flat `{ "<source column>": "<field>" }` rename (or a `sourceField`/`targetField` array) | A registered `mapping` artifact |
-| Transforms | None — rename only | The `fieldMapping` pipeline |
+| Transforms | Per entry of the array form: `transform` (`trim`, `uppercase`, `lowercase`; `none` and `lookup` copy the cell), `defaultValue` for a blank cell, `required`, `applyOn`. The flat record is a rename only | The `fieldMapping` pipeline |
 | Unmapped columns | **Pass through** to the write path under their own header | **Dropped.** The artifact is a strict projection: only mapped targets survive |
 | Lives | In the one request | In a package or in metadata, reusable |
 
 That projection difference is the one to keep in mind: a file from an external system
 routinely carries columns that must not reach the write path, and the artifact path
 guarantees they do not.
+
+### Columns written only when a row is created: `applyOn`
+
+An entry of the array form may declare `applyOn: 'create'` (the default is `'always'`).
+Its column is written when the import creates the row and left out when an `upsert`
+updates an existing one; an `update` import never writes it. That makes one upsert
+safe to re-run: master-data columns refresh, while a column the app has moved on since
+the first run (a status, a flag) keeps its current value.
+
+```json
+{
+  "writeMode": "upsert", "matchFields": ["credit_code"],
+  "mapping": [
+    { "sourceField": "Code", "targetField": "credit_code" },
+    { "sourceField": "Name", "targetField": "name" },
+    { "sourceField": "Status", "targetField": "status", "applyOn": "create" }
+  ]
+}
+```
+
+A create-only column is still read for matching: the match key a row was found by stays
+in that row's update, with the value it was found by.
+
+### Rows identified in different ways: ordered key sets
+
+`matchFields` takes one key set (`["email"]`) or an ordered list of key sets, for a sheet
+whose rows are identified in different ways:
+
+```json
+{ "writeMode": "upsert", "matchFields": [["credit_code"], ["country", "registration_no"]] }
+```
+
+Each row is matched by the **first** set whose fields are all non-blank on that row, and
+only by that set: a domestic row with a credit code is matched on it (and created when
+nothing matches), an overseas row with a blank credit code is matched on country and
+registration number. A row blank on every set fails with `BLANK_MATCH_KEY` instead of
+being created or skipped, so `skipBlankMatchKey` cannot be combined with key sets. A set
+that matches more than one record fails the row with `AMBIGUOUS_MATCH`, as one key set
+does.
 
 ---
 
@@ -218,9 +257,10 @@ These are whole-request failures — nothing is written, and there is no per-row
 | 400 | `MAPPING_TARGET_MISMATCH` | The artifact's `targetObject` is not the object in the URL. |
 | 400 | `MAPPING_FORMAT_UNSUPPORTED` | The artifact declares `sourceFormat: 'xml'` or `'sql'`; the endpoint accepts csv, json and xlsx payloads only. |
 | 400 | `MAPPING_FORMAT_MISMATCH` | The declared `sourceFormat` contradicts the payload actually sent. A `csv` mapping does apply to an `xlsx` payload — those rows are tabular in the same way — but a `json` mapping does not. |
-| 400 | `UNSUPPORTED_TRANSFORM` | Some entry declares `javascript`, or a transform name the pipeline does not implement. |
+| 400 | `UNSUPPORTED_TRANSFORM` | Some artifact entry declares `javascript`, or a transform name the pipeline does not implement; or an inline entry declares `date_format` (it carries no format to apply) or a name outside `none`, `lookup`, `trim`, `uppercase`, `lowercase`. |
+| 400 | `MISSING_REQUIRED_FIELD` | An inline entry is marked `required: true` and some row leaves its column blank after its `defaultValue`. The error names the column and the rows; it applies to the dry run and the commit alike. |
 | 400 | `CONFLICTING_MAPPING` | Both `mappingName` and an inline `mapping` were supplied. |
-| 400 | `INVALID_REQUEST` | No recognizable payload, or `writeMode` resolved to update/upsert with no `matchFields` from either the request or the artifact. |
+| 400 | `INVALID_REQUEST` | No recognizable payload; `writeMode` resolved to update/upsert with no `matchFields` from either the request or the artifact; malformed key sets in `matchFields` (an empty set or name, or names mixed with sets); `skipBlankMatchKey: true` with key sets; or an inline entry's `applyOn` outside `create` / `always`. |
 | 413 | `PAYLOAD_TOO_LARGE` | More than 5,000 rows on the synchronous route. |
 
 ---
@@ -235,7 +275,8 @@ fails does **not** stop the import.
 | `created` | `true` | — | Inserted. |
 | `updated` | `true` | — | Matched an existing record and updated it. |
 | `skipped` | `true` | `NO_MATCH` | `writeMode: 'update'` and the match fields matched nothing. Nothing is created. |
-| `skipped` | `true` | `BLANK_MATCH_KEY` | The row's match fields are blank. Upsert creates such a row by default; `update` skips it, and `skipBlankMatchKey: true` skips it in either mode. |
+| `skipped` | `true` | `BLANK_MATCH_KEY` | One key set in `matchFields`, and a field of it is blank on the row. Upsert creates such a row by default; `update` skips it, and `skipBlankMatchKey: true` skips it in either mode. |
+| `failed` | `false` | `BLANK_MATCH_KEY` | Ordered key sets in `matchFields`, and every set has a blank field on the row. Nothing is written for that row. |
 | `failed` | `false` | `AMBIGUOUS_MATCH` | The match fields matched **more than one** record. Nothing is written for that row. |
 | `failed` | `false` | a field error code | A cell could not be coerced, or the engine rejected the record. `field` names the column and `error` carries the message. |
 

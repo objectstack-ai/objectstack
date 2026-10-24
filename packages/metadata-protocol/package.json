@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/metadata-protocol",
-  "version": "18.0.0",
+  "version": "18.1.0",
   "license": "Apache-2.0",
   "description": "ObjectStack metadata management protocol: sys_metadata CRUD, draft/publish, locks, package ownership, diagnostics (ADR-0076).",
   "type": "module",
@@ -46,7 +46,7 @@
     "@objectstack/sdui-parser": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",

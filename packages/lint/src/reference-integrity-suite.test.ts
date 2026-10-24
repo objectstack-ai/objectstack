@@ -70,6 +70,10 @@ describe('reference-integrity suite — membership', () => {
       'validateHookBodyWrites',
       'validateActionBodyWrites',
       'validateFlowNodeWrites',
+      // [ruling 6377731715] A notify email-field recipient, resolved against
+      // the trigger object's declared fields — placed beside the member that
+      // resolves the same flow's CRUD write maps against that object.
+      'validateNotifyEmailFieldRecipients',
       'validateReadonlyFlowWrites',
       // [#13653] The hook-side half of the readonly write judgement: a body's
       // `ctx.api` update to a declared-`readonly` field, placed beside the flow
@@ -348,6 +352,14 @@ describe('reference-integrity suite — every member actually runs', () => {
             type: 'update_record',
             config: { objectName: 'crm_lead', fields: { locked: true } },
           },
+          // validateNotifyEmailFieldRecipients: an email-field recipient naming
+          // a field crm_lead does not declare — no address to send to, so it
+          // gates.
+          {
+            id: 'tell_lead',
+            type: 'notify',
+            config: { title: 'Thanks', channels: 'email', recipients: { emailField: 'contact_email' } },
+          },
         ],
       },
     ],
@@ -379,6 +391,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     // comments on why these ride along instead of becoming their own entries.
     expect(rules).toContain('action-record-write-discarded');
     expect(rules).toContain('flow-node-write-unknown-field');
+    expect(rules).toContain('notify-email-field-unknown');
     expect(rules).toContain('flow-update-readonly-field');
     expect(rules).toContain('hook-api-update-readonly-field');
     expect(rules).toContain('action-api-update-readonly-when-field');

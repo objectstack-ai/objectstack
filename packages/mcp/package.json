@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/mcp",
-  "version": "18.0.0",
+  "version": "18.1.0",
   "license": "Apache-2.0",
   "description": "ObjectStack as an MCP server — exposes your app's objects (and AI tools) over the Model Context Protocol (stdio + Streamable HTTP)",
   "type": "module",
@@ -31,7 +31,7 @@
     "@objectstack/formula": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@objectstack/lint": "workspace:*",

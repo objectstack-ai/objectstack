@@ -35,15 +35,29 @@
 //     skip. A silent skip is indistinguishable from a green run, which is
 //     precisely the invisibility this card was filed about.
 //
-// TWO VALUES, TWO MEANINGS — do not collapse them. `engines.protocol` is the
-// ADR-0087 D1 runtime handshake range and carries the PROTOCOL major (`^17`).
-// `specVersion` is documented by TemplateManifestSchema as the "Compatible
-// @objectstack/spec semver range" and carries the PACKAGE range (`^17.0.0`) —
-// the same value this script writes into the template's own
-// `@objectstack/spec` dependency, so the manifest and the package.json state
-// one fact once. They agree on the major today only because the spec package's
-// major and the protocol major are kept in lockstep; they are still two
-// different declarations and are stamped from two different values.
+// THREE VALUES, THREE MEANINGS — do not collapse them.
+//
+//   * `engines.protocol` is the ADR-0087 D1 runtime handshake range and
+//     carries the PROTOCOL major (`^18`).
+//   * `specVersion` is documented by TemplateManifestSchema as the "Compatible
+//     @objectstack/spec semver range" and carries the PACKAGE range
+//     (`^18.0.0`). It states which spec line the template is authored
+//     against, so it stays a RANGE.
+//   * every `@objectstack/*` dependency carries the scaffolder's EXACT version
+//     (`18.1.0`, a prerelease such as `19.0.0-rc.0` verbatim). A breaking
+//     change on the v18 line may ship in a minor or a patch, so the docs tell a
+//     project to pin exact versions (`content/docs/releases/v18/index.mdx`),
+//     and the committed baseline says what the scaffold writes
+//     (`syncObjectStackDeps` in `create-objectstack/src/pkg-utils.ts`). The
+//     exact version is always published for every one of these names: they
+//     all sit in the changesets `fixed` group with `create-objectstack`.
+//
+// Deps and `specVersion` used to be one value, which is why the ratchet
+// compared them for equality. They now agree on the MAJOR — the exact spec
+// dependency lies on the line `specVersion` names — and that is what
+// `template-consistency.test.ts` holds. `engines.protocol` and `specVersion`
+// agree on the major only because the spec package's major and the protocol
+// major are kept in lockstep; they are still different declarations.
 //
 // ## THE DECLARATIONS ARE EXPORTED, AND NOTHING RUNS ON IMPORT (#9554)
 //
@@ -80,8 +94,8 @@
 //
 // `stampedPaths()` reports all THREE per-template surfaces, not just the two
 // text stamps. A consumer asking which files the version pass writes is asking
-// about `package.json` too — it carries the `@objectstack/*` ranges this script
-// rewrites — and an export that answered the narrower question while being
+// about `package.json` too — it carries the `@objectstack/*` versions this
+// script rewrites — and an export that answered the narrower question while being
 // named for the wider one would seed the next restatement.
 
 import {
@@ -125,11 +139,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Control E: a stamp FILE that does not exist exits 1 naming it': 2,
   'Control F: an unparseable template package.json exits 1 naming it': 2,
   'Control H: zero templates refuses a vacuous green': 3,
+  'Control I: a PRERELEASE corpus is clean at its exact version, with specVersion still a range': 10,
+  'Control J: a scaffolder version that is not a whole semver exits 1 and writes nothing': 3,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -191,7 +207,7 @@ export const TEXT_STAMPS = [
     // `create-objectstack` copies it verbatim into every scaffolded project
     // (it rewrites name/displayName/namespace and drops description, and has
     // never touched this key), so a stale value ships to real users. Carries
-    // the PACKAGE range.
+    // the PACKAGE range — a range even though the deps beside it are exact.
     pattern: /("specVersion"\s*:\s*)"[^"]*"/,
     value: ({ range }) => range,
     replacement: ({ range }) => `$1"${range}"`,
@@ -200,7 +216,7 @@ export const TEXT_STAMPS = [
 
 /**
  * The per-template file that is stamped by DEPENDENCY REWRITE rather than by a
- * text stamp: every `@objectstack/*` range in it moves to the package range.
+ * text stamp: every `@objectstack/*` entry in it moves to the exact version.
  * Named here rather than inline so `stampedPaths()` and `main()` cannot drift.
  */
 export const TEMPLATE_PKG_FILE = 'package.json';
@@ -249,7 +265,14 @@ export function stampedPaths({ root: base = root } = {}) {
 }
 
 /**
- * The scaffolder's version, and the two values stamped from it.
+ * A whole semver version, prerelease allowed, build metadata refused. Anchored
+ * at BOTH ends: the version is written verbatim into every `@objectstack/*`
+ * dependency, so a prefix match would stamp `18.1.0garbage` as a pin.
+ */
+const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+
+/**
+ * The scaffolder's version, and the values stamped from it.
  *
  * THROWS on an unparseable version rather than exiting: this module is
  * importable (#9554), and a library call that kills the host process is not a
@@ -259,14 +282,15 @@ export function stampedPaths({ root: base = root } = {}) {
  */
 export function loadScaffolderVersion(file = join(root, VERSION_SOURCE)) {
   const version = JSON.parse(readFileSync(file, 'utf8')).version;
-  if (!/^\d+\.\d+\.\d+/.test(String(version))) {
+  if (!EXACT_VERSION.test(String(version))) {
     throw new Error(`cannot parse create-objectstack version '${version}'`);
   }
   const major = String(version).split('.')[0];
   return {
+    /** The exact version: every `@objectstack/*` dependency, prereleases verbatim. */
     version: String(version),
     major,
-    /** The `@objectstack/*` package range: dependencies AND the manifest's `specVersion`. */
+    /** The manifest's `specVersion` range. ⛔ Not a dependency value — deps are exact. */
     range: `^${major}.0.0`,
   };
 }
@@ -301,7 +325,7 @@ function main() {
   const problems = [];
 
   for (const template of templates) {
-    // ── package.json: every @objectstack/* range → the package range ────────
+    // ── package.json: every @objectstack/* dep → the exact version ──────────
     const templatePkgPath = join(TEMPLATE_ROOT, template, TEMPLATE_PKG_FILE);
     let templatePkg;
     try {
@@ -309,7 +333,7 @@ function main() {
     } catch (err) {
       problems.push(
         `${rel(templatePkgPath)} could not be read as JSON (${err.message}). Every bundled ` +
-          'template ships a package.json pinning the @objectstack/* ranges a scaffolded project installs.',
+          'template ships a package.json pinning the @objectstack/* versions a scaffolded project installs.',
       );
       templatePkg = null;
     }
@@ -322,9 +346,9 @@ function main() {
         for (const dep of Object.keys(deps)) {
           if (!dep.startsWith('@objectstack/')) continue;
           stackDeps++;
-          if (deps[dep] !== range) {
-            console.log(`  ${template}/package.json ${dep}: ${deps[dep]} → ${range}`);
-            deps[dep] = range;
+          if (deps[dep] !== version) {
+            console.log(`  ${template}/package.json ${dep}: ${deps[dep]} → ${version}`);
+            deps[dep] = version;
             changed++;
           }
         }
@@ -340,13 +364,13 @@ function main() {
         );
       } else if (changed === 0) {
         console.log(
-          `✓ ${template}/package.json already pins ${range} across ${stackDeps} @objectstack/* dep(s)` +
+          `✓ ${template}/package.json already pins ${version} across ${stackDeps} @objectstack/* dep(s)` +
             ` — in lockstep with create-objectstack@${version}`,
         );
       } else {
         writeFileSync(templatePkgPath, JSON.stringify(templatePkg, null, 2) + '\n');
         console.log(
-          `✓ ${template}/package.json: ${changed} of ${stackDeps} @objectstack/* range(s) → ${range}` +
+          `✓ ${template}/package.json: ${changed} of ${stackDeps} @objectstack/* dep(s) → ${version}` +
             ` (lockstep with create-objectstack@${version})`,
         );
       }
@@ -402,7 +426,7 @@ function main() {
 
   console.log(
     `\n✓ sync-template-versions: ${templates.length} template(s) in lockstep with ` +
-      `create-objectstack@${version} — deps and specVersion at ${range}, engines.protocol at '^${major}'.`,
+      `create-objectstack@${version} — deps at ${version}, specVersion at ${range}, engines.protocol at '^${major}'.`,
   );
 }
 
@@ -516,10 +540,13 @@ function writeFixtureFile(file, contents) {
 }
 
 /**
- * A throwaway checkout shaped like this repo, IN LOCKSTEP unless `major` says
- * otherwise. Returns the path of the copied script to run.
+ * A throwaway checkout shaped like this repo, IN LOCKSTEP with `version`: every
+ * `@objectstack/*` dep at that EXACT version, `specVersion` at its major's
+ * range, `engines.protocol` at its major. Returns the path of the copied script
+ * to run.
  */
-function buildFixture(dir, { templates = ['blank', 'second'], major = '42' } = {}) {
+function buildFixture(dir, { templates = ['blank', 'second'], version = SELF_TEST_VERSION } = {}) {
+  const major = version.split('.')[0];
   const script = join(dir, 'scripts', 'sync-template-versions.mjs');
   writeFixtureFile(script, readFileSync(fileURLToPath(import.meta.url), 'utf8'));
   // The entry guard is imported, not re-typed (`scripts/invoked-as.mjs`), so the
@@ -531,7 +558,7 @@ function buildFixture(dir, { templates = ['blank', 'second'], major = '42' } = {
   );
   writeFixtureFile(
     join(dir, VERSION_SOURCE),
-    JSON.stringify({ name: 'create-objectstack', version: SELF_TEST_VERSION }, null, 2) + '\n',
+    JSON.stringify({ name: 'create-objectstack', version }, null, 2) + '\n',
   );
   // Created even when `templates` is empty: the vacuous-green guard is about an
   // EMPTY templates directory, not a missing one.
@@ -543,8 +570,8 @@ function buildFixture(dir, { templates = ['blank', 'second'], major = '42' } = {
       JSON.stringify(
         {
           name: `template-${template}`,
-          dependencies: { '@objectstack/spec': `^${major}.0.0`, chalk: '^6.0.0' },
-          devDependencies: { '@objectstack/cli': `^${major}.0.0` },
+          dependencies: { '@objectstack/spec': version, chalk: '^6.0.0' },
+          devDependencies: { '@objectstack/cli': version },
         },
         null,
         2,
@@ -821,6 +848,78 @@ function selfTest() {
         `a run that stamped nothing must not print the success line\n${output}`,
       );
     }
+
+    // ── Control I: a PRERELEASE corpus is clean at its exact version, with specVersion still a range ──
+    //
+    // The two values a release-candidate cut stamps, observed in the direction
+    // only a clean corpus can show. The deps carry `42.0.0-rc.1` verbatim and
+    // `specVersion` carries `^42.0.0`; a rewriter that collapsed the two values
+    // back into one — either one — rewrites this corpus, and Control A would
+    // not notice, because on a plain release both readings of "the major" agree.
+    battery('Control I: a PRERELEASE corpus is clean at its exact version, with specVersion still a range');
+    {
+      const prerelease = '42.0.0-rc.1';
+      const dir = fixtureDir('prerelease');
+      const script = buildFixture(dir, { version: prerelease });
+      const surfaces = fixtureSurfaces(dir);
+      const backdated = new Date(Date.now() - 60_000);
+      for (const file of surfaces) utimesSync(file, backdated, backdated);
+      const before = surfaces.map((file) => ({
+        file,
+        text: readFileSync(file, 'utf8'),
+        mtimeMs: statSync(file).mtimeMs,
+      }));
+
+      const { status, output } = runFixture(script);
+      assert(status === 0, `a prerelease corpus in lockstep exits 0 — got ${status}\n${output}`);
+      for (const template of ['blank', 'second']) {
+        assert(
+          output.includes(`${template}/${TEMPLATE_PKG_FILE} already pins ${prerelease}`),
+          `${template}/${TEMPLATE_PKG_FILE} is judged clean at the EXACT prerelease, not at a range\n${output}`,
+        );
+      }
+      assert(
+        output.includes(`specVersion at ^42.0.0`),
+        `the run reports specVersion as the major's range, not the prerelease\n${output}`,
+      );
+      for (const snapshot of before) {
+        const rel = relative(dir, snapshot.file);
+        assert(
+          readFileSync(snapshot.file, 'utf8') === snapshot.text &&
+            statSync(snapshot.file).mtimeMs === snapshot.mtimeMs,
+          `${rel} was left byte-identical and UNWRITTEN on a clean prerelease run`,
+        );
+      }
+    }
+
+    // ── Control J: a scaffolder version that is not a whole semver exits 1 and writes nothing ──
+    //
+    // The version is now written VERBATIM into every dependency, so a prefix
+    // match is no longer enough to accept it: `42.0.0garbage` would become a
+    // pin no registry can resolve. The read throws, and `main()` must turn that
+    // into exit 1 before it opens a single template.
+    battery('Control J: a scaffolder version that is not a whole semver exits 1 and writes nothing');
+    {
+      const dir = fixtureDir('bad-version');
+      const script = buildFixture(dir);
+      writeFixtureFile(
+        join(dir, VERSION_SOURCE),
+        JSON.stringify({ name: 'create-objectstack', version: '42.0.0garbage' }, null, 2) + '\n',
+      );
+      const surfaces = fixtureSurfaces(dir);
+      const before = surfaces.map((file) => readFileSync(file, 'utf8'));
+
+      const { status, output } = runFixture(script);
+      assert(status === 1, `an unparseable scaffolder version exits 1 — got ${status}\n${output}`);
+      assert(
+        output.includes(`cannot parse create-objectstack version '42.0.0garbage'`),
+        `the failure names the version it refused\n${output}`,
+      );
+      assert(
+        surfaces.every((file, i) => readFileSync(file, 'utf8') === before[i]),
+        'no template surface was rewritten from a version that was refused',
+      );
+    }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -876,7 +975,9 @@ function selfTest() {
     `✓ sync-template-versions --self-test: ${checked} assertions over temp fixtures, running the real CLI. ` +
       'A CLEAN corpus is observed REACHED, byte-identical and UNWRITTEN; a missing stamp, a missing file, an ' +
       'unparseable package.json, a template with no @objectstack/* dependency and an empty templates directory ' +
-      'are each observed exiting 1 and naming the path; and one run is observed naming EVERY unstamped surface. ' +
+      'are each observed exiting 1 and naming the path; one run is observed naming EVERY unstamped surface; a ' +
+      'prerelease corpus is observed clean with deps at the exact version and specVersion still a range; and a ' +
+      'scaffolder version that is not a whole semver is observed exiting 1 with nothing written. ' +
       'The STALE -> rewritten direction and the discovery walk belong to ' +
       'packages/create-objectstack/src/template-version-stamps.test.ts and are deliberately not restated here.',
   );

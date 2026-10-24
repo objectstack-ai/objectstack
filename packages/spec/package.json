@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/spec",
-  "version": "18.0.0",
+  "version": "18.1.0",
   "description": "ObjectStack Protocol & Specification - TypeScript Interfaces, JSON Schemas, and Convention Configurations",
   "license": "Apache-2.0",
   "main": "dist/index.js",
@@ -340,7 +340,7 @@
   },
   "dependencies": {
     "pg-connection-string": "^2.14.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "peerDependencies": {
     "ai": "^7.0.0"

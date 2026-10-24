@@ -108,6 +108,15 @@ export const localizationSettingsManifest: SettingsManifest = {
       // rather than inheriting a guessed symbol (previously hard-defaulted to
       // 'USD', which surfaced an unwanted "$"/"US$" on every code-less amount).
       // A workspace can still pick a default to apply org-wide.
+      // [#25495] Where a new organization's value comes from: when an
+      // organization is created, plugin-auth writes this key as an ordinary
+      // `tenant` row for it, derived from the creator's language or region
+      // (their stored `sys_user.locale`, else the creating request's
+      // `Accept-Language`) through a CLDR region → currency table; the dev
+      // seed does the same from the host's POSIX locale. Nothing derivable ⇒
+      // nothing is written (there is no fallback to `default_country` or
+      // `locale`), and a value already set on any rung is never overwritten.
+      // `organization-default-currency.ts` in plugin-auth is the authority.
       description: 'ISO 4217 code applied when a currency field omits its own. Leave unset to render code-less amounts as plain numbers.',
       // As with `timezone`: the description promises ISO 4217, and since #5712
       // the declaration delivers it — any ISO 4217 code is accepted, the

@@ -391,7 +391,12 @@ export const CEILINGS = new Map([
   // line that binds every seat to the human floor; this branch, merged behind
   // it, lands at 319 − 1 = 318, so the ceiling is the landed count once more.
   // Headroom 0 (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/SKILL.md', 318],
+  // Raised 318 → 319 (#25663): maintainer ruling 6385407063, option A, verbatim
+  // 「同意 318→319」 (2026-10-24) — the claim template's `Premise:` line, the
+  // reading `dispatch-runbook.md` 派发前置 requires. Measured +1, ceiling +1;
+  // headroom 0. SKILL.md is not a CROSS_FILE_MOVES destination, so no
+  // `ruledRaises` record applies. Landed count, same convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 319],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -1452,14 +1457,23 @@ export const CEILINGS = new Map([
   // daily digest, the thin-triage pairing and the roster pointer the same word
   // ordered; +17 against a net source decrease of 17. Landed count, headroom 0,
   // same convention.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 87],
+  // 87 → 88 (#25558): ruling D of director batch #10, comment 6378083450 —
+  // maintainer 「#25558 记为 D」 (2026-10-24), adopting the record's workload
+  // 「`lanes/director.md` 职责行」: the seat an app project summons reviews that
+  // repo's business-rationale first touch. Measured +1, ceiling moved by +1;
+  // recorded under the move below as a `ruledRaises` record.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 88],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // alternates between the two multi-lane repos, oldest-first inside a repo, with a
   // 4-hour starvation guard). A seat charter is read per seat session like every
   // entry above. Set at the landed line count read from this ratchet's own run
   // (headroom 0, same convention as above); it is a NEW file, so this is an added
   // row and no other row moves.
-  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 7],
+  // 7 → 8 (#25558): ruling D of director batch #10, comment 6378083450 —
+  // maintainer 「#25558 记为 D」 (2026-10-24), adopting the record's workload
+  // 「`lanes/triage.md`「应用仓无分诊席」之后补「应用仓业务理由由该项目召唤的
+  // 总监席复核;第三方应用的总监是其自身维护者」」. Measured +1, ceiling +1.
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 8],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -2100,6 +2114,16 @@ export const CROSS_FILE_MOVES = new Map([
       ruling: 'the triage daily duties (release board, pin chain, decision-inbox duties) consolidated into the 总监席 charter on the maintainer\'s word of 2026-10-23 「分诊不忙不如留给总监管」, under the cross-file move authorised by #14685 item 5 (comment 5520452691)',
       was: 70,
       sources: [['.claude/skills/pm-dispatch/references/triage-duties.md', 120]],
+      ruledRaises: [
+        {
+          ruling:
+            'the app-repo business-rationale duty line on `.claude/skills/pm-dispatch/references/lanes/director.md`'
+            + ' — ruling D of director batch #10, comment 6378083450, maintainer verbatim and untranslated:'
+            + ' 「#25558 记为 D」, adopting the record\'s workload 「`lanes/director.md` 职责行」.',
+          date: '2026-10-24',
+          delta: 1,
+        },
+      ],
     },
   ],
 ]);

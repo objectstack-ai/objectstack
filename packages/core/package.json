@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/core",
-  "version": "18.0.0",
+  "version": "18.1.0",
   "license": "Apache-2.0",
   "description": "Microkernel Core for ObjectStack",
   "type": "module",
@@ -38,7 +38,7 @@
   "dependencies": {
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "keywords": [
     "objectstack",

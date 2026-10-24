@@ -106,9 +106,9 @@ export const SysUser = ObjectSchema.create({
       visible: 'features.cloudManaged != true',
       requiresFeature: 'organization',
       requiresMembershipReach: 'invite_member',
-      // `${result.email}`: invite-member answers the bare invitation row,
+      // `{{ result.email }}`: invite-member answers the bare invitation row,
       // whose top-level `email` is the invitee's address as stored (lowercased).
-      successMessage: 'Invitation sent to ${result.email}',
+      successMessage: 'Invitation sent to {{ result.email }}',
       refreshAfter: true,
       params: [
         { field: 'email', required: true },

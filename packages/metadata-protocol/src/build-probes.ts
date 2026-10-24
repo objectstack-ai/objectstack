@@ -138,6 +138,27 @@ function readAdmissionRefusal(e: unknown): { object?: string; fields: string[] }
     };
 }
 
+/**
+ * `SERVICE_UNAVAILABLE`, pinned against the STANDARD catalog — the code the
+ * analytics service throws (ADR-0112 envelope, 503) when a read gate could not
+ * reach a verdict: a permission or API-exposure resolver failed.
+ */
+const SERVICE_UNAVAILABLE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
+
+/**
+ * The fault refusal a widget query can be answered with, judged by the thrown
+ * error's ADR-0112 `code` — never by its message text.
+ *
+ * Neither the dataset nor the caller's access is the cause: the server could
+ * not decide, so the remedy is the operator's. `object` names the object the
+ * server could not decide read access to, when the error carries one.
+ */
+function serviceUnavailableRefusal(e: unknown): { object?: string } | undefined {
+    const err = e && typeof e === 'object' ? (e as Rec) : undefined;
+    if (!err || err.code !== SERVICE_UNAVAILABLE) return undefined;
+    return { object: typeof err.object === 'string' && err.object ? err.object : undefined };
+}
+
 /** Result rows of a queryDataset call, tolerant of {rows}/{data}/array shapes. */
 function resultRows(result: unknown): unknown[] {
     if (Array.isArray(result)) return result;
@@ -419,15 +440,24 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                 // The query runs as the publishing caller, so read admission
                 // can refuse a dataset that is correct. That refusal names an
                 // access remedy; telling the author to edit the dataset would
-                // send them to change something that works.
+                // send them to change something that works. A fault — the
+                // server could not decide read access at all — is neither: its
+                // remedy is the operator's.
                 const refusal = readAdmissionRefusal(e);
+                const unavailable = refusal ? undefined : serviceUnavailableRefusal(e);
                 const refusedObject = refusal?.object ?? objectName;
+                const undecidedObject = unavailable?.object ?? objectName;
                 const fix = refusal
                     ? `Dataset "${dsName}" is not the cause and needs no change: read admission refused the publishing caller. ` +
                       `The publisher (or the role this dashboard is for) needs read access to ` +
                       `${refusedObject ? `object "${refusedObject}"` : 'the object this dataset reads'}` +
                       `${refusal.fields.length ? ` and its field(s) ${refusal.fields.join(', ')}` : ''}; grant it, then republish. ` +
                       `The finding is about this caller's access: a viewer who has that access can read the widget.`
+                    : unavailable
+                    ? `Dataset "${dsName}" is not the cause and needs no change: the server could not decide read access to ` +
+                      `${undecidedObject ? `object "${undecidedObject}"` : 'the object this dataset reads'}, ` +
+                      `so the query was not run (SERVICE_UNAVAILABLE). This is a server-side fault, not a denial: ` +
+                      `check the server log for the permission or API-exposure resolver that failed, then republish once it is healthy.`
                     : `Fix the dataset definition (or the widget's values/dimensions) so the query compiles, then republish.`;
                 issues.push({
                     layer: 'runtime',

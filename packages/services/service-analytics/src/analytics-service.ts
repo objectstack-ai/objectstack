@@ -851,12 +851,13 @@ export interface AnalyticsServiceConfig {
    * construction rather than by maintenance.
    *
    * MAY be async. `false` refuses the query with `PERMISSION_DENIED` / 403; a
-   * THROW also refuses (fail-closed). When the hook is absent entirely no
+   * THROW also refuses (fail-closed), answered `SERVICE_UNAVAILABLE` / 503
+   * because no verdict was reached. When the hook is absent entirely no
    * object-level gate applies — a host that constructs the service without
    * one. That is not a deployment with no security service: the plugin always
-   * wires this hook, and on the in-repo kernels its bridge DENIES when no
-   * `security` service was ever registered, because the lookup throws
-   * (`plugin.ts`).
+   * wires this hook, and on the in-repo kernels its bridge REFUSES
+   * (`SERVICE_UNAVAILABLE` / 503) when no `security` service was ever
+   * registered, because the lookup throws (`plugin.ts`).
    */
   admitObjectRead?: ObjectReadAdmissionProvider;
   /**
@@ -1978,8 +1979,9 @@ export class AnalyticsService implements IAnalyticsService {
    * A no-op when no provider is wired — a host that constructs this service
    * without `admitObjectRead`. `AnalyticsServicePlugin` always wires one, so a
    * deployment with no security service is NOT this case: on the in-repo
-   * kernels the bridge's lookup throws and the provider denies, fail-closed
-   * (`plugin.ts`, `admission-bridge-resolution.test.ts`).
+   * kernels the bridge's lookup throws and the provider refuses, fail-closed,
+   * `SERVICE_UNAVAILABLE` / 503 (`plugin.ts`,
+   * `admission-bridge-resolution.test.ts`).
    */
   private async assertReadAdmitted(
     objects: Iterable<string>,

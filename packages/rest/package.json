@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/rest",
-  "version": "18.0.0",
+  "version": "18.1.0",
   "license": "Apache-2.0",
   "description": "ObjectStack REST API Server - automatic REST endpoint generation from protocol",
   "type": "module",
@@ -37,7 +37,7 @@
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "exceljs": "^4.4.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",

@@ -63,8 +63,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { doctorConfig } from '../utils/__tests__/doctor-config.js';
 import Doctor, {
   nodeEnvCheck,
   nodeEnvSourcePosture,
@@ -72,9 +72,6 @@ import Doctor, {
   environmentSourcesCheck,
   readDotenvFiles,
 } from './doctor.js';
-
-/** `packages/cli` — the oclif root the real command is loaded against below. */
-const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
  * `chalk` may or may not emit SGR codes depending on TTY detection.
@@ -337,7 +334,7 @@ describe('[#5673] os doctor, end to end — the row reaches the report', () => {
     }) as never);
 
     try {
-      await Doctor.run(argv, { root: CLI_ROOT });
+      await Doctor.run(argv, await doctorConfig());
     } catch (err) {
       if (!(err instanceof Error) || !err.message.startsWith('__PROCESS_EXIT__')) throw err;
     } finally {

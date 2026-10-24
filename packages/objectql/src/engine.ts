@@ -97,10 +97,14 @@ import {
   isDataMigrationFlagVerified,
   hasMovedFileColumns,
   renderOperationMessage,
-  objectLabelKey,
-  resolveBundleLocale,
   SystemFieldName,
 } from '@objectstack/spec/system';
+// [#25522 cut 1] The validation-message localisation helpers; the methods of the
+// same names below hand each body the members it reads (`ValidationMessageHost`).
+import { negotiatedMessageLocale, objectDisplayLabel, validationMessageContext } from './engine-validation-messages.js';
+// [#25522 cut 2] The datasource-routing bodies; the methods of the same names
+// below hand each body the members it reads (`DatasourceRoutingHost`).
+import { getDriver, matchPattern, resolveDatasourceFromMapping } from './engine-datasource-routing.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 // [#21120] The family-wide stored-metadata-body seam. A `data.record.*` event
 // carries the written row in `after` (and the input patch in `changes`), so a
@@ -10294,12 +10298,13 @@ export class ObjectQL implements IObjectQLEngine {
     // resolved and the input-shaped envelope satisfy it.
     context?: { locale?: string },
   ): { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string; objectName: string } {
-    const t = this.i18nService?.t;
-    return {
-      objectName,
-      locale: this.negotiatedMessageLocale(context?.locale),
-      translate: t ? (key, locale, params) => t.call(this.i18nService, key, locale, params) : undefined,
+    // [#25522 cut 1] The body moved to `engine-validation-messages.ts` (see `ValidationMessageHost`).
+    const readI18nService = () => this.i18nService;
+    const host: ThisParameterType<typeof validationMessageContext> = {
+      get i18nService() { return readI18nService(); },
+      negotiatedMessageLocale: (...a) => this.negotiatedMessageLocale(...a),
     };
+    return validationMessageContext.call(host, objectName, context);
   }
 
   /**
@@ -10333,24 +10338,12 @@ export class ObjectQL implements IObjectQLEngine {
    * EXISTS; inventing one is how a second rule gets born.
    */
   private negotiatedMessageLocale(requested: string | undefined): string | undefined {
-    if (!requested) return requested;
-    const getLocales = this.i18nService?.getLocales;
-    if (typeof getLocales !== 'function') return requested;
-    let available: unknown;
-    try {
-      available = getLocales.call(this.i18nService);
-    } catch {
-      // A misbehaving i18n service must not turn a write into a 500.
-      return requested;
-    }
-    if (!Array.isArray(available) || available.length === 0) return requested;
-    // `resolveBundleLocale` matches against a bundle's KEYS; the offered
-    // locales are exactly that key set, with no data behind them.
-    const offered: Record<string, true> = {};
-    for (const code of available) {
-      if (typeof code === 'string' && code.length > 0) offered[code] = true;
-    }
-    return resolveBundleLocale(offered, requested) ?? requested;
+    // [#25522 cut 1] The body moved to `engine-validation-messages.ts` (see `ValidationMessageHost`).
+    const readI18nService = () => this.i18nService;
+    const host: ThisParameterType<typeof negotiatedMessageLocale> = {
+      get i18nService() { return readI18nService(); },
+    };
+    return negotiatedMessageLocale.call(host, requested);
   }
 
   /**
@@ -10368,20 +10361,8 @@ export class ObjectQL implements IObjectQLEngine {
     declaredLabel: unknown,
     ctx: { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string },
   ): string {
-    if (ctx.translate && ctx.locale) {
-      const key = objectLabelKey(objectName);
-      try {
-        const translated = ctx.translate(key, ctx.locale);
-        // II18nService echoes the key back on a miss.
-        if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
-          return translated;
-        }
-      } catch {
-        // A misbehaving i18n service must not turn a 409 into a 500.
-      }
-    }
-    const declared = typeof declaredLabel === 'string' ? declaredLabel.trim() : '';
-    return declared.length > 0 ? declared : objectName;
+    // [#25522 cut 1] The body moved to `engine-validation-messages.ts`; it reads no member.
+    return objectDisplayLabel(objectName, declaredLabel, ctx);
   }
 
   /**
@@ -12391,62 +12372,17 @@ export class ObjectQL implements IObjectQLEngine {
    * that driver is missing.
    */
   private getDriver(objectName: string): IDataDriver {
-    const binding = this.resolveDatasourceBinding(objectName);
-
-    if (binding) {
-      const driver = this.drivers.get(binding.datasource);
-      if (driver) {
-        // Debug lines kept at the DECISION they describe, but emitted here so
-        // the resolver stays free of side effects: it also answers the public
-        // {@link resolveEffectiveDatasource} probe, which must be able to name
-        // a datasource without logging a routing event that never happened.
-        if (binding.via === 'mapping') {
-          this.logger.debug('Resolved datasource from mapping', {
-            object: objectName,
-            datasource: binding.datasource
-          });
-        } else if (binding.via === 'package') {
-          this.logger.debug('Resolved datasource from package manifest', {
-            object: objectName,
-            package: binding.packageId,
-            datasource: binding.datasource
-          });
-        }
-        return driver;
-      }
-
-      // Only steps 1 and 2 reach here. Steps 3-5 answer ONLY when their driver
-      // is registered (that registration is what opts the deployment into
-      // lifecycle separation / a package default / a global default at all), so
-      // a binding they produce always resolves.
-      //
-      // The datasource layer may have recorded WHY this one has no driver —
-      // refused by the host policy, or failed to connect under
-      // OS_ALLOW_DRIVER_CONNECT_FAILURE (framework#3828). Saying so beats
-      // sending the reader hunting for a typo that isn't there.
-      const unavailable = this.unavailableDatasources.get(binding.datasource);
-      if (unavailable) {
-        throw new DatasourceUnavailableError(
-          binding.datasource,
-          objectName,
-          unavailable.kind,
-          unavailable.publicDetail,
-        );
-      }
-      if (binding.via === 'mapping') {
-        throw new Error(
-          `[ObjectQL] Datasource '${binding.datasource}' mapped for object '${objectName}' is not registered. ` +
-          `A datasourceMapping rule routes this object to it, so falling back to the default store would ` +
-          `write the object's data to a different database than the one it declares. Fix the datasource ` +
-          `configuration, or remove the mapping rule.`,
-        );
-      }
-      // No record: nothing ever tried to connect this name, so it is genuinely
-      // undeclared (or misspelled). Unchanged message — there is nothing to add.
-      throw new Error(`[ObjectQL] Datasource '${binding.datasource}' configured for object '${objectName}' is not registered.`);
-    }
-
-    throw new Error(`[ObjectQL] No driver available for object '${objectName}'`);
+    // [#25522 cut 2] The body moved to `engine-datasource-routing.ts` (see `DatasourceRoutingHost`).
+    const readDrivers = () => this.drivers;
+    const readLogger = () => this.logger;
+    const readUnavailableDatasources = () => this.unavailableDatasources;
+    const host: ThisParameterType<typeof getDriver> = {
+      resolveDatasourceBinding: (...a) => this.resolveDatasourceBinding(...a),
+      get drivers() { return readDrivers(); },
+      get logger() { return readLogger(); },
+      get unavailableDatasources() { return readUnavailableDatasources(); },
+    };
+    return getDriver.call(host, objectName);
   }
 
   /**
@@ -12598,40 +12534,13 @@ export class ObjectQL implements IObjectQLEngine {
     objectName: string,
     object?: any
   ): string | null {
-    if (!this.datasourceMapping || this.datasourceMapping.length === 0) {
-      return null;
-    }
-
-    // Sort rules by priority if any have priority set
-    const sortedRules = [...this.datasourceMapping].sort((a, b) => {
-      const aPriority = a.priority ?? 1000;
-      const bPriority = b.priority ?? 1000;
-      return aPriority - bPriority;
-    });
-
-    for (const rule of sortedRules) {
-      // 1. Match by namespace
-      if (rule.namespace && object?.namespace === rule.namespace) {
-        return rule.datasource;
-      }
-
-      // 2. Match by package ID
-      if (rule.package && object?.packageId === rule.package) {
-        return rule.datasource;
-      }
-
-      // 3. Match by object name pattern (glob-style)
-      if (rule.objectPattern && this.matchPattern(objectName, rule.objectPattern)) {
-        return rule.datasource;
-      }
-
-      // 4. Default fallback rule
-      if (rule.default) {
-        return rule.datasource;
-      }
-    }
-
-    return null;
+    // [#25522 cut 2] The body moved to `engine-datasource-routing.ts` (see `DatasourceRoutingHost`).
+    const readDatasourceMapping = () => this.datasourceMapping;
+    const host: ThisParameterType<typeof resolveDatasourceFromMapping> = {
+      get datasourceMapping() { return readDatasourceMapping(); },
+      matchPattern: (...a) => this.matchPattern(...a),
+    };
+    return resolveDatasourceFromMapping.call(host, objectName, object);
   }
 
   /**
@@ -12639,13 +12548,8 @@ export class ObjectQL implements IObjectQLEngine {
    * Supports * (any chars) and ? (single char)
    */
   private matchPattern(objectName: string, pattern: string): boolean {
-    const regexPattern = pattern
-      .replace(/[.+^${}()|[\]\\]/g, '\\$&')  // Escape regex special chars
-      .replace(/\*/g, '.*')                   // * → .*
-      .replace(/\?/g, '.');                   // ? → .
-
-    const regex = new RegExp(`^${regexPattern}$`);
-    return regex.test(objectName);
+    // [#25522 cut 2] The body moved to `engine-datasource-routing.ts`; it reads no member.
+    return matchPattern(objectName, pattern);
   }
 
   /**

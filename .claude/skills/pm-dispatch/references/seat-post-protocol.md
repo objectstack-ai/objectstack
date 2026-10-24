@@ -25,7 +25,7 @@
 
 - 活性惰性半边在接管冲突时评估一次:Routine 座位查调度器 `last_fired` 与 `next_run`。
 - 会话座位查最近一条产出评论的时间戳;回收 = 改正文 + 审计评论。
-- 常设半边是分诊轮的座位贴活性巡查,同一判据,细则见 `dispatch-runbook.md`。
+- 常设半边是总监席摘要的座位贴活性巡查,同一判据,细则见 `dispatch-runbook.md`。
 - 可跑读法:本车道 `pm:dispatched` 卡按 `updated_at` 降序一搜,或读最近一条认领评论。
 - 写侧刷新三时刻:派发、收班、暂停或交接前;时间戳恒取自 `scripts/pm/post-stamped.mjs`。
 - 刷新前回执敲门;`--body` 拦截:评论晚于末次戳 ⇒ `--ack-through=ID`;空座欠账无卡号 ⇒ 拒写。
@@ -77,7 +77,7 @@
 
 ## 发版板运维(`target:<major>`)
 
-- 生产者:主仓归分诊座位,objectui 与 cloud 归各自整仓座位。
+- 生产者:主仓归总监席,objectui 与 cloud 归各自整仓座位。
 - 其余座位不打不摘,误判走上报;⛔ 三个生产者各扫各的 backlog。
 - 消费者:维护者的发版清单 = 三仓三条查询 `label:target:<major> is:open`。
 - 等价的 org 级搜索仅是备用写法;归零 = 可发版指三张板都空,单看主仓归零不是。

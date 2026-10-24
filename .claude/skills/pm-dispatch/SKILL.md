@@ -313,6 +313,7 @@ Clause-②: yes | no
 Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; the level table is AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and every changeset body)
 Responsibility: `<whose code produces the risk | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards only, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
+Premise: holds | corrected <comment id> | inbox (the pre-dispatch premise reading, dispatch-runbook.md 派发前置)
 Serial constraints cleared: `<点名同文件/同包的前驱 PR 与在飞认领,及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 none>`
 Resume-from: `BRANCH@SHA` (only when the card's newest `Release:` carries one; the dev starts from that sha, never from zero)
 ```

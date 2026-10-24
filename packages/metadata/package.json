@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/metadata",
-  "version": "18.0.0",
+  "version": "18.1.0",
   "license": "Apache-2.0",
   "description": "Metadata loading, saving, and persistence for ObjectStack",
   "type": "module",
@@ -98,7 +98,7 @@
     "chokidar": "^5.0.0",
     "glob": "^13.0.6",
     "js-yaml": "^5.4.1",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@objectstack/driver-sqlite-wasm": "workspace:*",

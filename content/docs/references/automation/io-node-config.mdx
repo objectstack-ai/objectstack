@@ -1,7 +1,7 @@
 ---
 title: Io Node Config — Automation Protocol reference
 navTitle: Io Node Config
-description: "Config contracts for the flat IO builtins — notify and http. Reference for HttpConfig, NotifyConfig: every property with its type and default."
+description: "Config contracts for the flat IO builtins — notify and http. Reference for HttpConfig, NotifyConfig and 1 more: every property with its type and default."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -63,8 +63,8 @@ sibling block — see the descriptor note in
 ## TypeScript Usage
 
 ```typescript
-import { HttpConfigSchema, NotifyConfigSchema } from '@objectstack/spec/automation';
-import type { HttpConfig, NotifyConfig } from '@objectstack/spec/automation';
+import { HttpConfigSchema, NotifyConfigSchema, NotifyEmailFieldRecipientSchema } from '@objectstack/spec/automation';
+import type { HttpConfig, NotifyConfig, NotifyEmailFieldRecipient } from '@objectstack/spec/automation';
 
 // Validate data
 const result = HttpConfigSchema.parse(data);
@@ -95,7 +95,7 @@ const result = HttpConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **recipients** | `string \| (string \| { dialect: 'cel'; source: string; ast?: any; meta?: object })[] \| { dialect: 'cel'; source: string; ast?: any; meta?: object }` | ✅ | Who the notification goes to: a recipient (a user id, or an audience selector such as `team:ID`) as a string; a list of them, each a string or a CEL value envelope `{ dialect: 'cel', source }` evaluated per run — an entry that evaluates to a list adds each of its recipients, and one that evaluates to null adds none; or one envelope evaluating to a recipient or a list. A `{…}` template token is refused. |
+| **recipients** | `string \| (string \| { dialect: 'cel'; source: string; ast?: any; meta?: object })[] \| { dialect: 'cel'; source: string; ast?: any; meta?: object } \| { emailField: string }` | ✅ | Who the notification goes to: a recipient (a user id, or an audience selector such as `team:ID`) as a string; a list of them, each a string or a CEL value envelope `{ dialect: 'cel', source }` evaluated per run — an entry that evaluates to a list adds each of its recipients, and one that evaluates to null adds none; or one envelope evaluating to a recipient or a list. A `{…}` template token is refused. Or, as the whole value, `{ emailField: 'applicant_email' }`: the address in that `email`-typed field of the record that triggered the flow, for a person who is not a user — the node then names `email` as its only channel. Delivery to an email-field recipient is not live yet: until the messaging service resolves the form, a run that reaches the node fails there. |
 | **title** | `string \| { dialect: 'template'; source?: string; ast?: any; meta?: object }` | optional | Notification title — a template: a bare string, or a `{ dialect: 'template', source }` envelope (the `tmpl` helper) carrying the same text. It is rendered per run with `{{ }}` holes over the flow's variables — a variable path with an optional formatter (`{{ record.name }}`, `{{ record.amount \| currency }}`); a single-brace `{token}` is refused. One text for every recipient (not localizable — use `template` for per-locale content). Either this or `template` is required; the two are mutually exclusive. |
 | **message** | `string \| { dialect: 'template'; source?: string; ast?: any; meta?: object }` | optional | Notification body — the same template input as `title` (a bare string or a `{ dialect: 'template', source }` envelope), rendered per run with `{{ }}` holes like `title`; not localizable. Only valid with inline `title`, never with `template`. |
 | **template** | `string` | optional | Email template name (an `email_template` item's `name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, locale)` among the email templates — built-in, declared by an app, or authored in Studio — at delivery time and renders subject/body from that member. The locale is resolved per recipient, after fan-out: the recipient's own `sys_user.locale` when set, else the deployment default locale — so recipients whose personal languages differ receive different members of the same bundle. The node's `payload.locale` is not consulted. Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation. |
@@ -108,6 +108,27 @@ const result = HttpConfigSchema.parse(data);
 | **actorId** | `string` | optional | User id that caused the event (writes sys_notification.actor_id) — a literal, read as written: a single-brace `{token}` is not resolved here and is refused, as is a CEL value envelope; write the value |
 | **actionUrl** | `string` | optional | Explicit click-through URL, rendered per run with `{{ }}` holes like `title` (`/crm_case/{{ record.id }}`); a single-brace `{token}` is refused. Overrides the link synthesized from sourceObject/sourceId. |
 | **payload** | `Record<string, any>` | optional | Extra values merged into the notification payload — literals, read as written: a single-brace `{token}` in any string of one is not resolved here and is refused, as is a CEL value envelope written as a value; write the value |
+
+### Nested Shape: `NotifyConfig.recipients[option 4]`
+
+An email-field recipient: the address in an `email`-typed field of the record that triggered the flow — the field is named, never an address or an expression
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **emailField** | `string` | ✅ | Machine name of an `email`-typed field of the record that triggered the flow; the address it holds is the recipient |
+
+
+---
+
+## NotifyEmailFieldRecipient
+
+An email-field recipient: the address in an `email`-typed field of the record that triggered the flow — the field is named, never an address or an expression
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **emailField** | `string` | ✅ | Machine name of an `email`-typed field of the record that triggered the flow; the address it holds is the recipient |
 
 
 ---

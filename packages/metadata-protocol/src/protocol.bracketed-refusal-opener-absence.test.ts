@@ -77,6 +77,13 @@ const PRODUCERS: Readonly<Record<string, number>> = {
   'protocol-batch-data.ts': 4,
   // The query validation, moved out of `protocol.ts` whole on the same terms.
   'protocol-query-validation.ts': 17,
+  // The lock gate and the OCC write addresses, moved out of `protocol.ts` whole
+  // on the same terms.
+  'protocol-lock-version-gates.ts': 4,
+  // The save door's refusals, moved out of `protocol.ts` whole on the same terms.
+  'protocol-save-door-refusals.ts': 5,
+  // Package install and update, moved out of `protocol.ts` whole on the same terms.
+  'protocol-package-install.ts': 3,
   'sys-metadata-repository.ts': 5,
   'runtime-authoring-gate.ts': 1,
 };

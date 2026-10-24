@@ -186,6 +186,12 @@ const PERSON_SITES: Readonly<Record<string, { count: number; role: PersonRole; w
     role: 'display',
     why: 'resolves the person\'s display name for the action log',
   },
+  'approval-service.ts · localizeAdminRescueNote · a.actor_id': {
+    count: 2,
+    role: 'display',
+    why: 'a presence test, no identity: only a row no person wrote can be the administrators\' routing note this '
+      + 'renders in the reader\'s language (#25576)',
+  },
   'action-slot-backfill.ts · backfillActionSlots · actor_id: { $contains: \':\' }': {
     count: 1,
     role: 'migration',
