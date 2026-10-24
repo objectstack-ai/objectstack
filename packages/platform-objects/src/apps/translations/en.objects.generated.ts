@@ -187,6 +187,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           permissionSet: {
             label: "Permission Set",
             helpText: "Optional. Grants this permission set to the new user, so they can open their apps on first sign-in."
+          },
+          organizationId: {
+            label: "Organization",
+            helpText: "Optional. Adds the new user to this organization as a member, so you do not have to add them on its Members list afterwards."
           }
         },
         resultDialog: {

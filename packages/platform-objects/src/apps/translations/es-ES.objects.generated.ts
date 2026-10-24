@@ -187,6 +187,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           permissionSet: {
             label: "Conjunto de permisos",
             helpText: "Opcional. Concede este conjunto de permisos al nuevo usuario para que pueda abrir sus aplicaciones desde el primer inicio de sesión."
+          },
+          organizationId: {
+            label: "Organización",
+            helpText: "Opcional. Añade el nuevo usuario a esta organización como miembro, para que no tenga que añadirlo después en su lista de miembros."
           }
         },
         resultDialog: {

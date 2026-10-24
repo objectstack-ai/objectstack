@@ -187,6 +187,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           permissionSet: {
             label: "权限集",
             helpText: "可选。将该权限集授予新用户，使其首次登录即可打开自己的应用。"
+          },
+          organizationId: {
+            label: "组织",
+            helpText: "可选。将新用户以成员身份加入该组织，无需再到组织的成员列表中手动添加。"
           }
         },
         resultDialog: {
