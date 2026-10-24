@@ -512,12 +512,13 @@ async function refuseWalledCatalogPackageWrite(
  * registry too (`POST /packages`, and `service-package` at boot), so a Studio
  * app is never "unknown" here.
  *
- * Read by `publish-drafts` and `discard-drafts` only AFTER the protocol has
- * answered, and only when that answer is empty: drafts the protocol does hold
- * for an id the registry lacks are still published or discarded exactly as
- * before. What changes is the one answer that lied — `200` "nothing to
- * publish" / "nothing discarded" for a package that is not there, which an SDK
- * or AI caller cannot tell apart from a real, empty package.
+ * Read by `publish-drafts`, `discard-drafts` and `GET /:id/commits` only
+ * AFTER the protocol has answered, and only when that answer is empty: drafts
+ * or commits the protocol does hold for an id the registry lacks are still
+ * published, discarded or listed exactly as before. What changes is the one
+ * answer that lied — `200` "nothing to publish" / "nothing discarded" / "no
+ * commits" for a package that is not there, which an SDK or AI caller cannot
+ * tell apart from a real, empty package.
  *
  * A registry without `getPackage` cannot be asked, so this answers `false`
  * ("no evidence of absence") rather than invent a 404.
@@ -2065,6 +2066,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     const commits = await protocol.listCommits({
                         packageId: id,
                     });
+                    // An empty trail is the answer for a package that exists —
+                    // see `packageIsUnknown`. A trail that outlived its
+                    // package's registry entry is still served.
+                    if (Array.isArray(commits) && commits.length === 0 && packageIsUnknown(registry, id)) {
+                        return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+                    }
                     return { handled: true, response: deps.success({ commits }) };
                 } catch (e: any) {
                     return { handled: true, response: deps.errorFromThrown(e, 500) };

@@ -4,12 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 /**
- * `POST /packages/:id/publish-drafts` and its twin `POST
- * /packages/:id/discard-drafts` answer `404 RESOURCE_NOT_FOUND` for a package
- * the registry does not hold — the answer `GET /packages/:id` gives the same id.
+ * `POST /packages/:id/publish-drafts`, its twin `POST
+ * /packages/:id/discard-drafts` and the commit trail `GET
+ * /packages/:id/commits` answer `404 RESOURCE_NOT_FOUND` for a package the
+ * registry does not hold — the answer `GET /packages/:id` gives the same id.
  *
  * Both answered `200`: `{ success: false, outcome: 'nothing_to_publish' }` and
- * `{ success: true, discardedCount: 0 }` — the bodies a package that EXISTS and
+ * `{ success: true, discardedCount: 0 }` (and `{ commits: [] }`) — the bodies a package that EXISTS and
  * has nothing pending gets, so an SDK or AI caller could not tell "no such
  * package" from "nothing to do". The draft doors now ask the registry lookup
  * their read sibling answers from (`packageIsUnknown`), and the parity cases
@@ -44,6 +45,8 @@ const NOTHING_DISCARDED = { success: true, discardedCount: 0, failedCount: 0, di
 function makeDoor(opts: {
     publishResult?: Record<string, unknown>;
     apps?: Array<Record<string, unknown>>;
+    /** Commit ids the trail holds, per package id. */
+    commits?: Record<string, string[]>;
 } = {}) {
     const publishPackageDrafts = vi.fn().mockImplementation(async () =>
         JSON.parse(JSON.stringify(opts.publishResult ?? NOTHING_TO_PUBLISH)));
@@ -51,11 +54,15 @@ function makeDoor(opts: {
     const apps = opts.apps ?? [];
     const getMetaItems = vi.fn().mockImplementation(async () => ({ items: apps.map((a) => ({ ...a })) }));
     const saveMetaItem = vi.fn().mockImplementation(async () => ({ ok: true }));
+    // The commit trail answers `[]` for ANY id it has no commits for — the
+    // shape that let an unknown package read as one with no history.
+    const listCommits = vi.fn().mockImplementation(async ({ packageId }: { packageId: string }) =>
+        (opts.commits?.[packageId] ?? []).map((id) => ({ id, packageId })));
     const packages = new Map([[KNOWN, { id: KNOWN, manifest: { id: KNOWN, name: 'App', version: '1.0.0' }, enabled: true }]]);
     const kernel: any = {
         getService: (name: string) => {
             if (name === 'protocol') {
-                return Promise.resolve({ publishPackageDrafts, discardPackageDrafts, getMetaItems, saveMetaItem });
+                return Promise.resolve({ publishPackageDrafts, discardPackageDrafts, getMetaItems, saveMetaItem, listCommits });
             }
             if (name === 'objectql') {
                 return Promise.resolve({
@@ -140,5 +147,38 @@ describe('the package draft doors answer an unknown package 404, like GET /packa
         expect(result.response?.status).toBe(200);
         expect(result.response?.body?.data?.unhiddenApps).toEqual(['crm']);
         expect(door.saveMetaItem).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('GET /packages/:id/commits answers an unknown package 404, like GET /packages/:id', () => {
+    it('answers 404 RESOURCE_NOT_FOUND naming the package, never 200 commits []', async () => {
+        const door = makeDoor();
+        const result = await door.send(`/${UNKNOWN}/commits`, 'GET', undefined);
+
+        expect(result.response?.status).toBe(404);
+        expect(result.response?.body?.error?.code).toBe('RESOURCE_NOT_FOUND');
+        expect(result.response?.body?.error?.message).toContain(UNKNOWN);
+    });
+
+    it('gives the read sibling\'s answer for the same id — status, code and message', async () => {
+        const door = makeDoor();
+        const read = answer(await door.send(`/${UNKNOWN}`, 'GET', undefined));
+        expect(answer(await door.send(`/${UNKNOWN}/commits`, 'GET', undefined))).toEqual(read);
+    });
+
+    it('control: a package that exists with no commits is still 200 []', async () => {
+        const door = makeDoor();
+        const result = await door.send(`/${KNOWN}/commits`, 'GET', undefined);
+
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.commits).toEqual([]);
+    });
+
+    it('control: the trail of an id the registry no longer holds is still served when it has commits', async () => {
+        const door = makeDoor({ commits: { [UNKNOWN]: ['cmt_01'] } });
+        const result = await door.send(`/${UNKNOWN}/commits`, 'GET', undefined);
+
+        expect(result.response?.status).toBe(200);
+        expect(result.response?.body?.data?.commits).toEqual([{ id: 'cmt_01', packageId: UNKNOWN }]);
     });
 });

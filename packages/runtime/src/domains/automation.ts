@@ -1862,7 +1862,8 @@ type FlowRemovalService =
  *    nothing.
  *  - **A name with no row is not a failure** — `deleteMetaItem` answers it as
  *    "nothing to delete" (a flow registered before its door saved, or in a
- *    composition with no store).
+ *    composition with no store). A name with no row that the engine does not
+ *    hold either is no flow at all, and answers `404` as the trigger door does.
  *  - **A delete that fails puts the definition back** in the engine and
  *    relays the store's own failure, so no answer reports a removal that will
  *    not survive. A composition with no metadata store keeps the engine-only
@@ -1886,15 +1887,26 @@ async function unregisterAndDeleteFlow(
     const store: (Partial<Pick<ObjectStackProtocolImplementation, 'deleteMetaItem'>>
         & Partial<Pick<MetadataProtocol, 'getMetaItems'>>) | undefined =
         await deps.resolveServiceOrLoud(context, 'protocol');
+    // The trigger door's own probe: the engine holds no such flow.
+    const unknownToEngine = await flowIsUnknown(automationService, name);
     const held = typeof automationService.getFlow === 'function' ? await automationService.getFlow(name) : null;
     automationService.unregisterFlow(name);
+    let rowDeleted = false;
     if (typeof store?.deleteMetaItem === 'function') {
         try {
-            await store.deleteMetaItem({ type: FLOW_METADATA_TYPE, name });
+            const receipt = await store.deleteMetaItem({ type: FLOW_METADATA_TYPE, name });
+            rowDeleted = (receipt as { reset?: unknown } | undefined)?.reset === true;
         } catch (e) {
             if (held) automationService.registerFlow?.(name, held);
             return { handled: true, response: deps.errorFromThrown(await flowWriteRefusal(store, e, name, 'delete')) };
         }
+    }
+    // Neither the engine nor the store held it: `404`, the trigger door's
+    // answer, never `200 {deleted: true}` for a removal of nothing. A stored
+    // row the engine does not hold (a flow that failed to register) is still
+    // removed above and answered as a deletion.
+    if (unknownToEngine && !rowDeleted) {
+        return { handled: true, response: deps.error(flowNotFoundMessage(name), FLOW_NOT_FOUND_STATUS) };
     }
     return undefined;
 }
@@ -2416,6 +2428,8 @@ export async function classifyResumeResult(
  *                                  ⚑ a name two packages hold → 409
  *                                    `RESOURCE_CONFLICT` naming the metadata
  *                                    door's `DELETE /meta/flow/:name?package=`
+ *                                  ⚑ a name neither the engine nor the store
+ *                                    holds → 404 `RESOURCE_NOT_FOUND`
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
  *                                  unknown name → 404, disabled → 409 `FLOW_DISABLED`,
  *                                  no start node → 422 `FLOW_NO_START_NODE`, node config
