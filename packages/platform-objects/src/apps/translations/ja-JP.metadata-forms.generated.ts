@@ -2195,6 +2195,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "実行主体",
         helpText: "system（admin）または user（現在のユーザー権限）として実行"
       },
+      requiredPermissions: {
+        label: "必要な権限",
+        helpText: "このフローを開始するために呼び出し元が保持すべき機能（権限セットの systemPermissions）。列挙したすべてが必要です。すべての開始口（トリガールート、REST と MCP 経由のフローアクション、フローエンドポイント）はそれ以外の呼び出し元を 403 で拒否し、このフローを開始するアクションはこのリストを継承します。親フローのサブフローステップでは再チェックしません。"
+      },
       errorHandling: {
         label: "エラー処理",
         helpText: "ノード失敗時の処理（fail, retry, continue）"

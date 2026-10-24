@@ -100,6 +100,9 @@ export const flowForm = defineForm({
         { field: 'status', required: true, colSpan: 1, helpText: 'Deployment status: draft → active → obsolete' },
         { field: 'version', colSpan: 1, helpText: 'Version number (auto-incremented)' },
         { field: 'runAs', colSpan: 1, helpText: 'Execute as system (admin) or user (current user permissions)' },
+        // Who may START the flow — the action form's `requiredPermissions` face
+        // (`string-tags`), since it is the same key and the same check.
+        { field: 'requiredPermissions', widget: 'string-tags', colSpan: 2, helpText: 'Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to start this flow. Every start door (the trigger route, a flow action over REST and MCP, a flow endpoint) refuses anyone else with 403, and an action that starts this flow inherits the list. A parent flow\'s subflow step is not checked again.' },
         { field: 'errorHandling', type: 'composite', colSpan: 2, helpText: 'What to do when a node fails (fail, retry, continue)' },
         // #19331 — both messages are declared by FlowSchema and were offered by
         // no control. The copy states the reach the runtime actually gives them:
