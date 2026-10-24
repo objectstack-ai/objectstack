@@ -24,7 +24,8 @@
  *   - control: a file of the writing organization is still claimed, and one
  *     another record of that organization owns is still copied, the copy
  *     stamped for that organization;
- *   - a write that names no organization is judged exactly as before.
+ *   - the posture decides the reach: under `single` (one tenant) the lookup is
+ *     not narrowed, so no organization comparison lives in this module.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -33,12 +34,15 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
 import { installFileReferenceHooks } from './file-reference-lifecycle.js';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
 import { SystemFile } from './objects/system-file.object.js';
 
 const OBJECT = 'xorg_case';
 const SYS = { context: { isSystem: true } };
+/** A system read that answers file fields in their STORED form (the id), never the expanded value. */
+const SYS_RAW = { context: { isSystem: true, [RAW_FILE_VALUES_CONTEXT_KEY]: true } };
 
 const quietLogger = () => ({ info() {}, warn() {}, debug() {}, error() {} });
 
@@ -117,7 +121,7 @@ const fileRows = async (h: Harness) =>
   (await h.ql.find('sys_file', { ...SYS })) as Array<Record<string, any>>;
 const fileRow = async (h: Harness, id: string) => (await fileRows(h)).find((r) => r.id === id);
 const recordRow = async (h: Harness, id: string) =>
-  ((await h.ql.find(OBJECT, { ...SYS })) as Array<Record<string, any>>).find((r) => r.id === id);
+  ((await h.ql.find(OBJECT, { ...SYS_RAW })) as Array<Record<string, any>>).find((r) => r.id === id);
 
 describe('the file-reference claim path resolves a file within the writing organization', () => {
   let h: Harness;
@@ -191,8 +195,8 @@ describe('the file-reference claim path resolves a file within the writing organ
   });
 });
 
-describe('a write that carries no organization is judged as before', () => {
-  it('the single posture: one tenant, so the lookup is not narrowed', async () => {
+describe('the posture decides the reach, not this module', () => {
+  it('the single posture is one tenant: the lookup is not narrowed', async () => {
     const h = await boot('single');
     await seedFile(h, 'org_b', 'file_single');
 
