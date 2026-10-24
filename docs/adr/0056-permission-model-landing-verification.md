@@ -2,6 +2,7 @@
 
 **Status**: Accepted (2026-06-20) — landed per the implementation-status addendum (D2 anonymous default-deny, D4 fail-closed RLS compile, D7 app default set, D10 conformance matrix CI-gated). Caveat: the addendum's D6 row is stale — `RoleGraphService` never shipped; role-hierarchy widening was superseded by the ADR-0090 position/business-unit model (positions are flat, rollup lives on the BU tree).
 · **Amended** (2026-10-13, ADR-0138 D2) — D2's explicit public exposures are a closed list of six door classes; every other surface answers 401, decided per domain.
+· **Amended** (2026-10-24, ADR-0138 D2 class 7) — the closed list gains a seventh class, the guest upload door bound to a public form; it serves once its implementation lands, and until then the list serves as six.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs), [ADR-0055](./0055-master-detail-controlled-by-parent.md) (controlled-by-parent)
 **Consumers**: `@objectstack/plugin-security`, `@objectstack/plugin-sharing`, `@objectstack/plugin-org-scoping`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/spec`, `@objectstack/verify`

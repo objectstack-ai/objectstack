@@ -25,6 +25,18 @@ D11 are unchanged.
 maintainer 「23267 我们的系统 和 salesforce 类似，暂时没有 没有公开站点或门户的产品计划」) — D3 item 5: the
 guest's bind door is built implementation-first, when a named deployment needs to grant the guest on
 a public surface; until then no door binds a set to `guest`, and the record carries the door's shape.
+· **Amended** (2026-10-24, letter B of ruling record
+[`6377731715`](https://github.com/objectstack-ai/objectstack/issues/25496#issuecomment-6377731715) on
+[#25496](https://github.com/objectstack-ai/objectstack/issues/25496), maintainer 「同意」; carried on
+[#25445](https://github.com/objectstack-ai/objectstack/issues/25445) by
+[`6377853567`](https://github.com/objectstack-ai/objectstack/issues/25445#issuecomment-6377853567) and
+[`6377887908`](https://github.com/objectstack-ai/objectstack/issues/25445#issuecomment-6377887908)) —
+D2 gains a seventh door class, [the guest upload door bound to a public form](#class-7--the-guest-upload-door-bound-to-a-public-form):
+a guest's file is taken only for a file field the form declares, limited in size and type by that
+field, stored unattached in the form's organization, and attached by the submission that follows or
+collected after a short TTL, under the form doors' own anti-abuse posture. The door is built by
+[#25572](https://github.com/objectstack-ai/objectstack/issues/25572) after this text lands; until
+then every upload door answers a guest 401.
 **Decided by**: the maintainer's ruling on [#22146](https://github.com/objectstack-ai/objectstack/issues/22146)
 (comment [`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537),
 decision batch #290 item 1, 2026-10-08, 「22146 同意」): **A on all eight questions, and G2 on the
@@ -69,11 +81,13 @@ ADR-0121 D6, ADR-0096 D5 and E1, ADR-0135. The back-pointer lines are written ou
 **Consumers**: `@objectstack/core` (`security/`), `@objectstack/plugin-security`,
 `@objectstack/runtime`, `@objectstack/rest`, `@objectstack/metadata-core` (the form doors' rule),
 `@objectstack/plugin-sharing` (D8), `@objectstack/service-automation` (D2b),
-`@objectstack/service-storage` (D2's class 6), and `@objectstack/spec` for the contract changes the
+`@objectstack/service-storage` (D2's classes 6 and 7), and `@objectstack/spec` for the contract changes the
 cards carry after acceptance (D2b's publish refusal, D8's retirement).
 **Card**: [#22146](https://github.com/objectstack-ai/objectstack/issues/22146) (rounds 1 to 3:
 measurement, decision, the draft; then the G2 sweep and the D2 revision under its ruling; then the
-in-repo sweep and this acceptance under the criterion-2 ruling). ⛔ Classes,
+in-repo sweep and this acceptance under the criterion-2 ruling);
+[#25572](https://github.com/objectstack-ai/objectstack/issues/25572) for class 7 (the 2026-10-24
+amendment, then its implementation). ⛔ Classes,
 positions and functions only: door-level readings that would work as an exploit recipe stay
 private, as [#21158](https://github.com/objectstack-ai/objectstack/issues/21158)'s did.
 
@@ -91,7 +105,7 @@ enforced, one only in a code comment, and one never answered. This record puts t
 | | Question | Ruled | Contract in this record | Enforced by |
 |:--|:--|:--|:--|:--|
 | [D1](#d1--identity-and-ownership-the-guest-is-a-principal-never-an-owner) | identity and ownership | A′ (supplement) | the guest never owns a record and a forged owner is refused; who owns a guest-written row is the business scenario's own metadata; the platform stamps nothing and declares no default | the guest branch of the owner-anchor stamp in `SecurityPlugin` (card E3) |
-| [D2](#d2--the-closed-list-of-doors) | the doors | A, plus a must-answer; class 6 added by the G2 ruling | six door classes; everything else answers 401, decided per domain | `shouldDenyAnonymous` at each domain's entry; the conformance matrix (card E2) |
+| [D2](#d2--the-closed-list-of-doors) | the doors | A, plus a must-answer; class 6 added by the G2 ruling; class 7 by letter B of `6377731715` | seven door classes, the seventh built by #25572; everything else answers 401, decided per domain | `shouldDenyAnonymous` at each domain's entry; the conformance matrix (card E2; class 7's row with its door) |
 | [D2b](#d2b--the-anonymous-door--elevated-flow-combination-a-publish-refusal) | anonymous door × elevated flow | R (supplement) | publish refuses an anonymous flow endpoint whose target runs as `system`, in both directions, with a prescription; no door triggers an elevated flow directly | the publish path, in both directions (card E2) |
 | [D3](#d3--the-grants-channel-adr-0090-d9-enforced) | the grants channel | A | the `guest` anchor's bindings resolve for the guest; an empty set denies all; no second channel | the anonymous branch of `resolveAuthzContext` (card E1) |
 | [D4](#d4--the-organization-a-guest-acts-in) | organization | A, with the form doors kept as they are | resolved only when the organization is unique; refused on a multi-organization deployment until D5 exists | the guest entry's organization step, sharing ADR-0131 D9's predicate (card E1) |
@@ -124,6 +138,13 @@ defect cards closed it, and the criterion-2 ruling
 made the re-measurement a test in the repository, which answers as D2 states, class by class, on
 `main` ([criterion 2](#acceptance-criteria)). The first ruling's summary above still says five door
 classes, because it is quoted as it was ruled.
+
+The amendment of 2026-10-24, letter B of ruling record
+[`6377731715`](https://github.com/objectstack-ai/objectstack/issues/25496#issuecomment-6377731715),
+adds a seventh class: a guest upload door bound to a public form, so that a public form can carry a
+file ([class 7](#class-7--the-guest-upload-door-bound-to-a-public-form)). It is an anonymous write of
+bytes, so the ruling put this text before the code: the door is built by
+[#25572](https://github.com/objectstack-ai/objectstack/issues/25572) once this text lands.
 
 ---
 
@@ -255,9 +276,12 @@ as it does today. **Card**: E3.
 ### D2 — The closed list of doors
 
 *Ruled: Q2 A, plus the must-answer that D2b states. Class 6 added by the G2 ruling
-[`6074960686`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074960686).*
+[`6074960686`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074960686).
+Class 7 added by letter B of ruling record
+[`6377731715`](https://github.com/objectstack-ai/objectstack/issues/25496#issuecomment-6377731715)
+(2026-10-24).*
 
-An unauthenticated request is served by exactly these six door classes. Each derives its own
+An unauthenticated request is served by exactly these seven door classes. Each derives its own
 narrow authorization from a declaration; none derives it from a deployment posture.
 
 | # | Door class | What admits the request | What it runs as | Enforced by |
@@ -268,6 +292,7 @@ narrow authorization from a declaration; none derives it from a deployment postu
 | 4 | `authRequired: false` endpoints of `type: 'object_operation'` | the endpoint declaration, with the armed rate limit ADR-0121 D6 requires | the guest envelope (D9), under the guest's grants (D3) | `packages/runtime/src/security/resolve-execution-context.ts#resolveExecutionContext`; the CRUD gate |
 | 5 | `authRequired: false` endpoints of `type: 'flow'` | the same | the guest envelope at the door; inside, the flow's own declared `runAs`, which publish never lets be `system` behind this door (D2b) | the same, then `@objectstack/service-automation` |
 | 6 | the `acl: 'public_read'` file download (ADR-0104 D3 wave 2) | the file's own `acl: 'public_read'` (`packages/services/service-storage/src/objects/system-file.object.ts#acl`), an explicit opt-in: the upload routes create a file `private` | a read of that one file's bytes, nothing else; no principal is evaluated | `packages/services/service-storage/src/storage-routes.ts#registerStorageRoutes`, at the download gate `#authorizeDownload` that both download routes call |
+| 7 | the guest upload door bound to a public form ([class 7](#class-7--the-guest-upload-door-bound-to-a-public-form)) | class 1's admission for that form, and a target that is one of the form's declared file fields | a store of one file's bytes for that field: unattached, private, in the form's organization; nothing else, and no principal's grants are evaluated | its implementation, [#25572](https://github.com/objectstack-ai/objectstack/issues/25572), after this text lands; until then no route carries the class |
 
 **Everything else answers 401** (`UNAUTHENTICATED`). The decision is taken once per **domain**, as the
 domain's first statement, never surface by surface:
@@ -291,13 +316,13 @@ envelope does not carry, so the envelope the runtime face assembles for every se
 
 **The adoption rule of D9, closed.** D9's ruling lets a surface adopt the guest entry only when its
 product semantics serve anonymous principals. D2 turns that sentence into a list: classes 4 and 5
-take the guest envelope; classes 1 to 3 and 6 take their own declaration; nothing else serves a
+take the guest envelope; classes 1 to 3, 6 and 7 take their own declaration; nothing else serves a
 guest.
 
 **Enforced by**: `shouldDenyAnonymous` at each domain's entry, today; and the authorization
 conformance matrix (`packages/qa/dogfood/test/authz-conformance.matrix.ts#AUTHZ_CONFORMANCE`), whose
 rows already fail on a deleted deny call or an unclassified route. Card E2 records the six classes
-there. ⛔ No new gate script. **Card**: E2.
+there; class 7's row joins with its door. ⛔ No new gate script. **Card**: E2; for class 7, #25572.
 
 **Measured on 2026-10-09, not held then; held on `main` now (G2).** The booted sweep found three families outside this
 list that served an anonymous caller instead of answering 401: the `/i18n` dispatcher domain, the
@@ -307,6 +332,114 @@ in-repo sweep found a fourth before it landed, the settings REST family. All fou
 everything-else class answers 401 throughout on `main`. The same 2026-10-09 sweep found
 `acl: 'public_read'` files served anonymously; that is ADR-0104's ruled opt-in, listed above as
 class 6.
+
+#### Class 7 — the guest upload door bound to a public form
+
+*Added 2026-10-24 by letter B of ruling record
+[`6377731715`](https://github.com/objectstack-ai/objectstack/issues/25496#issuecomment-6377731715)
+(maintainer 「同意」), carried on [#25445](https://github.com/objectstack-ai/objectstack/issues/25445)
+by two records. The director's
+[`6377853567`](https://github.com/objectstack-ai/objectstack/issues/25445#issuecomment-6377853567),
+verbatim:* "an ADR-0138 amendment declaring a guest upload door bound to a public form — accepted
+only for the form's declared file fields, size and type limited by the field, stored unattached under
+the form's organization (D4), attached by the submission that follows or garbage-collected after a
+short TTL; the form's anti-abuse posture (rate limit per address, no listing, no read-back of other
+guests' files) applies." *The maintainer account's
+[`6377887908`](https://github.com/objectstack-ai/objectstack/issues/25445#issuecomment-6377887908),
+verbatim:* 「先派 ADR-0138 的访客上传补充（只许表单声明的文件字段、按字段限大小与类型、未挂接文件存在表单的组织下（D4）、短期未被提交引用即清理、与表单同样的反滥用姿态：按地址限速、不可列举、不可读回他人文件），ADR 落后再实现」.
+
+**The gap, measured at `e649c2d91e`.** A file field holds a `sys_file` id, and no door hands a guest
+one. The storage upload doors (`/storage/upload/presigned`, `/storage/upload/complete`,
+`/storage/upload/chunked`, all in `packages/services/service-storage/src/storage-routes.ts#registerStorageRoutes`)
+refuse a caller with no session first (`packages/services/service-storage/src/storage-routes.ts#requireUploadSession`,
+401 `AUTH_REQUIRED`). The bare `POST /storage/upload` the card's measurement names is no route at
+all (its dispatcher bridge was retired), so it answers 404 to every caller. The signed byte URLs that
+criterion 2 places outside the model are reached only through a URL an authorized upload or download
+mints, so they give a guest nothing to start from. A public form with a required file field
+therefore cannot be submitted by a guest (the card, [#25572](https://github.com/objectstack-ai/objectstack/issues/25572)).
+
+**The rules.** Each states one constraint of the ruling. The implementation enforces each, and none
+binds before it lands.
+
+1. **Bound to a public form.** The door serves a form exactly when class 1's doors serve it. It reads
+   the form through the one resolution both form doors use
+   (`packages/rest/src/form-routes.ts#resolveFormBySlug`), so a slug no open form declares, a
+   withdrawn form, and a form that `anonymousFormIntakeUnavailability` withholds on this
+   deployment's posture answer it as they answer the form doors. No other surface takes a guest's
+   bytes: the storage upload doors keep refusing a caller with no session.
+2. **Only the form's declared file fields.** A request names one field. The door takes it only when
+   that field is an entry of the form's sections, the allow-list the submit door builds from the same
+   entries, and its type is a file type
+   (`packages/spec/src/data/field-value.zod.ts#FILE_REFERENCE_TYPES`). Any other name is refused
+   before a byte is stored.
+3. **Size and type limited by the field.** Before a byte is stored, the file's size and type are
+   judged against that field's `maxSize` and `accept` (`packages/spec/src/data/field.zod.ts#maxSize`, `#accept`),
+   beside the deployment's upload limit that every upload door asks
+   (`packages/services/service-storage/src/storage-limits.ts#uploadSizeRefusal`). The record write
+   that attaches the file judges it again
+   (`packages/services/service-storage/src/file-reference-lifecycle.ts#assertFileConstraints`).
+   Empty state: a field that declares neither key is limited by the deployment's upload limit alone
+   ([What the ruling did not settle](#what-the-ruling-did-not-settle), item 4).
+4. **Stored unattached, in the form's organization (D4).** The file is no record's: its
+   field-reference columns stay empty
+   (`packages/services/service-storage/src/objects/system-file.object.ts#ref_object`, `#ref_id`, `#ref_field`).
+   It is stored `acl: 'private'`, as every upload is, and its `owner_id` stays unset, because the
+   guest owns nothing (D1). Its organization is the form's, the one D4's clarification (1) binds the
+   form doors to, resolved on the server. Nothing the client sends names it, and where D4 withholds
+   the form, rule 1 withholds this door with it.
+5. **Attached by the submission that follows.** The form's submit door (class 1) attaches the file
+   when the submission's value for the field it was taken for names it. That record write claims the
+   file through the field-reference lifecycle
+   (`packages/services/service-storage/src/file-reference-lifecycle.ts#claimFile`, ADR-0104 D3 wave 2),
+   and from then on the file's read derives from that one record
+   (`packages/services/service-storage/src/storage-routes.ts#authorizeDownload`). What a guest
+   submission does with a file id this door did not store is not settled here
+   ([What the ruling did not settle](#what-the-ruling-did-not-settle), item 5).
+6. **Otherwise collected after a short TTL.** A file that no submission has claimed when its TTL
+   runs out is collected by the platform's one sweep
+   (`packages/objectql/src/lifecycle/lifecycle-service.ts#LifecycleService`;
+   [ADR-0057](./0057-system-data-lifecycle-and-retention.md) §3.3 allows no bespoke sweeper). Its
+   bytes are reclaimed by the `sys_file` reap guard, whose sweep-time re-check keeps a file that a
+   submission claimed after it was nominated
+   (`packages/services/service-storage/src/attachment-lifecycle.ts#createSysFileReapGuard`, `#findFileHolder`).
+   The TTL is a bound the implementation declares, in the `lifecycle` declaration that sweep reads,
+   and its changeset names the value. No platform constant covers it, measured at `e649c2d91e`: the
+   one term `sys_file` declares for an unclaimed upload
+   (`packages/services/service-storage/src/objects/system-file.object.ts#lifecycle`, a `retention`
+   of `7d` only when `status` is `pending`) reaches only an upload never completed, and a completed
+   file that no record claims matches no term
+   (`packages/services/service-storage/src/stranded-orphan-inventory.ts`).
+7. **The form's anti-abuse posture.** The ruling names three parts, and each is the form doors' own:
+   - *Rate limit per address.* The door is metered by the limiter that meters the form doors, the one
+     inbound limiter (`packages/runtime/src/security/inbound-rate-limit.ts#createInboundRateLimitMiddleware`),
+     armed by the stack's `server.security.rateLimit`
+     (`packages/spec/src/system/stack-server.zod.ts#ServerRateLimitConfigSchema`) and keyed, for a
+     caller with no session, by its address
+     (`packages/runtime/src/security/inbound-rate-limit.ts#resolveRateLimitKey`; a forwarded address
+     only under `server.trustProxy`). There is no second limiter and no budget of the door's own.
+     Empty state, measured at `e649c2d91e`: the limiter is opt-in and no app under `examples/` arms
+     it, so a deployment that arms no budget meters neither the form doors nor this door
+     ([What the ruling did not settle](#what-the-ruling-did-not-settle), item 4).
+   - *No listing.* The door answers the stored file's id and nothing else, and no door enumerates
+     guest uploads: the storage family mounts no listing route.
+   - *No read-back of other guests' files.* No door serves an unattached guest file to a caller with
+     no session. A file with neither an attachments scope nor a field owner downloads only for a
+     signed-in caller (`packages/services/service-storage/src/storage-routes.ts#requireDownloadSession`,
+     the 401 the everything-else class answers), and the door hands out no download URL. ⛔ It offers
+     no read-back of the guest's own file either: the guest is one principal (D9), so "my file" is
+     every guest's file.
+8. **The signed byte URL stays outside.** If the door hands the bytes to the local adapter's signed
+   byte URL (`packages/services/service-storage/src/local-storage-adapter.ts#LocalStorageAdapter.verifyToken`),
+   that URL stays criterion 2's outside family: the signed, expiring token this door minted is the
+   credential.
+
+**Enforced by**: the door #25572 builds; its PR names the route and the enforcer and anchors them in
+`scripts/adr-anchors/` (Prime Directive #13). Two rows land with the door, in the same change: the
+sweep's class-7 entry (`packages/qa/dogfood/test/anonymous-door-sweep.classification.ts#DOOR_CLASSES`)
+and the conformance matrix's row. A classification entry that claims no route on the boot is red as
+stale, so neither lands before the door. Until the door lands, the second half of rule 1 holds
+already, and nothing else here is in force. **Card**: E5, [#25572](https://github.com/objectstack-ai/objectstack/issues/25572)
+(its implementation phase, dispatched after this text lands).
 
 ### D2b — The anonymous door × elevated flow combination: a publish refusal
 
@@ -576,8 +709,9 @@ that card lands; no row is declared without an enforcer.
 | anonymous default-deny | ADR-0056 D2; D2 | `shouldDenyAnonymous`, at each domain's entry | enforced; the four families the sweeps found were closed before acceptance (criterion 2) |
 | the guest envelope | D9 | `assembleExecutionContextOrGuest` (through `entryFields`) | enforced |
 | the fail-closed default entry | D9 | `assembleExecutionContext` | enforced |
-| the six door classes | D2 | the enforcer named in each row of D2's table | enforced per door |
-| the list itself | D2 | the conformance matrix, `AUTHZ_CONFORMANCE` | card E2 records it |
+| door classes 1 to 6 | D2 | the enforcer named in each row of D2's table | enforced per door |
+| class 7: a guest's file only through a public form, for a field it declares, limited by that field, stored unattached and private in the form's organization, attached by the submission or collected after a declared TTL, under the form doors' posture | D2, class 7 | the door #25572 builds, under class 7's eight rules | card E5 (#25572), after this amendment lands |
+| the list itself | D2 | the conformance matrix, `AUTHZ_CONFORMANCE` | card E2 records classes 1 to 6; class 7's row lands with E5 |
 | no `system` flow behind an anonymous flow door | D2b | the publish path, in both directions | card E2 |
 | the guest's grants, and deny-all when none | D3 | the anonymous branch of `resolveAuthzContext` | card E1 |
 | no door binds a set to `guest` until the bind door is built | D3 item 5 (amended) | the anchors' seal (`NOT_OVERRIDABLE`; the package door's built-in names) and `confirmAudienceBindingSuggestion`'s refusal of a `guest` row | enforced; the door is follow-up F4 |
@@ -620,6 +754,11 @@ that card lands; no row is declared without an enforcer.
   opt-in. Listing it in D2 makes the re-measurement read a `public_read` download as a door and
   not as a gap, and [#22431](https://github.com/objectstack-ai/objectstack/issues/22431), the defect
   card for files with no scope and no field owner, keeps that door anonymous.
+- **A public form can carry a file from a guest once E5 lands (class 7).** It is the one write of
+  bytes a guest is given, and it is bounded by the form, the field, the organization and a declared
+  TTL. Nothing that serves today changes before E5: every upload door keeps answering a guest 401,
+  and the form doors keep their posture. Class 7's two empty states are named under
+  [What the ruling did not settle](#what-the-ruling-did-not-settle), item 4.
 - **Measured since the draft:** the booted per-class sweep (G2, 2026-10-09), not met then, and its
   re-measurement, the in-repo sweep, met on `main` ([criterion 2](#acceptance-criteria)).
   **Not measured, and named:** the guest's row scope for each sharing model (E1's pins), and the
@@ -639,6 +778,18 @@ Stated so that approving this record approves these readings knowingly.
    settled it as share links only, never the object's sharing model (D3 item 6), and E1 pins it: with
    a bound read set and no share link, `private`, `public_read`, `public_read_write` and
    `controlled_by_parent` each read zero rows.
+4. **Class 7's two empty states** (the 2026-10-24 amendment). The ruling names the form doors'
+   anti-abuse posture and the field's limits, and both can be empty. A deployment that arms no
+   inbound limiter meters neither the form doors nor class 7, and no app under `examples/` arms one
+   (measured at `e649c2d91e`). A file field that declares neither `maxSize` nor `accept` limits
+   nothing beyond the deployment's upload limit. As written, the door opens in both cases, exactly
+   as the form doors do. Closing it in either, so that the door stays shut until the limiter is armed
+   or the field declares its limits (the shape ADR-0121 D6 gives an anonymous endpoint), is a refusal
+   the ruling did not name. Approving this text approves the door open in both cases.
+5. **A file id class 7 did not store** (the 2026-10-24 amendment). The class-1 submit hands every
+   file id in a file field to the field-reference claim, as it does today, and this amendment does
+   not change that. Whether a guest submission may name a file that class 7 did not store for it is
+   E5's to measure. If E5 narrows the submit's accept set, its PR declares the narrowing.
 
 ## Alternatives considered
 
@@ -824,7 +975,9 @@ The seat cuts these cards from the accepted record. ⛔ None is filed before acc
 changes `packages/spec` before it. The three defect cards the G2 ruling ordered (#22432, #22430,
 #22431) and the fourth the in-repo sweep found (#23142; [criterion 2](#acceptance-criteria)) are
 not execution cards of this record: they enforce ADR-0056 D2 and ADR-0104, which were already
-Accepted, and they landed before acceptance.
+Accepted, and they landed before acceptance. E5 was filed before its amendment, as
+[#25572](https://github.com/objectstack-ai/objectstack/issues/25572): the 2026-10-24 ruling put the
+amendment first on that card and the door after it, so the card carries both.
 
 | Card | Decisions | What lands | Pins | ADR-0087 disposition | Order |
 |:--|:--|:--|:--|:--|:--|
@@ -832,6 +985,7 @@ Accepted, and they landed before acceptance.
 | **E2** — the closed list and denial by domain, and D2b | D2, D2b, D9's pointer | the six classes recorded in the conformance matrix; any face of a listed domain that still decides per face moved to the domain-level deny; D2b's publish refusal in both directions, with its prescription; the module doc of `assemble-execution-context.ts` cites this record | a new route in a governed domain answers 401; each class's admission; D2b refused in both directions (an anonymous flow endpoint naming a `system` flow, and a flow set to `system` while an anonymous endpoint names it), each refusal carrying the prescription | `registered`, one new semantic entry: the publish refusal narrows the accept set, and no conversion can choose a posture for the author | after acceptance |
 | **E3** — the stamp's guest branch | D1 | the owner-anchor stamp's guest branch: never the guest, never the system principal, a forged owner refused, the owner unset unless the scenario sets it | a guest insert with nothing in the scenario setting an owner leaves it unset; an owner set by a hook, flow or assignment rule stands; a guest-supplied owner refused at an endpoint and stripped at the form doors; the owner column never holds the guest or the system principal | none: no new key, and nothing moves | after E1, which opens guest inserts at the endpoint doors |
 | **E4** — retire `sys_record_share`'s `guest` recipient | D8 | the select option and the contract's union member removed, translations regenerated, following the `spec-property-retirement` playbook where it applies | the value refused with its prescription; a census showing no stored row carries it | expected `not-required (no-migration-prescription)`; `registered` if the census finds a stored metadata surface carrying the value | independent |
+| **E5** — the guest upload door ([#25572](https://github.com/objectstack-ai/objectstack/issues/25572)) | D2 class 7 | the door under class 7's eight rules; the sweep's class-7 entry and the conformance matrix's row, in the same change; the TTL declared in the `lifecycle` declaration the platform sweep reads | the card's acceptance: a guest submits a public form whose required file field it filled through the door, the record carries the file, and an upload no submission claims is gone after the declared TTL; refused before a byte is stored: a field the form does not place, a field that is not a file type, a file over the field's `maxSize` or outside its `accept`, a withdrawn or withheld form; the door answers the stored file's id only; that file answers an anonymous download 401 | its PR declares it | after this amendment lands |
 
 ## Follow-ups, named, not filed
 
@@ -884,3 +1038,13 @@ Accepted, and they landed before acceptance.
   [#21331](https://github.com/objectstack-ai/objectstack/issues/21331), the form doors' intake rules;
   [#13419](https://github.com/objectstack-ai/objectstack/issues/13419), the position-name fold.
 - The 2026-08-08 Option A ruling: commit `f586f1a89` (#7259).
+- Class 7 (the 2026-10-24 amendment): the ruling record
+  [`6377731715`](https://github.com/objectstack-ai/objectstack/issues/25496#issuecomment-6377731715)
+  on [#25496](https://github.com/objectstack-ai/objectstack/issues/25496), letter B, and the
+  maintainer account's batch record on the same card
+  ([`6377842908`](https://github.com/objectstack-ai/objectstack/issues/25496#issuecomment-6377842908));
+  the two records on [#25445](https://github.com/objectstack-ai/objectstack/issues/25445)
+  ([`6377853567`](https://github.com/objectstack-ai/objectstack/issues/25445#issuecomment-6377853567),
+  [`6377887908`](https://github.com/objectstack-ai/objectstack/issues/25445#issuecomment-6377887908)),
+  which [#25572](https://github.com/objectstack-ai/objectstack/issues/25572) re-files and which
+  carries the amendment and then the door (E5).
