@@ -409,7 +409,7 @@ describe('a bound action is served as its ActionSchema parse', () => {
 
     it('control: the platform object\'s own action is served as `ObjectSchema.create` produced it', async () => {
         const owner = platformOwner();
-        const authored = structuredClone(owner.objects[0].actions!.find((a: any) => a.name === 'own_gated'));
+        const authored = structuredClone(owner.objects[0].actions!.find((a: any) => a.name === 'own_gated'))!;
         const { protocol } = await hostWith([owner, gatedBinder({ name: 'change_slug', objectName: 'ba_org', ...GATED })]);
         expect(await servedAction(protocol, 'own_gated')).toEqual(authored);
         expect(authored.visible).toEqual(LOWERED);
