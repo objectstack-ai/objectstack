@@ -542,11 +542,46 @@ export function withLeadLine(text, line) {
 }
 
 /**
+ * Orders two CLI versions (`X.Y.Z` or `X.Y.Z-tag.N`): negative when `a` is
+ * older, positive when newer, 0 when equal. A prerelease sorts before its
+ * release; prerelease identifiers compare numerically where both are numbers.
+ */
+export function compareVersions(a, b) {
+  const split = (v) => {
+    const [core, pre] = v.split('-', 2);
+    return { core: core.split('.').map(Number), pre: pre === undefined ? null : pre.split('.') };
+  };
+  const x = split(a);
+  const y = split(b);
+  for (let i = 0; i < 3; i += 1) {
+    const d = (x.core[i] ?? 0) - (y.core[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  if (x.pre === null || y.pre === null) return x.pre === y.pre ? 0 : x.pre === null ? 1 : -1;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i += 1) {
+    if (x.pre[i] === undefined) return -1;
+    if (y.pre[i] === undefined) return 1;
+    const nx = /^\d+$/.test(x.pre[i]);
+    const ny = /^\d+$/.test(y.pre[i]);
+    if (nx && ny && Number(x.pre[i]) !== Number(y.pre[i])) return Number(x.pre[i]) - Number(y.pre[i]);
+    if (x.pre[i] !== y.pre[i]) return nx ? -1 : ny ? 1 : x.pre[i] < y.pre[i] ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
  * The last version commit on `head`'s first-parent chain, read WITHOUT
  * assuming full history: `found` needs the commit and its first parent both
  * present, because a graft-boundary commit has no parent and would read as the
  * version's introduction. `need-history` = the walk reached the shallow
  * boundary first; `none` = this history has no version commit, with the reason.
+ *
+ * A commit that moves the version BACK (a reverted cut: `git revert` of an
+ * unpublished version commit, as 18.1.0's `74fa3cb6d` was by #25605) did not
+ * introduce the version it returns to. The walk passes over it and over the
+ * reverted cut's span, and keeps looking for the forward commit that did.
+ * Read as a version commit, it made every changeset the revert restored look
+ * shipped in the version main went back to.
  */
 export function locateLastVersionCommit({ cwd, head }) {
   const shallow = gitOk(cwd, ['rev-parse', '--is-shallow-repository']).trim() !== 'false';
@@ -554,8 +589,14 @@ export function locateLastVersionCommit({ cwd, head }) {
   const version = versionAt(cwd, headSha);
   if (version === null) return { state: 'none', headSha, reason: `${headSha.slice(0, 10)} carries no ${CLI_MANIFEST}` };
   const touching = gitOk(cwd, ['log', '--first-parent', '--format=%H', headSha, '--', CLI_MANIFEST]).split('\n').filter(Boolean);
+  let reverted = false;
   for (const commit of touching) {
     const here = versionAt(cwd, commit);
+    if (reverted) {
+      // Inside a reverted cut's span: commits carrying the version it undid.
+      if (here !== version) continue;
+      reverted = false;
+    }
     if (here !== version) {
       return {
         state: 'none',
@@ -573,6 +614,10 @@ export function locateLastVersionCommit({ cwd, head }) {
     if (before === version) continue;
     if (before === null) {
       return { state: 'none', headSha, reason: `${CLI_MANIFEST} is created at ${commit.slice(0, 10)}, and its creation is not a release` };
+    }
+    if (compareVersions(before, version) > 0) {
+      reverted = true;
+      continue;
     }
     return { state: 'found', headSha, version, from: before, versionCommit: commit };
   }
@@ -1256,6 +1301,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'annotate-shipped -> a second run writes nothing': 2,
   'annotate-shipped -> a changeset whose first body line already says Shipped in is left byte-identical': 2,
   'annotate-shipped -> outside pre mode, where the version pass deletes what it consumes': 2,
+  'annotate-shipped -> a reverted cut is not a version commit: the walk reads the forward cut before it': 3,
   'annotate-shipped -> a depth-1 clone deepens itself to the version commit; with no reachable history it warns, annotates nothing and exits 0': 4,
   'annotate-shipped -> no version commit, an unpublished or unreadable version, an error anywhere: a warning or a plain line, nothing written, exit 0': 5,
 });
@@ -1643,6 +1689,49 @@ async function selfTest() {
     check(
       readFileSync(join(s.dir, '.changeset/y.md'), 'utf8').includes('**Shipped in 17.7.0**, whose CHANGELOG missed this entry; listed here one release late.'),
       'with the "release" form of the line',
+    );
+
+    battery('annotate-shipped -> a reverted cut is not a version commit: the walk reads the forward cut before it');
+    // The 18.1.0 shape: a 17.7.0 cut left y.md unconsumed (above); the next cut
+    // (17.8.0) consumed every pending changeset, was never published, and was
+    // reverted, which restored them all and moved the CLI back to 17.7.0.
+    const rv = fixture();
+    const rPut = (path) => {
+      mkdirSync(dirname(join(rv.dir, path)), { recursive: true });
+      writeFileSync(join(rv.dir, path), `---\n'${CLI_PACKAGE}': minor\n---\n\n${path}\n`);
+    };
+    rv.writeCli('17.6.0');
+    rPut('.changeset/x.md');
+    rv.commit('base: one changeset pending');
+    rv.g('checkout', '-q', '-b', 'version-pr');
+    rv.g('rm', '-q', '.changeset/x.md');
+    rv.writeCli('17.7.0');
+    rv.commit('chore: version packages');
+    rv.g('checkout', '-q', 'main');
+    rPut('.changeset/y.md');
+    rv.commit('a landing after the cut');
+    rv.g('merge', '-q', '--squash', 'version-pr');
+    const rForward = rv.commit('chore: version packages (landed behind main)');
+    rPut('.changeset/z.md');
+    rv.commit('a landing after 17.7.0');
+    rv.g('rm', '-q', '.changeset/y.md', '.changeset/z.md');
+    rv.writeCli('17.8.0');
+    const rCut = rv.commit('chore: version packages (17.8.0, never published)');
+    rv.g('revert', '--no-edit', rCut);
+    const rRevert = gitOk(rv.dir, ['rev-parse', 'HEAD']).trim();
+    const afterRevert = annotate(rv.dir);
+    check(
+      locateLastVersionCommit({ cwd: rv.dir, head: rRevert }).versionCommit === rForward && compareVersions('17.8.0', '17.7.0') > 0 &&
+        compareVersions('18.0.0-next.2', '18.0.0') < 0 && compareVersions('18.0.0-next.10', '18.0.0-next.2') > 0,
+      'the revert back to 17.7.0 is passed over with the reverted 17.8.0 cut; the 17.7.0 cut is the version commit, and versions order numerically',
+    );
+    check(
+      afterRevert.verdict === 'done' && afterRevert.versionCommit === rForward && afterRevert.annotated.join() === '.changeset/y.md',
+      'so only y.md, which 17.7.0 really left unconsumed, is annotated',
+    );
+    check(
+      !readFileSync(join(rv.dir, '.changeset/z.md'), 'utf8').includes(SHIPPED_MARK),
+      'and z.md, which the revert restored but 17.7.0 never carried, is not stamped as shipped in 17.7.0',
     );
 
     battery('annotate-shipped -> a depth-1 clone deepens itself to the version commit; with no reachable history it warns, annotates nothing and exits 0');
