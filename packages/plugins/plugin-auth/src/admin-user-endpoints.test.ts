@@ -1415,7 +1415,7 @@ describe('create-user: an optional organization the new user joins as a member',
     expect(j.createUser).not.toHaveBeenCalled();
   });
 
-  it('the Create User dialog offers it as an optional organization picker, only where organizations exist', () => {
+  it('the Create User dialog offers it as an optional organization picker, only in multi-org mode', () => {
     const action = (SysUser.actions ?? []).find((a) => a.name === 'create_user');
     const param = (action?.params ?? []).find((p) => p.name === 'organizationId');
     expect(param).toMatchObject({
@@ -1424,6 +1424,6 @@ describe('create-user: an optional organization the new user joins as a member',
       required: false,
     });
     // `requiresFeature` is lowered into `visible` at parse time.
-    expect(JSON.stringify((param as { visible?: unknown }).visible)).toContain('features.organization');
+    expect(JSON.stringify((param as { visible?: unknown }).visible)).toContain('features.multiOrgEnabled');
   });
 });

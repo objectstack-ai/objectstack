@@ -319,7 +319,9 @@ export const SysUser = ObjectSchema.create({
           label: 'Organization',
           required: false,
           helpText: 'Optional. Adds the new user to this organization as a member, so you do not have to add them on its Members list afterwards.',
-          requiresFeature: 'organization',
+          // Offered only where it is needed: single-org already binds every
+          // new user to the default organization by itself.
+          requiresFeature: 'multiOrgEnabled',
         },
       ],
       resultDialog: {
