@@ -1311,5 +1311,31 @@ export const ShowcaseTranslationBundle = {
         },
       },
     },
+    // The security catalog — positions and permission sets. Counted by
+    // `check-i18n-coverage` like every other declared label: a new position or
+    // set that skips zh-CN widens the debt.
+    positions: {
+      contributor: { label: '贡献者', description: '处理自己项目中的任务。' },
+      manager: { label: '项目经理', description: '管理项目及其中的贡献者。' },
+      exec: { label: '高管', description: '用于报表的全量只读可见性。' },
+      auditor: { label: '审计员', description: '跨私有记录的合规只读视图（viewAllRecords）。' },
+      ops: { label: '运营', description: '后台运营 — Setup 访问、公告修复、运营应用。' },
+      field_ops_delegate: { label: '现场运营委派管理员', description: '对现场运营业务单元子树的范围化管理。' },
+      client_liaison: { label: '客户联络人', description: '准备并发布面向客户的项目简报；看不到内部预算数据。' },
+      client_portal_user: { label: '客户门户用户', description: '获准进入客户门户的外部客户。' },
+      finance: { label: '财务', description: '发票和大额费用的财务签批权（仅用于审批路由）。' },
+      legal: { label: '法务', description: '发票和大额费用的法务签批权（仅用于审批路由）。' },
+    },
+    permissions: {
+      showcase_contributor: { label: '示例贡献者' },
+      showcase_manager: { label: '示例经理' },
+      showcase_executive: { label: '示例高管' },
+      showcase_auditor: { label: '示例审计员' },
+      showcase_ops: { label: '示例运营' },
+      showcase_member_default: { label: '示例成员（默认）' },
+      showcase_guest_portal: { label: '示例访客门户' },
+      showcase_field_ops_delegate: { label: '现场运营委派管理员' },
+      showcase_client_liaison: { label: '示例客户联络人' },
+    },
   },
 };
