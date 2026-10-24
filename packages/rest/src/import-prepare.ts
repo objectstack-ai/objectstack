@@ -262,7 +262,7 @@ function readInlineEntryRule(
 
 /**
  * Apply each inline entry's rules to every row, in place, before the cells
- * are coerced: the transform to a string cell, then `defaultValue` to a cell
+ * are coerced: the transform to a non-blank string cell, then `defaultValue` to a cell
  * that is blank (what cell coercion calls blank: absent, empty, whitespace or
  * one of the request's `nullValues`), then `required` to what is left. A
  * required cell still blank refuses the whole request before any row is
@@ -278,7 +278,11 @@ function applyInlineEntryRules(
     rows.forEach((row, i) => {
         for (const rule of rules) {
             let value = row[rule.targetField];
-            if (typeof value === 'string') value = INLINE_TRANSFORMS[rule.transform](value);
+            // Blankness is judged on the raw cell: a case transform would rewrite a
+            // `nullValues` sentinel (matched exactly) out of being one, so a blank
+            // cell is never transformed and stays blank for the rules below and
+            // for cell coercion.
+            if (typeof value === 'string' && !isBlank(value, nullValues)) value = INLINE_TRANSFORMS[rule.transform](value);
             if (rule.hasDefault && isBlank(value, nullValues)) value = rule.defaultValue;
             if (value !== undefined) row[rule.targetField] = value;
             if (rule.required && isBlank(value, nullValues)) {
