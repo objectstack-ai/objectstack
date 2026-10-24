@@ -107,7 +107,7 @@ const writeFixtureFile = (file: string, content: string) => {
  * resolve its repo root to the real checkout instead of this fixture — which is
  * the very thing the copy exists to prevent.
  */
-const copyWithLocalImports = (absFile: string, seen = new Set<string>()): void => {
+const copyWithLocalImports = (absFile: string, seen = new Set<string>(), into = fixture): void => {
   if (!fs.existsSync(absFile)) return;
   const real = fs.realpathSync(absFile);
   if (seen.has(real)) return;
@@ -118,13 +118,13 @@ const copyWithLocalImports = (absFile: string, seen = new Set<string>()): void =
   if (rel.startsWith('..') || path.isAbsolute(rel)) return;
 
   const source = fs.readFileSync(real, 'utf8');
-  writeFixtureFile(path.join(fixture, rel), source);
+  writeFixtureFile(path.join(into, rel), source);
 
   const specifiers = [
     ...source.matchAll(/\bfrom\s+'(\.[^']*)'/g),
     ...source.matchAll(/\bimport\s*\(\s*'(\.[^']*)'/g),
   ];
-  for (const m of specifiers) copyWithLocalImports(path.resolve(path.dirname(real), m[1]), seen);
+  for (const m of specifiers) copyWithLocalImports(path.resolve(path.dirname(real), m[1]), seen, into);
 };
 
 beforeAll(() => {
@@ -241,9 +241,9 @@ describe('the entry-point guard leaves the CLI path working', () => {
       const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
       expect(
         pkg.dependencies['@objectstack/spec'],
-        `${template}/package.json @objectstack/* ranges move to the scaffolder's major`,
-      ).toBe('^42.0.0');
-      expect(pkg.devDependencies['@objectstack/cli']).toBe('^42.0.0');
+        `${template}/package.json @objectstack/* deps move to the scaffolder's EXACT version`,
+      ).toBe(FIXTURE_VERSION);
+      expect(pkg.devDependencies['@objectstack/cli']).toBe(FIXTURE_VERSION);
       expect(
         pkg.dependencies.chalk,
         'a non-@objectstack dependency is never touched',
@@ -254,7 +254,10 @@ describe('the entry-point guard leaves the CLI path working', () => {
       );
 
       const manifest = fs.readFileSync(path.join(dir, 'objectstack.manifest.json'), 'utf8');
-      expect(manifest).toContain('"specVersion": "^42.0.0"');
+      expect(
+        manifest,
+        'specVersion stays a RANGE while the deps beside it become exact',
+      ).toContain('"specVersion": "^42.0.0"');
       expect(
         manifest,
         'the manifest is rewritten as TEXT, so unrelated compact structure survives',
@@ -265,6 +268,53 @@ describe('the entry-point guard leaves the CLI path working', () => {
     // worse than the finding it fixes, so the run is observed to REPORT both.
     expect(stdout).toContain('2 template(s) in lockstep with create-objectstack@42.0.0');
     expect(stdout).toContain('second/objectstack.manifest.json');
+  });
+
+  it('stamps a PRERELEASE verbatim into the deps, and only its major into specVersion', () => {
+    // A release-candidate cut (`cut-rc.yml`) runs this same pass at a version
+    // like `19.0.0-rc.0`. The deps take it verbatim, because a scaffold of the
+    // rc must install the rc; `specVersion` keeps the major's range, because it
+    // names the spec line the template is authored against, not a build.
+    const prerelease = '43.0.0-rc.2';
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-template-versions-rc-'));
+    try {
+      const script = path.join(dir, 'scripts', 'sync-template-versions.mjs');
+      copyWithLocalImports(SYNC_SCRIPT, new Set(), dir);
+      writeFixtureFile(
+        path.join(dir, 'packages', 'create-objectstack', 'package.json'),
+        JSON.stringify({ name: 'create-objectstack', version: prerelease }, null, 2) + '\n',
+      );
+      const templateDir = path.join(dir, 'packages', 'create-objectstack', 'src', 'templates', 'blank');
+      writeFixtureFile(
+        path.join(templateDir, 'package.json'),
+        JSON.stringify(
+          { name: 'template-blank', dependencies: { '@objectstack/spec': `^${STALE_MAJOR}.0.0` } },
+          null,
+          2,
+        ) + '\n',
+      );
+      writeFixtureFile(
+        path.join(templateDir, 'objectstack.config.ts'),
+        `export default defineStack({ manifest: { engines: { protocol: '^${STALE_MAJOR}' } } });\n`,
+      );
+      writeFixtureFile(
+        path.join(templateDir, 'objectstack.manifest.json'),
+        `{\n  "specVersion": "^${STALE_MAJOR}.0.0",\n  "scaffold": { "variables": [] }\n}\n`,
+      );
+
+      execFileSync(process.execPath, [script], { encoding: 'utf8' });
+
+      const pkg = JSON.parse(fs.readFileSync(path.join(templateDir, 'package.json'), 'utf8'));
+      expect(pkg.dependencies['@objectstack/spec']).toBe(prerelease);
+      expect(fs.readFileSync(path.join(templateDir, 'objectstack.manifest.json'), 'utf8')).toContain(
+        '"specVersion": "^43.0.0"',
+      );
+      expect(fs.readFileSync(path.join(templateDir, 'objectstack.config.ts'), 'utf8')).toContain(
+        "engines: { protocol: '^43' }",
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
