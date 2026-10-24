@@ -179,14 +179,20 @@ describe('§4 the published JSON schema carries it as an optional boolean with n
 // ───────────────────────────────────────────────────────────────────────────
 
 describe('§5 the describe declares the key planned and names its two subjects', () => {
-  const doc = ApprovalNodeConfigSchema.shape.excludeSubmitter.description ?? '';
+  // Read inside each test, never at collection: a key that went missing then
+  // reds these two tests instead of erroring the file and hiding §1–§4.
+  const doc = (): string => {
+    const member = (ApprovalNodeConfigSchema.shape as Record<string, { description?: string } | undefined>)
+      .excludeSubmitter;
+    return member?.description ?? '';
+  };
 
   it('opens with the planned marker: declared, not yet read by the approval engine', () => {
-    expect(doc.startsWith('[PLANNED')).toBe(true);
+    expect(doc().startsWith('[PLANNED')).toBe(true);
   });
 
   it('names who is removed (submitter_id) and where an emptied slate goes (onEmptyApprovers)', () => {
-    expect(doc).toContain('`submitter_id`');
-    expect(doc).toContain('`onEmptyApprovers`');
+    expect(doc()).toContain('`submitter_id`');
+    expect(doc()).toContain('`onEmptyApprovers`');
   });
 });
