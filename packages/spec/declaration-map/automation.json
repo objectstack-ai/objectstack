@@ -103,6 +103,8 @@
     "NodeExecutorDescriptorSchema": "automation/NodeExecutorDescriptor",
     "NotifyConfig": "automation/NotifyConfig",
     "NotifyConfigSchema": "automation/NotifyConfig",
+    "NotifyEmailFieldRecipient": "automation/NotifyEmailFieldRecipient",
+    "NotifyEmailFieldRecipientSchema": "automation/NotifyEmailFieldRecipient",
     "ParallelBranch": "automation/ParallelBranch",
     "ParallelBranchSchema": "automation/ParallelBranch",
     "ParallelConfig": "automation/ParallelConfig",

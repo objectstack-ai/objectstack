@@ -274,6 +274,7 @@
     "automation/NotifyConfig:templateData",
     "automation/NotifyConfig:title",
     "automation/NotifyConfig:topic",
+    "automation/NotifyEmailFieldRecipient:emailField",
     "automation/ParallelBranch:edges",
     "automation/ParallelBranch:name",
     "automation/ParallelBranch:nodes",

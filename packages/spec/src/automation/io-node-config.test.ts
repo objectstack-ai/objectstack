@@ -741,7 +741,9 @@ describe('NotifyConfigSchema — the value slots, the literals and the `actionUr
       }
       expect(json.properties?.templateData?.additionalProperties?.xExpression).toBe('value');
       // The literal arms stay in the published shape, beside the envelope.
-      expect(json.properties?.recipients?.anyOf?.map((arm) => arm.type)).toEqual(['string', 'array', 'object']);
+      // The fourth arm is the email-field recipient, `{ emailField }` — a closed object, no envelope.
+      expect(json.properties?.recipients?.anyOf?.map((arm) => arm.type)).toEqual(['string', 'array', 'object', 'object']);
+      expect(Object.keys(json.properties?.recipients?.anyOf?.[3]?.properties ?? {})).toEqual(['emailField']);
       expect(json.properties?.sourceId?.anyOf?.map((arm) => arm.type)).toEqual(['string', 'object']);
       // The literals publish their 17.x shapes, with no marker and no envelope arm.
       for (const key of ['sourceObject', 'actorId']) {

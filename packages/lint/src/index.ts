@@ -855,6 +855,16 @@ export type {
   FlowWriteNodeDeferral,
 } from './validate-flow-node-writes.js';
 
+// A `notify` node's email-field recipient (`{ emailField }`) against the
+// trigger object's declared fields: the field must exist and be `email`-typed.
+export {
+  validateNotifyEmailFieldRecipients,
+  NOTIFY_EMAIL_FIELD_UNKNOWN,
+  NOTIFY_EMAIL_FIELD_NOT_EMAIL,
+  NOTIFY_EMAIL_FIELD_NO_TRIGGER_RECORD,
+} from './validate-notify-email-field-recipients.js';
+export type { NotifyEmailFieldRecipientFinding } from './validate-notify-email-field-recipients.js';
+
 // One entry point for the reference-resolution rules above (#3583 §5 D5).
 // Adding a rule to `REFERENCE_INTEGRITY_RULES` runs it on `validate`, `lint`
 // and `compile` at once — the CLI call sites do not change.
