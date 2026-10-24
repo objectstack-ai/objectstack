@@ -92,9 +92,15 @@ export const FieldType = z.enum([
   'image', 'file', 'avatar', 'video', 'audio',
   // Calculated / System
   'formula', 'summary', 'autonumber',
-  // Embedded structured values (stored as JSON on the parent row — no separate table / FK)
-  'composite',    // Single embedded sub-object with declared sub-fields  (≈ Strapi component / ACF group)
-  'repeater',     // Repeating embedded sub-object array with declared sub-fields  (≈ Strapi repeatable component / ACF repeater)
+  // Embedded structured values (stored as JSON on the parent row — no separate table / FK).
+  // On an OBJECT field, `composite` / `repeater` are UNTYPED JSON containers of CMS lineage
+  // (≈ Strapi component / ACF group / ACF repeater): `FieldSchema` declares no sub-field
+  // member, so nothing types, labels, validates or addresses the inner keys or rows.
+  // A list that needs typed columns is a CHILD OBJECT whose `master_detail` field points
+  // back at the parent, shown on the record as an inline related list (ruling 6386744473).
+  // A form view's `fields` sub-rows (`ui/view.zod.ts`) are a different surface.
+  'composite',    // Single embedded JSON object, untyped — no declared sub-fields
+  'repeater',     // Array of embedded JSON objects, untyped — no declared sub-fields or columns
   'record',       // Name-keyed map of embedded sub-objects (Record<string, SubObject>). Insertion order = display order. Used for collections where each item has a stable machine name (e.g. object.fields). See ADR-0007.
   // Enhanced Types
   'location',     // GPS coordinates
