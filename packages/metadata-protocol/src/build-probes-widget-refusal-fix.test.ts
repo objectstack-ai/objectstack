@@ -48,7 +48,7 @@ async function probeThrowing(err: Error) {
     expect(issue).toMatchObject({
         layer: 'runtime',
         severity: 'error',
-        code: 'widget_query_failed',
+        code: 'widget_query_failed', // adr0112-ok: D6c build-probe diagnostics code
         artifact: { type: 'dashboard', name: 'board' },
         ref: { type: 'dataset', name: 'ds', member: 'w1' },
     });
