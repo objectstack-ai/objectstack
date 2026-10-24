@@ -616,8 +616,12 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 //   `400 VALIDATION_FAILED` with `fields[]`, so a submission with
                 //   both problems is told both at once. The field code is the
                 //   closed ADR-0114 catalog's `invalid_value`.
+                // The declared fields this submission carries a value in: the
+                // only ones the file judgement can refuse, so a submission that
+                // carries none reads no object declarations for it.
                 const fileValued = [...allowedFields].filter((name) =>
-                    Object.prototype.hasOwnProperty.call(filteredData, name));
+                    Object.prototype.hasOwnProperty.call(filteredData, name)
+                    && !isMissing(filteredData[name]));
                 if (judged.length > 0 || fileValued.length > 0) {
                     const objectDef = (await this.readFormObjectDefinitions(p, environmentId))
                         .find((o: any) => o?.name === match.object);
