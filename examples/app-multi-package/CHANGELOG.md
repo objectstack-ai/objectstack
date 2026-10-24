@@ -1,5 +1,14 @@
 # @objectstack/example-multi-package
 
+## 0.0.9
+
+### Patch Changes
+
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+  - @objectstack/spec@18.2.0
+
 ## 0.0.8
 
 ### Patch Changes

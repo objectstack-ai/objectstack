@@ -1,5 +1,21 @@
 # @objectstack/cloud-connection
 
+## 18.2.0
+
+### Patch Changes
+
+- Updated dependencies [42d9fe8]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [f1d6be0]
+  - @objectstack/spec@18.2.0
+  - @objectstack/metadata-protocol@18.2.0
+  - @objectstack/core@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/objectql@18.2.0
+  - @objectstack/runtime@18.2.0
+  - @objectstack/types@18.2.0
+
 ## 18.1.0
 
 ### Minor Changes

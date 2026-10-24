@@ -1,5 +1,46 @@
 # @objectstack/dogfood
 
+## 0.0.50
+
+### Patch Changes
+
+- Updated dependencies [42d9fe8]
+- Updated dependencies [e8de8a7]
+- Updated dependencies [2af790f]
+- Updated dependencies [cc10e74]
+- Updated dependencies [f1d6be0]
+- Updated dependencies [2351c8d]
+  - @objectstack/spec@18.2.0
+  - @objectstack/plugin-auth@18.2.0
+  - @objectstack/service-analytics@18.2.0
+  - @objectstack/plugin-approvals@18.2.0
+  - @objectstack/example-crm@4.0.102
+  - @objectstack/example-multi-package@0.0.9
+  - @objectstack/example-showcase@0.3.24
+  - @objectstack/connector-mcp@18.2.0
+  - @objectstack/connector-openapi@18.2.0
+  - @objectstack/connector-rest@18.2.0
+  - @objectstack/formula@18.2.0
+  - @objectstack/mcp@18.2.0
+  - @objectstack/metadata@18.2.0
+  - @objectstack/metadata-core@18.2.0
+  - @objectstack/objectql@18.2.0
+  - @objectstack/platform-objects@18.2.0
+  - @objectstack/plugin-audit@18.2.0
+  - @objectstack/plugin-email@18.2.0
+  - @objectstack/plugin-security@18.2.0
+  - @objectstack/plugin-sharing@18.2.0
+  - @objectstack/plugin-webhooks@18.2.0
+  - @objectstack/runtime@18.2.0
+  - @objectstack/service-datasource@18.2.0
+  - @objectstack/service-messaging@18.2.0
+  - @objectstack/service-storage@18.2.0
+  - @objectstack/trigger-record-change@18.2.0
+  - @objectstack/trigger-schedule@18.2.0
+  - @objectstack/types@18.2.0
+  - @objectstack/verify@18.2.0
+  - @objectstack/plugin-pinyin-search@18.2.0
+
 ## 0.0.49
 
 ### Patch Changes
