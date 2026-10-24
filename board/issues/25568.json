@@ -1,0 +1,33 @@
+{
+  "number": 25568,
+  "kind": "issue",
+  "title": "Drop the cross-account review rule: the queue guard stops refusing a same-account review of record, and contract-review.md stops requiring Reviewed-by-account (maintainer 2026-10-24)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T01:19:50Z",
+  "updated_at": "2026-10-24T01:22:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25568",
+  "body": "Filing gate **③**: a maintainer-direct task, the maintainer's words quoted verbatim. Filed by the `domain:skills` seat 2 (seat post #19287) on the maintainer's word in the project thread 待决策汇总, which reverses the rule #25415 asked for. Grade suggested **p1 · S** (it blocks every project-thread Tier S landing in all three lanes); triage may regrade.\n\n## The maintainer's words (2026-10-24, thread 待决策汇总, verbatim)\n\n> 守卫在合并队列里只认「另一账户复审」，这个没必要，去掉这条规则 (01:16:45Z)\n> 立skills卡 (01:16:51Z)\n\n## Business rationale\n\n- **Who benefits:** every lane seat that lands a Tier S PR from a project thread (HotCRM, Devx, Skills), and the maintainer, who otherwise hand-merges each one.\n- **Scenario:** since #25436 merged (2026-10-24 00:25Z) the `merge_group` leg of Governed Surface Guard refuses a project-thread PR whose review of record carries `Reviewed-by-account:` equal to the PR body's `claude-projects-attribution` login. The maintainer runs one account per project, so every such record is same-account. First casualty: PR #25552, dequeued 00:44Z (run 40046346946, job 120728837597: 「the review of record on this head (comment 6377468190) was written from the SAME account that built the pull request」), now back in draft.\n- **Cost of not doing it:** no project-thread Tier S PR lands through the queue; each needs the maintainer's bypass merge.\n\n## Reader (who acts)\n\nA card thread on the `domain:skills` lane (the surface below includes `.claude/**`, so the fable model). Branch read at spawn and written on the claim.\n\n## Wanted\n\nThe seat's reading of 「去掉这条规则」: the cross-account requirement goes as one rule, enforcement and text together. Keeping the text while the guard stops enforcing it would leave seats a duty the maintainer called unnecessary.\n\n1. `scripts/pm/check-governed-queue-guard.mjs`: remove the #25436 account leg (`accountIndependence`, the `not-independent` record state, `independenceRefusalLines`, the `accounts compared` clear line, the `attributionLogin` recogniser wiring, the header paragraph, and the `#25415` battery with its floor row 28 → 27). A Tier S record on the current head stands on tier alone, as it did before #25436.\n2. `scripts/pm/record-recognisers.mjs`: remove `readReviewedByAccount`, `readAttributionLogin`, `REVIEWED_BY_ACCOUNT_LINE`, the locator's `account` field and the `#25415` battery (floor 13 → 12), unless another caller on `main` reads them (`git grep` first; keep and say so if one does).\n3. `.claude/skills/pm-dispatch/references/contract-review.md`: drop the account requirement from L36 (`Reviewed-by:` 须属 PR 作者外的账户), L37 (`Reviewed-by-account:` 行), L38 (「另一账户」 on the prose-surface record; whether the `TIER_DEFAULT` record itself stays is the implementer's to read against its source and say), L41 (① 另加 … 队列守卫同判) and L42–L43 (the 过渡 substitute, moot once ① owes no second account). Session independence (`Implemented-by:` ≠ `Reviewed-by:`, L35) is not this rule and stays. `git grep -n 'Reviewed-by-account\\|另一账户' -- .claude scripts` after the edit names every other mention; each is removed or justified in the PR body.\n\nNot in scope: Tier H landing (authorized approval) and the human-merge size line, both unchanged.\n\n## Acceptance\n\n- `node scripts/pm/check-governed-queue-guard.mjs --self-test` and `node scripts/pm/record-recognisers.mjs --self-test` green.\n- `pnpm check:pm-skill-ratchet`, `pnpm check:pm-skill-id-lint`, `pnpm check:skill-frame-sync`, `pnpm check:skill-frame-freshness` green.\n- `node scripts/pm/check-governed-queue-guard.mjs --explain` (or the self-test's tier harness) on a project-thread PR with a same-account Tier S record on its head reads CLEAR.\n- Landing note: the guard's `merge_group` job checks out the merge-group commit, so this PR's own queue run is judged by the code it ships. After it lands, PR #25552 is re-armed by the skills seat.\n\n## Dedupe\n\nMCP `search_issues`, objectstack, \"queue guard Reviewed-by-account\" → 12 hits, all closed; top: #25415 (the card this reverses), #18384, #15187, #12750, #18083, #18470 (other queue-guard legs). None removes the account leg. **New.**\n\nDedupe words: `queue guard Reviewed-by-account remove`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

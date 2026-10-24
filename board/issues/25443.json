@@ -2,8 +2,8 @@
   "number": 25443,
   "kind": "issue",
   "title": "spec/automation: an app cannot provision one position per external party at runtime — positions are metadata, flows cannot create them, and the system-flow assignment path is the bypass #25251 closes",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "duplicate",
   "draft": null,
   "author": {
     "login": "marchtian",
@@ -14,19 +14,22 @@
     "area:access",
     "domain:spec",
     "enhancement",
-    "pm:awaiting-maintainer",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T13:51:15Z",
-  "updated_at": "2026-10-23T15:57:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T01:04:39Z",
+  "closed_at": "2026-10-24T01:03:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25443",
-  "body": "Filed from the objectstack-ai/hotsrm v0.2 (supplier portal) platform evaluation, 2026-10-23, spec 18.0.0. Related: #25233 (external organisation role), #25251 (system flows writing `sys_user_position`).\n\n## The pattern an SRM portal needs\nRow-level isolation per supplier company: one position `srm_vendor_<no>` per supplier, a `portal_position` field on every portal-visible object, and an RLS policy `portal_position in current_user.positions`. The evaluation measured this pattern working: supplier A and B cannot see each other, a direct id read answers 404.\n\n## What was measured\n- The position itself is metadata. An admin can create it at runtime with `PUT /meta/position/:name`, but a flow has no action that creates a position, so the app cannot provision it when a supplier passes admission.\n- Assigning the position from a `runAs: 'system'` flow by writing `sys_user_position` works today, but #25251 reads that write as a bypass of the delegated-administration gate and asks for it to be refused or judged. Once it lands, the app has no path for the assignment either.\n- Result: onboarding an external party is a two-step manual process (admin creates the position, then someone assigns it), for every supplier.\n\n## Wanted\nA governed, app-authorable way to do both steps, for example:\n- a flow action `createPosition` / `assignPosition` whose writes pass the ADR-0090 D12 gate judged as the flow's owner, with `granted_by` stamped, and whose target position must sit under an app-declared template (`srm_vendor_*`), or\n- a declarative \"position per record\" binding on an object (each `srm_supplier` row owns a derived position, created and retired with the row), which is the whole need in one declaration.\n\n## Acceptance\nA supplier record reaching status `approved` results, without an administrator acting, in a position that exists, is assigned to the supplier's portal users, and whose grant is stamped and within the app's declared template; deleting or blacklisting the supplier retires it.\n\nDedupe words: position per record runtime provisioning flow createPosition assignPosition portal isolation external party sys_user_position governed path."
+  "body": "Ruled: 6377886479 · batch #9 item 1 (#25496, 6377842908) · letter B · 2026-10-24T00:43:45Z (folded into #25234: roster record + `membershipKeys` per supplier, no position per party; closed as duplicate)\n\nFiled from the objectstack-ai/hotsrm v0.2 (supplier portal) platform evaluation, 2026-10-23, spec 18.0.0. Related: #25233 (external organisation role), #25251 (system flows writing `sys_user_position`).\n\n## The pattern an SRM portal needs\nRow-level isolation per supplier company: one position `srm_vendor_<no>` per supplier, a `portal_position` field on every portal-visible object, and an RLS policy `portal_position in current_user.positions`. The evaluation measured this pattern working: supplier A and B cannot see each other, a direct id read answers 404.\n\n## What was measured\n- The position itself is metadata. An admin can create it at runtime with `PUT /meta/position/:name`, but a flow has no action that creates a position, so the app cannot provision it when a supplier passes admission.\n- Assigning the position from a `runAs: 'system'` flow by writing `sys_user_position` works today, but #25251 reads that write as a bypass of the delegated-administration gate and asks for it to be refused or judged. Once it lands, the app has no path for the assignment either.\n- Result: onboarding an external party is a two-step manual process (admin creates the position, then someone assigns it), for every supplier.\n\n## Wanted\n~~A governed, app-authorable way to do both steps, for example:~~\n~~- a flow action `createPosition` / `assignPosition` whose writes pass the ADR-0090 D12 gate judged as the flow's owner, with `granted_by` stamped, and whose target position must sit under an app-declared template (`srm_vendor_*`), or~~\n~~- a declarative \"position per record\" binding on an object (each `srm_supplier` row owns a derived position, created and retired with the row), which is the whole need in one declaration.~~\n\n(Ruled B: the need is met by #25234's declarative membership keys — the roster object carries `membershipKeys`, supplier isolation is RLS over them, no position per supplier; ruling 6377886479.)\n\n## Acceptance\nA supplier record reaching status `approved` results, without an administrator acting, in a position that exists, is assigned to the supplier's portal users, and whose grant is stamped and within the app's declared template; deleting or blacklisting the supplier retires it.\n\nDedupe words: position per record runtime provisioning flow createPosition assignPosition portal isolation external party sys_user_position governed path."
 }

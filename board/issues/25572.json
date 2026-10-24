@@ -1,0 +1,33 @@
+{
+  "number": 25572,
+  "kind": "issue",
+  "title": "storage/public forms: an anonymous public-form submission cannot carry a file — `/storage/upload` answers 404 to the guest principal, so a required attachment field is impossible on a public form",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:files",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T01:26:21Z",
+  "updated_at": "2026-10-24T01:26:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25572",
+  "body": "Ruled: 6377887908 · batch #9 item 1 (#25496, 6377842908) · letter B · 2026-10-24T00:43:45Z (ADR-0138 guest-upload addendum first, implementation after it lands)\n\nFiled from the objectstack-ai/hotsrm v0.1 platform evaluation, 2026-10-23, spec 18.0.0.\n\n## What was measured\n- Anonymous submission through a public form works: forged `status`, `supplier`, `duplicate_check` and `owner` values are stripped, the record flow fires.\n- A file field needs an existing `sys_file` id. `POST /storage/upload` returns 404 for the guest principal, so no public form can take an attachment, and a `required` file field makes the form unsubmittable.\n- Supplier registration in China needs the business licence scan on the first contact; the app had to move the upload to after the portal account exists, which changes the registration process the customer signs off on.\n\n## Wanted\n- A guest upload door bound to the public form: the file is accepted only for the form's declared file fields, size and type limited by the field, stored unattached under the form's organisation (ADR-0138 D4), and either attached by the submission that follows or garbage-collected after a short TTL if no submission arrives.\n- The same anti-abuse posture as the form itself (rate limit per address, no listing, no read-back of other guests' files).\n\n## Acceptance\nA public form with a required file field can be submitted by an anonymous visitor; the record is created with the attachment; an upload that is never followed by a submission disappears after the TTL.\n\nDedupe words: public form guest anonymous file upload storage/upload 404 required file field attachment TTL.\n\n---\n\nRe-filed as `objectstack-fleet[bot]` from #25445, same body and labels. #25445 was written off the fleet relay, under the maintainer's personal account, by a project-thread session through GitHub MCP; pm-dispatch allows content writes only through the relay. #25445's thread (triage, ruling, comments) stays there for reference; this card replaces it in the queue.\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"
+}

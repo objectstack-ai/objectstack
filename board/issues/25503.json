@@ -2,8 +2,8 @@
   "number": 25503,
   "kind": "issue",
   "title": "showcase: the command center's \"待审核列表 · Work Queue\" (badge 审批中) has no filter, so it lists every task including completed ones",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:reports",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T16:28:53Z",
-  "updated_at": "2026-10-23T19:49:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T21:04:07Z",
+  "closed_at": "2026-10-23T21:02:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25503",
   "body": "Filing-gate: ① product defect · reach: `/apps/com.example.showcase/page/showcase_command_center` as admin\nReader: objectstack triage seat → the lane that owns `examples/app-showcase`; the fix is one `filter` on `cc_queue_g` in `src/ui/pages/command-center.page.ts`\nDuplicate search: semantic search \"showcase command center work queue lists all tasks not only in review\" in objectstack, incl. closed → 4 hits: #7750 (closed, `my-work` `filters:` vs `$filter`, a different page), #7568, #6739, #22030 (closed, unrelated). None covers this panel.\n\nMeasured during an exploratory showcase walkthrough on 2026-10-23: objectstack `main` b9c7a8f (`PORT=3000 pnpm dev`, stock showcase), objectui `main` 6fb31dc console (Vite dev, :5180), locale zh-CN.\n\n## What happens\n\nThe bottom panel is titled **待审核列表 · Work Queue** with an **审批中** badge, and the KPI tile above it counts **待复审 Review = 2** (status `in_review`). The grid, however, lists all 10 tasks. That includes `done` ones such as *Audit current IA*, as well as backlog and to-do rows.\n\n## Where\n\n`examples/app-showcase/src/ui/pages/command-center.page.ts`:\n\n```ts\nchild: { id: 'cc_queue_g', type: 'object-grid', …, properties: { objectName: 'showcase_task', columns: ['title', 'project', 'status', 'priority', 'due_date'] } },\n```\n\nThere is no `filter`. The KPI tile `cc_k3` on the same page uses `[{ field: 'status', operator: 'equals', value: 'in_review' }]`.\n\n## Expected\n\nThe queue shows the rows its title and badge promise, the same set as the KPI it sits under (2 rows today). The other option is to retitle it as an all-tasks list.\n\nSession: https://claude.ai/code/session_01A48x1XYLTmiM2pgQxsgeKJ\n"

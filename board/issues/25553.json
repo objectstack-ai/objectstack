@@ -1,0 +1,36 @@
+{
+  "number": 25553,
+  "kind": "pull_request",
+  "title": "docs(releases): fold the changesets merged after b2c0752900 into the 18.1.0 notes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T23:58:00Z",
+  "updated_at": "2026-10-24T00:35:17Z",
+  "closed_at": "2026-10-24T00:35:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T00:35:15Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25553",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiRwWtsarkLPmw9fMYiFZ3LY)_\n\n## Summary\n\nThe 18.1.0 notes (#25460) were compiled at `b2c0752900`. Twenty-three changesets have landed on `main` since then, before the cut. This PR folds them in. It changes docs only.\n\n- **Breaking changes you must act on** gains four entries:\n  - a bulk action `confirmText` that the template cannot fill (#25451)\n  - a `runAs: 'system'` flow that writes identity objects (#25483)\n  - an out-of-office delegation outside its own organization (#25439)\n  - a rollback `toVersion` that is not a JSON whole number (#25532)\n- **Semantic changes**: membership keys are now staged per request (#25528). Until now this section said there were none.\n- **New capabilities**:\n  - the `external` organization role (#25515)\n  - `ObjectSchema.membershipKeys` (#25513)\n  - the upgrade impact report (#25512)\n  - `OS_PLATFORM_OWNER_ORGANIZATION` (#25489)\n  - the live mail transport statement (#25448)\n- **Pins**: the scaffolds now write exact `@objectstack/*` pins (#25539). The upgrade checklist's pin step says how to move an older project off caret ranges.\n- **Console**: the pin moves to `2958f17e9c6a`. That is eight refreshes, 130 entries, ten of them `minor`.\n- **Counts**: 250 entries, split 77 / 9 / 47 / 1 / 116 across the five sections. 86 changesets are declared breaking, and 39 of them are graded `patch`. The counts are updated on the 18.1 page, the v18 index, the releases index and Backward Compatibility. `check-adr-0087-registration --list` confirms 86 out of 86.\n- **Checklist**: steps 3 and 4 gain the new refusals.\n\nThe page still says it has not been walked. That changes after 18.1.0 publishes.\n\n## Checks\n\nThese all pass locally:\n- `check:release-notes`\n- `check:release-page-status`\n- `check:release-index-currency-sync`\n- `check:doc-anchors`\n- `check:docs-audit-scope`\n- `check:docs-single-h1`\n- `check:docs-redirects`\n- `check-release-section-coverage`\n- an MDX compile of the four pages\n\nClause-②: no\nMetadata-protocol: none\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01At7xrR4rgknXtej5ZkMJHd\n"
+}

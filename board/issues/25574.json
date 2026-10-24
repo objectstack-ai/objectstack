@@ -1,0 +1,32 @@
+{
+  "number": 25574,
+  "kind": "issue",
+  "title": "ADR-0138 D5 ask: on a multi-organisation hosted environment a public form lands in the deployment default organisation — an app serving several legal entities needs the form to name its organisation",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T01:27:27Z",
+  "updated_at": "2026-10-24T01:27:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25574",
+  "body": "Ruled: 6377889413 · batch #9 item 1 (#25496, 6377842908) · letter B · 2026-10-24T00:43:45Z (implement ADR-0138 D5: a public form binds to an organisation at publish time)\n\nFiled from the objectstack-ai/hotsrm design review, 2026-10-23, spec 18.0.0. Related: #23224 (E1 grants channel resolves D4's organisation), #15194 (ADR-0131 epic).\n\n## What the ADR says today\nADR-0138 D4: a public-form submission lands in the deployment's default organisation; a multi-organisation environment is refused until D5 lands. #23224 implemented the D4 resolution.\n\n## The app case\nA supplier self-registration form is the front door of an SRM. A group with several legal entities runs one hosted environment with one organisation per entity (ADR-0131 line). Each entity publishes its own registration link; the application must land in that entity's organisation, because admission, approval routes and the supplier number sequence are all organisation-scoped. Under D4 every link lands in the default organisation, and the app cannot move the row afterwards (ADR-0131 D9/D10 forbid re-owning).\n\nThe app's current workaround is invited registration only (an organisation invite with the `external` role once #25233 lands), which drops the public link entirely. That is acceptable for v0.2 but not for a public procurement notice (SOE pack) where anyone may apply.\n\n## Wanted (D5 shape, from the app side)\n- A public form binds to an organisation at publish time (the form's URL carries the organisation; the grants channel resolves it the way #23224 resolves D4).\n- The guest anchor's bindings are evaluated under that organisation; everything else in ADR-0138 unchanged.\n\n## Acceptance\nTwo organisations in one environment each publish the same package's registration form; a submission on each link lands in its own organisation with its own number sequence; a link for an organisation the form is not published to is refused.\n\nDedupe words: ADR-0138 D5 public form organisation multi-organisation hosted guest entry per-organisation link.\n\n---\n\nRe-filed as `objectstack-fleet[bot]` from #25447, same body and labels. #25447 was written off the fleet relay, under the maintainer's personal account, by a project-thread session through GitHub MCP; pm-dispatch allows content writes only through the relay. #25447's thread (triage, ruling, comments) stays there for reference; this card replaces it in the queue.\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"
+}

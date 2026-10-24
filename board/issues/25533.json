@@ -1,0 +1,37 @@
+{
+  "number": 25533,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): publish-drafts widget probes run as the publishing caller",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T20:29:01Z",
+  "updated_at": "2026-10-23T22:46:33Z",
+  "closed_at": "2026-10-23T22:46:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T22:46:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25533",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDWJsBGQpadCH8JR2xZQ5re)_\n\nFixes #25484\n\nClause-②: no\nMetadata-protocol: none\n\n## What was wrong\n\n`POST /api/v1/packages/:id/publish-drafts` runs the ADR-0038 L3 build probes after it publishes. The dashboard-widget probe called `analytics.queryDataset(dataset, selection, undefined)`, with no execution context. The analytics service's object-level read admission refuses a read that has no context. So every widget whose dataset reads a permission-gated object came back as an error-tier `widget_query_failed` (\"[Analytics] Access denied: reading ... is not permitted for this user\"), and the fix text told the author to change a dataset that renders correctly.\n\nThe probe's docblock says it takes \"the SAME `queryDataset` path the dashboard renderer hits\". The renderer passes the caller's context, and now the probe does too.\n\n## The change\n\n- `packages/runtime/src/domains/packages.ts` (the publish-drafts door): the caller's `executionContext` now goes to `publishPackageDrafts` on every request. Before, it went only when the request named a `backfill`. The request type already declared `context?: unknown`, so no interface changes.\n- `packages/metadata-protocol/src/protocol.ts` (`publishPackageDrafts`): passes `request.context` to `runBuildProbes`. One added line plus a docblock sentence.\n- `packages/metadata-protocol/src/build-probes.ts`: `RunBuildProbesOptions` gains an optional `context`, and the widget probe runs `queryDataset` with it. The probe never falls back to a system context. A probe that read as the system would report a widget healthy even when its own publisher cannot open it.\n- Same file, a follow-on of the same change: `empty_query` (\"returns NO data although object X has rows\") is now judged over the rows that caller can see. Before, a system count sat beside a caller-scoped query, and that would report a row-scoped empty answer as broken. With no context, the plane behaves exactly as before: a context-less query and a system count.\n\n**What a publisher who cannot read the dataset sees:** the same error-tier `widget_query_failed`, with the access-denied message. Its severity is unchanged on purpose, because that widget will not render for that caller either. Only the false error caused by the missing context goes away.\n\n## Tests\n\n- `packages/runtime/src/domains/packages-publish-drafts-probe-caller-context.test.ts` (new) runs the real path: `HttpDispatcher.handlePackages` → the real `ObjectStackProtocolImplementation.publishPackageDrafts` → `runBuildProbes` → a real `AnalyticsService` whose `admitObjectRead` admits only the reader on the gated object. The draft store and the phase-1/phase-2 publish seams are the doubles `packages/objectql/src/build-probes.test.ts` already uses.\n  - A reader gets no error-tier issue, and admission is asked about that caller and never about a system principal.\n  - A publisher who cannot read gets exactly one error-tier `widget_query_failed`.\n- `packages/metadata-protocol/src/build-probes-caller-context.test.ts` (new): `queryDataset` receives the caller context, and the rows-exist count runs as that caller. With no context, a context-less query and a system count still produce `empty_query`.\n- `packages-publish-drafts-response-conformance.test.ts`: the pin \"without the key, the protocol is sent neither a backfill nor a context\" now reads \"no backfill, but THIS caller's context (not a system one)\".\n- **Ablation** (fix committed first, through `scripts/ablation-replace.mjs`): `queryDataset(dataset, selection, context)` was changed to pass an undefined global marker. `ablation-dist-preflight` found the marker present in 2 built files of `metadata-protocol/dist`. Both new runtime cases went red. The reader case was the expected red. The non-reader case went red too, but only on its \"admission saw this caller\" assertion. The issue it pins was still produced, because a context-less read is refused too. Restore: blob back equal to HEAD (`d23a96693a7e`) and `git diff HEAD` empty, rebuild, `--absent` preflight clean on all 24 built files, and the 2 cases green again.\n\n## Acceptance notes\n\n- The publish-drafts `widget_query_failed` fix text (\"Fix the dataset definition ... so the query compiles\") also prints for a real access denial, where the dataset is fine and the publisher lacks read access. This change leaves that text alone, as the card scoped it. Recorded, not filed.\n- `protocol.ts` is being split under #25467. The one hunk here sits inside `publishPackageDrafts` (around line 27146). The open slice PR #25518 edits lines 301, 2301 and 9254-9450 only, so the two diffs do not overlap.\n- `scripts/engine-double-contract.pinned.json` gains the new test's engine double, written by `check-engine-double-contract.mjs --write` as that gate asked (new pinned coverage).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01CxBKycaiUpA1yGx1XyoGqX\n"
+}

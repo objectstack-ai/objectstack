@@ -1,0 +1,32 @@
+{
+  "number": 25573,
+  "kind": "issue",
+  "title": "plugin-approvals: a `field` or `position` approver step has no \"not the submitter\" guard, so a manager who submits their own request can approve it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T01:26:44Z",
+  "updated_at": "2026-10-24T01:26:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25573",
+  "body": "Ruled: 6377888641 · batch #9 item 1 (#25496, 6377842908) · letter B · 2026-10-24T00:43:45Z (step option `excludeSubmitter`, default off; empty set escalates per ADR-0042 or reroutes to the fallback)\n\nFiled from the objectstack-ai/hotsrm v0.1 platform evaluation, 2026-10-23, spec 18.0.0.\n\n## What was measured\n- A two-level admission approval: step 1 approver `field` (the category manager on the record), step 2 `position` (procurement director). Both resolve and work.\n- When the category manager submits the admission themselves, step 1 resolves to the same person and they approve their own submission. Nothing in the step declaration excludes the submitter.\n- Every procurement control framework (SOX-style segregation of duties, Chinese SOE procurement rules T/CFLP 0016) treats self-approval as a finding, so an app has to add it by hand: an `expression` approver, or a validation rule blocking \"submitter == approver\" before entry. Both are easy to forget and are per-flow.\n\n## Wanted\n- A step-level option (`excludeSubmitter: true`, or a flow-level default) that removes the submitter from the resolved approver set and, when the set becomes empty, escalates per ADR-0042 or reroutes to the step's fallback, instead of silently letting the request through.\n- The approval record should show when the exclusion changed the route.\n\n## Acceptance\nWith the option on, a request whose resolved approver is its submitter is routed to the fallback or escalated, never approved by the submitter; with the option off, behaviour is unchanged.\n\nDedupe words: approvals self-approval submitter excluded approver segregation of duties excludeSubmitter fallback.\n\n---\n\nRe-filed as `objectstack-fleet[bot]` from #25446, same body and labels. #25446 was written off the fleet relay, under the maintainer's personal account, by a project-thread session through GitHub MCP; pm-dispatch allows content writes only through the relay. #25446's thread (triage, ruling, comments) stays there for reference; this card replaces it in the queue.\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"
+}

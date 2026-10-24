@@ -2,8 +2,8 @@
   "number": 25233,
   "kind": "issue",
   "title": "Security: an external organisation role whose members do not see the member directory and reach data only through explicit grants (portal users on hosted environments)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-22T13:49:51Z",
-  "updated_at": "2026-10-23T19:00:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T00:58:43Z",
+  "closed_at": "2026-10-23T23:59:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 10,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25233",
   "body": "Ruled: 6355206139 · letter B · 2026-10-23T01:26:35Z\n\nFiling gate ②: from the maintainer's ruling on objectstack-ai/cloud#3149 (batch #386 item 5, 「3149 1 2 5 且第 1 项加 external 角色」, 2026-10-22T13:42Z). Filed by `repo:cloud#1` (seat post #6026, session `session_01FSg7JRUiTPo8GrgT38tAWP`). ⛔ Not a claim. A design card: `domain:spec` + `domain:services`.\n\n**Reader who acts:** the objectstack lane. objectstack-ai/cloud#3149 (the tracker) is `Blocked-by:` this card.\n\n## The gap (cloud#3149 item 1, found while designing objectstack-ai/hotsrm#1)\n- On hosted environments the organisation invite is the only way in (objectstack-ai/cloud#3132 ruling), so a supplier's portal users are organisation members.\n- The baseline member sets carry the `sys_user_org_members` row scope (`id in current_user.org_user_ids`; `packages/plugins/plugin-security/src/objects/default-permission-sets.ts:447`, repeated on `viewer_readonly`), and `sys_user` declares the same `defaultRowScope` (`packages/platform-objects/src/identity/sys-user.object.ts`).\n- RLS policies OR-combine, so an app permission set cannot narrow it.\n- Result: supplier A's portal users list supplier B's portal accounts, and every supplier sees every employee's name and email.\n- ADR-0138 (the v18 guest model) covers the anonymous principal only, not a signed-in external member: this is a new population, not an unused capability.\n\n## The ruling (what binds)\n- An organisation invite may carry the role **`external`**, beside owner / admin / member. The better-auth organization plugin's roles are configurable.\n- A person holding `external` in the organisation is, in every environment of that organisation, a member whose:\n  - **baseline excludes the member directory**: no `sys_user_org_members` row scope, own row only;\n  - data comes **only through explicit grants** (positions, permission sets, sharing rules);\n  - access is not reached by the `everyone`-anchor default sets.\n- The JIT path stamps the population from the role.\n- Self-hosted deployments get the same role through the environment's own organisation.\n- The record: a dated note on ADR-0135 D2 / D4, mirrored in cloud's ADR-0024. objectstack-ai/cloud#3132 is not reopened; it gains one line.\n\n## Acceptance\n- An `external` member of an organisation with two suppliers' portal users reads `sys_user` and `sys_member` and sees its own row only.\n- With a permission set granting one object, it reads that object and nothing else.\n- An ordinary member is unchanged.\n- The cloud's invite flow can issue `external` (cloud follows with its own card when this lands)."

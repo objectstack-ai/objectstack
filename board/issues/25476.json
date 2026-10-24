@@ -2,8 +2,8 @@
   "number": 25476,
   "kind": "issue",
   "title": "Data import: allow alternative match keys per row (e.g. credit code, else country + registration no.)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "duplicate",
   "draft": null,
   "author": {
     "login": "marchtian",
@@ -14,19 +14,22 @@
     "area:records",
     "domain:spec",
     "enhancement",
-    "needs-user-decision",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T15:36:51Z",
-  "updated_at": "2026-10-23T16:51:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T01:38:42Z",
+  "closed_at": "2026-10-24T01:38:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25476",
-  "body": "## Context\n\nIn hotsrm a supplier's identity depends on where it is registered (ADR-0007): domestic suppliers are unique by `credit_code`, overseas ones by `country + registration_no` (`credit_code` is blank for them). One legacy supplier sheet contains both.\n\n## Gap\n\n`ImportRequest.matchFields` is a single key set for the whole import. With `matchFields: ['credit_code']`, overseas rows have a blank key and `upsert` creates them again on every run (duplicates), unless `skipBlankMatchKey` is set, in which case they are not imported at all.\n\n## Proposal\n\nAccept an ordered list of key sets, first non-blank one wins per row:\n\n```json\n{ \"writeMode\": \"upsert\", \"matchKeys\": [[\"credit_code\"], [\"country\", \"registration_no\"]] }\n```\n\n(or `matchFields` accepting `string[][]`). Ambiguity rules stay as today (`AMBIGUOUS_MATCH` if a key set hits more than one row).\n\n## Workaround in hotsrm (temporary)\n\nImport the same sheet twice with `skipBlankMatchKey: true`: pass 1 `matchFields: ['credit_code']`, pass 2 `matchFields: ['country', 'registration_no']`. Each pass skips the other kind of row. Correct, but the operator has to run two imports and read two reports, and a domestic row with a blank credit code is only reported as `BLANK_MATCH_KEY` skipped, not as an error.\n\nLinked: objectstack-ai/hotsrm#10"
+  "body": "Ruled: 6377845536 · batch #9 item 3b · letter A · 2026-10-24T00:43:45Z (ordered key sets; a row blank on every set is a row error, not a silent skip)\n\n## Context\n\nIn hotsrm a supplier's identity depends on where it is registered (ADR-0007): domestic suppliers are unique by `credit_code`, overseas ones by `country + registration_no` (`credit_code` is blank for them). One legacy supplier sheet contains both.\n\n## Gap\n\n`ImportRequest.matchFields` is a single key set for the whole import. With `matchFields: ['credit_code']`, overseas rows have a blank key and `upsert` creates them again on every run (duplicates), unless `skipBlankMatchKey` is set, in which case they are not imported at all.\n\n## Proposal\n\nAccept an ordered list of key sets, first non-blank one wins per row:\n\n```json\n{ \"writeMode\": \"upsert\", \"matchKeys\": [[\"credit_code\"], [\"country\", \"registration_no\"]] }\n```\n\n(or `matchFields` accepting `string[][]`). Ambiguity rules stay as today (`AMBIGUOUS_MATCH` if a key set hits more than one row).\n\n## Workaround in hotsrm (temporary)\n\nImport the same sheet twice with `skipBlankMatchKey: true`: pass 1 `matchFields: ['credit_code']`, pass 2 `matchFields: ['country', 'registration_no']`. Each pass skips the other kind of row. Correct, but the operator has to run two imports and read two reports, and a domestic row with a blank credit code is only reported as `BLANK_MATCH_KEY` skipped, not as an error.\n\nLinked: objectstack-ai/hotsrm#10"
 }

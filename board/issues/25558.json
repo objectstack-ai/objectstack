@@ -1,0 +1,33 @@
+{
+  "number": 25558,
+  "kind": "issue",
+  "title": "pm-dispatch: in an app repo with no 分诊席 the seat that files a card also judges its 业务理由 — who is the independent reader there? (from the #25507 review, 2026-10-24)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T00:26:33Z",
+  "updated_at": "2026-10-24T01:26:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25558",
+  "body": "Ruled: 6378083450 · batch #10 item 1 · letter D · 2026-10-24T01:17:34Z (D = the 总监 is a per-app-project role: the app-repo PM summons a fable 总监席 in its own project, 「pm-dispatch 总监」, to review each card's 业务理由 with triage's three exits, never claiming or landing; a third-party app's 总监 is its own maintainer; unsure cases go to that app's own 总监; a card that turns out to need a platform change is filed to objectstack and reaches this maintainer's batch through platform triage; rule text names roles, never logins; A becomes the fallback)\n\nFiling gate **③**: a follow-up owed by landing work. Filed by `domain:skills` seat 2 (seat post #19287, session `session_01REMuzhz6MWRjg8uohedMnM`) from watch point (c) and ③-4 of the seat's review of record on PR #25552 (card #25507, record 6377274688). ⛔ Not a claim. Lane self-applied; grade suggested S, p3. **Likely a maintainer ruling, not a mechanical edit.**\n\n## The gap\n\nPR #25552 gives every card a 「业务理由」 field that the 分诊席 judges (clear ⇒ queue; missing ⇒ back to the filer; product trade-off ⇒ `needs-user-decision`). Per #25414 (PR #25422) app repos (e.g. hotcrm) have **no 分诊席**: they self-triage (`cross-repo-coordination.md` 机械三务). So in an app repo the lane seat that files a card is also the one that judges its business rationale — filer and judge are the same seat, which is the independence the maintainer's question 「我说的是业务需求上的合理性，谁来判断」 (2026-10-23 16:44Z) was asking for.\n\n## Options to put to the maintainer\n\n- A. App-repo cards' 业务理由 are judged by the 总监席 in its daily digest (sampled or all). — *fallback only after the ruling*\n- B. Judged by the 分诊席 of objectstack/objectui as well (widens triage to app repos for this one check).\n- C. Accept same-seat judgement in app repos; only product trade-offs go to 「待决策汇总」.\n- **D (ruled, maintainer's own shape, 2026-10-24 00:45–01:17Z).** Each app project summons its own 总监席 (fable) with one instruction line 「pm-dispatch 总监」; that seat does the first-touch review of the repo's cards' 业务理由 (three exits as triage), does not claim or land; third-party apps have their own maintainer as 总监; unsure ⇒ that app's own 总监; platform-change cards ⇒ objectstack triage ⇒ this maintainer's batch. Ruling comment 6378083450.\n\n## Acceptance\n\nThe maintainer's ruling is recorded on this card; then a one-line edit in the file the ruling names. Writes: relay only; ⛔ GitHub MCP writes.\n\n## Dedupe\n\nFollow-up of #25507 / PR #25552 review ③-4; no open carrier. **New.**"
+}

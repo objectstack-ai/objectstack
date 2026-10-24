@@ -1,0 +1,32 @@
+{
+  "number": 25557,
+  "kind": "pull_request",
+  "title": "docs(adr): the EXTERNAL rung admits explicit grants — ADR-0095, 0099, 0090 and 0135 record ruling 6355206139 B",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T00:21:32Z",
+  "updated_at": "2026-10-24T01:46:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25557",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoFqCf6db2fM7iSSM3dJb5rf)_\n\nRefs #25233 (closed by #25541). This is the Tier H ADR text for the ruling of record 6355206139, letter B, item 2. It stays a draft for the maintainer to merge (`docs/adr/**` is a governed surface).\n\nClause-②: no\nMetadata-protocol: none\n\n## What this does\n\nThe ADRs now say what #25515 and #25541 enforce. An EXTERNAL principal is a member of the organization's member pool who holds the `external` organization role. It reaches rows through explicit grants only: shares and share links, sharing rules, and the position and permission-set grants it holds, with their RLS evaluated. It never reaches the OWD baseline.\n\n| ADR | Clause | Change |\n|---|---|---|\n| ADR-0095 | header, TL;DR item 2, D2 | A dated Amended line. The enum comment and the EXTERNAL bullet carry the channel list, the owner-only OWD and write floors, the `controlled_by_parent` exemption, and the named limit: an ownerless object with a public effective model is under no OWD for any principal. The original wording is quoted. |\n| ADR-0095 | D3 | One bullet: EXTERNAL derives from the reserved `org_external` position, which the resolver projects from `sys_member.role = external`. As with `role='admin'`, the role is the source of a position, and enforcement reads the posture. |\n| ADR-0099 | header, D2 table, D3, I3, I7 | The EXTERNAL column is rewritten, with a dated note superseding the 2026-07-18 note's \"EXTERNAL rows stand as written\" and quoting the original cells. D3 gains a head note: sharing rules apply, item 1 shipped, the ownerless-object limit, and explain's `guest` → `EXTERNAL` debugger mapping. I3 gains a dated note: EXTERNAL is the one exception to \"only from capability grants\", derived from the reserved `org_external` position by the resolver alone. I7 reads through the floor. |\n| ADR-0090 | header, D11 | A Re-amended line and a second note under D11. \"drawn from an identity pool separate from members\" is replaced by the population inside the member pool, by role. The \"D6 access matrix gains an external-audience column\" sentence is retired, because it rode `externalSharingModel` and audience is a property of the principal. |\n| ADR-0135 | after D4 | A dated objectstack note: a third population, members of either D2 source who hold the `external` role, marked by role on `sys_member` and not by `sys_user.source`. D4's markings are unchanged, and cloud ADR-0024's text is not amended. |\n\nOne source line rides along: `packages/core/src/security/external-owd-floor.ts`'s docblock no longer lists `controlled_by_parent` among the models the floor closes (the seat's carry note on #25541). It takes a `patch` changeset on `@objectstack/core`, comment only.\n\n## Acceptance notes\n\n- The text matches the code on `main` at 45f996231: `owdForAudience` and `owdForPrincipal` (the cbp exemption), `holdsExternalIdentity` and `derivePosture`, `external_default`'s owner-only write floor, and the authz-matrix EXTERNAL column.\n- The notes from contract review 6375883728 are folded in: the D11 column sentence retired explicitly, the ownerless-object limit named, and the guest debugger mapping noted.\n- Cloud ADR-0024's mirror text is not ours and is not touched.\n\nNotes for review:\n\n- **ADR-0095 D3 and ADR-0099 I3** said posture derives \"only from capability grants\". EXTERNAL is the one rung whose evidence is an identity position. The new D3 bullet and a dated note on I3 record that exception; the resolver stays the only deriver, and no enforcement site reads the role.\n- **#25549** (share creation and sharing-rule materialisation refused as inert on effective-public objects) is still awaiting a ruling. Whatever the ruling, its ADR-0111 D7 line rides a later Tier H PR, not this one.\n\nVerification: all 69 derived gates were run and reconciled with `dispatch-gates --ran` (0 not measured), including `check-adr-links`, `check:adr-anchors`, `check-adr-symbol-anchors` and `check:doc-authoring`. The diff is 6 files. The I3 note (f653505be) re-derives the same 69, and the ADR, citation and doc-authoring gates re-pass on it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01AZbN6PU5Xz4WTi6NKmyKhN\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 25563,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth, driver-sql)!: fail closed on a missing auth secret outside development; compile window functions from closed tables",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T00:49:44Z",
+  "updated_at": "2026-10-24T02:02:36Z",
+  "closed_at": "2026-10-24T02:02:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T02:02:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25563",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoFczGz9PyHzzvPyUf2P99fn)_\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n\nTwo small hardenings, one commit each, each with its own changeset. Draft: it waits for the maintainer's review.\n\n## 1 · plugin-auth: the temporary auth secret is admitted on a development boot only\n\n`generateSecret` (`auth-manager-database-secret.ts`) fell back to a temporary `dev-secret-` value whenever `NODE_ENV` was anything but exactly `production`. It now admits that fallback only when `isDevelopmentBoot` from `@objectstack/core` holds (`NODE_ENV=development`) or under `NODE_ENV=test`, the same pair core's own production fuse reads (`isCloudManaged`). Every other boot without `OS_AUTH_SECRET` (or its legacy spellings, or a `secret` option) refuses to start, as `production` already did.\n\n- **CLI boots are unchanged.** `os serve` sets `NODE_ENV=production` when it is unset and `development` under `--dev`; `os start` does the same for the child it spawns. So only an embedder that constructs `AuthPlugin` / `AuthManager` itself with no secret and no `NODE_ENV=development` sees the new refusal.\n- **Why `test` is kept.** Vitest sets `NODE_ENV=test`, and the full plugin-auth suite constructs managers without a secret. Core's own fuse treats `test` as non-production for the same reason.\n- **Tests:** the existing guard block in `auth-manager.test.ts` gains an unset `NODE_ENV` case, four custom values (`staging`, `Production`, `dev`, empty), and a `test` case.\n\n## 2 · driver-sql: `findWithWindowFunctions()` compiles from closed tables and quoted columns\n\n`buildWindowFunction` assembled `FUNC() OVER (PARTITION BY … ORDER BY …)` as text. Now:\n\n- the function name is looked up in a closed table, `row_number`, `rank`, `dense_rank`, `percent_rank`, `cume_dist` (any case). These are the argument-less functions the door's flat shape can express. Anything else answers `INVALID_QUERY` / 400 before a statement is sent.\n- the sort direction is `asc` or `desc` (any case, default `asc`); anything else answers `INVALID_QUERY` / 400.\n- every `partitionBy` / `orderBy` field is emitted with `knex.ref(...).toQuery()`, the quoting idiom this file already uses for columns.\n\n**Why parameterised, not removed.** The dispatch preferred deleting the method. Measured first: nothing in objectstack, objectui or hotcrm calls it outside driver-sql's own tests and the turso override. It is still a published door, though. The protocol-17 migration `query-window-functions-retired` and the `query.windowFunctions` tombstone in `packages/spec/src/data/query.zod.ts` both prescribe `SqlDriver.findWithWindowFunctions()` as the replacement for the retired request key, and the 17.0 release notes and `content/docs/data-modeling/queries.mdx` document it. Removing it would retire a capability those texts tell embedders to migrate to. This PR keeps it and closes the string assembly instead. If the maintainer prefers removal, that is a follow-up that also rewrites those prescriptions.\n\n- **Tests:** a new `sql-driver-window-function-compilation.test.ts` covers the five functions in mixed case, three refused names, both directions plus the default, a refused direction, the exact compiled text, and a field-slot expression read as a column name.\n\n## Red on `main`, green here\n\nEach fix was committed first, then the source file alone was restored from `main` (`19d3720`) and the new tests were run:\n\n- plugin-auth guard block: **6 failed / 3 passed** on `main`'s source; **9 passed** with the fix.\n- window-function compilation: **6 failed / 6 passed** on `main`'s source (the six passes are the accepted spellings); **12 passed** with the fix.\n\n## Local verification\n\n- `pnpm --filter @objectstack/plugin-auth exec vitest run --maxWorkers=2`: **191 files, 3613 passed, 10 skipped**\n- `pnpm --filter @objectstack/driver-sql exec vitest run --maxWorkers=2`: **235 files passed, 12 skipped; 3787 passed, 212 skipped**\n- Derived gate list (`dispatch-gates.mjs --commands`) run locally: all **74** derived families exit 0 at `329dd94a` (`dispatch-gates.mjs --ran` reconciles 74 run, 0 NOT-MEASURED). Four needed a real-declaration build or a deeper fetch first and were re-run after it.\n- `pnpm --filter @objectstack/plugin-auth --filter @objectstack/driver-sql run typecheck` after a real-declaration build of both closures: exit 0\n- Dogfood battery (owed by the narrowing changesets): run on this head after the PR opens; the result goes to the reviewer thread.\n\n## Acceptance notes\n\n- `driver-sqlite-wasm` and `driver-turso` (local and replica transports) inherit the builder, so they get the same closed compilation. The turso remote transport already refused this door.\n- No issue is linked: this work was dispatched directly.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SNJgKweepTFKCrYgaKeFZK)_\n"
+}

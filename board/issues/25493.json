@@ -2,8 +2,8 @@
   "number": 25493,
   "kind": "issue",
   "title": "/import: common spreadsheet cell shapes fail whole rows (dotted / compact dates, option value case, one error per row)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "duplicate",
   "draft": null,
   "author": {
     "login": "marchtian",
@@ -14,19 +14,22 @@
     "area:records",
     "domain:server",
     "enhancement",
-    "needs-user-decision",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T15:49:32Z",
-  "updated_at": "2026-10-23T16:55:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-24T01:40:54Z",
+  "closed_at": "2026-10-24T01:40:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25493",
-  "body": "## Context\n\nTrial import of a simulated messy supplier ledger (hotsrm#10, the kind of sheet a purchasing department keeps in Excel for years). These are the cell shapes that failed rows which a person reads without hesitation. Each failure rejects the whole row, including rows where the bad cell is an optional field.\n\n| Cell | Field type | Result | Expected |\n|---|---|---|---|\n| `2011.07.01` | date | `invalid_date` | 2011-07-01 (`YYYY.MM.DD` is the most common Chinese written date form) |\n| `20090615` | date | `invalid_date` | 2009-06-15 (8-digit compact date, common in ERP exports) |\n| `2005/3/8` | date | accepted ✓ | — |\n| `CN` | select, option value `cn` | `invalid_option` | match option **values** case-insensitively (labels already are) |\n| `中国大陆` / `物流` | select (labels `中国` / `物流商`) | `invalid_option` | fine to refuse, but there is no way to declare **synonyms** on an option or picklist, so every legacy sheet needs a hand clean-up |\n\nAnd one reporting problem: when a row has several bad cells, only the **first** coercion error is reported (`coerceRow` collects all errors, the runner keeps `errors[0]`). The operator fixes one cell, re-runs, finds the next one. Two to three rounds per row in our trial.\n\n## Proposal\n\n1. Accept `YYYY.MM.DD` and `YYYYMMDD` in `parseDateCell` (unambiguous, year first).\n2. Case-insensitive match on option values.\n3. Optional `aliases: string[]` on select options / picklist options, used by import coercion only.\n4. Report all cell errors of a row (e.g. `errors: [{ field, code, message }]` next to the existing first-error keys).\n\n## Temporary measure in hotsrm\n\nThe import guide lists a cleaning checklist (date format, option labels, ISO country labels) to run on the sheet before importing."
+  "body": "Ruled: 6377844879 · batch #9 item 3a · letter A · 2026-10-24T00:43:45Z (proposals 1, 2, 4; not 3)\n\n## Context\n\nTrial import of a simulated messy supplier ledger (hotsrm#10, the kind of sheet a purchasing department keeps in Excel for years). These are the cell shapes that failed rows which a person reads without hesitation. Each failure rejects the whole row, including rows where the bad cell is an optional field.\n\n| Cell | Field type | Result | Expected |\n|---|---|---|---|\n| `2011.07.01` | date | `invalid_date` | 2011-07-01 (`YYYY.MM.DD` is the most common Chinese written date form) |\n| `20090615` | date | `invalid_date` | 2009-06-15 (8-digit compact date, common in ERP exports) |\n| `2005/3/8` | date | accepted ✓ | — |\n| `CN` | select, option value `cn` | `invalid_option` | match option **values** case-insensitively (labels already are) |\n| `中国大陆` / `物流` | select (labels `中国` / `物流商`) | `invalid_option` | fine to refuse, but there is no way to declare **synonyms** on an option or picklist, so every legacy sheet needs a hand clean-up |\n\nAnd one reporting problem: when a row has several bad cells, only the **first** coercion error is reported (`coerceRow` collects all errors, the runner keeps `errors[0]`). The operator fixes one cell, re-runs, finds the next one. Two to three rounds per row in our trial.\n\n## Proposal\n\n1. Accept `YYYY.MM.DD` and `YYYYMMDD` in `parseDateCell` (unambiguous, year first).\n2. Case-insensitive match on option values.\n3. ~~Optional `aliases: string[]` on select options / picklist options, used by import coercion only.~~ (not in letter A — a new permanent metadata key waits for a second app; ruling 6377844879)\n4. Report all cell errors of a row (e.g. `errors: [{ field, code, message }]` next to the existing first-error keys).\n\n## Temporary measure in hotsrm\n\nThe import guide lists a cleaning checklist (date format, option labels, ISO country labels) to run on the sheet before importing."
 }

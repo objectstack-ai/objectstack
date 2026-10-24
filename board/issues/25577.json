@@ -1,0 +1,32 @@
+{
+  "number": 25577,
+  "kind": "issue",
+  "title": "Data import: no way to write a column only when the row is created (re-running an upsert reverts state written since)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T01:29:05Z",
+  "updated_at": "2026-10-24T01:29:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25577",
+  "body": "Ruled: 6377846440 · batch #9 item 3c · letter B · 2026-10-24T00:43:45Z (proposal 2 `applyOn`; not proposal 1)\n\n## Context\n\nhotsrm (an SRM app built purely from metadata) migrates legacy suppliers with the platform import (`POST /data/:object/import`, `writeMode: 'upsert'`). Migrations are run more than once (rehearsal, corrections), so the import must be idempotent: a re-run may refresh master-data columns, but it must **not** overwrite fields that the app's own flows or users have changed since the first run.\n\nExample: legacy suppliers are created with `status = qualified` and `legacy_imported = true`. Between two runs a supplier gets frozen (`status = frozen`) and reviewed. A second upsert that carries the same `status` column silently moves it back to `qualified` (the state machine allows `frozen → qualified`), and `treatAsHistorical` is system-only anyway, so a signed-in admin cannot even send the first-run status through the import door.\n\n## Gap\n\n`ImportRequest` has `insert` / `update` / `upsert`, but nothing between them:\n\n- no \"create missing rows, skip existing ones\" mode (`insert` has no match step, so re-runs fail with duplicate-key errors instead of reporting `skipped`);\n- no per-column \"on create only\" flag in `FieldMappingEntry` (like `defaultValue` but applied only when the row is inserted).\n\n## Proposal (either would do)\n\n1. ~~`writeMode: 'insert_missing'` (or `upsert` + `onExisting: 'skip'`): match on `matchFields`, report existing rows as `skipped`, create the rest.~~ (not chosen — row-level skip would need two imports to also refresh master data; ruling 6377846440)\n2. `FieldMappingEntry.applyOn: 'create' | 'always'` (default `always`), so one sheet can carry \"initial\" columns that an update ignores.\n\n## Workaround in hotsrm (temporary)\n\n- `status.defaultValue = cel\\`has(record.legacy_imported) && record.legacy_imported == true ? 'qualified' : 'potential'\\`` so the sheet never carries `status`;\n- `legacy_imported.readonlyWhen = previous.legacy_imported != true` so a re-run cannot mark an existing supplier;\n- `initialStates` widened to include `qualified`, guarded by an insert-only script rule.\n\nIt works, but it spreads one import rule over three field declarations and is easy to get wrong (an expression default reading a field declared after it evaluates against an unset key unless guarded with `has()`).\n\nLinked: objectstack-ai/hotsrm#10\n\n---\n\nRe-filed as `objectstack-fleet[bot]` from #25475, same body and labels. #25475 was written off the fleet relay, under the maintainer's personal account, by a project-thread session through GitHub MCP; pm-dispatch allows content writes only through the relay. #25475's thread (triage, ruling, comments) stays there for reference; this card replaces it in the queue.\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"
+}

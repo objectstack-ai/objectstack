@@ -2,8 +2,8 @@
   "number": 25484,
   "kind": "issue",
   "title": "metadata-protocol: publish-drafts build probes query datasets with no execution context, so a correct dataset widget is reported as an error-tier widget_query_failed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:studio",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T15:41:55Z",
-  "updated_at": "2026-10-23T18:24:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T22:49:11Z",
+  "closed_at": "2026-10-23T22:46:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25484",
   "body": "Filing gate: ① a product defect with a named location and a live reproduction (finding class (a)).\nReader: the `packages/metadata-protocol` lane (`build-probes.ts`, the dataset probe call), next PR touching publish-time probes.\nDedupe (open AND closed): \"publish-drafts build probes widget_query_failed access denied dataset no execution context\" → 6 hits, none on this (nearest: #10377, same-batch dataset closure; #8400/#8594/#8595, publish audit rows — all different defects).\nreach: public HTTP entry, measured twice — `POST /api/v1/packages/:id/publish-drafts` answers an error-tier `widget_query_failed` for a widget that renders correctly.\nChecklist item priority: P1\ntype: Bug\nQA-source: #25479 · studio-authoring.draft-publish-lifecycle · observed beside the clauses\n\n## What happens\n\nAfter `POST /api/v1/packages/PKG/publish-drafts` publishes a dashboard whose widget is bound to a valid dataset (`showcase_task_metrics`), the response's `data.probes.issues` carries an **error-severity** `widget_query_failed`: `[Analytics] Access denied: reading \"showcase_task\" is not permitted for this user`, with fix text \"Fix the dataset definition…\". The same widget renders correctly for the admin who published it and for the member Mei. So the probe reports a defect that does not exist and tells the author to fix a correct dataset. The per-item publish runs no probes, which is why this appears only on the package publish.\n\nReproduced twice (two dashboards in one batch, then a third alone) on `main` 77392e90.\n\n## Mechanism\n\n`packages/metadata-protocol/src/build-probes.ts` (around line 343) calls the analytics service with no execution context:\n\n```\nconst result = await analytics.queryDataset(dataset, selection, undefined);\n```\n\nRead admission refuses a context-less read, so every dataset over a permission-gated object fails the probe. The probe's own docblock says it runs \"the SAME `queryDataset` path the dashboard renderer hits\", and the renderer passes the caller's context.\n\n**Expected:** the probe runs in the publishing caller's context, or in an explicit system context for a build check. Either way a correct dataset produces no error-tier issue."

@@ -1,0 +1,26 @@
+{
+  "number": 25584,
+  "kind": "issue",
+  "title": "Create form locks every field whose readonlyWhen is TRUE against the field defaults, though the server exempts INSERT from readonlyWhen",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T01:48:18Z",
+  "updated_at": "2026-10-24T01:48:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25584",
+  "body": "Filing gate: ① product defect with a reproduction (reach: console create form, measured once in the browser on 18.0.0).\nReader: objectui form renderer seat (`packages/components/src/renderers/form/form.tsx`, the per-field `resolveFieldRuleState` call), the next PR that touches create-mode rule evaluation.\nDuplicate check: searched objectstack and objectui issues (open and closed) for \"create form readonlyWhen evaluated on insert / fields read-only on new record\": 6 + 12 hits, none about this (closest: objectui#12082, which was about permission grants, not `readonlyWhen`).\n\n## What happens\n\nA field whose `readonlyWhen` reads a column that has a `defaultValue` is shown read-only on the **create** form, because the form evaluates the predicate against the seeded defaults. The server, by contrast, does not apply `readonlyWhen` on INSERT (`packages/objectql/src/engine.ts`, the insert-strip note: \"What INSERT still does NOT strip: `readonlyWhen`\"; objectui's own `form.tsx` comment says \"objectql exempts INSERT from `readonlyWhen` entirely\"). So the client is stricter than the server and the user cannot fill a form the API accepts.\n\n## Reproduction (hotsrm, platform 18.0.0)\n\n```ts\nconst locked = P`record.status == 'pending_verify' || record.status == 'active'`;\nstatus: Field.select({ defaultValue: 'pending_verify', readonly: true, options: [...] }),\nbank_name: Field.text({ required: true, readonlyWhen: locked }),\naccount_no: Field.text({ required: true, readonlyWhen: locked }),\n```\n\n1. Open the object's list in the console and click New.\n2. Every field with `readonlyWhen: locked` renders as a read-only `—`; the dialog has no inputs except the boolean toggle, and Create can only fail on the required fields.\n3. `POST /api/v1/data/<object>` with the same fields as the same user succeeds (201, the values are stored).\n\nSame with a predicate over an unset field: `readonlyWhen: P\\`record.approval_status != 'returned'\\`` locks the whole create form, because `null != 'returned'` is TRUE.\n\n## Expected\n\nOn a create form (no `previousValues`, the same `isCreateForm` signal the readonly strip already uses), `readonlyWhen` should not lock the field, matching the server. If locking on create is intended, the server should enforce it on INSERT too, and the spec text for `Field.readonlyWhen` should say so; either way client and server should agree.\n\n## Workaround in the app\n\nGuard the predicate with `has(record.id) && record.id != null && (...)`; the stored row on UPDATE carries `id`, the create form does not."
+}

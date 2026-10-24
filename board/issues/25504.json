@@ -2,8 +2,8 @@
   "number": 25504,
   "kind": "issue",
   "title": "showcase: money reads four ways — expense-report roll-ups show `1,500.5` / `917` beside `225.75`, `budget` has no currency, `budget_remaining` drops the decimals, and two dashboards print the same total as `109万` and `1,090,000`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:records",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T16:29:23Z",
-  "updated_at": "2026-10-23T17:59:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-23T22:19:06Z",
+  "closed_at": "2026-10-23T22:16:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25504",
   "body": "Filing-gate: ① product defect · reach: the Expense Reports list, the Projects list and the two dashboards, as admin in zh-CN\nReader: objectstack triage seat → the lane that owns `examples/app-showcase`; the fixes are declarations on `src/data/objects/expense-report.object.ts` and `project.object.ts` (`scale` / `currencyConfig` / a formula result type) and the KPI `format` on the two pages\nDuplicate search: semantic search \"showcase expense report total summary currency format decimals budget no currency symbol\" in objectstack, incl. closed → 2 hits: #8345 (open, multi-currency conversion, unrelated) and #22727 (closed, a formula could not declare a currency result). Neither covers these declarations.\n\nMeasured during an exploratory showcase walkthrough on 2026-10-23: objectstack `main` b9c7a8f (`PORT=3000 pnpm dev`, stock showcase), objectui `main` 6fb31dc console (Vite dev, :5180), locale zh-CN.\n\n## What happens\n\n- **Expense Reports → Total** (`total_amount`, a `sum` roll-up over the currency field `showcase_expense_line.amount`): one column reads `225.75`, `917`, `8,900` and `1,500.5`. The roll-up declares no `scale`. objectui#11752 made a summary format at its natural precision unless the author declares one, so this is the showcase's declaration to make. The same applies to `approved_amount` and `reimbursable_amount` (`960`, `512` on EXP-2001).\n- **Projects → Budget** (`Field.currency` with no `currencyConfig`) reads `200,000.00` with no currency, while **Accounts → Annual Revenue** (`currencyConfig: { defaultCurrency: 'USD' }`) reads `US$12,000,000.00`.\n- **Projects → Budget Remaining** (a formula over two currency fields) reads `200,000` beside `200,000.00`.\n- The command center KPI shows **109万**, and Delivery Operations → Total Budget shows **1,090,000** for the same sum.\n\n## Expected\n\nWithin the showcase, every money column of one currency reads in the same format: two decimals, and one currency treatment throughout. The two dashboards agree on how a total budget is written. The showcase is the app people copy from, so its money fields should carry the declarations that give that result.\n\nSession: https://claude.ai/code/session_01A48x1XYLTmiM2pgQxsgeKJ\n"

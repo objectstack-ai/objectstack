@@ -1,0 +1,36 @@
+{
+  "number": 25546,
+  "kind": "pull_request",
+  "title": "chore(console): move the objectui pin 6fb31dcc9954 → 2958f17e9c6a, past objectui#13427, so the console builds against the spec's external role",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T22:33:37Z",
+  "updated_at": "2026-10-23T23:36:08Z",
+  "closed_at": "2026-10-23T23:36:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T23:36:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25546",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuUEiL7Whkdn2bgECeG7DDX9)_\n\nFixes #25537\nPart of #25438\nClause-②: no\nMetadata-protocol: none\n\nThis PR moves the console pin from `6fb31dcc9954` to `2958f17e9c6a`. That is objectui `main` at `2958f17e9c6add35636bb07aa9da4b1dcb1daa5f`, the merge of objectstack-ai/objectui#13429, which fixes objectstack-ai/objectui#13427. It is objectui `origin/main`'s tip, and `6fb31dcc9954` is its ancestor (34 commits).\n\n**Why.** #25515 added the `external` role to the spec's built-in membership roles. objectui's `ORG_ROLE_LABELS` at `6fb31dcc9954` is a record keyed by every `OrgRole`, with no `external` entry, so `@object-ui/auth` fails its build against this tree's spec. That is the Console Pin Gate and Spec Shape Gate red on `main` (#25438). objectstack-ai/objectui#13429 adds the label and types the table so it compiles against the spec on both sides of #25515. At this pin, `pnpm objectui:build` on this branch builds the console with no local patch.\n\nThis PR is marked `Part of` #25438, not `Fixes`. #25438 closes when the hourly Console Pin Gate and Spec Shape Gate go green on `main`.\n\n**Branch.** The harness assigned the branch `claude/project-thread-75czxa`; the card's `Claim:` (6375839808) names it.\n\n## The diff\n\nThe same four files as the earlier pin moves #25455, #25358 and #25262. The repo's own tooling wrote each one; none was edited by hand.\n\n- `.objectui-sha` and `.changeset/console-2958f17e9c6a.md`: `OBJECTUI_ROOT=/home/claude/objectui OBJECTUI_NO_DEEPEN=1 bash scripts/bump-objectui.sh 2958f17e9c6add35636bb07aa9da4b1dcb1daa5f --no-commit` exited 0. It printed \"6fb31dcc9954..2958f17e9c6a walks completely\", \"32 releasing changeset(s), 0 breaking\" and \"(on origin/main)\".\n- `scripts/sdui-manifest.record.json`: `NODE_OPTIONS=--max-old-space-size=6144 pnpm objectui:build` exited 0 with \"@objectstack/console dist ready (65900 KB) from objectui@2958f17e9c6a\" and \"Console bundle carries THIS tree's @objectstack/spec, and only it\". Then `node scripts/gen-sdui-manifest-node.mjs` ran: 107 components, sha256 `d1fde278ffd6…`. `sdui.manifest.json` is byte-identical, so only its provenance record moves. `node scripts/check-sdui-manifest.mjs` passes.\n- `packages/sdui-parser/objectui-lockstep.json`: `OBJECTUI_ROOT=.cache/objectui-2958f17e9c6a pnpm gen:sdui-lockstep` recorded 214 region lines, blob `0131f27cf86d`, and 25 diagnostic codes. `pnpm check:sdui-lockstep` passes. `pnpm check:console-sha` passes.\n\n## The changeset\n\n`scripts/objectui-changeset-digest.mjs` derived it from the 33 changesets objectui added over `6fb31dcc9954..2958f17e9c6a`, across 34 non-merge commits (32 releasing, 1 release-nothing, 1 commit with no changeset, listed by subject). objectui declared `minor`; under ruling A (#25105) a console refresh is recorded as `patch` with `Metadata-protocol: none`. #25455's `console-6fb31dcc9954.md` covers the range before this one, so the two do not overlap.\n\n## The built console\n\n- The injection stamp carries a real witness: `skew: true`, against objectui's own vendored spec at objectstack `915e9404992234a7cd0d2dd4701dfbadbe9cb2c7`. The fresh witness (an injected-only description) is present, and the stale detector \"Member role (owner, admin, delegated_admin, member\" (the pre-#25515 role description) is absent. So the bundle carries this tree's spec, the one with `external`.\n- `node scripts/check-console-injection.mjs --require-stamp` exit 0. Single-zod canary: one zod literal (4.6.7).\n\n## F1 re-test\n\nRuling 6262099137 item 2 re-runs the F1 re-test when `.objectui-sha` moves before the cut. It runs on this branch's console at this pin; the reading is posted on #15194 and in the card's `os-dev-report`.\n\n## Out of scope\n\n- No objectui source changes here, and no product code, `.github/workflows/**`, `scripts/build-console.sh` or `content/docs/releases/`.\n- This PR is not a release act and does not touch the Version Packages PR #24876. After it lands, refreshing #24876 is the maintainer's action.\n- objectui's own `.objectstack-sha` stays at `915e9404` (before #25483), as the objectui card ruled; that pin is not this repo's.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01RpaQUYs7rsJJJj35xjQPeK\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RpaQUYs7rsJJJj35xjQPeK)_\n"
+}

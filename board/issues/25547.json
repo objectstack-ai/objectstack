@@ -1,0 +1,36 @@
+{
+  "number": 25547,
+  "kind": "pull_request",
+  "title": "test(cli): the shared-name install-local jobs test lets each install run to the setup deadline, not a fixed 120 s",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T22:34:19Z",
+  "updated_at": "2026-10-23T23:20:43Z",
+  "closed_at": "2026-10-23T23:20:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T23:20:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25547",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDWJsBGQpadCH8JR2xZQ5re)_\n\nFixes #25499\n\nClause-②: no\nMetadata-protocol: none\n\n`packages/cli/test/package-install-local-jobs-shared-name.integration.test.ts` gave each of its three `os package install` children a fixed 120 s SIGKILL. That number was set on an idle machine. Under a full `pnpm test` on a 4 vCPU box, the first install outlived it, and 6 of 9 assertions went red against correct code. The `beforeAll` still had more than 390 s of its 600 s budget left.\n\nTest-only. `skip-changeset`: the file is under `packages/cli/test/`, which `@objectstack/cli`'s `files[]` does not ship.\n\n## What changed (one file)\n\n- **An install has no budget of its own.** `beforeAll` takes one deadline when it starts: `SETUP_BUDGET_MS` (the hook's existing timeout, `2 * BOOT_TIMEOUT_MS + 12 * RUN_WAIT_MS`, unchanged at 600 s) less a 10 s `KILL_REPORT_RESERVE_MS`. Each install may run until that deadline. On a slow box, the installs use the time the boots and run waits did not need. No number went up.\n- **A kill names the install.** On the deadline the install's whole process group is SIGKILLed: the child now spawns `detached`, so the node process that `tsx` starts is killed too, and that process holds the pipes `close` waits on. The promise then **rejects**, naming the install, its wall time and the budget, with both transcripts. So the red is that message, not a bare `exit null` and not vitest's `Hook timed out`, which names no step.\n- **The wall time is kept as evidence and is not an input.** `InstallRun` now carries `elapsedMs`, and the first `it` puts it in its failure message.\n\nWhy there is no constant and no load factor: `run-dev-unbuilt-workspace.e2e.test.ts` in this package records two ceilings that failed this way, a fixed one and one scaled from a calibration. A bigger constant fails again on a busier box. The shared spawner helpers in `test/helpers/serve-process.ts` export no install budget and no load-aware ceiling (their only child budget is `runServe`'s inline 180 s default). So this change adds no export to them, and the seven sibling `package-install-local-*` files keep their own copy of `packageInstall()` (see Acceptance notes).\n\n## Verification (head `02097ac15b`, 4 vCPU container, every run under `scripts/pm/os-verify-lock.sh`)\n\n| leg | result |\n|---|---|\n| the file alone (pure tree) | `Test Files 1 passed`, `Tests 9 passed`, 87.10 s |\n| per-install wall time, alone (one-off logging mutation, restored) | alpha 11105 ms, beta 10159 ms, gamma 11483 ms, all exit 0 |\n| per-install wall time inside the whole cli `integration` tier, `VITEST_MAX_WORKERS=3` (same mutation) | alpha 14198 ms, beta 13516 ms, gamma 15747 ms, all exit 0; tier `Test Files 171 passed, 1 skipped (172)`, `Tests 1469 passed, 9 skipped`, 2498.96 s |\n| ablation: bogus artifact path (`./dist/no-such-artifact.json`) | red: `all three packages install` fails with `alpha (9838 ms): … Cannot read artifact: ENOENT`, exit 1 against expected 0. 9/9 red, no hook timeout |\n| ablation: budget spent (`deadline = Date.now() + 1`) | red in 16.96 s: `beforeAll` rejects with `os package install in …/shared_alpha was SIGKILLed after 7 ms: the setup budget (600000 ms for the whole beforeAll, less a 10000 ms reserve) was spent.` The file fails and its 9 tests are skipped. No `Hook timed out` |\n\nThe mutations went through `scripts/ablation-replace.mjs`, in WRAP mode, with an EXIT/INT/TERM trap. After the last leg the file's blob equals HEAD (`bc1e7d9b3a…`) and `git diff HEAD` is empty. My first attempt at the logging mutation did nothing: its anchor was a substring of its replacement, so the tool refused it (anchor count 1 -> 1). It was re-run with an anchor that is not.\n\n**NOT MEASURED: a full `pnpm test` on this box.** The loaded reading above is the cli integration tier at three workers, not the turbo-wide run from the issue. The installs there took 14-16 s, against more than 120 s in the issue's run. So this box's load never came near the old ceiling, and the fix's tolerance of a busier box is argued from the design, not measured.\n\nThe local gates are listed in the report on #25499. `pnpm lint` and the cli `typecheck` / `unit` tier were run here.\n\n## Acceptance notes\n\n- The same fixed `setTimeout(() => child.kill('SIGKILL'), 120_000)` install ceiling is in six sibling files: `package-install-local-{jobs,jobs-pull,hooks,handlers,boot-steps,uninstall-cleanups}.integration.test.ts`. Not changed here, because the claim's file surface is this one file. No red is on record for them. carrier: none.\n- In this file, `bootStart`'s fixed `BOOT_TIMEOUT_MS` still does not read the shared deadline. If installs used most of the budget, a hung second boot would show as `Hook timed out` instead of a named error. Not observed. carrier: none.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CxBKycaiUpA1yGx1XyoGqX)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01CxBKycaiUpA1yGx1XyoGqX\n"
+}

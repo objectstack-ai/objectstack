@@ -1,0 +1,37 @@
+{
+  "number": 25565,
+  "kind": "pull_request",
+  "title": "fix(rest)!: compare the credential's environment with the resolved environment in enforceAuth",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T00:51:55Z",
+  "updated_at": "2026-10-24T02:06:37Z",
+  "closed_at": "2026-10-24T02:06:35Z",
+  "closed_by": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "merged_at": "2026-10-24T02:06:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25565",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao2dkxxuFkMApsJLTFUkjKef)_\n\nClause-②: yes (narrowing)\nMetadata-protocol: none\n\n## What changes\n\n`enforceAuth`, the shared gate every REST data-plane route calls, now compares the environment whose `auth` service validated the credential with the environment the request resolved to, and answers a mismatch with the existing anonymous-deny response (same status, same body).\n\n- `computeExecCtx` already stamped `__authEnvironmentId` (the validating environment). It now also stamps `__environmentId` (the resolved environment) beside it. Both are internal keys, not `ExecutionContext` fields.\n- A module-private predicate, `credentialAnchoredElsewhere`, makes the comparison. `undefined` and `'platform'` are not compared (a control-plane request has nothing to own), and a context that `computeExecCtx` did not produce carries neither key and is not judged.\n- `GET /ui/view/:object/:type` keeps its own `enforceEnvironmentOwnership` call unchanged. Its anchored-elsewhere half now duplicates the shared gate, but its named-but-not-served half (an `X-Environment-Id` the chain did not serve) has no other home, so the call stays. Only its docblock changed.\n\nWhy: ADR-0006 makes auth per-environment. `computeExecCtx` can validate a caller against the default environment's `auth` service when the target environment's kernel carries none, and until now only the UI-view route compared the two environments.\n\n## New pins\n\n`rest-scoped-route-environment-ownership.test.ts` drives the unstubbed identity resolution with two environments and checks five route families (crud read and write, data-action clone, batch `createMany`, record sharing), each on the scoped and the unscoped mount:\n\n- a credential validated in a different environment than the target answers the anonymous-deny status and body, and nothing downstream (protocol or sharing service) is called;\n- positive controls: the target environment's own credential, and the default environment's credential aimed at the default environment, are served and reach the downstream call exactly once.\n\nThe file also pins that the context names both environments. Its refusal cases fail on `main` (19d3720af) and pass with this change; its 20 controls pass on both.\n\n## Who sees a difference\n\nOnly a multi-environment host whose per-environment kernels carry no `auth` service while the default environment's does. In this repository nothing registers both `kernel-manager` and `default-project`, so in-repo compositions answer exactly as before. Single-kernel deployments are untouched: the one auth service answers for the one environment.\n\n## Tests\n\nOn head 985e41fb (the fix), plus the census re-anchor on 1fcfb16b:\n\n- `pnpm --filter @objectstack/rest test`: Test Files 317 passed (317), Tests 6379 passed / 326 skipped.\n- `pnpm --filter @objectstack/rest typecheck`: exit 0.\n- `pnpm --filter @objectstack/runtime typecheck`: exit 0. `request-execution-context.conformance.test.ts`: 13/13 (the new internal key is set aside by name beside the other two).\n- `rest-exec-ctx-principal-kind.test.ts`: the post-assembly key-set pin names `__environmentId`.\n- Dogfood battery (`pnpm --filter @objectstack/dogfood test`, full, on 985e41fb, lock VERDICT command-exit 1): Test Files 290 passed / 1 failed / 3 skipped (294), Tests 2499 passed / 1 failed / 18 skipped. The one failure was a consequence of this change: `authz-probe-blind-spot.test.ts` counts the bare term `enforceAuth` in `rest-server.ts`, comments included, and this diff adds four prose mentions (111 to 115, no call site). Re-anchored in the census with its provenance on 1fcfb16b; that file reruns 47/47. Declared narrowing: the full battery was not rerun for the test-only commit.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on 1fcfb16b: 73 derived, 73 run, all exit 0, reconciled with `--ran` (exit 0). 69 ran on 985e41fb; the 4 the census commit added (`spec` `check:empty-state`, `check:liveness`, `check:strictness-ledger`, `check:variant-docs`) and the ratchet and text families (`check:type-check-debt`, `check:type-check-coverage`, `check:cross-package-test-inputs`, `check:doc-authoring`, `check:issue-citations`, `check:nul-bytes`, `check:test-source-alias`) ran on 1fcfb16b. Two needed prerequisites on the first pass: `check-plugin-teardown-shape --self-test` (exit 3: pinned fixture commit absent from the shallow clone; fetched, exit 0) and `check:dual-build-cjs-loads` (exit 3: needs a full declaration build; rebuilt, exit 0).\n\n## Acceptance notes\n\n- The changeset carries the BREAKING banner, the remedy line and the ADR-0087 `not-required` disposition.\n- Kept as a draft for the maintainer's approval: this is a security boundary.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017KrjEWoY6mS9sWygvs6Qxg)_\n"
+}

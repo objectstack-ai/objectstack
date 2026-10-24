@@ -13,21 +13,19 @@
   "labels": [
     "area:devpath",
     "bug",
-    "domain:server",
-    "pm:dispatched",
+    "domain:devx",
+    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-23T17:01:12Z",
-  "updated_at": "2026-10-23T18:25:54Z",
+  "updated_at": "2026-10-23T21:53:21Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25510",
   "body": "Filing gate **①**: product defect with a named locus. `reach:` a public entry, `npm create objectstack` (and `os init` / `os create plugin`), writes `^18.0.0` into every new project's `package.json`, which is the range the 18.x docs tell users not to use. Filed in a maintainer-directed session (`session_01FLzfC4GSjCxa5gYJky3BAg`), turning the 2026-10-23 whole-project assessment into cards. Maintainer, verbatim: 「使用 pm-dispatch 技能创建 issues」, then 「从业务角度评估合理性」. ⛔ Not a claim.\n\n- **Reader who acts:** whichever seat triage gives the scaffolders (`packages/create-objectstack`, `packages/cli` `init` / `create`). One os-dev, one PR.\n- **Dedupe:** `search_issues` on objectstack-ai/objectstack, closed included, \"create-objectstack scaffold caret range version pin template package.json\" → 65 hits. None is about the range's operator. The nearest are #25165 (closed, the vitest `~4.0.0` pin) and #23805 (closed, npm 10 `edgesOut`).\n\n## Business case\n\n- **Who hits it today:** every developer who starts a project from the scaffolder. That is the first step of the onboarding path. Their manifest says \"any 18.x\".\n- **What the docs promise instead:** since the 2026-10-21 ruling (#25105), a breaking change on the v18 line can ship in a MINOR or a PATCH.\n  - `content/docs/releases/v18/index.mdx:129-130`: \"A `^18.0.0` range can therefore move you to a release that breaks you. Pin exact versions, and read each release's page before you move.\"\n  - `content/docs/protocol/backward-compatibility.mdx:206` and `:213` say the same.\n- **Cost if not fixed:** the lockfile keeps a project steady only until something re-resolves. That happens on `npm update`, on a deleted lockfile, or on a CI that installs without the lock. The next re-resolve after 18.1.0 ships moves the project across a release the docs warn may break it, without the user deciding to upgrade. The user did what the product told them; the product wrote the range its own docs forbid.\n- The reference app already follows the docs: hotcrm pins `@objectstack/*` exactly.\n\n## Where\n\n- `packages/create-objectstack/src/pkg-utils.ts:23`: `syncObjectStackDeps` writes `` `^${version}` `` into every `@objectstack/*` dependency.\n- `packages/create-objectstack/src/templates/blank/package.json:19-29`: the committed baseline is `^18.0.0` for nine packages.\n- `packages/cli/src/commands/init.ts:54` and `packages/cli/src/commands/create.ts:165`: the same `` `^${getCliVersion()}` `` for out-of-repo projects. `create.ts` keeps `workspace:*` in-repo, and that should stay.\n- `packages/create-objectstack/src/runtime-image.test.ts:166-168` asserts \"the range the scaffolder writes for its own version\" with `satisfiesCaret`. It moves with the change.\n\n## Done when\n\n- A project scaffolded by `create-objectstack`, `os init` or `os create plugin` (out of repo) lists every `@objectstack/*` at the exact version of the tool that wrote it, with no `^` or `~`.\n- The blank template's committed baseline and the docs' scaffold examples agree with that.\n- The release-time rewrite still lands the scaffolder's own version (prereleases included). Tests pin the exact form.\n- Third-party ranges (`typescript`, `vitest`) are out of scope.\n"

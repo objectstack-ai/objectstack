@@ -1,0 +1,36 @@
+{
+  "number": 25534,
+  "kind": "pull_request",
+  "title": "fix(app-showcase): scope the command center work queue to in-review tasks",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T20:34:10Z",
+  "updated_at": "2026-10-23T21:02:40Z",
+  "closed_at": "2026-10-23T21:02:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T21:02:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25534",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuACdPWFJTLDcTrByFCHLzqb)_\n\nFixes #25503\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nOn the showcase command center (`examples/app-showcase/src/ui/pages/command-center.page.ts`), the bottom panel `cc_queue_g` is titled 待审核列表 · Work Queue and carries the badge 审批中, but its `object-grid` had no filter and listed all 10 seeded tasks, done ones included. The KPI tile `cc_k3` (待复审 Review) above it counts only `status = in_review`.\n\nBoth blocks now read one module constant, `IN_REVIEW = [{ field: 'status', operator: 'equals', value: 'in_review' }]`. The tile passes it to `kpi()` as before, and the grid gets `filter: IN_REVIEW`, so the panel lists the set the tile counts (2 rows on the stock seed).\n\nLanding: the file the claim names. No `packages/spec` edit.\n\n## Which key object-grid reads\n\n`filter`, singular, as a `ViewFilterRule` array:\n\n- **Spec:** `ObjectGridPropsSchema` in `packages/spec/src/ui/component.zod.ts` (the `filter: z.array(ViewFilterRuleSchema, …)` member, line 5055 at base `1ff43b67ea`) is described as \"lowered to the wire `$filter`. THE key, singular — not the plural misspelling\". `filters` is declared only as an alias of `filter` (`FILTERS_TO_FILTER`), and `defaultFilters` is a retired key.\n- **Renderer inputs:** the committed `sdui.manifest.json`, generated from objectui's built tree at the `.objectui-sha` pin `6fb31dc`, lists `filter` (type `array`) among `object-grid`'s inputs. It has no `filters` input.\n- **Showcase precedent:** `examples/app-showcase/src/ui/pages/my-work.page.ts` filters its `object-grid` the same way. That page is the one #7750 was about: the plural `filters:` was written there but never read.\n\nThe renderer's own read point (objectui `plugin-grid/src/ObjectGrid.tsx` reading `schema.filter`) is cited from that page's comment. This session can only read this repository, so I did not open it at the pin myself.\n\n## Pin\n\n`examples/app-showcase/test/command-center-metric-filter.test.ts` gains a `describe` block. It finds `cc_queue_g` and `cc_k3` anywhere in the page as authored, helpers included, and asserts four things:\n\n- the queue's `filter` equals the in_review rule array;\n- the queue's `filter` equals the tile's `filter`;\n- both blocks read the same `objectName`;\n- the whole `cc_queue_g` properties bag passes `ComponentPropsMap['object-grid'].safeParse`.\n\n## Tests (head `15ef279240`)\n\n- `pnpm --filter @objectstack/example-showcase exec vitest run --maxWorkers=2 test/command-center-metric-filter.test.ts`: Test Files 1 passed, Tests 7 passed.\n- `pnpm --filter @objectstack/example-showcase test`: Test Files 38 passed (38), Tests 465 passed (465), lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/example-showcase typecheck`: exit 0. `tsc --listFiles` includes the test file (count 1).\n- `pnpm --filter @objectstack/example-showcase validate` (`os validate`): Validation passed, exit 0.\n- **Ablation:** `node scripts/ablation-replace.mjs` replaced the anchor `'due_date'], filter: IN_REVIEW } },` with `'due_date'] } },` (anchor x1 to x0, blob a98af74d6112 to 8af132bc2407).\n  - Red: 2 of 7 failed, \"scopes the queue to in_review tasks through `filter`\" and \"carries the same rules as the tile `cc_k3`\".\n  - Restore: blob == HEAD (a98af74d6112), `git diff HEAD` empty.\n  - No build leg: the test imports the page from the package's own `src`.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 45 commands at `15ef279240`. 44 exited 0. `pnpm check:dual-build-cjs-loads` exited 3 with PREREQUISITE NOT MET because the worktree built only the showcase's dependency closure, so that one is NOT MEASURED locally and CI's Lint & Repo Gates covers it. `--ran` reconciliation: \"45 derived famil(ies) accounted for — 44 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)\".\n\n## Changeset\n\nNone, with `skip-changeset`. `@objectstack/example-showcase` is `private: true`, so nothing in this diff publishes.\n\n## Acceptance notes\n\n- `cc_k3`'s filter is now read through the shared constant rather than written inline. The value it counts is unchanged.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016g7nYP9wdNx1GDa5XDr7Uy\n"
+}

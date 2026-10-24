@@ -1,0 +1,36 @@
+{
+  "number": 25562,
+  "kind": "pull_request",
+  "title": "docs(releases): fold #25541, #25550 and #25429 into the 18.1.0 notes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T00:37:54Z",
+  "updated_at": "2026-10-24T01:03:09Z",
+  "closed_at": "2026-10-24T01:03:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-24T01:03:07Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25562",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiRwWtsarkLPmw9fMYiFZ3LY)_\n\n## Summary\n\nThree more changesets reached `main` after #25553 was compiled at `19d3720af1`. They are still before the 18.1.0 cut. This PR folds them into the 18.1.0 notes. It changes docs only.\n\n- **#25550** is breaking (`minor`, narrowed). The permission save door now refuses a row policy that reads a membership key nothing owns. An object write that breaks a stored policy is refused too. Both are added under \"Metadata the build and the save doors now refuse\".\n- **#25541** is semantic. An `external` holder is now its own posture, with an owner-only org-wide default. It is added under \"Semantic changes\".\n- **#25429** is a fix to the skills docs. It is counted under other fixes.\n\nThe counts become 253 entries, split 78 / 9 / 47 / 2 / 117 across the five sections. 87 changesets are declared breaking, 48 `minor` and 39 `patch`. `check-adr-0087-registration --list` confirms 87 out of 87. The counts are updated on the 18.1 page, the v18 index, the releases index and Backward Compatibility.\n\n## Checks\n\nThese all pass locally:\n- `check:role-word`\n- `check:release-notes`\n- `check:release-page-status`\n- `check:release-index-currency-sync`\n- `check:doc-anchors`\n- `check:docs-audit-scope`\n- `check:docs-single-h1`\n- an MDX compile of the page\n\nClause-②: no\nMetadata-protocol: none\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01At7xrR4rgknXtej5ZkMJHd\n"
+}

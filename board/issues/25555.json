@@ -1,0 +1,31 @@
+{
+  "number": 25555,
+  "kind": "issue",
+  "title": "core: ResolveLocalizationInput.tenantId takes an organization id but does not say so — cloud passed the environment id for months and every hosted environment resolved UTC; rename or brand it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:engine",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T00:13:51Z",
+  "updated_at": "2026-10-24T00:13:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25555",
+  "body": "Filing gate ③: maintainer direct dispatch, 2026-10-24, in the cloud ops seat's chat: 「可以：在 objectstack 立这两张改进卡（时区接口参数名、跨仓公开类型改动同步落地），挂 pm:queue。」 ⛔ Not a claim.\n\n**Reader who acts:** the `domain:engine` seat. `resolveLocalizationContext` and `ResolveLocalizationInput` live in `@objectstack/core`.\n\n## What happened\n\n`ResolveLocalizationInput.tenantId` (`packages/core/src/security/resolve-authz-context.ts:2181`, on `main` `45f996231e`) means the **organization** id: the settings service stores and reads the tenant rung by organization. The name does not say so.\n\nobjectstack-ai/cloud passed the **environment** id there from its three AI entry points: `agent-routes` (`chatContext.environmentId`), `ai-routes` `/chat` and `tool-routes`. The consequences:\n- every hosted environment resolved its organization's timezone as `UTC`;\n- the AI's \"today\" and `{today}` filter boundaries were cut in UTC for every non-UTC organization;\n- the defect lasted for months after cloud#1496 / #1498 claimed to fix it.\n\nUnit tests stayed green because they only exercised the \"settings service unavailable → read `sys_setting` directly\" fallback, which did not filter by organization until #25301 narrowed it. cloud fixed its callers in cloud#3150 (merged `1b26a28b`) and pinned the fix with a real hosted-kernel e2e.\n\nA rig measurement on a real hosted kernel, with the organization timezone `Asia/Shanghai`:\n\n| `tenantId` passed | Timezone resolved |\n|:--|:--|\n| the environment id | `UTC` |\n| the organization id | `Asia/Shanghai` |\n| absent | `Asia/Shanghai` |\n\n## Wanted\n\nMake the parameter say what it takes, so this class of mistake cannot type-check. The seat picks the shape:\n- **(a) Rename** `tenantId` → `organizationId` on `ResolveLocalizationInput`. It is a published `@objectstack/core` export, so the rename needs this repo's deprecation and ADR-0087 treatment. There are 4 in-repo callers: `request-execution-context.ts:274`, `mcp/src/plugin.ts:669`, `plugin-audit/src/audit-plugin.ts:387`, `plugin-hono-server/src/current-user-endpoints.ts:742`.\n- **(b) Keep the key and brand the type:** an `OrganizationId` brand that an environment id cannot satisfy without a cast.\n- **(c) Both.**\n\nThe settings service's own `{ tenantId, userId }` scope carries the same naming. Whether it moves with this change is the seat's call; say so on the card.\n\n## Acceptance\n\n- The input's name or type states it takes an organization id.\n- Passing an environment-shaped value is caught at compile time (b) or is impossible to spell (a).\n- In-repo callers are migrated.\n- A changeset declares `Clause-②` / `Metadata-protocol` per this repo's rules.\n\n## Dedupe\n\nSearched with `gh api search/issues`, closed included:\n\n| Query | Hits |\n|:--|:--|\n| `repo:objectstack-ai/objectstack resolveLocalizationContext tenantId` | 29 |\n| `repo:objectstack-ai/objectstack localization tenantId organizationId rename` | 7 |\n\nThe nearest hits are #25301 and #25226, both merged: they narrowed the fallback and the settings rungs to the caller's organization (ADR-0131 D8) but kept the name. #22318 and #24235 are plugin-audit locale seams. None renames or brands the parameter. **New.**\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 25590,
+  "kind": "pull_request",
+  "title": "docs(releases): fold #25563, #25564, #25565 and #25560 into the 18.1.0 notes",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T02:29:50Z",
+  "updated_at": "2026-10-24T02:30:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25590",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiRwWtsarkLPmw9fMYiFZ3LY)_\n\n## Summary\n\nFive more changesets reached `main` after #25562 was compiled at `03243fc637`, still before the 18.1.0 cut. This PR folds them into the 18.1.0 notes. It is docs-only.\n\nThree are breaking patches:\n- **#25563, auth secret**: the temporary auth secret is now used on a development or test boot only. This goes under \"Boot and deployment\", and checklist step 2 now names the embedded-kernel case.\n- **#25563, window functions**: `findWithWindowFunctions()` now serves a closed set of functions and directions. This goes under \"Datasources and drivers\".\n- **#25565**: a REST credential is honoured only in the environment that validated it. This goes under \"REST, MCP and API clients\", and checklist step 4 covers multi-environment hosts.\n\nThe other two:\n- **#25564** is semantic: it records the change of meaning that #25483 made to `runAs`. It goes under \"Semantic changes\".\n- **#25560** is a fix and is counted under other fixes.\n\nThe counts are now 258 entries, split 81 / 9 / 47 / 3 / 118. 90 changesets are declared breaking, 48 `minor` and 42 `patch`, and `check-adr-0087-registration --list` reports 90 of 90. The count is updated on the 18.1 page, the v18 index, the releases index and Backward Compatibility.\n\n## Checks\n\nThese pass locally: `check:role-word`, `check:release-notes`, `check:release-page-status`, `check:release-index-currency-sync`, `check:doc-anchors`, `check:docs-audit-scope`, `check:docs-single-h1`, and an MDX compile of the page.\n\nClause-②: no\nMetadata-protocol: none\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01At7xrR4rgknXtej5ZkMJHd\n"
+}

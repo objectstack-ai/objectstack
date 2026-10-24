@@ -1,0 +1,37 @@
+{
+  "number": 25539,
+  "kind": "pull_request",
+  "title": "fix(create-objectstack, cli): scaffolded projects pin every @objectstack/* dependency to the exact scaffolder version",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-23T20:55:32Z",
+  "updated_at": "2026-10-23T21:44:57Z",
+  "closed_at": "2026-10-23T21:44:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-23T21:44:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/25539",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDWJsBGQpadCH8JR2xZQ5re)_\n\nPart of #25510 (the producer half). The card stays open for two halves this PR does not carry, named under \"What is left\" below.\n\nClause-②: no\nMetadata-protocol: none\n\n## What changed\n\nEvery project scaffolded by `npm create objectstack`, `os init` or `os create` (default standalone placement) now lists each `@objectstack/*` dependency at the EXACT version of the tool that wrote it. Before, it got `^VERSION`. A prerelease is written verbatim (`18.1.0-rc.2`). The v18 docs say a `^18.0.0` range \"can therefore move you to a release that breaks you. Pin exact versions\" (`content/docs/releases/v18/index.mdx:129-130`).\n\n| Producer | Before | After |\n|---|---|---|\n| `packages/create-objectstack/src/pkg-utils.ts` `syncObjectStackDeps` | `^VERSION` | `VERSION` |\n| `packages/cli/src/commands/init.ts` `pkgVersion()` | `^VERSION` | `VERSION` |\n| `packages/cli/src/commands/create.ts` `objectstackDependencySpec('standalone')` | `^VERSION` | `VERSION` |\n| `os create --in-repo` | `workspace:*` | `workspace:*` (unchanged) |\n\nThird-party ranges (`typescript`, `vitest`, `zod`, `@types/node`) are not touched. Every scaffolded `@objectstack/*` name is in `.changeset/config.json`'s `fixed` group, so the scaffolder's own version is published for each one. The changeset is `patch` on `create-objectstack` and `@objectstack/cli`, and it carries the hand fix for existing projects.\n\n## What is left on #25510\n\n1. **The committed blank baseline (`packages/create-objectstack/src/templates/blank/package.json`) stays `^18.0.0` on purpose.** The release rewrite that stamps it is `scripts/sync-template-versions.mjs`, which is outside this card's file surface. It runs in the root `version` script, after `changeset version`, and in `cut-rc.yml`. It sets every `@objectstack/*` entry of every template's `package.json` to `range` = `` `^${major}.0.0` `` (`loadScaffolderVersion()`, about line 270). The same `range` also feeds the manifest's `specVersion`. If this PR wrote an exact baseline, the next version pass would put `^MAJOR.0.0` back, and an exact-form ratchet in `template-consistency.test.ts` would then fail on the post-version tree. So the baseline, its ratchet (`template-consistency.test.ts:122-139`, \"must be ^MAJOR.x\") and the rewriter have to move together, in a change whose surface includes `scripts/sync-template-versions.mjs` and its `--self-test` fixtures. That change has to split the deps value (the exact `version`, prerelease included) from `specVersion`, which is a protocol range and should stay one. Users are not exposed in the meantime: `syncObjectStackDeps` overwrites the baseline at scaffold time whenever the scaffolder's version is readable. The test `leaves no @objectstack/* range in the scaffolded blank template` pins that.\n2. **Docs (devx lane):** `content/docs/protocol/kernel/plugin-spec.mdx:719,723` (a plugin `package.json` example with `^17.0.0`) and `:741-746` (\"the scaffolders caret-pin each dependency\"), plus `content/docs/upgrading.mdx:81-82` (\"a project on the scaffold's default ranges (`^17.0.0`)\").\n\n## Tests\n\nMeasured on this branch (head `3a678c53a7` for the final union; package runs cited per commit):\n\n- `pnpm --filter create-objectstack test`: Test Files 18 passed (18), Tests 268 passed (268) (at `95c59d7dbe`; the create-objectstack tree is unchanged since).\n- `pnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2`: Test Files 327 passed (327), Tests 4811 passed (4811) (at `4f417d70e9`).\n- `pnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2 test/scaffold-exact-objectstack-pin.test.ts test/init.test.ts test/create.test.ts`: 3 passed (3), 73 passed (73) (final test content).\n- `pnpm --filter create-objectstack typecheck` exit 0; `pnpm --filter @objectstack/cli typecheck` exit 0 (`tsc --noEmit && pnpm check:test-typecheck`).\n\nWhat is pinned:\n- create-objectstack: exact form, a prerelease (`18.1.0-rc.2`), and the real blank template through the rewrite (`template-consistency.test.ts`). `runtime-image.test.ts` now uses EQUALITY between the Dockerfile tag and the emitted pin, plus a prerelease scaffold. `satisfiesCaret` and its battery are gone, because no producer writes a caret any more. `scaffold-skills-single-copy.test.ts` reads the exact form.\n- `os init` and `os create` (standalone): exact form at this checkout's version (`init.test.ts`, `create.test.ts`). The new `test/scaffold-exact-objectstack-pin.test.ts` imports the commands under a planted `18.1.0-rc.2` manifest and checks every template of both commands, with `--in-repo` `workspace:*` as the control.\n\n**Ablation**, one per producer, through `scripts/ablation-replace.mjs` in wrap mode. Each mutation put the caret back. Each restore was proven by blob == HEAD and an empty `git diff HEAD`. These tests import `src/`, so no build or dist leg applies.\n- `init.ts` `pkgVersion()`: 4 failed / 53 passed (`init.test.ts` ×3 templates and the prerelease file).\n- `create.ts` standalone: 2 failed / 18 passed.\n- `pkg-utils.ts`: 6 failed / 53 passed (`template-consistency.test.ts` ×3, `runtime-image.test.ts` ×3).\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derives 70 commands. The same 70 were re-derived at `3a678c53a7` and run there, together with `pnpm lint`. Results are in the report comment on #25510. CI owns every other family.\n\n## Acceptance notes\n\n- Prose now stale and outside the file surface (comments only, no behaviour): `packages/create-objectstack/src/index.ts:37` and `:586` (\"the template carries a caret range\"), and `packages/create-objectstack/src/runtime-image.ts:20-27` (the generated `package.json` \"carries a caret RANGE\"). The resolve-after-install logic is still correct with exact pins: the resolved version now equals the pin.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CxBKycaiUpA1yGx1XyoGqX)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01CxBKycaiUpA1yGx1XyoGqX\n"
+}

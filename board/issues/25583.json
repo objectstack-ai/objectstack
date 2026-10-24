@@ -1,0 +1,30 @@
+{
+  "number": 25583,
+  "kind": "issue",
+  "title": "Write-identity lock 1 is absent in multi-repo project threads: the session starts in the parent folder, never loads objectstack's `.claude/settings.json` deny list, and 26 MCP writes on 2026-10-23 landed as the maintainer's personal account",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-24T01:42:10Z",
+  "updated_at": "2026-10-24T01:42:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/25583",
+  "body": "Filing gate: ① tooling defect with a named landing point, measured in a live session.\nReader: `domain:skills` seat; the next PR that touches the project-thread session start (the #25380 hook family) or the write-identity locks.\nDedupe (open AND closed): \"project thread settings deny MCP write identity\" → 3 related hits, all closed and none covering this: #18205 (lock 1 inert because settings load from the clone-time checkout), #25380 (multi-repo working directory hides `.claude/skills`), #25457 (card threads write only through the relay — a rule in text, not a lock).\nreach: measured 2026-10-24 in project thread session `session_018fnREjMeK9XQeHDwkJXKMW` (the Objectstack project, repos objectstack + objectui).\n\n## What happens\n\nA Claude Code project thread with two repositories starts with its working directory at the parent folder (`/home/claude`), not inside `/home/claude/objectstack`. The settings that session loads are the launcher's (`/home/claude/.claude/launcher-settings.json`, whose `permissions` is `{\"allow\": [\"Skill\"]}`) — objectstack's `.claude/settings.json`, which denies `mcp__github__issue_write`, `mcp__github__create_pull_request`, `mcp__github__add_issue_comment` and 14 other MCP content writes (lock 1, #18068), is never read. The MCP write tools are offered to the session, and a write through them is authored as the account that connected GitHub — the maintainer's own login.\n\n## What it cost, 2026-10-23\n\n26 writes landed under the maintainer's personal account, every one with `performed_via_github_app: claude`:\n\n- objectstack issues #25430 #25442 #25443 #25444 #25445 #25446 #25447 #25468 #25469 #25470 #25471 #25475 #25476 #25477 #25481 #25491 #25493;\n- objectui issues #13387 #13388 #13389 #13390 #13412 #13413 (#13412 and #13413 were transferred from objectstack, keeping their author);\n- pull requests objectstack #25455 and #25460, objectui #13370 (all merged).\n\nThe 13 open, unclaimed cards among them are being re-filed through the relay and closed as duplicates; the rest are claimed, closed or merged and stay as they are.\n\n## Expected\n\nA project-thread session refuses the same MCP content writes a session started inside the repo refuses, so the relay is the only write path whichever folder the session starts in.\n\n## Where the fix can land\n\n- The project-thread session start (the hook family #25380 added) installs the deny roster where the parent-folder session reads it, or refuses to start writes until it is present; `scripts/pm/check-settings-deny-roster.mjs` already holds the roster to copy from.\n- Until then, every dispatch order and coordinator instruction already carries the relay-only line (#25457); this card is the mechanical half that text cannot enforce.\n\nSession: `session_018fnREjMeK9XQeHDwkJXKMW`"
+}
