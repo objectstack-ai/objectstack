@@ -262,6 +262,50 @@ export const RELATIONSHIP_DELETE_BEHAVIOR = 'relationship/delete-behavior';
 export const ROLLUP_NON_NUMERIC_AGGREGAND = 'rollup/non-numeric-aggregand';
 
 /**
+ * The rule id R14 reports under: an object field of type `composite` /
+ * `repeater` that declares sub-fields or columns.
+ *
+ * Ruling 6386744473: an object-level `composite` / `repeater` is untyped JSON,
+ * no sub-field member is added to `FieldSchema`, and a list that needs typed
+ * columns is a child object (`master_detail`). A form view's `fields` sub-rows
+ * (`view.zod.ts`) and the Studio metadata forms are other schemas and are not
+ * judged here.
+ *
+ * ## Intake — which doors reach this rule at all
+ *
+ * `FieldSchema` is strict, and its `FIELD_KEY_GUIDANCE` rows for these three
+ * keys make the parse refusal name the child-object route. So on every door
+ * that PARSES first this rule is unreachable by construction — the object
+ * never arrives. Measured on the source tree this rule shipped against:
+ *
+ * | door                                                         | reaches the rule?       |
+ * |--------------------------------------------------------------|-------------------------|
+ * | `defineStack(x)` (strict default), hence `os validate` /     | no — refused at load    |
+ * |   `os build` / `os lint` on such a config                    |                         |
+ * | `saveMetaItem` (Studio / REST `/meta` / MCP)                 | no — 422 at the parse   |
+ * | **`os lint` on a RAW object-literal config** (never parses)  | **yes — fires**         |
+ * | **`defineStack(x, { strict: false })`** (keeps the key)      | **yes — fires**         |
+ * | **the metadata-generation rubric** (`scoreMetadata`), beside | **yes — fires**         |
+ * |   its own schema verdict                                     |                         |
+ * | **`lintDataModel` called directly with an unparsed stack**   | **yes — fires**         |
+ *
+ * It is not a second opinion on the parse: it exists so the unparsed doors
+ * name the same route instead of letting the key ride to `os build`. A
+ * consumer crediting it as coverage on a `defineStack`-authored app is
+ * crediting the wrong gate — there the credit belongs to the schema.
+ */
+export const FIELD_EMBEDDED_SUB_FIELDS = 'field/embedded-sub-fields';
+
+/** The two embedded-JSON field types R14 judges. */
+const EMBEDDED_JSON_FIELD_TYPES = new Set(['composite', 'repeater']);
+
+/**
+ * The keys an author writes when they expect a typed list on R14's types — the
+ * three the ruling names, the same three `FIELD_KEY_GUIDANCE` answers.
+ */
+const SUB_FIELD_KEYS = ['fields', 'subFields', 'columns'] as const;
+
+/**
  * [#22161] The consequence every `controlled_by_parent` arm of R2 ends with —
  * one wording, so the three shapes cannot drift. Why such a record is
  * readable by nobody, and why `readonly` / `system` skip the required check,
@@ -774,6 +818,25 @@ export function lintDataModel(objects: any[]): LintIssue[] {
             fix:
               "Give the field ONE options source: inline `options: [{ label: '…', value: '…' }]` or " +
               "`picklist: '<name>'` naming a shared list — never both: `options` beside `picklist` is refused.",
+          });
+        }
+      }
+
+      // R14 — an object-level `composite` / `repeater` declares no sub-fields
+      // (see FIELD_EMBEDDED_SUB_FIELDS for the ruling and the doors it reaches).
+      if (EMBEDDED_JSON_FIELD_TYPES.has(type)) {
+        const declared = SUB_FIELD_KEYS.filter((k) => Object.prototype.hasOwnProperty.call(def, k));
+        if (declared.length > 0) {
+          issues.push({
+            severity: 'error',
+            rule: FIELD_EMBEDDED_SUB_FIELDS,
+            message:
+              `${type} field "${obj.name}.${fieldName}" declares \`${declared.join('`, `')}\`, but an ` +
+              `object-level ${type} is untyped JSON with no sub-fields`,
+            path: `${fieldPath}.${declared[0]}`,
+            fix:
+              'Make the typed list a child object whose `master_detail` field points back here (an inline ' +
+              'related list), and remove the key.',
           });
         }
       }

@@ -2936,6 +2936,32 @@ const ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION: RuleExplanation = {
+  rule: 'field/embedded-sub-fields',
+  covers: 'why a composite or repeater field has no sub-fields',
+  paragraphs: [
+    'On an object field, `composite` and `repeater` are untyped JSON containers of CMS lineage (a ' +
+      'Strapi component, an ACF group or repeater): the value is stored as JSON on the parent row, ' +
+      'and `FieldSchema` has no member that declares its inner keys. So nothing gives a row its ' +
+      'labels, per-column types, options, required flags or translations, nothing validates one, ' +
+      'and nothing — a flow included — can address a single row. Declaring `fields`, `subFields` ' +
+      'or `columns` on one promises a typed list the platform does not build.',
+    'A list that needs typed columns is a child object: its own fields carry the types, labels, ' +
+      'options and validation, a `master_detail` field on it points back at the parent, and the ' +
+      'parent\'s record page shows the children as an inline related list, editable in place with ' +
+      '`inlineEdit` on that field. Each row then has a record identity that a lookup, a roll-up or a ' +
+      'flow can reach. Keep a `composite` / `repeater` only for JSON whose shape the platform does ' +
+      'not need to know.',
+    'Not judged: a form view\'s `fields` sub-rows and the metadata forms Studio renders — those are ' +
+      'other schemas that do declare sub-rows.',
+    'Reach: the strict field schema refuses all three keys at the parse with this same route, so ' +
+      '`defineStack`, `os validate`, `os build` and the metadata save door never hand such a field ' +
+      'to this rule. It fires only on the doors that never parse — `os lint` on a raw object-literal ' +
+      'config, `defineStack(x, { strict: false })`, and the metadata-generation rubric beside its own ' +
+      'schema verdict — where without it the key would ride unnamed to `os build`.',
+  ],
+};
+
 const RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION: RuleExplanation = {
   rule: 'relationship/delete-behavior',
   covers: 'what deleting a master does to its details',
@@ -4974,6 +5000,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION.rule]: RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION,
   [ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION.rule]: ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION,
   [RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION.rule]: RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION,
+  [FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION.rule]: FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION,
   [DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION.rule]: DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION,
   [DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION.rule]: DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION,
   [AGENT_AUTHORING_WITHDRAWN_EXPLANATION.rule]: AGENT_AUTHORING_WITHDRAWN_EXPLANATION,

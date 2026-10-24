@@ -5,8 +5,9 @@
 // three ADR-0120 uniqueness ids carry it as the `hint` `os validate` and
 // `os build` print. What the hints used to explain is `os explain` text.
 //
-// The three `lintDataModel` sweep ids (`object/missing-name-field`,
-// `field/select-missing-options`, `rollup/non-numeric-aggregand`) are never
+// The four `lintDataModel` sweep ids (`object/missing-name-field`,
+// `field/select-missing-options`, `rollup/non-numeric-aggregand`,
+// `field/embedded-sub-fields`) are never
 // adapted into an `AuthoringFinding`, so a census that reads `hint` never sees
 // them. This file reads `fix` directly, over every arm each rule has, with long
 // object and field names where a name is interpolated.
@@ -14,6 +15,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  FIELD_EMBEDDED_SUB_FIELDS,
   lintDataModel,
   lintLegacyOrganizationComposites,
   lintUniqueDeclarations,
@@ -36,6 +38,7 @@ const IDS = [
   MISSING_NAME_FIELD,
   SELECT_MISSING_OPTIONS,
   ROLLUP_NON_NUMERIC_AGGREGAND,
+  FIELD_EMBEDDED_SUB_FIELDS,
 ];
 
 const LONG_OBJECT = 'acme_customer_purchase_order_header';
@@ -170,6 +173,24 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
     }
   });
 
+  it('field/embedded-sub-fields: one line, whatever the type, the keys or the names', () => {
+    const fix =
+      'Make the typed list a child object whose `master_detail` field points back here (an inline ' +
+      'related list), and remove the key.';
+    for (const type of ['repeater', 'composite']) {
+      const objects = [
+        {
+          name: LONG_OBJECT,
+          fields: {
+            name: { type: 'text' },
+            [LONG_FIELD]: { type, fields: [{ name: 'item' }], subFields: [{ name: 'item' }], columns: ['item'] },
+          },
+        },
+      ];
+      expect(fixOf(record(lintDataModel(objects)), FIELD_EMBEDDED_SUB_FIELDS)).toBe(fix);
+    }
+  });
+
   it('rollup/non-numeric-aggregand: one line naming the child type, not the parent', () => {
     expect(fixOf(record(lintDataModel(rollup('datetime', LONG_OBJECT))), ROLLUP_NON_NUMERIC_AGGREGAND)).toBe(
       "Aggregate a numeric or boolean child field, or use function: 'count'; a roll-up cannot store a " +
@@ -181,7 +202,7 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
   });
 
   it('every fix the cases above fired is one line of at most 200 characters', () => {
-    // The coverage control first: all six ids fired.
+    // The coverage control first: all seven ids fired.
     expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...IDS].sort());
     for (const f of fired) {
       expect(f.fix, f.rule).toBeTruthy();
