@@ -395,7 +395,8 @@ export interface SharingRuleReconcilePassResult extends SharingRuleEvaluationRes
    * [#25549] One line, present only when the pass skipped recipients: the rule
    * is anchored on a public object, where a share reaches an `external` member
    * of the record's organization only, so no row was written for the internal
-   * recipients it expands to. The count is in the pass's log line.
+   * recipients it expands to, nor for any recipient on a record whose
+   * organization could not be resolved. The count is in the pass's log line.
    */
   note?: string;
 }
@@ -405,8 +406,9 @@ type RuleGrantOutcome = 'granted' | 'refused' | 'internal';
 
 /** [#25549] The pass's one-line note when it skipped internal recipients. */
 function internalHalfNote(object: string): string {
-  return `"${object}" has a public sharing model: rows were written for external recipients only; `
-    + 'the internal recipients this rule expands to already reach its records, so none was written for them';
+  return `"${object}" has a public sharing model: rows were written only for external members of each record's `
+    + 'organization; none for the other recipients this rule expands to (internal members already reach its '
+    + 'records, and a record whose organization could not be resolved admits no recipient)';
 }
 
 export interface SharingRuleServiceOptions {

@@ -192,8 +192,7 @@ const INERT_OBJECTS = Object.keys(INERT_SCHEMAS);
  * [#25549] The classes on which a RULE's pass still aborts. On the public one
  * (`whiteboard`) the grant service admits an `external` member of the record's
  * organization and refuses everyone else, so a rule pass there skips its
- * internal recipients and goes on — pinned below and in
- * `external-recipient-public-object.test.ts`.
+ * internal recipients and goes on — pinned below and in block 3 of this file.
  */
 const RULE_ABORTING_OBJECTS = INERT_OBJECTS.filter((o) => o !== 'whiteboard');
 
@@ -364,7 +363,7 @@ describe('[#8207] the sharing-rule evaluator can no longer materialise inert row
     // a skip the pass absorbs and reports, not an abort.
     const result = await rules.evaluateRule('share_whiteboard_gold', SYS);
     expect(result).toMatchObject({ matchedRecords: 1, expandedUsers: 1, grantsCreated: 0, grantsRefused: 0 });
-    expect(result.note).toMatch(/external recipients only/);
+    expect(result.note).toMatch(/written only for external members of each record's organization/);
     expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
   });
 
@@ -555,8 +554,9 @@ describe('[#25549] a public object admits a share to an external member of the r
     // member, and the skip is neither a refusal nor an abort.
     expect(result).toMatchObject({ matchedRecords: 2, expandedUsers: 2, grantsCreated: 2, grantsRefused: 0 });
     expect(result.note).toBe(
-      '"board" has a public sharing model: rows were written for external recipients only; '
-        + 'the internal recipients this rule expands to already reach its records, so none was written for them',
+      '"board" has a public sharing model: rows were written only for external members of each record\'s '
+        + 'organization; none for the other recipients this rule expands to (internal members already reach its '
+        + 'records, and a record whose organization could not be resolved admits no recipient)',
     );
     expect((engine._tables.sys_record_share ?? []).map((r) => r.recipient_id)).toEqual(['usr_ext', 'usr_ext']);
     // The count reaches the log once per pass, not once per skipped grant.

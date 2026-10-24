@@ -399,9 +399,11 @@ export interface ISharingService {
    * recipient (`VALIDATION_FAILED` — other recipient types are not enforced by
    * any gate and are refused rather than persisted inert, ADR-0078), and an
    * object in an enforcing sharing posture (`SHARING_NOT_ENABLED` — a share on
-   * a public / bypass / owner-less / `controlled_by_parent` object enforces
-   * nothing). Upserts match on `(object, record, recipient, source)` so a
-   * manual grant never clobbers a rule-materialised row (D7).
+   * a bypass / owner-less / `controlled_by_parent` object enforces nothing; on
+   * a public object it is admitted only for a recipient who is an `external`
+   * member of the record's organization, since that population's owner-only
+   * floor consults it). Upserts match on `(object, record, recipient, source)`
+   * so a manual grant never clobbers a rule-materialised row (D7).
    */
   grant(input: GrantShareInput, context: ExecutionContext): Promise<RecordShare>;
 
