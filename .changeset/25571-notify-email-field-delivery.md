@@ -1,0 +1,17 @@
+---
+'@objectstack/service-automation': minor
+---
+
+feat(service-automation): a `notify` node mails the address in an email field of the trigger record, and refuses a computed address no user holds
+
+Clause-②: no
+Metadata-protocol: narrowed
+
+A `notify` node can now reach a person who is not a user, such as an applicant who came in through a public form. `recipients: { emailField: 'applicant_email' }` with `channels: 'email'` (the form `@objectstack/spec` declared earlier in this release, which until now failed the run at the node) mails the address held in that `email`-typed field of the record that triggered the flow.
+
+- **The address.** It is read from the stored record by id when the node runs, never from the record snapshot the run carries. It must be exactly one mailbox, `name@example.com`. A list, a display name, a separator, a line break or an audience prefix such as `role:` fails the node and nothing is sent. So do an empty field, a record that is not stored and a run with no trigger record. The failure names the field and the record, never the value.
+- **The send.** The title and message render as for any notify, the email goes through the deployment's outbound mail, and it is recorded like every notification: a `sys_notification` event and a `sys_notification_delivery` row whose recipient is the address.
+- **Per-address limit.** One address receives at most 5 email-field sends per hour (`EMAIL_FIELD_SENDS_PER_WINDOW`, `EMAIL_FIELD_SEND_WINDOW_SECONDS`), across every flow, counted case-insensitively in the kernel `cache` service (per process when none is registered, said once). A sixth fails the node before anything is written.
+- **Narrowed: a computed address must be a user's.** A recipient that a value expression (a CEL envelope) evaluates to and that reads as an email address now resolves to the user who holds it, and fails the node when no user holds it, with a message that points to `{ emailField }`. Before, such an address was mailed as it stood, so an expression over record text let whoever typed that text choose who the flow mailed. An address written out in the flow (`recipients: ['ops@example.com']`) is the author's constant and is sent as written, as before.
+- **Who moves.** A flow whose recipient expression evaluates to an address that belongs to no user. Measured over `examples/**` at `47af3dd`: all 17 `recipients` envelopes read a user reference (`record.assignee`, `record.owner`, `task.owner`, `ownerId`, …), none an address, so no in-repo flow changes. Fix: give the address its own `notify` node with `recipients: { emailField: 'FIELD' }` and `channels: 'email'`, or give the person a user.
+- **Dependency.** `@objectstack/plugin-auth` moves from a dev dependency to a dependency of `@objectstack/service-automation`: the limit counts through its `rate-limit-storage` fixed-window counter, the repository's one counter, as `@objectstack/service-sms` does.

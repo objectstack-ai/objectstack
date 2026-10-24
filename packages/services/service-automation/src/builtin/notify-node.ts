@@ -417,7 +417,13 @@ async function resolveEmailFieldAddress(
     } catch (err) {
         return { ok: false, error: `${lead}; reading ${at} failed (${(err as Error).message}), so nothing was sent.` };
     }
-    if (!row) return { ok: false, error: `${lead}, and that record no longer exists, so nothing was sent.` };
+    if (!row) {
+        return {
+            ok: false,
+            error: `${lead}, and ${trigger.object} '${trigger.id}' is not stored (deleted, or not written yet), so `
+                + 'nothing was sent. The address is read from the stored record.',
+        };
+    }
     const value = row[field];
     if (value == null || value === '') {
         return {
