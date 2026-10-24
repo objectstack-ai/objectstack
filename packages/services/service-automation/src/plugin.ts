@@ -16,6 +16,7 @@ import type { MetadataMutationEvent } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
 import type { AutomationEngineOptions, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
+import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
 import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
 import { resolveFlowPrecedence, renderFlowContender } from './flow-precedence.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
@@ -175,6 +176,10 @@ export interface AutomationServicePluginOptions {
      * enterprise host injects a vault/KMS-backed resolver here without touching
      * the materialization path. A ref that resolves to `undefined`/empty is a
      * hard boot error (an app must not silently run with a dead connector).
+     *
+     * The engine reads an `api` flow's start-node `config.secretRef` through
+     * the same resolver, at every inbound post: a name that resolves to
+     * nothing refuses that post as unavailable (`503`), never verifies it.
      */
     credentialResolver?: CredentialResolver;
     /**
@@ -277,23 +282,9 @@ export function createPackagePathResolver(packageRoot?: string): (relativePath: 
     return (relativePath: string) => resolveInsidePackageRoot(packageRoot, relativePath, 'paths');
 }
 
-/**
- * Resolves a declarative connector `credentialRef` to its plaintext secret, or
- * `undefined`/empty when unknown (which the materializer turns into a hard boot
- * error). May be async so an enterprise resolver can hit a vault. The open-tier
- * default reads from `process.env` (see {@link defaultEnvCredentialResolver}).
- */
-export type CredentialResolver = (ref: string) => string | undefined | Promise<string | undefined>;
-
-/**
- * Open-tier credential resolver (ADR-0097 §3, ADR-0015 open/enterprise line):
- * a `credentialRef` is the name of an environment variable. This is the
- * degraded-but-honest story for environments without a managed secrets service —
- * static credentials from env/config are open source; managed vaulting, OAuth2
- * refresh, and per-tenant connection lifecycle are the enterprise tier.
- */
-export const defaultEnvCredentialResolver: CredentialResolver = (ref) =>
-    typeof process !== 'undefined' ? process.env?.[ref] : undefined;
+// The credential resolver lives in ./credential-resolver.ts so the engine reads
+// the same one for an `api` flow's `config.secretRef`; re-exported unchanged.
+export { defaultEnvCredentialResolver, type CredentialResolver };
 
 /**
  * Retry backoff for **degraded** declarative instances (#3017) — provider-bound
@@ -952,6 +943,7 @@ export class AutomationServicePlugin implements Plugin {
             maxLogSize: this.options.maxLogSize,
             runSummaryLog: this.options.runSummaryLog,
             scheduledWorkPolicy: this.options.scheduledWorkPolicy,
+            credentialResolver: this.options.credentialResolver,
         });
 
         // [#20790] The write-only flow credential channel — the engine reads a

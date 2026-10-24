@@ -69,6 +69,7 @@ import { summarizeRun } from './run-summary.js';
 // provider factory's text), so it renders it as structured `meta` rather than
 // interpolating it into the log message. See ./thrown-cause-diagnostics.ts.
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
+import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
 // [#22450] The one bundle-locale negotiation rule (exact → case-insensitive →
 // base language → variant expansion), asked about the locales the i18n service
 // holds — the same question objectql's `negotiatedMessageLocale` asks it.
@@ -556,11 +557,14 @@ export interface FlowTriggerBinding {
     /**
      * [#20790] api: the inbound hook's secret, read at VERIFICATION time —
      * present whenever the flow has one, whether its definition carries it as
-     * a literal (a packaged flow) or the write-only credential channel holds it
-     * (every flow stored through the metadata save door; `config` then carries
-     * none). The channel's row wins where one exists. Never cached: a rotation
-     * applies to the next post. Rejects when a held secret does not come back —
-     * the trigger answers that post as unavailable, never as verified.
+     * a literal (a packaged flow), names it by `config.secretRef` (the
+     * deployment fills the name; read through the credential resolver), or the
+     * write-only credential channel holds it (every flow stored through the
+     * metadata save door; `config` then carries none). The channel's row wins
+     * over a literal where one exists. Never cached: a rotation applies to the
+     * next post. Rejects when a held secret does not come back, or a named one
+     * resolves to nothing — the trigger answers that post as unavailable,
+     * never as verified.
      */
     readonly resolveSecret?: () => Promise<string | undefined>;
 }
@@ -930,6 +934,15 @@ export interface AutomationEngineOptions {
      * it under an `isolated` posture.
      */
     scheduledWorkPolicy?: ScheduledWorkPolicy | (() => ScheduledWorkPolicy);
+    /**
+     * Resolves an `api` flow's start-node `config.secretRef` — the name of its
+     * inbound hook secret, which the deployment fills — at every post. The
+     * automation plugin hands its own `credentialResolver` here, so a
+     * connector's `credentialRef` and a hook's `secretRef` resolve through one
+     * resolver. Absent: {@link defaultEnvCredentialResolver}, an environment
+     * variable of that name.
+     */
+    credentialResolver?: CredentialResolver;
 }
 
 /**
@@ -2690,6 +2703,8 @@ export class AutomationEngine implements IAutomationService {
     private readonly runSummaryLog: RunSummaryLogLevel;
     /** [#19834] Per-kernel policy override; see {@link AutomationEngineOptions.scheduledWorkPolicy}. */
     private readonly scheduledWorkPolicy: AutomationEngineOptions['scheduledWorkPolicy'];
+    /** Reads an `api` flow's `config.secretRef` per post — {@link AutomationEngineOptions.credentialResolver}. */
+    private readonly credentialResolver: CredentialResolver;
     private logger: Logger;
     /**
      * Runs paused at a node, keyed by runId (ADR-0019). Process-local copy of
@@ -2808,6 +2823,7 @@ export class AutomationEngine implements IAutomationService {
         this.maxLogSize = options?.maxLogSize ?? DEFAULT_MAX_EXECUTION_LOG_SIZE;
         this.runSummaryLog = options?.runSummaryLog ?? 'info';
         this.scheduledWorkPolicy = options?.scheduledWorkPolicy;
+        this.credentialResolver = options?.credentialResolver ?? defaultEnvCredentialResolver;
     }
 
     /**
@@ -4727,6 +4743,14 @@ export class AutomationEngine implements IAutomationService {
      * after its last refresh (boot, `kernel:ready`, `metadata:reloaded`, every
      * channel write in this process) loses to the literal until the next
      * refresh, exactly as at the `http` node.
+     *
+     * A secret NAMED by `config.secretRef` (the form an app package ships, so
+     * no credential is published with it) yields a reader that asks
+     * {@link credentialResolver} for that name at every post, and never the
+     * channel. A name that resolves to nothing rejects with
+     * `FlowCredentialUnresolvableError`, which the trigger answers `503` and
+     * logs naming the flow and the reference; a reference the spec refuses
+     * yields no reader, so the flow is refused at registration.
      */
     private hookSecretResolver(
         flowName: string,
@@ -4737,6 +4761,7 @@ export class AutomationEngine implements IAutomationService {
         const readFlowCredentialSource = () => this.flowCredentialSource;
         const host: ThisParameterType<typeof hookSecretResolver> = {
             get flowCredentialSource() { return readFlowCredentialSource(); },
+            credentialResolver: this.credentialResolver,
         };
         return hookSecretResolver.call(host, flowName, startNodeId, config);
     }

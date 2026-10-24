@@ -30,7 +30,10 @@
  *  - the cleared form `''` → the channel's row is removed and `''` is stored,
  *    so "cleared" stays distinguishable from "withheld";
  *  - a row whose position the definition no longer has (the node removed, or
- *    its kind changed) → removed: a credential never outlives its position.
+ *    its kind changed) → removed: a credential never outlives its position;
+ *  - the start node's secret NAMED instead (`config.secretRef`, no `secret`)
+ *    → removed too: the deployment fills that name and the engine resolves it
+ *    per post, so a stored literal would only be a stale credential at rest.
  *
  * Every write of a VALUE comes first: with no crypto provider the engine
  * refuses the first one before anything — channel row or stored row — is

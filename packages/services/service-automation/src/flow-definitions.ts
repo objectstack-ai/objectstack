@@ -19,7 +19,8 @@ import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
 import { applyConversionsToFlow } from '@objectstack/spec';
 import { FLOW_HOOK_SECRET_KEY, flowCredentialClassLabel, flowCredentialPositions } from './flow-credential-projection.js';
 import type { FlowParsed } from '@objectstack/spec/automation';
-import { FlowSchema, validateControlFlow } from '@objectstack/spec/automation';
+import { API_TRIGGER_SECRET_REF_KEY, FlowSchema, apiTriggerSecretRefOf, validateControlFlow } from '@objectstack/spec/automation';
+import { FlowCredentialUnresolvableError } from './flow-credential-channel.js';
 // The values below (`CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION`,
 // `flowRegistrationTodo` and `graftConditionEnvelopes`) are read only inside
 // the function bodies, at call time, never while a module is evaluating, so the
@@ -70,6 +71,7 @@ export interface FlowDefinitionsHost {
     readonly triggers: AutomationEngine['triggers'];
     readonly flowCredentialSource: AutomationEngine['flowCredentialSource'];
     readonly flowVersionHistory: AutomationEngine['flowVersionHistory'];
+    readonly credentialResolver: AutomationEngine['credentialResolver'];
 }
 
 /** The body of {@link AutomationEngine.resolveFunction}, moved unedited; that method's docblock is its contract. */
@@ -336,13 +338,35 @@ export function flowCredentialHoldings(this: Pick<FlowDefinitionsHost, 'flows' |
 
 /** The body of {@link AutomationEngine.hookSecretResolver}, moved unedited; that method's docblock is its contract. */
 export function hookSecretResolver(
-    this: Pick<FlowDefinitionsHost, 'flowCredentialSource'>,
+    this: Pick<FlowDefinitionsHost, 'flowCredentialSource' | 'credentialResolver'>,
     flowName: string,
     startNodeId: string | undefined,
     config: Record<string, unknown>,
 ): (() => Promise<string | undefined>) | undefined {
     const source = this.flowCredentialSource;
     const written = Object.prototype.hasOwnProperty.call(config, FLOW_HOOK_SECRET_KEY);
+    // A secret NAMED by `config.secretRef`: the deployment fills the name, and
+    // it is read through the credential resolver at every post — never the
+    // channel, whose row for this position the save door removes once the
+    // definition names its secret instead. A name with no value refuses that
+    // post as unavailable; a reference the spec does not accept (or one beside
+    // a literal, which `FlowSchema` refuses) yields no reader, so the flow is
+    // refused at registration rather than armed on a guess.
+    if (Object.prototype.hasOwnProperty.call(config, API_TRIGGER_SECRET_REF_KEY)) {
+        const ref = apiTriggerSecretRefOf(config);
+        if (ref === undefined || written) return undefined;
+        const resolve = this.credentialResolver;
+        return async () => {
+            const value = await resolve(ref);
+            if (typeof value === 'string' && value.trim() !== '') return value;
+            throw new FlowCredentialUnresolvableError(
+                `Flow '${flowName}': its inbound hook secret is named by \`config.secretRef\` '${ref}', which resolved `
+                    + 'to no value, so every post is refused until the deployment fills it. Set the '
+                    + `'${ref}' environment variable, or serve '${ref}' from the host's credential resolver `
+                    + '(AutomationServicePluginOptions.credentialResolver).',
+            );
+        };
+    }
     const literal = typeof config.secret === 'string' && config.secret.trim() !== '' ? config.secret : undefined;
     if (written && literal === undefined) return undefined;
     if (!source || startNodeId === undefined) {
