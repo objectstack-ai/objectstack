@@ -144,6 +144,42 @@ describe('validateTranslationReferences — orphan keys', () => {
     expect(findings).toEqual([]);
   });
 
+  it('accepts a form section entry\'s copy keyed by its `field`, and flags an entry no section of that name declares', () => {
+    const stack = (sections: unknown) => ({
+      ...leadStack([
+        {
+          'zh-CN': {
+            objects: {
+              crm_lead: {
+                label: '线索',
+                _sections: {
+                  contact: { label: '联系方式', fields: { name: { label: '您的姓名', placeholder: '张三', helpText: '全名' } } },
+                  basics: { fields: { name: { label: 'x' } } },
+                },
+              },
+            },
+          },
+        },
+      ]),
+      views: [{
+        name: 'lead_forms',
+        objectName: 'crm_lead',
+        formViews: { web: { type: 'simple', data: { provider: 'object', object: 'crm_lead' }, sections } },
+      }],
+    });
+    const findings = validateTranslationReferences(stack([
+      { name: 'contact', label: 'Contact', fields: [{ field: 'name', label: 'Your name', placeholder: 'Jane', helpText: 'Full' }, 'status'] },
+    ]));
+    // `contact.fields.name` resolves; `basics` is a `fieldGroups` group, which has no entries.
+    expect(findings.map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.crm_lead._sections.basics.fields.name',
+    ]);
+    expect(findings[0].severity).toBe('error');
+    // A bare field-name entry authors no copy, so its `field` addresses nothing.
+    const bare = validateTranslationReferences(stack([{ name: 'contact', label: 'Contact', fields: ['name'] }]));
+    expect(bare.map((f) => f.path)).toContain('translations[0]["zh-CN"].objects.crm_lead._sections.contact.fields.name');
+  });
+
   it('does not flag implicit audit/system fields', () => {
     const findings = validateTranslationReferences(
       leadStack([

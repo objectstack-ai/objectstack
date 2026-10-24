@@ -9,6 +9,7 @@ import {
   indexObjectGraph,
   isUnjudgeable,
   joinablePrefixes,
+  packagesOf,
   recordsOf,
   resolveFieldPath,
   suggestName,
@@ -690,6 +691,23 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   const datasets = new Map<string, AnyRec>();
   for (const ds of recordsOf(stack.datasets)) {
     if (typeof ds.name === 'string') datasets.set(ds.name, ds);
+  }
+  // [#25514] A widget's `dataset` resolves against the ARTIFACT: the datasets
+  // every `packages[]` body declares join the map as RESOLUTION CONTEXT, the way
+  // `validate-object-references.ts` widens rung ① with the artifact's objects.
+  // A cross-domain dashboard in the app package reads a module's dataset (the
+  // ADR-0130 plan rule "multi-module dashboards move to the app package"), and
+  // the runtime serves every package's datasets from one analytics service.
+  // ⛔ It changes what a widget can RESOLVE, never what is JUDGED: the
+  // dataset-level checks below still walk `stack.datasets` alone, and a name no
+  // package declares still resolves nowhere. The stack's own declaration wins a
+  // name it shares with a body — on the per-package pass that body IS this one.
+  for (const entry of packagesOf(stack)) {
+    const body = entry.manifest;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
+    for (const ds of recordsOf((body as AnyRec).datasets)) {
+      if (typeof ds.name === 'string' && !datasets.has(ds.name)) datasets.set(ds.name, ds);
+    }
   }
 
   // ── (0) dataset measures aggregate their field coherently ──
