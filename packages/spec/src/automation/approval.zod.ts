@@ -829,6 +829,59 @@ function checkFallbackApproversPairing(
   });
 }
 
+/**
+ * `excludeSubmitter: true` beside `onEmptyApprovers: 'auto_approve'` is
+ * refused as a pair (ruling 6386627950 on #25635, letter A).
+ *
+ * ## Why the pair contradicts itself
+ *
+ * `excludeSubmitter` exists so that a submitter cannot approve their own
+ * request. The slate it empties is the slate of a submitter who was its only
+ * approver, and an emptied slate takes the node's `onEmptyApprovers` route.
+ * Under `auto_approve` that route approves the request with nobody deciding:
+ * the submitter's own request passes, the one outcome the option was written
+ * to prevent. The ruling that governs the option (6377842908: an emptied slate
+ * "never passes silently") is made true here, in the contract both ends read,
+ * rather than by a runtime override of an authored policy (AGENTS.md Prime
+ * Directive 12: reject at authoring, never reinterpret in a consumer).
+ *
+ * ## Where the issue lands
+ *
+ * On `onEmptyApprovers`, because the ruled prescription is a different policy
+ * (`admin_rescue`, `fail` or `fallback`), so that is the key the author edits.
+ * The message names both keys, but unlike {@link checkFallbackApproversPairing}
+ * it does not offer removing the other key as an equal fix: removing
+ * `excludeSubmitter` drops the control the author asked for, and an author or
+ * an AI told that either key will do takes the cheaper edit.
+ *
+ * ## What it does NOT judge
+ *
+ * Only `true` arms it. `false` and an omitted key are the "off" the option
+ * defaults to, under which `auto_approve` keeps its own meaning. No other
+ * policy is refused: `admin_rescue` and `fallback` open the request on other
+ * people, and `fail` stops the run; none of them passes the request. Who the
+ * runtime removes, and what the approval record says, is the approval
+ * engine's (`plugin-approvals`), not this rule's.
+ */
+function checkExcludeSubmitterPolicyPairing(
+  cfg: { excludeSubmitter?: unknown; onEmptyApprovers?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (cfg.excludeSubmitter !== true || cfg.onEmptyApprovers !== 'auto_approve') return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['onEmptyApprovers'],
+    message:
+      "onEmptyApprovers: 'auto_approve' cannot be paired with excludeSubmitter: true. "
+      + 'excludeSubmitter removes the submitter from the slate, and when that leaves nobody '
+      + "'auto_approve' approves the request with no one deciding, so a submitter who is the "
+      + 'only approver gets their own request approved: the outcome excludeSubmitter exists to '
+      + "prevent. Choose a policy that never passes the request: 'admin_rescue' (the default, "
+      + "which opens it on the organization's administrators), 'fail', or 'fallback' with a "
+      + 'fallbackApprovers list naming who decides.',
+  });
+}
+
 export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
   {
     surface: "this approval node's config",
@@ -886,6 +939,11 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    * - **An emptied slate.** Takes the node's `onEmptyApprovers` route, never a
    *   silent pass, and the approval record shows that the exclusion changed
    *   the route (the ruled behaviour, built in `plugin-approvals` by #25573).
+   *   The one policy that would pass it, `'auto_approve'`, is refused beside
+   *   `excludeSubmitter: true` at the parse by
+   *   {@link checkExcludeSubmitterPolicyPairing} (ruling 6386627950 on
+   *   #25635), so "never a silent pass" holds in the contract, not only at
+   *   the run.
    * - **Off by default, and ABSENT when off.** `.optional()`, not
    *   `.default(false)`: a node that does not author the key parses to
    *   exactly the output it parsed to before the key existed, so every stored
@@ -908,7 +966,9 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
     + 'removed from the slate `approvers` resolves to, whatever approver type produced them. If that leaves '
     + 'nobody, the request takes the node\'s `onEmptyApprovers` route (`admin_rescue` by default, or '
     + '`fallbackApprovers` under `\'fallback\'`) and never passes silently, and the approval record shows that '
-    + 'the exclusion changed the route. Omitted or false (the default), the slate stays as resolved. '
+    + 'the exclusion changed the route. `onEmptyApprovers: \'auto_approve\'` is refused beside '
+    + '`excludeSubmitter: true`, because it would approve exactly the request this option exists to stop; '
+    + 'choose `\'admin_rescue\'`, `\'fail\'` or `\'fallback\'`. Omitted or false (the default), the slate stays as resolved. '
     + 'The approval engine does not read this key yet, so today the submitter is NOT removed: keep any guard '
     + 'you rely on (an `expression` approver or a validation rule) until it does.',
   ),
@@ -976,7 +1036,8 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    *    slate can only mean a configuration bug.
    *  - `auto_approve` — skip the request and continue down the `approve` edge
    *    with `output.autoApproved = true`. The DingTalk/Feishu default; opt-in
-   *    here because it silently waves the record through.
+   *    here because it silently waves the record through. Refused beside
+   *    `excludeSubmitter: true` ({@link checkExcludeSubmitterPolicyPairing}).
    *  - `fallback` — open the request on {@link ApprovalNodeConfig.fallbackApprovers}
    *    instead: the way to NAME who decides, rather than leave it to the
    *    organization's administrators. Measured elsewhere as
@@ -1058,7 +1119,7 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    */
   maxRevisions: z.number().int().min(0).default(3)
     .describe('Max send-backs for revision before auto-reject (0 = send-back disabled)'),
-}).superRefine(checkFallbackApproversPairing));
+}).superRefine(checkFallbackApproversPairing).superRefine(checkExcludeSubmitterPolicyPairing));
 export type ApprovalNodeConfig = z.input<typeof ApprovalNodeConfigSchema>;
 /** Post-parse shape of {@link ApprovalNodeConfig} — defaults applied, transforms run (ADR-0122). */
 export type ApprovalNodeConfigParsed = z.infer<typeof ApprovalNodeConfigSchema>;

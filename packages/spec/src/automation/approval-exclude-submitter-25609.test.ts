@@ -26,9 +26,19 @@
  *   `additionalProperties: false`.
  * - §5 THE STATUS: the describe opens with the `[PLANNED` marker (the runtime
  *   half has not landed, so the key is declared and not yet read) and names
- *   the two subjects an author needs — `submitter_id` (who is removed) and
- *   `onEmptyApprovers` (where an emptied slate goes). The prose itself is not
- *   pinned.
+ *   the subjects an author needs — `submitter_id` (who is removed),
+ *   `onEmptyApprovers` (where an emptied slate goes) and `'auto_approve'` (the
+ *   one policy refused beside it, §6). The prose itself is not pinned.
+ * - §6 THE REFUSED PAIR (#25635, ruling 6386627950, letter A):
+ *   `excludeSubmitter: true` beside `onEmptyApprovers: 'auto_approve'` is
+ *   refused at the parse, ONE issue at `onEmptyApprovers` — the key the ruled
+ *   prescription edits — naming both keys and the three policies it offers.
+ *   Controls: every other policy beside `true`, and `auto_approve` beside a
+ *   `false` or omitted key, parse green. The refusal reaches the flow door
+ *   (the issue at the node config's own key, and the build judge's
+ *   `node-config-refused-by-contract`), and it is independent of the
+ *   `fallbackApprovers` pairing: a config that trips both carries both, and the
+ *   one edit to `'fallback'` clears both.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -39,6 +49,7 @@ import {
   ApprovalNodeConfigSchema,
   getApprovalNodeConfigJsonSchema,
 } from './approval.zod';
+import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 import { FlowSchema } from './flow.zod';
 
 type Door = { safeParse: (v: unknown) => z.ZodSafeParseResult<unknown> };
@@ -194,5 +205,81 @@ describe('§5 the describe declares the key planned and names its two subjects',
   it('names who is removed (submitter_id) and where an emptied slate goes (onEmptyApprovers)', () => {
     expect(doc()).toContain('`submitter_id`');
     expect(doc()).toContain('`onEmptyApprovers`');
+  });
+
+  it("names the one policy refused beside it ('auto_approve'), so an author reading it is not surprised by §6", () => {
+    expect(doc()).toContain("'auto_approve'");
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// §6 the refused pair: excludeSubmitter: true + onEmptyApprovers: 'auto_approve'
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("§6 excludeSubmitter: true beside onEmptyApprovers: 'auto_approve' is refused at the parse", () => {
+  const PAIR = { ...BASE, excludeSubmitter: true, onEmptyApprovers: 'auto_approve' };
+  const FALLBACK = [{ type: 'org_membership_level', value: 'owner' }];
+
+  /** The refusal's message, read off the contract itself — never re-spelled here. */
+  const refusalMessage = (value: unknown): string => {
+    const result = ApprovalNodeConfigSchema.safeParse(value);
+    if (result.success) return '';
+    return result.error.issues.find((i) => i.path.join('.') === 'onEmptyApprovers')?.message ?? '';
+  };
+
+  it('refuses the pair with ONE issue, at onEmptyApprovers (the key the prescribed edit changes)', () => {
+    expect(issues(ApprovalNodeConfigSchema, PAIR)).toEqual([{ code: 'custom', path: 'onEmptyApprovers' }]);
+  });
+
+  it('names both keys and the three policies it offers instead', () => {
+    const message = refusalMessage(PAIR);
+    for (const subject of ['excludeSubmitter', "'auto_approve'", "'admin_rescue'", "'fail'", "'fallback'", 'fallbackApprovers']) {
+      expect(message, subject).toContain(subject);
+    }
+  });
+
+  it.each([
+    ['admin_rescue, declared', { onEmptyApprovers: 'admin_rescue' }],
+    ['admin_rescue, the default (key omitted)', {}],
+    ['fail', { onEmptyApprovers: 'fail' }],
+    ['fallback with fallbackApprovers', { onEmptyApprovers: 'fallback', fallbackApprovers: FALLBACK }],
+  ])('control: excludeSubmitter: true beside %s parses green', (_label, policy) => {
+    expect(issues(ApprovalNodeConfigSchema, { ...BASE, excludeSubmitter: true, ...policy })).toEqual([]);
+  });
+
+  it.each([
+    ['excludeSubmitter: false', { excludeSubmitter: false }],
+    ['excludeSubmitter omitted', {}],
+  ])("control: onEmptyApprovers: 'auto_approve' beside %s parses green and keeps its meaning", (_label, exclusion) => {
+    const config = { ...BASE, ...exclusion, onEmptyApprovers: 'auto_approve' };
+    expect(issues(ApprovalNodeConfigSchema, config)).toEqual([]);
+    expect(ApprovalNodeConfigSchema.parse(config).onEmptyApprovers).toBe('auto_approve');
+  });
+
+  it('reaches the flow door: FlowSchema refuses it at the node config key, in the contract\'s own words', () => {
+    const result = FlowSchema.safeParse(flowWith({ config: PAIR }));
+    expect(result.success).toBe(false);
+    const found = result.success ? [] : result.error.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message }));
+    expect(found.map(({ code, path }) => ({ code, path }))).toEqual([
+      { code: 'custom', path: 'nodes.1.config.onEmptyApprovers' },
+    ]);
+    expect(found[0]!.message).toContain(refusalMessage(PAIR));
+  });
+
+  it("reaches the build judge as node-config-refused-by-contract on onEmptyApprovers", () => {
+    const refusals = flowNodeConfigRefusals('approval', PAIR);
+    expect(refusals.map(({ code, path }) => ({ code, path }))).toEqual([
+      { code: 'node-config-refused-by-contract', path: 'onEmptyApprovers' },
+    ]);
+    expect(refusals[0]!.message).toContain(refusalMessage(PAIR));
+  });
+
+  it('is independent of the fallbackApprovers pairing: both arms report, and one edit to fallback clears both', () => {
+    const both = { ...PAIR, fallbackApprovers: FALLBACK };
+    expect(issues(ApprovalNodeConfigSchema, both)).toEqual([
+      { code: 'custom', path: 'onEmptyApprovers' },
+      { code: 'custom', path: 'onEmptyApprovers' },
+    ]);
+    expect(issues(ApprovalNodeConfigSchema, { ...both, onEmptyApprovers: 'fallback' })).toEqual([]);
   });
 });
