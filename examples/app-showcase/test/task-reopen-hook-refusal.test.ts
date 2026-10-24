@@ -3,7 +3,7 @@
 /**
  * The showcase's hook-REFUSAL fixture: `showcase_guard_task_reopen` refuses the
  * write that reopens a finished task, with a sentence addressed to the user,
- * and `showcase_reopen_task` is the script action whose write reaches it.
+ * and `showcase_reopen_task` is the action whose declared write reaches it.
  *
  * Platform checklist item `records-forms.script-action-hook-refusal-toast`
  * drives this pair in the console (4xx on the action route, exactly one error
@@ -14,12 +14,14 @@
  *   1. on the real engine with the app's real hooks, the reopening write is
  *      refused with the sentence and the stored row is unchanged — while an
  *      edit of the same finished task that leaves `done` alone still lands;
- *   2. the action's body writes exactly the reopening shape (`done: false` on
- *      its own record), so a click reaches the hook's condition.
+ *   2. the action declares exactly the reopening write (`done: false` on its
+ *      own record, `operation: 'update'`), so a click reaches the hook's
+ *      condition through the write the platform action route performs as the
+ *      caller.
  *
- * The action route's own 4xx for a nested sandboxed refusal is pinned in
- * `packages/runtime/src/sandbox/nested-hook-refusal-is-a-rejection.test.ts`;
- * it is not restated here.
+ * The action route's answer to that refusal, and to a caller who may not edit
+ * the task at all, is pinned over real HTTP in the dogfood suite
+ * (`showcase-record-write-actions.dogfood.test.ts`); it is not restated here.
  *
  * Harness: the production one `hook-body-persisted-writes.test.ts` uses — real
  * `ObjectQL`, real `SqlDriver` (better-sqlite3), real `QuickJSScriptRunner`
@@ -29,11 +31,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import {
-  QuickJSScriptRunner,
-  actionBodyRunnerFactory,
-  hookBodyRunnerFactory,
-} from '@objectstack/runtime';
+import { QuickJSScriptRunner, hookBodyRunnerFactory } from '@objectstack/runtime';
 
 import { Account, Project, Task } from '../src/data/objects/index.js';
 import { allHooks, TASK_REOPEN_REFUSAL } from '../src/data/hooks/index.js';
@@ -150,31 +148,11 @@ describe('showcase_guard_task_reopen — the hook refuses reopening a finished t
   }, 30000);
 });
 
-describe('showcase_reopen_task — the script action writes the shape the hook refuses', () => {
-  it("the body updates its own record with done: false and nothing else", async () => {
-    let written: { object: string; data: Record<string, unknown> } | undefined;
-    const ql = {
-      object: (object: string) => ({
-        update: async (data: Record<string, unknown>) => {
-          written = { object, data };
-          return { id: data.id };
-        },
-      }),
-    };
-
-    const handler = actionBodyRunnerFactory(new QuickJSScriptRunner(), { ql, appId: 'showcase' })(
-      ReopenTaskAction as never,
-    );
-    expect(typeof handler).toBe('function');
-
-    await handler!({
-      recordId: 'task_1',
-      record: { id: 'task_1', done: true, progress: 100 },
-      params: {},
-      user: { id: 'u1' },
-    });
-
-    expect(written).toEqual({ object: 'showcase_task', data: { id: 'task_1', done: false } });
+describe('showcase_reopen_task — the declared write is the shape the hook refuses', () => {
+  it('declares an update of its own record with done: false and nothing else', () => {
+    expect(ReopenTaskAction.operation).toBe('update');
+    expect(ReopenTaskAction.patch).toEqual({ done: false });
+    expect(ReopenTaskAction).not.toHaveProperty('body');
   });
 
   it('is offered only on finished tasks', () => {

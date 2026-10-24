@@ -218,3 +218,67 @@ describe('import route — inline FieldMappingEntry rules (#25491)', () => {
     expect(stored).toMatchObject({ name: '  Acme ', country: 'cn' });
   });
 });
+
+/**
+ * [#25611] A cell the request declares null (`nullValues`) stays blank whatever
+ * case `transform` its entry declares: the blank test reads the raw cell, so a
+ * sentinel is never rewritten out of being one (`n/a` upper-cased to `N/A`
+ * would no longer match `nullValues: ['n/a']` and be stored as a value).
+ */
+describe('import route — a nullValues sentinel survives an inline case transform (#25611)', () => {
+  let engine: any;
+  let route: any;
+  const call = async (object: string, body: any) => {
+    const res = makeRes();
+    await route.handler({ params: { object }, body } as any, res);
+    return res;
+  };
+  const countryOf = async (name: string) => {
+    const [row] = await engine.find('supplier', { where: { name } });
+    return row?.country;
+  };
+
+  beforeEach(async () => {
+    ({ engine, route } = await boot());
+  });
+
+  for (const [transform, sentinel] of [['uppercase', 'n/a'], ['lowercase', 'N/A']] as const) {
+    it(`${transform}: the sentinel cell is stored unset, a non-sentinel cell is still transformed`, async () => {
+      const res = await call('supplier', {
+        format: 'csv', csv: `Name,Country\nA,${sentinel}\nB,Jp\n`, nullValues: [sentinel],
+        mapping: [
+          { sourceField: 'Name', targetField: 'name' },
+          { sourceField: 'Country', targetField: 'country', transform },
+        ],
+      });
+      expect(res._json).toMatchObject({ ok: 2, created: 2 });
+      expect(await countryOf('A')).toBeNull();
+      expect(await countryOf('B')).toBe(transform === 'uppercase' ? 'JP' : 'jp');
+    });
+
+    it(`${transform}: the sentinel cell takes the entry's defaultValue`, async () => {
+      const res = await call('supplier', {
+        format: 'csv', csv: `Name,Country\nA,${sentinel}\n`, nullValues: [sentinel],
+        mapping: [
+          { sourceField: 'Name', targetField: 'name' },
+          { sourceField: 'Country', targetField: 'country', transform, defaultValue: 'cn-default' },
+        ],
+      });
+      expect(res._json).toMatchObject({ ok: 1, created: 1 });
+      expect(await countryOf('A')).toBe('cn-default');
+    });
+
+    it(`${transform}: a required entry refuses the sentinel cell as blank, nothing written`, async () => {
+      const res = await call('supplier', {
+        format: 'csv', csv: `Name,Country\nA,${sentinel}\n`, nullValues: [sentinel],
+        mapping: [
+          { sourceField: 'Name', targetField: 'name' },
+          { sourceField: 'Country', targetField: 'country', transform, required: true },
+        ],
+      });
+      expect(res._status).toBe(400);
+      expect(res._json?.error?.code ?? res._json?.code).toBe('MISSING_REQUIRED_FIELD');
+      expect(await engine.find('supplier', {})).toHaveLength(0);
+    });
+  }
+});

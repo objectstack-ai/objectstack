@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@objectstack/plugin-hono-server": "workspace:*",
-    "@objectstack/runtime": "workspace:^",
+    "@objectstack/runtime": "workspace:*",
     "@objectstack/types": "workspace:*"
   },
   "peerDependencies": {
