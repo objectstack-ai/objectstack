@@ -161,9 +161,10 @@ interface CensusEntry {
  * `query:` slot.
  *
  * [#23050 slice 11] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0: the
- * public form doors (`form-routes.ts`) build no `query:` literal either — they
- * list the environment's views and objects by `type` and insert through
- * `createData`, never through a `query:` slot.
+ * public form doors (`form-routes.ts`) built no `query:` literal when they
+ * moved — they listed the environment's views and objects by `type` and
+ * inserted through `createData`, never through a `query:` slot. (Superseded
+ * for this file by the [#25574] entry below.)
  *
  * [#23050 slice 12] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1, a
  * MOVE: `rest-server.ts`' one slot, the list door's caller-supplied
@@ -198,6 +199,14 @@ interface CensusEntry {
  * unchanged: neither the object state-machine read (`meta-object-state-routes.ts`)
  * nor the published read (now in `meta-item-history-routes.ts`) builds a `query:`
  * slot, so the new module's floor is 0 and the history module's stays 0.
+ *
+ * [#25574] 5 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 1 + 0 + 0 + 0 + 0 + 0:
+ * the public form doors (`form-routes.ts`) now build one `query:` slot, the
+ * server's own read of a bound form's organization (ADR-0138 D5,
+ * `probeOrganizationsBySlug` in `resolveFormBySlug`):
+ * `query: { object, where: { slug }, fields: ['id'], limit: 2 }`, canonical
+ * QueryAST slots with no wire alias and no cast. Its floor goes 0 → 1, its
+ * measured count, and the sum 4 → 5.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 0,
@@ -211,7 +220,7 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'email-routes.ts': 0,
     'search-routes.ts': 0,
     'ui-routes.ts': 0,
-    'form-routes.ts': 0,
+    'form-routes.ts': 1,
     'crud-routes.ts': 1,
     'meta-collection-routes.ts': 0,
     'meta-item-read-routes.ts': 0,
@@ -425,11 +434,13 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // carries no slot).
         // [#23050 slice 13e] Length 17 → 18, the sum unchanged (neither the object
         // state-machine read nor the published read carries a slot).
+        // [#25574] Length unchanged, the sum 4 → 5: `form-routes.ts` builds one
+        // slot, the bound form's organization read (ADR-0138 D5).
         expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);
-        expect([...REGISTRAR_SOURCES.values()].reduce((n, source) => n + querySlots(source).length, 0)).toBe(4);
+        expect([...REGISTRAR_SOURCES.values()].reduce((n, source) => n + querySlots(source).length, 0)).toBe(5);
     });
 
     it('dropping comment lines leaves the code that is being censused', () => {
