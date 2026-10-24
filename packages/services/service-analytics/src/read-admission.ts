@@ -57,15 +57,18 @@
  *     it does not answer as one: `503 SERVICE_UNAVAILABLE`
  *     ({@link readAdmissionUnresolvedError}), the cause in the server log;
  *   - a `security` service that is wired but cannot be used — resolving it
- *     throws, or it exposes neither `canReadObject` nor `explain` — denies at
+ *     throws, or it exposes neither `canReadObject` nor `explain` — refuses at
  *     the bridge, because `/data`'s middleware does not fall open in those
- *     states either (`plugin.ts`);
- *   - [#22235] a deployment that registers NO security service denies at the
+ *     states either (`plugin.ts`). The bridge reached no verdict, so it throws
+ *     and the refusal answers `503 SERVICE_UNAVAILABLE` (#25561);
+ *   - [#22235] a deployment that registers NO security service refuses at the
  *     bridge too, by declaration: the in-repo kernels (`ObjectKernel`,
  *     `LiteKernel`) throw on a `security` service nothing ever registered, so
- *     the bridge takes its UNUSABLE branch and refuses with a located error.
+ *     the bridge takes its UNUSABLE branch and refuses with a located error,
+ *     `503 SERVICE_UNAVAILABLE` like the broken service above (the service is
+ *     "not loaded"; #25561).
  *     `/data` carries no object-level gate on such a deployment, so there the
- *     two doors do NOT agree: a loud deny is preferred over a silent admit. A
+ *     two doors do NOT agree: a loud refusal is preferred over a silent admit. A
  *     composition that wants analytics to answer registers a security service,
  *     or its host supplies its own `admitObjectRead`;
  *   - a context that answers the `security` lookup with NOTHING (ABSENT) is a

@@ -157,7 +157,7 @@ describe('admission absence report — a real kernel that never registers a secu
   it('logs no init-time WARN, and absence stays loud at query time with the outcome unchanged', async () => {
     // The in-repo kernels answer a missing service by THROWING
     // ("[Kernel] Service 'security' not found"), which this bridge classifies
-    // as a resolution that threw: it denies, fail-closed, and says so at
+    // as a resolution that threw: it refuses, fail-closed, and says so at
     // `error` on every query. That outcome is what this boot produced before
     // the init-time WARN moved, and it is not this file's to change; what is
     // pinned is that dropping the init-time WARN left this case loud.
@@ -165,9 +165,12 @@ describe('admission absence report — a real kernel that never registers a secu
 
     expect(about(lines.warn)).toEqual([]);
 
+    // [#25561] No verdict was reached, so the refusal is the fault answer
+    // (`SERVICE_UNAVAILABLE` / 503, naming the object), not a denial's 403.
     await expect(runProbe(service)).rejects.toMatchObject({
-      code: 'PERMISSION_DENIED',
-      status: 403,
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      object: 'employer_member',
     });
     expect(reads).toEqual([]);
     expect(about(lines.error).join('\n')).toMatch(

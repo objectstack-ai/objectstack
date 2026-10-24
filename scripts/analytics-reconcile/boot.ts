@@ -22,10 +22,11 @@ import { resolveDateMacros } from './macros.js';
  * The `security` service this reconciliation runs under: registered
  * EXPLICITLY, and OPEN on purpose.
  *
- * [#22235] The analytics read bridges DENY, fail-closed, on a kernel that
+ * [#22235] The analytics read bridges REFUSE, fail-closed, on a kernel that
  * registers no security service: the kernel's lookup throws on the miss, the
  * bridge reads that as a security service it cannot use, and every dataset
- * query is refused `PERMISSION_DENIED` — which this runner would report as a
+ * query is refused `SERVICE_UNAVAILABLE` / 503 (#25561; it was
+ * `PERMISSION_DENIED` / 403 before) — which this runner would report as a
  * mismatch on every widget. That is the declared behaviour, so a composition
  * that wants analytics to answer registers a security service.
  *
