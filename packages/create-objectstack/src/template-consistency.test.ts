@@ -89,7 +89,9 @@ const REPO_READ_ENV: NodeJS.ProcessEnv = gitFreeEnv();
 //
 // Every bundled template declares the platform it targets in THREE places, and
 // each one is committed to git, shipped in the tarball and copied into every
-// scaffolded project. `scripts/sync-template-versions.mjs` re-stamps all three
+// scaffolded project: the `@objectstack/*` dependencies at the scaffolder's
+// EXACT version, `specVersion` at its major's range, and `engines.protocol` at
+// its protocol major. `scripts/sync-template-versions.mjs` re-stamps all three
 // at version time; these ratchets are the CI half, because that script runs on
 // a changesets/action release PR that gets no CI at all.
 //
@@ -121,22 +123,25 @@ describe('bundled template declared version surfaces', () => {
     const readTemplateFile = (name: string) =>
       fs.readFileSync(path.join(templateDir, name), 'utf8');
 
-    it('package.json pins every @objectstack/* dep to the current major', () => {
+    // Exact, not a range: on the v18 line a breaking change may ship in a minor
+    // or a patch, the docs tell a project to pin exact versions, and the
+    // scaffold writes exact pins (`syncObjectStackDeps`). The committed
+    // baseline says the same thing the scaffold writes.
+    it("package.json pins every @objectstack/* dep to create-objectstack's exact version", () => {
       const templatePkg = JSON.parse(readTemplateFile('package.json'));
       const allDeps = { ...templatePkg.dependencies, ...templatePkg.devDependencies };
       const stackDeps = Object.entries(allDeps).filter(([name]) =>
         name.startsWith('@objectstack/'),
       );
       expect(stackDeps.length).toBeGreaterThan(0);
-      for (const [name, range] of stackDeps) {
-        const match = /^\^(\d+)\./.exec(String(range));
-        expect(match, `${name} range "${range}" must be ^<major>.x`).not.toBeNull();
+      for (const [name, pin] of stackDeps) {
         expect(
-          Number(match![1]),
-          `${name} pins ^${match![1]}.x but create-objectstack is v${ownMajor} — ` +
-            'bump the template with the release (scaffold-time sync only fixes ' +
-            'generated projects, not this committed baseline)',
-        ).toBe(ownMajor);
+          pin,
+          `${template}/package.json pins ${name} at "${String(pin)}" but create-objectstack is ` +
+            `${ownPkg.version} — every @objectstack/* dep is the exact version, no ^ or ~; ` +
+            'scripts/sync-template-versions.mjs re-stamps it at version time (scaffold-time ' +
+            'sync only fixes generated projects, not this committed baseline)',
+        ).toBe(ownPkg.version);
       }
     });
 
@@ -296,12 +301,14 @@ describe('bundled template declared version surfaces', () => {
       ).toBe(ownMajor);
     });
 
-    // The invariant that makes the two files one fact rather than two: the
-    // manifest's declared spec range and the dependency a scaffolded project
-    // actually installs must agree. Either alone can be self-consistently
-    // stale; only comparing them catches a stamp that covered one and not the
-    // other, which is the exact failure this card is about.
-    it('specVersion agrees with the @objectstack/spec dependency the template installs', () => {
+    // The invariant that ties the two files together: the manifest's declared
+    // spec range and the dependency a scaffolded project actually installs
+    // must name the same line. Either alone can be self-consistently stale;
+    // only comparing them catches a stamp that covered one and not the other,
+    // which is the exact failure this card is about. They are no longer EQUAL
+    // — the dependency is an exact version, `specVersion` a range — so what is
+    // compared is the range the exact dependency's major implies.
+    it('specVersion is the range of the @objectstack/spec dependency the template installs', () => {
       const manifest = JSON.parse(readTemplateFile('objectstack.manifest.json'));
       const templatePkg = JSON.parse(readTemplateFile('package.json'));
       const specDep =
@@ -313,11 +320,16 @@ describe('bundled template declared version surfaces', () => {
         `${template}/package.json must depend on @objectstack/spec for its manifest's ` +
           'specVersion to be checkable against something',
       ).toBeDefined();
+      const depMajor = /^(\d+)\.\d+\.\d+/.exec(String(specDep));
+      expect(
+        depMajor,
+        `${template}/package.json pins @objectstack/spec at "${String(specDep)}", which is not an exact version`,
+      ).not.toBeNull();
       expect(
         manifest.specVersion,
         `${template} declares specVersion "${manifest.specVersion}" but installs ` +
-          `@objectstack/spec "${specDep}" — one fact written twice, and they disagree`,
-      ).toBe(specDep);
+          `@objectstack/spec "${String(specDep)}" — the range must be ^${depMajor![1]}.0.0, the line the pin is on`,
+      ).toBe(`^${depMajor![1]}.0.0`);
     });
   });
 });

@@ -129,6 +129,11 @@ export const PUBLIC_AUTH_FEATURES = {
       // page's `record_header` — a `page:header` resolves ids against its own
       // object's actions only (ruling 6228318638, B′ on #24034).
       'sys_organization.actions.invite_user',
+      // The name/logo-only rename door, at the record header and the row:
+      // `update_organization`'s endpoint and grades, without its `slug` param.
+      // On the capability, not multi-org: a `single` deployment's one
+      // organization has no other name door (ruling 6384629949 on #25347).
+      'sys_organization.actions.rename_organization',
     ],
     notes: 'Org CAPABILITY gate, not multi-org (cloud ADR-0081 D1).',
   },
@@ -138,9 +143,6 @@ export const PUBLIC_AUTH_FEATURES = {
     gatedInputs: [
       'sys_organization.actions.create_organization',
       'sys_organization.actions.update_organization',
-      // The name/logo-only rename door, at the record header and the row:
-      // `update_organization`'s endpoint and gate, without its `slug` param.
-      'sys_organization.actions.rename_organization',
       'sys_organization.actions.delete_organization',
       'sys_organization.actions.set_active_organization',
       'sys_organization.actions.leave_organization',

@@ -16,16 +16,13 @@
 // comment and the published tag guidance.
 //
 // The tag is read from the INSTALLED cli — `node_modules/@objectstack/cli`'s
-// own version — and not from the generated `package.json`, because that file
-// carries a caret RANGE (`^17.0.0`, written by syncObjectStackDeps). The two
-// are not interchangeable:
-//
-//   - npm resolves `^17.0.0` to the newest 17.x, so the artifact is built by
-//     (say) 17.0.5 while the range's floor is 17.0.0. Pinning the floor would
-//     ship a runtime image OLDER than the CLI that built the artifact — the
-//     exact promise the comment makes, broken in a new way.
-//   - The rolling `:17` tag does match the range's float window, but it is a
-//     rolling tag, which is what `docker/README.md` tells production not to use.
+// own version — and not from the generated `package.json`. That file now pins
+// the exact version (written by syncObjectStackDeps), so on a clean install the
+// two agree; the installed copy is still the one that builds the artifact, and
+// it is the only value that stays true when they do not (an override, a hand
+// edit, a package manager that resolved something else). The rolling `:17` tag
+// is never the answer: it is a rolling tag, which is what `docker/README.md`
+// tells production not to use.
 //
 // The resolved version is the only value that makes the sentence true, and it
 // is the same rule the repo already applies for the same reason in
@@ -41,7 +38,7 @@
 // and correct either way — only the tag is less precise — so aborting a
 // finished scaffold would be disproportionate. The real guard against a silent
 // no-op is `runtime-image.test.ts`, which asserts on SCAFFOLDED OUTPUT: the
-// emitted Dockerfile's `FROM` tag against the emitted `package.json`'s range.
+// emitted Dockerfile's `FROM` tag against the emitted `package.json`'s pin.
 // A template edit that moves the anchor turns that test red in CI.
 
 import fs from 'node:fs';

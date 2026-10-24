@@ -699,7 +699,9 @@ describe('feature-gate lowering matrix (#2874)', () => {
     // Their doors are better-auth's `organization/update` (owner, admin) and
     // `organization/delete` (owner), so the grade term leads the feature gate.
     ['SysOrganization', SysOrganization, 'update_organization', `${ADMINS} && ${MULTI_ORG}`],
-    ['SysOrganization', SysOrganization, 'rename_organization', `${ADMINS} && ${MULTI_ORG}`],
+    // [#25347] The name/logo-only rename is on the capability: under `single`
+    // it is the one organization's only name door.
+    ['SysOrganization', SysOrganization, 'rename_organization', `${ADMINS} && ${ORG}`],
     ['SysOrganization', SysOrganization, 'delete_organization', `(${OWNER}) && ${MULTI_ORG}`],
     ['SysOrganization', SysOrganization, 'set_active_organization', MULTI_ORG],
     ['SysOrganization', SysOrganization, 'leave_organization', MULTI_ORG],
@@ -762,15 +764,19 @@ describe('feature-gate lowering matrix (#2874)', () => {
     expect((action?.visible as { source?: string })?.source).toBe(expected);
   });
 
-  // The rows above are the whole multi-org surface of sys_organization: an
-  // action gated on `multiOrgEnabled` without a row here is one this matrix
-  // never pinned. `change_slug` is not among them — its door is the cloud
-  // orchestrator's, and the composition that mounts it declares the action.
+  // The multi-org rows above are the whole multi-org surface of
+  // sys_organization: an action gated on `multiOrgEnabled` without a row here
+  // is one this matrix never pinned. `change_slug` is not among them — its door
+  // is the cloud orchestrator's, and the composition that mounts it declares
+  // the action. `rename_organization` has a row on the capability gate instead
+  // (#25347), so the pinned side reads the rows' gate too.
   it('the SysOrganization rows are every action it gates on multiOrgEnabled, and change_slug is none of them', () => {
     const gated = (SysOrganization.actions ?? [])
       .filter((a) => ((a.visible as { source?: string } | undefined)?.source ?? '').includes('features.multiOrgEnabled'))
       .map((a) => a.name);
-    const pinned = rows.filter(([exported]) => exported === 'SysOrganization').map(([, , name]) => name);
+    const pinned = rows
+      .filter(([exported, , , expected]) => exported === 'SysOrganization' && expected.includes(MULTI_ORG))
+      .map(([, , name]) => name);
     expect([...gated].sort()).toEqual([...pinned].sort());
     expect(gated).not.toContain('change_slug');
   });
