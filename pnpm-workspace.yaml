@@ -75,6 +75,9 @@ onlyBuiltDependencies:
 patchedDependencies:
   tsup@8.5.1: patches/tsup@8.5.1.patch
   tsx@4.23.15: patches/tsx@4.23.15.patch
+  # objectui's focus-scope patch (verification branch for objectstack#25697);
+  # it was keyed unversioned in ui/package.json's ignored `pnpm` field.
+  '@radix-ui/react-focus-scope@1.1.16': patches/@radix-ui__react-focus-scope.patch
 
 # Transitive-dependency version pins. pnpm v10 reads `overrides` from THIS file
 # — the `pnpm.overrides` block in package.json is silently ignored — so all
@@ -233,6 +236,18 @@ patchedDependencies:
 #     legacy agent chain; force the patched 2.0.1 line.
 overrides:
   esbuild: '>=0.28.1'
+  # objectui's security floors, from ui/package.json's ignored `pnpm` field
+  # (verification branch for objectstack#25697; dompurify is already pinned).
+  'qs@<6.15.2': '^6.15.2'
+  'shell-quote@<1.8.4': '^1.8.4'
+  'tmp@<0.2.6': '^0.2.6'
+  'uuid@<11.1.1': '^11.1.1'
+  # objectui's single react line (verification branch for objectstack#25697):
+  # objectui pins 19.3.0 exactly; objectstack manifests still carry ^19.2.x ranges.
+  react: 19.3.0
+  react-dom: 19.3.0
+  '@types/react': 19.3.0
+  '@types/react-dom': 19.3.0
   'minimatch@<11.0.0': '^10.2.3'
   'tar@>=2.0.0 <8.0.0': '^7.5.11'
   'form-data@<5.0.0': '>=4.0.6'
