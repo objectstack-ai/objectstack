@@ -15233,7 +15233,7 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 // inventory two-tiered and closes the rule with a forcing function: 「选层按
 // fire 时刻,⛔ 不用计数器;简报写明本轮跑的层」. The SELECTOR itself is pinned
 // one hop away in `.claude/skills/pm-dispatch/references/dispatch-runbook.md`
-// 〈分诊两级盘点细则〉 — 「每日层(当日首 fire)= 四仓全量对账 + 归集本就日频的
+// 〈分诊两级盘点细则〉 — 「每日层(当日首 fire)= 两仓全量对账 + 归集本就日频的
 // 职责」, the hourly tier reading a `since` window — and neither text is
 // ambiguous. What had no reader is the LAST clause. The filing card's grep for
 // it across `scripts/pm/` and `.claude/skills/pm-dispatch/`, excluding the two
@@ -15307,7 +15307,7 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 //
 //   · the KEY is closed — 「层」 plus a colon (ASCII or full-width), nothing else;
 //   · the WORD SET is closed — 「小时层」/「每日层」, the runbook's own two names
-//     (〈分诊两级盘点细则〉「每日层(当日首 fire)= 四仓全量对账 …」). Any other
+//     (〈分诊两级盘点细则〉「每日层(当日首 fire)= 两仓全量对账 …」). Any other
 //     word after the key is `unknown-tier`, exactly as `Tier: full` is;
 //   · it must sit in a DECLARATION SLOT, never mid-sentence: the start of a
 //     line, or immediately after a 「·」 field separator, which is the marker
@@ -15656,7 +15656,7 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
     `${H65_TIER_EXAMPLES_CN} at the start of a line or as a 「·」-delimited field of the ` +
     'headline — with the selector ' +
     'read from `.claude/skills/pm-dispatch/references/dispatch-runbook.md` 〈分诊两级盘点细则〉 ' +
-    '(「每日层(当日首 fire)= 四仓全量对账 + 归集本就日频的职责」). ⛔ This row does NOT judge ' +
+    '(「每日层(当日首 fire)= 两仓全量对账 + 归集本就日频的职责」). ⛔ This row does NOT judge ' +
     'whether the tier chosen was the RIGHT one — that reading is the seat\'s and is pinned in the ' +
     'runbook; this one only refuses the silence. Report-only: patrol input, never a gate verdict.' +
     more
