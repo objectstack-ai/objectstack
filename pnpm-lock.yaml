@@ -2533,6 +2533,9 @@ importers:
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
+      '@objectstack/plugin-auth':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-auth
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -2549,9 +2552,6 @@ importers:
       '@objectstack/plugin-audit':
         specifier: workspace:*
         version: link:../../plugins/plugin-audit
-      '@objectstack/plugin-auth':
-        specifier: workspace:*
-        version: link:../../plugins/plugin-auth
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../../plugins/plugin-security
